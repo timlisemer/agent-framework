@@ -5,6 +5,18 @@ import { runCheckAgent } from "../agents/check.js";
 import { runConfirmAgent } from "../agents/confirm.js";
 import { runCommitAgent } from "../agents/commit.js";
 
+// Ensure PATH includes standard locations for subprocess spawning
+// Required for Claude Agent SDK to find node when running in Docker via `docker exec`
+const requiredPaths = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/local/sbin', '/usr/sbin', '/sbin'];
+const currentPath = process.env.PATH || '';
+const pathParts = currentPath.split(':').filter(Boolean);
+for (const p of requiredPaths) {
+  if (!pathParts.includes(p)) {
+    pathParts.push(p);
+  }
+}
+process.env.PATH = pathParts.join(':');
+
 const server = new McpServer({
   name: "agent-framework",
   version: "1.0.0"
