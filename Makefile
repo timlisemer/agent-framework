@@ -1,10 +1,7 @@
-.PHONY: build run check clean install
+.PHONY: build check clean install
 
 build:
 	npm run build
-
-run: build
-	npm run mcp
 
 check:
 	npx tsc --noEmit

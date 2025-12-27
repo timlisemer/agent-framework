@@ -6,7 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 make build      # Compile TypeScript (tsc)
-make run        # Build and run MCP server
 make check      # Type-check without emitting
 make clean      # Remove dist/
 ```
