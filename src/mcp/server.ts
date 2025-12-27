@@ -1,0 +1,59 @@
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+import { runCheckAgent } from "../agents/check.js";
+import { runConfirmAgent } from "../agents/confirm.js";
+import { runCommitAgent } from "../agents/commit.js";
+
+const server = new McpServer({
+  name: "agent-framework",
+  version: "1.0.0"
+});
+
+server.registerTool(
+  "check",
+  {
+    title: "Check",
+    description: "Run linter and make check, return summarized results with warning recommendations. Does not access source code.",
+    inputSchema: {
+      working_dir: z.string().optional().describe("Working directory (defaults to cwd)")
+    }
+  },
+  async (args) => {
+    const result = await runCheckAgent(args.working_dir || process.cwd());
+    return { content: [{ type: "text", text: result }] };
+  }
+);
+
+server.registerTool(
+  "confirm",
+  {
+    title: "Confirm",
+    description: "Binary code quality gate. Analyzes git diff and returns CONFIRMED or DECLINED. Cannot ask questions or request context.",
+    inputSchema: {
+      working_dir: z.string().optional().describe("Working directory (defaults to cwd)")
+    }
+  },
+  async (args) => {
+    const result = await runConfirmAgent(args.working_dir || process.cwd());
+    return { content: [{ type: "text", text: result }] };
+  }
+);
+
+server.registerTool(
+  "commit",
+  {
+    title: "Commit",
+    description: "Generate minimal commit message based on diff and execute git commit (no push).",
+    inputSchema: {
+      working_dir: z.string().optional().describe("Working directory (defaults to cwd)")
+    }
+  },
+  async (args) => {
+    const result = await runCommitAgent(args.working_dir || process.cwd());
+    return { content: [{ type: "text", text: result }] };
+  }
+);
+
+const transport = new StdioServerTransport();
+await server.connect(transport);

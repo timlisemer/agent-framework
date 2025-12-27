@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "agent-framework": {
+      "command": "node",
+      "args": ["/path/to/agent-framework/dist/mcp/server.js"],
+      "env": {
+        "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}"
+      }
+    }
+  }
+}
