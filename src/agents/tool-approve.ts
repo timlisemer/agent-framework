@@ -1,7 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
-import * as fs from "fs";
-import * as path from "path";
-import { getModelId } from "../types.js";
+import Anthropic from '@anthropic-ai/sdk';
+import * as fs from 'fs';
+import * as path from 'path';
+import { getModelId } from '../types.js';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || null,
@@ -13,52 +13,97 @@ export async function approveCommand(
   command: string,
   projectDir: string
 ): Promise<{ approved: boolean; reason?: string }> {
-
   // Load CLAUDE.md if exists
-  let rules = "";
-  const claudeMdPath = path.join(projectDir, "CLAUDE.md");
+  let rules = '';
+  const claudeMdPath = path.join(projectDir, 'CLAUDE.md');
   if (fs.existsSync(claudeMdPath)) {
-    rules = fs.readFileSync(claudeMdPath, "utf-8");
+    rules = fs.readFileSync(claudeMdPath, 'utf-8');
   }
 
   const response = await anthropic.messages.create({
-    model: getModelId("haiku"),
+    model: getModelId('haiku'),
     max_tokens: 150,
-    messages: [{
-      role: "user",
-      content: `You are a command approval gate. Your job is to approve or deny bash commands.
+    messages: [
+      {
+        role: 'user',
+        content: `You are a command approval gate. Evaluate bash commands for safety and compliance.
 
+PROJECT DIRECTORY: ${projectDir}
 PROJECT RULES (from CLAUDE.md):
-${rules || "No project-specific rules."}
+${rules || 'No project-specific rules.'}
 
 COMMAND TO EVALUATE:
 ${command}
 
-DENY if:
-- Command violates any rule in CLAUDE.md
-- Command is destructive (rm -rf, drop database, etc.)
-- Command uses "cd &&" pattern (suggest --manifest-path or similar)
-- Command runs a tool when CLAUDE.md specifies a different one (e.g., "cargo check" when only "make check" is allowed)
-- Command could leak secrets or credentials
-- Command modifies system files outside project
+=== CONDITIONALLY ALLOWED ===
 
-APPROVE if:
-- Command follows CLAUDE.md rules
-- Command is safe and reasonable
+rm, mv: APPROVE only if ALL paths are within the project directory.
+- Verify no path escapes project root (watch for "..", absolute paths outside project, symlinks)
+- Be extra cautious - when in doubt, DENY
+
+=== ALWAYS DENY ===
+
+1. cd command (any form)
+   - AIs must stay in their starting directory - changing dirs causes state confusion
+   - Special case: "cd && <cmd>" pattern - suggest --manifest-path, --prefix, or absolute paths
+
+2. Bash commands that duplicate AI tools
+   - cat/head/tail → use Read tool
+   - grep/rg → use Grep tool
+   - find → use Glob tool
+   - echo > file → use Write tool
+   - Principle: AI tools exist for a reason, use them over bash equivalents
+
+3. Commands duplicating Makefile targets (check if Makefile exists first)
+   - If project has Makefile, deny raw build commands covered by make targets
+   - Examples: "cargo check" when "make check" exists, "npm run build" when "make build" exists
+   - Suggest the appropriate make target instead
+
+4. Non-read-only git commands
+   - DENY: git commit, git push, git merge, git rebase, git reset, git checkout -b, git branch -d, git add
+   - ALLOW: git status, git log, git diff, git show, git branch (list), git stash
+
+5. Persistent background processes
+   - DENY commands that start processes surviving after Claude Code exits
+   - Examples: docker compose up, docker run (without --rm), systemctl start, nohup, daemon processes
+   - These waste resources and user may never realize they're running
+
+6. "Run" commands (application execution)
+   - Generally DENY: make run, cargo run, npm run start, npm run dev, docker compose up
+   - ALLOW: npm run build, npm run check, npm run test (these run and exit)
+   - Key distinction: deny long-running servers/apps, allow commands that complete and exit
+
+7. Secret/credential exposure
+   - Commands that could leak API keys, tokens, passwords but you can allow if the command is trying to redact them. For example cat with regex to redact the secret.
+
+8. System modifications outside project
+   - Commands affecting files outside project directory
+
+=== SOFT WARNING: COMPLEXITY ===
+
+Overly complex/bloated commands - evaluate carefully:
+- If you can't understand what it does in ~1 second, it's likely too complex
+- Watch for: redundant cd to current dir, unnecessary flags, over-engineered pipes
+- Example bloat: "make -C /already/here check" or "cd /already/here && make check" when just "make check" works
+- AIs love adding unnecessary flags - question every flag that isn't strictly required
+- Complex commands aren't auto-denied but require clear justification
 
 Reply with EXACTLY one line:
 APPROVE
 or
-DENY: <specific reason and suggested alternative if applicable>`
-    }]
+DENY: <specific reason and suggested alternative>`,
+      },
+    ],
   });
 
-  const decision = (response.content[0] as { type: "text"; text: string }).text.trim();
+  const decision = (
+    response.content[0] as { type: 'text'; text: string }
+  ).text.trim();
 
-  if (decision.startsWith("DENY")) {
+  if (decision.startsWith('DENY')) {
     return {
       approved: false,
-      reason: decision.replace("DENY: ", "")
+      reason: decision.replace('DENY: ', ''),
     };
   }
 

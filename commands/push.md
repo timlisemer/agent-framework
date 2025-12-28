@@ -1,6 +1,6 @@
 ---
 description: Commit staged changes and push to remote
-allowed-tools: mcp__agent-framework__commit, Bash(git push:*)
+allowed-tools: mcp__agent-framework__commit, Bash(git push), Bash(git push:*)
 ---
 
 1. Use the mcp__agent-framework__commit tool to generate and execute a commit
