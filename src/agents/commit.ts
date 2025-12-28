@@ -1,7 +1,14 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
+import { execSync } from "child_process";
 import { getModelId } from "../types.js";
 
 export async function runCommitAgent(workingDir: string): Promise<string> {
+  // Pre-check: skip LLM call if nothing to commit
+  const status = execSync("git status --porcelain", { cwd: workingDir, encoding: "utf-8" });
+  if (!status.trim()) {
+    return "SKIPPED: nothing to commit";
+  }
+
   let output = "";
 
   const q = query({
@@ -41,7 +48,13 @@ RULES:
 - Never push (only commit)
 - Always use \`git add -A\` to stage all changes
 
-After committing, output only the commit hash.`
+After committing, output ONLY this format on two lines:
+<first line of commit message>
+<commit hash>
+
+Example:
+fix typo in readme
+abc123def`
     }
   });
 
