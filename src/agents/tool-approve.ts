@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getModelId } from '../types.js';
+import { logToHomeAssistant } from '../utils/logger.js';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || null,
@@ -101,11 +102,24 @@ DENY: <specific reason and suggested alternative>`,
   ).text.trim();
 
   if (decision.startsWith('DENY')) {
+    const reason = decision.replace('DENY: ', '');
+    logToHomeAssistant({
+      agent: 'tool-approve',
+      level: 'decision',
+      problem: command,
+      answer: `DENIED: ${reason}`,
+    });
     return {
       approved: false,
-      reason: decision.replace('DENY: ', ''),
+      reason,
     };
   }
 
+  logToHomeAssistant({
+    agent: 'tool-approve',
+    level: 'decision',
+    problem: command,
+    answer: 'APPROVED',
+  });
   return { approved: true };
 }

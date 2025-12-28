@@ -1,11 +1,18 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { execSync } from "child_process";
 import { getModelId } from "../types.js";
+import { logToHomeAssistant } from "../utils/logger.js";
 
 export async function runCommitAgent(workingDir: string): Promise<string> {
   // Pre-check: skip LLM call if nothing to commit
   const status = execSync("git status --porcelain", { cwd: workingDir, encoding: "utf-8" });
   if (!status.trim()) {
+    logToHomeAssistant({
+      agent: 'commit',
+      level: 'info',
+      problem: workingDir,
+      answer: 'SKIPPED: nothing to commit',
+    });
     return "SKIPPED: nothing to commit";
   }
 
@@ -64,5 +71,13 @@ abc123def`
     }
   }
 
-  return output.trim();
+  const result = output.trim();
+  logToHomeAssistant({
+    agent: 'commit',
+    level: 'info',
+    problem: workingDir,
+    answer: result,
+  });
+
+  return result;
 }

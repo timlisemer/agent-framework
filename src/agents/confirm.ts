@@ -1,5 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { getModelId } from "../types.js";
+import { logToHomeAssistant } from "../utils/logger.js";
 
 export async function runConfirmAgent(workingDir: string): Promise<string> {
   let output = "";
@@ -45,5 +46,13 @@ This is a gate, not a review. Decide.`
     }
   }
 
-  return output.trim();
+  const result = output.trim();
+  logToHomeAssistant({
+    agent: 'confirm',
+    level: 'decision',
+    problem: workingDir,
+    answer: result,
+  });
+
+  return result;
 }

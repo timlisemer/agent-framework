@@ -1,5 +1,6 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { getModelId } from "../types.js";
+import { logToHomeAssistant } from "../utils/logger.js";
 
 export async function runCheckAgent(workingDir: string): Promise<string> {
   let output = "";
@@ -44,6 +45,13 @@ Do NOT suggest code fixes. Only provide policy recommendations.`
       output = message.result;
     }
   }
+
+  logToHomeAssistant({
+    agent: 'check',
+    level: 'info',
+    problem: workingDir,
+    answer: output,
+  });
 
   return output;
 }

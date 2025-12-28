@@ -1,5 +1,6 @@
 import { type PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { approveCommand } from "../agents/tool-approve.js";
+import { logToHomeAssistant } from "../utils/logger.js";
 
 async function main() {
   const input: PreToolUseHookInput = await new Promise((resolve) => {
@@ -17,6 +18,13 @@ async function main() {
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
   const decision = await approveCommand(command, projectDir);
+
+  logToHomeAssistant({
+    agent: 'pre-tool-use-hook',
+    level: 'decision',
+    problem: command,
+    answer: decision.approved ? 'ALLOWED' : `DENIED: ${decision.reason}`,
+  });
 
   if (!decision.approved) {
     // Output structured JSON to deny and provide feedback to Claude
