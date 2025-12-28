@@ -6,7 +6,32 @@ import { logToHomeAssistant } from "../utils/logger.js";
 
 async function readRecentTranscript(path: string, lines: number): Promise<string> {
   const content = await fs.promises.readFile(path, "utf-8");
-  return content.trim().split("\n").slice(-lines).join("\n");
+  const entries = content.trim().split("\n").slice(-lines);
+
+  return entries
+    .map(line => {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.message?.role === 'user' && entry.message?.content) {
+          const text = typeof entry.message.content === 'string'
+            ? entry.message.content
+            : JSON.stringify(entry.message.content);
+          return `USER: ${text}`;
+        }
+        if (entry.message?.role === 'assistant' && entry.message?.content) {
+          const textBlocks = entry.message.content
+            .filter((b: { type: string }) => b.type === 'text')
+            .map((b: { text: string }) => b.text)
+            .join(' ');
+          if (textBlocks) return `ASSISTANT: ${textBlocks}`;
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .join('\n');
 }
 
 async function main() {
@@ -35,7 +60,7 @@ async function main() {
 
   if (!decision.approved) {
     // Layer 2: Appeal with transcript context
-    const transcript = await readRecentTranscript(input.transcript_path, 20);
+    const transcript = await readRecentTranscript(input.transcript_path, 50);
     const appeal = await appealDenial(command, transcript, decision.reason || "No reason provided");
 
     if (appeal.approved) {
