@@ -3,7 +3,11 @@ import * as fs from "fs";
 import * as path from "path";
 import { getModelId } from "../types.js";
 
-const anthropic = new Anthropic();
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY || undefined,
+  authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
+  baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
+});
 
 export async function approveCommand(
   command: string,
