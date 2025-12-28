@@ -42,6 +42,10 @@ rm, mv: APPROVE only if ALL paths are within the project directory.
 - Verify no path escapes project root (watch for "..", absolute paths outside project, symlinks)
 - Be extra cautious - when in doubt, DENY
 
+sqlite3: APPROVE only for read-only operations.
+- ALLOW: SELECT queries, .tables, .schema, .dump, PRAGMA (read info)
+- DENY: INSERT, UPDATE, DELETE, DROP, CREATE, ALTER, ATTACH
+
 === ALWAYS DENY ===
 
 1. cd command (any form)
@@ -79,6 +83,14 @@ rm, mv: APPROVE only if ALL paths are within the project directory.
 
 8. System modifications outside project
    - Commands affecting files outside project directory
+
+9. make check command
+   - DENY: make check (use MCP tool for better integration)
+   - Suggest: use mcp__agent-framework__check tool instead
+
+10. curl/wget commands (network requests)
+   - DENY by default (requires explicit user permission via transcript appeal)
+   - User must explicitly request or approve the curl command
 
 === SOFT WARNING: COMPLEXITY ===
 

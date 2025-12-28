@@ -2,6 +2,7 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { execSync } from "child_process";
 import { getModelId } from "../types.js";
 import { logToHomeAssistant } from "../utils/logger.js";
+import { runConfirmAgent } from "./confirm.js";
 
 export async function runCommitAgent(workingDir: string): Promise<string> {
   // Pre-check: skip LLM call if nothing to commit
@@ -14,6 +15,18 @@ export async function runCommitAgent(workingDir: string): Promise<string> {
       answer: 'SKIPPED: nothing to commit',
     });
     return "SKIPPED: nothing to commit";
+  }
+
+  // Confirm changes before generating commit message
+  const confirmResult = await runConfirmAgent(workingDir);
+  if (confirmResult.startsWith("DECLINED")) {
+    logToHomeAssistant({
+      agent: 'commit',
+      level: 'info',
+      problem: workingDir,
+      answer: confirmResult,
+    });
+    return confirmResult;
   }
 
   let output = "";
