@@ -102,20 +102,23 @@ DENY: <specific reason and suggested alternative>`,
   ).text.trim();
 
   if (decision.startsWith('DENY')) {
-    const reason = decision.replace('DENY: ', '');
-    logToHomeAssistant({
+    let reason = decision.replace('DENY: ', '');
+    const logErr = await logToHomeAssistant({
       agent: 'tool-approve',
       level: 'decision',
       problem: command,
       answer: `DENIED: ${reason}`,
     });
+    //if (logErr) {
+    //  reason = `logToHomeAssistant error: ${logErr} ${reason}`;
+    //}
     return {
       approved: false,
       reason,
     };
   }
 
-  logToHomeAssistant({
+  await logToHomeAssistant({
     agent: 'tool-approve',
     level: 'decision',
     problem: command,
