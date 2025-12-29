@@ -9,47 +9,50 @@ const anthropic = new Anthropic({
 });
 
 export async function appealDenial(
-  command: string,
+  toolName: string,
+  toolInput: unknown,
   transcript: string,
   originalReason: string
 ): Promise<{ approved: boolean; reason?: string }> {
+  const toolDescription = `${toolName} with ${JSON.stringify(toolInput)}`;
+
   const response = await anthropic.messages.create({
     model: getModelId('haiku'),
     max_tokens: 500,
     messages: [
       {
         role: 'user',
-        content: `You are reviewing an appeal. The command was denied for a valid technical reason.
+        content: `You are reviewing an appeal. The tool call was denied for a valid technical reason.
 
 DENIAL REASON: ${originalReason}
-COMMAND: ${command}
+TOOL CALL: ${toolDescription}
 
 RECENT CONVERSATION:
 ${transcript}
 
-The original denial is ALWAYS technically correct. Your ONLY job is to check if the user explicitly approved this command or if there's a mismatch.
+The original denial is ALWAYS technically correct. Your ONLY job is to check if the user explicitly approved this tool call or if there's a mismatch.
 
 OVERTURN TO APPROVE when:
-- User explicitly typed this exact command (e.g., "run make check", "execute git push")
-- User invoked a slash command requiring this (/push, /commit)
+- User explicitly requested this exact tool operation
+- User invoked a slash command requiring this operation (/push, /commit)
 - User explicitly confirmed when asked
 → The user knowingly wants this despite the technical restriction
 
 OVERTURN WITH NEW REASON when:
 - User asked for X but AI is autonomously doing Y (clear mismatch)
-  Example: User said "run checks" but AI is doing "git commit"
-  Reply: OVERTURN: User asked for checks, not commit
-- User explicitly opposed this command (said no/don't/stop)
+  Example: User said "check the code" but AI is writing/editing files
+  Reply: OVERTURN: User asked to check, not modify
+- User explicitly opposed this operation (said no/don't/stop)
   Reply: OVERTURN: User explicitly opposed
 
 UPHOLD (default) when:
-- User's request was vague (e.g., "run check" → AI chose "make check")
-- No explicit user approval for this exact command
+- User's request was vague or general
+- No explicit user approval for this exact operation
 - Anything unclear
 → The original technical reason stands
 
 CRITICAL: You are NOT judging if the technical rule is correct (it always is).
-You are ONLY checking if the user explicitly approved this specific command.
+You are ONLY checking if the user explicitly approved this specific tool operation.
 
 ===== OUTPUT FORMAT (STRICT) =====
 Your response MUST start with EXACTLY one of these three formats. DO NOT add any explanation before the decision:
@@ -63,9 +66,9 @@ OVERTURN: <new reason>
 NO other text before the decision word. NO explanations first. NO preamble.
 
 Examples:
-- User: "run check", Command: "make check" → UPHOLD
-- User: "please run make check", Command: "make check" → OVERTURN: APPROVE
-- User: "run checks", Command: "git commit" → OVERTURN: User asked for checks, not commit
+- User: "check the code", Tool: Read → UPHOLD
+- User: "please read /etc/passwd", Tool: Read /etc/passwd → OVERTURN: APPROVE
+- User: "just check it", Tool: Edit (modifying file) → OVERTURN: User asked to check, not modify
 - User: "don't do that" → OVERTURN: User explicitly opposed`,
       },
     ],
@@ -105,7 +108,7 @@ Examples:
     await logToHomeAssistant({
       agent: 'tool-appeal',
       level: 'decision',
-      problem: command,
+      problem: toolDescription,
       answer: 'OVERTURNED → APPROVED',
     });
     return { approved: true };
@@ -137,7 +140,7 @@ Examples:
   await logToHomeAssistant({
     agent: 'tool-appeal',
     level: 'decision',
-    problem: command,
+    problem: toolDescription,
     answer: reason ? `DENIED: ${reason}` : 'UPHELD (using original reason)',
   });
 

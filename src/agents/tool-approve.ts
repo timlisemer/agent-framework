@@ -10,8 +10,9 @@ const anthropic = new Anthropic({
   baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
 });
 
-export async function approveCommand(
-  command: string,
+export async function approveTool(
+  toolName: string,
+  toolInput: unknown,
   projectDir: string
 ): Promise<{ approved: boolean; reason?: string }> {
   // Load CLAUDE.md if exists
@@ -23,18 +24,39 @@ export async function approveCommand(
 
   const response = await anthropic.messages.create({
     model: getModelId('haiku'),
-    max_tokens: 500,
+    max_tokens: 1000,
     messages: [
       {
         role: 'user',
-        content: `You are a command approval gate. Evaluate bash commands for safety and compliance.
+        content: `You are a tool approval gate. Evaluate tool calls for safety and compliance.
 
 PROJECT DIRECTORY: ${projectDir}
 PROJECT RULES (from CLAUDE.md):
 ${rules || 'No project-specific rules.'}
 
-COMMAND TO EVALUATE:
-${command}
+TOOL TO EVALUATE:
+Tool: ${toolName}
+Input: ${JSON.stringify(toolInput)}
+
+=== UNIVERSAL RULES ===
+
+- DENY modifying files outside project directory (Edit/Write/NotebookEdit)
+- ALLOW reading files outside project (Read) for documentation/resources, BUT deny sensitive files
+- DENY sensitive files anywhere: .env, credentials.json, secrets.*, id_rsa, private keys, ~/.ssh/, ~/.aws/credentials, etc.
+
+=== TOOL-SPECIFIC RULES ===
+
+For Read:
+- ALLOW reading files outside project for documentation/reference purposes
+- DENY if reading sensitive files (credentials, private keys, ~/.ssh/, .env, ~/.aws/, etc.)
+- ALLOW reading within project (except sensitive files)
+
+For Edit/Write/NotebookEdit:
+- DENY if file path is outside project directory
+- DENY if editing sensitive files (.env, credentials, secrets, keys)
+- DENY if editing system files (/etc, /sys, /proc, /usr, /var)
+
+For Bash commands:
 
 === CONDITIONALLY ALLOWED ===
 
@@ -46,7 +68,7 @@ sqlite3: APPROVE only for read-only operations.
 - ALLOW: SELECT queries, .tables, .schema, .dump, PRAGMA (read info)
 - DENY: INSERT, UPDATE, DELETE, DROP, CREATE, ALTER, ATTACH
 
-=== ALWAYS DENY ===
+=== ALWAYS DENY FOR BASH ===
 
 1. cd command (ANY form, no exceptions)
    - DENY: cd /path, cd && cmd, cd /path && cmd, etc.
@@ -123,6 +145,8 @@ NO other text before the decision word. NO explanations first. NO preamble.`,
   let retries = 0;
   const maxRetries = 2;
 
+  const toolDescription = `${toolName} with ${JSON.stringify(toolInput)}`;
+
   while (!decision.startsWith('APPROVE') && !decision.startsWith('DENY:') && retries < maxRetries) {
     retries++;
 
@@ -131,7 +155,7 @@ NO other text before the decision word. NO explanations first. NO preamble.`,
       max_tokens: 100,
       messages: [{
         role: 'user',
-        content: `Invalid format: "${decision}". You are evaluating the command: ${command}. Reply with EXACTLY: APPROVE or DENY: <reason>`
+        content: `Invalid format: "${decision}". You are evaluating tool: ${toolDescription}. Reply with EXACTLY: APPROVE or DENY: <reason>`
       }]
     });
 
@@ -142,7 +166,7 @@ NO other text before the decision word. NO explanations first. NO preamble.`,
     await logToHomeAssistant({
       agent: 'tool-approve',
       level: 'decision',
-      problem: command,
+      problem: toolDescription,
       answer: 'APPROVED',
     });
     return { approved: true };
@@ -156,7 +180,7 @@ NO other text before the decision word. NO explanations first. NO preamble.`,
   await logToHomeAssistant({
     agent: 'tool-approve',
     level: 'decision',
-    problem: command,
+    problem: toolDescription,
     answer: `DENIED: ${reason}`,
   });
 

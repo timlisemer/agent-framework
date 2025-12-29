@@ -1,6 +1,6 @@
 import { type PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import * as fs from "fs";
-import { approveCommand } from "../agents/tool-approve.js";
+import { approveTool } from "../agents/tool-approve.js";
 import { appealDenial } from "../agents/tool-appeal.js";
 import { logToHomeAssistant } from "../utils/logger.js";
 
@@ -41,35 +41,49 @@ async function main() {
     process.stdin.on("end", () => resolve(JSON.parse(data)));
   });
 
-  // Only intercept Bash commands
-  if (input.tool_name !== "Bash") {
-    process.exit(0); // Allow non-bash tools
+  // Auto-approve low-risk tools
+  const LOW_RISK_TOOLS = ['LSP', 'WebSearch', 'WebFetch', 'Grep', 'Glob'];
+  if (LOW_RISK_TOOLS.includes(input.tool_name)) {
+    console.log(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow"
+      }
+    }));
+    process.exit(0);
   }
 
-  const command = (input.tool_input as { command: string }).command;
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
-  const decision = await approveCommand(command, projectDir);
+  const decision = await approveTool(input.tool_name, input.tool_input, projectDir);
+
+  const toolDescription = `${input.tool_name} with ${JSON.stringify(input.tool_input)}`;
 
   logToHomeAssistant({
     agent: 'pre-tool-use-hook',
     level: 'decision',
-    problem: command,
+    problem: toolDescription,
     answer: decision.approved ? 'ALLOWED' : `DENIED: ${decision.reason}`,
   });
 
   if (!decision.approved) {
     // Layer 2: Appeal with transcript context
     const transcript = await readRecentTranscript(input.transcript_path, 50);
-    const appeal = await appealDenial(command, transcript, decision.reason || "No reason provided");
+    const appeal = await appealDenial(input.tool_name, input.tool_input, transcript, decision.reason || "No reason provided");
 
     if (appeal.approved) {
       logToHomeAssistant({
         agent: "pre-tool-use-hook",
         level: "decision",
-        problem: command,
+        problem: toolDescription,
         answer: "APPEALED",
       });
+      console.log(JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "allow"
+        }
+      }));
       process.exit(0); // Allow on successful appeal
     }
 
@@ -81,8 +95,16 @@ async function main() {
         permissionDecisionReason: appeal.reason ?? decision.reason
       }
     }));
+    process.exit(0);
   }
 
+  // Explicitly allow approved tools
+  console.log(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow"
+    }
+  }));
   process.exit(0);
 }
 
