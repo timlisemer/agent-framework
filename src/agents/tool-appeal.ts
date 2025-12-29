@@ -19,47 +19,49 @@ export async function appealDenial(
     messages: [
       {
         role: 'user',
-        content: `You are an appeal judge for command denials. A command was denied by the first-pass safety check.
+        content: `You are reviewing an appeal of a command denial.
 
+ORIGINAL DECISION: DENIED
+ORIGINAL REASON: ${originalReason}
 COMMAND: ${command}
-DENIAL REASON: ${originalReason}
 
 RECENT CONVERSATION:
 ${transcript}
 
-APPROVE the appeal if the user explicitly requested this exact command:
-- User typed the exact command (e.g., "run make check", "execute git push")
-- User invoked a slash command that requires this (/push, /commit)
+Your role is to determine if the original denial should stand or be overturned based on the conversation context.
+
+UPHOLD THE DENIAL (agree with original) when:
+1. User's request was vague and AI inferred the command
+   - Example: User said "run check" but AI chose "make check"
+   - The original technical reason is correct
+2. User didn't explicitly request this specific command
+3. Original denial reason is valid and applicable
+
+OVERTURN TO APPROVE when:
+- User explicitly typed this exact command
+- User invoked a slash command requiring this action (/push, /commit)
 - User explicitly confirmed when asked
 
-DENY the appeal in these cases:
+OVERTURN WITH NEW REASON when:
+- User asked for X but AI is autonomously doing Y (clear mismatch)
+- User explicitly opposed this command (said no/don't/stop)
+- You have important context the original decision missed
 
-1. VAGUE REQUEST (no reason needed):
-   - User's message was ambiguous and AI inferred the command
-   - Example: User said "run check" but AI chose "make check"
-   - Reply: DENY
-
-2. AI AUTONOMOUS DECISION (provide reason explaining mismatch):
-   - User asked for X but AI decided to do Y
-   - Example: User said "run checks" but AI tried "git commit"
-   - Reply: DENY: User asked for checks, not commit
-
-3. USER OPPOSITION (provide reason):
-   - User explicitly said no/don't/stop
-   - Reply: DENY: User explicitly opposed the command
+CRITICAL: If the original denial is correct and you have no additional context, UPHOLD it.
+Only overturn if you have a compelling reason from the transcript.
 
 Reply with EXACTLY one line:
-APPROVE
+UPHOLD
 or
-DENY
+OVERTURN: APPROVE
 or
-DENY: <reason>
+OVERTURN: <new reason>
 
 Examples:
-- User: "run check", Command: "make check" → DENY
-- User: "please run make check", Command: "make check" → APPROVE
-- User: "run checks", Command: "git commit" → DENY: User asked for checks, not commit
-- User: "don't run that" → DENY: User explicitly opposed the command`,
+- User: "run check", Command: "make check", Original: "use MCP tool" → UPHOLD
+- User: "please run make check", Command: "make check" → OVERTURN: APPROVE
+- User: "run checks", Command: "git commit", Original: "non-read-only" → OVERTURN: User asked for checks, not commit
+- User: "don't do that", Command: any → OVERTURN: User explicitly opposed`,
       },
     ],
   });
@@ -73,7 +75,8 @@ Examples:
   const maxRetries = 2;
 
   while (
-    !decision.startsWith('APPROVE') &&
+    !decision.startsWith('UPHOLD') &&
+    !decision.startsWith('OVERTURN:') &&
     decision !== 'DENY' &&
     !decision.startsWith('DENY:') &&
     retries < maxRetries
@@ -85,33 +88,43 @@ Examples:
       max_tokens: 50,
       messages: [{
         role: 'user',
-        content: `Invalid format: "${decision}". Reply with EXACTLY: APPROVE, DENY, or DENY: <reason>`
+        content: `Invalid format: "${decision}". Reply with EXACTLY: UPHOLD, OVERTURN: APPROVE, or OVERTURN: <reason>`
       }]
     });
 
     decision = (retryResponse.content[0] as { type: 'text'; text: string }).text.trim();
   }
 
-  if (decision.startsWith('APPROVE')) {
+  // Check for approval (overturn)
+  if (decision.startsWith('OVERTURN: APPROVE') || decision === 'APPROVE') {
     await logToHomeAssistant({
       agent: 'tool-appeal',
       level: 'decision',
       problem: command,
-      answer: 'APPROVED',
+      answer: 'OVERTURNED → APPROVED',
     });
     return { approved: true };
   }
 
-  // Parse denial - extract reason if provided
+  // Parse denial/uphold - extract reason if provided
   let reason: string | undefined;
-  if (decision === 'DENY') {
-    // No reason provided - defer to original tool-approve reason
+  const normalizedDecision = decision.trim().toUpperCase();
+
+  if (normalizedDecision === 'UPHOLD' || normalizedDecision === 'DENY') {
+    // Uphold original - no reason needed
     reason = undefined;
+  } else if (decision.startsWith('OVERTURN: ')) {
+    // Overturn with new reason
+    reason = decision.replace('OVERTURN: ', '');
+    if (reason === 'APPROVE') reason = undefined; // Already handled above, but safety
   } else if (decision.startsWith('DENY: ')) {
-    // Explicit reason provided (e.g., user said no)
+    // Old format compatibility
     reason = decision.replace('DENY: ', '');
+  } else if (normalizedDecision.includes('UPHOLD') || normalizedDecision.includes('DENY')) {
+    // Formatting issue but clear intent to uphold
+    reason = undefined;
   } else {
-    // Malformed response after retries
+    // Truly malformed
     reason = `Malformed response after ${retries} retries: ${decision}`;
   }
 
@@ -119,7 +132,7 @@ Examples:
     agent: 'tool-appeal',
     level: 'decision',
     problem: command,
-    answer: reason ? `DENIED: ${reason}` : 'DENIED (no appeal reason)',
+    answer: reason ? `DENIED: ${reason}` : 'UPHELD (using original reason)',
   });
 
   return { approved: false, reason };
