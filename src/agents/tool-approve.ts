@@ -109,9 +109,28 @@ DENY: <specific reason and suggested alternative>`,
     ],
   });
 
-  const decision = (
+  let decision = (
     response.content[0] as { type: 'text'; text: string }
   ).text.trim();
+
+  // Retry if malformed (not starting with APPROVE or DENY:)
+  let retries = 0;
+  const maxRetries = 2;
+
+  while (!decision.startsWith('APPROVE') && !decision.startsWith('DENY:') && retries < maxRetries) {
+    retries++;
+
+    const retryResponse = await anthropic.messages.create({
+      model: getModelId('haiku'),
+      max_tokens: 50,
+      messages: [{
+        role: 'user',
+        content: `Invalid format: "${decision}". You are evaluating the command: ${command}. Reply with EXACTLY: APPROVE or DENY: <reason>`
+      }]
+    });
+
+    decision = (retryResponse.content[0] as { type: 'text'; text: string }).text.trim();
+  }
 
   if (decision.startsWith('APPROVE')) {
     await logToHomeAssistant({
@@ -126,7 +145,7 @@ DENY: <specific reason and suggested alternative>`,
   // Default to DENY for safety - extract reason from response
   let reason = decision.startsWith('DENY: ')
     ? decision.replace('DENY: ', '')
-    : `Unexpected response format: ${decision}`;
+    : `Malformed response after ${retries} retries: ${decision}`;
 
   await logToHomeAssistant({
     agent: 'tool-approve',
