@@ -78,7 +78,7 @@ async function main() {
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
-        permissionDecisionReason: appeal.reason || decision.reason
+        permissionDecisionReason: appeal.reason ?? decision.reason
       }
     }));
   }

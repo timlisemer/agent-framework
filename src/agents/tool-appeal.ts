@@ -27,36 +27,39 @@ DENIAL REASON: ${originalReason}
 RECENT CONVERSATION:
 ${transcript}
 
-APPROVE the appeal if ANY of these are true:
-1. User invoked a slash command that requires this action (e.g., /push, /commit)
-2. User explicitly requested this exact command in their message
-3. User explicitly confirmed/approved this command
-4. Command is a direct response to user's explicit instruction
+APPROVE the appeal if the user explicitly requested this exact command:
+- User typed the exact command (e.g., "run make check", "execute git push")
+- User invoked a slash command that requires this (/push, /commit)
+- User explicitly confirmed when asked
 
-APPROVAL KEYWORDS - Look for these exact phrases in the recent conversation:
-- "user approved"
-- "this is user approved"
-- "user explicitly requested"
-- "user confirmed"
-- "proceed with"
-- "go ahead"
-- "run this command"
-- "execute this"
+DENY the appeal in these cases:
 
-If you see ANY of these approval keywords in the RECENT CONVERSATION section referring to the current command, APPROVE the appeal.
+1. VAGUE REQUEST (no reason needed):
+   - User's message was ambiguous and AI inferred the command
+   - Example: User said "run check" but AI chose "make check"
+   - Reply: DENY
 
-IMPORTANT: The keyword must appear in the MOST RECENT user messages (last 1-3 messages). Ignore older approval keywords that may refer to different commands.
+2. AI AUTONOMOUS DECISION (provide reason explaining mismatch):
+   - User asked for X but AI decided to do Y
+   - Example: User said "run checks" but AI tried "git commit"
+   - Reply: DENY: User asked for checks, not commit
 
-DENY the appeal if:
-- Claude decided to run this command autonomously without user request
-- User's request was vague and doesn't specifically require this command
-- No clear user intent to run this specific command
-- User said "user denied" or similar denial keywords
+3. USER OPPOSITION (provide reason):
+   - User explicitly said no/don't/stop
+   - Reply: DENY: User explicitly opposed the command
 
 Reply with EXACTLY one line:
 APPROVE
 or
-DENY: <reason>`,
+DENY
+or
+DENY: <reason>
+
+Examples:
+- User: "run check", Command: "make check" → DENY
+- User: "please run make check", Command: "make check" → APPROVE
+- User: "run checks", Command: "git commit" → DENY: User asked for checks, not commit
+- User: "don't run that" → DENY: User explicitly opposed the command`,
       },
     ],
   });
@@ -69,7 +72,12 @@ DENY: <reason>`,
   let retries = 0;
   const maxRetries = 2;
 
-  while (!decision.startsWith('APPROVE') && !decision.startsWith('DENY:') && retries < maxRetries) {
+  while (
+    !decision.startsWith('APPROVE') &&
+    decision !== 'DENY' &&
+    !decision.startsWith('DENY:') &&
+    retries < maxRetries
+  ) {
     retries++;
 
     const retryResponse = await anthropic.messages.create({
@@ -77,7 +85,7 @@ DENY: <reason>`,
       max_tokens: 50,
       messages: [{
         role: 'user',
-        content: `Invalid format: "${decision}". You are evaluating an appeal for the command: ${command}. Reply with EXACTLY: APPROVE or DENY: <reason>`
+        content: `Invalid format: "${decision}". Reply with EXACTLY: APPROVE, DENY, or DENY: <reason>`
       }]
     });
 
@@ -94,16 +102,24 @@ DENY: <reason>`,
     return { approved: true };
   }
 
-  // Default to DENY for safety - extract reason from response
-  const reason = decision.startsWith('DENY: ')
-    ? decision.replace('DENY: ', '')
-    : `Malformed response after ${retries} retries: ${decision}`;
+  // Parse denial - extract reason if provided
+  let reason: string | undefined;
+  if (decision === 'DENY') {
+    // No reason provided - defer to original tool-approve reason
+    reason = undefined;
+  } else if (decision.startsWith('DENY: ')) {
+    // Explicit reason provided (e.g., user said no)
+    reason = decision.replace('DENY: ', '');
+  } else {
+    // Malformed response after retries
+    reason = `Malformed response after ${retries} retries: ${decision}`;
+  }
 
   await logToHomeAssistant({
     agent: 'tool-appeal',
     level: 'decision',
     problem: command,
-    answer: `DENIED: ${reason}`,
+    answer: reason ? `DENIED: ${reason}` : 'DENIED (no appeal reason)',
   });
 
   return { approved: false, reason };
