@@ -16,14 +16,33 @@ export interface AgentResult {
   output: string;
 }
 
-export interface IntentValidationResult {
-  decision: 'ALLOW' | 'WARN' | 'BLOCK';
-  reason?: string;
+// Off-topic / conversation alignment check result
+export interface OffTopicCheckResult {
+  decision: 'OK' | 'INTERVENE';
+  feedback?: string;
 }
 
 export interface UserMessage {
   text: string;
   messageIndex: number;
+}
+
+export interface AssistantMessage {
+  text: string;
+  messageIndex: number;
+}
+
+export interface ConversationContext {
+  userMessages: UserMessage[];
+  assistantMessages: AssistantMessage[];
+  conversationSummary: string;
+  lastAssistantMessage: string;
+}
+
+// Legacy types kept for backwards compatibility
+export interface IntentValidationResult {
+  decision: 'ALLOW' | 'WARN' | 'BLOCK';
+  reason?: string;
 }
 
 export interface IntentContext {

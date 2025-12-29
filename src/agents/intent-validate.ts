@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import * as fs from 'fs';
-import { getModelId, type IntentValidationResult, type IntentContext, type UserMessage } from '../types.js';
+import { getModelId, type OffTopicCheckResult, type ConversationContext, type UserMessage, type AssistantMessage } from '../types.js';
 import { logToHomeAssistant } from '../utils/logger.js';
 
 const anthropic = new Anthropic({
@@ -11,57 +11,78 @@ const anthropic = new Anthropic({
 
 const RECENT_MESSAGE_LIMIT = 30;
 
-const SYSTEM_PROMPT = `You are an intent-alignment validator. Your job is to verify AI actions match cumulative user intent.
+const SYSTEM_PROMPT = `You are a conversation-alignment detector. Your job is to catch when an AI assistant has gone off-track and is about to waste the user's time.
 
 You will receive:
-1. CUMULATIVE USER INTENT: Every user message from the conversation
-2. PROPOSED AI ACTION: Tool use or question AI wants to perform
+1. CONVERSATION CONTEXT: Recent user and assistant messages from the conversation
+2. ASSISTANT'S FINAL RESPONSE: What the assistant just said (it has stopped and is waiting for user input)
 
-Your task: Determine if the action aligns with what the user actually requested.
+Your task: Determine if the assistant is asking the user something irrelevant or already answered.
 
-CRITICAL MISALIGNMENTS (→ BLOCK):
-- AI modifying files user explicitly said not to touch
-- AI running commands user said to avoid (e.g., "don't push", "don't delete")
-- AI asking questions user already answered clearly in ANY previous message
-- AI doing something directly opposite to user's stated goal
-- AI proposing destructive changes user never requested
+WHAT TO DETECT (→ INTERVENE):
 
-MINOR MISALIGNMENTS (→ WARN):
-- AI asking for clarification when user gave vague instructions
-- AI making reasonable assumptions on ambiguous requests
-- AI proposing extra changes that seem helpful but weren't explicitly requested
-- AI repeating a question user partially answered (incomplete answer)
+1. REDUNDANT QUESTIONS - AI asks something already answered:
+   - User said "the config is in /etc/myapp/config.yaml" earlier
+   - AI now asks "Where is your configuration file located?"
+   - This wastes the user's time - INTERVENE
 
-ALLOWED (→ ALLOW):
-- Action directly requested by user in ANY message
-- Reasonable interpretation of user's goals
-- Necessary steps to accomplish user's stated objective
-- AI asking for clarification when user's intent is genuinely unclear
+2. OFF-TOPIC QUESTIONS - AI asks about something the user never mentioned:
+   - User asked to "fix the login bug"
+   - AI asks "Would you like me to refactor the database schema?"
+   - User never mentioned database schema - INTERVENE
+
+3. IRRELEVANT SUGGESTIONS - AI suggests something unrelated to user's goal:
+   - User asked to "add dark mode to settings"
+   - AI says "I notice you could improve performance by adding caching, should I do that?"
+   - This is not what the user asked for - INTERVENE
+
+4. MISUNDERSTOOD REQUESTS - AI is clearly doing something different than asked:
+   - User asked to "update the tests"
+   - AI says "I've finished redesigning the UI, what do you think?"
+   - Complete disconnect from user's request - INTERVENE
+
+WHEN IT'S FINE (→ OK):
+
+1. ON-TOPIC CLARIFICATIONS - AI asks about genuine ambiguity in user's request:
+   - User said "fix the bug" without specifying which one
+   - AI asks "I see multiple issues, which one should I prioritize?"
+   - Legitimate need for clarification - OK
+
+2. RELEVANT FOLLOW-UPS - AI completed task and asks what's next:
+   - User asked to "add the button"
+   - AI says "Done! Should I also add the click handler?"
+   - Related follow-up - OK
+
+3. NECESSARY INFORMATION - AI needs info user hasn't provided yet:
+   - User asked to "deploy to production"
+   - AI asks "What's the production server address?"
+   - User hasn't answered this yet - OK
+
+4. PROGRESS UPDATES - AI reports what it did and awaits confirmation:
+   - "I've made these changes, does this look correct?"
+   - Normal workflow - OK
 
 RESPONSE FORMAT:
 Reply with EXACTLY one of:
 
-ALLOW
+OK
 or
-WARN: <one sentence explaining the minor misalignment>
-or
-BLOCK: <one sentence explaining the critical misalignment and cite specific user message>
+INTERVENE: <specific feedback to give the AI, addressing what it got wrong and redirecting it>
 
 RULES:
-- Consider ALL user messages, not just the most recent
-- If user said "don't do X" in message 2, and AI tries X in message 10, BLOCK it
-- If user answered "where is the config?" in message 3, and AI asks again in message 8, BLOCK it
-- Focus on INTENT not exact wording - same intent phrased differently is still answered
-- When in doubt between WARN and ALLOW, choose ALLOW
-- When in doubt between BLOCK and WARN, choose WARN (only BLOCK clear violations)
-- If user changes their mind across messages, the MOST RECENT statement of intent takes precedence`;
+- Consider ALL previous messages when checking if something was already answered
+- The goal is to prevent the user from being bothered with irrelevant questions
+- When in doubt, choose OK - only INTERVENE when there's a clear disconnect
+- Your intervention message should be helpful and specific, guiding the AI back on track
+- Keep intervention messages concise but actionable`;
 
-export async function extractUserIntent(transcriptPath: string): Promise<IntentContext> {
+export async function extractConversationContext(transcriptPath: string): Promise<ConversationContext> {
   try {
     const content = await fs.promises.readFile(transcriptPath, 'utf-8');
     const lines = content.trim().split('\n');
 
     const userMessages: UserMessage[] = [];
+    const assistantMessages: AssistantMessage[] = [];
 
     lines.forEach((line, idx) => {
       try {
@@ -86,64 +107,101 @@ export async function extractUserIntent(transcriptPath: string): Promise<IntentC
             });
           }
         }
+
+        if (entry.message?.role === 'assistant') {
+          let text = '';
+
+          if (Array.isArray(entry.message.content)) {
+            text = entry.message.content
+              .filter((block: any) => block.type === 'text')
+              .map((block: any) => block.text)
+              .join('\n');
+          }
+
+          if (text.trim()) {
+            assistantMessages.push({
+              text: text.trim(),
+              messageIndex: idx
+            });
+          }
+        }
       } catch {
         // Skip malformed lines
       }
     });
 
     // Truncate to recent messages if too many
-    const recentMessages = userMessages.length > RECENT_MESSAGE_LIMIT
+    const recentUserMessages = userMessages.length > RECENT_MESSAGE_LIMIT
       ? userMessages.slice(-RECENT_MESSAGE_LIMIT)
       : userMessages;
 
-    const fullIntent = recentMessages
-      .map((msg, i) => `[User Message ${i + 1}]:\n${msg.text}`)
+    const recentAssistantMessages = assistantMessages.length > RECENT_MESSAGE_LIMIT
+      ? assistantMessages.slice(-RECENT_MESSAGE_LIMIT)
+      : assistantMessages;
+
+    // Get the last assistant message (what the AI just said)
+    const lastAssistantMessage = recentAssistantMessages[recentAssistantMessages.length - 1];
+
+    // Build conversation summary (interleaved user and assistant messages)
+    const allMessages = [...recentUserMessages, ...recentAssistantMessages.slice(0, -1)]
+      .sort((a, b) => a.messageIndex - b.messageIndex);
+
+    const conversationSummary = allMessages
+      .map(msg => {
+        const role = 'text' in msg ? 
+          (recentUserMessages.includes(msg as UserMessage) ? 'USER' : 'ASSISTANT') : 
+          'UNKNOWN';
+        return `[${role}]: ${msg.text}`;
+      })
       .join('\n\n---\n\n');
 
-    return { userMessages: recentMessages, fullIntent };
+    return {
+      userMessages: recentUserMessages,
+      assistantMessages: recentAssistantMessages,
+      conversationSummary,
+      lastAssistantMessage: lastAssistantMessage?.text || ''
+    };
   } catch (error) {
     // If transcript doesn't exist or is unreadable, return empty
-    return { userMessages: [], fullIntent: '' };
+    return {
+      userMessages: [],
+      assistantMessages: [],
+      conversationSummary: '',
+      lastAssistantMessage: ''
+    };
   }
 }
 
-export async function validateIntent(
-  action: {
-    type: 'tool_use';
-    toolName?: string;
-    toolInput?: unknown;
-  },
-  transcriptPath: string,
-  projectDir: string
-): Promise<IntentValidationResult> {
-  const intentContext = await extractUserIntent(transcriptPath);
+export async function checkForOffTopic(
+  transcriptPath: string
+): Promise<OffTopicCheckResult> {
+  const context = await extractConversationContext(transcriptPath);
 
-  // No user intent yet - allow everything
-  if (intentContext.userMessages.length === 0) {
+  // No conversation yet - nothing to check
+  if (context.userMessages.length === 0 || !context.lastAssistantMessage) {
     return {
-      decision: 'ALLOW',
-      reason: 'No user intent established yet'
+      decision: 'OK',
     };
   }
 
-  // Build action description
-  const actionDescription = `Tool: ${action.toolName}\nInput: ${JSON.stringify(action.toolInput, null, 2)}`;
-
   try {
     const response = await anthropic.messages.create({
-      model: getModelId('sonnet'),
-      max_tokens: 200,
+      model: getModelId('haiku'),
+      max_tokens: 300,
       messages: [{
         role: 'user',
-        content: `CUMULATIVE USER INTENT (ALL messages):
-${intentContext.fullIntent}
+        content: `CONVERSATION CONTEXT:
+${context.conversationSummary}
 
 ---
 
-PROPOSED AI ACTION:
-${actionDescription}
+ASSISTANT'S FINAL RESPONSE (waiting for user input):
+${context.lastAssistantMessage}
 
-Does this action align with user intent? Reply with: ALLOW, WARN: <reason>, or BLOCK: <reason>`
+---
+
+Is the assistant on track, or has it gone off-topic / asked something already answered?
+Reply with: OK or INTERVENE: <feedback for the AI>`
       }],
       system: SYSTEM_PROMPT
     });
@@ -155,78 +213,61 @@ Does this action align with user intent? Reply with: ALLOW, WARN: <reason>, or B
     const maxRetries = 2;
 
     while (
-      !decision.startsWith('ALLOW') &&
-      !decision.startsWith('WARN:') &&
-      !decision.startsWith('BLOCK:') &&
+      !decision.startsWith('OK') &&
+      !decision.startsWith('INTERVENE:') &&
       retries < maxRetries
     ) {
       retries++;
 
       const retryResponse = await anthropic.messages.create({
-        model: getModelId('sonnet'),
-        max_tokens: 100,
+        model: getModelId('haiku'),
+        max_tokens: 150,
         messages: [{
           role: 'user',
-          content: `Invalid format: "${decision}". Reply with exactly: ALLOW, WARN: <reason>, or BLOCK: <reason>`
+          content: `Invalid format: "${decision}". Reply with exactly: OK or INTERVENE: <feedback>`
         }]
       });
 
       decision = (retryResponse.content[0] as { type: 'text'; text: string }).text.trim();
     }
 
-    if (decision.startsWith('BLOCK:')) {
-      const reason = decision.replace('BLOCK: ', '');
+    if (decision.startsWith('INTERVENE:')) {
+      const feedback = decision.replace('INTERVENE:', '').trim();
 
       await logToHomeAssistant({
-        agent: 'intent-validate',
+        agent: 'off-topic-check',
         level: 'decision',
-        problem: `${action.toolName}: ${JSON.stringify(action.toolInput).substring(0, 100)}`,
-        answer: `BLOCKED: ${reason}`
+        problem: `Assistant stopped with: ${context.lastAssistantMessage.substring(0, 100)}...`,
+        answer: `INTERVENE: ${feedback}`
       });
 
       return {
-        decision: 'BLOCK',
-        reason
-      };
-    }
-
-    if (decision.startsWith('WARN:')) {
-      const reason = decision.replace('WARN: ', '');
-
-      await logToHomeAssistant({
-        agent: 'intent-validate',
-        level: 'decision',
-        problem: `${action.toolName}: ${JSON.stringify(action.toolInput).substring(0, 100)}`,
-        answer: `WARNED: ${reason}`
-      });
-
-      return {
-        decision: 'WARN',
-        reason
+        decision: 'INTERVENE',
+        feedback
       };
     }
 
     await logToHomeAssistant({
-      agent: 'intent-validate',
+      agent: 'off-topic-check',
       level: 'decision',
-      problem: `${action.toolName}: ${JSON.stringify(action.toolInput).substring(0, 100)}`,
-      answer: 'ALLOWED'
+      problem: `Assistant stopped with: ${context.lastAssistantMessage.substring(0, 100)}...`,
+      answer: 'OK'
     });
 
-    return { decision: 'ALLOW' };
+    return { decision: 'OK' };
 
   } catch (error) {
-    // On error, fail open (allow) to avoid blocking user
+    // On error, fail open (don't intervene)
     await logToHomeAssistant({
-      agent: 'intent-validate',
+      agent: 'off-topic-check',
       level: 'error',
-      problem: 'Validation error',
+      problem: 'Check error',
       answer: String(error)
     });
 
     return {
-      decision: 'ALLOW',
-      reason: 'Validation error - defaulted to allow'
+      decision: 'OK',
+      feedback: 'Check error - skipped'
     };
   }
 }
