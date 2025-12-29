@@ -41,9 +41,9 @@ async function main() {
     process.stdin.on("end", () => resolve(JSON.parse(data)));
   });
 
-  // Auto-approve low-risk tools
+  // Auto-approve low-risk tools and ALL MCP tools
   const LOW_RISK_TOOLS = ['LSP', 'WebSearch', 'WebFetch', 'Grep', 'Glob'];
-  if (LOW_RISK_TOOLS.includes(input.tool_name)) {
+  if (LOW_RISK_TOOLS.includes(input.tool_name) || input.tool_name.startsWith('mcp__')) {
     console.log(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",

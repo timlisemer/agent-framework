@@ -94,10 +94,26 @@ export async function extractConversationContext(transcriptPath: string): Promis
           if (typeof entry.message.content === 'string') {
             text = entry.message.content;
           } else if (Array.isArray(entry.message.content)) {
-            text = entry.message.content
+            const textBlocks = entry.message.content
               .filter((block: any) => block.type === 'text')
-              .map((block: any) => block.text)
-              .join('\n');
+              .map((block: any) => block.text);
+
+            const toolResults = entry.message.content
+              .filter((block: any) => block.type === 'tool_result')
+              .map((block: any) => {
+                // tool_result content can be string or array
+                if (typeof block.content === 'string') {
+                  return block.content;
+                } else if (Array.isArray(block.content)) {
+                  return block.content
+                    .filter((c: any) => c.type === 'text')
+                    .map((c: any) => c.text)
+                    .join(' ');
+                }
+                return '';
+              });
+
+            text = [...textBlocks, ...toolResults].join('\n');
           }
 
           if (text.trim()) {
@@ -112,10 +128,26 @@ export async function extractConversationContext(transcriptPath: string): Promis
           let text = '';
 
           if (Array.isArray(entry.message.content)) {
-            text = entry.message.content
+            const textBlocks = entry.message.content
               .filter((block: any) => block.type === 'text')
-              .map((block: any) => block.text)
-              .join('\n');
+              .map((block: any) => block.text);
+
+            const toolResults = entry.message.content
+              .filter((block: any) => block.type === 'tool_result')
+              .map((block: any) => {
+                // tool_result content can be string or array
+                if (typeof block.content === 'string') {
+                  return block.content;
+                } else if (Array.isArray(block.content)) {
+                  return block.content
+                    .filter((c: any) => c.type === 'text')
+                    .map((c: any) => c.text)
+                    .join(' ');
+                }
+                return '';
+              });
+
+            text = [...textBlocks, ...toolResults].join('\n');
           }
 
           if (text.trim()) {
