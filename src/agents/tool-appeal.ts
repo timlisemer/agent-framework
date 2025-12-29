@@ -19,36 +19,37 @@ export async function appealDenial(
     messages: [
       {
         role: 'user',
-        content: `You are reviewing an appeal of a command denial.
+        content: `You are reviewing an appeal. The command was denied for a valid technical reason.
 
-ORIGINAL DECISION: DENIED
-ORIGINAL REASON: ${originalReason}
+DENIAL REASON: ${originalReason}
 COMMAND: ${command}
 
 RECENT CONVERSATION:
 ${transcript}
 
-Your role is to determine if the original denial should stand or be overturned based on the conversation context.
-
-UPHOLD THE DENIAL (agree with original) when:
-1. User's request was vague and AI inferred the command
-   - Example: User said "run check" but AI chose "make check"
-   - The original technical reason is correct
-2. User didn't explicitly request this specific command
-3. Original denial reason is valid and applicable
+The original denial is ALWAYS technically correct. Your ONLY job is to check if the user explicitly approved this command or if there's a mismatch.
 
 OVERTURN TO APPROVE when:
-- User explicitly typed this exact command
-- User invoked a slash command requiring this action (/push, /commit)
+- User explicitly typed this exact command (e.g., "run make check", "execute git push")
+- User invoked a slash command requiring this (/push, /commit)
 - User explicitly confirmed when asked
+→ The user knowingly wants this despite the technical restriction
 
 OVERTURN WITH NEW REASON when:
 - User asked for X but AI is autonomously doing Y (clear mismatch)
+  Example: User said "run checks" but AI is doing "git commit"
+  Reply: OVERTURN: User asked for checks, not commit
 - User explicitly opposed this command (said no/don't/stop)
-- You have important context the original decision missed
+  Reply: OVERTURN: User explicitly opposed
 
-CRITICAL: If the original denial is correct and you have no additional context, UPHOLD it.
-Only overturn if you have a compelling reason from the transcript.
+UPHOLD (default) when:
+- User's request was vague (e.g., "run check" → AI chose "make check")
+- No explicit user approval for this exact command
+- Anything unclear
+→ The original technical reason stands
+
+CRITICAL: You are NOT judging if the technical rule is correct (it always is).
+You are ONLY checking if the user explicitly approved this specific command.
 
 Reply with EXACTLY one line:
 UPHOLD
@@ -58,10 +59,10 @@ or
 OVERTURN: <new reason>
 
 Examples:
-- User: "run check", Command: "make check", Original: "use MCP tool" → UPHOLD
+- User: "run check", Command: "make check" → UPHOLD
 - User: "please run make check", Command: "make check" → OVERTURN: APPROVE
-- User: "run checks", Command: "git commit", Original: "non-read-only" → OVERTURN: User asked for checks, not commit
-- User: "don't do that", Command: any → OVERTURN: User explicitly opposed`,
+- User: "run checks", Command: "git commit" → OVERTURN: User asked for checks, not commit
+- User: "don't do that" → OVERTURN: User explicitly opposed`,
       },
     ],
   });
@@ -110,22 +111,23 @@ Examples:
   let reason: string | undefined;
   const normalizedDecision = decision.trim().toUpperCase();
 
-  if (normalizedDecision === 'UPHOLD' || normalizedDecision === 'DENY') {
-    // Uphold original - no reason needed
+  // CODE-LEVEL SAFEGUARD: If response contains UPHOLD in any form, ALWAYS return undefined
+  // This ensures the original tool-approve reason is used, regardless of LLM output
+  if (normalizedDecision.includes('UPHOLD')) {
     reason = undefined;
   } else if (decision.startsWith('OVERTURN: ')) {
-    // Overturn with new reason
+    // Overturn with new reason - ONLY case where appeal provides a reason
     reason = decision.replace('OVERTURN: ', '');
     if (reason === 'APPROVE') reason = undefined; // Already handled above, but safety
   } else if (decision.startsWith('DENY: ')) {
-    // Old format compatibility
+    // Old format compatibility - appeal provides reason
     reason = decision.replace('DENY: ', '');
-  } else if (normalizedDecision.includes('UPHOLD') || normalizedDecision.includes('DENY')) {
-    // Formatting issue but clear intent to uphold
+  } else if (normalizedDecision === 'DENY') {
+    // Bare DENY - defer to original
     reason = undefined;
   } else {
-    // Truly malformed
-    reason = `Malformed response after ${retries} retries: ${decision}`;
+    // Truly malformed - treat as uphold to be safe (defer to original)
+    reason = undefined;
   }
 
   await logToHomeAssistant({
