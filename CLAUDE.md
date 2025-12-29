@@ -15,12 +15,14 @@ make clean      # Remove dist/
 This is a TypeScript framework for custom AI agents using the Claude Agent SDK. Agents are exposed via:
 1. **MCP Server** (`src/mcp/server.ts`) - Registers `check`, `confirm`, `commit` as MCP tools
 2. **PreToolUse Hook** (`src/hooks/pre-tool-use.ts`) - Intercepts bash commands for `tool-approve` agent
+3. **Stop Hook** (`src/hooks/stop-off-topic-check.ts`) - Detects when AI goes off-track and injects course-correction
 
 ### Agents (`src/agents/`)
 
 | Agent | Model | Purpose |
 |-------|-------|---------|
 | `tool-approve.ts` | Haiku | Approve/deny bash commands based on CLAUDE.md rules |
+| `intent-validate.ts` | Haiku | Detect off-topic questions/suggestions when AI stops |
 | `check.ts` | Sonnet | Run linter + `make check`, return structured summary |
 | `confirm.ts` | Opus | Binary gate: returns exactly `CONFIRMED` or `DECLINED: <reason>` |
 | `commit.ts` | Sonnet | Generate commit message and execute commit, return hash |
@@ -41,4 +43,4 @@ export const MODEL_IDS: Record<ModelTier, string> = {
 ### Integration Files (`claude-integration/`)
 
 - `mcp.json` - MCP server configuration for Claude Code
-- `settings.json` - PreToolUse hook configuration
+- `settings.json` - Hook configuration (PreToolUse for tool-approve, Stop for off-topic-check)

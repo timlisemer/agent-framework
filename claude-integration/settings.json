@@ -9,13 +9,15 @@
             "command": "node /path/to/agent-framework/dist/hooks/pre-tool-use.js"
           }
         ]
-      },
+      }
+    ],
+    "Stop": [
       {
-        "matcher": "(Edit|Write|Bash)",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "node /path/to/agent-framework/dist/hooks/intent-validation-pre-tool-use.js",
+            "command": "node /path/to/agent-framework/dist/hooks/stop-off-topic-check.js",
             "timeout": 30
           }
         ]

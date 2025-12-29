@@ -1,15 +1,17 @@
 # Agent Framework
 
-A TypeScript framework for custom AI agents using the Claude Agent SDK. Agents are exposed via two mechanisms:
+A TypeScript framework for custom AI agents using the Claude Agent SDK. Agents are exposed via three mechanisms:
 
 1. **MCP Server** - For `check`, `confirm`, `commit` agents (portable, works with any MCP client)
 2. **PreToolUse Hook** - For `tool-approve` agent (intercepts Claude Code's bash commands)
+3. **Stop Hook** - For `off-topic-check` agent (detects when AI goes off-track)
 
 ## Agents
 
 | Agent | Model | Mechanism | Purpose |
 |-------|-------|-----------|---------|
 | tool-approve | haiku | PreToolUse Hook | Approve/deny bash commands based on CLAUDE.md + common sense |
+| off-topic-check | haiku | Stop Hook | Detect when AI asks irrelevant/already-answered questions |
 | check | sonnet | MCP Tool | Linter + make check -> summary with recommendations |
 | confirm | opus | MCP Tool | Binary gate: CONFIRMED or DECLINED |
 | commit | sonnet | MCP Tool | Generate commit message + commit |
@@ -28,7 +30,7 @@ claude mcp add agent-framework node $(pwd)/dist/mcp/server.js
 
 # Copy hook config to your project
 cp claude-integration/settings.json /your/project/.claude/settings.json
-# Update the path in settings.json to point to your dist/hooks/pre-tool-use.js
+# Update the paths in settings.json to point to your dist/hooks/*.js
 ```
 
 ## Environment Variables
@@ -59,6 +61,13 @@ a1b2c3d
 ```
 
 The tool-approve hook runs automatically on every bash command Claude tries to execute.
+
+The off-topic-check hook runs when Claude stops and is waiting for user input. It detects when Claude:
+- Asks questions that were already answered earlier in the conversation
+- Asks questions unrelated to what the user requested
+- Suggests actions the user never asked for
+
+When detected, it injects a course-correction message to get Claude back on track.
 
 ### Programmatic Usage
 
