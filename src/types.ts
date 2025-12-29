@@ -15,3 +15,18 @@ export interface AgentResult {
   success: boolean;
   output: string;
 }
+
+export interface IntentValidationResult {
+  decision: 'ALLOW' | 'WARN' | 'BLOCK';
+  reason?: string;
+}
+
+export interface UserMessage {
+  text: string;
+  messageIndex: number;
+}
+
+export interface IntentContext {
+  userMessages: UserMessage[];
+  fullIntent: string;
+}

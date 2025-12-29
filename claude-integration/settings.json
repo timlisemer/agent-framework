@@ -9,6 +9,16 @@
             "command": "node /path/to/agent-framework/dist/hooks/pre-tool-use.js"
           }
         ]
+      },
+      {
+        "matcher": "(Edit|Write|Bash)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /path/to/agent-framework/dist/hooks/intent-validation-pre-tool-use.js",
+            "timeout": 30
+          }
+        ]
       }
     ]
   }
