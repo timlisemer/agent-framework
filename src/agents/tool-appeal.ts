@@ -15,7 +15,7 @@ export async function appealDenial(
 ): Promise<{ approved: boolean; reason?: string }> {
   const response = await anthropic.messages.create({
     model: getModelId('haiku'),
-    max_tokens: 150,
+    max_tokens: 500,
     messages: [
       {
         role: 'user',
@@ -51,12 +51,16 @@ UPHOLD (default) when:
 CRITICAL: You are NOT judging if the technical rule is correct (it always is).
 You are ONLY checking if the user explicitly approved this specific command.
 
-Reply with EXACTLY one line:
+===== OUTPUT FORMAT (STRICT) =====
+Your response MUST start with EXACTLY one of these three formats. DO NOT add any explanation before the decision:
+
 UPHOLD
-or
+OR
 OVERTURN: APPROVE
-or
+OR
 OVERTURN: <new reason>
+
+NO other text before the decision word. NO explanations first. NO preamble.
 
 Examples:
 - User: "run check", Command: "make check" → UPHOLD
@@ -86,7 +90,7 @@ Examples:
 
     const retryResponse = await anthropic.messages.create({
       model: getModelId('haiku'),
-      max_tokens: 50,
+      max_tokens: 100,
       messages: [{
         role: 'user',
         content: `Invalid format: "${decision}". Reply with EXACTLY: UPHOLD, OVERTURN: APPROVE, or OVERTURN: <reason>`

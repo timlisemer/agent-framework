@@ -23,7 +23,7 @@ export async function approveCommand(
 
   const response = await anthropic.messages.create({
     model: getModelId('haiku'),
-    max_tokens: 150,
+    max_tokens: 500,
     messages: [
       {
         role: 'user',
@@ -48,9 +48,11 @@ sqlite3: APPROVE only for read-only operations.
 
 === ALWAYS DENY ===
 
-1. cd command (any form)
+1. cd command (ANY form, no exceptions)
+   - DENY: cd /path, cd && cmd, cd /path && cmd, etc.
    - AIs must stay in their starting directory - changing dirs causes state confusion
-   - Special case: "cd && <cmd>" pattern - suggest --manifest-path, --prefix, or absolute paths
+   - For "cd /path && <cmd>": suggest running <cmd> with absolute paths or --prefix/--manifest-path flags
+   - For "cd /path && git <cmd>": suggest just "git <cmd>" (git works from any directory)
 
 2. Bash commands that duplicate AI tools
    - cat/head/tail → use Read tool
@@ -101,10 +103,14 @@ Overly complex/bloated commands - evaluate carefully:
 - AIs love adding unnecessary flags - question every flag that isn't strictly required
 - Complex commands aren't auto-denied but require clear justification
 
-Reply with EXACTLY one line:
+===== OUTPUT FORMAT (STRICT) =====
+Your response MUST start with EXACTLY one of these two formats. DO NOT add any explanation before the decision:
+
 APPROVE
-or
-DENY: <specific reason and suggested alternative>`,
+OR
+DENY: <specific reason and suggested alternative>
+
+NO other text before the decision word. NO explanations first. NO preamble.`,
       },
     ],
   });
@@ -122,7 +128,7 @@ DENY: <specific reason and suggested alternative>`,
 
     const retryResponse = await anthropic.messages.create({
       model: getModelId('haiku'),
-      max_tokens: 50,
+      max_tokens: 100,
       messages: [{
         role: 'user',
         content: `Invalid format: "${decision}". You are evaluating the command: ${command}. Reply with EXACTLY: APPROVE or DENY: <reason>`
