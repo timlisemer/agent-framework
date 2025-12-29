@@ -113,28 +113,30 @@ DENY: <specific reason and suggested alternative>`,
     response.content[0] as { type: 'text'; text: string }
   ).text.trim();
 
-  if (decision.startsWith('DENY')) {
-    let reason = decision.replace('DENY: ', '');
-    const logErr = await logToHomeAssistant({
+  if (decision.startsWith('APPROVE')) {
+    await logToHomeAssistant({
       agent: 'tool-approve',
       level: 'decision',
       problem: command,
-      answer: `DENIED: ${reason}`,
+      answer: 'APPROVED',
     });
-    //if (logErr) {
-    //  reason = `logToHomeAssistant error: ${logErr} ${reason}`;
-    //}
-    return {
-      approved: false,
-      reason,
-    };
+    return { approved: true };
   }
+
+  // Default to DENY for safety - extract reason from response
+  let reason = decision.startsWith('DENY: ')
+    ? decision.replace('DENY: ', '')
+    : `Unexpected response format: ${decision}`;
 
   await logToHomeAssistant({
     agent: 'tool-approve',
     level: 'decision',
     problem: command,
-    answer: 'APPROVED',
+    answer: `DENIED: ${reason}`,
   });
-  return { approved: true };
+
+  return {
+    approved: false,
+    reason,
+  };
 }

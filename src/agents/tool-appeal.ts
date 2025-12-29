@@ -30,13 +30,28 @@ ${transcript}
 APPROVE the appeal if ANY of these are true:
 1. User invoked a slash command that requires this action (e.g., /push, /commit)
 2. User explicitly requested this exact command in their message
-3. User explicitly confirmed/approved this command when asked
+3. User explicitly confirmed/approved this command
 4. Command is a direct response to user's explicit instruction
+
+APPROVAL KEYWORDS - Look for these exact phrases in the recent conversation:
+- "user approved"
+- "this is user approved"
+- "user explicitly requested"
+- "user confirmed"
+- "proceed with"
+- "go ahead"
+- "run this command"
+- "execute this"
+
+If you see ANY of these approval keywords in the RECENT CONVERSATION section referring to the current command, APPROVE the appeal.
+
+IMPORTANT: The keyword must appear in the MOST RECENT user messages (last 1-3 messages). Ignore older approval keywords that may refer to different commands.
 
 DENY the appeal if:
 - Claude decided to run this command autonomously without user request
 - User's request was vague and doesn't specifically require this command
 - No clear user intent to run this specific command
+- User said "user denied" or similar denial keywords
 
 Reply with EXACTLY one line:
 APPROVE
@@ -50,22 +65,27 @@ DENY: <reason>`,
     response.content[0] as { type: 'text'; text: string }
   ).text.trim();
 
-  if (decision.startsWith('DENY')) {
-    const reason = decision.replace('DENY: ', '');
+  if (decision.startsWith('APPROVE')) {
     await logToHomeAssistant({
       agent: 'tool-appeal',
       level: 'decision',
       problem: command,
-      answer: `DENIED: ${reason}`,
+      answer: 'APPROVED',
     });
-    return { approved: false, reason };
+    return { approved: true };
   }
+
+  // Default to DENY for safety - extract reason from response
+  const reason = decision.startsWith('DENY: ')
+    ? decision.replace('DENY: ', '')
+    : `Unexpected response format: ${decision}`;
 
   await logToHomeAssistant({
     agent: 'tool-appeal',
     level: 'decision',
     problem: command,
-    answer: 'APPROVED',
+    answer: `DENIED: ${reason}`,
   });
-  return { approved: true };
+
+  return { approved: false, reason };
 }
