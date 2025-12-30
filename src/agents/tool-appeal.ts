@@ -74,9 +74,9 @@ Examples:
     ],
   });
 
-  let decision = (
-    response.content[0] as { type: 'text'; text: string }
-  ).text.trim();
+  const textBlock = response.content.find((block) => block.type === 'text');
+  let decision =
+    textBlock && 'text' in textBlock ? textBlock.text.trim() : '';
 
   // Retry if malformed (not starting with APPROVE or DENY:)
   let retries = 0;
@@ -100,7 +100,13 @@ Examples:
       }]
     });
 
-    decision = (retryResponse.content[0] as { type: 'text'; text: string }).text.trim();
+    const retryTextBlock = retryResponse.content.find(
+      (block) => block.type === 'text'
+    );
+    decision =
+      retryTextBlock && 'text' in retryTextBlock
+        ? retryTextBlock.text.trim()
+        : '';
   }
 
   // Check for approval (overturn)

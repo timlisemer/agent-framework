@@ -8,13 +8,13 @@ A TypeScript framework for custom AI agents using the Claude Agent SDK. Agents a
 
 ## Agents
 
-| Agent | Model | Mechanism | Purpose |
-|-------|-------|-----------|---------|
-| tool-approve | haiku | PreToolUse Hook | Approve/deny bash commands based on CLAUDE.md + common sense |
-| off-topic-check | haiku | Stop Hook | Detect when AI asks irrelevant/already-answered questions |
-| check | sonnet | MCP Tool | Linter + make check -> summary with recommendations |
-| confirm | opus | MCP Tool | Binary gate: CONFIRMED or DECLINED |
-| commit | sonnet | MCP Tool | Generate commit message + commit |
+| Agent           | Model  | Mechanism       | Purpose                                                      |
+| --------------- | ------ | --------------- | ------------------------------------------------------------ |
+| tool-approve    | haiku  | PreToolUse Hook | Approve/deny bash commands based on CLAUDE.md + common sense |
+| off-topic-check | haiku  | Stop Hook       | Detect when AI asks irrelevant/already-answered questions    |
+| check           | sonnet | MCP Tool        | Linter + make check -> summary with recommendations          |
+| confirm         | opus   | MCP Tool        | Binary gate: CONFIRMED or DECLINED                           |
+| commit          | sonnet | MCP Tool        | Generate commit message + commit                             |
 
 ## Build & Install
 
@@ -46,6 +46,7 @@ The `PreToolUse` hook intercepts tool calls. To configure which tools trigger yo
 1. **Web search** - Searched for "Claude Code PreToolUse hook matcher tool names" but official docs only mention a few examples (Bash, Edit, Write, Read)
 
 2. **SDK type definitions** - The `@anthropic-ai/claude-agent-sdk` package contains TypeScript definitions. Found the tool list by exploring:
+
    ```bash
    find node_modules -name "*.d.ts" -path "*anthropic*"
    ```
@@ -61,35 +62,35 @@ This file defines a `ToolInputSchemas` union type that lists all available tools
 
 ```typescript
 export type ToolInputSchemas =
-  | AgentInput        // Tool: Agent (or Task)
-  | BashInput         // Tool: Bash
-  | TaskOutputInput   // Tool: TaskOutput
-  | FileEditInput     // Tool: Edit
-  | FileReadInput     // Tool: Read
-  | FileWriteInput    // Tool: Write
-  | GlobInput         // Tool: Glob
-  | GrepInput         // Tool: Grep
-  | KillShellInput    // Tool: KillShell
-  | ListMcpResourcesInput  // Tool: ListMcpResources
-  | McpInput          // Tool: mcp__<server>__<tool>
+  | AgentInput // Tool: Agent (or Task)
+  | BashInput // Tool: Bash
+  | TaskOutputInput // Tool: TaskOutput
+  | FileEditInput // Tool: Edit
+  | FileReadInput // Tool: Read
+  | FileWriteInput // Tool: Write
+  | GlobInput // Tool: Glob
+  | GrepInput // Tool: Grep
+  | KillShellInput // Tool: KillShell
+  | ListMcpResourcesInput // Tool: ListMcpResources
+  | McpInput // Tool: mcp__<server>__<tool>
   | NotebookEditInput // Tool: NotebookEdit
-  | ReadMcpResourceInput   // Tool: ReadMcpResource
-  | TodoWriteInput    // Tool: TodoWrite
-  | WebFetchInput     // Tool: WebFetch
-  | WebSearchInput    // Tool: WebSearch
-  | AskUserQuestionInput   // Tool: AskUserQuestion
-  // ... plus ExitPlanModeInput (internal)
+  | ReadMcpResourceInput // Tool: ReadMcpResource
+  | TodoWriteInput // Tool: TodoWrite
+  | WebFetchInput // Tool: WebFetch
+  | WebSearchInput // Tool: WebSearch
+  | AskUserQuestionInput; // Tool: AskUserQuestion
+// ... plus ExitPlanModeInput (internal)
 ```
 
 Additional tool `LSP` (Language Server Protocol) exists but isn't in the SDK types.
 
 ### Tool Risk Categories
 
-| Risk Level | Tools | Notes |
-|------------|-------|-------|
-| **Low** | `LSP`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `ListMcpResources`, `ReadMcpResource`, `TodoWrite`, `TaskOutput`, `AskUserQuestion` | Read-only or no filesystem impact |
-| **Medium** | `Read`, `mcp__*` | Can access files; MCP tools vary by server |
-| **High** | `Bash`, `Edit`, `Write`, `NotebookEdit`, `Agent`/`Task`, `KillShell` | Modify files, execute commands, spawn agents |
+| Risk Level | Tools                                                                                                                               | Notes                                        |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| **Low**    | `LSP`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `ListMcpResources`, `ReadMcpResource`, `TodoWrite`, `TaskOutput`, `AskUserQuestion` | Read-only or no filesystem impact            |
+| **Medium** | `Read`, `mcp__*`                                                                                                                    | Can access files; MCP tools vary by server   |
+| **High**   | `Bash`, `Edit`, `Write`, `NotebookEdit`, `Agent`/`Task`, `KillShell`                                                                | Modify files, execute commands, spawn agents |
 
 ### Hook Matcher Configuration
 
@@ -98,15 +99,18 @@ In `settings.json`, the `matcher` field is a regex that determines which tools t
 ```json
 {
   "hooks": {
-    "PreToolUse": [{
-      "matcher": ".*",           // Match ALL tools
-      "hooks": [{ "type": "command", "command": "node /path/to/hook.js" }]
-    }]
+    "PreToolUse": [
+      {
+        "matcher": ".*", // Match ALL tools
+        "hooks": [{ "type": "command", "command": "node /path/to/hook.js" }]
+      }
+    ]
   }
 }
 ```
 
 Common matcher patterns:
+
 - `".*"` - All tools (recommended for full control)
 - `"(Bash|Edit|Write)"` - Only specific high-risk tools
 - `"mcp__.*"` - Only MCP tools
@@ -144,6 +148,7 @@ a1b2c3d
 The tool-approve hook runs automatically on every bash command Claude tries to execute.
 
 The off-topic-check hook runs when Claude stops and is waiting for user input. It detects when Claude:
+
 - Asks questions that were already answered earlier in the conversation
 - Asks questions unrelated to what the user requested
 - Suggests actions the user never asked for
@@ -153,16 +158,16 @@ When detected, it injects a course-correction message to get Claude back on trac
 ### Programmatic Usage
 
 ```typescript
-import { runCheckAgent } from "./agents/check.js";
-import { runConfirmAgent } from "./agents/confirm.js";
-import { runCommitAgent } from "./agents/commit.js";
+import { runCheckAgent } from './agents/check.js';
+import { runConfirmAgent } from './agents/confirm.js';
+import { runCommitAgent } from './agents/commit.js';
 
-const checkResult = await runCheckAgent("/path/to/project");
+const checkResult = await runCheckAgent('/path/to/project');
 console.log(checkResult);
 
-const confirmResult = await runConfirmAgent("/path/to/project");
-if (confirmResult === "CONFIRMED") {
-  await runCommitAgent("/path/to/project");
+const confirmResult = await runConfirmAgent('/path/to/project');
+if (confirmResult === 'CONFIRMED') {
+  await runCommitAgent('/path/to/project');
 }
 ```
 

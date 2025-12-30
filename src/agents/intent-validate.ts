@@ -238,7 +238,9 @@ Reply with: OK or INTERVENE: <feedback for the AI>`
       system: SYSTEM_PROMPT
     });
 
-    let decision = (response.content[0] as { type: 'text'; text: string }).text.trim();
+    const textBlock = response.content.find((block) => block.type === 'text');
+    let decision =
+      textBlock && 'text' in textBlock ? textBlock.text.trim() : '';
 
     // Retry logic for malformed responses
     let retries = 0;
@@ -260,7 +262,13 @@ Reply with: OK or INTERVENE: <feedback for the AI>`
         }]
       });
 
-      decision = (retryResponse.content[0] as { type: 'text'; text: string }).text.trim();
+      const retryTextBlock = retryResponse.content.find(
+        (block) => block.type === 'text'
+      );
+      decision =
+        retryTextBlock && 'text' in retryTextBlock
+          ? retryTextBlock.text.trim()
+          : '';
     }
 
     if (decision.startsWith('INTERVENE:')) {
