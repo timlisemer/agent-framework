@@ -48,10 +48,16 @@ Evaluate against these criteria:
 - Reasonable code style
 - No unused code workarounds: If the diff shows unused variables/imports being renamed with underscores (_var), flagged with @ts-ignore/@ts-expect-error, or otherwise suppressed instead of deleted, DECLINE. Unused code must be removed, not hidden.
 
-Then output EXACTLY one of:
-CONFIRMED
+OUTPUT FORMAT:
+Your response must follow this exact structure:
+
+## Summary
+<2-4 sentences describing what the changes do conceptually>
+
+## Verdict
+CONFIRMED: <1-2 sentences explaining why the changes are acceptable>
 or
-DECLINED: <one sentence reason>
+DECLINED: <1-2 sentences explaining the specific issue>
 
 RULES:
 - You CANNOT ask questions
@@ -61,7 +67,7 @@ RULES:
 - Small, obvious changes bias toward CONFIRMED
 - Large, complex changes require higher scrutiny
 
-This is a gate, not a review. Decide.`
+This is a gate, not a review. Summarize and decide.`
     }
   );
 

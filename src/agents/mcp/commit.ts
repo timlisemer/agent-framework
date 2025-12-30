@@ -31,17 +31,25 @@ export async function runCommitAgent(workingDir: string): Promise<string> {
 
   const result = await runAgentQuery(
     'commit',
-    `1. Run \`git diff --stat HEAD\` to count files and lines changed
+    `CONFIRM AGENT ANALYSIS:
+${confirmResult}
+
+---
+
+Based on the analysis above:
+1. Run \`git diff --stat HEAD\` to count files and lines changed
 2. Classify the change size based on stats
-3. Run \`git diff HEAD\` to understand the actual changes
+3. Run \`git diff HEAD\` to verify the changes match the analysis
 4. Generate commit message matching the classified size
 5. Execute \`git add -A && git commit -m "..."\`
 6. Return SIZE, the commit message, and HASH`,
     {
       cwd: workingDir,
-      model: getModelId("sonnet"),
+      model: getModelId("haiku"),
       allowedTools: ["Bash"],
-      systemPrompt: `You are a commit message generator. Follow this EXACT process.
+      systemPrompt: `You are a commit message generator. You receive analysis from a confirm agent that has already reviewed the changes. Use this analysis to guide your commit message.
+
+Follow this EXACT process.
 
 STEP 1: CLASSIFY CHANGE SIZE
 Run \`git diff --stat HEAD\` and classify based on the summary line:
