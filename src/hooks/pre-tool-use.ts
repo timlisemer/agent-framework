@@ -5,7 +5,12 @@ import * as os from 'os';
 import { approveTool } from '../agents/tool-approve.js';
 import { appealDenial } from '../agents/tool-appeal.js';
 import { validatePlanIntent } from '../agents/plan-validate.js';
+import { checkErrorAcknowledgment } from '../agents/error-acknowledge.js';
 import { logToHomeAssistant } from '../utils/logger.js';
+import {
+  readTranscriptForErrorCheck,
+  quickErrorCheck,
+} from '../utils/transcript-parser.js';
 
 // Retry tracking for workaround detection
 const DENIAL_CACHE_FILE = '/tmp/claude-hook-denials.json';
@@ -254,6 +259,42 @@ async function main() {
       })
     );
     process.exit(0);
+  }
+
+  // Error acknowledgment check - detect if AI is ignoring errors
+  // Step 1: Quick pattern check (TypeScript only, no LLM)
+  const errorCheckTranscript = await readTranscriptForErrorCheck(
+    input.transcript_path,
+    20
+  );
+  const quickCheck = quickErrorCheck(errorCheckTranscript);
+
+  if (quickCheck.needsHaikuCheck) {
+    // Step 2: Only call Haiku if error/directive patterns detected
+    const ackResult = await checkErrorAcknowledgment(
+      errorCheckTranscript,
+      input.tool_name,
+      input.tool_input
+    );
+    if (ackResult.startsWith('BLOCK:')) {
+      const reason = ackResult.substring(7).trim();
+      logToHomeAssistant({
+        agent: 'pre-tool-use-hook',
+        level: 'decision',
+        problem: `${input.tool_name} blocked for ignoring errors`,
+        answer: reason,
+      });
+      console.log(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: `Error acknowledgment required: ${reason}`,
+          },
+        })
+      );
+      process.exit(0);
+    }
   }
 
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
