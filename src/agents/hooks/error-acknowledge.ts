@@ -38,7 +38,7 @@ export async function checkErrorAcknowledgment(
     messages: [
       {
         role: 'user',
-        content: `You are an issue acknowledgment validator. Analyze the recent transcript to determine if the AI is ignoring issues or user feedback.
+        content: `You are an issue acknowledgment validator.
 
 TRANSCRIPT (recent messages):
 ${transcript}
@@ -47,38 +47,50 @@ CURRENT TOOL CALL:
 Tool: ${toolName}
 Input: ${JSON.stringify(toolInput)}
 
-=== WHAT TO DETECT ===
+=== WHAT COUNTS AS A REAL ISSUE ===
 
-1. A tool returned an issue message (TypeScript issues, build failures, hook blocks)
-2. The user provided feedback/correction (especially caps, directives)
-3. The AI is now calling a tool WITHOUT acknowledging the issue in its text response
+Real issues that need acknowledgment:
+- TypeScript errors: "error TS2304: Cannot find name 'foo'" at src/file.ts:42
+- Build failures: "make: *** [Makefile:10: build] Error 1"
+- Test failures: "FAILED tests/foo.test.ts" with actual failure reason
+- Hook denials with SPECIFIC reason: "DENY: modifying system files outside project"
+- User directives in ALL CAPS or explicit corrections
+
+NOT real issues (ignore these):
+- Source code from Read/Grep containing words like "error", "failed", "denied"
+- Generic text like "The tool call was denied for a valid technical reason"
+- Variable names like "errorHandler" or "onFailure"
+- System prompts or documentation text being read/written
+- Strings inside code that happen to contain error-like words
 
 === RETURN "OK" WHEN ===
 
-- No recent issues in transcript
-- AI's text explicitly acknowledges the issue before this tool call
-- This tool call is directly addressing/fixing the issue (e.g., Edit to fix the issue)
-- The tool call is Read/Grep to investigate the issue further
+- No real issues in transcript (just source code content)
+- AI explicitly acknowledged the issue in its text before this tool call
+- This tool call directly addresses/fixes the issue
+- Tool call is Read/Grep to investigate further
 
-=== RETURN "BLOCK: <message>" WHEN ===
+=== RETURN "BLOCK" WHEN ===
 
-- Issue exists in recent transcript
-- AI said nothing about the issue (no ASSISTANT text after the issue)
-- AI is calling an unrelated tool (not fixing or investigating the issue)
+- A REAL issue exists (build failure, TypeScript error, test failure)
+- AI said nothing about it after the issue appeared
+- AI is calling an unrelated tool instead of fixing it
 - User gave explicit directive that AI ignored
-
-The message should tell the AI what it needs to acknowledge before proceeding.
 
 === OUTPUT FORMAT (STRICT) ===
 Your response MUST be EXACTLY one of:
 
 OK
 OR
-BLOCK: [ISSUE: "<quote the specific issue from transcript>"] <what AI needs to acknowledge>
+BLOCK: [ISSUE: "<exact error with file:line or error code>"] <what to acknowledge>
 
-Example: BLOCK: [ISSUE: "TS2304: Cannot find name 'foo'"] Acknowledge this TypeScript issue before proceeding.
+Good example:
+BLOCK: [ISSUE: "error TS2304: Cannot find name 'foo' at src/types.ts:42"] Fix this TypeScript error.
 
-NO other text. NO explanations. Just OK or BLOCK: [ISSUE: "..."] <message>.`,
+Bad example (DO NOT DO THIS):
+BLOCK: [ISSUE: "The tool call was denied"] - This is useless, not a real error.
+
+NO other text. Just OK or BLOCK with a SPECIFIC, USEFUL issue quote.`,
       },
     ],
   });
