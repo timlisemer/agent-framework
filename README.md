@@ -89,11 +89,17 @@ Additional tools exist but aren't in the SDK types:
 
 ### Tool Risk Categories
 
-| Risk Level | Tools                                                                                                                                                                             | Notes                                        |
-| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| **Low**    | `LSP`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `ListMcpResources`, `ReadMcpResource`, `TodoWrite`, `TaskOutput`, `AskUserQuestion`, `ExitPlanMode`, `EnterPlanMode`, `Skill` | Read-only or no filesystem impact            |
-| **Medium** | `Read`, `mcp__*`                                                                                                                                                                  | Can access files; MCP tools vary by server   |
-| **High**   | `Bash`, `Edit`, `Write`, `NotebookEdit`, `Agent`/`Task`, `KillShell`                                                                                                              | Modify files, execute commands, spawn agents |
+| Risk Level     | Tools                                                                                                                                                                         | Notes                                      |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| **Low**        | `LSP`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `ListMcpResources`, `ReadMcpResource`, `TodoWrite`, `TaskOutput`, `AskUserQuestion`, `ExitPlanMode`, `EnterPlanMode`, `Skill` | Read-only or no filesystem impact          |
+| **Low**        | `mcp__*`                                                                                                                                                                      | All MCP tools auto-approved                |
+| **Path-based** | `Read`, `Write`, `Edit`, `NotebookEdit`                                                                                                                                       | Low if inside project or `~/.claude/`, otherwise high |
+| **High**       | `Bash`, `Agent`/`Task`, `KillShell`                                                                                                                                           | Execute commands, spawn agents             |
+
+**Path-based classification**: File tools are auto-approved when:
+- File path is inside the project directory (`CLAUDE_PROJECT_DIR` or cwd), OR
+- File path is inside `~/.claude/` (Claude Code's own files)
+- AND the path doesn't match sensitive patterns (`.env`, `credentials`, `.ssh`, `.aws`, `secrets`, `.key`, `.pem`, `password`)
 
 ### Hook Matcher Configuration
 

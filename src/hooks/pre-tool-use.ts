@@ -1,14 +1,52 @@
 import { type PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 import { approveTool } from '../agents/tool-approve.js';
 import { appealDenial } from '../agents/tool-appeal.js';
 import { logToHomeAssistant } from '../utils/logger.js';
 
+// File tools that benefit from path-based risk classification
+const FILE_TOOLS = ['Read', 'Write', 'Edit', 'NotebookEdit'];
+
+// Sensitive file patterns - always require LLM approval
+const SENSITIVE_PATTERNS = [
+  '.env',
+  'credentials',
+  '.ssh',
+  '.aws',
+  'secrets',
+  '.key',
+  '.pem',
+  'password',
+];
+
+function isPathInDirectory(filePath: string, dirPath: string): boolean {
+  const resolved = path.resolve(filePath);
+  const dirResolved = path.resolve(dirPath);
+  return (
+    resolved.startsWith(dirResolved + path.sep) || resolved === dirResolved
+  );
+}
+
+function isTrustedPath(filePath: string, projectDir: string): boolean {
+  const claudeDir = path.join(os.homedir(), '.claude');
+  return (
+    isPathInDirectory(filePath, projectDir) ||
+    isPathInDirectory(filePath, claudeDir)
+  );
+}
+
+function isSensitivePath(filePath: string): boolean {
+  const lower = filePath.toLowerCase();
+  return SENSITIVE_PATTERNS.some((p) => lower.includes(p));
+}
+
 async function readRecentTranscript(
-  path: string,
+  transcriptPath: string,
   lines: number
 ): Promise<string> {
-  const content = await fs.promises.readFile(path, 'utf-8');
+  const content = await fs.promises.readFile(transcriptPath, 'utf-8');
   const entries = content.trim().split('\n').slice(-lines);
 
   return entries
@@ -83,6 +121,33 @@ async function main() {
   }
 
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+
+  // Path-based risk classification for file tools
+  // Low risk: inside project or ~/.claude, and not sensitive
+  // High risk: outside trusted dirs or sensitive files
+  if (FILE_TOOLS.includes(input.tool_name)) {
+    const filePath =
+      (input.tool_input as { file_path?: string }).file_path ||
+      (input.tool_input as { path?: string }).path;
+    if (filePath) {
+      const trusted = isTrustedPath(filePath, projectDir);
+      const sensitive = isSensitivePath(filePath);
+
+      if (trusted && !sensitive) {
+        // Low risk - auto-approve
+        console.log(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'allow',
+            },
+          })
+        );
+        process.exit(0);
+      }
+      // High risk - fall through to LLM approval
+    }
+  }
 
   const decision = await approveTool(
     input.tool_name,
