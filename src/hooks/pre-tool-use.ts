@@ -63,6 +63,9 @@ async function main() {
     'TodoWrite', // Task list management (internal to Claude)
     'TaskOutput', // Read output from background tasks
     'AskUserQuestion', // Prompts user for input (safe)
+    'ExitPlanMode', // Exit plan mode (internal to Claude)
+    'EnterPlanMode', // Enter plan mode (internal to Claude)
+    'Skill', // Invoke skills like /commit (user-initiated)
   ];
   if (
     LOW_RISK_TOOLS.includes(input.tool_name) ||

@@ -65,6 +65,7 @@ export type ToolInputSchemas =
   | AgentInput // Tool: Agent (or Task)
   | BashInput // Tool: Bash
   | TaskOutputInput // Tool: TaskOutput
+  | ExitPlanModeInput // Tool: ExitPlanMode
   | FileEditInput // Tool: Edit
   | FileReadInput // Tool: Read
   | FileWriteInput // Tool: Write
@@ -79,18 +80,20 @@ export type ToolInputSchemas =
   | WebFetchInput // Tool: WebFetch
   | WebSearchInput // Tool: WebSearch
   | AskUserQuestionInput; // Tool: AskUserQuestion
-// ... plus ExitPlanModeInput (internal)
 ```
 
-Additional tool `LSP` (Language Server Protocol) exists but isn't in the SDK types.
+Additional tools exist but aren't in the SDK types:
+- `LSP` - Language Server Protocol queries
+- `EnterPlanMode` - Enter planning mode
+- `Skill` - Invoke skills like /commit, /push
 
 ### Tool Risk Categories
 
-| Risk Level | Tools                                                                                                                               | Notes                                        |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| **Low**    | `LSP`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `ListMcpResources`, `ReadMcpResource`, `TodoWrite`, `TaskOutput`, `AskUserQuestion` | Read-only or no filesystem impact            |
-| **Medium** | `Read`, `mcp__*`                                                                                                                    | Can access files; MCP tools vary by server   |
-| **High**   | `Bash`, `Edit`, `Write`, `NotebookEdit`, `Agent`/`Task`, `KillShell`                                                                | Modify files, execute commands, spawn agents |
+| Risk Level | Tools                                                                                                                                                                             | Notes                                        |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| **Low**    | `LSP`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `ListMcpResources`, `ReadMcpResource`, `TodoWrite`, `TaskOutput`, `AskUserQuestion`, `ExitPlanMode`, `EnterPlanMode`, `Skill` | Read-only or no filesystem impact            |
+| **Medium** | `Read`, `mcp__*`                                                                                                                                                                  | Can access files; MCP tools vary by server   |
+| **High**   | `Bash`, `Edit`, `Write`, `NotebookEdit`, `Agent`/`Task`, `KillShell`                                                                                                              | Modify files, execute commands, spawn agents |
 
 ### Hook Matcher Configuration
 
