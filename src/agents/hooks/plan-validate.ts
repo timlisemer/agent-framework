@@ -18,7 +18,7 @@ DETECT DRIFT (→ DRIFT):
 - Plan is appended to an old plan instead of replacing it - Look for if the user clearly started a new topic and the existing plan was not related to the new topic.
 
 OVER-ENGINEERING DRIFT (→ DRIFT):
-- Plan includes extensive testing campaigns (e.g., "Testing Phase", "Test Plan", "QA Campaign") for relatively small changes (single file edits, minor fixes, simple additions)
+- Plan includes testing/verification sections (e.g., "Testing", "Test Plan", "Tests", "QA", "Verification Steps") with manual test instructions - verification should reference the check MCP tool only, not manual testing steps
 - Plan includes time estimates or timeline phases like "Week 1:", "Day 1:", "Phase 1:", "Sprint 1:", etc.
 - Plan includes manual build/check commands like "make check", "npm run build", "tsc", "cargo build" - these should use the check MCP tool instead
 

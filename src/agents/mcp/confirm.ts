@@ -7,38 +7,41 @@ import { runCheckAgent } from "./check.js";
 
 const SYSTEM_PROMPT = `You are a strict code quality gate. You have ONE job: evaluate changes and return a verdict.
 
-The code has already passed linting and type checks. Now evaluate the changes.
+The code has already passed linting and type checks. Now evaluate the changes against these 4 categories:
 
-STEP 1: Check for unwanted files in the git status.
-DECLINE immediately if you see any of these patterns:
-- node_modules/ (dependencies should never be committed)
-- dist/, build/, out/ (build artifacts)
+## CATEGORY 1: Files
+Check for unwanted files in the git status. FAIL if you see:
+- node_modules/, dist/, build/, out/, target/, vendor/, coverage/
 - .env, .env.local, .env.* (environment files with secrets)
-- *.log, *.tmp, *.cache (temporary files)
-- .DS_Store, Thumbs.db (OS artifacts)
-- __pycache__/, *.pyc (Python cache)
-- target/ (Rust/Java build output)
-- vendor/ (vendored dependencies)
-- coverage/ (test coverage reports)
-- .idea/, .vscode/ with settings (IDE configs - unless intentional)
+- *.log, *.tmp, *.cache, .DS_Store, Thumbs.db
+- __pycache__/, *.pyc
+- .idea/, .vscode/ with settings (unless intentional)
 
-If unwanted files are staged, DECLINE with: "Unwanted files staged: <list>. Check .gitignore."
-
-STEP 2: Evaluate the diff against these criteria:
+## CATEGORY 2: Code Quality
+Evaluate the diff for:
 - No obvious bugs or logic errors
-- No security vulnerabilities
-- No hardcoded secrets or credentials
 - No debug code (console.log, print, dbg!, etc.)
 - Changes are coherent and intentional
 - Reasonable code style
-- No unused code workarounds: If the diff shows unused variables/imports being renamed with underscores (_var), flagged with @ts-ignore/@ts-expect-error, or otherwise suppressed instead of deleted, DECLINE. Unused code must be removed, not hidden.
+- No unused code workarounds (renaming with _var, @ts-ignore, etc. - unused code must be deleted)
 
-STEP 3: Documentation check
-- Verify documentation is still up to date after the changes
-- DECLINE if documentation was left out, and summarize what is missing
+## CATEGORY 3: Security
+Check for:
+- No security vulnerabilities
+- No hardcoded secrets or credentials
+
+## CATEGORY 4: Documentation
+- Verify documentation is updated if the changes require it
+- Note what is missing if applicable
 
 OUTPUT FORMAT:
 Your response must follow this exact structure:
+
+## Results
+- Files: PASS or FAIL (<brief reason if FAIL>)
+- Code Quality: PASS or FAIL (<brief reason if FAIL>)
+- Security: PASS or FAIL (<brief reason if FAIL>)
+- Documentation: PASS or FAIL (<brief reason if FAIL>)
 
 ## Summary
 <2-4 sentences describing what the changes do conceptually>
@@ -49,14 +52,13 @@ or
 DECLINED: <1-2 sentences explaining the specific issue>
 
 RULES:
-- You CANNOT ask questions
-- You CANNOT request more context
-- You CANNOT suggest improvements
+- You CANNOT ask questions or request more context
 - You MUST decide based solely on the diff
+- All 4 categories must PASS for CONFIRMED
+- Any FAIL means DECLINED
 - Small, obvious changes bias toward CONFIRMED
-- Large, complex changes require higher scrutiny
 
-This is a gate, not a review. Summarize and decide.`;
+This is a gate, not a review.`;
 
 /**
  * Run a shell command and capture output.
@@ -85,7 +87,17 @@ export async function runConfirmAgent(workingDir: string): Promise<string> {
 
   // Step 3: If check failed, decline immediately
   if (checkStatus === "FAIL" || errorCount > 0) {
-    const result = `DECLINED: check failed with ${errorCount} error(s)`;
+    const result = `## Results
+- Files: SKIP
+- Code Quality: SKIP
+- Security: SKIP
+- Documentation: SKIP
+
+## Verdict
+DECLINED: check failed with ${errorCount} error(s)`;
+    console.error("\n=== Confirm Agent Results ===");
+    console.error(result);
+    console.error("=============================\n");
     logToHomeAssistant({
       agent: "confirm",
       level: "decision",
@@ -120,6 +132,10 @@ ${gitDiff.output || "(no diff)"}`,
   });
 
   const output = extractTextFromResponse(response);
+
+  console.error("\n=== Confirm Agent Results ===");
+  console.error(output);
+  console.error("=============================\n");
 
   logToHomeAssistant({
     agent: "confirm",
