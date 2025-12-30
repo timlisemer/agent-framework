@@ -4,7 +4,6 @@ import { z } from "zod";
 import { runCheckAgent } from "../agents/mcp/check.js";
 import { runConfirmAgent } from "../agents/mcp/confirm.js";
 import { runCommitAgent } from "../agents/mcp/commit.js";
-import { runPushAgent } from "../agents/mcp/push.js";
 
 // Ensure PATH includes standard locations for subprocess spawning
 // Required for Claude Agent SDK to find node when running in Docker via `docker exec`

@@ -46,6 +46,7 @@ Evaluate against these criteria:
 - No debug code (console.log, print, dbg!, etc.)
 - Changes are coherent and intentional
 - Reasonable code style
+- No unused code workarounds: If the diff shows unused variables/imports being renamed with underscores (_var), flagged with @ts-ignore/@ts-expect-error, or otherwise suppressed instead of deleted, DECLINE. Unused code must be removed, not hidden.
 
 Then output EXACTLY one of:
 CONFIRMED

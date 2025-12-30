@@ -12,7 +12,6 @@ import {
   hasErrorPatterns,
   TranscriptFilter,
   MessageLimit,
-  type ErrorCheckOptions,
 } from '../utils/transcript.js';
 
 // Retry tracking for workaround detection
