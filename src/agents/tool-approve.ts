@@ -112,7 +112,10 @@ sqlite3: APPROVE only for read-only operations.
    - DENY: make check (use MCP tool for better integration)
    - Suggest: use mcp__agent-framework__check tool instead
 
-10. curl/wget commands (network requests)
+10. build commands like make build, npm run build, etc.
+   - DENY: Ais are not intended to build the project. Use the mcp__agent-framework__check tool for validation - it runs both linter and type-check with better output
+
+11. curl/wget commands (network requests)
    - DENY by default (requires explicit user permission via transcript appeal)
    - User must explicitly request or approve the curl command
 
@@ -138,8 +141,7 @@ NO other text before the decision word. NO explanations first. NO preamble.`,
   });
 
   const textBlock = response.content.find((block) => block.type === 'text');
-  let decision =
-    textBlock && 'text' in textBlock ? textBlock.text.trim() : '';
+  let decision = textBlock && 'text' in textBlock ? textBlock.text.trim() : '';
 
   // Retry if malformed (not starting with APPROVE or DENY:)
   let retries = 0;
@@ -147,16 +149,22 @@ NO other text before the decision word. NO explanations first. NO preamble.`,
 
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput)}`;
 
-  while (!decision.startsWith('APPROVE') && !decision.startsWith('DENY:') && retries < maxRetries) {
+  while (
+    !decision.startsWith('APPROVE') &&
+    !decision.startsWith('DENY:') &&
+    retries < maxRetries
+  ) {
     retries++;
 
     const retryResponse = await anthropic.messages.create({
       model: getModelId('haiku'),
       max_tokens: 100,
-      messages: [{
-        role: 'user',
-        content: `Invalid format: "${decision}". You are evaluating tool: ${toolDescription}. Reply with EXACTLY: APPROVE or DENY: <reason>`
-      }]
+      messages: [
+        {
+          role: 'user',
+          content: `Invalid format: "${decision}". You are evaluating tool: ${toolDescription}. Reply with EXACTLY: APPROVE or DENY: <reason>`,
+        },
+      ],
     });
 
     const retryTextBlock = retryResponse.content.find(
