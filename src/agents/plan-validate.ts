@@ -21,11 +21,17 @@ DETECT DRIFT (→ DRIFT):
 - Plan adds major unrelated scope user never asked for
 - Plan is appended to an old plan instead of replacing it - Look for if the user clearly started a new topic and the existing plan was not related to the new topic.
 
+OVER-ENGINEERING DRIFT (→ DRIFT):
+- Plan includes extensive testing campaigns (e.g., "Testing Phase", "Test Plan", "QA Campaign") for relatively small changes (single file edits, minor fixes, simple additions)
+- Plan includes time estimates or timeline phases like "Week 1:", "Day 1:", "Phase 1:", "Sprint 1:", etc.
+- Plan includes manual build/check commands like "make check", "npm run build", "tsc", "cargo build" - these should use the check MCP tool instead
+
 ALLOW (→ OK):
 - Plan is incomplete but heading in the right direction
 - Plan is a reasonable interpretation of ambiguous request
 - Plan addresses the core request even if not all details yet
 - Plan is work-in-progress (partial plans are fine)
+- Plan mentions running the check MCP tool for verification
 
 RULES:
 - Be PERMISSIVE - only block clear misalignment
@@ -33,6 +39,7 @@ RULES:
 - Don't require every detail - focus on direction
 - Consider the plan might be iteratively built
 - When in doubt, allow
+- For build verification, always prefer "check MCP tool" over manual commands
 
 Reply with EXACTLY:
 OK
