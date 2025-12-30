@@ -3,18 +3,76 @@
 A TypeScript framework for custom AI agents using the Claude Agent SDK. Agents are exposed via three mechanisms:
 
 1. **MCP Server** - For `check`, `confirm`, `commit` agents (portable, works with any MCP client)
-2. **PreToolUse Hook** - For `tool-approve` agent (intercepts Claude Code's bash commands)
-3. **Stop Hook** - For `off-topic-check` agent (detects when AI goes off-track)
+2. **PreToolUse Hook** - Multi-layer safety gate with `tool-approve`, `tool-appeal`, `error-acknowledge`, and `plan-validate` agents
+3. **Stop Hook** - For `intent-validate` agent (detects when AI goes off-track)
 
 ## Agents
 
-| Agent           | Model  | Mechanism       | Purpose                                                      |
-| --------------- | ------ | --------------- | ------------------------------------------------------------ |
-| tool-approve    | haiku  | PreToolUse Hook | Approve/deny bash commands based on CLAUDE.md + common sense |
-| off-topic-check | haiku  | Stop Hook       | Detect when AI asks irrelevant/already-answered questions    |
-| check           | sonnet | MCP Tool        | Linter + make check -> summary with recommendations          |
-| confirm         | opus   | MCP Tool        | Binary gate: CONFIRMED or DECLINED                           |
-| commit          | sonnet | MCP Tool        | Generate commit message + commit                             |
+The framework implements 9 specialized agents organized into three categories:
+
+### MCP Tools (User-Facing)
+
+| Agent   | Model  | Purpose                                                      |
+| ------- | ------ | ------------------------------------------------------------ |
+| check   | sonnet | Run linter + make check, return summary with recommendations |
+| confirm | opus   | Binary quality gate: CONFIRMED or DECLINED                   |
+| commit  | sonnet | Generate minimal commit message + execute git commit         |
+
+### Validation Agents (Hook-Triggered)
+
+| Agent            | Model  | Hook        | Purpose                                        |
+| ---------------- | ------ | ----------- | ---------------------------------------------- |
+| intent-validate  | haiku  | Stop        | Detect off-topic questions or misunderstood requests |
+| plan-validate    | sonnet | PreToolUse  | Detect plan drift from user intent             |
+| error-acknowledge| haiku  | PreToolUse  | Detect when AI ignores errors or feedback      |
+
+### Approval Agents (PreToolUse Hook)
+
+| Agent        | Model | Purpose                                            |
+| ------------ | ----- | -------------------------------------------------- |
+| tool-approve | haiku | Approve/deny tools based on CLAUDE.md + safety rules |
+| tool-appeal  | haiku | Review denials with conversation context           |
+
+### Simple Wrapper
+
+| Agent | Purpose                    |
+| ----- | -------------------------- |
+| push  | Execute git push with logging |
+
+## Agent Chaining
+
+Agents call each other in verification chains:
+
+```
+check ─────────────────────────► (runs independently)
+confirm ──► runCheckAgent() ───► (check must pass first)
+commit ───► runConfirmAgent() ─► runCheckAgent() ─► (full chain)
+```
+
+The `commit` agent enforces the complete verification chain before committing.
+
+## PreToolUse Hook Flow
+
+```
+┌─ Tool Call Received
+│
+├─ Auto-approve low-risk tools (Grep, Glob, LSP, MCP tools, etc.)
+│
+├─ error-acknowledge: Check if AI is ignoring errors
+│  └─ BLOCK if errors not acknowledged
+│
+├─ Path-based classification for file tools
+│  ├─ Trusted path (project dir or ~/.claude) + not sensitive → ALLOW
+│  └─ plan-validate: Check for plan drift on ~/.claude/plans writes
+│
+├─ tool-approve: Evaluate tool call against CLAUDE.md + rules
+│  └─ DENY → tool-appeal: Review with transcript context
+│           ├─ OVERTURN: APPROVE → allow
+│           ├─ OVERTURN: <reason> → deny with new reason
+│           └─ UPHOLD → deny with original reason
+│
+└─ Workaround detection: Escalate after 3 similar denied attempts
+```
 
 ## Build & Install
 
@@ -135,7 +193,25 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 # Optional - set by Claude Code automatically
 CLAUDE_PROJECT_DIR=/path/to/project
+
+# Optional - Home Assistant logging
+WEBHOOK_ID_AGENT_LOGS=your-webhook-id
 ```
+
+## Home Assistant Integration
+
+All agents log decisions to Home Assistant via webhook for monitoring and debugging:
+
+```typescript
+interface AgentLog {
+  agent: string;    // Agent name (e.g., 'tool-approve', 'commit')
+  level: string;    // 'info', 'error', 'decision', 'escalation'
+  problem: string;  // What was evaluated
+  answer: string;   // The decision made
+}
+```
+
+Set `WEBHOOK_ID_AGENT_LOGS` environment variable to enable logging. Logs are fire-and-forget (non-blocking).
 
 ## Usage
 
@@ -154,9 +230,9 @@ CONFIRMED
 a1b2c3d
 ```
 
-The tool-approve hook runs automatically on every bash command Claude tries to execute.
+The tool-approve hook runs automatically on every tool call Claude tries to execute.
 
-The off-topic-check hook runs when Claude stops and is waiting for user input. It detects when Claude:
+The intent-validate hook runs when Claude stops and is waiting for user input. It detects when Claude:
 
 - Asks questions that were already answered earlier in the conversation
 - Asks questions unrelated to what the user requested

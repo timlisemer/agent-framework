@@ -30,6 +30,7 @@ export interface TranscriptOptions {
   trimToolOutput?: boolean;
   maxToolOutputLines?: number;
   excludeSystemReminders?: boolean;
+  excludeToolNames?: string[]; // Tool names to skip in tool_result processing (e.g., ['Task', 'Agent'])
 }
 
 export interface TranscriptMessage {
@@ -48,6 +49,8 @@ interface ContentBlock {
   text?: string;
   content?: string | ContentBlock[];
   tool_use_id?: string;
+  name?: string; // Tool name for tool_use blocks
+  id?: string; // Tool use ID for tool_use blocks
 }
 
 interface TranscriptEntry {
@@ -83,12 +86,28 @@ export function trimToolOutput(output: string, maxLines = 20): string {
   return output;
 }
 
+export interface ErrorCheckOptions {
+  toolResultsOnly?: boolean; // Only check TOOL_RESULT lines for error patterns
+}
+
 /**
  * Quick pattern check to determine if error acknowledgment should be checked.
  * Returns true only if error patterns or user frustration indicators are found.
  */
-export function hasErrorPatterns(transcript: string): ErrorCheckResult {
+export function hasErrorPatterns(
+  transcript: string,
+  options?: ErrorCheckOptions
+): ErrorCheckResult {
   const indicators: string[] = [];
+
+  // If toolResultsOnly is true, only check TOOL_RESULT lines for errors
+  // This prevents false positives from Read tool content (source code)
+  const textToCheck = options?.toolResultsOnly
+    ? transcript
+        .split('\n')
+        .filter((l) => l.startsWith('TOOL_RESULT:'))
+        .join('\n')
+    : transcript;
 
   const errorPatterns = [
     /error TS\d+/i,
@@ -99,16 +118,21 @@ export function hasErrorPatterns(transcript: string): ErrorCheckResult {
   ];
 
   const userPatterns = [
-    /\bignore\b/i,
-    /[A-Z]{5,}/,
+    /\bignore\b/i, // "ignore this"
+    /[A-Z]{5,}/, // All caps words (5+ chars) - triggers Haiku to evaluate
+    /\bstop\s+(doing|trying|that)\b/i, // "stop doing that"
+    /\bI\s+(said|told|asked)\b/i, // "I said to..."
+    /\bwrong\b.*\byou\b/i, // "wrong, you should..."
   ];
 
+  // Check error patterns against tool results (or full transcript)
   for (const pattern of errorPatterns) {
-    if (pattern.test(transcript)) {
+    if (pattern.test(textToCheck)) {
       indicators.push(`error:${pattern.source}`);
     }
   }
 
+  // Always check user patterns against full transcript (user frustration can be anywhere)
   for (const pattern of userPatterns) {
     if (pattern.test(transcript)) {
       indicators.push(`user:${pattern.source}`);
@@ -161,6 +185,7 @@ export async function readTranscriptStructured(
     trimToolOutput: shouldTrim = filter === TranscriptFilter.BOTH_WITH_TOOLS,
     maxToolOutputLines = 20,
     excludeSystemReminders = true,
+    excludeToolNames = [],
   } = options;
 
   const content = await fs.promises.readFile(transcriptPath, 'utf-8');
@@ -171,6 +196,9 @@ export async function readTranscriptStructured(
 
   const messages: TranscriptMessage[] = [];
 
+  // Map tool_use_id -> tool_name for filtering tool_results
+  const toolUseIdToName: Map<string, string> = new Map();
+
   for (let i = 0; i < linesToProcess.length; i++) {
     const line = linesToProcess[i];
     try {
@@ -178,6 +206,15 @@ export async function readTranscriptStructured(
       if (!entry.message) continue;
 
       const { role, content: msgContent } = entry.message;
+
+      // First pass: collect tool_use names from assistant messages
+      if (role === 'assistant' && Array.isArray(msgContent)) {
+        for (const block of msgContent) {
+          if (block.type === 'tool_use' && block.id && block.name) {
+            toolUseIdToName.set(block.id, block.name);
+          }
+        }
+      }
 
       if (role === 'user') {
         if (filter === TranscriptFilter.AI_ONLY) continue;
@@ -190,6 +227,14 @@ export async function readTranscriptStructured(
         } else if (Array.isArray(msgContent)) {
           for (const block of msgContent) {
             if (block.type === 'tool_result' && filter === TranscriptFilter.BOTH_WITH_TOOLS) {
+              // Check if this tool_result should be excluded based on tool name
+              if (block.tool_use_id && excludeToolNames.length > 0) {
+                const toolName = toolUseIdToName.get(block.tool_use_id);
+                if (toolName && excludeToolNames.includes(toolName)) {
+                  continue; // Skip this tool result
+                }
+              }
+
               const toolContent = extractToolResultContent(block);
               if (toolContent) {
                 const finalContent = shouldTrim

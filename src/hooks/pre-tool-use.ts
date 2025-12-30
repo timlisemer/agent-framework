@@ -12,6 +12,7 @@ import {
   hasErrorPatterns,
   TranscriptFilter,
   MessageLimit,
+  type ErrorCheckOptions,
 } from '../utils/transcript.js';
 
 // Retry tracking for workaround detection
@@ -205,8 +206,10 @@ async function main() {
     limit: MessageLimit.FIVE,
     trimToolOutput: true,
     maxToolOutputLines: 20,
+    excludeToolNames: ['Task', 'Agent', 'TaskOutput'], // Exclude sub-agent results to prevent cascade blocking
   });
-  const quickCheck = hasErrorPatterns(errorCheckTranscript);
+  // Only check TOOL_RESULT lines for error patterns to avoid false positives from Read tool (source code)
+  const quickCheck = hasErrorPatterns(errorCheckTranscript, { toolResultsOnly: true });
 
   if (quickCheck.needsCheck) {
     // Step 2: Only call Haiku if error/directive patterns detected

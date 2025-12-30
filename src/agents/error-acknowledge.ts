@@ -1,6 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getModelId } from '../types.js';
 import { logToHomeAssistant } from '../utils/logger.js';
+import {
+  isErrorAcknowledged,
+  markErrorAcknowledged,
+} from '../utils/ack-cache.js';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || null,
@@ -8,11 +12,26 @@ const anthropic = new Anthropic({
   baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
 });
 
+// Pattern to extract error text from transcript for caching
+const ERROR_EXTRACT_PATTERN =
+  /error TS\d+[^\n]*|Error:[^\n]*|failed[^\n]*|FAILED[^\n]*/i;
+
 export async function checkErrorAcknowledgment(
   transcript: string,
   toolName: string,
   toolInput: unknown
 ): Promise<string> {
+  // Check if the error in this transcript was already acknowledged
+  const errorMatch = transcript.match(ERROR_EXTRACT_PATTERN);
+  if (errorMatch && isErrorAcknowledged(errorMatch[0])) {
+    await logToHomeAssistant({
+      agent: 'error-acknowledge',
+      level: 'decision',
+      problem: `${toolName} (cached)`,
+      answer: 'OK - error already acknowledged',
+    });
+    return 'OK';
+  }
   const response = await anthropic.messages.create({
     model: getModelId('haiku'),
     max_tokens: 500,
@@ -55,9 +74,11 @@ Your response MUST be EXACTLY one of:
 
 OK
 OR
-BLOCK: <message telling AI what error to acknowledge>
+BLOCK: [ERROR: "<quote the specific error from transcript>"] <what AI needs to acknowledge>
 
-NO other text. NO explanations. Just OK or BLOCK: <message>.`,
+Example: BLOCK: [ERROR: "error TS2304: Cannot find name 'foo'"] Acknowledge this TypeScript error before proceeding.
+
+NO other text. NO explanations. Just OK or BLOCK: [ERROR: "..."] <message>.`,
       },
     ],
   });
@@ -99,6 +120,10 @@ NO other text. NO explanations. Just OK or BLOCK: <message>.`,
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput).slice(0, 100)}`;
 
   if (decision.startsWith('OK')) {
+    // Mark error as acknowledged so future checks skip it
+    if (errorMatch) {
+      markErrorAcknowledged(errorMatch[0]);
+    }
     await logToHomeAssistant({
       agent: 'error-acknowledge',
       level: 'decision',
