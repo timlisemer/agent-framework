@@ -111,9 +111,11 @@ sqlite3: APPROVE only for read-only operations.
 9. make check command
    - DENY: make check (use MCP tool for better integration)
    - Suggest: use mcp__agent-framework__check tool instead
+   - IMPORTANT: Do not attempt workarounds like tsc, npx tsc, or direct compiler calls. If MCP tool fails, ask the user for help.
 
 10. build commands like make build, npm run build, etc.
-   - DENY: Ais are not intended to build the project. Use the mcp__agent-framework__check tool for validation - it runs both linter and type-check with better output
+   - DENY: AIs are not intended to build the project. Use the mcp__agent-framework__check tool for validation.
+   - IMPORTANT: Do not attempt alternative build commands. If validation fails, ask the user for guidance.
 
 11. curl/wget commands (network requests)
    - DENY by default (requires explicit user permission via transcript appeal)

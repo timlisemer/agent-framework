@@ -7,6 +7,70 @@ import { appealDenial } from '../agents/tool-appeal.js';
 import { validatePlanIntent } from '../agents/plan-validate.js';
 import { logToHomeAssistant } from '../utils/logger.js';
 
+// Retry tracking for workaround detection
+const DENIAL_CACHE_FILE = '/tmp/claude-hook-denials.json';
+const MAX_SIMILAR_DENIALS = 3;
+const DENIAL_EXPIRY_MS = 60 * 1000; // 1 minute
+
+interface DenialCache {
+  [pattern: string]: { count: number; timestamp: number };
+}
+
+const WORKAROUND_PATTERNS: Record<string, string[]> = {
+  'type-check': [
+    'make check',
+    'tsc',
+    'npx tsc',
+    'npm run check',
+    'cargo check',
+  ],
+  build: ['make build', 'npm run build', 'cargo build'],
+  lint: ['eslint', 'prettier', 'npm run lint'],
+};
+
+function detectWorkaroundPattern(
+  toolName: string,
+  toolInput: unknown
+): string | null {
+  if (toolName !== 'Bash') return null;
+  const command = (toolInput as { command?: string }).command || '';
+
+  for (const [pattern, variants] of Object.entries(WORKAROUND_PATTERNS)) {
+    if (variants.some((v) => command.includes(v))) {
+      return pattern;
+    }
+  }
+  return null;
+}
+
+function loadDenials(): DenialCache {
+  try {
+    if (fs.existsSync(DENIAL_CACHE_FILE)) {
+      const data = fs.readFileSync(DENIAL_CACHE_FILE, 'utf-8');
+      const cache: DenialCache = JSON.parse(data);
+      // Clean expired entries
+      const now = Date.now();
+      for (const key of Object.keys(cache)) {
+        if (now - cache[key].timestamp > DENIAL_EXPIRY_MS) {
+          delete cache[key];
+        }
+      }
+      return cache;
+    }
+  } catch {
+    // Ignore errors, return empty cache
+  }
+  return {};
+}
+
+function saveDenials(cache: DenialCache): void {
+  try {
+    fs.writeFileSync(DENIAL_CACHE_FILE, JSON.stringify(cache));
+  } catch {
+    // Ignore write errors
+  }
+}
+
 // File tools that benefit from path-based risk classification
 const FILE_TOOLS = ['Read', 'Write', 'Edit', 'NotebookEdit'];
 
@@ -311,13 +375,35 @@ async function main() {
       process.exit(0); // Allow on successful appeal
     }
 
+    // Track workaround patterns for escalation
+    let finalReason = appeal.reason ?? decision.reason;
+    const pattern = detectWorkaroundPattern(input.tool_name, input.tool_input);
+    if (pattern) {
+      const denials = loadDenials();
+      denials[pattern] = {
+        count: (denials[pattern]?.count || 0) + 1,
+        timestamp: Date.now(),
+      };
+      saveDenials(denials);
+
+      if (denials[pattern].count >= MAX_SIMILAR_DENIALS) {
+        finalReason += ` CRITICAL: You have attempted ${denials[pattern].count} similar workarounds for '${pattern}'. STOP trying alternatives. Either use the approved MCP tool, ask the user for guidance, or acknowledge that this action cannot be performed.`;
+        logToHomeAssistant({
+          agent: 'pre-tool-use-hook',
+          level: 'escalation',
+          problem: `Repeated workaround attempts: ${pattern}`,
+          answer: `Count: ${denials[pattern].count}`,
+        });
+      }
+    }
+
     // Output structured JSON to deny and provide feedback to Claude
     console.log(
       JSON.stringify({
         hookSpecificOutput: {
           hookEventName: 'PreToolUse',
           permissionDecision: 'deny',
-          permissionDecisionReason: appeal.reason ?? decision.reason,
+          permissionDecisionReason: finalReason,
         },
       })
     );

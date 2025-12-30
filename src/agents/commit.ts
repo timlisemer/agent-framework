@@ -84,6 +84,10 @@ abc123def`
     }
   }
 
+  if (!output.trim()) {
+    output = "ERROR: Commit agent returned no output";
+  }
+
   const result = output.trim();
   logToHomeAssistant({
     agent: 'commit',

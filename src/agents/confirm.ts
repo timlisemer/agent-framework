@@ -71,6 +71,10 @@ This is a gate, not a review. Decide.`
     }
   }
 
+  if (!output.trim()) {
+    output = "ERROR: Confirm agent returned no output";
+  }
+
   const result = output.trim();
   logToHomeAssistant({
     agent: 'confirm',

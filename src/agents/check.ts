@@ -48,6 +48,10 @@ RULES:
     }
   }
 
+  if (!output.trim()) {
+    output = "ERROR: Check agent returned no output";
+  }
+
   logToHomeAssistant({
     agent: 'check',
     level: 'info',
