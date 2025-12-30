@@ -7,7 +7,7 @@ export async function runCheckAgent(workingDir: string): Promise<string> {
 
   const q = query({
     prompt: `Execute the following in order:
-1. Run the project linter (detect from project type - eslint, clippy, ruff, etc.)
+1. Run the project linter ONLY if configured (check for eslint.config.*, .eslintrc.*, Cargo.toml, pyproject.toml, etc. first)
 2. Run \`make check\`
 3. Collect ALL output from both commands
 

@@ -11,6 +11,12 @@ export function getModelId(tier: ModelTier): string {
   return MODEL_IDS[tier];
 }
 
+// Set SDK environment variables to use our model IDs
+// This ensures internal SDK sub-agents use our configured models
+process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = MODEL_IDS.haiku;
+process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = MODEL_IDS.sonnet;
+process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = MODEL_IDS.opus;
+
 export interface AgentResult {
   success: boolean;
   output: string;
