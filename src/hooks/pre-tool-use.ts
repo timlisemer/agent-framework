@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { approveTool } from '../agents/tool-approve.js';
 import { appealDenial } from '../agents/tool-appeal.js';
+import { validatePlanIntent } from '../agents/plan-validate.js';
 import { logToHomeAssistant } from '../utils/logger.js';
 
 // File tools that benefit from path-based risk classification
@@ -76,6 +77,41 @@ async function readRecentTranscript(
     .join('\n');
 }
 
+async function readRecentUserMessages(
+  transcriptPath: string,
+  lines: number
+): Promise<string> {
+  const content = await fs.promises.readFile(transcriptPath, 'utf-8');
+  const entries = content.trim().split('\n').slice(-lines);
+
+  return entries
+    .map((line) => {
+      try {
+        const entry = JSON.parse(line);
+        if (entry.message?.role === 'user' && entry.message?.content) {
+          let text = '';
+          if (typeof entry.message.content === 'string') {
+            text = entry.message.content;
+          } else if (Array.isArray(entry.message.content)) {
+            const textBlocks = entry.message.content
+              .filter((b: { type: string }) => b.type === 'text')
+              .map((b: { text: string }) => b.text);
+            text = textBlocks.join('\n');
+          }
+          // Skip tool results and system messages
+          if (text.trim() && !text.startsWith('<system-reminder>')) {
+            return `USER: ${text.trim()}`;
+          }
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 async function main() {
   const input: PreToolUseHookInput = await new Promise((resolve) => {
     let data = '';
@@ -130,6 +166,51 @@ async function main() {
       (input.tool_input as { file_path?: string }).file_path ||
       (input.tool_input as { path?: string }).path;
     if (filePath) {
+      // Plan file drift detection - validate plan content against user intent
+      const plansDir = path.join(os.homedir(), '.claude', 'plans');
+      if (
+        input.tool_name === 'Write' &&
+        isPathInDirectory(filePath, plansDir)
+      ) {
+        const content = (input.tool_input as { content?: string }).content;
+        if (content) {
+          const userMessages = await readRecentUserMessages(
+            input.transcript_path,
+            50
+          );
+          const validation = await validatePlanIntent(content, userMessages);
+
+          if (!validation.approved) {
+            logToHomeAssistant({
+              agent: 'pre-tool-use-hook',
+              level: 'decision',
+              problem: `Plan write to ${filePath}`,
+              answer: `DRIFT: ${validation.reason}`,
+            });
+            console.log(
+              JSON.stringify({
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: `Plan drift detected: ${validation.reason}`,
+                },
+              })
+            );
+            process.exit(0);
+          }
+        }
+        // Plan validated - allow write
+        console.log(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'allow',
+            },
+          })
+        );
+        process.exit(0);
+      }
+
       const trusted = isTrustedPath(filePath, projectDir);
       const sensitive = isSensitivePath(filePath);
 
