@@ -33,6 +33,87 @@ cp claude-integration/settings.json /your/project/.claude/settings.json
 # Update the paths in settings.json to point to your dist/hooks/*.js
 ```
 
+## Claude Code Tool Names
+
+The `PreToolUse` hook intercepts tool calls. To configure which tools trigger your hook, you need to know the exact tool names Claude Code uses.
+
+### How Tool Names Were Discovered
+
+**The problem**: Claude Code's documentation doesn't provide a complete list of tool names. We needed to find them to properly configure hook matchers.
+
+**Discovery process**:
+
+1. **Web search** - Searched for "Claude Code PreToolUse hook matcher tool names" but official docs only mention a few examples (Bash, Edit, Write, Read)
+
+2. **SDK type definitions** - The `@anthropic-ai/claude-agent-sdk` package contains TypeScript definitions. Found the tool list by exploring:
+   ```bash
+   find node_modules -name "*.d.ts" -path "*anthropic*"
+   ```
+
+3. **Found the source** - The file `sdk-tools.d.ts` contains a `ToolInputSchemas` union type that defines input schemas for ALL tools. The tool name maps to the input type name (e.g., `BashInput` → tool name `Bash`, `FileReadInput` → tool name `Read`)
+
+```bash
+# The SDK exposes tool input schemas in:
+node_modules/@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts
+```
+
+This file defines a `ToolInputSchemas` union type that lists all available tools:
+
+```typescript
+export type ToolInputSchemas =
+  | AgentInput        // Tool: Agent (or Task)
+  | BashInput         // Tool: Bash
+  | TaskOutputInput   // Tool: TaskOutput
+  | FileEditInput     // Tool: Edit
+  | FileReadInput     // Tool: Read
+  | FileWriteInput    // Tool: Write
+  | GlobInput         // Tool: Glob
+  | GrepInput         // Tool: Grep
+  | KillShellInput    // Tool: KillShell
+  | ListMcpResourcesInput  // Tool: ListMcpResources
+  | McpInput          // Tool: mcp__<server>__<tool>
+  | NotebookEditInput // Tool: NotebookEdit
+  | ReadMcpResourceInput   // Tool: ReadMcpResource
+  | TodoWriteInput    // Tool: TodoWrite
+  | WebFetchInput     // Tool: WebFetch
+  | WebSearchInput    // Tool: WebSearch
+  | AskUserQuestionInput   // Tool: AskUserQuestion
+  // ... plus ExitPlanModeInput (internal)
+```
+
+Additional tool `LSP` (Language Server Protocol) exists but isn't in the SDK types.
+
+### Tool Risk Categories
+
+| Risk Level | Tools | Notes |
+|------------|-------|-------|
+| **Low** | `LSP`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `ListMcpResources`, `ReadMcpResource`, `TodoWrite`, `TaskOutput`, `AskUserQuestion` | Read-only or no filesystem impact |
+| **Medium** | `Read`, `mcp__*` | Can access files; MCP tools vary by server |
+| **High** | `Bash`, `Edit`, `Write`, `NotebookEdit`, `Agent`/`Task`, `KillShell` | Modify files, execute commands, spawn agents |
+
+### Hook Matcher Configuration
+
+In `settings.json`, the `matcher` field is a regex that determines which tools trigger your hook:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": ".*",           // Match ALL tools
+      "hooks": [{ "type": "command", "command": "node /path/to/hook.js" }]
+    }]
+  }
+}
+```
+
+Common matcher patterns:
+- `".*"` - All tools (recommended for full control)
+- `"(Bash|Edit|Write)"` - Only specific high-risk tools
+- `"mcp__.*"` - Only MCP tools
+- `""` (empty) - Matches all tools
+
+**Important**: Tool names are case-sensitive. `Bash` ≠ `bash`.
+
 ## Environment Variables
 
 ```bash
