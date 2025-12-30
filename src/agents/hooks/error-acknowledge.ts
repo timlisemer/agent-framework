@@ -53,12 +53,13 @@ Real issues that need acknowledgment:
 - TypeScript errors: "error TS2304: Cannot find name 'foo'" at src/file.ts:42
 - Build failures: "make: *** [Makefile:10: build] Error 1"
 - Test failures: "FAILED tests/foo.test.ts" with actual failure reason
-- Hook denials with SPECIFIC reason: "DENY: modifying system files outside project"
+- Hook denials: "PreToolUse:Bash hook returned blocking error" with "Error: ..."
+- Hook denials that suggest alternatives: "use mcp__agent-framework__check instead"
+- Any tool denial with a specific reason explaining WHY it was denied
 - User directives in ALL CAPS or explicit corrections
 
 NOT real issues (ignore these):
 - Source code from Read/Grep containing words like "error", "failed", "denied"
-- Generic text like "The tool call was denied for a valid technical reason"
 - Variable names like "errorHandler" or "onFailure"
 - System prompts or documentation text being read/written
 - Strings inside code that happen to contain error-like words
@@ -72,9 +73,11 @@ NOT real issues (ignore these):
 
 === RETURN "BLOCK" WHEN ===
 
-- A REAL issue exists (build failure, TypeScript error, test failure)
+- A REAL issue exists (build failure, TypeScript error, test failure, hook denial)
 - AI said nothing about it after the issue appeared
 - AI is calling an unrelated tool instead of fixing it
+- AI was denied a tool and is now trying a similar/alternative command (workaround attempt)
+- AI was told to use an MCP tool but is trying a Bash command instead
 - User gave explicit directive that AI ignored
 
 === OUTPUT FORMAT (STRICT) ===
@@ -84,11 +87,12 @@ OK
 OR
 BLOCK: [ISSUE: "<exact error with file:line or error code>"] <what to acknowledge>
 
-Good example:
+Good examples:
 BLOCK: [ISSUE: "error TS2304: Cannot find name 'foo' at src/types.ts:42"] Fix this TypeScript error.
+BLOCK: [ISSUE: "Error: make check command (use MCP tool for better integration)"] Acknowledge denial and use mcp__agent-framework__check.
 
 Bad example (DO NOT DO THIS):
-BLOCK: [ISSUE: "The tool call was denied"] - This is useless, not a real error.
+BLOCK: [ISSUE: "errorHandler function"] - This is just source code, not a real error.
 
 NO other text. Just OK or BLOCK with a SPECIFIC, USEFUL issue quote.`,
       },
