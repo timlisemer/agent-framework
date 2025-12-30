@@ -1,16 +1,18 @@
 import { type PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
-import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import * as fs from 'fs';
 import { approveTool } from '../agents/tool-approve.js';
 import { appealDenial } from '../agents/tool-appeal.js';
 import { validatePlanIntent } from '../agents/plan-validate.js';
 import { checkErrorAcknowledgment } from '../agents/error-acknowledge.js';
 import { logToHomeAssistant } from '../utils/logger.js';
 import {
-  readTranscriptForErrorCheck,
-  quickErrorCheck,
-} from '../utils/transcript-parser.js';
+  readTranscript,
+  hasErrorPatterns,
+  TranscriptFilter,
+  MessageLimit,
+} from '../utils/transcript.js';
 
 // Retry tracking for workaround detection
 const DENIAL_CACHE_FILE = '/tmp/claude-hook-denials.json';
@@ -112,74 +114,6 @@ function isSensitivePath(filePath: string): boolean {
   return SENSITIVE_PATTERNS.some((p) => lower.includes(p));
 }
 
-async function readRecentTranscript(
-  transcriptPath: string,
-  lines: number
-): Promise<string> {
-  const content = await fs.promises.readFile(transcriptPath, 'utf-8');
-  const entries = content.trim().split('\n').slice(-lines);
-
-  return entries
-    .map((line) => {
-      try {
-        const entry = JSON.parse(line);
-        if (entry.message?.role === 'user' && entry.message?.content) {
-          const text =
-            typeof entry.message.content === 'string'
-              ? entry.message.content
-              : JSON.stringify(entry.message.content);
-          return `USER: ${text}`;
-        }
-        if (entry.message?.role === 'assistant' && entry.message?.content) {
-          const textBlocks = entry.message.content
-            .filter((b: { type: string }) => b.type === 'text')
-            .map((b: { text: string }) => b.text)
-            .join(' ');
-          if (textBlocks) return `ASSISTANT: ${textBlocks}`;
-        }
-        return null;
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean)
-    .join('\n');
-}
-
-async function readRecentUserMessages(
-  transcriptPath: string,
-  lines: number
-): Promise<string> {
-  const content = await fs.promises.readFile(transcriptPath, 'utf-8');
-  const entries = content.trim().split('\n').slice(-lines);
-
-  return entries
-    .map((line) => {
-      try {
-        const entry = JSON.parse(line);
-        if (entry.message?.role === 'user' && entry.message?.content) {
-          let text = '';
-          if (typeof entry.message.content === 'string') {
-            text = entry.message.content;
-          } else if (Array.isArray(entry.message.content)) {
-            const textBlocks = entry.message.content
-              .filter((b: { type: string }) => b.type === 'text')
-              .map((b: { text: string }) => b.text);
-            text = textBlocks.join('\n');
-          }
-          // Skip tool results and system messages
-          if (text.trim() && !text.startsWith('<system-reminder>')) {
-            return `USER: ${text.trim()}`;
-          }
-        }
-        return null;
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean)
-    .join('\n\n');
-}
 
 async function main() {
   const input: PreToolUseHookInput = await new Promise((resolve) => {
@@ -191,7 +125,10 @@ async function main() {
   // Block confirm tool from Claude Code - requires explicit user approval
   // Internal agents (like commit) call runConfirmAgent() directly, bypassing this hook
   if (input.tool_name === 'mcp__agent-framework__confirm') {
-    const transcript = await readRecentTranscript(input.transcript_path, 50);
+    const transcript = await readTranscript(input.transcript_path, {
+      filter: TranscriptFilter.BOTH,
+      limit: MessageLimit.FIVE,
+    });
     const appeal = await appealDenial(
       input.tool_name,
       input.tool_input,
@@ -263,13 +200,15 @@ async function main() {
 
   // Error acknowledgment check - detect if AI is ignoring errors
   // Step 1: Quick pattern check (TypeScript only, no LLM)
-  const errorCheckTranscript = await readTranscriptForErrorCheck(
-    input.transcript_path,
-    20
-  );
-  const quickCheck = quickErrorCheck(errorCheckTranscript);
+  const errorCheckTranscript = await readTranscript(input.transcript_path, {
+    filter: TranscriptFilter.BOTH_WITH_TOOLS,
+    limit: MessageLimit.FIVE,
+    trimToolOutput: true,
+    maxToolOutputLines: 20,
+  });
+  const quickCheck = hasErrorPatterns(errorCheckTranscript);
 
-  if (quickCheck.needsHaikuCheck) {
+  if (quickCheck.needsCheck) {
     // Step 2: Only call Haiku if error/directive patterns detected
     const ackResult = await checkErrorAcknowledgment(
       errorCheckTranscript,
@@ -319,10 +258,10 @@ async function main() {
             ? (input.tool_input as { content?: string }).content
             : (input.tool_input as { new_string?: string }).new_string;
         if (content) {
-          const userMessages = await readRecentUserMessages(
-            input.transcript_path,
-            50
-          );
+          const userMessages = await readTranscript(input.transcript_path, {
+            filter: TranscriptFilter.USER_ONLY,
+            limit: MessageLimit.TEN,
+          });
           const validation = await validatePlanIntent(content, userMessages);
 
           if (!validation.approved) {
@@ -394,7 +333,10 @@ async function main() {
 
   if (!decision.approved) {
     // Layer 2: Appeal with transcript context
-    const transcript = await readRecentTranscript(input.transcript_path, 50);
+    const transcript = await readTranscript(input.transcript_path, {
+      filter: TranscriptFilter.BOTH,
+      limit: MessageLimit.TEN,
+    });
     const appeal = await appealDenial(
       input.tool_name,
       input.tool_input,

@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
-import * as fs from 'fs';
 import { getModelId, type OffTopicCheckResult, type ConversationContext, type UserMessage, type AssistantMessage } from '../types.js';
 import { logToHomeAssistant } from '../utils/logger.js';
+import { readTranscriptStructured, TranscriptFilter, MessageLimit, type TranscriptMessage } from '../utils/transcript.js';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || null,
@@ -9,7 +9,6 @@ const anthropic = new Anthropic({
   baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
 });
 
-const RECENT_MESSAGE_LIMIT = 30;
 
 const SYSTEM_PROMPT = `You are a conversation-alignment detector. Your job is to catch when an AI assistant has gone off-track and is about to waste the user's time.
 
@@ -78,128 +77,54 @@ RULES:
 
 export async function extractConversationContext(transcriptPath: string): Promise<ConversationContext> {
   try {
-    const content = await fs.promises.readFile(transcriptPath, 'utf-8');
-    const lines = content.trim().split('\n');
+    const messages = await readTranscriptStructured(transcriptPath, {
+      filter: TranscriptFilter.BOTH_WITH_TOOLS,
+      limit: MessageLimit.TEN,
+    });
 
     const userMessages: UserMessage[] = [];
     const assistantMessages: AssistantMessage[] = [];
 
-    lines.forEach((line, idx) => {
-      try {
-        const entry = JSON.parse(line);
-
-        if (entry.message?.role === 'user') {
-          let text = '';
-
-          if (typeof entry.message.content === 'string') {
-            text = entry.message.content;
-          } else if (Array.isArray(entry.message.content)) {
-            const textBlocks = entry.message.content
-              .filter((block: any) => block.type === 'text')
-              .map((block: any) => block.text);
-
-            const toolResults = entry.message.content
-              .filter((block: any) => block.type === 'tool_result')
-              .map((block: any) => {
-                // tool_result content can be string or array
-                if (typeof block.content === 'string') {
-                  return block.content;
-                } else if (Array.isArray(block.content)) {
-                  return block.content
-                    .filter((c: any) => c.type === 'text')
-                    .map((c: any) => c.text)
-                    .join(' ');
-                }
-                return '';
-              });
-
-            text = [...textBlocks, ...toolResults].join('\n');
-          }
-
-          if (text.trim()) {
-            userMessages.push({
-              text: text.trim(),
-              messageIndex: idx
-            });
-          }
-        }
-
-        if (entry.message?.role === 'assistant') {
-          let text = '';
-
-          if (Array.isArray(entry.message.content)) {
-            const textBlocks = entry.message.content
-              .filter((block: any) => block.type === 'text')
-              .map((block: any) => block.text);
-
-            const toolResults = entry.message.content
-              .filter((block: any) => block.type === 'tool_result')
-              .map((block: any) => {
-                // tool_result content can be string or array
-                if (typeof block.content === 'string') {
-                  return block.content;
-                } else if (Array.isArray(block.content)) {
-                  return block.content
-                    .filter((c: any) => c.type === 'text')
-                    .map((c: any) => c.text)
-                    .join(' ');
-                }
-                return '';
-              });
-
-            text = [...textBlocks, ...toolResults].join('\n');
-          }
-
-          if (text.trim()) {
-            assistantMessages.push({
-              text: text.trim(),
-              messageIndex: idx
-            });
-          }
-        }
-      } catch {
-        // Skip malformed lines
+    messages.forEach((msg) => {
+      if (msg.role === 'user' || msg.role === 'tool_result') {
+        userMessages.push({
+          text: msg.content,
+          messageIndex: msg.index,
+        });
+      } else if (msg.role === 'assistant') {
+        assistantMessages.push({
+          text: msg.content,
+          messageIndex: msg.index,
+        });
       }
     });
 
-    // Truncate to recent messages if too many
-    const recentUserMessages = userMessages.length > RECENT_MESSAGE_LIMIT
-      ? userMessages.slice(-RECENT_MESSAGE_LIMIT)
-      : userMessages;
+    const lastAssistantMessage = assistantMessages[assistantMessages.length - 1];
 
-    const recentAssistantMessages = assistantMessages.length > RECENT_MESSAGE_LIMIT
-      ? assistantMessages.slice(-RECENT_MESSAGE_LIMIT)
-      : assistantMessages;
-
-    // Get the last assistant message (what the AI just said)
-    const lastAssistantMessage = recentAssistantMessages[recentAssistantMessages.length - 1];
-
-    // Build conversation summary (interleaved user and assistant messages)
-    const allMessages = [...recentUserMessages, ...recentAssistantMessages.slice(0, -1)]
+    const allMessages = [...userMessages, ...assistantMessages.slice(0, -1)]
       .sort((a, b) => a.messageIndex - b.messageIndex);
 
     const conversationSummary = allMessages
-      .map(msg => {
-        const role = 'text' in msg ? 
-          (recentUserMessages.includes(msg as UserMessage) ? 'USER' : 'ASSISTANT') : 
-          'UNKNOWN';
+      .map((msg) => {
+        const role = userMessages.some((u) => u.messageIndex === msg.messageIndex)
+          ? 'USER'
+          : 'ASSISTANT';
         return `[${role}]: ${msg.text}`;
       })
       .join('\n\n---\n\n');
 
     return {
-      userMessages: recentUserMessages,
-      assistantMessages: recentAssistantMessages,
+      userMessages,
+      assistantMessages,
       conversationSummary,
-      lastAssistantMessage: lastAssistantMessage?.text || ''
+      lastAssistantMessage: lastAssistantMessage?.text || '',
     };
-  } catch (error) {
-    // If transcript doesn't exist or is unreadable, return empty
+  } catch {
     return {
       userMessages: [],
       assistantMessages: [],
       conversationSummary: '',
-      lastAssistantMessage: ''
+      lastAssistantMessage: '',
     };
   }
 }
