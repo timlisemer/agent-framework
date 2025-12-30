@@ -1,13 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { getModelId, type OffTopicCheckResult, type ConversationContext, type UserMessage, type AssistantMessage } from '../../types.js';
+import { getAnthropicClient } from '../../utils/anthropic-client.js';
 import { logToHomeAssistant } from '../../utils/logger.js';
-import { readTranscriptStructured, TranscriptFilter, MessageLimit, type TranscriptMessage } from '../../utils/transcript.js';
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || null,
-  authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
-  baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
-});
+import { extractTextFromResponse } from '../../utils/response-parser.js';
+import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
+import { readTranscriptStructured, TranscriptFilter, MessageLimit } from '../../utils/transcript.js';
 
 
 const SYSTEM_PROMPT = `You are a conversation-alignment detector. Your job is to catch when an AI assistant has gone off-track and is about to waste the user's time.
@@ -141,6 +137,8 @@ export async function checkForOffTopic(
     };
   }
 
+  const anthropic = getAnthropicClient();
+
   try {
     const response = await anthropic.messages.create({
       model: getModelId('haiku'),
@@ -163,38 +161,18 @@ Reply with: OK or INTERVENE: <feedback for the AI>`
       system: SYSTEM_PROMPT
     });
 
-    const textBlock = response.content.find((block) => block.type === 'text');
-    let decision =
-      textBlock && 'text' in textBlock ? textBlock.text.trim() : '';
-
-    // Retry logic for malformed responses
-    let retries = 0;
-    const maxRetries = 2;
-
-    while (
-      !decision.startsWith('OK') &&
-      !decision.startsWith('INTERVENE:') &&
-      retries < maxRetries
-    ) {
-      retries++;
-
-      const retryResponse = await anthropic.messages.create({
-        model: getModelId('haiku'),
-        max_tokens: 150,
-        messages: [{
-          role: 'user',
-          content: `Invalid format: "${decision}". Reply with exactly: OK or INTERVENE: <feedback>`
-        }]
-      });
-
-      const retryTextBlock = retryResponse.content.find(
-        (block) => block.type === 'text'
-      );
-      decision =
-        retryTextBlock && 'text' in retryTextBlock
-          ? retryTextBlock.text.trim()
-          : '';
-    }
+    const decision = await retryUntilValid(
+      anthropic,
+      getModelId('haiku'),
+      extractTextFromResponse(response),
+      `Intent validation for assistant response`,
+      {
+        maxRetries: 2,
+        formatValidator: (text) => startsWithAny(text, ['OK', 'INTERVENE:']),
+        formatReminder: 'Reply with exactly: OK or INTERVENE: <feedback>',
+        maxTokens: 150,
+      }
+    );
 
     if (decision.startsWith('INTERVENE:')) {
       const feedback = decision.replace('INTERVENE:', '').trim();

@@ -1,12 +1,8 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { getModelId } from '../../types.js';
+import { getAnthropicClient } from '../../utils/anthropic-client.js';
 import { logToHomeAssistant } from '../../utils/logger.js';
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || null,
-  authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
-  baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
-});
+import { extractTextFromResponse } from '../../utils/response-parser.js';
+import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
 
 export async function appealDenial(
   toolName: string,
@@ -14,6 +10,7 @@ export async function appealDenial(
   transcript: string,
   originalReason: string
 ): Promise<{ approved: boolean; reason?: string }> {
+  const anthropic = getAnthropicClient();
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput)}`;
 
   const response = await anthropic.messages.create({
@@ -74,40 +71,19 @@ Examples:
     ],
   });
 
-  const textBlock = response.content.find((block) => block.type === 'text');
-  let decision =
-    textBlock && 'text' in textBlock ? textBlock.text.trim() : '';
-
-  // Retry if malformed
-  let retries = 0;
-  const maxRetries = 2;
-
-  while (
-    !decision.startsWith('UPHOLD') &&
-    !decision.startsWith('OVERTURN:') &&
-    decision !== 'DENY' &&
-    !decision.startsWith('DENY:') &&
-    retries < maxRetries
-  ) {
-    retries++;
-
-    const retryResponse = await anthropic.messages.create({
-      model: getModelId('haiku'),
-      max_tokens: 100,
-      messages: [{
-        role: 'user',
-        content: `Invalid format: "${decision}". Reply with EXACTLY: UPHOLD, OVERTURN: APPROVE, or OVERTURN: <reason>`
-      }]
-    });
-
-    const retryTextBlock = retryResponse.content.find(
-      (block) => block.type === 'text'
-    );
-    decision =
-      retryTextBlock && 'text' in retryTextBlock
-        ? retryTextBlock.text.trim()
-        : '';
-  }
+  const decision = await retryUntilValid(
+    anthropic,
+    getModelId('haiku'),
+    extractTextFromResponse(response),
+    toolDescription,
+    {
+      maxRetries: 2,
+      formatValidator: (text) =>
+        startsWithAny(text, ['UPHOLD', 'OVERTURN:', 'DENY:', 'DENY']),
+      formatReminder:
+        'Reply with EXACTLY: UPHOLD, OVERTURN: APPROVE, or OVERTURN: <reason>',
+    }
+  );
 
   // Check for approval (overturn)
   if (decision.startsWith('OVERTURN: APPROVE') || decision === 'APPROVE') {

@@ -1,16 +1,12 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { getModelId } from '../../types.js';
-import { logToHomeAssistant } from '../../utils/logger.js';
 import {
   isErrorAcknowledged,
   markErrorAcknowledged,
 } from '../../utils/ack-cache.js';
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || null,
-  authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
-  baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
-});
+import { getAnthropicClient } from '../../utils/anthropic-client.js';
+import { logToHomeAssistant } from '../../utils/logger.js';
+import { extractTextFromResponse } from '../../utils/response-parser.js';
+import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
 
 // Pattern to extract issue text from transcript for caching
 const ISSUE_EXTRACT_PATTERN =
@@ -32,6 +28,10 @@ export async function checkErrorAcknowledgment(
     });
     return 'OK';
   }
+
+  const anthropic = getAnthropicClient();
+  const toolDescription = `${toolName} with ${JSON.stringify(toolInput).slice(0, 100)}`;
+
   const response = await anthropic.messages.create({
     model: getModelId('haiku'),
     max_tokens: 500,
@@ -95,41 +95,17 @@ NO other text. Just OK or BLOCK with a SPECIFIC, USEFUL issue quote.`,
     ],
   });
 
-  const textBlock = response.content.find((block) => block.type === 'text');
-  let decision = textBlock && 'text' in textBlock ? textBlock.text.trim() : '';
-
-  // Retry if malformed
-  let retries = 0;
-  const maxRetries = 1;
-
-  while (
-    !decision.startsWith('OK') &&
-    !decision.startsWith('BLOCK:') &&
-    retries < maxRetries
-  ) {
-    retries++;
-
-    const retryResponse = await anthropic.messages.create({
-      model: getModelId('haiku'),
-      max_tokens: 100,
-      messages: [
-        {
-          role: 'user',
-          content: `Invalid format: "${decision}". Reply with EXACTLY: OK or BLOCK: <message>`,
-        },
-      ],
-    });
-
-    const retryTextBlock = retryResponse.content.find(
-      (block) => block.type === 'text'
-    );
-    decision =
-      retryTextBlock && 'text' in retryTextBlock
-        ? retryTextBlock.text.trim()
-        : '';
-  }
-
-  const toolDescription = `${toolName} with ${JSON.stringify(toolInput).slice(0, 100)}`;
+  const decision = await retryUntilValid(
+    anthropic,
+    getModelId('haiku'),
+    extractTextFromResponse(response),
+    toolDescription,
+    {
+      maxRetries: 1, // Only 1 retry for error-acknowledge
+      formatValidator: (text) => startsWithAny(text, ['OK', 'BLOCK:']),
+      formatReminder: 'Reply with EXACTLY: OK or BLOCK: <message>',
+    }
+  );
 
   if (decision.startsWith('OK')) {
     // Mark issue as acknowledged so future checks skip it

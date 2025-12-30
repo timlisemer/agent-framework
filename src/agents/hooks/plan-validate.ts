@@ -1,12 +1,8 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { getModelId } from '../../types.js';
+import { getAnthropicClient } from '../../utils/anthropic-client.js';
 import { logToHomeAssistant } from '../../utils/logger.js';
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || null,
-  authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
-  baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
-});
+import { extractTextFromResponse } from '../../utils/response-parser.js';
+import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
 
 const SYSTEM_PROMPT = `You are a plan-intent alignment checker. Your job is to detect when an AI's plan has DRIFTED from what the user actually requested.
 
@@ -60,6 +56,8 @@ export async function validatePlanIntent(
     return { approved: true };
   }
 
+  const anthropic = getAnthropicClient();
+
   try {
     const response = await anthropic.messages.create({
       model: getModelId('sonnet'),
@@ -83,40 +81,18 @@ Does this plan align with the user's request, or has it drifted?`,
       ],
     });
 
-    const textBlock = response.content.find((block) => block.type === 'text');
-    let decision =
-      textBlock && 'text' in textBlock ? textBlock.text.trim() : '';
-
-    // Retry logic for malformed responses
-    let retries = 0;
-    const maxRetries = 2;
-
-    while (
-      !decision.startsWith('OK') &&
-      !decision.startsWith('DRIFT:') &&
-      retries < maxRetries
-    ) {
-      retries++;
-
-      const retryResponse = await anthropic.messages.create({
-        model: getModelId('haiku'),
-        max_tokens: 150,
-        messages: [
-          {
-            role: 'user',
-            content: `Invalid format: "${decision}". Reply with exactly: OK or DRIFT: <feedback>`,
-          },
-        ],
-      });
-
-      const retryTextBlock = retryResponse.content.find(
-        (block) => block.type === 'text'
-      );
-      decision =
-        retryTextBlock && 'text' in retryTextBlock
-          ? retryTextBlock.text.trim()
-          : '';
-    }
+    const decision = await retryUntilValid(
+      anthropic,
+      getModelId('sonnet'), // Standardized on Sonnet for both initial and retry
+      extractTextFromResponse(response),
+      `Plan validation for: ${planContent.substring(0, 100)}...`,
+      {
+        maxRetries: 2,
+        formatValidator: (text) => startsWithAny(text, ['OK', 'DRIFT:']),
+        formatReminder: 'Reply with exactly: OK or DRIFT: <feedback>',
+        maxTokens: 150,
+      }
+    );
 
     if (decision.startsWith('DRIFT:')) {
       const feedback = decision.replace('DRIFT:', '').trim();

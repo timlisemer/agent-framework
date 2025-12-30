@@ -1,14 +1,10 @@
-import Anthropic from '@anthropic-ai/sdk';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getModelId } from '../../types.js';
+import { getAnthropicClient } from '../../utils/anthropic-client.js';
 import { logToHomeAssistant } from '../../utils/logger.js';
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY || null,
-  authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
-  baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
-});
+import { extractTextFromResponse } from '../../utils/response-parser.js';
+import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
 
 export async function approveTool(
   toolName: string,
@@ -21,6 +17,9 @@ export async function approveTool(
   if (fs.existsSync(claudeMdPath)) {
     rules = fs.readFileSync(claudeMdPath, 'utf-8');
   }
+
+  const anthropic = getAnthropicClient();
+  const toolDescription = `${toolName} with ${JSON.stringify(toolInput)}`;
 
   const response = await anthropic.messages.create({
     model: getModelId('haiku'),
@@ -142,41 +141,17 @@ NO other text before the decision word. NO explanations first. NO preamble.`,
     ],
   });
 
-  const textBlock = response.content.find((block) => block.type === 'text');
-  let decision = textBlock && 'text' in textBlock ? textBlock.text.trim() : '';
-
-  // Retry if malformed (not starting with APPROVE or DENY:)
-  let retries = 0;
-  const maxRetries = 2;
-
-  const toolDescription = `${toolName} with ${JSON.stringify(toolInput)}`;
-
-  while (
-    !decision.startsWith('APPROVE') &&
-    !decision.startsWith('DENY:') &&
-    retries < maxRetries
-  ) {
-    retries++;
-
-    const retryResponse = await anthropic.messages.create({
-      model: getModelId('haiku'),
-      max_tokens: 100,
-      messages: [
-        {
-          role: 'user',
-          content: `Invalid format: "${decision}". You are evaluating tool: ${toolDescription}. Reply with EXACTLY: APPROVE or DENY: <reason>`,
-        },
-      ],
-    });
-
-    const retryTextBlock = retryResponse.content.find(
-      (block) => block.type === 'text'
-    );
-    decision =
-      retryTextBlock && 'text' in retryTextBlock
-        ? retryTextBlock.text.trim()
-        : '';
-  }
+  const decision = await retryUntilValid(
+    anthropic,
+    getModelId('haiku'),
+    extractTextFromResponse(response),
+    toolDescription,
+    {
+      maxRetries: 2,
+      formatValidator: (text) => startsWithAny(text, ['APPROVE', 'DENY:']),
+      formatReminder: 'Reply with EXACTLY: APPROVE or DENY: <reason>',
+    }
+  );
 
   if (decision.startsWith('APPROVE')) {
     await logToHomeAssistant({
@@ -189,9 +164,9 @@ NO other text before the decision word. NO explanations first. NO preamble.`,
   }
 
   // Default to DENY for safety - extract reason from response
-  let reason = decision.startsWith('DENY: ')
+  const reason = decision.startsWith('DENY: ')
     ? decision.replace('DENY: ', '')
-    : `Malformed response after ${retries} retries: ${decision}`;
+    : `Malformed response: ${decision}`;
 
   await logToHomeAssistant({
     agent: 'tool-approve',
