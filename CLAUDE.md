@@ -45,14 +45,30 @@ Tool Call → Auto-approve low-risk → error-acknowledge check → Path-based c
 - **Path-based**: Read, Write, Edit, NotebookEdit (approved if inside project or ~/.claude/, denied if sensitive)
 - **High-risk**: Bash, Agent/Task, KillShell
 
+### Directory Structure
+
+```
+src/
+  agents/
+    mcp/          # MCP-exposed agents (SDK streaming): check, confirm, commit, push
+    hooks/        # Hook-triggered agents (direct API): tool-approve, tool-appeal, etc.
+  hooks/          # Claude Code hook entry points
+  mcp/            # MCP server
+  utils/          # Shared utilities
+```
+
+See `ARCHITECTURE.md` for detailed documentation on design decisions.
+
 ### Key Files
 
-| File                        | Purpose                            |
-| --------------------------- | ---------------------------------- |
-| `src/types.ts`              | Model IDs (single source of truth) |
-| `src/hooks/pre-tool-use.ts` | Main safety logic                  |
-| `src/utils/transcript.ts`   | Conversation context extraction    |
-| `src/utils/agent-query.ts`  | Claude Agent SDK wrapper           |
+| File                             | Purpose                            |
+| -------------------------------- | ---------------------------------- |
+| `src/types.ts`                   | Model IDs (single source of truth) |
+| `src/hooks/pre-tool-use.ts`      | Main safety logic                  |
+| `src/agents/mcp/`                | MCP agents (check, confirm, commit)|
+| `src/agents/hooks/`              | Hook agents (tool-approve, etc.)   |
+| `src/utils/anthropic-client.ts`  | Singleton Anthropic client factory |
+| `src/utils/agent-query.ts`       | Claude Agent SDK wrapper           |
 
 ## Integration
 

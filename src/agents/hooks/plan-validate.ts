@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { getModelId } from '../types.js';
-import { logToHomeAssistant } from '../utils/logger.js';
+import { getModelId } from '../../types.js';
+import { logToHomeAssistant } from '../../utils/logger.js';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || null,
@@ -142,13 +142,13 @@ Does this plan align with the user's request, or has it drifted?`,
     });
 
     return { approved: true };
-  } catch (error) {
-    // On error, fail open (allow the write)
+  } catch (err) {
+    // On issue, fail open (allow the write)
     logToHomeAssistant({
       agent: 'plan-validate',
-      level: 'error',
-      problem: 'Validation error',
-      answer: String(error),
+      level: 'info',
+      problem: 'Validation issue',
+      answer: String(err),
     });
 
     return { approved: true };

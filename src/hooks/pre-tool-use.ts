@@ -2,10 +2,10 @@ import { type PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { approveTool } from '../agents/tool-approve.js';
-import { appealDenial } from '../agents/tool-appeal.js';
-import { validatePlanIntent } from '../agents/plan-validate.js';
-import { checkErrorAcknowledgment } from '../agents/error-acknowledge.js';
+import { approveTool } from '../agents/hooks/tool-approve.js';
+import { appealDenial } from '../agents/hooks/tool-appeal.js';
+import { validatePlanIntent } from '../agents/hooks/plan-validate.js';
+import { checkErrorAcknowledgment } from '../agents/hooks/error-acknowledge.js';
 import { logToHomeAssistant } from '../utils/logger.js';
 import {
   readTranscript,

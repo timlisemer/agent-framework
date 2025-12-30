@@ -1,10 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { getModelId } from '../types.js';
-import { logToHomeAssistant } from '../utils/logger.js';
+import { getModelId } from '../../types.js';
+import { logToHomeAssistant } from '../../utils/logger.js';
 import {
   isErrorAcknowledged,
   markErrorAcknowledged,
-} from '../utils/ack-cache.js';
+} from '../../utils/ack-cache.js';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || null,
@@ -12,8 +12,8 @@ const anthropic = new Anthropic({
   baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
 });
 
-// Pattern to extract error text from transcript for caching
-const ERROR_EXTRACT_PATTERN =
+// Pattern to extract issue text from transcript for caching
+const ISSUE_EXTRACT_PATTERN =
   /error TS\d+[^\n]*|Error:[^\n]*|failed[^\n]*|FAILED[^\n]*/i;
 
 export async function checkErrorAcknowledgment(
@@ -21,14 +21,14 @@ export async function checkErrorAcknowledgment(
   toolName: string,
   toolInput: unknown
 ): Promise<string> {
-  // Check if the error in this transcript was already acknowledged
-  const errorMatch = transcript.match(ERROR_EXTRACT_PATTERN);
-  if (errorMatch && isErrorAcknowledged(errorMatch[0])) {
+  // Check if the issue in this transcript was already acknowledged
+  const issueMatch = transcript.match(ISSUE_EXTRACT_PATTERN);
+  if (issueMatch && isErrorAcknowledged(issueMatch[0])) {
     await logToHomeAssistant({
       agent: 'error-acknowledge',
       level: 'decision',
       problem: `${toolName} (cached)`,
-      answer: 'OK - error already acknowledged',
+      answer: 'OK - issue already acknowledged',
     });
     return 'OK';
   }
@@ -38,7 +38,7 @@ export async function checkErrorAcknowledgment(
     messages: [
       {
         role: 'user',
-        content: `You are an error acknowledgment validator. Analyze the recent transcript to determine if the AI is ignoring errors or user feedback.
+        content: `You are an issue acknowledgment validator. Analyze the recent transcript to determine if the AI is ignoring issues or user feedback.
 
 TRANSCRIPT (recent messages):
 ${transcript}
@@ -49,22 +49,22 @@ Input: ${JSON.stringify(toolInput)}
 
 === WHAT TO DETECT ===
 
-1. A tool returned an error message (TypeScript errors, build failures, hook denials)
+1. A tool returned an issue message (TypeScript issues, build failures, hook blocks)
 2. The user provided feedback/correction (especially caps, directives)
-3. The AI is now calling a tool WITHOUT acknowledging the error in its text response
+3. The AI is now calling a tool WITHOUT acknowledging the issue in its text response
 
 === RETURN "OK" WHEN ===
 
-- No recent errors in transcript
-- AI's text explicitly acknowledges the error before this tool call
-- This tool call is directly addressing/fixing the error (e.g., Edit to fix the error)
-- The tool call is Read/Grep to investigate the error further
+- No recent issues in transcript
+- AI's text explicitly acknowledges the issue before this tool call
+- This tool call is directly addressing/fixing the issue (e.g., Edit to fix the issue)
+- The tool call is Read/Grep to investigate the issue further
 
 === RETURN "BLOCK: <message>" WHEN ===
 
-- Error exists in recent transcript
-- AI said nothing about the error (no ASSISTANT text after the error)
-- AI is calling an unrelated tool (not fixing or investigating the error)
+- Issue exists in recent transcript
+- AI said nothing about the issue (no ASSISTANT text after the issue)
+- AI is calling an unrelated tool (not fixing or investigating the issue)
 - User gave explicit directive that AI ignored
 
 The message should tell the AI what it needs to acknowledge before proceeding.
@@ -74,11 +74,11 @@ Your response MUST be EXACTLY one of:
 
 OK
 OR
-BLOCK: [ERROR: "<quote the specific error from transcript>"] <what AI needs to acknowledge>
+BLOCK: [ISSUE: "<quote the specific issue from transcript>"] <what AI needs to acknowledge>
 
-Example: BLOCK: [ERROR: "error TS2304: Cannot find name 'foo'"] Acknowledge this TypeScript error before proceeding.
+Example: BLOCK: [ISSUE: "TS2304: Cannot find name 'foo'"] Acknowledge this TypeScript issue before proceeding.
 
-NO other text. NO explanations. Just OK or BLOCK: [ERROR: "..."] <message>.`,
+NO other text. NO explanations. Just OK or BLOCK: [ISSUE: "..."] <message>.`,
       },
     ],
   });
@@ -120,9 +120,9 @@ NO other text. NO explanations. Just OK or BLOCK: [ERROR: "..."] <message>.`,
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput).slice(0, 100)}`;
 
   if (decision.startsWith('OK')) {
-    // Mark error as acknowledged so future checks skip it
-    if (errorMatch) {
-      markErrorAcknowledged(errorMatch[0]);
+    // Mark issue as acknowledged so future checks skip it
+    if (issueMatch) {
+      markErrorAcknowledged(issueMatch[0]);
     }
     await logToHomeAssistant({
       agent: 'error-acknowledge',
@@ -147,7 +147,7 @@ NO other text. NO explanations. Just OK or BLOCK: [ERROR: "..."] <message>.`,
   // Default to OK if response is malformed after retries (fail open)
   await logToHomeAssistant({
     agent: 'error-acknowledge',
-    level: 'error',
+    level: 'info',
     problem: toolDescription,
     answer: `Malformed response after retries: ${decision}`,
   });

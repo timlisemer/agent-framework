@@ -1,6 +1,6 @@
-import { getModelId } from "../types.js";
-import { logToHomeAssistant } from "../utils/logger.js";
-import { runAgentQuery } from "../utils/agent-query.js";
+import { getModelId } from "../../types.js";
+import { logToHomeAssistant } from "../../utils/logger.js";
+import { runAgentQuery } from "../../utils/agent-query.js";
 
 export async function runCheckAgent(workingDir: string): Promise<string> {
   const result = await runAgentQuery(

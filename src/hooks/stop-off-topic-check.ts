@@ -1,5 +1,5 @@
 import { type StopHookInput } from "@anthropic-ai/claude-agent-sdk";
-import { checkForOffTopic } from "../agents/intent-validate.js";
+import { checkForOffTopic } from "../agents/hooks/intent-validate.js";
 import { logToHomeAssistant } from "../utils/logger.js";
 
 /**

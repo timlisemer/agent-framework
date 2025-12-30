@@ -1,7 +1,7 @@
 import { execSync } from "child_process";
-import { getModelId } from "../types.js";
-import { logToHomeAssistant } from "../utils/logger.js";
-import { runAgentQuery } from "../utils/agent-query.js";
+import { getModelId } from "../../types.js";
+import { logToHomeAssistant } from "../../utils/logger.js";
+import { runAgentQuery } from "../../utils/agent-query.js";
 import { runConfirmAgent } from "./confirm.js";
 
 export async function runCommitAgent(workingDir: string): Promise<string> {

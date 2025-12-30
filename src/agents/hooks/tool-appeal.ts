@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { getModelId } from '../types.js';
-import { logToHomeAssistant } from '../utils/logger.js';
+import { getModelId } from '../../types.js';
+import { logToHomeAssistant } from '../../utils/logger.js';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || null,
@@ -22,15 +22,15 @@ export async function appealDenial(
     messages: [
       {
         role: 'user',
-        content: `You are reviewing an appeal. The tool call was denied for a valid technical reason.
+        content: `You are reviewing an appeal. The tool call was initially blocked for a technical reason.
 
-DENIAL REASON: ${originalReason}
+BLOCK REASON: ${originalReason}
 TOOL CALL: ${toolDescription}
 
 RECENT CONVERSATION:
 ${transcript}
 
-The original denial is ALWAYS technically correct. Your ONLY job is to check if the user explicitly approved this tool call or if there's a mismatch.
+The original block is ALWAYS technically correct. Your ONLY job is to check if the user explicitly approved this tool call or if there's a mismatch.
 
 OVERTURN TO APPROVE when:
 - User explicitly requested this exact tool operation
@@ -78,7 +78,7 @@ Examples:
   let decision =
     textBlock && 'text' in textBlock ? textBlock.text.trim() : '';
 
-  // Retry if malformed (not starting with APPROVE or DENY:)
+  // Retry if malformed
   let retries = 0;
   const maxRetries = 2;
 
@@ -120,7 +120,7 @@ Examples:
     return { approved: true };
   }
 
-  // Parse denial/uphold - extract reason if provided
+  // Parse block/uphold - extract reason if provided
   let reason: string | undefined;
   const normalizedDecision = decision.trim().toUpperCase();
 
@@ -147,7 +147,7 @@ Examples:
     agent: 'tool-appeal',
     level: 'decision',
     problem: toolDescription,
-    answer: reason ? `DENIED: ${reason}` : 'UPHELD (using original reason)',
+    answer: reason ? `BLOCKED: ${reason}` : 'UPHELD (using original reason)',
   });
 
   return { approved: false, reason };

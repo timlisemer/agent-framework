@@ -1,8 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getModelId } from '../types.js';
-import { logToHomeAssistant } from '../utils/logger.js';
+import { getModelId } from '../../types.js';
+import { logToHomeAssistant } from '../../utils/logger.js';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || null,

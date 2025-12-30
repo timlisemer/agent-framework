@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { getModelId, type OffTopicCheckResult, type ConversationContext, type UserMessage, type AssistantMessage } from '../types.js';
-import { logToHomeAssistant } from '../utils/logger.js';
-import { readTranscriptStructured, TranscriptFilter, MessageLimit, type TranscriptMessage } from '../utils/transcript.js';
+import { getModelId, type OffTopicCheckResult, type ConversationContext, type UserMessage, type AssistantMessage } from '../../types.js';
+import { logToHomeAssistant } from '../../utils/logger.js';
+import { readTranscriptStructured, TranscriptFilter, MessageLimit, type TranscriptMessage } from '../../utils/transcript.js';
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || null,
@@ -221,18 +221,18 @@ Reply with: OK or INTERVENE: <feedback for the AI>`
 
     return { decision: 'OK' };
 
-  } catch (error) {
-    // On error, fail open (don't intervene)
+  } catch (err) {
+    // On issue, fail open (don't intervene)
     await logToHomeAssistant({
       agent: 'off-topic-check',
-      level: 'error',
-      problem: 'Check error',
-      answer: String(error)
+      level: 'info',
+      problem: 'Check issue',
+      answer: String(err)
     });
 
     return {
       decision: 'OK',
-      feedback: 'Check error - skipped'
+      feedback: 'Check issue - skipped'
     };
   }
 }

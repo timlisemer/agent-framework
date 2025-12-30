@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { logToHomeAssistant } from "../utils/logger.js";
+import { logToHomeAssistant } from "../../utils/logger.js";
 
 export async function runPushAgent(workingDir: string): Promise<string> {
   try {
@@ -9,11 +9,11 @@ export async function runPushAgent(workingDir: string): Promise<string> {
       stdio: ['pipe', 'pipe', 'pipe']
     });
     const result = output.trim() || "Pushed successfully";
-    await logToHomeAssistant({ agent: 'push', level: 'info', problem: workingDir, answer: result });
+    logToHomeAssistant({ agent: 'push', level: 'info', problem: workingDir, answer: result });
     return result;
   } catch (err) {
     const error = `ERROR: ${(err as Error).message}`;
-    await logToHomeAssistant({ agent: 'push', level: 'error', problem: workingDir, answer: error });
+    logToHomeAssistant({ agent: 'push', level: 'error', problem: workingDir, answer: error });
     return error;
   }
 }
