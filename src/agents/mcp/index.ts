@@ -2,16 +2,19 @@
  * MCP-Exposed Agents
  *
  * These agents are exposed via the MCP server (src/mcp/server.ts).
- * They use the Claude Agent SDK with streaming for shell access.
+ * They use direct Anthropic API calls (not SDK streaming) because:
  *
- * ## WHY SDK STREAMING?
+ * ## WHY DIRECT API?
  *
- * MCP agents need:
- * - Shell access via Bash tool - the Agent SDK provides tool orchestration
- * - Streaming output - captures incremental results from long-running commands
- * - Multi-turn execution - agent can run multiple commands in sequence
+ * MCP agents were refactored from SDK streaming to direct API because:
+ * - Commands are deterministic (linter, make check, git commands)
+ * - No agent decision-making needed for tool selection
+ * - Single API call is cheaper than multi-turn SDK conversations
+ * - Prevents "overthinking" or unwanted tool calls
+ * - Faster execution without agent loop overhead
  *
- * The Agent SDK wrapper in `utils/agent-query.ts` handles all this complexity.
+ * Shell commands are executed directly via execSync, then results
+ * are summarized/analyzed with a single API call.
  *
  * ## AGENT CHAIN
  *
@@ -19,7 +22,7 @@
  *   │         │         │
  *   │         │         └─ Runs linter + make check (sonnet)
  *   │         └─ Analyzes git diff (opus)
- *   └─ Generates commit message + executes commit (sonnet)
+ *   └─ Generates commit message + executes commit (haiku)
  */
 
 export { runCheckAgent } from './check.js';

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-TypeScript framework for custom AI agents using the Claude Agent SDK. Agents are exposed via MCP Server, PreToolUse Hook, and Stop Hook mechanisms.
+TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via MCP Server, PreToolUse Hook, and Stop Hook mechanisms.
 
 ## Architecture
 
@@ -14,8 +14,8 @@ Model IDs are centrally defined in `src/types.ts`. Update there to change models
 
 | Tier   | Usage                                                                          |
 | ------ | ------------------------------------------------------------------------------ |
-| haiku  | Fast validation: intent-validate, error-acknowledge, tool-approve, tool-appeal |
-| sonnet | Detailed analysis: check, plan-validate, commit                                |
+| haiku  | Fast tasks: intent-validate, error-acknowledge, tool-approve, tool-appeal, commit |
+| sonnet | Detailed analysis: check, plan-validate                                        |
 | opus   | Complex decisions: confirm                                                     |
 
 ### Three Exposure Mechanisms
@@ -50,7 +50,7 @@ Tool Call → Auto-approve low-risk → error-acknowledge check → Path-based c
 ```
 src/
   agents/
-    mcp/          # MCP-exposed agents (SDK streaming): check, confirm, commit, push
+    mcp/          # MCP-exposed agents (direct API): check, confirm, commit, push
     hooks/        # Hook-triggered agents (direct API): tool-approve, tool-appeal, etc.
   hooks/          # Claude Code hook entry points
   mcp/            # MCP server
@@ -68,7 +68,6 @@ See `ARCHITECTURE.md` for detailed documentation on design decisions.
 | `src/agents/mcp/`                | MCP agents (check, confirm, commit)|
 | `src/agents/hooks/`              | Hook agents (tool-approve, etc.)   |
 | `src/utils/anthropic-client.ts`  | Singleton Anthropic client factory |
-| `src/utils/agent-query.ts`       | Claude Agent SDK wrapper           |
 
 ## Integration
 

@@ -1,50 +1,37 @@
 /**
  * Anthropic Client Factory
  *
- * This module provides a singleton Anthropic client for hook agents.
+ * This module provides a singleton Anthropic client for all agents.
  *
  * ## WHY A SINGLETON?
  *
  * The Anthropic SDK maintains internal state (connection pooling, rate limiting).
  * Creating multiple clients wastes resources and can cause rate limit issues.
  *
- * ## WHY HOOK AGENTS USE DIRECT API (not SDK streaming)
+ * ## WHY ALL AGENTS USE DIRECT API
  *
- * Hook agents are validators that run INSIDE Claude's tool execution loop.
- * They must be:
- * - Fast (<100ms) - validation should not noticeably delay tool execution
- * - Lightweight - no sub-agent spawning or tool orchestration needed
- * - Synchronous in nature - single request/response, no streaming required
+ * All agents use the direct Anthropic API (`messages.create`) because:
  *
- * The direct Anthropic API (`messages.create`) is perfect for this:
- * - Lower overhead than the Agent SDK
- * - No streaming complexity
+ * **Hook agents** (tool-approve, tool-appeal, error-acknowledge, etc.):
+ * - Run inside Claude's tool execution loop
+ * - Must be fast (<100ms) - validation should not delay tool execution
  * - Simple request/response pattern
  *
- * ## WHY MCP AGENTS USE SDK STREAMING (runAgentQuery)
- *
- * MCP agents (check, confirm, commit) need:
- * - Shell access via Bash tool - the Agent SDK provides tool orchestration
- * - Streaming output - captures incremental results from long-running commands
- * - Multi-turn execution - agent can run multiple commands in sequence
- *
- * The Agent SDK wrapper in `agent-query.ts` handles all this complexity.
+ * **MCP agents** (check, confirm, commit):
+ * - Commands are deterministic (linter, make check, git commands)
+ * - No agent decision-making needed for tool selection
+ * - Shell commands executed via execSync, then single API call to analyze
+ * - Single request is cheaper than multi-turn SDK conversations
+ * - Prevents "overthinking" or unwanted tool calls
  *
  * ## USAGE
  *
- * Hook agents (tool-approve, tool-appeal, error-acknowledge, etc.):
+ * All agents:
  * ```typescript
  * import { getAnthropicClient } from '../utils/anthropic-client.js';
  *
  * const client = getAnthropicClient();
  * const response = await client.messages.create({ ... });
- * ```
- *
- * MCP agents (check, confirm, commit):
- * ```typescript
- * import { runAgentQuery } from '../utils/agent-query.js';
- *
- * const result = await runAgentQuery('agent-name', prompt, options);
  * ```
  */
 

@@ -37,53 +37,54 @@ src/
     retry.ts                        # Generic format validation retry
     transcript-presets.ts           # Standard transcript configurations
     transcript.ts                   # Transcript reading utilities
-    agent-query.ts                  # Claude Agent SDK wrapper
     logger.ts                       # Home Assistant logging
     ack-cache.ts                    # Error acknowledgment cache
 ```
 
-## Two Execution Patterns
+## Execution Pattern: Direct Anthropic API
 
-The framework uses two distinct patterns for LLM calls, chosen based on requirements:
+All agents use direct Anthropic API calls via `getAnthropicClient()` in `utils/anthropic-client.ts`.
 
-### 1. SDK Streaming (MCP Agents)
+### Why Direct API for All Agents?
 
-**Used by:** `check`, `confirm`, `commit`
+**Hook Agents** (tool-approve, tool-appeal, error-acknowledge, plan-validate, intent-validate):
+- Run inside Claude's tool execution loop
+- Must be fast (<100ms) - no noticeable delay
+- Simple request/response validation
 
-**Implementation:** `runAgentQuery()` in `utils/agent-query.ts`
+**MCP Agents** (check, confirm, commit):
+- Commands are deterministic (linter, make check, git commands)
+- No agent decision-making needed for tool selection
+- Single API call is cheaper than multi-turn SDK conversations
+- Prevents "overthinking" or unwanted tool calls
+- Faster execution without agent loop overhead
 
-**Why SDK streaming?**
-- Need shell access via Bash tool
-- Multi-turn execution (agent runs multiple commands in sequence)
-- Streaming captures incremental output from long-running commands
-- Agent SDK provides tool orchestration
+### MCP Agent Pattern
+
+MCP agents execute shell commands directly with `execSync`, then use a single API call to analyze results:
 
 ```typescript
 // Example: check agent
-const result = await runAgentQuery(
-  'check',
-  'Run linter and make check...',
-  {
-    cwd: workingDir,
-    model: getModelId("sonnet"),
-    allowedTools: ["Bash"],
-    systemPrompt: `...`
-  }
-);
+import { execSync } from 'child_process';
+import { getAnthropicClient } from '../../utils/anthropic-client.js';
+
+// Step 1: Run commands directly
+const lintOutput = execSync('npx eslint . 2>&1', { cwd, encoding: 'utf-8' });
+const checkOutput = execSync('make check 2>&1', { cwd, encoding: 'utf-8' });
+
+// Step 2: Single API call to summarize
+const client = getAnthropicClient();
+const response = await client.messages.create({
+  model: getModelId('sonnet'),
+  max_tokens: 2000,
+  system: SYSTEM_PROMPT,
+  messages: [{ role: 'user', content: `Summarize:\n${lintOutput}\n${checkOutput}` }]
+});
 ```
 
-### 2. Direct Anthropic API (Hook Agents)
+### Hook Agent Pattern
 
-**Used by:** `tool-approve`, `tool-appeal`, `error-acknowledge`, `plan-validate`, `intent-validate`
-
-**Implementation:** `getAnthropicClient()` in `utils/anthropic-client.ts`
-
-**Why direct API?**
-- Run inside Claude's tool execution loop
-- Must be fast (<100ms) - no noticeable delay
-- No sub-agent spawning or tool orchestration needed
-- Simple request/response pattern
-- Lower overhead than Agent SDK
+Hook agents use a single API call for validation:
 
 ```typescript
 // Example: tool-approve agent
@@ -91,9 +92,13 @@ const client = getAnthropicClient();
 const response = await client.messages.create({
   model: getModelId('haiku'),
   max_tokens: 1000,
-  messages: [{ role: 'user', content: `...` }]
+  messages: [{ role: 'user', content: `Evaluate: ${toolDescription}` }]
 });
 ```
+
+### Historical Note
+
+MCP agents previously used Claude Agent SDK streaming (`@anthropic-ai/claude-agent-sdk`) which provided tool orchestration. This was refactored to direct API because the agents' commands were deterministic and didn't benefit from multi-turn tool selection.
 
 ## Model Tiers
 
@@ -101,8 +106,8 @@ Models are centrally configured in `src/types.ts`:
 
 | Tier   | Usage                                                  |
 | ------ | ------------------------------------------------------ |
-| haiku  | Fast validation: tool-approve, tool-appeal, error-ack, intent-validate |
-| sonnet | Detailed analysis: check, commit, plan-validate        |
+| haiku  | Fast tasks: tool-approve, tool-appeal, error-ack, intent-validate, commit |
+| sonnet | Detailed analysis: check, plan-validate                |
 | opus   | Complex decisions: confirm (git diff analysis)         |
 
 ## Agent Chains
@@ -114,7 +119,7 @@ commit → confirm → check
   │         │         │
   │         │         └─ Runs linter + make check (sonnet)
   │         └─ Analyzes git diff (opus)
-  └─ Generates commit message + executes commit (sonnet)
+  └─ Generates commit message + executes commit (haiku)
 ```
 
 ## Hook Flow (PreToolUse)

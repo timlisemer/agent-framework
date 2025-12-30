@@ -1,23 +1,14 @@
+import { execSync } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 import { getModelId } from "../../types.js";
+import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logToHomeAssistant } from "../../utils/logger.js";
-import { runAgentQuery } from "../../utils/agent-query.js";
+import { extractTextFromResponse } from "../../utils/response-parser.js";
 
-export async function runCheckAgent(workingDir: string): Promise<string> {
-  const result = await runAgentQuery(
-    'check',
-    `Execute the following in order:
-1. Run the project linter ONLY if configured (check for eslint.config.*, .eslintrc.*, Cargo.toml, pyproject.toml, etc. first)
-2. Run \`make check\`
-3. Collect ALL output from both commands
+const SYSTEM_PROMPT = `You are a check tool runner. Your ONLY job is to summarize check results.
 
-Then provide a structured summary.`,
-    {
-      cwd: workingDir,
-      model: getModelId("sonnet"),
-      allowedTools: ["Bash"],
-      systemPrompt: `You are a check tool runner. Your ONLY job is to run checks and summarize results.
-
-Run the commands, then output EXACTLY this format:
+Output EXACTLY this format:
 
 ## Results
 - Errors: <count>
@@ -37,16 +28,80 @@ RULES:
 - Do NOT analyze what the errors mean
 - Do NOT suggest fixes or recommendations
 - Do NOT provide policy guidance
-- Just report what the tools said`
-    }
-  );
+- Just report what the tools said`;
 
-  logToHomeAssistant({
-    agent: 'check',
-    level: 'info',
-    problem: workingDir,
-    answer: result.output,
+/**
+ * Detect which linter is configured for the project.
+ * Returns the lint command to run, or null if no linter found.
+ */
+function detectLinter(workingDir: string): string | null {
+  const checks = [
+    { files: ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", ".eslintrc.js", ".eslintrc.json", ".eslintrc.yml", ".eslintrc"], cmd: "npx eslint . 2>&1" },
+    { files: ["Cargo.toml"], cmd: "cargo clippy 2>&1 || cargo check 2>&1" },
+    { files: ["pyproject.toml", "setup.py"], cmd: "ruff check . 2>&1 || pylint . 2>&1" },
+    { files: ["go.mod"], cmd: "golangci-lint run 2>&1 || go vet ./... 2>&1" },
+  ];
+
+  for (const { files, cmd } of checks) {
+    for (const file of files) {
+      if (fs.existsSync(path.join(workingDir, file))) {
+        return cmd;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Run a shell command and capture output.
+ * Returns { output, exitCode } - never throws.
+ */
+function runCommand(cmd: string, cwd: string): { output: string; exitCode: number } {
+  try {
+    const output = execSync(cmd, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
+    return { output, exitCode: 0 };
+  } catch (err) {
+    const error = err as { stdout?: string; stderr?: string; status?: number };
+    const output = (error.stdout || "") + (error.stderr || "");
+    return { output, exitCode: error.status ?? 1 };
+  }
+}
+
+export async function runCheckAgent(workingDir: string): Promise<string> {
+  // Step 1: Run linter if configured
+  let lintOutput = "";
+  const lintCmd = detectLinter(workingDir);
+  if (lintCmd) {
+    const lint = runCommand(lintCmd, workingDir);
+    lintOutput = `LINTER OUTPUT (exit code ${lint.exitCode}):\n${lint.output}\n`;
+  }
+
+  // Step 2: Run make check
+  const check = runCommand("make check 2>&1", workingDir);
+  const checkOutput = `MAKE CHECK OUTPUT (exit code ${check.exitCode}):\n${check.output}`;
+
+  // Step 3: Single API call to summarize
+  const client = getAnthropicClient();
+  const response = await client.messages.create({
+    model: getModelId("sonnet"),
+    max_tokens: 2000,
+    system: SYSTEM_PROMPT,
+    messages: [
+      {
+        role: "user",
+        content: `Summarize these check results:\n\n${lintOutput}${checkOutput}`,
+      },
+    ],
   });
 
-  return result.output;
+  const output = extractTextFromResponse(response);
+
+  logToHomeAssistant({
+    agent: "check",
+    level: "info",
+    problem: workingDir,
+    answer: output,
+  });
+
+  return output;
 }
