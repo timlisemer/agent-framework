@@ -1,6 +1,6 @@
-import { execSync } from "child_process";
 import { getModelId } from "../../types.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
+import { runCommand } from "../../utils/command.js";
 import { logToHomeAssistant } from "../../utils/logger.js";
 import { extractTextFromResponse } from "../../utils/response-parser.js";
 import { runCheckAgent } from "./check.js";
@@ -59,21 +59,6 @@ RULES:
 - Small, obvious changes bias toward CONFIRMED
 
 This is a gate, not a review.`;
-
-/**
- * Run a shell command and capture output.
- * Returns { output, exitCode } - never throws.
- */
-function runCommand(cmd: string, cwd: string): { output: string; exitCode: number } {
-  try {
-    const output = execSync(cmd, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
-    return { output, exitCode: 0 };
-  } catch (err) {
-    const error = err as { stdout?: string; stderr?: string; status?: number };
-    const output = (error.stdout || "") + (error.stderr || "");
-    return { output, exitCode: error.status ?? 1 };
-  }
-}
 
 export async function runConfirmAgent(workingDir: string): Promise<string> {
   // Step 1: Run check agent first

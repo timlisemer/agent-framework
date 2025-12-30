@@ -2,53 +2,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getModelId } from '../../types.js';
 import { getAnthropicClient } from '../../utils/anthropic-client.js';
+import { getBlacklistHighlights } from '../../utils/command-patterns.js';
 import { logToHomeAssistant } from '../../utils/logger.js';
 import { extractTextFromResponse } from '../../utils/response-parser.js';
 import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
-
-interface BlacklistPattern {
-  pattern: RegExp;
-  name: string;
-  alternative: string;
-}
-
-const BLACKLIST_PATTERNS: BlacklistPattern[] = [
-  // File reading - should use Read tool
-  { pattern: /\bcat\s+/, name: 'cat', alternative: 'Use Read tool' },
-  { pattern: /\bhead\s+/, name: 'head', alternative: 'Use Read tool with limit' },
-  { pattern: /\btail\s+/, name: 'tail', alternative: 'Use Read tool with offset' },
-
-  // Search - should use Grep tool
-  { pattern: /\b(grep|rg)\s+/, name: 'grep/rg', alternative: 'Use Grep tool' },
-
-  // File finding - should use Glob tool
-  { pattern: /\bfind\s+/, name: 'find', alternative: 'Use Glob tool' },
-
-  // File writing - should use Write tool
-  { pattern: /\becho\s+.*>/, name: 'echo redirect', alternative: 'Use Write tool' },
-
-  // Directory change - always deny
-  { pattern: /\bcd\s+/, name: 'cd', alternative: 'Use absolute paths' },
-
-  // Git write operations
-  { pattern: /\bgit\s+(commit|push|add|merge|rebase|reset)\b/, name: 'git write op', alternative: 'Use MCP tools' },
-
-  // Build/check commands
-  { pattern: /\bmake\s+(check|build)\b/, name: 'make check/build', alternative: 'Use mcp__agent-framework__check' },
-  { pattern: /\bnpm\s+run\s+(build|check)\b/, name: 'npm build/check', alternative: 'Use mcp__agent-framework__check' },
-  { pattern: /\bcargo\s+(build|check)\b/, name: 'cargo build/check', alternative: 'Use mcp__agent-framework__check' },
-  { pattern: /\b(tsc|npx\s+tsc)\b/, name: 'tsc', alternative: 'Use mcp__agent-framework__check' },
-];
-
-function getBlacklistHighlights(toolName: string, toolInput: unknown): string[] {
-  if (toolName !== 'Bash') return [];
-  const command = (toolInput as { command?: string }).command;
-  if (!command) return [];
-
-  return BLACKLIST_PATTERNS.filter(({ pattern }) => pattern.test(command)).map(
-    ({ name, alternative }) => `[BLACKLIST: ${name}] ${alternative}`
-  );
-}
 
 export async function approveTool(
   toolName: string,

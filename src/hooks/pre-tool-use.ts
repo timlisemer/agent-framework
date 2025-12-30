@@ -6,6 +6,7 @@ import { approveTool } from '../agents/hooks/tool-approve.js';
 import { appealDenial } from '../agents/hooks/tool-appeal.js';
 import { validatePlanIntent } from '../agents/hooks/plan-validate.js';
 import { checkErrorAcknowledgment } from '../agents/hooks/error-acknowledge.js';
+import { detectWorkaroundPattern } from '../utils/command-patterns.js';
 import { logToHomeAssistant } from '../utils/logger.js';
 import {
   readTranscript,
@@ -21,33 +22,6 @@ const DENIAL_EXPIRY_MS = 60 * 1000; // 1 minute
 
 interface DenialCache {
   [pattern: string]: { count: number; timestamp: number };
-}
-
-const WORKAROUND_PATTERNS: Record<string, string[]> = {
-  'type-check': [
-    'make check',
-    'tsc',
-    'npx tsc',
-    'npm run check',
-    'cargo check',
-  ],
-  build: ['make build', 'npm run build', 'cargo build'],
-  lint: ['eslint', 'prettier', 'npm run lint'],
-};
-
-function detectWorkaroundPattern(
-  toolName: string,
-  toolInput: unknown
-): string | null {
-  if (toolName !== 'Bash') return null;
-  const command = (toolInput as { command?: string }).command || '';
-
-  for (const [pattern, variants] of Object.entries(WORKAROUND_PATTERNS)) {
-    if (variants.some((v) => command.includes(v))) {
-      return pattern;
-    }
-  }
-  return null;
 }
 
 function loadDenials(): DenialCache {

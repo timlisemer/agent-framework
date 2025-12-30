@@ -1,8 +1,8 @@
-import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { getModelId } from "../../types.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
+import { runCommand } from "../../utils/command.js";
 import { logToHomeAssistant } from "../../utils/logger.js";
 import { extractTextFromResponse } from "../../utils/response-parser.js";
 
@@ -50,21 +50,6 @@ function detectLinter(workingDir: string): string | null {
     }
   }
   return null;
-}
-
-/**
- * Run a shell command and capture output.
- * Returns { output, exitCode } - never throws.
- */
-function runCommand(cmd: string, cwd: string): { output: string; exitCode: number } {
-  try {
-    const output = execSync(cmd, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
-    return { output, exitCode: 0 };
-  } catch (err) {
-    const error = err as { stdout?: string; stderr?: string; status?: number };
-    const output = (error.stdout || "") + (error.stderr || "");
-    return { output, exitCode: error.status ?? 1 };
-  }
 }
 
 export async function runCheckAgent(workingDir: string): Promise<string> {

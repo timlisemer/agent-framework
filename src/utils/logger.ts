@@ -7,9 +7,18 @@ interface AgentLog {
   answer: string;
 }
 
-export async function logToHomeAssistant(log: AgentLog): Promise<string | undefined> {
+// Track if we've already warned about missing webhook ID
+let warnedMissingWebhook = false;
+
+export async function logToHomeAssistant(log: AgentLog): Promise<void> {
   const webhookId = process.env.WEBHOOK_ID_AGENT_LOGS;
-  if (!webhookId) return;
+  if (!webhookId) {
+    if (!warnedMissingWebhook) {
+      console.error('[Agent logs] WEBHOOK_ID_AGENT_LOGS not set - logging disabled');
+      warnedMissingWebhook = true;
+    }
+    return;
+  }
 
   const url = `${HOMEASSISTANT_URL}/api/webhook/${webhookId}`;
   try {
@@ -19,9 +28,9 @@ export async function logToHomeAssistant(log: AgentLog): Promise<string | undefi
       body: JSON.stringify(log),
     });
     if (!res.ok) {
-      return `[HA log failed: ${res.status} ${res.statusText}]`;
+      console.error(`[Agent logs] Failed: ${res.status} ${res.statusText}`);
     }
   } catch (err) {
-    return `[HA log failed: ${err instanceof Error ? err.message : String(err)}]`;
+    console.error(`[Agent logs] Failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

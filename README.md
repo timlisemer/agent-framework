@@ -1,6 +1,6 @@
 # Agent Framework
 
-A TypeScript framework for custom AI agents using the Claude Agent SDK. Agents are exposed via three mechanisms:
+A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
 1. **MCP Server** - For `check`, `confirm`, `commit` agents (portable, works with any MCP client)
 2. **PreToolUse Hook** - Multi-layer safety gate with `tool-approve`, `tool-appeal`, `error-acknowledge`, and `plan-validate` agents
@@ -16,7 +16,7 @@ The framework implements 9 specialized agents organized into three categories:
 | ------- | ------ | ------------------------------------------------------------ |
 | check   | sonnet | Run linter + make check, return summary with recommendations |
 | confirm | opus   | Binary quality gate: CONFIRMED or DECLINED                   |
-| commit  | sonnet | Generate minimal commit message + execute git commit         |
+| commit  | haiku  | Generate minimal commit message + execute git commit         |
 
 ### Validation Agents (Hook-Triggered)
 

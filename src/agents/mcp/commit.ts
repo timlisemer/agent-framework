@@ -1,6 +1,6 @@
-import { execSync } from "child_process";
 import { getModelId } from "../../types.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
+import { runCommand } from "../../utils/command.js";
 import { logToHomeAssistant } from "../../utils/logger.js";
 import { extractTextFromResponse } from "../../utils/response-parser.js";
 import { runConfirmAgent } from "./confirm.js";
@@ -70,21 +70,6 @@ refactor: restructure agents directory
 - Remove deprecated utility functions`;
 
 /**
- * Run a shell command and capture output.
- * Returns { output, exitCode } - never throws.
- */
-function runCommand(cmd: string, cwd: string): { output: string; exitCode: number } {
-  try {
-    const output = execSync(cmd, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] });
-    return { output, exitCode: 0 };
-  } catch (err) {
-    const error = err as { stdout?: string; stderr?: string; status?: number };
-    const output = (error.stdout || "") + (error.stderr || "");
-    return { output, exitCode: error.status ?? 1 };
-  }
-}
-
-/**
  * Parse the LLM response to extract size and message.
  */
 function parseCommitResponse(response: string): { size: string; message: string } | null {
@@ -101,8 +86,8 @@ function parseCommitResponse(response: string): { size: string; message: string 
 
 export async function runCommitAgent(workingDir: string): Promise<string> {
   // Pre-check: skip LLM call if nothing to commit
-  const status = execSync("git status --porcelain", { cwd: workingDir, encoding: "utf-8" });
-  if (!status.trim()) {
+  const status = runCommand("git status --porcelain", workingDir);
+  if (!status.output.trim()) {
     logToHomeAssistant({
       agent: "commit",
       level: "info",
