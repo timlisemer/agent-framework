@@ -119,6 +119,42 @@ async function main() {
     process.stdin.on('end', () => resolve(JSON.parse(data)));
   });
 
+  // Block confirm tool from Claude Code - requires explicit user approval
+  // Internal agents (like commit) call runConfirmAgent() directly, bypassing this hook
+  if (input.tool_name === 'mcp__agent-framework__confirm') {
+    const transcript = await readRecentTranscript(input.transcript_path, 50);
+    const appeal = await appealDenial(
+      input.tool_name,
+      input.tool_input,
+      transcript,
+      'Confirm requires explicit user approval. Use /commit or explicitly request confirm.'
+    );
+
+    if (appeal.approved) {
+      console.log(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'allow',
+          },
+        })
+      );
+      process.exit(0);
+    }
+
+    console.log(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason:
+            'Confirm requires explicit user approval. Use /commit or explicitly request confirm.',
+        },
+      })
+    );
+    process.exit(0);
+  }
+
   // Auto-approve low-risk tools and ALL MCP tools
   // These tools are read-only or have no filesystem/system impact
   const LOW_RISK_TOOLS = [
