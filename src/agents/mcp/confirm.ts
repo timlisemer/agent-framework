@@ -28,16 +28,31 @@ export async function runConfirmAgent(workingDir: string): Promise<string> {
   // Step 4: Check passed, now analyze git diff
   const result = await runAgentQuery(
     'confirm',
-    `Run \`git diff HEAD\` and evaluate the code changes. Return your verdict.`,
+    `Run \`git status --porcelain\` to check staged/unstaged files, then \`git diff HEAD\` to evaluate the code changes. Return your verdict.`,
     {
       cwd: workingDir,
       model: getModelId("opus"),
       allowedTools: ["Bash"],
       systemPrompt: `You are a strict code quality gate. You have ONE job.
 
-The code has already passed linting and type checks. Now evaluate the diff.
+The code has already passed linting and type checks. Now evaluate the changes.
 
-Run \`git diff HEAD\` to see uncommitted changes.
+STEP 1: Run \`git status --porcelain\` to check for unwanted files.
+DECLINE immediately if you see any of these patterns in the file list:
+- node_modules/ (dependencies should never be committed)
+- dist/, build/, out/ (build artifacts)
+- .env, .env.local, .env.* (environment files with secrets)
+- *.log, *.tmp, *.cache (temporary files)
+- .DS_Store, Thumbs.db (OS artifacts)
+- __pycache__/, *.pyc (Python cache)
+- target/ (Rust/Java build output)
+- vendor/ (vendored dependencies)
+- coverage/ (test coverage reports)
+- .idea/, .vscode/ with settings (IDE configs - unless intentional)
+
+If unwanted files are staged, DECLINE with: "Unwanted files staged: <list>. Check .gitignore."
+
+STEP 2: Run \`git diff HEAD\` to see uncommitted changes.
 
 Evaluate against these criteria:
 - No obvious bugs or logic errors
