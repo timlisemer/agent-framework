@@ -1,7 +1,7 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { execSync } from "child_process";
 import { getModelId } from "../types.js";
 import { logToHomeAssistant } from "../utils/logger.js";
+import { runAgentQuery } from "../utils/agent-query.js";
 import { runConfirmAgent } from "./confirm.js";
 
 export async function runCommitAgent(workingDir: string): Promise<string> {
@@ -29,15 +29,14 @@ export async function runCommitAgent(workingDir: string): Promise<string> {
     return confirmResult;
   }
 
-  let output = "";
-
-  const q = query({
-    prompt: `1. Run \`git diff HEAD\` to see changes
+  const result = await runAgentQuery(
+    'commit',
+    `1. Run \`git diff HEAD\` to see changes
 2. Run \`git diff --stat HEAD\` for overview
 3. Generate an appropriate commit message
 4. Execute \`git add -A && git commit -m "..."\`
 5. Return the commit hash`,
-    options: {
+    {
       cwd: workingDir,
       model: getModelId("sonnet"),
       allowedTools: ["Bash"],
@@ -76,25 +75,14 @@ Example:
 fix typo in readme
 abc123def`
     }
-  });
+  );
 
-  for await (const message of q) {
-    if (message.type === "result" && message.subtype === "success") {
-      output = message.result;
-    }
-  }
-
-  if (!output.trim()) {
-    output = "ERROR: Commit agent returned no output";
-  }
-
-  const result = output.trim();
   logToHomeAssistant({
     agent: 'commit',
     level: 'info',
     problem: workingDir,
-    answer: result,
+    answer: result.output,
   });
 
-  return result;
+  return result.output;
 }

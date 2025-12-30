@@ -1,6 +1,6 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { getModelId } from "../types.js";
 import { logToHomeAssistant } from "../utils/logger.js";
+import { runAgentQuery } from "../utils/agent-query.js";
 import { runCheckAgent } from "./check.js";
 
 export async function runConfirmAgent(workingDir: string): Promise<string> {
@@ -26,11 +26,10 @@ export async function runConfirmAgent(workingDir: string): Promise<string> {
   }
 
   // Step 4: Check passed, now analyze git diff
-  let output = "";
-
-  const q = query({
-    prompt: `Run \`git diff HEAD\` and evaluate the code changes. Return your verdict.`,
-    options: {
+  const result = await runAgentQuery(
+    'confirm',
+    `Run \`git diff HEAD\` and evaluate the code changes. Return your verdict.`,
+    {
       cwd: workingDir,
       model: getModelId("opus"),
       allowedTools: ["Bash"],
@@ -63,25 +62,14 @@ RULES:
 
 This is a gate, not a review. Decide.`
     }
-  });
+  );
 
-  for await (const message of q) {
-    if (message.type === "result" && message.subtype === "success") {
-      output = message.result;
-    }
-  }
-
-  if (!output.trim()) {
-    output = "ERROR: Confirm agent returned no output";
-  }
-
-  const result = output.trim();
   logToHomeAssistant({
     agent: 'confirm',
     level: 'decision',
     problem: workingDir,
-    answer: result,
+    answer: result.output,
   });
 
-  return result;
+  return result.output;
 }

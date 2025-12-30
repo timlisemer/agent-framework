@@ -1,18 +1,17 @@
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import { getModelId } from "../types.js";
 import { logToHomeAssistant } from "../utils/logger.js";
+import { runAgentQuery } from "../utils/agent-query.js";
 
 export async function runCheckAgent(workingDir: string): Promise<string> {
-  let output = "";
-
-  const q = query({
-    prompt: `Execute the following in order:
+  const result = await runAgentQuery(
+    'check',
+    `Execute the following in order:
 1. Run the project linter ONLY if configured (check for eslint.config.*, .eslintrc.*, Cargo.toml, pyproject.toml, etc. first)
 2. Run \`make check\`
 3. Collect ALL output from both commands
 
 Then provide a structured summary.`,
-    options: {
+    {
       cwd: workingDir,
       model: getModelId("sonnet"),
       allowedTools: ["Bash"],
@@ -40,24 +39,14 @@ RULES:
 - Do NOT provide policy guidance
 - Just report what the tools said`
     }
-  });
-
-  for await (const message of q) {
-    if (message.type === "result" && message.subtype === "success") {
-      output = message.result;
-    }
-  }
-
-  if (!output.trim()) {
-    output = "ERROR: Check agent returned no output";
-  }
+  );
 
   logToHomeAssistant({
     agent: 'check',
     level: 'info',
     problem: workingDir,
-    answer: output,
+    answer: result.output,
   });
 
-  return output;
+  return result.output;
 }

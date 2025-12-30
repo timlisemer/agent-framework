@@ -19,6 +19,7 @@ DETECT DRIFT (→ DRIFT):
 - Plan does something fundamentally different than requested
 - Plan ignores a critical aspect the user explicitly mentioned
 - Plan adds major unrelated scope user never asked for
+- Plan is appended to an old plan instead of replacing it - Look for if the user clearly started a new topic and the existing plan was not related to the new topic.
 
 ALLOW (→ OK):
 - Plan is incomplete but heading in the right direction

@@ -269,10 +269,14 @@ async function main() {
       // Plan file drift detection - validate plan content against user intent
       const plansDir = path.join(os.homedir(), '.claude', 'plans');
       if (
-        input.tool_name === 'Write' &&
+        (input.tool_name === 'Write' || input.tool_name === 'Edit') &&
         isPathInDirectory(filePath, plansDir)
       ) {
-        const content = (input.tool_input as { content?: string }).content;
+        // Write uses 'content', Edit uses 'new_string'
+        const content =
+          input.tool_name === 'Write'
+            ? (input.tool_input as { content?: string }).content
+            : (input.tool_input as { new_string?: string }).new_string;
         if (content) {
           const userMessages = await readRecentUserMessages(
             input.transcript_path,
@@ -284,7 +288,7 @@ async function main() {
             logToHomeAssistant({
               agent: 'pre-tool-use-hook',
               level: 'decision',
-              problem: `Plan write to ${filePath}`,
+              problem: `Plan ${input.tool_name.toLowerCase()} to ${filePath}`,
               answer: `DRIFT: ${validation.reason}`,
             });
             console.log(
