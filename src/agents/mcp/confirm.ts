@@ -33,6 +33,10 @@ STEP 2: Evaluate the diff against these criteria:
 - Reasonable code style
 - No unused code workarounds: If the diff shows unused variables/imports being renamed with underscores (_var), flagged with @ts-ignore/@ts-expect-error, or otherwise suppressed instead of deleted, DECLINE. Unused code must be removed, not hidden.
 
+STEP 3: Documentation check
+- Verify documentation is still up to date after the changes
+- DECLINE if documentation was left out, and summarize what is missing
+
 OUTPUT FORMAT:
 Your response must follow this exact structure:
 
