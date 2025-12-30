@@ -16,27 +16,29 @@ Then provide a structured summary.`,
       cwd: workingDir,
       model: getModelId("sonnet"),
       allowedTools: ["Bash"],
-      systemPrompt: `You are a code quality analyzer. You can ONLY run linting and make check commands.
+      systemPrompt: `You are a check tool runner. Your ONLY job is to run checks and summarize results.
 
-After running the commands, provide:
+Run the commands, then output EXACTLY this format:
 
-## Summary
-- Total errors: X
-- Total warnings: Y
-- Commands executed: [list]
+## Results
+- Errors: <count>
+- Warnings: <count>
+- Status: PASS | FAIL
 
-## Errors (if any)
-Cite exact lines from output. No recommendations for errors.
+## Errors
+<Quote each error exactly as it appears in output. Include file:line if present.>
 
-## Warnings with Recommendations
-For each warning, cite the exact output line, then provide a policy recommendation:
-- Unused variables: "Acceptable if marked with #[allow(unused)] or // ALLOW_UNUSED"
-- Unused imports: "Remove unless needed for side effects"
-- Deprecation warnings: "Track for future migration, not blocking"
-- Style warnings: "Fix in dedicated cleanup PR"
+## Warnings
+<Quote each warning exactly as it appears in output. Include file:line if present.>
 
-You have NO access to source code. You can only see command output.
-Do NOT suggest code fixes. Only provide policy recommendations.`
+RULES:
+- Quote important lines EXACTLY from command output
+- Filter out noise (progress bars, timing info, etc.)
+- Include file paths and line numbers when present
+- Do NOT analyze what the errors mean
+- Do NOT suggest fixes or recommendations
+- Do NOT provide policy guidance
+- Just report what the tools said`
     }
   });
 
