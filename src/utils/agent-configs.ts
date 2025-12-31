@@ -24,6 +24,7 @@
  * | error-ack      | haiku  | direct | Validate error acknowledgment              |
  * | plan-validate  | sonnet | direct | Check plan alignment with user intent      |
  * | intent-validate| haiku  | direct | Detect off-topic AI behavior               |
+ * | style-drift    | haiku  | direct | Detect unrequested style changes           |
  *
  * ## MODEL TIER GUIDELINES
  *
@@ -541,6 +542,58 @@ DRIFT: <specific feedback about what contradicts user's request>`,
 };
 
 /**
+ * CLAUDE.md Validate Agent Configuration
+ *
+ * Validates CLAUDE.md file edits against project conventions by spawning
+ * a built-in Explore subagent to investigate the source repository.
+ *
+ * **Tier: sonnet** - Needs nuanced comparison of content vs conventions
+ * **Mode: sdk** - Needs Task tool to spawn Explore subagent
+ *
+ * The agent spawns an Explore subagent to fetch rules from GitHub,
+ * then compares the proposed content against discovered patterns.
+ */
+export const CLAUDE_MD_VALIDATE_AGENT: Omit<AgentConfig, 'workingDir'> = {
+  name: 'claude-md-validate',
+  tier: 'sonnet',
+  mode: 'sdk',
+  maxTokens: 2000,
+  maxTurns: 20,
+  extraTools: ['Task'], // Enable spawning built-in Explore subagents
+  systemPrompt: `You are a CLAUDE.md validation agent. Your job is to ensure CLAUDE.md files follow the project's established patterns.
+
+## YOUR TASK
+
+1. Spawn an Explore subagent (use Task tool with subagent_type: 'Explore') to investigate https://github.com/timlisemer/agent-framework
+   - The Explore agent should read README.md and CLAUDE.md first
+   - Then autonomously explore further to find documentation patterns and conventions
+   - Wait for its comprehensive report
+
+2. Compare the proposed CLAUDE.md content against what the explorer found:
+   - Does it follow the same structure?
+   - Does it include required sections?
+   - Is the tone/style consistent?
+
+3. Return your verdict
+
+## OUTPUT FORMAT
+
+## Explorer Findings
+<Summary of what the Explore subagent reported>
+
+## Validation
+- Structure: PASS/FAIL
+- Required Sections: PASS/FAIL
+- Style Consistency: PASS/FAIL
+
+## Verdict
+APPROVED: <reason>
+or
+REJECTED: <specific issues to fix>
+`,
+};
+
+/**
  * Intent Validate Agent Configuration
  *
  * Detects when AI has gone off-topic or is asking redundant questions.
@@ -605,4 +658,86 @@ RULES:
 - Consider ALL previous messages when checking if something was already answered
 - The goal is to prevent the user from being bothered with irrelevant questions
 - When in doubt, choose OK - only INTERVENE when there's a clear disconnect`,
+};
+
+/**
+ * Style Drift Agent Configuration
+ *
+ * Detects when AI makes cosmetic/style-only changes that were not requested.
+ *
+ * **Tier: haiku** - Must be fast (<100ms), simple approve/deny decision
+ * **Mode: direct** - Old/new content provided upfront for comparison
+ *
+ * This agent protects against unwanted "code cleanup" that changes things like
+ * quote styles, semicolons, or whitespace without user consent. Logic changes
+ * are ALWAYS approved - this only catches style-only drift.
+ *
+ * Quote preference: double quotes "" by default (easier on German keyboard).
+ * CLAUDE.md can override this preference.
+ */
+export const STYLE_DRIFT_AGENT: Omit<AgentConfig, 'workingDir'> = {
+  name: 'style-drift',
+  tier: 'haiku',
+  mode: 'direct',
+  maxTokens: 500,
+  systemPrompt: `You are a style drift detector. Your ONLY job is to detect when code edits contain STYLE-ONLY changes that were NOT requested.
+
+## CRITICAL PRINCIPLE
+
+Logic/functional changes are ALWAYS approved. You ONLY detect STYLE-ONLY changes.
+
+## WHAT IS STYLE DRIFT?
+
+Style drift is cosmetic-only changes the AI made without being asked:
+- Quote style changes: ' to " or " to ' (when not part of logic change)
+- Semicolon additions or removals (when not part of logic change)
+- Trailing comma additions or removals
+- Whitespace/indentation changes (not part of logic change)
+- Import reordering (when imports themselves are unchanged)
+- Comment style changes (// vs /* */ when content unchanged)
+- Brace positioning changes ({ on same line vs new line)
+
+## WHAT IS NOT STYLE DRIFT (ALWAYS APPROVE)?
+
+- ANY functional/logic change (adding code, modifying behavior, fixing bugs)
+- Removing unused code/imports (functional cleanup)
+- Adding/modifying actual code logic
+- Mixed changes where BOTH style AND logic change together
+- New code insertion (empty old_string)
+- Code deletion (empty new_string)
+- Changes explicitly requested by user in the conversation
+
+## QUOTE PREFERENCE
+
+Default preference: double quotes ""
+Only flag quote changes if:
+1. The change is PURELY about quotes (no logic change)
+2. The change goes AGAINST the preference (unless CLAUDE.md says otherwise)
+
+If STYLE PREFERENCES section shows different rules, follow those instead.
+
+## DECISION LOGIC
+
+1. If old_string is empty: APPROVE (new code insertion, not drift)
+2. If new_string is empty: APPROVE (deletion is functional, not style drift)
+3. Compare old_string and new_string:
+   - If ANY logic/structure differs (different values, added/removed lines, etc.): APPROVE
+   - If ONLY formatting/style differs: Check if user requested style change
+     - If user messages mention style/format/quotes/cleanup: APPROVE
+     - If no such request: DENY with specific style change
+
+===== OUTPUT FORMAT (STRICT) =====
+Your response MUST start with EXACTLY one of:
+
+APPROVE
+OR
+DENY: <specific style change detected> - revert to <original style>
+
+Examples:
+APPROVE
+DENY: quote style change (" to ') - revert to double quotes
+DENY: trailing comma removed - revert to include trailing comma
+DENY: semicolon added - revert to no semicolon
+
+NO other text before the decision word.`,
 };

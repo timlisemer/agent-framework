@@ -24,6 +24,7 @@
  * - tool-appeal: Reviews denials with user context (haiku)
  * - error-acknowledge: Ensures AI acknowledges issues (haiku)
  * - plan-validate: Checks plan drift against user request (sonnet)
+ * - style-drift: Detects unrequested style changes (haiku)
  *
  * Stop Hook (`src/hooks/stop-off-topic-check.ts`):
  * - intent-validate: Detects off-topic AI behavior (haiku)
@@ -34,3 +35,4 @@ export { appealDenial } from './tool-appeal.js';
 export { checkErrorAcknowledgment } from './error-acknowledge.js';
 export { validatePlanIntent } from './plan-validate.js';
 export { checkForOffTopic, extractConversationContext } from './intent-validate.js';
+export { checkStyleDrift } from './style-drift.js';

@@ -8,7 +8,7 @@ A TypeScript framework for custom AI agents using the Anthropic API. Agents are 
 
 ## Agents
 
-The framework implements 9 specialized agents organized into three categories:
+The framework implements 11 specialized agents organized into three categories:
 
 ### MCP Tools (User-Facing)
 
@@ -25,6 +25,8 @@ The framework implements 9 specialized agents organized into three categories:
 | intent-validate  | haiku  | Stop        | Detect off-topic questions or misunderstood requests |
 | plan-validate    | sonnet | PreToolUse  | Detect plan drift from user intent             |
 | error-acknowledge| haiku  | PreToolUse  | Detect when AI ignores errors or feedback      |
+| style-drift      | haiku  | PreToolUse  | Detect unrequested cosmetic/style changes      |
+| claude-md-validate| sonnet | PreToolUse  | Validate CLAUDE.md edits against conventions   |
 
 ### Approval Agents (PreToolUse Hook)
 

@@ -1,6 +1,7 @@
 import { appealDenial } from '../agents/hooks/tool-appeal.js';
 import { logToHomeAssistant } from './logger.js';
-import { readTranscript, TranscriptFilter, MessageLimit } from './transcript.js';
+import { readTranscriptExact, formatTranscriptResult } from './transcript.js';
+import { APPEAL_COUNTS } from './transcript-presets.js';
 
 export interface CheckResult {
   approved: boolean;
@@ -21,10 +22,8 @@ export async function checkWithAppeal(
   }
 
   // Appeal the denial
-  const transcript = await readTranscript(transcriptPath, {
-    filter: TranscriptFilter.BOTH,
-    limit: MessageLimit.TEN,
-  });
+  const transcriptResult = await readTranscriptExact(transcriptPath, APPEAL_COUNTS);
+  const transcript = formatTranscriptResult(transcriptResult);
   const appeal = await appealDenial(
     toolName,
     toolInput,

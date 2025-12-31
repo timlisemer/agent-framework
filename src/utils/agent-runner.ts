@@ -153,6 +153,19 @@ export interface AgentConfig {
    * Optional for direct mode (used only for logging).
    */
   workingDir?: string;
+
+  /**
+   * Additional tools beyond read-only for SDK mode.
+   *
+   * By default, SDK mode only has Read/Glob/Grep (read-only).
+   * Use this to enable additional tools like:
+   * - 'Task': Allow spawning built-in subagents (Explore, Plan, general-purpose)
+   * - 'WebFetch': Fetch web content
+   * - 'WebSearch': Search the web
+   *
+   * @example extraTools: ['Task'] // Enable subagent spawning
+   */
+  extraTools?: string[];
 }
 
 /**
@@ -317,15 +330,18 @@ Do NOT use Bash - git data is already provided in the prompt.
 Your final response should be your complete analysis in the required format.`;
 
   try {
-    // Create SDK query with read-only tools
+    // Build tool list: base read-only tools + any extra tools
+    const tools = [...SDK_TOOLS, ...(config.extraTools ?? [])];
+
+    // Create SDK query with configured tools
     const q = query({
       prompt,
       options: {
         model: getModelId(config.tier),
         cwd: config.workingDir,
         systemPrompt: enhancedSystemPrompt,
-        tools: [...SDK_TOOLS],
-        allowedTools: [...SDK_TOOLS], // Auto-approve these tools
+        tools,
+        allowedTools: tools, // Auto-approve these tools
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
         maxTurns: config.maxTurns ?? 10,

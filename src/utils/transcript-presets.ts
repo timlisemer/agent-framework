@@ -7,14 +7,11 @@
  * - Off-topic check: needs both with tool context
  * - Plan validation: needs user messages to check against request
  *
- * These presets standardize configurations across agents.
+ * These presets use guaranteed counts - they will scan backwards until
+ * the exact count of each message type is collected (or transcript exhausted).
  */
 
-import {
-  TranscriptFilter,
-  MessageLimit,
-  type TranscriptOptions,
-} from './transcript.js';
+import type { TranscriptReadOptions } from './transcript.js';
 
 /**
  * For error acknowledgment checks.
@@ -23,24 +20,24 @@ import {
  * Trims tool output to focus on error-relevant lines.
  * Excludes Task/Agent outputs (too verbose, rarely contain errors).
  */
-export const ERROR_CHECK_PRESET: TranscriptOptions = {
-  filter: TranscriptFilter.BOTH_WITH_TOOLS,
-  limit: MessageLimit.FIVE,
-  trimToolOutput: true,
-  maxToolOutputLines: 20,
-  excludeToolNames: ['Task', 'Agent', 'TaskOutput'],
+export const ERROR_CHECK_COUNTS: TranscriptReadOptions = {
+  counts: { user: 3, assistant: 3, toolResult: 5 },
+  toolResultOptions: {
+    trim: true,
+    maxLines: 20,
+    excludeToolNames: ['Task', 'Agent', 'TaskOutput'],
+  },
 };
 
 /**
  * For appeal decisions.
  *
  * Includes both user and assistant messages for context.
- * More messages (10) to understand conversation flow.
+ * More messages to understand conversation flow.
  * No tool results - appeal focuses on user intent, not tool output.
  */
-export const APPEAL_PRESET: TranscriptOptions = {
-  filter: TranscriptFilter.BOTH,
-  limit: MessageLimit.TEN,
+export const APPEAL_COUNTS: TranscriptReadOptions = {
+  counts: { user: 5, assistant: 5 },
 };
 
 /**
@@ -49,23 +46,23 @@ export const APPEAL_PRESET: TranscriptOptions = {
  * Full context with tool results to understand what AI has been doing.
  * Excludes Task/Agent outputs (sub-agent chatter is noise).
  */
-export const OFF_TOPIC_PRESET: TranscriptOptions = {
-  filter: TranscriptFilter.BOTH_WITH_TOOLS,
-  limit: MessageLimit.TEN,
-  trimToolOutput: true,
-  maxToolOutputLines: 20,
-  excludeToolNames: ['Task', 'Agent', 'TaskOutput'],
+export const OFF_TOPIC_COUNTS: TranscriptReadOptions = {
+  counts: { user: 5, assistant: 5, toolResult: 5 },
+  toolResultOptions: {
+    trim: true,
+    maxLines: 20,
+    excludeToolNames: ['Task', 'Agent', 'TaskOutput'],
+  },
 };
 
 /**
  * For plan drift validation.
  *
  * Only user messages - checking if plan matches user's request.
- * More messages (10) to capture full context of what user asked for.
+ * Guarantees exactly 10 user messages (or all available).
  */
-export const PLAN_VALIDATE_PRESET: TranscriptOptions = {
-  filter: TranscriptFilter.USER_ONLY,
-  limit: MessageLimit.TEN,
+export const PLAN_VALIDATE_COUNTS: TranscriptReadOptions = {
+  counts: { user: 10 },
 };
 
 /**
@@ -74,7 +71,16 @@ export const PLAN_VALIDATE_PRESET: TranscriptOptions = {
  * Both user and assistant, but fewer messages.
  * Used when just need recent context without full history.
  */
-export const QUICK_CONTEXT_PRESET: TranscriptOptions = {
-  filter: TranscriptFilter.BOTH,
-  limit: MessageLimit.FIVE,
+export const QUICK_CONTEXT_COUNTS: TranscriptReadOptions = {
+  counts: { user: 3, assistant: 3 },
+};
+
+/**
+ * For style drift checks.
+ *
+ * Only user messages - checking if user requested style changes.
+ * Fewer messages since style requests are usually recent.
+ */
+export const STYLE_DRIFT_COUNTS: TranscriptReadOptions = {
+  counts: { user: 5 },
 };

@@ -6,16 +6,23 @@ import { approveTool } from '../agents/hooks/tool-approve.js';
 import { appealDenial } from '../agents/hooks/tool-appeal.js';
 import { validatePlanIntent } from '../agents/hooks/plan-validate.js';
 import { checkErrorAcknowledgment } from '../agents/hooks/error-acknowledge.js';
+import { validateClaudeMd } from '../agents/hooks/claude-md-validate.js';
+import { checkStyleDrift } from '../agents/hooks/style-drift.js';
 import { detectWorkaroundPattern } from '../utils/command-patterns.js';
 import { logToHomeAssistant } from '../utils/logger.js';
 import { markErrorAcknowledged, setSession } from '../utils/ack-cache.js';
 import { checkWithAppeal } from '../utils/pre-tool-use-utils.js';
 import {
-  readTranscript,
+  readTranscriptExact,
+  formatTranscriptResult,
   hasErrorPatterns,
-  TranscriptFilter,
-  MessageLimit,
 } from '../utils/transcript.js';
+import {
+  APPEAL_COUNTS,
+  ERROR_CHECK_COUNTS,
+  PLAN_VALIDATE_COUNTS,
+  STYLE_DRIFT_COUNTS,
+} from '../utils/transcript-presets.js';
 
 // Retry tracking for workaround detection
 const DENIAL_CACHE_FILE = '/tmp/claude-hook-denials.json';
@@ -125,10 +132,10 @@ async function main() {
   // Block confirm tool from Claude Code - requires explicit user approval
   // Internal agents (like commit) call runConfirmAgent() directly, bypassing this hook
   if (input.tool_name === 'mcp__agent-framework__confirm') {
-    const transcript = await readTranscript(input.transcript_path, {
-      filter: TranscriptFilter.BOTH,
-      limit: MessageLimit.FIVE,
+    const result = await readTranscriptExact(input.transcript_path, {
+      counts: { user: 5, assistant: 5 },
     });
+    const transcript = formatTranscriptResult(result);
     const appeal = await appealDenial(
       input.tool_name,
       input.tool_input,
@@ -200,13 +207,8 @@ async function main() {
 
   // Error acknowledgment check - detect if AI is ignoring errors
   // Step 1: Quick pattern check (TypeScript only, no LLM)
-  const errorCheckTranscript = await readTranscript(input.transcript_path, {
-    filter: TranscriptFilter.BOTH_WITH_TOOLS,
-    limit: MessageLimit.FIVE,
-    trimToolOutput: true,
-    maxToolOutputLines: 20,
-    excludeToolNames: ['Task', 'Agent', 'TaskOutput'], // Exclude sub-agent results to prevent cascade blocking
-  });
+  const errorCheckResult = await readTranscriptExact(input.transcript_path, ERROR_CHECK_COUNTS);
+  const errorCheckTranscript = formatTranscriptResult(errorCheckResult);
   // Only check TOOL_RESULT lines for error patterns to avoid false positives from Read tool (source code)
   const quickCheck = hasErrorPatterns(errorCheckTranscript, { toolResultsOnly: true });
 
@@ -221,14 +223,12 @@ async function main() {
       const reason = ackResult.substring(7).trim();
 
       // Appeal the error-acknowledge denial
-      const transcript = await readTranscript(input.transcript_path, {
-        filter: TranscriptFilter.BOTH,
-        limit: MessageLimit.TEN,
-      });
+      const appealResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
+      const appealTranscript = formatTranscriptResult(appealResult);
       const appeal = await appealDenial(
         input.tool_name,
         input.tool_input,
-        transcript,
+        appealTranscript,
         reason
       );
 
@@ -286,10 +286,9 @@ async function main() {
             ? (input.tool_input as { content?: string }).content
             : (input.tool_input as { new_string?: string }).new_string;
         if (content) {
-          const userMessages = await readTranscript(input.transcript_path, {
-            filter: TranscriptFilter.USER_ONLY,
-            limit: MessageLimit.TEN,
-          });
+          const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
+          // Format only user messages for plan validation
+          const userMessages = planResult.user.map((m) => `USER: ${m.content}`).join('\n\n');
           const validation = await validatePlanIntent(content, userMessages);
 
           if (!validation.approved) {
@@ -323,11 +322,99 @@ async function main() {
         process.exit(0);
       }
 
+      // CLAUDE.md validation - detect Write/Edit to any CLAUDE.md file
+      if (
+        (input.tool_name === 'Write' || input.tool_name === 'Edit') &&
+        filePath.endsWith('CLAUDE.md')
+      ) {
+        const content =
+          input.tool_name === 'Write'
+            ? (input.tool_input as { content?: string }).content
+            : (input.tool_input as { new_string?: string }).new_string;
+
+        if (content) {
+          const validation = await validateClaudeMd(content, input.transcript_path);
+
+          if (!validation.approved) {
+            logToHomeAssistant({
+              agent: 'pre-tool-use-hook',
+              level: 'decision',
+              problem: `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
+              answer: `REJECTED: ${validation.reason.slice(0, 200)}`,
+            });
+            console.log(
+              JSON.stringify({
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: `CLAUDE.md validation failed: ${validation.reason}`,
+                },
+              })
+            );
+            process.exit(0);
+          }
+        }
+        // CLAUDE.md validated - allow write
+        console.log(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'allow',
+            },
+          })
+        );
+        process.exit(0);
+      }
+
       const trusted = isTrustedPath(filePath, projectDir);
       const sensitive = isSensitivePath(filePath);
 
       if (trusted && !sensitive) {
-        // Low risk - auto-approve
+        // Low risk path - but check for style drift on Edit tool
+        // Edit has old_string/new_string for comparison; Write/NotebookEdit lack old content
+        if (input.tool_name === 'Edit') {
+          // Get user messages to check if style change was requested
+          const transcriptResult = await readTranscriptExact(
+            input.transcript_path,
+            STYLE_DRIFT_COUNTS
+          );
+          const userMessages = formatTranscriptResult(transcriptResult);
+
+          // Check for style drift with automatic appeal on denial
+          const styleDriftResult = await checkWithAppeal(
+            () =>
+              checkStyleDrift(
+                input.tool_name,
+                input.tool_input,
+                projectDir,
+                userMessages
+              ),
+            input.tool_name,
+            input.tool_input,
+            input.transcript_path
+          );
+
+          if (!styleDriftResult.approved) {
+            logToHomeAssistant({
+              agent: 'pre-tool-use-hook',
+              level: 'decision',
+              problem: `Edit ${filePath}`,
+              answer: `STYLE DRIFT: ${styleDriftResult.reason}`,
+            });
+            console.log(
+              JSON.stringify({
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: `Style drift detected: ${styleDriftResult.reason}`,
+                },
+              })
+            );
+            process.exit(0);
+          }
+        }
+
+        // Low risk - auto-approve (passed style-drift check or not applicable)
         console.log(
           JSON.stringify({
             hookSpecificOutput: {

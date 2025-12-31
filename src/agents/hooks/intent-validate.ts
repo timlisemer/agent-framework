@@ -40,11 +40,8 @@ import { INTENT_VALIDATE_AGENT } from '../../utils/agent-configs.js';
 import { getAnthropicClient } from '../../utils/anthropic-client.js';
 import { logToHomeAssistant } from '../../utils/logger.js';
 import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
-import {
-  readTranscriptStructured,
-  TranscriptFilter,
-  MessageLimit,
-} from '../../utils/transcript.js';
+import { readTranscriptExact } from '../../utils/transcript.js';
+import { OFF_TOPIC_COUNTS } from '../../utils/transcript-presets.js';
 
 /**
  * Extract conversation context from a transcript file.
@@ -56,27 +53,24 @@ export async function extractConversationContext(
   transcriptPath: string
 ): Promise<ConversationContext> {
   try {
-    const messages = await readTranscriptStructured(transcriptPath, {
-      filter: TranscriptFilter.BOTH_WITH_TOOLS,
-      limit: MessageLimit.TEN,
-    });
+    const result = await readTranscriptExact(transcriptPath, OFF_TOPIC_COUNTS);
 
-    const userMessages: UserMessage[] = [];
-    const assistantMessages: AssistantMessage[] = [];
+    // Convert to UserMessage format (includes tool_result as user context)
+    const userMessages: UserMessage[] = [
+      ...result.user.map((msg) => ({
+        text: msg.content,
+        messageIndex: msg.index,
+      })),
+      ...result.toolResult.map((msg) => ({
+        text: msg.content,
+        messageIndex: msg.index,
+      })),
+    ].sort((a, b) => a.messageIndex - b.messageIndex);
 
-    messages.forEach((msg) => {
-      if (msg.role === 'user' || msg.role === 'tool_result') {
-        userMessages.push({
-          text: msg.content,
-          messageIndex: msg.index,
-        });
-      } else if (msg.role === 'assistant') {
-        assistantMessages.push({
-          text: msg.content,
-          messageIndex: msg.index,
-        });
-      }
-    });
+    const assistantMessages: AssistantMessage[] = result.assistant.map((msg) => ({
+      text: msg.content,
+      messageIndex: msg.index,
+    }));
 
     const lastAssistantMessage = assistantMessages[assistantMessages.length - 1];
 
@@ -84,11 +78,12 @@ export async function extractConversationContext(
       (a, b) => a.messageIndex - b.messageIndex
     );
 
+    // Build set of user message indices for role lookup
+    const userIndices = new Set(userMessages.map((u) => u.messageIndex));
+
     const conversationSummary = allMessages
       .map((msg) => {
-        const role = userMessages.some((u) => u.messageIndex === msg.messageIndex)
-          ? 'USER'
-          : 'ASSISTANT';
+        const role = userIndices.has(msg.messageIndex) ? 'USER' : 'ASSISTANT';
         return `[${role}]: ${msg.text}`;
       })
       .join('\n\n---\n\n');

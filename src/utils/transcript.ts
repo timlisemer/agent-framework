@@ -1,42 +1,61 @@
 import * as fs from 'fs';
 
-/**
- * Filter for what types of messages to include in transcript
- */
-export enum TranscriptFilter {
-  USER_ONLY = 'user_only',
-  AI_ONLY = 'ai_only',
-  BOTH = 'both',
-  BOTH_WITH_TOOLS = 'both_with_tools',
-}
-
-/**
- * Number of messages to include in transcript
- */
-export enum MessageLimit {
-  ONE = 1,
-  THREE = 3,
-  FIVE = 5,
-  TEN = 10,
-  TWENTY = 20,
-  THIRTY = 30,
-  FIFTY = 50,
-  ALL = -1,
-}
-
-export interface TranscriptOptions {
-  filter: TranscriptFilter;
-  limit: MessageLimit;
-  trimToolOutput?: boolean;
-  maxToolOutputLines?: number;
-  excludeSystemReminders?: boolean;
-  excludeToolNames?: string[]; // Tool names to skip in tool_result processing (e.g., ['Task', 'Agent'])
-}
-
 export interface TranscriptMessage {
   role: 'user' | 'assistant' | 'tool_result';
   content: string;
   index: number;
+}
+
+/**
+ * Counts for each message type.
+ * Each field specifies exact number of that type to collect.
+ * The scanner will read backwards until these counts are satisfied (or transcript exhausted).
+ */
+export interface MessageCounts {
+  user?: number;
+  assistant?: number;
+  toolResult?: number;
+}
+
+/**
+ * Options for reading transcript with guaranteed counts.
+ */
+export interface TranscriptReadOptions {
+  /**
+   * Exact counts per message type.
+   * The scanner will read backwards until these counts are satisfied
+   * (or transcript is exhausted).
+   */
+  counts: MessageCounts;
+
+  /**
+   * Options for tool result processing.
+   */
+  toolResultOptions?: {
+    /** Trim tool output to error-relevant lines */
+    trim?: boolean;
+    /** Max lines to include per tool result (default: 20) */
+    maxLines?: number;
+    /** Tool names to exclude from results */
+    excludeToolNames?: string[];
+  };
+
+  /** Exclude system reminder messages (default: true) */
+  excludeSystemReminders?: boolean;
+}
+
+/**
+ * Collected messages with guaranteed counts per type.
+ */
+export interface TranscriptReadResult {
+  /** User messages (length === min(counts.user, available)) */
+  user: TranscriptMessage[];
+  /** Assistant messages */
+  assistant: TranscriptMessage[];
+  /** Tool result messages */
+  toolResult: TranscriptMessage[];
+  /** Total messages collected across all types */
+  totalCount: number;
 }
 
 export interface ErrorCheckResult {
@@ -173,121 +192,172 @@ function extractToolResultContent(block: ContentBlock): string {
 }
 
 /**
- * Read transcript and return structured messages array
+ * Read transcript with guaranteed message counts per type.
+ *
+ * Scans backwards through the transcript file until the requested
+ * count of each message type is collected (or file is exhausted).
+ *
+ * @example
+ * // Get exactly 10 user messages for plan validation
+ * const result = await readTranscriptExact(transcriptPath, {
+ *   counts: { user: 10 }
+ * });
+ * // result.user.length === 10 (or fewer if not enough in transcript)
+ *
+ * @example
+ * // Get 5 of each type for context
+ * const result = await readTranscriptExact(transcriptPath, {
+ *   counts: { user: 5, assistant: 5, toolResult: 3 },
+ *   toolResultOptions: { trim: true, maxLines: 20 }
+ * });
  */
-export async function readTranscriptStructured(
+export async function readTranscriptExact(
   transcriptPath: string,
-  options: TranscriptOptions
-): Promise<TranscriptMessage[]> {
-  const {
-    filter,
-    limit,
-    trimToolOutput: shouldTrim = filter === TranscriptFilter.BOTH_WITH_TOOLS,
-    maxToolOutputLines = 20,
-    excludeSystemReminders = true,
-    excludeToolNames = [],
-  } = options;
+  options: TranscriptReadOptions
+): Promise<TranscriptReadResult> {
+  const { counts, toolResultOptions = {}, excludeSystemReminders = true } = options;
+
+  const targetUser = counts.user ?? 0;
+  const targetAssistant = counts.assistant ?? 0;
+  const targetToolResult = counts.toolResult ?? 0;
 
   const content = await fs.promises.readFile(transcriptPath, 'utf-8');
   const allLines = content.trim().split('\n');
 
-  const linesToProcess =
-    limit === MessageLimit.ALL ? allLines : allLines.slice(-limit * 3);
-
-  const messages: TranscriptMessage[] = [];
+  const collected: TranscriptReadResult = {
+    user: [],
+    assistant: [],
+    toolResult: [],
+    totalCount: 0,
+  };
 
   // Map tool_use_id -> tool_name for filtering tool_results
-  const toolUseIdToName: Map<string, string> = new Map();
+  const toolUseIdToName = new Map<string, string>();
 
-  for (let i = 0; i < linesToProcess.length; i++) {
-    const line = linesToProcess[i];
+  // First pass: build tool_use ID map from entire file
+  for (const line of allLines) {
     try {
       const entry: TranscriptEntry = JSON.parse(line);
-      if (!entry.message) continue;
-
-      const { role, content: msgContent } = entry.message;
-
-      // First pass: collect tool_use names from assistant messages
-      if (role === 'assistant' && Array.isArray(msgContent)) {
-        for (const block of msgContent) {
+      if (entry.message?.role === 'assistant' && Array.isArray(entry.message.content)) {
+        for (const block of entry.message.content) {
           if (block.type === 'tool_use' && block.id && block.name) {
             toolUseIdToName.set(block.id, block.name);
           }
         }
       }
-
-      if (role === 'user') {
-        if (filter === TranscriptFilter.AI_ONLY) continue;
-
-        if (typeof msgContent === 'string') {
-          if (excludeSystemReminders && msgContent.startsWith('<system-reminder>')) {
-            continue;
-          }
-          messages.push({ role: 'user', content: msgContent, index: i });
-        } else if (Array.isArray(msgContent)) {
-          for (const block of msgContent) {
-            if (block.type === 'tool_result' && filter === TranscriptFilter.BOTH_WITH_TOOLS) {
-              // Check if this tool_result should be excluded based on tool name
-              if (block.tool_use_id && excludeToolNames.length > 0) {
-                const toolName = toolUseIdToName.get(block.tool_use_id);
-                if (toolName && excludeToolNames.includes(toolName)) {
-                  continue; // Skip this tool result
-                }
-              }
-
-              const toolContent = extractToolResultContent(block);
-              if (toolContent) {
-                const finalContent = shouldTrim
-                  ? trimToolOutput(toolContent, maxToolOutputLines)
-                  : toolContent;
-                messages.push({ role: 'tool_result', content: finalContent, index: i });
-              }
-            } else if (block.type === 'text' && block.text) {
-              if (excludeSystemReminders && block.text.startsWith('<system-reminder>')) {
-                continue;
-              }
-              messages.push({ role: 'user', content: block.text, index: i });
-            }
-          }
-        }
-      } else if (role === 'assistant') {
-        if (filter === TranscriptFilter.USER_ONLY) continue;
-
-        const text = extractTextFromContent(msgContent);
-        if (text) {
-          messages.push({ role: 'assistant', content: text, index: i });
-        }
-      }
     } catch {
-      // Skip malformed lines
+      // Skip malformed
     }
   }
 
-  if (limit === MessageLimit.ALL) {
-    return messages;
+  // Second pass: scan backwards collecting messages until quotas met
+  for (let i = allLines.length - 1; i >= 0; i--) {
+    // Early exit if all quotas met
+    if (
+      collected.user.length >= targetUser &&
+      collected.assistant.length >= targetAssistant &&
+      collected.toolResult.length >= targetToolResult
+    ) {
+      break;
+    }
+
+    try {
+      const entry: TranscriptEntry = JSON.parse(allLines[i]);
+      if (!entry.message) continue;
+
+      const { role, content: msgContent } = entry.message;
+
+      if (role === 'user') {
+        processUserEntry(msgContent, i, collected, {
+          targetUser,
+          targetToolResult,
+          excludeSystemReminders,
+          toolResultOptions,
+          toolUseIdToName,
+        });
+      } else if (role === 'assistant' && collected.assistant.length < targetAssistant) {
+        const text = extractTextFromContent(msgContent);
+        if (text) {
+          collected.assistant.unshift({ role: 'assistant', content: text, index: i });
+        }
+      }
+    } catch {
+      // Skip malformed
+    }
   }
-  return messages.slice(-limit);
+
+  collected.totalCount =
+    collected.user.length + collected.assistant.length + collected.toolResult.length;
+
+  return collected;
 }
 
 /**
- * Read transcript and return formatted string
+ * Process a user entry (may contain text blocks and/or tool_result blocks)
  */
-export async function readTranscript(
-  transcriptPath: string,
-  options: TranscriptOptions
-): Promise<string> {
-  const messages = await readTranscriptStructured(transcriptPath, options);
+function processUserEntry(
+  msgContent: string | ContentBlock[],
+  lineIndex: number,
+  collected: TranscriptReadResult,
+  config: {
+    targetUser: number;
+    targetToolResult: number;
+    excludeSystemReminders: boolean;
+    toolResultOptions: TranscriptReadOptions['toolResultOptions'];
+    toolUseIdToName: Map<string, string>;
+  }
+): void {
+  const { targetUser, targetToolResult, excludeSystemReminders, toolResultOptions, toolUseIdToName } =
+    config;
+  const { trim = false, maxLines = 20, excludeToolNames = [] } = toolResultOptions ?? {};
 
-  return messages
-    .map((msg) => {
-      switch (msg.role) {
-        case 'user':
-          return `USER: ${msg.content}`;
-        case 'assistant':
-          return `ASSISTANT: ${msg.content}`;
-        case 'tool_result':
-          return `TOOL_RESULT: ${msg.content}`;
+  if (typeof msgContent === 'string') {
+    if (excludeSystemReminders && msgContent.startsWith('<system-reminder>')) {
+      return;
+    }
+    if (collected.user.length < targetUser) {
+      collected.user.unshift({ role: 'user', content: msgContent, index: lineIndex });
+    }
+  } else if (Array.isArray(msgContent)) {
+    for (const block of msgContent) {
+      if (block.type === 'tool_result' && collected.toolResult.length < targetToolResult) {
+        // Check if this tool should be excluded
+        if (block.tool_use_id && excludeToolNames.length > 0) {
+          const toolName = toolUseIdToName.get(block.tool_use_id);
+          if (toolName && excludeToolNames.includes(toolName)) {
+            continue;
+          }
+        }
+
+        let toolContent = extractToolResultContent(block);
+        if (trim && toolContent) {
+          toolContent = trimToolOutput(toolContent, maxLines);
+        }
+        if (toolContent) {
+          collected.toolResult.unshift({ role: 'tool_result', content: toolContent, index: lineIndex });
+        }
+      } else if (block.type === 'text' && block.text) {
+        if (excludeSystemReminders && block.text.startsWith('<system-reminder>')) {
+          continue;
+        }
+        if (collected.user.length < targetUser) {
+          collected.user.unshift({ role: 'user', content: block.text, index: lineIndex });
+        }
       }
-    })
-    .join('\n\n');
+    }
+  }
+}
+
+/**
+ * Format TranscriptReadResult as string for agent prompts.
+ * Merges all message types, sorts by original index, formats with role prefixes.
+ */
+export function formatTranscriptResult(result: TranscriptReadResult): string {
+  const allMessages = [
+    ...result.user.map((m) => ({ ...m, prefix: 'USER' })),
+    ...result.assistant.map((m) => ({ ...m, prefix: 'ASSISTANT' })),
+    ...result.toolResult.map((m) => ({ ...m, prefix: 'TOOL_RESULT' })),
+  ].sort((a, b) => a.index - b.index);
+
+  return allMessages.map((m) => `${m.prefix}: ${m.content}`).join('\n\n');
 }
