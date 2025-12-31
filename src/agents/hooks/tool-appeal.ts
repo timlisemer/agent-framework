@@ -1,80 +1,81 @@
+/**
+ * Tool Appeal Agent - Review Denied Tool Calls
+ *
+ * This agent reviews tool calls that were initially denied to check if
+ * the user explicitly approved the operation or if there's a mismatch.
+ *
+ * ## FLOW
+ *
+ * 1. Receive denial reason and transcript context
+ * 2. Run unified agent to evaluate appeal
+ * 3. Retry if format is invalid
+ * 4. Return UPHOLD, OVERTURN to approve, or OVERTURN with new reason
+ *
+ * ## CRITICAL
+ *
+ * The original denial is ALWAYS technically correct. This agent only checks:
+ * - Did user explicitly request this operation?
+ * - Is there a clear mismatch between user request and AI action?
+ *
+ * @module tool-appeal
+ */
+
 import { getModelId } from '../../types.js';
+import { runAgent } from '../../utils/agent-runner.js';
+import { TOOL_APPEAL_AGENT } from '../../utils/agent-configs.js';
 import { getAnthropicClient } from '../../utils/anthropic-client.js';
 import { logToHomeAssistant } from '../../utils/logger.js';
-import { extractTextFromResponse } from '../../utils/response-parser.js';
 import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
 
+/**
+ * Review an appeal for a denied tool call.
+ *
+ * @param toolName - Name of the denied tool
+ * @param toolInput - Input parameters for the tool
+ * @param transcript - Recent conversation context
+ * @param originalReason - The original denial reason
+ * @returns Approval result with optional new reason
+ *
+ * @example
+ * ```typescript
+ * const result = await appealDenial(
+ *   'Bash',
+ *   { command: 'curl ...' },
+ *   transcript,
+ *   'Network requests denied by default'
+ * );
+ * if (result.approved) {
+ *   // User explicitly approved this operation
+ * }
+ * ```
+ */
 export async function appealDenial(
   toolName: string,
   toolInput: unknown,
   transcript: string,
   originalReason: string
 ): Promise<{ approved: boolean; reason?: string }> {
-  const anthropic = getAnthropicClient();
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput)}`;
 
-  const response = await anthropic.messages.create({
-    model: getModelId('haiku'),
-    max_tokens: 500,
-    messages: [
-      {
-        role: 'user',
-        content: `You are reviewing an appeal. The tool call was initially blocked for a technical reason.
-
-BLOCK REASON: ${originalReason}
+  // Run appeal evaluation via unified runner
+  const initialResponse = await runAgent(
+    { ...TOOL_APPEAL_AGENT },
+    {
+      prompt: 'Review this appeal for a denied tool call.',
+      context: `BLOCK REASON: ${originalReason}
 TOOL CALL: ${toolDescription}
 
 RECENT CONVERSATION:
-${transcript}
+${transcript}`,
+    }
+  );
 
-The original block is ALWAYS technically correct. Your ONLY job is to check if the user explicitly approved this tool call or if there's a mismatch.
-
-OVERTURN TO APPROVE when:
-- User explicitly requested this exact tool operation
-- User invoked a slash command requiring this operation (/push, /commit)
-- User explicitly confirmed when asked
-→ The user knowingly wants this despite the technical restriction
-
-OVERTURN WITH NEW REASON when:
-- User asked for X but AI is autonomously doing Y (clear mismatch)
-  Example: User said "check the code" but AI is writing/editing files
-  Reply: OVERTURN: User asked to check, not modify
-- User explicitly opposed this operation (said no/don't/stop)
-  Reply: OVERTURN: User explicitly opposed
-
-UPHOLD (default) when:
-- User's request was vague or general
-- No explicit user approval for this exact operation
-- Anything unclear
-→ The original technical reason stands
-
-CRITICAL: You are NOT judging if the technical rule is correct (it always is).
-You are ONLY checking if the user explicitly approved this specific tool operation.
-
-===== OUTPUT FORMAT (STRICT) =====
-Your response MUST start with EXACTLY one of these three formats. DO NOT add any explanation before the decision:
-
-UPHOLD
-OR
-OVERTURN: APPROVE
-OR
-OVERTURN: <new reason>
-
-NO other text before the decision word. NO explanations first. NO preamble.
-
-Examples:
-- User: "check the code", Tool: Read → UPHOLD
-- User: "please read /etc/passwd", Tool: Read /etc/passwd → OVERTURN: APPROVE
-- User: "just check it", Tool: Edit (modifying file) → OVERTURN: User asked to check, not modify
-- User: "don't do that" → OVERTURN: User explicitly opposed`,
-      },
-    ],
-  });
-
+  // Retry if format is invalid
+  const anthropic = getAnthropicClient();
   const decision = await retryUntilValid(
     anthropic,
     getModelId('haiku'),
-    extractTextFromResponse(response),
+    initialResponse,
     toolDescription,
     {
       maxRetries: 2,
@@ -87,7 +88,7 @@ Examples:
 
   // Check for approval (overturn)
   if (decision.startsWith('OVERTURN: APPROVE') || decision === 'APPROVE') {
-    await logToHomeAssistant({
+    logToHomeAssistant({
       agent: 'tool-appeal',
       level: 'decision',
       problem: toolDescription,
@@ -119,7 +120,7 @@ Examples:
     reason = undefined;
   }
 
-  await logToHomeAssistant({
+  logToHomeAssistant({
     agent: 'tool-appeal',
     level: 'decision',
     problem: toolDescription,

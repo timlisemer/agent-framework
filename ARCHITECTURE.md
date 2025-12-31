@@ -9,14 +9,14 @@ src/
   types.ts                          # Core types and model IDs
 
   agents/
-    mcp/                            # MCP-exposed agents (SDK streaming)
+    mcp/                            # MCP-exposed agents
       check.ts                      # Runs linter + make check
-      confirm.ts                    # Binary code quality gate
+      confirm.ts                    # Code quality gate (SDK mode)
       commit.ts                     # Generates commit message + commits
       push.ts                       # Executes git push
       index.ts                      # Barrel export
 
-    hooks/                          # Hook-triggered agents (direct API)
+    hooks/                          # Hook-triggered agents
       tool-approve.ts               # Policy enforcement
       tool-appeal.ts                # Reviews denials with user context
       error-acknowledge.ts          # Ensures AI acknowledges issues
@@ -32,6 +32,8 @@ src/
     server.ts                       # MCP server exposing tools
 
   utils/
+    agent-runner.ts                 # Unified agent execution (direct + SDK)
+    agent-configs.ts                # Centralized agent configurations
     anthropic-client.ts             # Singleton Anthropic client factory
     response-parser.ts              # Text extraction + decision parsing
     retry.ts                        # Generic format validation retry
@@ -39,76 +41,78 @@ src/
     transcript.ts                   # Transcript reading utilities
     logger.ts                       # Home Assistant logging
     ack-cache.ts                    # Error acknowledgment cache
+    git-utils.ts                    # Git operations (status, diff)
+    command.ts                      # Safe command execution
+    command-patterns.ts             # Blacklist pattern detection
 ```
 
-## Execution Pattern: Direct Anthropic API
+## Unified Agent Execution
 
-All agents use direct Anthropic API calls via `getAnthropicClient()` in `utils/anthropic-client.ts`.
+All agents use the unified `runAgent()` function from `utils/agent-runner.ts`. This provides a single interface regardless of whether the agent uses direct API calls or the Claude SDK.
 
-### Why Direct API for All Agents?
+### Execution Modes
 
-**Hook Agents** (tool-approve, tool-appeal, error-acknowledge, plan-validate, intent-validate):
-- Run inside Claude's tool execution loop
-- Must be fast (<100ms) - no noticeable delay
-- Simple request/response validation
+| Mode   | Description                              | Used By                        |
+|--------|------------------------------------------|--------------------------------|
+| direct | Single API call, no tools, fast          | All hook agents, check, commit |
+| sdk    | Multi-turn with Read/Glob/Grep tools     | confirm                        |
 
-**MCP Agents** (check, confirm, commit):
-- Commands are deterministic (linter, make check, git commands)
-- No agent decision-making needed for tool selection
-- Single API call is cheaper than multi-turn SDK conversations
-- Prevents "overthinking" or unwanted tool calls
-- Faster execution without agent loop overhead
+### Why Two Modes?
 
-### MCP Agent Pattern
+**Direct Mode** (default):
+- Hook agents must be fast (<100ms)
+- MCP agents with deterministic commands don't need tool selection
+- Single API call is cheaper and more predictable
 
-MCP agents execute shell commands directly with `execSync`, then use a single API call to analyze results:
+**SDK Mode** (for confirm agent):
+- Code quality decisions benefit from autonomous investigation
+- Can read additional files to understand context
+- Can search codebase for patterns
+- Restricted to read-only tools (Read, Glob, Grep)
+
+### Agent Runner Pattern
 
 ```typescript
-// Example: check agent
-import { execSync } from 'child_process';
-import { getAnthropicClient } from '../../utils/anthropic-client.js';
+import { runAgent } from '../utils/agent-runner.js';
+import { CHECK_AGENT } from '../utils/agent-configs.js';
 
-// Step 1: Run commands directly
-const lintOutput = execSync('npx eslint . 2>&1', { cwd, encoding: 'utf-8' });
-const checkOutput = execSync('make check 2>&1', { cwd, encoding: 'utf-8' });
+// Direct mode - single API call
+const result = await runAgent(
+  { ...CHECK_AGENT, workingDir: '/path/to/project' },
+  { prompt: 'Summarize:', context: lintOutput }
+);
 
-// Step 2: Single API call to summarize
-const client = getAnthropicClient();
-const response = await client.messages.create({
-  model: getModelId('sonnet'),
-  max_tokens: 2000,
-  system: SYSTEM_PROMPT,
-  messages: [{ role: 'user', content: `Summarize:\n${lintOutput}\n${checkOutput}` }]
-});
+// SDK mode - multi-turn with tools (confirm agent)
+const result = await runAgent(
+  { ...CONFIRM_AGENT, workingDir: '/path/to/project' },
+  { prompt: 'Evaluate:', context: gitDiff }
+);
 ```
 
-### Hook Agent Pattern
+### Agent Configuration
 
-Hook agents use a single API call for validation:
+All agent configs are defined in `utils/agent-configs.ts`:
 
 ```typescript
-// Example: tool-approve agent
-const client = getAnthropicClient();
-const response = await client.messages.create({
-  model: getModelId('haiku'),
-  max_tokens: 1000,
-  messages: [{ role: 'user', content: `Evaluate: ${toolDescription}` }]
-});
+interface AgentConfig {
+  name: string;           // For logging
+  tier: ModelTier;        // haiku | sonnet | opus
+  mode: 'direct' | 'sdk'; // Execution mode
+  systemPrompt: string;   // Agent behavior
+  maxTokens?: number;     // Response limit
+  maxTurns?: number;      // SDK mode only
+}
 ```
-
-### Historical Note
-
-MCP agents previously used Claude Agent SDK streaming (`@anthropic-ai/claude-agent-sdk`) which provided tool orchestration. This was refactored to direct API because the agents' commands were deterministic and didn't benefit from multi-turn tool selection.
 
 ## Model Tiers
 
 Models are centrally configured in `src/types.ts`:
 
-| Tier   | Usage                                                  |
-| ------ | ------------------------------------------------------ |
-| haiku  | Fast tasks: tool-approve, tool-appeal, error-ack, intent-validate, commit |
-| sonnet | Detailed analysis: check, plan-validate                |
-| opus   | Complex decisions: confirm (git diff analysis)         |
+| Tier   | Mode   | Usage                                                  |
+|--------|--------|--------------------------------------------------------|
+| haiku  | direct | Fast tasks: tool-approve, tool-appeal, error-ack, intent-validate, commit |
+| sonnet | direct | Detailed analysis: check, plan-validate                |
+| opus   | sdk    | Complex decisions: confirm (code quality gate)         |
 
 ## Agent Chains
 
@@ -117,10 +121,24 @@ MCP agents chain together for verification:
 ```
 commit → confirm → check
   │         │         │
-  │         │         └─ Runs linter + make check (sonnet)
-  │         └─ Analyzes git diff (opus)
-  └─ Generates commit message + executes commit (haiku)
+  │         │         └─ Runs linter + make check (sonnet, direct)
+  │         └─ Analyzes git diff + investigates code (opus, SDK)
+  └─ Generates commit message + executes commit (haiku, direct)
 ```
+
+## SDK Agent Restrictions
+
+The confirm agent (only SDK mode user) is restricted to read-only tools:
+
+- **Read**: View file contents
+- **Glob**: Find files by pattern
+- **Grep**: Search file contents
+
+**NOT available:**
+- **Bash**: Git data passed via prompt instead
+- **Write/Edit**: No modifications allowed
+
+This ensures the SDK agent can investigate but not modify anything.
 
 ## Hook Flow (PreToolUse)
 
@@ -145,8 +163,25 @@ Tool call received
 
 ## Shared Utilities
 
+### `agent-runner.ts`
+Unified agent execution for both direct API and SDK modes.
+- `runAgent()` - main entry point, dispatches to appropriate mode
+- `runDirectAgent()` - single API call execution
+- `runSdkAgent()` - multi-turn SDK execution with tools
+
+### `agent-configs.ts`
+Centralized agent configurations with documentation:
+- `CHECK_AGENT` - sonnet, direct
+- `CONFIRM_AGENT` - opus, SDK
+- `COMMIT_AGENT` - haiku, direct
+- `TOOL_APPROVE_AGENT` - haiku, direct
+- `TOOL_APPEAL_AGENT` - haiku, direct
+- `ERROR_ACK_AGENT` - haiku, direct
+- `PLAN_VALIDATE_AGENT` - sonnet, direct
+- `INTENT_VALIDATE_AGENT` - haiku, direct
+
 ### `anthropic-client.ts`
-Singleton factory for Anthropic client. Eliminates duplication and ensures consistent configuration.
+Singleton factory for Anthropic client. Used by direct mode agents.
 
 ### `response-parser.ts`
 - `extractTextFromResponse()` - finds text block in API response
@@ -162,6 +197,12 @@ Standard configurations for different use cases:
 - `APPEAL_PRESET` - for tool appeal decisions
 - `OFF_TOPIC_PRESET` - for intent validation
 - `PLAN_VALIDATE_PRESET` - for plan drift checks
+
+### `git-utils.ts`
+- `getUncommittedChanges()` - returns status, diff, and diffStat
+
+### `command.ts`
+- `runCommand()` - safe command execution with output capture
 
 ## Environment Variables
 

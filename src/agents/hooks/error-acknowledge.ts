@@ -1,17 +1,64 @@
+/**
+ * Error Acknowledge Agent - Issue Acknowledgment Validator
+ *
+ * This agent validates that the AI has acknowledged real issues before
+ * proceeding with tool calls. Prevents AI from ignoring errors.
+ *
+ * ## FLOW
+ *
+ * 1. Check if issue was already acknowledged (cached)
+ * 2. If cached, return OK immediately
+ * 3. Otherwise, run unified agent to evaluate
+ * 4. Retry if format is invalid
+ * 5. Cache acknowledged issues
+ * 6. Return OK or BLOCK with issue details
+ *
+ * ## REAL vs FALSE POSITIVE
+ *
+ * Real issues:
+ * - TypeScript errors, build failures, test failures
+ * - Hook denials with explanations
+ * - User directives in ALL CAPS
+ *
+ * False positives (ignore):
+ * - Source code containing "error" or "failed"
+ * - Variable names like "errorHandler"
+ * - Documentation/prompts being read
+ *
+ * @module error-acknowledge
+ */
+
 import { getModelId } from '../../types.js';
 import {
   isErrorAcknowledged,
   markErrorAcknowledged,
 } from '../../utils/ack-cache.js';
+import { runAgent } from '../../utils/agent-runner.js';
+import { ERROR_ACK_AGENT } from '../../utils/agent-configs.js';
 import { getAnthropicClient } from '../../utils/anthropic-client.js';
 import { logToHomeAssistant } from '../../utils/logger.js';
-import { extractTextFromResponse } from '../../utils/response-parser.js';
 import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
 
 // Pattern to extract issue text from transcript for caching
 const ISSUE_EXTRACT_PATTERN =
   /error TS\d+[^\n]*|Error:[^\n]*|failed[^\n]*|FAILED[^\n]*/i;
 
+/**
+ * Check if AI has acknowledged issues in the transcript.
+ *
+ * @param transcript - Recent conversation transcript
+ * @param toolName - Name of the tool being called
+ * @param toolInput - Input parameters for the tool
+ * @returns "OK" if acknowledged, or "BLOCK: ..." with issue details
+ *
+ * @example
+ * ```typescript
+ * const result = await checkErrorAcknowledgment(transcript, 'Edit', { file_path: '...' });
+ * if (result.startsWith('BLOCK:')) {
+ *   // AI needs to acknowledge the issue first
+ * }
+ * ```
+ */
 export async function checkErrorAcknowledgment(
   transcript: string,
   toolName: string,
@@ -20,7 +67,7 @@ export async function checkErrorAcknowledgment(
   // Check if the issue in this transcript was already acknowledged
   const issueMatch = transcript.match(ISSUE_EXTRACT_PATTERN);
   if (issueMatch && isErrorAcknowledged(issueMatch[0])) {
-    await logToHomeAssistant({
+    logToHomeAssistant({
       agent: 'error-acknowledge',
       level: 'decision',
       problem: `${toolName} (cached)`,
@@ -29,80 +76,28 @@ export async function checkErrorAcknowledgment(
     return 'OK';
   }
 
-  const anthropic = getAnthropicClient();
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput).slice(0, 100)}`;
 
-  const response = await anthropic.messages.create({
-    model: getModelId('haiku'),
-    max_tokens: 500,
-    messages: [
-      {
-        role: 'user',
-        content: `You are an issue acknowledgment validator.
-
-TRANSCRIPT (recent messages):
+  // Run acknowledgment check via unified runner
+  const initialResponse = await runAgent(
+    { ...ERROR_ACK_AGENT },
+    {
+      prompt: 'Check if the AI has acknowledged issues in this transcript.',
+      context: `TRANSCRIPT (recent messages):
 ${transcript}
 
 CURRENT TOOL CALL:
 Tool: ${toolName}
-Input: ${JSON.stringify(toolInput)}
+Input: ${JSON.stringify(toolInput)}`,
+    }
+  );
 
-=== WHAT COUNTS AS A REAL ISSUE ===
-
-Real issues that need acknowledgment:
-- TypeScript errors: "error TS2304: Cannot find name 'foo'" at src/file.ts:42
-- Build failures: "make: *** [Makefile:10: build] Error 1"
-- Test failures: "FAILED tests/foo.test.ts" with actual failure reason
-- Hook denials: "PreToolUse:Bash hook returned blocking error" with "Error: ..."
-- Hook denials that suggest alternatives: "use mcp__agent-framework__check instead"
-- Any tool denial with a specific reason explaining WHY it was denied
-- User directives in ALL CAPS or explicit corrections
-
-NOT real issues (ignore these):
-- Source code from Read/Grep containing words like "error", "failed", "denied"
-- Variable names like "errorHandler" or "onFailure"
-- System prompts or documentation text being read/written
-- Strings inside code that happen to contain error-like words
-
-=== RETURN "OK" WHEN ===
-
-- No real issues in transcript (just source code content)
-- AI explicitly acknowledged the issue in its text before this tool call
-- This tool call directly addresses/fixes the issue
-- Tool call is Read/Grep to investigate further
-
-=== RETURN "BLOCK" WHEN ===
-
-- A REAL issue exists (build failure, TypeScript error, test failure, hook denial)
-- AI said nothing about it after the issue appeared
-- AI is calling an unrelated tool instead of fixing it
-- AI was denied a tool and is now trying a similar/alternative command (workaround attempt)
-- AI was told to use an MCP tool but is trying a Bash command instead
-- User gave explicit directive that AI ignored
-
-=== OUTPUT FORMAT (STRICT) ===
-Your response MUST be EXACTLY one of:
-
-OK
-OR
-BLOCK: [ISSUE: "<exact error with file:line or error code>"] <what to acknowledge>
-
-Good examples:
-BLOCK: [ISSUE: "error TS2304: Cannot find name 'foo' at src/types.ts:42"] Fix this TypeScript error.
-BLOCK: [ISSUE: "Error: make check command (use MCP tool for better integration)"] Acknowledge denial and use mcp__agent-framework__check.
-
-Bad example (DO NOT DO THIS):
-BLOCK: [ISSUE: "errorHandler function"] - This is just source code, not a real error.
-
-NO other text. Just OK or BLOCK with a SPECIFIC, USEFUL issue quote.`,
-      },
-    ],
-  });
-
+  // Retry if format is invalid
+  const anthropic = getAnthropicClient();
   const decision = await retryUntilValid(
     anthropic,
     getModelId('haiku'),
-    extractTextFromResponse(response),
+    initialResponse,
     toolDescription,
     {
       maxRetries: 1, // Only 1 retry for error-acknowledge
@@ -116,7 +111,7 @@ NO other text. Just OK or BLOCK with a SPECIFIC, USEFUL issue quote.`,
     if (issueMatch) {
       markErrorAcknowledged(issueMatch[0]);
     }
-    await logToHomeAssistant({
+    logToHomeAssistant({
       agent: 'error-acknowledge',
       level: 'decision',
       problem: toolDescription,
@@ -127,7 +122,7 @@ NO other text. Just OK or BLOCK with a SPECIFIC, USEFUL issue quote.`,
 
   if (decision.startsWith('BLOCK:')) {
     const reason = decision.substring(7).trim();
-    await logToHomeAssistant({
+    logToHomeAssistant({
       agent: 'error-acknowledge',
       level: 'decision',
       problem: toolDescription,
@@ -137,7 +132,7 @@ NO other text. Just OK or BLOCK with a SPECIFIC, USEFUL issue quote.`,
   }
 
   // Default to OK if response is malformed after retries (fail open)
-  await logToHomeAssistant({
+  logToHomeAssistant({
     agent: 'error-acknowledge',
     level: 'info',
     problem: toolDescription,
