@@ -29,8 +29,8 @@
  * ```
  */
 
-import type Anthropic from '@anthropic-ai/sdk';
-import { extractTextFromResponse } from './response-parser.js';
+import type Anthropic from "@anthropic-ai/sdk";
+import { extractTextFromResponse } from "./response-parser.js";
 
 /**
  * Options for retry behavior.

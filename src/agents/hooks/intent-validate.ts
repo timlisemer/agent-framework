@@ -34,14 +34,14 @@ import {
   type ConversationContext,
   type UserMessage,
   type AssistantMessage,
-} from '../../types.js';
-import { runAgent } from '../../utils/agent-runner.js';
-import { INTENT_VALIDATE_AGENT } from '../../utils/agent-configs.js';
-import { getAnthropicClient } from '../../utils/anthropic-client.js';
-import { logToHomeAssistant } from '../../utils/logger.js';
-import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
-import { readTranscriptExact } from '../../utils/transcript.js';
-import { OFF_TOPIC_COUNTS } from '../../utils/transcript-presets.js';
+} from "../../types.js";
+import { runAgent } from "../../utils/agent-runner.js";
+import { INTENT_VALIDATE_AGENT } from "../../utils/agent-configs.js";
+import { getAnthropicClient } from "../../utils/anthropic-client.js";
+import { logToHomeAssistant } from "../../utils/logger.js";
+import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { readTranscriptExact } from "../../utils/transcript.js";
+import { OFF_TOPIC_COUNTS } from "../../utils/transcript-presets.js";
 
 /**
  * Extract conversation context from a transcript file.
@@ -83,10 +83,10 @@ export async function extractConversationContext(
 
     const conversationSummary = allMessages
       .map((msg) => {
-        const role = userIndices.has(msg.messageIndex) ? 'USER' : 'ASSISTANT';
+        const role = userIndices.has(msg.messageIndex) ? "USER" : "ASSISTANT";
         return `[${role}]: ${msg.text}`;
       })
-      .join('\n\n---\n\n');
+      .join("\n\n---\n\n");
 
     return {
       userMessages,
@@ -98,8 +98,8 @@ export async function extractConversationContext(
     return {
       userMessages: [],
       assistantMessages: [],
-      conversationSummary: '',
-      lastAssistantMessage: '',
+      conversationSummary: "",
+      lastAssistantMessage: "",
     };
   }
 }
@@ -126,7 +126,7 @@ export async function checkForOffTopic(
   // No conversation yet - nothing to check
   if (context.userMessages.length === 0 || !context.lastAssistantMessage) {
     return {
-      decision: 'OK',
+      decision: "OK",
     };
   }
 
@@ -136,7 +136,7 @@ export async function checkForOffTopic(
       { ...INTENT_VALIDATE_AGENT },
       {
         prompt:
-          'Check if the assistant has gone off-topic or asked something already answered.',
+          "Check if the assistant has gone off-topic or asked something already answered.",
         context: `CONVERSATION CONTEXT:
 ${context.conversationSummary}
 
@@ -151,53 +151,53 @@ ${context.lastAssistantMessage}`,
     const anthropic = getAnthropicClient();
     const decision = await retryUntilValid(
       anthropic,
-      getModelId('haiku'),
+      getModelId("haiku"),
       initialResponse,
-      `Intent validation for assistant response`,
+      "Intent validation for assistant response",
       {
         maxRetries: 2,
-        formatValidator: (text) => startsWithAny(text, ['OK', 'INTERVENE:']),
-        formatReminder: 'Reply with exactly: OK or INTERVENE: <feedback>',
+        formatValidator: (text) => startsWithAny(text, ["OK", "INTERVENE:"]),
+        formatReminder: "Reply with exactly: OK or INTERVENE: <feedback>",
         maxTokens: 150,
       }
     );
 
-    if (decision.startsWith('INTERVENE:')) {
-      const feedback = decision.replace('INTERVENE:', '').trim();
+    if (decision.startsWith("INTERVENE:")) {
+      const feedback = decision.replace("INTERVENE:", "").trim();
 
       logToHomeAssistant({
-        agent: 'off-topic-check',
-        level: 'decision',
+        agent: "off-topic-check",
+        level: "decision",
         problem: `Assistant stopped with: ${context.lastAssistantMessage.substring(0, 100)}...`,
         answer: `INTERVENE: ${feedback}`,
       });
 
       return {
-        decision: 'INTERVENE',
+        decision: "INTERVENE",
         feedback,
       };
     }
 
     logToHomeAssistant({
-      agent: 'off-topic-check',
-      level: 'decision',
+      agent: "off-topic-check",
+      level: "decision",
       problem: `Assistant stopped with: ${context.lastAssistantMessage.substring(0, 100)}...`,
-      answer: 'OK',
+      answer: "OK",
     });
 
-    return { decision: 'OK' };
+    return { decision: "OK" };
   } catch (err) {
     // On issue, fail open (don't intervene)
     logToHomeAssistant({
-      agent: 'off-topic-check',
-      level: 'info',
-      problem: 'Check issue',
+      agent: "off-topic-check",
+      level: "info",
+      problem: "Check issue",
       answer: String(err),
     });
 
     return {
-      decision: 'OK',
-      feedback: 'Check issue - skipped',
+      decision: "OK",
+      feedback: "Check issue - skipped",
     };
   }
 }

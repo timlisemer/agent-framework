@@ -1,31 +1,31 @@
-import { type PreToolUseHookInput } from '@anthropic-ai/claude-agent-sdk';
-import * as path from 'path';
-import * as os from 'os';
-import * as fs from 'fs';
-import { approveTool } from '../agents/hooks/tool-approve.js';
-import { appealDenial } from '../agents/hooks/tool-appeal.js';
-import { validatePlanIntent } from '../agents/hooks/plan-validate.js';
-import { checkErrorAcknowledgment } from '../agents/hooks/error-acknowledge.js';
-import { validateClaudeMd } from '../agents/hooks/claude-md-validate.js';
-import { checkStyleDrift } from '../agents/hooks/style-drift.js';
-import { detectWorkaroundPattern } from '../utils/command-patterns.js';
-import { logToHomeAssistant } from '../utils/logger.js';
-import { markErrorAcknowledged, setSession } from '../utils/ack-cache.js';
-import { checkWithAppeal } from '../utils/pre-tool-use-utils.js';
+import { type PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
+import * as path from "path";
+import * as os from "os";
+import * as fs from "fs";
+import { approveTool } from "../agents/hooks/tool-approve.js";
+import { appealDenial } from "../agents/hooks/tool-appeal.js";
+import { validatePlanIntent } from "../agents/hooks/plan-validate.js";
+import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
+import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
+import { checkStyleDrift } from "../agents/hooks/style-drift.js";
+import { detectWorkaroundPattern } from "../utils/command-patterns.js";
+import { logToHomeAssistant } from "../utils/logger.js";
+import { markErrorAcknowledged, setSession } from "../utils/ack-cache.js";
+import { checkWithAppeal } from "../utils/pre-tool-use-utils.js";
 import {
   readTranscriptExact,
   formatTranscriptResult,
   hasErrorPatterns,
-} from '../utils/transcript.js';
+} from "../utils/transcript.js";
 import {
   APPEAL_COUNTS,
   ERROR_CHECK_COUNTS,
   PLAN_VALIDATE_COUNTS,
   STYLE_DRIFT_COUNTS,
-} from '../utils/transcript-presets.js';
+} from "../utils/transcript-presets.js";
 
 // Retry tracking for workaround detection
-const DENIAL_CACHE_FILE = '/tmp/claude-hook-denials.json';
+const DENIAL_CACHE_FILE = "/tmp/claude-hook-denials.json";
 const MAX_SIMILAR_DENIALS = 3;
 const DENIAL_EXPIRY_MS = 60 * 1000; // 1 minute
 
@@ -48,7 +48,7 @@ function setDenialSession(transcriptPath: string): void {
 function loadDenials(): { [pattern: string]: DenialEntry } {
   try {
     if (fs.existsSync(DENIAL_CACHE_FILE)) {
-      const data = fs.readFileSync(DENIAL_CACHE_FILE, 'utf-8');
+      const data = fs.readFileSync(DENIAL_CACHE_FILE, "utf-8");
       const cache: DenialCache = JSON.parse(data);
 
       // Clear cache if session changed (new Claude Code session)
@@ -82,18 +82,18 @@ function saveDenials(denials: { [pattern: string]: DenialEntry }): void {
 }
 
 // File tools that benefit from path-based risk classification
-const FILE_TOOLS = ['Read', 'Write', 'Edit', 'NotebookEdit'];
+const FILE_TOOLS = ["Read", "Write", "Edit", "NotebookEdit"];
 
 // Sensitive file patterns - always require LLM approval
 const SENSITIVE_PATTERNS = [
-  '.env',
-  'credentials',
-  '.ssh',
-  '.aws',
-  'secrets',
-  '.key',
-  '.pem',
-  'password',
+  ".env",
+  "credentials",
+  ".ssh",
+  ".aws",
+  "secrets",
+  ".key",
+  ".pem",
+  "password",
 ];
 
 function isPathInDirectory(filePath: string, dirPath: string): boolean {
@@ -105,7 +105,7 @@ function isPathInDirectory(filePath: string, dirPath: string): boolean {
 }
 
 function isTrustedPath(filePath: string, projectDir: string): boolean {
-  const claudeDir = path.join(os.homedir(), '.claude');
+  const claudeDir = path.join(os.homedir(), ".claude");
   return (
     isPathInDirectory(filePath, projectDir) ||
     isPathInDirectory(filePath, claudeDir)
@@ -120,9 +120,9 @@ function isSensitivePath(filePath: string): boolean {
 
 async function main() {
   const input: PreToolUseHookInput = await new Promise((resolve) => {
-    let data = '';
-    process.stdin.on('data', (chunk) => (data += chunk));
-    process.stdin.on('end', () => resolve(JSON.parse(data)));
+    let data = "";
+    process.stdin.on("data", (chunk) => (data += chunk));
+    process.stdin.on("end", () => resolve(JSON.parse(data)));
   });
 
   // Set session ID for cache invalidation on new session
@@ -131,7 +131,7 @@ async function main() {
 
   // Block confirm tool from Claude Code - requires explicit user approval
   // Internal agents (like commit) call runConfirmAgent() directly, bypassing this hook
-  if (input.tool_name === 'mcp__agent-framework__confirm') {
+  if (input.tool_name === "mcp__agent-framework__confirm") {
     const result = await readTranscriptExact(input.transcript_path, {
       counts: { user: 5, assistant: 5 },
     });
@@ -140,15 +140,15 @@ async function main() {
       input.tool_name,
       input.tool_input,
       transcript,
-      'Confirm requires explicit user approval. Use /commit or explicitly request confirm.'
+      "Confirm requires explicit user approval. Use /commit or explicitly request confirm."
     );
 
     if (appeal.approved) {
       console.log(
         JSON.stringify({
           hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'allow',
+            hookEventName: "PreToolUse",
+            permissionDecision: "allow",
           },
         })
       );
@@ -158,10 +158,10 @@ async function main() {
     console.log(
       JSON.stringify({
         hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'deny',
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
           permissionDecisionReason:
-            'Confirm requires explicit user approval. Use /commit or explicitly request confirm.',
+            "Confirm requires explicit user approval. Use /commit or explicitly request confirm.",
         },
       })
     );
@@ -172,33 +172,33 @@ async function main() {
   // These tools are read-only or have no filesystem/system impact
   const LOW_RISK_TOOLS = [
     // Read-only search/navigation
-    'LSP', // Language server protocol queries
-    'Grep', // File content search
-    'Glob', // File pattern matching
-    'WebSearch', // Web search
-    'WebFetch', // Fetch web content
+    "LSP", // Language server protocol queries
+    "Grep", // File content search
+    "Glob", // File pattern matching
+    "WebSearch", // Web search
+    "WebFetch", // Fetch web content
 
     // MCP resource reading (read-only)
-    'ListMcpResources', // List available MCP resources
-    'ReadMcpResource', // Read an MCP resource
+    "ListMcpResources", // List available MCP resources
+    "ReadMcpResource", // Read an MCP resource
 
     // Internal/meta tools (low impact)
-    'TodoWrite', // Task list management (internal to Claude)
-    'TaskOutput', // Read output from background tasks
-    'AskUserQuestion', // Prompts user for input (safe)
-    'ExitPlanMode', // Exit plan mode (internal to Claude)
-    'EnterPlanMode', // Enter plan mode (internal to Claude)
-    'Skill', // Invoke skills like /commit (user-initiated)
+    "TodoWrite", // Task list management (internal to Claude)
+    "TaskOutput", // Read output from background tasks
+    "AskUserQuestion", // Prompts user for input (safe)
+    "ExitPlanMode", // Exit plan mode (internal to Claude)
+    "EnterPlanMode", // Enter plan mode (internal to Claude)
+    "Skill", // Invoke skills like /commit (user-initiated)
   ];
   if (
     LOW_RISK_TOOLS.includes(input.tool_name) ||
-    input.tool_name.startsWith('mcp__')
+    input.tool_name.startsWith("mcp__")
   ) {
     console.log(
       JSON.stringify({
         hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'allow',
+          hookEventName: "PreToolUse",
+          permissionDecision: "allow",
         },
       })
     );
@@ -219,7 +219,7 @@ async function main() {
       input.tool_name,
       input.tool_input
     );
-    if (ackResult.startsWith('BLOCK:')) {
+    if (ackResult.startsWith("BLOCK:")) {
       const reason = ackResult.substring(7).trim();
 
       // Appeal the error-acknowledge denial
@@ -236,25 +236,25 @@ async function main() {
         // Mark error as acknowledged since appeal passed
         markErrorAcknowledged(reason);
         logToHomeAssistant({
-          agent: 'pre-tool-use-hook',
-          level: 'decision',
+          agent: "pre-tool-use-hook",
+          level: "decision",
           problem: `${input.tool_name} error-acknowledge appealed`,
-          answer: 'APPEALED - continuing',
+          answer: "APPEALED - continuing",
         });
         // Continue to next checks (don't exit)
       } else {
         const finalReason = appeal.reason ?? reason;
         logToHomeAssistant({
-          agent: 'pre-tool-use-hook',
-          level: 'decision',
+          agent: "pre-tool-use-hook",
+          level: "decision",
           problem: `${input.tool_name} blocked for ignoring errors`,
           answer: finalReason,
         });
         console.log(
           JSON.stringify({
             hookSpecificOutput: {
-              hookEventName: 'PreToolUse',
-              permissionDecision: 'deny',
+              hookEventName: "PreToolUse",
+              permissionDecision: "deny",
               permissionDecisionReason: `Error acknowledgment required: ${finalReason}`,
             },
           })
@@ -275,34 +275,34 @@ async function main() {
       (input.tool_input as { path?: string }).path;
     if (filePath) {
       // Plan file drift detection - validate plan content against user intent
-      const plansDir = path.join(os.homedir(), '.claude', 'plans');
+      const plansDir = path.join(os.homedir(), ".claude", "plans");
       if (
-        (input.tool_name === 'Write' || input.tool_name === 'Edit') &&
+        (input.tool_name === "Write" || input.tool_name === "Edit") &&
         isPathInDirectory(filePath, plansDir)
       ) {
         // Write uses 'content', Edit uses 'new_string'
         const content =
-          input.tool_name === 'Write'
+          input.tool_name === "Write"
             ? (input.tool_input as { content?: string }).content
             : (input.tool_input as { new_string?: string }).new_string;
         if (content) {
           const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
           // Format only user messages for plan validation
-          const userMessages = planResult.user.map((m) => `USER: ${m.content}`).join('\n\n');
+          const userMessages = planResult.user.map((m) => `USER: ${m.content}`).join("\n\n");
           const validation = await validatePlanIntent(content, userMessages);
 
           if (!validation.approved) {
             logToHomeAssistant({
-              agent: 'pre-tool-use-hook',
-              level: 'decision',
+              agent: "pre-tool-use-hook",
+              level: "decision",
               problem: `Plan ${input.tool_name.toLowerCase()} to ${filePath}`,
               answer: `DRIFT: ${validation.reason}`,
             });
             console.log(
               JSON.stringify({
                 hookSpecificOutput: {
-                  hookEventName: 'PreToolUse',
-                  permissionDecision: 'deny',
+                  hookEventName: "PreToolUse",
+                  permissionDecision: "deny",
                   permissionDecisionReason: `Plan drift detected: ${validation.reason}`,
                 },
               })
@@ -314,8 +314,8 @@ async function main() {
         console.log(
           JSON.stringify({
             hookSpecificOutput: {
-              hookEventName: 'PreToolUse',
-              permissionDecision: 'allow',
+              hookEventName: "PreToolUse",
+              permissionDecision: "allow",
             },
           })
         );
@@ -324,11 +324,11 @@ async function main() {
 
       // CLAUDE.md validation - detect Write/Edit to any CLAUDE.md file
       if (
-        (input.tool_name === 'Write' || input.tool_name === 'Edit') &&
-        filePath.endsWith('CLAUDE.md')
+        (input.tool_name === "Write" || input.tool_name === "Edit") &&
+        filePath.endsWith("CLAUDE.md")
       ) {
         const content =
-          input.tool_name === 'Write'
+          input.tool_name === "Write"
             ? (input.tool_input as { content?: string }).content
             : (input.tool_input as { new_string?: string }).new_string;
 
@@ -337,16 +337,16 @@ async function main() {
 
           if (!validation.approved) {
             logToHomeAssistant({
-              agent: 'pre-tool-use-hook',
-              level: 'decision',
+              agent: "pre-tool-use-hook",
+              level: "decision",
               problem: `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
               answer: `REJECTED: ${validation.reason.slice(0, 200)}`,
             });
             console.log(
               JSON.stringify({
                 hookSpecificOutput: {
-                  hookEventName: 'PreToolUse',
-                  permissionDecision: 'deny',
+                  hookEventName: "PreToolUse",
+                  permissionDecision: "deny",
                   permissionDecisionReason: `CLAUDE.md validation failed: ${validation.reason}`,
                 },
               })
@@ -358,8 +358,8 @@ async function main() {
         console.log(
           JSON.stringify({
             hookSpecificOutput: {
-              hookEventName: 'PreToolUse',
-              permissionDecision: 'allow',
+              hookEventName: "PreToolUse",
+              permissionDecision: "allow",
             },
           })
         );
@@ -372,7 +372,7 @@ async function main() {
       if (trusted && !sensitive) {
         // Low risk path - but check for style drift on Edit tool
         // Edit has old_string/new_string for comparison; Write/NotebookEdit lack old content
-        if (input.tool_name === 'Edit') {
+        if (input.tool_name === "Edit") {
           // Get user messages to check if style change was requested
           const transcriptResult = await readTranscriptExact(
             input.transcript_path,
@@ -396,16 +396,16 @@ async function main() {
 
           if (!styleDriftResult.approved) {
             logToHomeAssistant({
-              agent: 'pre-tool-use-hook',
-              level: 'decision',
+              agent: "pre-tool-use-hook",
+              level: "decision",
               problem: `Edit ${filePath}`,
               answer: `STYLE DRIFT: ${styleDriftResult.reason}`,
             });
             console.log(
               JSON.stringify({
                 hookSpecificOutput: {
-                  hookEventName: 'PreToolUse',
-                  permissionDecision: 'deny',
+                  hookEventName: "PreToolUse",
+                  permissionDecision: "deny",
                   permissionDecisionReason: `Style drift detected: ${styleDriftResult.reason}`,
                 },
               })
@@ -418,8 +418,8 @@ async function main() {
         console.log(
           JSON.stringify({
             hookSpecificOutput: {
-              hookEventName: 'PreToolUse',
-              permissionDecision: 'allow',
+              hookEventName: "PreToolUse",
+              permissionDecision: "allow",
             },
           })
         );
@@ -442,10 +442,10 @@ async function main() {
   );
 
   logToHomeAssistant({
-    agent: 'pre-tool-use-hook',
-    level: 'decision',
+    agent: "pre-tool-use-hook",
+    level: "decision",
     problem: toolDescription,
-    answer: decision.approved ? 'ALLOWED' : `DENIED: ${decision.reason}`,
+    answer: decision.approved ? "ALLOWED" : `DENIED: ${decision.reason}`,
   });
 
   if (!decision.approved) {
@@ -463,8 +463,8 @@ async function main() {
       if (denials[pattern].count >= MAX_SIMILAR_DENIALS) {
         finalReason += ` CRITICAL: You have attempted ${denials[pattern].count} similar workarounds for '${pattern}'. STOP trying alternatives. Either use the approved MCP tool, ask the user for guidance, or acknowledge that this action cannot be performed.`;
         logToHomeAssistant({
-          agent: 'pre-tool-use-hook',
-          level: 'escalation',
+          agent: "pre-tool-use-hook",
+          level: "escalation",
           problem: `Repeated workaround attempts: ${pattern}`,
           answer: `Count: ${denials[pattern].count}`,
         });
@@ -475,8 +475,8 @@ async function main() {
     console.log(
       JSON.stringify({
         hookSpecificOutput: {
-          hookEventName: 'PreToolUse',
-          permissionDecision: 'deny',
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
           permissionDecisionReason: finalReason,
         },
       })
@@ -488,8 +488,8 @@ async function main() {
   console.log(
     JSON.stringify({
       hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'allow',
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
       },
     })
   );

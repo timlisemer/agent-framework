@@ -1,4 +1,4 @@
-export type ModelTier = 'haiku' | 'sonnet' | 'opus';
+export type ModelTier = "haiku" | "sonnet" | "opus";
 
 // Model IDs defined ONCE here. Update when Anthropic releases new versions.
 export const MODEL_IDS: Record<ModelTier, string> = {
@@ -24,7 +24,7 @@ export interface AgentResult {
 
 // Off-topic / conversation alignment check result
 export interface OffTopicCheckResult {
-  decision: 'OK' | 'INTERVENE';
+  decision: "OK" | "INTERVENE";
   feedback?: string;
 }
 
@@ -47,7 +47,7 @@ export interface ConversationContext {
 
 // Legacy types kept for backwards compatibility
 export interface IntentValidationResult {
-  decision: 'ALLOW' | 'WARN' | 'BLOCK';
+  decision: "ALLOW" | "WARN" | "BLOCK";
   reason?: string;
 }
 

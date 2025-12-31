@@ -95,6 +95,7 @@ CLASSIFICATION RULES:
 2. WARNINGS are: style suggestions, lints, refactoring hints (like "if can be collapsed")
 3. Unused code (unused variables, functions, imports, dead code) counts as ERROR, not warning
    - Unused code must be deleted, not suppressed with underscores, comments, or annotations
+4. Quote style: project uses double quotes ("") for all strings and imports
 
 REPORTING RULES:
 - Quote important lines EXACTLY from command output
@@ -147,6 +148,7 @@ Evaluate the diff for:
 - No debug code (console.log, print, dbg!, etc.)
 - Changes are coherent and intentional
 - Reasonable code style
+- Uses double quotes ("") for strings and imports (project standard)
 - No unused code workarounds (renaming with _var, @ts-ignore, etc. - unused code must be deleted)
 
 ### CATEGORY 3: Security

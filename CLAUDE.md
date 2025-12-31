@@ -93,3 +93,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 - `ANTHROPIC_API_KEY` - Required
 - `CLAUDE_PROJECT_DIR` - Set automatically by Claude Code
 - `WEBHOOK_ID_AGENT_LOGS` - Optional, enables Home Assistant logging
+
+## Code Style
+
+- **Quotes:** Use double quotes (`"`) for all strings and imports

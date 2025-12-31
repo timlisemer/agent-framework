@@ -24,15 +24,15 @@
  * @module tool-approve
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import { getModelId } from '../../types.js';
-import { runAgent } from '../../utils/agent-runner.js';
-import { TOOL_APPROVE_AGENT } from '../../utils/agent-configs.js';
-import { getAnthropicClient } from '../../utils/anthropic-client.js';
-import { getBlacklistHighlights } from '../../utils/command-patterns.js';
-import { logToHomeAssistant } from '../../utils/logger.js';
-import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
+import * as fs from "fs";
+import * as path from "path";
+import { getModelId } from "../../types.js";
+import { runAgent } from "../../utils/agent-runner.js";
+import { TOOL_APPROVE_AGENT } from "../../utils/agent-configs.js";
+import { getAnthropicClient } from "../../utils/anthropic-client.js";
+import { getBlacklistHighlights } from "../../utils/command-patterns.js";
+import { logToHomeAssistant } from "../../utils/logger.js";
+import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 
 /**
  * Evaluate a tool call for safety and compliance.
@@ -56,10 +56,10 @@ export async function approveTool(
   projectDir: string
 ): Promise<{ approved: boolean; reason?: string }> {
   // Load CLAUDE.md if exists (project-specific rules)
-  let rules = '';
-  const claudeMdPath = path.join(projectDir, 'CLAUDE.md');
+  let rules = "";
+  const claudeMdPath = path.join(projectDir, "CLAUDE.md");
   if (fs.existsSync(claudeMdPath)) {
-    rules = fs.readFileSync(claudeMdPath, 'utf-8');
+    rules = fs.readFileSync(claudeMdPath, "utf-8");
   }
 
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput)}`;
@@ -68,18 +68,18 @@ export async function approveTool(
   const highlights = getBlacklistHighlights(toolName, toolInput);
   const highlightSection =
     highlights.length > 0
-      ? `\n=== BLACKLISTED PATTERNS DETECTED ===\n${highlights.join('\n')}\n=== END BLACKLIST ===\n`
-      : '';
+      ? `\n=== BLACKLISTED PATTERNS DETECTED ===\n${highlights.join("\n")}\n=== END BLACKLIST ===\n`
+      : "";
 
   // Run initial evaluation via unified runner
   const initialResponse = await runAgent(
     { ...TOOL_APPROVE_AGENT, workingDir: projectDir },
     {
-      prompt: 'Evaluate this tool call for safety and compliance.',
+      prompt: "Evaluate this tool call for safety and compliance.",
       context: `PROJECT DIRECTORY: ${projectDir}
 
 PROJECT RULES (from CLAUDE.md):
-${rules || 'No project-specific rules.'}
+${rules || "No project-specific rules."}
 ${highlightSection}
 TOOL TO EVALUATE:
 Tool: ${toolName}
@@ -91,34 +91,34 @@ Input: ${JSON.stringify(toolInput)}`,
   const anthropic = getAnthropicClient();
   const decision = await retryUntilValid(
     anthropic,
-    getModelId('haiku'),
+    getModelId("haiku"),
     initialResponse,
     toolDescription,
     {
       maxRetries: 2,
-      formatValidator: (text) => startsWithAny(text, ['APPROVE', 'DENY:']),
-      formatReminder: 'Reply with EXACTLY: APPROVE or DENY: <reason>',
+      formatValidator: (text) => startsWithAny(text, ["APPROVE", "DENY:"]),
+      formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
     }
   );
 
-  if (decision.startsWith('APPROVE')) {
+  if (decision.startsWith("APPROVE")) {
     logToHomeAssistant({
-      agent: 'tool-approve',
-      level: 'decision',
+      agent: "tool-approve",
+      level: "decision",
       problem: toolDescription,
-      answer: 'APPROVED',
+      answer: "APPROVED",
     });
     return { approved: true };
   }
 
   // Default to DENY for safety - extract reason from response
-  const reason = decision.startsWith('DENY: ')
-    ? decision.replace('DENY: ', '')
+  const reason = decision.startsWith("DENY: ")
+    ? decision.replace("DENY: ", "")
     : `Malformed response: ${decision}`;
 
   logToHomeAssistant({
-    agent: 'tool-approve',
-    level: 'decision',
+    agent: "tool-approve",
+    level: "decision",
     problem: toolDescription,
     answer: `DENIED: ${reason}`,
   });
