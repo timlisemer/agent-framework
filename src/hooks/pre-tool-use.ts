@@ -10,7 +10,7 @@ import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
 import { detectWorkaroundPattern } from "../utils/command-patterns.js";
 import { logToHomeAssistant } from "../utils/logger.js";
-import { markErrorAcknowledged, setSession } from "../utils/ack-cache.js";
+import { markErrorAcknowledged, setSession, checkUserInteraction } from "../utils/ack-cache.js";
 import { checkWithAppeal } from "../utils/pre-tool-use-utils.js";
 import {
   readTranscriptExact,
@@ -117,6 +117,41 @@ function isSensitivePath(filePath: string): boolean {
   return SENSITIVE_PATTERNS.some((p) => lower.includes(p));
 }
 
+/**
+ * Check if current tool call matches a suggested alternative from a previous denial.
+ * Uses conservative exact matching.
+ *
+ * @param toolName - Current tool being called
+ * @param transcript - Recent transcript with tool results
+ * @returns true if tool matches a suggestion, skip error-ack check
+ */
+function matchesSuggestedAlternative(toolName: string, transcript: string): boolean {
+  // Only check TOOL_RESULT lines for denied suggestions
+  const toolResultLines = transcript
+    .split("\n")
+    .filter((l) => l.startsWith("TOOL_RESULT:"))
+    .join("\n");
+
+  // Conservative patterns - extract exact tool name
+  const patterns = [
+    /suggested alternative:\s*(?:use\s+)?["']?(\w+)["']?/gi,
+    /use\s+["']?(\w+)["']?\s+(?:tool\s+)?instead/gi,
+    /use\s+the\s+["']?(\w+)["']?\s+tool/gi,
+  ];
+
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(toolResultLines)) !== null) {
+      const suggested = match[1];
+      // Exact match only (conservative)
+      if (toolName === suggested) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 
 async function main() {
   const input: PreToolUseHookInput = await new Promise((resolve) => {
@@ -209,10 +244,24 @@ async function main() {
   // Step 1: Quick pattern check (TypeScript only, no LLM)
   const errorCheckResult = await readTranscriptExact(input.transcript_path, ERROR_CHECK_COUNTS);
   const errorCheckTranscript = formatTranscriptResult(errorCheckResult);
+
+  // Clear ack cache if user has sent a new message (any user interaction = fresh start)
+  const lastUserMessage = errorCheckResult.user[errorCheckResult.user.length - 1]?.content;
+  checkUserInteraction(lastUserMessage);
+
   // Only check TOOL_RESULT lines for error patterns to avoid false positives from Read tool (source code)
   const quickCheck = hasErrorPatterns(errorCheckTranscript, { toolResultsOnly: true });
 
-  if (quickCheck.needsCheck) {
+  // Skip error-ack if tool matches suggested alternative (conservative exact match)
+  if (quickCheck.needsCheck && matchesSuggestedAlternative(input.tool_name, errorCheckTranscript)) {
+    logToHomeAssistant({
+      agent: "pre-tool-use-hook",
+      level: "info",
+      problem: `${input.tool_name} matches suggested alternative`,
+      answer: "Skipping error-ack check",
+    });
+    // Continue to next checks (don't require explicit ack)
+  } else if (quickCheck.needsCheck) {
     // Step 2: Only call Haiku if error/directive patterns detected
     const ackResult = await checkErrorAcknowledgment(
       errorCheckTranscript,

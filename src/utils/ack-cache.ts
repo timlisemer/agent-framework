@@ -12,6 +12,7 @@ interface AckEntry {
 
 interface AckCache {
   sessionId?: string;
+  lastUserMessageHash?: string;
   entries: AckEntry[];
 }
 
@@ -86,5 +87,28 @@ export function clearAckCache(): void {
     }
   } catch {
     // Ignore errors
+  }
+}
+
+/**
+ * Check if user has sent a new message since last check.
+ * If so, clear the ack cache (user interaction = fresh start).
+ *
+ * Call this at the start of pre-tool-use hook.
+ */
+export function checkUserInteraction(lastUserMessage: string | undefined): void {
+  if (!lastUserMessage) return;
+
+  const cache = loadAckCache();
+  const currentHash = hashError(lastUserMessage);
+
+  if (cache.lastUserMessageHash !== currentHash) {
+    // New user message detected - clear all acks
+    const newCache: AckCache = {
+      sessionId: currentSessionId,
+      lastUserMessageHash: currentHash,
+      entries: [],
+    };
+    saveAckCache(newCache);
   }
 }

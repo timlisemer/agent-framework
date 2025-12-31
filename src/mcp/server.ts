@@ -4,6 +4,7 @@ import { z } from "zod";
 import { runCheckAgent } from "../agents/mcp/check.js";
 import { runConfirmAgent } from "../agents/mcp/confirm.js";
 import { runCommitAgent } from "../agents/mcp/commit.js";
+import { runPushAgent } from "../agents/mcp/push.js";
 
 // Ensure PATH includes standard locations for subprocess spawning
 // Required for Claude Agent SDK to find node when running in Docker via `docker exec`
@@ -63,6 +64,21 @@ server.registerTool(
   },
   async (args) => {
     const result = await runCommitAgent(args.working_dir || process.cwd());
+    return { content: [{ type: "text", text: result }] };
+  }
+);
+
+server.registerTool(
+  "push",
+  {
+    title: "Push",
+    description: "Push committed changes to remote repository.",
+    inputSchema: {
+      working_dir: z.string().optional().describe("Working directory (defaults to cwd)")
+    }
+  },
+  async (args) => {
+    const result = await runPushAgent(args.working_dir || process.cwd());
     return { content: [{ type: "text", text: result }] };
   }
 );
