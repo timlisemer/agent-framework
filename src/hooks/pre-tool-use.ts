@@ -8,7 +8,7 @@ import { validatePlanIntent } from '../agents/hooks/plan-validate.js';
 import { checkErrorAcknowledgment } from '../agents/hooks/error-acknowledge.js';
 import { detectWorkaroundPattern } from '../utils/command-patterns.js';
 import { logToHomeAssistant } from '../utils/logger.js';
-import { markErrorAcknowledged } from '../utils/ack-cache.js';
+import { markErrorAcknowledged, setSession } from '../utils/ack-cache.js';
 import { checkWithAppeal } from '../utils/pre-tool-use-utils.js';
 import {
   readTranscript,
@@ -22,23 +22,42 @@ const DENIAL_CACHE_FILE = '/tmp/claude-hook-denials.json';
 const MAX_SIMILAR_DENIALS = 3;
 const DENIAL_EXPIRY_MS = 60 * 1000; // 1 minute
 
-interface DenialCache {
-  [pattern: string]: { count: number; timestamp: number };
+interface DenialEntry {
+  count: number;
+  timestamp: number;
 }
 
-function loadDenials(): DenialCache {
+interface DenialCache {
+  sessionId?: string;
+  denials: { [pattern: string]: DenialEntry };
+}
+
+let denialSessionId: string | undefined;
+
+function setDenialSession(transcriptPath: string): void {
+  denialSessionId = transcriptPath;
+}
+
+function loadDenials(): { [pattern: string]: DenialEntry } {
   try {
     if (fs.existsSync(DENIAL_CACHE_FILE)) {
       const data = fs.readFileSync(DENIAL_CACHE_FILE, 'utf-8');
       const cache: DenialCache = JSON.parse(data);
+
+      // Clear cache if session changed (new Claude Code session)
+      if (denialSessionId && cache.sessionId && cache.sessionId !== denialSessionId) {
+        return {};
+      }
+
       // Clean expired entries
       const now = Date.now();
-      for (const key of Object.keys(cache)) {
-        if (now - cache[key].timestamp > DENIAL_EXPIRY_MS) {
-          delete cache[key];
+      const denials = cache.denials || {};
+      for (const key of Object.keys(denials)) {
+        if (now - denials[key].timestamp > DENIAL_EXPIRY_MS) {
+          delete denials[key];
         }
       }
-      return cache;
+      return denials;
     }
   } catch {
     // Ignore errors, return empty cache
@@ -46,8 +65,9 @@ function loadDenials(): DenialCache {
   return {};
 }
 
-function saveDenials(cache: DenialCache): void {
+function saveDenials(denials: { [pattern: string]: DenialEntry }): void {
   try {
+    const cache: DenialCache = { sessionId: denialSessionId, denials };
     fs.writeFileSync(DENIAL_CACHE_FILE, JSON.stringify(cache));
   } catch {
     // Ignore write errors
@@ -97,6 +117,10 @@ async function main() {
     process.stdin.on('data', (chunk) => (data += chunk));
     process.stdin.on('end', () => resolve(JSON.parse(data)));
   });
+
+  // Set session ID for cache invalidation on new session
+  setSession(input.transcript_path);
+  setDenialSession(input.transcript_path);
 
   // Block confirm tool from Claude Code - requires explicit user approval
   // Internal agents (like commit) call runConfirmAgent() directly, bypassing this hook

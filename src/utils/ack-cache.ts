@@ -11,28 +11,43 @@ interface AckEntry {
 }
 
 interface AckCache {
+  sessionId?: string;
   entries: AckEntry[];
 }
+
+// Current session ID, set via setSession()
+let currentSessionId: string | undefined;
 
 function hashError(error: string): string {
   return crypto.createHash('md5').update(error).digest('hex').slice(0, 8);
 }
 
+export function setSession(transcriptPath: string): void {
+  currentSessionId = transcriptPath;
+}
+
 export function loadAckCache(): AckCache {
   try {
     if (fs.existsSync(ACK_CACHE_FILE)) {
-      const data = JSON.parse(fs.readFileSync(ACK_CACHE_FILE, 'utf-8'));
+      const data = JSON.parse(fs.readFileSync(ACK_CACHE_FILE, 'utf-8')) as AckCache;
+
+      // Clear cache if session changed (new Claude Code session)
+      if (currentSessionId && data.sessionId && data.sessionId !== currentSessionId) {
+        return { sessionId: currentSessionId, entries: [] };
+      }
+
       // Clean expired entries
       const now = Date.now();
       data.entries = data.entries.filter(
         (e: AckEntry) => now - e.acknowledgedAt < ACK_EXPIRY_MS
       );
+      data.sessionId = currentSessionId;
       return data;
     }
   } catch {
     // Ignore errors, return empty cache
   }
-  return { entries: [] };
+  return { sessionId: currentSessionId, entries: [] };
 }
 
 export function saveAckCache(cache: AckCache): void {
