@@ -21,14 +21,21 @@ Output EXACTLY this format:
 ## Warnings
 <Quote each warning exactly as it appears in output. Include file:line if present.>
 
-RULES:
+CLASSIFICATION RULES:
+1. ERRORS are: compilation failures, type errors, syntax errors, and UNUSED CODE warnings
+2. WARNINGS are: style suggestions, lints, refactoring hints (like "if can be collapsed")
+3. Unused code (unused variables, functions, imports, dead code) counts as ERROR, not warning
+   - Unused code must be deleted, not suppressed with underscores, comments, or annotations
+
+REPORTING RULES:
 - Quote important lines EXACTLY from command output
 - Filter out noise (progress bars, timing info, etc.)
 - Include file paths and line numbers when present
 - Do NOT analyze what the errors mean
 - Do NOT suggest fixes or recommendations
 - Do NOT provide policy guidance
-- Just report what the tools said`;
+- Just report what the tools said
+- Status is FAIL if Errors > 0, PASS otherwise (warnings alone do not cause FAIL)`;
 
 /**
  * Detect which linter is configured for the project.
