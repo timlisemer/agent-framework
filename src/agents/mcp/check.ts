@@ -3,6 +3,7 @@ import * as path from "path";
 import { getModelId } from "../../types.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { runCommand } from "../../utils/command.js";
+import { getUncommittedChanges } from "../../utils/git-utils.js";
 import { logToHomeAssistant } from "../../utils/logger.js";
 import { extractTextFromResponse } from "../../utils/response-parser.js";
 
@@ -60,7 +61,10 @@ function detectLinter(workingDir: string): string | null {
 }
 
 export async function runCheckAgent(workingDir: string): Promise<string> {
-  // Step 1: Run linter if configured
+  // Step 1: Get uncommitted files info
+  const { status } = getUncommittedChanges(workingDir);
+
+  // Step 2: Run linter if configured
   let lintOutput = "";
   const lintCmd = detectLinter(workingDir);
   if (lintCmd) {
@@ -68,11 +72,11 @@ export async function runCheckAgent(workingDir: string): Promise<string> {
     lintOutput = `LINTER OUTPUT (exit code ${lint.exitCode}):\n${lint.output}\n`;
   }
 
-  // Step 2: Run make check
+  // Step 3: Run make check
   const check = runCommand("make check 2>&1", workingDir);
   const checkOutput = `MAKE CHECK OUTPUT (exit code ${check.exitCode}):\n${check.output}`;
 
-  // Step 3: Single API call to summarize
+  // Step 4: Single API call to summarize
   const client = getAnthropicClient();
   const response = await client.messages.create({
     model: getModelId("sonnet"),
@@ -81,7 +85,7 @@ export async function runCheckAgent(workingDir: string): Promise<string> {
     messages: [
       {
         role: "user",
-        content: `Summarize these check results:\n\n${lintOutput}${checkOutput}`,
+        content: `UNCOMMITTED FILES:\n${status || "(none)"}\n\n${lintOutput}${checkOutput}`,
       },
     ],
   });

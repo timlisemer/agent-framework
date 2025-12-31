@@ -1,6 +1,7 @@
 import { getModelId } from "../../types.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { runCommand } from "../../utils/command.js";
+import { getUncommittedChanges } from "../../utils/git-utils.js";
 import { logToHomeAssistant } from "../../utils/logger.js";
 import { extractTextFromResponse } from "../../utils/response-parser.js";
 import { runConfirmAgent } from "./confirm.js";
@@ -86,8 +87,9 @@ function parseCommitResponse(response: string): { size: string; message: string 
 
 export async function runCommitAgent(workingDir: string): Promise<string> {
   // Pre-check: skip LLM call if nothing to commit
-  const status = runCommand("git status --porcelain", workingDir);
-  if (!status.output.trim()) {
+  const { status, diff, diffStat } = getUncommittedChanges(workingDir);
+
+  if (!status.trim()) {
     logToHomeAssistant({
       agent: "commit",
       level: "info",
@@ -109,10 +111,6 @@ export async function runCommitAgent(workingDir: string): Promise<string> {
     return confirmResult;
   }
 
-  // Get diff stats for size classification
-  const diffStat = runCommand("git diff --stat HEAD", workingDir);
-  const diff = runCommand("git diff HEAD", workingDir);
-
   // Single API call to generate commit message
   const client = getAnthropicClient();
   const response = await client.messages.create({
@@ -128,10 +126,10 @@ ${confirmResult}
 ---
 
 DIFF STATS:
-${diffStat.output}
+${diffStat}
 
 DIFF (for context):
-${diff.output.slice(0, 8000)}${diff.output.length > 8000 ? "\n... (truncated)" : ""}
+${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}
 
 Generate a commit message based on the analysis and stats above.`,
       },
