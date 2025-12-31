@@ -11,6 +11,17 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /path/to/agent-framework/dist/hooks/post-tool-use.js"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": "",

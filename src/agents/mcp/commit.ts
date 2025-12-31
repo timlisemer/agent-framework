@@ -171,7 +171,7 @@ Generate a commit message based on the analysis and stats above.`,
   const hashResult = runCommand("git rev-parse --short HEAD", workingDir);
   const hash = hashResult.output.trim();
 
-  const output = `SIZE: ${parsed.size}\n${parsed.message}\nHASH: ${hash}`;
+  const output = `${confirmResult}\n\nSIZE: ${parsed.size}\n${parsed.message}\nHASH: ${hash}`;
 
   logToHomeAssistant({
     agent: "commit",

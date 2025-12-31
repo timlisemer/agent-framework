@@ -8,6 +8,8 @@ import { validatePlanIntent } from '../agents/hooks/plan-validate.js';
 import { checkErrorAcknowledgment } from '../agents/hooks/error-acknowledge.js';
 import { detectWorkaroundPattern } from '../utils/command-patterns.js';
 import { logToHomeAssistant } from '../utils/logger.js';
+import { markErrorAcknowledged } from '../utils/ack-cache.js';
+import { checkWithAppeal } from '../utils/pre-tool-use-utils.js';
 import {
   readTranscript,
   hasErrorPatterns,
@@ -193,22 +195,48 @@ async function main() {
     );
     if (ackResult.startsWith('BLOCK:')) {
       const reason = ackResult.substring(7).trim();
-      logToHomeAssistant({
-        agent: 'pre-tool-use-hook',
-        level: 'decision',
-        problem: `${input.tool_name} blocked for ignoring errors`,
-        answer: reason,
+
+      // Appeal the error-acknowledge denial
+      const transcript = await readTranscript(input.transcript_path, {
+        filter: TranscriptFilter.BOTH,
+        limit: MessageLimit.TEN,
       });
-      console.log(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason: `Error acknowledgment required: ${reason}`,
-          },
-        })
+      const appeal = await appealDenial(
+        input.tool_name,
+        input.tool_input,
+        transcript,
+        reason
       );
-      process.exit(0);
+
+      if (appeal.approved) {
+        // Mark error as acknowledged since appeal passed
+        markErrorAcknowledged(reason);
+        logToHomeAssistant({
+          agent: 'pre-tool-use-hook',
+          level: 'decision',
+          problem: `${input.tool_name} error-acknowledge appealed`,
+          answer: 'APPEALED - continuing',
+        });
+        // Continue to next checks (don't exit)
+      } else {
+        const finalReason = appeal.reason ?? reason;
+        logToHomeAssistant({
+          agent: 'pre-tool-use-hook',
+          level: 'decision',
+          problem: `${input.tool_name} blocked for ignoring errors`,
+          answer: finalReason,
+        });
+        console.log(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: `Error acknowledgment required: ${finalReason}`,
+            },
+          })
+        );
+        process.exit(0);
+      }
     }
   }
 
@@ -290,15 +318,17 @@ async function main() {
     }
   }
 
-  const decision = await approveTool(
-    input.tool_name,
-    input.tool_input,
-    projectDir
-  );
-
   const toolDescription = `${input.tool_name} with ${JSON.stringify(
     input.tool_input
   )}`;
+
+  // Tool approval with automatic appeal on denial
+  const decision = await checkWithAppeal(
+    () => approveTool(input.tool_name, input.tool_input, projectDir),
+    input.tool_name,
+    input.tool_input,
+    input.transcript_path
+  );
 
   logToHomeAssistant({
     agent: 'pre-tool-use-hook',
@@ -308,38 +338,8 @@ async function main() {
   });
 
   if (!decision.approved) {
-    // Layer 2: Appeal with transcript context
-    const transcript = await readTranscript(input.transcript_path, {
-      filter: TranscriptFilter.BOTH,
-      limit: MessageLimit.TEN,
-    });
-    const appeal = await appealDenial(
-      input.tool_name,
-      input.tool_input,
-      transcript,
-      decision.reason || 'No reason provided'
-    );
-
-    if (appeal.approved) {
-      logToHomeAssistant({
-        agent: 'pre-tool-use-hook',
-        level: 'decision',
-        problem: toolDescription,
-        answer: 'APPEALED',
-      });
-      console.log(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'allow',
-          },
-        })
-      );
-      process.exit(0); // Allow on successful appeal
-    }
-
     // Track workaround patterns for escalation
-    let finalReason = appeal.reason ?? decision.reason;
+    let finalReason = decision.reason;
     const pattern = detectWorkaroundPattern(input.tool_name, input.tool_input);
     if (pattern) {
       const denials = loadDenials();

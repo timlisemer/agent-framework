@@ -63,3 +63,13 @@ export function markErrorAcknowledged(errorSnippet: string): void {
   });
   saveAckCache(cache);
 }
+
+export function clearAckCache(): void {
+  try {
+    if (fs.existsSync(ACK_CACHE_FILE)) {
+      fs.unlinkSync(ACK_CACHE_FILE);
+    }
+  } catch {
+    // Ignore errors
+  }
+}

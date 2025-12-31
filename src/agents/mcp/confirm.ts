@@ -80,9 +80,6 @@ export async function runConfirmAgent(workingDir: string): Promise<string> {
 
 ## Verdict
 DECLINED: check failed with ${errorCount} error(s)`;
-    console.error("\n=== Confirm Agent Results ===");
-    console.error(result);
-    console.error("=============================\n");
     logToHomeAssistant({
       agent: "confirm",
       level: "decision",
@@ -117,10 +114,6 @@ ${gitDiff.output || "(no diff)"}`,
   });
 
   const output = extractTextFromResponse(response);
-
-  console.error("\n=== Confirm Agent Results ===");
-  console.error(output);
-  console.error("=============================\n");
 
   logToHomeAssistant({
     agent: "confirm",
