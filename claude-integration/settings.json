@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /path/to/agent-framework/dist/hooks/pre-tool-use.js"
+            "command": "node $HOME/.claude/hooks/hooks/pre-tool-use.js"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /path/to/agent-framework/dist/hooks/post-tool-use.js"
+            "command": "node $HOME/.claude/hooks/hooks/post-tool-use.js"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node /path/to/agent-framework/dist/hooks/stop-off-topic-check.js",
+            "command": "node $HOME/.claude/hooks/stop-off-topic-check.js",
             "timeout": 30
           }
         ]
