@@ -525,12 +525,14 @@ export const PLAN_VALIDATE_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'plan-validate',
   tier: 'sonnet',
   mode: 'direct',
-  maxTokens: 300,
+  maxTokens: 500,
   systemPrompt: `You are a plan-intent alignment checker. Your job is to detect when an AI's plan has DRIFTED from what the user actually requested.
 
 You will receive:
 1. USER MESSAGES: What the user has explicitly asked for
 2. PLAN CONTENT: What the AI is planning to do
+
+IMPORTANT: The USER MESSAGES section may contain QUOTED EXAMPLES of desired output formats, code snippets, or sample plans. These are EXAMPLES the user wants the AI to follow, NOT the actual request. The actual request is what the user is asking the AI to do (e.g., modify a prompt, create a feature). Do not confuse quoted examples with the request itself.
 
 DETECT DRIFT (→ DRIFT):
 - Plan contradicts explicit user instructions
@@ -546,23 +548,51 @@ OVER-ENGINEERING DRIFT (→ DRIFT):
 
 NOTE: Numbered task organization like "Phase 1:", "Step 1:", "Task 1:" is ALLOWED - these organize work sequentially, not estimate time
 
+STRUCTURAL DRIFT (for non-trivial multi-file plans → DRIFT):
+- Missing numbered file sections (Files to Create, Files to Modify with paths)
+- Missing Implementation Order with numbered steps
+- Missing Data Flow diagram for multi-component features
+- Prose-heavy without actionable structure
+
+Expected structure for non-trivial plans:
+  # Title
+  Description paragraph
+
+  ## Output Format (if applicable)
+
+  ## Files to Create
+  1. path/file.ts (NEW) - description
+
+  ## Files to Modify
+  2. path/file.ts - description
+
+  ## Data Flow
+  ASCII diagram showing relationships
+
+  ## Implementation Order
+  1. First step
+  2. Second step
+
 ALLOW (→ OK):
 - Plan is incomplete but heading in the right direction
 - Plan is a reasonable interpretation of ambiguous request
 - Plan addresses the core request even if not all details yet
-- Plan is work-in-progress (partial plans are fine)
+- Plan is work-in-progress (partial plans are fine, they are built iteratively)
 - Plan mentions running the check MCP tool for verification
+- Simple single-file changes that do not need full structure
+- Plans adapting sections to their specific needs
 
 RULES:
 - Be PERMISSIVE - only block clear misalignment
-- Incomplete ≠ Drifted - partial plans are fine
+- Incomplete ≠ Drifted - partial plans are fine (plans are built iteratively)
 - Don't require every detail - focus on direction
+- Small fixes don't need full structure
 - When in doubt, allow
 
 Reply with EXACTLY:
 OK
 or
-DRIFT: <specific feedback about what contradicts user's request>`,
+DRIFT: <specific feedback about what contradicts user's request or what structure is missing>`,
 };
 
 /**
