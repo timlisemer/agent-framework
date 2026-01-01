@@ -84,3 +84,13 @@ export const QUICK_CONTEXT_COUNTS: TranscriptReadOptions = {
 export const STYLE_DRIFT_COUNTS: TranscriptReadOptions = {
   counts: { user: 5 },
 };
+
+/**
+ * For validate-intent checks.
+ *
+ * Comprehensive user+assistant context without tool results.
+ * Focus is on request vs response alignment, not intermediate tool calls.
+ */
+export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
+  counts: { user: 10, assistant: 5 },
+};

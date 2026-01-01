@@ -42,6 +42,9 @@ export interface TranscriptReadOptions {
 
   /** Exclude system reminder messages (default: true) */
   excludeSystemReminders?: boolean;
+
+  /** Exclude slash command system prompts (default: true) */
+  excludeSlashCommandPrompts?: boolean;
 }
 
 /**
@@ -164,6 +167,26 @@ export function hasErrorPatterns(
   };
 }
 
+/**
+ * Detect if content is a slash command system prompt.
+ * These have YAML frontmatter with allowed-tools/description metadata.
+ */
+function isSlashCommandPrompt(content: string): boolean {
+  // Check for YAML frontmatter pattern at start
+  if (!content.startsWith("---")) {
+    return false;
+  }
+
+  // Look for slash command metadata indicators
+  const frontmatterEnd = content.indexOf("---", 3);
+  if (frontmatterEnd === -1) {
+    return false;
+  }
+
+  const frontmatter = content.slice(0, frontmatterEnd + 3);
+  return /allowed-tools:|description:/.test(frontmatter);
+}
+
 function extractTextFromContent(content: string | ContentBlock[]): string {
   if (typeof content === 'string') {
     return content;
@@ -215,7 +238,12 @@ export async function readTranscriptExact(
   transcriptPath: string,
   options: TranscriptReadOptions
 ): Promise<TranscriptReadResult> {
-  const { counts, toolResultOptions = {}, excludeSystemReminders = true } = options;
+  const {
+    counts,
+    toolResultOptions = {},
+    excludeSystemReminders = true,
+    excludeSlashCommandPrompts = true,
+  } = options;
 
   const targetUser = counts.user ?? 0;
   const targetAssistant = counts.assistant ?? 0;
@@ -272,6 +300,7 @@ export async function readTranscriptExact(
           targetUser,
           targetToolResult,
           excludeSystemReminders,
+          excludeSlashCommandPrompts,
           toolResultOptions,
           toolUseIdToName,
         });
@@ -303,16 +332,26 @@ function processUserEntry(
     targetUser: number;
     targetToolResult: number;
     excludeSystemReminders: boolean;
+    excludeSlashCommandPrompts: boolean;
     toolResultOptions: TranscriptReadOptions['toolResultOptions'];
     toolUseIdToName: Map<string, string>;
   }
 ): void {
-  const { targetUser, targetToolResult, excludeSystemReminders, toolResultOptions, toolUseIdToName } =
-    config;
+  const {
+    targetUser,
+    targetToolResult,
+    excludeSystemReminders,
+    excludeSlashCommandPrompts,
+    toolResultOptions,
+    toolUseIdToName,
+  } = config;
   const { trim = false, maxLines = 20, excludeToolNames = [] } = toolResultOptions ?? {};
 
   if (typeof msgContent === 'string') {
     if (excludeSystemReminders && msgContent.startsWith('<system-reminder>')) {
+      return;
+    }
+    if (excludeSlashCommandPrompts && isSlashCommandPrompt(msgContent)) {
       return;
     }
     if (collected.user.length < targetUser) {
@@ -338,6 +377,9 @@ function processUserEntry(
         }
       } else if (block.type === 'text' && block.text) {
         if (excludeSystemReminders && block.text.startsWith('<system-reminder>')) {
+          continue;
+        }
+        if (excludeSlashCommandPrompts && isSlashCommandPrompt(block.text)) {
           continue;
         }
         if (collected.user.length < targetUser) {

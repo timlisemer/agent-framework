@@ -30,8 +30,7 @@ import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
 /**
  * Review an appeal for a denied tool call.
  *
- * @param toolName - Name of the denied tool
- * @param toolInput - Input parameters for the tool
+ * @param toolDescription - Human-readable description of the tool call
  * @param transcript - Recent conversation context
  * @param originalReason - The original denial reason
  * @returns Approval result with optional new reason
@@ -39,8 +38,7 @@ import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
  * @example
  * ```typescript
  * const result = await appealDenial(
- *   'Bash',
- *   { command: 'curl ...' },
+ *   'Bash with {"command": "curl ..."}',
  *   transcript,
  *   'Network requests denied by default'
  * );
@@ -50,12 +48,10 @@ import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
  * ```
  */
 export async function appealDenial(
-  toolName: string,
-  toolInput: unknown,
+  toolDescription: string,
   transcript: string,
   originalReason: string
 ): Promise<{ approved: boolean; reason?: string }> {
-  const toolDescription = `${toolName} with ${JSON.stringify(toolInput)}`;
 
   // Run appeal evaluation via unified runner
   const initialResponse = await runAgent(

@@ -8,12 +8,19 @@ export interface CheckResult {
   reason?: string;
 }
 
+export interface CheckWithAppealOptions {
+  /** Custom context for appeal (overrides default toolDescription) */
+  appealContext?: string;
+  /** Callback when appeal succeeds */
+  onAppealSuccess?: () => void;
+}
+
 export async function checkWithAppeal(
   check: () => Promise<CheckResult>,
   toolName: string,
   toolInput: unknown,
   transcriptPath: string,
-  onAppealSuccess?: () => void
+  options?: CheckWithAppealOptions
 ): Promise<CheckResult> {
   const result = await check();
 
@@ -24,23 +31,24 @@ export async function checkWithAppeal(
   // Appeal the denial
   const transcriptResult = await readTranscriptExact(transcriptPath, APPEAL_COUNTS);
   const transcript = formatTranscriptResult(transcriptResult);
-  const appeal = await appealDenial(
-    toolName,
-    toolInput,
-    transcript,
-    result.reason || 'No reason provided'
-  );
 
-  const toolDescription = `${toolName} with ${JSON.stringify(toolInput).slice(0, 100)}`;
+  // Use custom appeal context if provided, otherwise default to tool description
+  const appealDescription = options?.appealContext ?? `${toolName} with ${JSON.stringify(toolInput).slice(0, 200)}`;
+
+  const appeal = await appealDenial(
+    appealDescription,
+    transcript,
+    result.reason || "No reason provided"
+  );
 
   if (appeal.approved) {
     await logToHomeAssistant({
-      agent: 'check-with-appeal',
-      level: 'decision',
-      problem: toolDescription,
-      answer: 'APPEALED',
+      agent: "check-with-appeal",
+      level: "decision",
+      problem: appealDescription,
+      answer: "APPEALED",
     });
-    onAppealSuccess?.();
+    options?.onAppealSuccess?.();
     return { approved: true };
   }
 

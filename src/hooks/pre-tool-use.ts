@@ -172,9 +172,9 @@ async function main() {
       counts: { user: 5, assistant: 5 },
     });
     const transcript = formatTranscriptResult(result);
+    const toolDescription = `${input.tool_name} with ${JSON.stringify(input.tool_input).slice(0, 200)}`;
     const appeal = await appealDenial(
-      input.tool_name,
-      input.tool_input,
+      toolDescription,
       transcript,
       "Confirm requires explicit user approval. Use /commit or explicitly request confirm."
     );
@@ -275,9 +275,9 @@ async function main() {
       // Appeal the error-acknowledge denial
       const appealResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
       const appealTranscript = formatTranscriptResult(appealResult);
+      const errorToolDescription = `${input.tool_name} with ${JSON.stringify(input.tool_input).slice(0, 200)}`;
       const appeal = await appealDenial(
-        input.tool_name,
-        input.tool_input,
+        errorToolDescription,
         appealTranscript,
         reason
       );
@@ -341,11 +341,13 @@ async function main() {
           const userMessages = planResult.user.map((m) => `USER: ${m.content}`).join("\n\n");
 
           // Wrap plan validation with appeal (like style-drift)
+          // Use minimal appealContext to avoid flooding appeal with plan content
           const validation = await checkWithAppeal(
             () => validatePlanIntent(content, userMessages),
             input.tool_name,
             input.tool_input,
-            input.transcript_path
+            input.transcript_path,
+            { appealContext: `Plan ${input.tool_name.toLowerCase()} to ${filePath}` }
           );
 
           if (!validation.approved) {

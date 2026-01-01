@@ -6,6 +6,7 @@ import { runCheckAgent } from "../agents/mcp/check.js";
 import { runConfirmAgent } from "../agents/mcp/confirm.js";
 import { runCommitAgent } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
+import { runValidateIntentAgent } from "../agents/mcp/validate-intent.js";
 import { initializeTelemetry } from "../telemetry/index.js";
 
 // Ensure PATH includes standard locations for subprocess spawning
@@ -83,6 +84,25 @@ server.registerTool(
   },
   async (args) => {
     const result = await runPushAgent(args.working_dir || process.cwd());
+    return { content: [{ type: "text", text: result }] };
+  }
+);
+
+server.registerTool(
+  "validate_intent",
+  {
+    title: "Validate Intent",
+    description: "Check if AI followed user intentions. Analyzes conversation, code changes, and plan file. Returns ALIGNED or DRIFTED with reason.",
+    inputSchema: {
+      working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
+      transcript_path: z.string().describe("Path to the conversation transcript file")
+    }
+  },
+  async (args) => {
+    const result = await runValidateIntentAgent(
+      args.working_dir || process.cwd(),
+      args.transcript_path
+    );
     return { content: [{ type: "text", text: result }] };
   }
 );
