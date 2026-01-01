@@ -85,10 +85,10 @@ Output EXACTLY this format:
 - Status: PASS | FAIL
 
 ## Errors
-<Quote each error exactly as it appears in output. Include file:line if present.>
+<Quote each error with full context needed to locate and fix it>
 
 ## Warnings
-<Quote each warning exactly as it appears in output. Include file:line if present.>
+<Quote each warning with full context needed to locate and fix it>
 
 CLASSIFICATION RULES:
 1. ERRORS are: compilation failures, type errors, syntax errors, and UNUSED CODE warnings
@@ -97,14 +97,21 @@ CLASSIFICATION RULES:
    - Unused code must be deleted, not suppressed with underscores, comments, or annotations
 4. Quote style: project uses double quotes ("") for all strings and imports
 
+CONTEXT PRESERVATION RULES (CRITICAL):
+- Include the COMMAND or STEP that produced each error (e.g., "docker buildx build", "tsc", "eslint")
+- For Docker errors: Quote the full failing instruction (ADD, RUN, COPY, etc.)
+- For TypeScript/linter errors: Include "file:line" format (e.g., "src/foo.ts:42")
+- For Dockerfile warnings: Always prefix with "Dockerfile:" (e.g., "Dockerfile:62")
+- Quote enough surrounding context to make errors ACTIONABLE, not just the error message
+- Example BAD: "ERROR: invalid response status 404"
+- Example GOOD: "[stage-1 3/15] ADD https://github.com/.../s6-overlay-amd64.tar.xz failed: ERROR 404"
+
 REPORTING RULES:
-- Quote important lines EXACTLY from command output
-- Filter out noise (progress bars, timing info, etc.)
-- Include file paths and line numbers when present
+- Filter out noise (progress bars, timing info, download progress, etc.)
 - Do NOT analyze what the errors mean
 - Do NOT suggest fixes or recommendations
 - Do NOT provide policy guidance
-- Just report what the tools said
+- Just report what the tools said with enough context to act on it
 - Status is FAIL if Errors > 0, PASS otherwise (warnings alone do not cause FAIL)`,
 };
 
