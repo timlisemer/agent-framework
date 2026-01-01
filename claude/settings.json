@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENT_FRAMEWORK_ROOT=/path/to/agent-framework node $HOME/.claude/hooks/pre-tool-use.js"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENT_FRAMEWORK_ROOT=/path/to/agent-framework node $HOME/.claude/hooks/post-tool-use.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "AGENT_FRAMEWORK_ROOT=/path/to/agent-framework node $HOME/.claude/hooks/stop-off-topic-check.js",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

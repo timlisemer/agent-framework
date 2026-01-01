@@ -415,20 +415,45 @@ async function main() {
         (input.tool_name === "Write" || input.tool_name === "Edit") &&
         filePath.endsWith("CLAUDE.md")
       ) {
-        const content =
-          input.tool_name === "Write"
-            ? (input.tool_input as { content?: string }).content
-            : (input.tool_input as { new_string?: string }).new_string;
+        let content: string | undefined;
+        if (input.tool_name === "Write") {
+          content = (input.tool_input as { content?: string }).content;
+        } else {
+          // Edit tool - reconstruct full file content after edit
+          const toolInput = input.tool_input as {
+            old_string?: string;
+            new_string?: string;
+          };
+          try {
+            const currentContent = fs.readFileSync(filePath, "utf-8");
+            if (toolInput.old_string && toolInput.new_string) {
+              content = currentContent.replace(
+                toolInput.old_string,
+                toolInput.new_string
+              );
+            }
+          } catch {
+            content = undefined; // File doesn't exist - skip validation
+          }
+        }
 
         if (content) {
-          const validation = await validateClaudeMd(content, input.transcript_path);
+          const validation = await checkWithAppeal(
+            () => validateClaudeMd(content!, input.transcript_path),
+            input.tool_name,
+            input.tool_input,
+            input.transcript_path,
+            {
+              appealContext: `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
+            }
+          );
 
           if (!validation.approved) {
             logToHomeAssistant({
               agent: "pre-tool-use-hook",
               level: "decision",
               problem: `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
-              answer: `REJECTED: ${validation.reason.slice(0, 200)}`,
+              answer: `REJECTED: ${(validation.reason ?? "").slice(0, 200)}`,
             });
             console.log(
               JSON.stringify({
