@@ -330,6 +330,34 @@ async function main() {
         (input.tool_name === "Write" || input.tool_name === "Edit") &&
         isPathInDirectory(filePath, plansDir)
       ) {
+        // Skip validation if ExitPlanMode was recently approved
+        // This means user approved the plan and AI is now writing it
+        const recentContext = await readTranscriptExact(input.transcript_path, {
+          counts: { toolResult: 10 },
+        });
+        const hasExitPlanModeApproval = recentContext.toolResult.some(
+          (r) =>
+            r.content.includes("ExitPlanMode") &&
+            (r.content.includes("approved") || r.content.includes("allow"))
+        );
+        if (hasExitPlanModeApproval) {
+          logToHomeAssistant({
+            agent: "pre-tool-use-hook",
+            level: "info",
+            problem: `Plan ${input.tool_name.toLowerCase()} to ${filePath}`,
+            answer: "ExitPlanMode approved - skipping validation",
+          });
+          console.log(
+            JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "allow",
+              },
+            })
+          );
+          process.exit(0);
+        }
+
         // Write uses 'content', Edit uses 'new_string'
         const content =
           input.tool_name === "Write"
@@ -337,13 +365,14 @@ async function main() {
             : (input.tool_input as { new_string?: string }).new_string;
         if (content) {
           const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
-          // Format only user messages for plan validation
-          const userMessages = planResult.user.map((m) => `USER: ${m.content}`).join("\n\n");
+          // Format both user and assistant messages for plan validation
+          // Assistant context helps catch user approvals and confirmations
+          const conversationContext = formatTranscriptResult(planResult);
 
           // Wrap plan validation with appeal (like style-drift)
           // Use minimal appealContext to avoid flooding appeal with plan content
           const validation = await checkWithAppeal(
-            () => validatePlanIntent(content, userMessages),
+            () => validatePlanIntent(content, conversationContext),
             input.tool_name,
             input.tool_input,
             input.transcript_path,

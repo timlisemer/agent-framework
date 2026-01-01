@@ -35,9 +35,11 @@ export const ERROR_CHECK_COUNTS: TranscriptReadOptions = {
  * Includes both user and assistant messages for context.
  * More messages to understand conversation flow.
  * No tool results - appeal focuses on user intent, not tool output.
+ * Includes first user message to capture initial request context.
  */
 export const APPEAL_COUNTS: TranscriptReadOptions = {
-  counts: { user: 5, assistant: 5 },
+  counts: { user: 10, assistant: 10 },
+  includeFirstUserMessage: true,
 };
 
 /**
@@ -58,11 +60,13 @@ export const OFF_TOPIC_COUNTS: TranscriptReadOptions = {
 /**
  * For plan drift validation.
  *
- * Only user messages - checking if plan matches user's request.
- * Guarantees exactly 10 user messages (or all available).
+ * User messages with assistant context - checking if plan matches user's request.
+ * Includes assistant messages to see user approvals and confirmations.
+ * Always includes first user message to capture initial request.
  */
 export const PLAN_VALIDATE_COUNTS: TranscriptReadOptions = {
-  counts: { user: 10 },
+  counts: { user: 20, assistant: 10 },
+  includeFirstUserMessage: true,
 };
 
 /**

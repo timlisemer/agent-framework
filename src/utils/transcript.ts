@@ -45,6 +45,14 @@ export interface TranscriptReadOptions {
 
   /** Exclude slash command system prompts (default: true) */
   excludeSlashCommandPrompts?: boolean;
+
+  /**
+   * Always include the first user message (initial request).
+   * Useful for plan validation where the original task context matters.
+   * If true, scans forward from line 0 after backwards scan and prepends
+   * the first user message if not already collected.
+   */
+  includeFirstUserMessage?: boolean;
 }
 
 /**
@@ -243,6 +251,7 @@ export async function readTranscriptExact(
     toolResultOptions = {},
     excludeSystemReminders = true,
     excludeSlashCommandPrompts = true,
+    includeFirstUserMessage = false,
   } = options;
 
   const targetUser = counts.user ?? 0;
@@ -312,6 +321,50 @@ export async function readTranscriptExact(
       }
     } catch {
       // Skip malformed
+    }
+  }
+
+  // If includeFirstUserMessage is true, ensure we have the first user message
+  if (includeFirstUserMessage && collected.user.length > 0) {
+    const firstCollectedIndex = collected.user[0].index;
+
+    // Only scan forward if first message might not be in our collection
+    if (firstCollectedIndex > 0) {
+      // Scan forward to find the first valid user message
+      for (let i = 0; i < allLines.length; i++) {
+        if (i >= firstCollectedIndex) break; // Stop at our earliest collected message
+
+        try {
+          const entry: TranscriptEntry = JSON.parse(allLines[i]);
+          if (!entry.message || entry.message.role !== "user") continue;
+
+          const msgContent = entry.message.content;
+          let text: string | undefined;
+
+          if (typeof msgContent === "string") {
+            if (excludeSystemReminders && msgContent.startsWith("<system-reminder>")) continue;
+            if (excludeSlashCommandPrompts && isSlashCommandPrompt(msgContent)) continue;
+            text = msgContent;
+          } else if (Array.isArray(msgContent)) {
+            for (const block of msgContent) {
+              if (block.type === "text" && block.text) {
+                if (excludeSystemReminders && block.text.startsWith("<system-reminder>")) continue;
+                if (excludeSlashCommandPrompts && isSlashCommandPrompt(block.text)) continue;
+                text = block.text;
+                break;
+              }
+            }
+          }
+
+          if (text) {
+            // Found the first user message - prepend it if not already there
+            collected.user.unshift({ role: "user", content: text, index: i });
+            break;
+          }
+        } catch {
+          // Skip malformed
+        }
+      }
     }
   }
 
