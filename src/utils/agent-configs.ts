@@ -399,6 +399,7 @@ OVERTURN TO APPROVE when:
 - User invoked a slash command requiring this operation (/push, /commit)
 - User explicitly confirmed when asked
 - The user knowingly wants this despite the technical restriction
+- User said "override", "continue anyway", "proceed despite", "ignore the error", or similar override language
 
 OVERTURN WITH NEW REASON when:
 - User asked for X but AI is autonomously doing Y (clear mismatch)
@@ -532,8 +533,10 @@ DETECT DRIFT (→ DRIFT):
 
 OVER-ENGINEERING DRIFT (→ DRIFT):
 - Plan includes testing/verification sections with manual test instructions - verification should reference the check MCP tool only
-- Plan includes time estimates or timeline phases like "Week 1:", "Day 1:", "Phase 1:"
+- Plan includes time estimates like "Week 1:", "Day 1:", "takes 2-3 days", "Month 1:"
 - Plan includes manual build/check commands like "make check", "npm run build", "tsc" - these should use the check MCP tool instead
+
+NOTE: Numbered task organization like "Phase 1:", "Step 1:", "Task 1:" is ALLOWED - these organize work sequentially, not estimate time
 
 ALLOW (→ OK):
 - Plan is incomplete but heading in the right direction

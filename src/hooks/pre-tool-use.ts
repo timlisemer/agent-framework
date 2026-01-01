@@ -338,7 +338,14 @@ async function main() {
           const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
           // Format only user messages for plan validation
           const userMessages = planResult.user.map((m) => `USER: ${m.content}`).join("\n\n");
-          const validation = await validatePlanIntent(content, userMessages);
+
+          // Wrap plan validation with appeal (like style-drift)
+          const validation = await checkWithAppeal(
+            () => validatePlanIntent(content, userMessages),
+            input.tool_name,
+            input.tool_input,
+            input.transcript_path
+          );
 
           if (!validation.approved) {
             logToHomeAssistant({

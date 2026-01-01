@@ -225,6 +225,8 @@ export async function runAgent(
   config: AgentConfig,
   input: AgentInput
 ): Promise<string> {
+  const startTime = Date.now();
+
   // Combine prompt and context
   const fullPrompt = input.context
     ? `${input.prompt}\n\n${input.context}`
@@ -236,12 +238,16 @@ export async function runAgent(
       ? await runSdkAgent(config, fullPrompt)
       : await runDirectAgent(config, fullPrompt);
 
+  const latencyMs = Date.now() - startTime;
+
   // Log execution (fire and forget - don't await)
   logToHomeAssistant({
     agent: config.name,
     level: 'info',
     problem: config.workingDir || 'unknown',
-    answer: result.slice(0, 500), // Truncate for logging
+    answer: result.slice(0, 500),
+    latencyMs,
+    modelTier: config.tier,
   });
 
   return result;
