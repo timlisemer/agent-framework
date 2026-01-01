@@ -42,5 +42,6 @@ const projectRoot = findProjectRoot(scriptPath);
 const envPath = resolve(projectRoot, ".env");
 
 if (existsSync(envPath)) {
-  config({ path: envPath });
+  config({ path: envPath, quiet: true });
+  console.error("[agent-framework] env loaded");
 }
