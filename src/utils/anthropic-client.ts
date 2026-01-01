@@ -35,7 +35,8 @@
  * ```
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import "./load-env.js";
+import Anthropic from "@anthropic-ai/sdk";
 
 let clientInstance: Anthropic | null = null;
 
