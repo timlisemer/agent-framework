@@ -6,6 +6,8 @@ import { existsSync, lstatSync, readlinkSync } from "fs";
 /**
  * Load .env from the project root, following symlinks to find the real location.
  * This ensures env vars are loaded even when scripts are symlinked elsewhere.
+ *
+ * For performance, set AGENT_FRAMEWORK_ROOT to skip the expensive FS traversal.
  */
 function findProjectRoot(startPath: string): string {
   let currentPath = startPath;
@@ -37,11 +39,21 @@ function findProjectRoot(startPath: string): string {
   return dirname(currentPath);
 }
 
-const scriptPath = fileURLToPath(import.meta.url);
-const projectRoot = findProjectRoot(scriptPath);
+function getProjectRoot(): string {
+  // Fast path: use explicit env var (avoids 10+ sync FS calls)
+  const envRoot = process.env.AGENT_FRAMEWORK_ROOT;
+  if (envRoot && existsSync(resolve(envRoot, ".env"))) {
+    return envRoot;
+  }
+
+  // Slow path: resolve via filesystem (fallback for MCP server, dev mode)
+  const scriptPath = fileURLToPath(import.meta.url);
+  return findProjectRoot(scriptPath);
+}
+
+const projectRoot = getProjectRoot();
 const envPath = resolve(projectRoot, ".env");
 
 if (existsSync(envPath)) {
   config({ path: envPath, quiet: true });
-  console.error("[agent-framework] env loaded");
 }

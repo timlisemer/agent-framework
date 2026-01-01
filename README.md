@@ -193,6 +193,9 @@ Common matcher patterns:
 # Required
 ANTHROPIC_API_KEY=sk-ant-...
 
+# Required for hooks - avoids expensive filesystem traversal on every hook invocation
+AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
+
 # Optional - set by Claude Code automatically
 CLAUDE_PROJECT_DIR=/path/to/project
 
