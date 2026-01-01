@@ -1,3 +1,4 @@
+import "../utils/load-env.js";
 import type { TelemetryConfig, TelemetryEvent } from "./types.js";
 import { TelemetryQueue } from "./queue.js";
 import { sanitizeToolInput } from "./sanitizer.js";

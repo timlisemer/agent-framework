@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node $HOME/.claude/hooks/hooks/pre-tool-use.js"
+            "command": "node $HOME/.claude/hooks/pre-tool-use.js"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node $HOME/.claude/hooks/hooks/post-tool-use.js"
+            "command": "node $HOME/.claude/hooks/post-tool-use.js"
           }
         ]
       }
