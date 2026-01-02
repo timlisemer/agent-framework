@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node $AGENT_FRAMEWORK_ROOT/dist/hooks/stop-off-topic-check.js",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/hooks/stop-response-check.js",
             "timeout": 30
           }
         ]

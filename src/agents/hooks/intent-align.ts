@@ -1,7 +1,7 @@
 /**
- * First Response Intent Agent - First Tool Call Alignment Check
+ * Intent Alignment Agent - Tool Call Alignment Check
  *
- * This agent validates that the AI's first tool call after a user message
+ * This agent validates that the AI's tool call or stop response
  * aligns with what the user actually requested. It catches scenarios where
  * the AI ignores user questions or does something unrelated to the request.
  *
@@ -26,7 +26,7 @@
  * - Passing it as context to the agent
  * - Agent verifies the tool matches both user request AND acknowledgment
  *
- * @module first-response-intent
+ * @module intent-align
  */
 
 import { getModelId } from "../../types.js";
@@ -41,37 +41,39 @@ import {
   FIRST_RESPONSE_STOP_COUNTS,
 } from "../../utils/transcript-presets.js";
 
-export interface FirstResponseCheckResult {
-  isFirstToolCall: boolean;
+export interface IntentAlignmentResult {
   approved: boolean;
   reason?: string;
 }
 
 /**
- * Check if the AI's first tool call after a user message aligns with the request.
+ * Check if the AI's tool call aligns with the user's request.
+ *
+ * Note: The "first tool call" gating is now handled by rewind-cache.ts.
+ * This function always runs the full alignment check when called.
  *
  * @param toolName - Name of the tool being called
  * @param toolInput - Input parameters for the tool
  * @param transcriptPath - Path to the transcript file
- * @returns Check result with isFirstToolCall flag, approval status, and optional reason
+ * @returns Check result with approval status and optional reason
  *
  * @example
  * ```typescript
- * const result = await checkFirstResponseIntent(
+ * const result = await checkIntentAlignment(
  *   'Edit',
  *   { file_path: 'src/auth.ts', ... },
  *   transcriptPath
  * );
- * if (result.isFirstToolCall && !result.approved) {
- *   // Block: AI's first action doesn't match user request
+ * if (!result.approved) {
+ *   // Block: AI's action doesn't match user request
  * }
  * ```
  */
-export async function checkFirstResponseIntent(
+export async function checkIntentAlignment(
   toolName: string,
   toolInput: unknown,
   transcriptPath: string
-): Promise<FirstResponseCheckResult> {
+): Promise<IntentAlignmentResult> {
   // Read transcript to get context
   const result = await readTranscriptExact(
     transcriptPath,
@@ -80,7 +82,7 @@ export async function checkFirstResponseIntent(
 
   if (result.user.length === 0) {
     // No user message found - skip check
-    return { isFirstToolCall: false, approved: true };
+    return { approved: true };
   }
 
   // Get last user message
@@ -110,7 +112,7 @@ Input: ${JSON.stringify(toolInput, null, 2).slice(0, 500)}`;
   const initialResponse = await runAgent(
     { ...FIRST_RESPONSE_INTENT_AGENT },
     {
-      prompt: "Check if this first tool call aligns with the user's request.",
+      prompt: "Check if this tool call aligns with the user's request.",
       context,
     }
   );
@@ -131,34 +133,33 @@ Input: ${JSON.stringify(toolInput, null, 2).slice(0, 500)}`;
 
   if (decision.startsWith("OK")) {
     logToHomeAssistant({
-      agent: "first-response-intent",
+      agent: "intent-align",
       level: "decision",
-      problem: `First tool: ${toolName}`,
+      problem: `Tool: ${toolName}`,
       answer: "OK - aligned with request",
     });
-    return { isFirstToolCall: true, approved: true };
+    return { approved: true };
   }
 
   // Extract block reason
   const reason = decision.startsWith("BLOCK: ")
     ? decision.substring(7).trim()
-    : `Misaligned first response: ${decision}`;
+    : `Misaligned response: ${decision}`;
 
   logToHomeAssistant({
-    agent: "first-response-intent",
+    agent: "intent-align",
     level: "decision",
-    problem: `First tool: ${toolName}`,
+    problem: `Tool: ${toolName}`,
     answer: `BLOCKED: ${reason}`,
   });
 
   return {
-    isFirstToolCall: true,
     approved: false,
     reason,
   };
 }
 
-export interface StopCheckResult {
+export interface StopIntentResult {
   approved: boolean;
   reason?: string;
   systemMessage?: string;
@@ -269,9 +270,9 @@ function hasPlainTextQuestion(assistantText: string): {
  * @param transcriptPath - Path to the transcript file
  * @returns Check result with approval status, reason, and optional system message
  */
-export async function checkFirstResponseIntentForStop(
+export async function checkStopIntentAlignment(
   transcriptPath: string
-): Promise<StopCheckResult> {
+): Promise<StopIntentResult> {
   const result = await readTranscriptExact(
     transcriptPath,
     FIRST_RESPONSE_STOP_COUNTS

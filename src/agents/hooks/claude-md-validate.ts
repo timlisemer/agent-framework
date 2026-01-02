@@ -23,10 +23,18 @@
 
 import { runAgent } from '../../utils/agent-runner.js';
 import { CLAUDE_MD_VALIDATE_AGENT } from '../../utils/agent-configs.js';
+import { setRewindSession, detectRewind } from '../../utils/rewind-cache.js';
 
 // Session cache for GitHub rules (fetched once per session)
 let cachedRules: string | null = null;
 let cacheSessionId: string | null = null;
+
+/**
+ * Clear the cached rules (called on rewind detection).
+ */
+export function clearCachedRules(): void {
+  cachedRules = null;
+}
 
 /**
  * Validate CLAUDE.md content against project conventions.
@@ -50,6 +58,15 @@ export async function validateClaudeMd(
   content: string,
   sessionId: string
 ): Promise<{ approved: boolean; reason: string }> {
+  // Set session for rewind detection
+  setRewindSession(sessionId);
+
+  // Check for rewind - if detected, clear cached rules
+  const rewound = await detectRewind(sessionId);
+  if (rewound) {
+    cachedRules = null;
+  }
+
   // Invalidate cache on new session
   if (cacheSessionId !== sessionId) {
     cachedRules = null;

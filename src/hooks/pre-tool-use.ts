@@ -9,10 +9,17 @@ import { validatePlanIntent } from "../agents/hooks/plan-validate.js";
 import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
-import { checkFirstResponseIntent } from "../agents/hooks/first-response-intent.js";
+import { checkIntentAlignment } from "../agents/hooks/intent-align.js";
 import { detectWorkaroundPattern } from "../utils/command-patterns.js";
 import { logToHomeAssistant } from "../utils/logger.js";
 import { markErrorAcknowledged, setSession, checkUserInteraction } from "../utils/ack-cache.js";
+import {
+  setRewindSession,
+  detectRewind,
+  recordUserMessage,
+  isFirstResponseChecked,
+  markFirstResponseChecked,
+} from "../utils/rewind-cache.js";
 import { checkWithAppeal } from "../utils/pre-tool-use-utils.js";
 import {
   readTranscriptExact,
@@ -165,6 +172,18 @@ async function main() {
   // Set session ID for cache invalidation on new session
   setSession(input.transcript_path);
   setDenialSession(input.transcript_path);
+  setRewindSession(input.transcript_path);
+
+  // Detect rewind - if user rewound, clear all caches
+  const rewound = await detectRewind(input.transcript_path);
+  if (rewound) {
+    logToHomeAssistant({
+      agent: "pre-tool-use-hook",
+      level: "info",
+      problem: "Rewind detected",
+      answer: "Cleared all caches, re-validating fresh",
+    });
+  }
 
   // Block confirm tool from Claude Code - requires explicit user approval
   // Internal agents (like commit) call runConfirmAgent() directly, bypassing this hook
@@ -242,17 +261,21 @@ async function main() {
     process.exit(0);
   }
 
-  // First-response-intent check - detect if AI's first tool call ignores user question/request
+  // First-response intent check - detect if AI's first tool call ignores user question/request
   // Only check for action tools (Edit, Write, Bash, etc.) - investigation tools are fine
+  // Gate: only run once per user turn (reset when user sends new message or rewinds)
   const ACTION_TOOLS = ["Edit", "Write", "NotebookEdit", "Bash", "Agent", "Task"];
-  if (ACTION_TOOLS.includes(input.tool_name)) {
-    const intentResult = await checkFirstResponseIntent(
+  if (ACTION_TOOLS.includes(input.tool_name) && !isFirstResponseChecked()) {
+    const intentResult = await checkIntentAlignment(
       input.tool_name,
       input.tool_input,
       input.transcript_path
     );
 
-    if (intentResult.isFirstToolCall && !intentResult.approved) {
+    // Mark as checked so we don't run again for subsequent tool calls in same turn
+    markFirstResponseChecked();
+
+    if (!intentResult.approved) {
       // Appeal the denial
       const appealResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
       const appealTranscript = formatTranscriptResult(appealResult);
@@ -296,8 +319,12 @@ async function main() {
   const errorCheckTranscript = formatTranscriptResult(errorCheckResult);
 
   // Clear ack cache if user has sent a new message (any user interaction = fresh start)
-  const lastUserMessage = errorCheckResult.user[errorCheckResult.user.length - 1]?.content;
-  checkUserInteraction(lastUserMessage);
+  const lastUserMessage = errorCheckResult.user[errorCheckResult.user.length - 1];
+  if (lastUserMessage) {
+    checkUserInteraction(lastUserMessage.content);
+    // Record user message for rewind detection
+    recordUserMessage(lastUserMessage.content, lastUserMessage.index);
+  }
 
   // Only check TOOL_RESULT lines for error patterns to avoid false positives from Read tool (source code)
   const quickCheck = hasErrorPatterns(errorCheckTranscript, { toolResultsOnly: true });
