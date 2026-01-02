@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "AGENT_FRAMEWORK_ROOT=/path/to/agent-framework node $HOME/.claude/hooks/pre-tool-use.js"
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/hooks/pre-tool-use.js"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "AGENT_FRAMEWORK_ROOT=/path/to/agent-framework node $HOME/.claude/hooks/post-tool-use.js"
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/hooks/post-tool-use.js"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "AGENT_FRAMEWORK_ROOT=/path/to/agent-framework node $HOME/.claude/hooks/stop-off-topic-check.js",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/hooks/stop-off-topic-check.js",
             "timeout": 30
           }
         ]

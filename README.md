@@ -81,13 +81,32 @@ npm install
 # Build
 npm run build
 
-# Register MCP server with Claude Code (see claude/mcp.json for config)
-claude mcp add agent-framework node $(pwd)/dist/mcp/server.js
+# Set env var (add to shell profile)
+export AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
 
-# Symlink to ~/.claude:
-ln -s $(pwd)/dist/hooks ~/.claude/hooks
-ln -s $(pwd)/claude/commands ~/.claude/commands
-ln -s $(pwd)/claude/settings.json ~/.claude/settings.json
+# Register MCP server with Claude Code
+claude mcp add agent-framework node $AGENT_FRAMEWORK_ROOT/dist/mcp/server.js
+
+# Symlink commands (slash commands like /check, /commit)
+ln -s $AGENT_FRAMEWORK_ROOT/claude/commands ~/.claude/commands
+
+# Symlink skills (auto-applied by Claude when relevant)
+ln -s $AGENT_FRAMEWORK_ROOT/claude/skills ~/.claude/skills
+
+# Copy settings.json (hooks use $AGENT_FRAMEWORK_ROOT internally)
+cp $AGENT_FRAMEWORK_ROOT/claude/settings.json ~/.claude/settings.json
+```
+
+For manual MCP config (alternative to `claude mcp add`):
+```json
+{
+  "mcpServers": {
+    "agent-framework": {
+      "command": "node",
+      "args": ["/path/to/agent-framework/dist/mcp/server.js"]
+    }
+  }
+}
 ```
 
 ## Claude Code Tool Names

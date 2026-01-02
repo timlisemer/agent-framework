@@ -49,10 +49,9 @@ Tool Call → Auto-approve low-risk → error-acknowledge check → Path-based c
 
 ```
 claude/           # Claude Code integration (symlink targets)
-  commands/       # Skill documentation (check.md, commit.md, etc.)
-  skills/         # Future skill definitions
-  mcp.json        # MCP server config
-  settings.json   # Hook configuration
+  commands/       # Slash commands (check.md, commit.md, etc.)
+  skills/         # Skills (pure Markdown, auto-applied by Claude)
+  settings.json   # Hook configuration (uses $AGENT_FRAMEWORK_ROOT)
 src/
   agents/
     mcp/          # MCP-exposed agents: check, confirm, commit, push, validate-intent
@@ -60,7 +59,7 @@ src/
   hooks/          # Claude Code hook entry points
   mcp/            # MCP server
   utils/          # Shared utilities
-dist/             # Build output (symlink ~/.claude/hooks here)
+dist/             # Build output (hooks executed from here)
 ```
 
 See `ARCHITECTURE.md` for detailed documentation on design decisions.
@@ -80,13 +79,18 @@ See `ARCHITECTURE.md` for detailed documentation on design decisions.
 ## Integration
 
 ```bash
-# Register MCP server
-claude mcp add agent-framework node $(pwd)/dist/mcp/server.js
+# Set env var (add to shell profile)
+export AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
 
-# Symlink to ~/.claude:
-ln -s $(pwd)/dist/hooks ~/.claude/hooks
-ln -s $(pwd)/claude/commands ~/.claude/commands
-ln -s $(pwd)/claude/settings.json ~/.claude/settings.json
+# Register MCP server
+claude mcp add agent-framework node $AGENT_FRAMEWORK_ROOT/dist/mcp/server.js
+
+# Symlink commands and skills
+ln -s $AGENT_FRAMEWORK_ROOT/claude/commands ~/.claude/commands
+ln -s $AGENT_FRAMEWORK_ROOT/claude/skills ~/.claude/skills
+
+# Copy settings.json (hooks use $AGENT_FRAMEWORK_ROOT internally)
+cp $AGENT_FRAMEWORK_ROOT/claude/settings.json ~/.claude/settings.json
 ```
 
 ## Testing MCP Server
@@ -100,6 +104,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 ## Environment Variables
 
 - `ANTHROPIC_API_KEY` - Required
+- `AGENT_FRAMEWORK_ROOT` - Required, path to agent-framework repo
 - `CLAUDE_PROJECT_DIR` - Set automatically by Claude Code
 - `WEBHOOK_ID_AGENT_LOGS` - Optional, enables Home Assistant logging
 

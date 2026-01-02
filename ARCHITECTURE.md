@@ -6,14 +6,13 @@ This document explains the architectural decisions in the agent-framework.
 
 ```
 claude/                             # Claude Code integration (symlink targets)
-  commands/                         # Skill documentation
+  commands/                         # Slash commands (/check, /commit, etc.)
     check.md
     commit.md
     confirm.md
     push.md
-  skills/                           # Future skill definitions
-  mcp.json                          # MCP server registration config
-  settings.json                     # Hook configuration
+  skills/                           # Skills (pure Markdown, auto-applied by Claude)
+  settings.json                     # Hook configuration (uses $AGENT_FRAMEWORK_ROOT)
 
 src/                                # TypeScript source
   types.ts                          # Core types and model IDs
@@ -60,7 +59,7 @@ src/                                # TypeScript source
     command-patterns.ts             # Blacklist pattern detection
 
 dist/                               # Compiled JavaScript (build output)
-  hooks/                            # Hook entry points (symlink ~/.claude/hooks here)
+  hooks/                            # Hook entry points (executed via $AGENT_FRAMEWORK_ROOT)
   mcp/server.js                     # MCP server entry point
   agents/                           # Compiled agents
   utils/                            # Compiled utilities
