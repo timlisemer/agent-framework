@@ -41,6 +41,9 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bnpm\s+run\s+(build|check)\b/, name: 'npm build/check', alternative: 'Use mcp__agent-framework__check' },
   { pattern: /\bcargo\s+(build|check)\b/, name: 'cargo build/check', alternative: 'Use mcp__agent-framework__check' },
   { pattern: /\b(tsc|npx\s+tsc)\b/, name: 'tsc', alternative: 'Use mcp__agent-framework__check' },
+
+  // Nix formatting - should use check tool
+  { pattern: /\balejandra\b/, name: 'alejandra', alternative: 'Use mcp__agent-framework__check' },
 ];
 
 /**
@@ -56,7 +59,7 @@ export const WORKAROUND_PATTERNS: Record<string, string[]> = {
     'cargo check',
   ],
   build: ['make build', 'npm run build', 'cargo build'],
-  lint: ['eslint', 'prettier', 'npm run lint'],
+  lint: ['eslint', 'prettier', 'npm run lint', 'alejandra'],
 };
 
 /**
