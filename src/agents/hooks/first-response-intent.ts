@@ -1,0 +1,350 @@
+/**
+ * First Response Intent Agent - First Tool Call Alignment Check
+ *
+ * This agent validates that the AI's first tool call after a user message
+ * aligns with what the user actually requested. It catches scenarios where
+ * the AI ignores user questions or does something unrelated to the request.
+ *
+ * ## FLOW
+ *
+ * 1. Read transcript to get last user message and any AI acknowledgment
+ * 2. Run sonnet agent to check alignment
+ * 3. Retry if format is invalid
+ * 4. Return OK or BLOCK with reason
+ *
+ * ## KEY SCENARIOS DETECTED
+ *
+ * - User asks question, AI does tool call instead of answering
+ * - User requests X, AI does Y (unrelated action)
+ * - User says stop/explain, AI continues with tools
+ * - AI acknowledged X but then did Y
+ *
+ * ## ACKNOWLEDGMENT HANDLING
+ *
+ * The "possible but not required thought/ack message" is handled by:
+ * - Extracting any assistant text AFTER the last user message
+ * - Passing it as context to the agent
+ * - Agent verifies the tool matches both user request AND acknowledgment
+ *
+ * @module first-response-intent
+ */
+
+import { getModelId } from "../../types.js";
+import { runAgent } from "../../utils/agent-runner.js";
+import { FIRST_RESPONSE_INTENT_AGENT } from "../../utils/agent-configs.js";
+import { getAnthropicClient } from "../../utils/anthropic-client.js";
+import { logToHomeAssistant } from "../../utils/logger.js";
+import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { readTranscriptExact } from "../../utils/transcript.js";
+import {
+  FIRST_RESPONSE_INTENT_COUNTS,
+  FIRST_RESPONSE_STOP_COUNTS,
+} from "../../utils/transcript-presets.js";
+
+export interface FirstResponseCheckResult {
+  isFirstToolCall: boolean;
+  approved: boolean;
+  reason?: string;
+}
+
+/**
+ * Check if the AI's first tool call after a user message aligns with the request.
+ *
+ * @param toolName - Name of the tool being called
+ * @param toolInput - Input parameters for the tool
+ * @param transcriptPath - Path to the transcript file
+ * @returns Check result with isFirstToolCall flag, approval status, and optional reason
+ *
+ * @example
+ * ```typescript
+ * const result = await checkFirstResponseIntent(
+ *   'Edit',
+ *   { file_path: 'src/auth.ts', ... },
+ *   transcriptPath
+ * );
+ * if (result.isFirstToolCall && !result.approved) {
+ *   // Block: AI's first action doesn't match user request
+ * }
+ * ```
+ */
+export async function checkFirstResponseIntent(
+  toolName: string,
+  toolInput: unknown,
+  transcriptPath: string
+): Promise<FirstResponseCheckResult> {
+  // Read transcript to get context
+  const result = await readTranscriptExact(
+    transcriptPath,
+    FIRST_RESPONSE_INTENT_COUNTS
+  );
+
+  if (result.user.length === 0) {
+    // No user message found - skip check
+    return { isFirstToolCall: false, approved: true };
+  }
+
+  // Get last user message
+  const lastUserMessage = result.user[result.user.length - 1];
+  const lastUserIndex = lastUserMessage.index;
+  const userRequest = lastUserMessage.content;
+
+  // Get assistant messages AFTER the last user message (acknowledgments)
+  const assistantAfterUser = result.assistant.filter(
+    (msg) => msg.index > lastUserIndex
+  );
+
+  // Combine any acknowledgment text
+  const ackText = assistantAfterUser.map((m) => m.content).join("\n").trim();
+
+  const toolDescription = `${toolName} with ${JSON.stringify(toolInput).slice(0, 300)}`;
+
+  // Build context for the agent
+  const context = `USER MESSAGE:
+${userRequest}
+
+${ackText ? `AI ACKNOWLEDGMENT (text before this tool call):\n${ackText}\n` : ""}TOOL CALL:
+Tool: ${toolName}
+Input: ${JSON.stringify(toolInput, null, 2).slice(0, 500)}`;
+
+  // Run alignment check via unified runner
+  const initialResponse = await runAgent(
+    { ...FIRST_RESPONSE_INTENT_AGENT },
+    {
+      prompt: "Check if this first tool call aligns with the user's request.",
+      context,
+    }
+  );
+
+  // Retry if format is invalid (must start with OK or BLOCK:)
+  const anthropic = getAnthropicClient();
+  const decision = await retryUntilValid(
+    anthropic,
+    getModelId("sonnet"),
+    initialResponse,
+    toolDescription,
+    {
+      maxRetries: 1,
+      formatValidator: (text) => startsWithAny(text, ["OK", "BLOCK:"]),
+      formatReminder: "Reply with EXACTLY: OK or BLOCK: <reason>",
+    }
+  );
+
+  if (decision.startsWith("OK")) {
+    logToHomeAssistant({
+      agent: "first-response-intent",
+      level: "decision",
+      problem: `First tool: ${toolName}`,
+      answer: "OK - aligned with request",
+    });
+    return { isFirstToolCall: true, approved: true };
+  }
+
+  // Extract block reason
+  const reason = decision.startsWith("BLOCK: ")
+    ? decision.substring(7).trim()
+    : `Misaligned first response: ${decision}`;
+
+  logToHomeAssistant({
+    agent: "first-response-intent",
+    level: "decision",
+    problem: `First tool: ${toolName}`,
+    answer: `BLOCKED: ${reason}`,
+  });
+
+  return {
+    isFirstToolCall: true,
+    approved: false,
+    reason,
+  };
+}
+
+export interface StopCheckResult {
+  approved: boolean;
+  reason?: string;
+  systemMessage?: string;
+}
+
+// Patterns indicating AI is asking plain text questions (should use AskUserQuestion)
+const PLAIN_TEXT_QUESTION_PATTERNS = [
+  /would you like\b/i,
+  /should I\b/i,
+  /do you want\b/i,
+  /do you prefer\b/i,
+  /shall I\b/i,
+  /can I\b/i,
+  /may I\b/i,
+  /let me know if\b/i,
+  /what would you prefer/i,
+];
+
+// Patterns indicating AI is asking for plan approval in plain text (should use ExitPlanMode)
+const PLAN_APPROVAL_PATTERNS = [
+  /does this (?:plan |approach )?(?:look|sound) (?:good|ok|right)/i,
+  /(?:ready to )?proceed with this/i,
+  /(?:can|shall) I (?:proceed|continue|start)/i,
+  /approve this (?:plan|approach)/i,
+  /continue with (?:this|the) (?:plan|approach|implementation)/i,
+];
+
+/**
+ * Strip quoted content from text to avoid false positives on quoted questions.
+ */
+function stripQuotedContent(text: string): string {
+  return text
+    .replace(/"[^"]*"/g, "")
+    .replace(/'[^']*'/g, "")
+    .replace(/`[^`]*`/g, "");
+}
+
+/**
+ * Extract the main question from user text (for error messages).
+ */
+function extractUserQuestion(text: string): string | null {
+  const stripped = stripQuotedContent(text);
+  const sentences = stripped.split(/[.!]\s+/);
+
+  for (const sentence of sentences) {
+    if (sentence.includes("?")) {
+      return sentence.trim();
+    }
+  }
+
+  // Check for question words without ?
+  const questionMatch = stripped.match(
+    /\b(what|why|how|where|when|which|who|can you|could you|would you)[^.!?]+/i
+  );
+  if (questionMatch) {
+    return questionMatch[0].trim();
+  }
+
+  return null;
+}
+
+/**
+ * Check if assistant response ends with a question or contains question patterns.
+ */
+function hasPlainTextQuestion(assistantText: string): {
+  detected: boolean;
+  type?: "question" | "plan_approval";
+} {
+  const trimmed = assistantText.trim();
+
+  // Check for plan approval patterns first (more specific)
+  for (const pattern of PLAN_APPROVAL_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return { detected: true, type: "plan_approval" };
+    }
+  }
+
+  // Check for general question patterns
+  for (const pattern of PLAIN_TEXT_QUESTION_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return { detected: true, type: "question" };
+    }
+  }
+
+  // Check if response ends with a question mark (common pattern)
+  if (trimmed.endsWith("?")) {
+    // Exclude rhetorical questions or self-directed questions
+    const lastSentence = trimmed.split(/[.!]\s+/).pop() || "";
+    if (
+      !lastSentence.match(/^(?:why|how) (?:does|is|would) (?:this|that)/i) &&
+      !lastSentence.match(/^(?:I wonder|wondering)/i)
+    ) {
+      return { detected: true, type: "question" };
+    }
+  }
+
+  return { detected: false };
+}
+
+/**
+ * Check if the AI's stop (text-only response) is appropriate.
+ *
+ * This catches scenarios where the AI:
+ * - Uses plain text questions instead of AskUserQuestion tool
+ * - Asks for plan approval in text instead of ExitPlanMode tool
+ * - Doesn't answer the user's question
+ *
+ * @param transcriptPath - Path to the transcript file
+ * @returns Check result with approval status, reason, and optional system message
+ */
+export async function checkFirstResponseIntentForStop(
+  transcriptPath: string
+): Promise<StopCheckResult> {
+  const result = await readTranscriptExact(
+    transcriptPath,
+    FIRST_RESPONSE_STOP_COUNTS
+  );
+
+  if (result.user.length === 0 || result.assistant.length === 0) {
+    return { approved: true };
+  }
+
+  const lastUserMessage = result.user[result.user.length - 1];
+  const lastAssistantMessage = result.assistant[result.assistant.length - 1];
+
+  const userText = lastUserMessage.content;
+  const assistantText = lastAssistantMessage.content;
+
+  // Only check if assistant message is AFTER user message
+  if (lastAssistantMessage.index <= lastUserMessage.index) {
+    return { approved: true };
+  }
+
+  // Check 1: Plain text questions (should use AskUserQuestion)
+  const questionCheck = hasPlainTextQuestion(assistantText);
+  if (questionCheck.detected) {
+    if (questionCheck.type === "plan_approval") {
+      return {
+        approved: false,
+        reason: "Plain text plan approval detected",
+        systemMessage:
+          "Do not ask for plan approval in plain text. Use the ExitPlanMode tool to present the plan with structured approval options.",
+      };
+    }
+    return {
+      approved: false,
+      reason: "Plain text question detected",
+      systemMessage:
+        "Do not ask questions in plain text. Use the AskUserQuestion tool to present structured options to the user.",
+    };
+  }
+
+  // Check 2: User asked a question that wasn't addressed
+  const userQuestion = extractUserQuestion(userText);
+
+  if (userQuestion) {
+    // Check if assistant response is very short (might not have answered)
+    const strippedAssistant = stripQuotedContent(assistantText);
+
+    // If assistant response is very short or doesn't seem to address the question
+    if (strippedAssistant.length < 50) {
+      // Check if it's just an acknowledgment without substance
+      if (/^(?:I'll|Let me|Sure|OK|Okay|Got it|Understood)/.test(assistantText)) {
+        return {
+          approved: false,
+          reason: "User question not answered",
+          systemMessage: `You didn't answer the user's question: "${userQuestion}"\nPlease respond to what they asked.`,
+        };
+      }
+    }
+  }
+
+  // Check 3: AI stopped without clear reason (very short response without action)
+  const trimmedAssistant = assistantText.trim();
+  if (
+    trimmedAssistant.length < 30 &&
+    !trimmedAssistant.match(/(?:done|completed|finished|ready)/i)
+  ) {
+    // Very short response that doesn't indicate completion
+    return {
+      approved: false,
+      reason: "AI stopped without clear reason",
+      systemMessage:
+        "If you're unsure how to proceed, please explain what's blocking you so the user can help.",
+    };
+  }
+
+  return { approved: true };
+}

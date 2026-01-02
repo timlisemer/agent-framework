@@ -98,3 +98,25 @@ export const STYLE_DRIFT_COUNTS: TranscriptReadOptions = {
 export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
   counts: { user: 10, assistant: 5 },
 };
+
+/**
+ * For first-response-intent checks.
+ *
+ * Gets last user message and any assistant text before the current tool call.
+ * Includes first user message to capture original request context.
+ * More assistant messages to catch acknowledgments in the current turn.
+ */
+export const FIRST_RESPONSE_INTENT_COUNTS: TranscriptReadOptions = {
+  counts: { user: 3, assistant: 5 },
+  includeFirstUserMessage: true,
+};
+
+/**
+ * For first-response-intent stop checks.
+ *
+ * Gets last user message and last assistant response to check for
+ * plain text questions, unanswered user questions, and tool usage violations.
+ */
+export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
+  counts: { user: 3, assistant: 3 },
+};

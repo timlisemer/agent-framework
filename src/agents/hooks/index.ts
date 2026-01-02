@@ -36,3 +36,4 @@ export { checkErrorAcknowledgment } from './error-acknowledge.js';
 export { validatePlanIntent } from './plan-validate.js';
 export { checkForOffTopic, extractConversationContext } from './intent-validate.js';
 export { checkStyleDrift } from './style-drift.js';
+export { checkFirstResponseIntent, checkFirstResponseIntentForStop } from './first-response-intent.js';

@@ -9,6 +9,7 @@ import { validatePlanIntent } from "../agents/hooks/plan-validate.js";
 import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
+import { checkFirstResponseIntent } from "../agents/hooks/first-response-intent.js";
 import { detectWorkaroundPattern } from "../utils/command-patterns.js";
 import { logToHomeAssistant } from "../utils/logger.js";
 import { markErrorAcknowledged, setSession, checkUserInteraction } from "../utils/ack-cache.js";
@@ -239,6 +240,54 @@ async function main() {
       })
     );
     process.exit(0);
+  }
+
+  // First-response-intent check - detect if AI's first tool call ignores user question/request
+  // Only check for action tools (Edit, Write, Bash, etc.) - investigation tools are fine
+  const ACTION_TOOLS = ["Edit", "Write", "NotebookEdit", "Bash", "Agent", "Task"];
+  if (ACTION_TOOLS.includes(input.tool_name)) {
+    const intentResult = await checkFirstResponseIntent(
+      input.tool_name,
+      input.tool_input,
+      input.transcript_path
+    );
+
+    if (intentResult.isFirstToolCall && !intentResult.approved) {
+      // Appeal the denial
+      const appealResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
+      const appealTranscript = formatTranscriptResult(appealResult);
+      const appeal = await appealDenial(
+        `${input.tool_name} as first response`,
+        appealTranscript,
+        intentResult.reason || "First action misaligned with user request"
+      );
+
+      if (!appeal.approved) {
+        logToHomeAssistant({
+          agent: "pre-tool-use-hook",
+          level: "decision",
+          problem: `First response: ${input.tool_name}`,
+          answer: `BLOCKED: ${intentResult.reason}`,
+        });
+        console.log(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse",
+              permissionDecision: "deny",
+              permissionDecisionReason: `First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`,
+            },
+          })
+        );
+        process.exit(0);
+      }
+      // Appeal passed - continue to other checks
+      logToHomeAssistant({
+        agent: "pre-tool-use-hook",
+        level: "info",
+        problem: `First response intent appealed: ${input.tool_name}`,
+        answer: "APPEALED - continuing",
+      });
+    }
   }
 
   // Error acknowledgment check - detect if AI is ignoring errors
