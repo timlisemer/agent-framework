@@ -12,15 +12,15 @@ TypeScript framework for custom AI agents using the Anthropic API. Agents are ex
 
 Model IDs are centrally defined in `src/types.ts`. Update there to change models globally.
 
-| Tier   | Usage                                                                          |
-| ------ | ------------------------------------------------------------------------------ |
-| haiku  | Fast tasks: intent-validate, error-acknowledge, tool-approve, tool-appeal, commit |
-| sonnet | Detailed analysis: check, plan-validate                                        |
-| opus   | Complex decisions: confirm                                                     |
+| Tier   | Usage                                                                                    |
+| ------ | ---------------------------------------------------------------------------------------- |
+| haiku  | Fast tasks: intent-validate, error-acknowledge, tool-approve, tool-appeal, commit, style-drift |
+| sonnet | Detailed analysis: check, plan-validate, claude-md-validate                              |
+| opus   | Complex decisions: confirm                                                               |
 
 ### Three Exposure Mechanisms
 
-1. **MCP Server** (`src/mcp/server.ts`) - Exposes `check`, `confirm`, `commit` tools
+1. **MCP Server** (`src/mcp/server.ts`) - Exposes `check`, `confirm`, `commit`, `push`, `validate_intent` tools
 2. **PreToolUse Hook** (`src/hooks/pre-tool-use.ts`) - Multi-layer safety gate (~400 lines, most complex file)
 3. **Stop Hook** (`src/hooks/stop-off-topic-check.ts`) - Detects off-topic AI behavior
 
@@ -48,26 +48,34 @@ Tool Call → Auto-approve low-risk → error-acknowledge check → Path-based c
 ### Directory Structure
 
 ```
+claude/           # Claude Code integration (symlink targets)
+  commands/       # Skill documentation (check.md, commit.md, etc.)
+  skills/         # Future skill definitions
+  mcp.json        # MCP server config
+  settings.json   # Hook configuration
 src/
   agents/
-    mcp/          # MCP-exposed agents (direct API): check, confirm, commit, push
-    hooks/        # Hook-triggered agents (direct API): tool-approve, tool-appeal, etc.
+    mcp/          # MCP-exposed agents: check, confirm, commit, push, validate-intent
+    hooks/        # Hook-triggered agents: tool-approve, tool-appeal, style-drift, etc.
   hooks/          # Claude Code hook entry points
   mcp/            # MCP server
   utils/          # Shared utilities
+dist/             # Build output (symlink ~/.claude/hooks here)
 ```
 
 See `ARCHITECTURE.md` for detailed documentation on design decisions.
 
 ### Key Files
 
-| File                             | Purpose                            |
-| -------------------------------- | ---------------------------------- |
-| `src/types.ts`                   | Model IDs (single source of truth) |
-| `src/hooks/pre-tool-use.ts`      | Main safety logic                  |
-| `src/agents/mcp/`                | MCP agents (check, confirm, commit)|
-| `src/agents/hooks/`              | Hook agents (tool-approve, etc.)   |
-| `src/utils/anthropic-client.ts`  | Singleton Anthropic client factory |
+| File                             | Purpose                                     |
+| -------------------------------- | ------------------------------------------- |
+| `src/types.ts`                   | Model IDs (single source of truth)          |
+| `src/hooks/pre-tool-use.ts`      | Main safety logic                           |
+| `src/agents/mcp/`                | MCP agents (check, confirm, commit, push)   |
+| `src/agents/hooks/`              | Hook agents (tool-approve, style-drift, etc.) |
+| `src/utils/agent-configs.ts`     | Centralized agent configurations            |
+| `src/utils/anthropic-client.ts`  | Singleton Anthropic client factory          |
+| `claude/settings.json`           | Hook configuration for Claude Code          |
 
 ## Integration
 

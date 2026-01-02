@@ -5,7 +5,17 @@ This document explains the architectural decisions in the agent-framework.
 ## Directory Structure
 
 ```
-src/
+claude/                             # Claude Code integration (symlink targets)
+  commands/                         # Skill documentation
+    check.md
+    commit.md
+    confirm.md
+    push.md
+  skills/                           # Future skill definitions
+  mcp.json                          # MCP server registration config
+  settings.json                     # Hook configuration
+
+src/                                # TypeScript source
   types.ts                          # Core types and model IDs
 
   agents/
@@ -14,6 +24,7 @@ src/
       confirm.ts                    # Code quality gate (SDK mode)
       commit.ts                     # Generates commit message + commits
       push.ts                       # Executes git push
+      validate-intent.ts            # Validates AI followed user intent
       index.ts                      # Barrel export
 
     hooks/                          # Hook-triggered agents
@@ -22,10 +33,13 @@ src/
       error-acknowledge.ts          # Ensures AI acknowledges issues
       plan-validate.ts              # Checks plan drift
       intent-validate.ts            # Detects off-topic AI behavior
+      style-drift.ts                # Detects unrequested style changes
+      claude-md-validate.ts         # Validates CLAUDE.md edits
       index.ts                      # Barrel export
 
   hooks/                            # Claude Code hook entry points
     pre-tool-use.ts                 # PreToolUse hook (main safety gate)
+    post-tool-use.ts                # PostToolUse hook
     stop-off-topic-check.ts         # Stop hook
 
   mcp/
@@ -44,6 +58,12 @@ src/
     git-utils.ts                    # Git operations (status, diff)
     command.ts                      # Safe command execution
     command-patterns.ts             # Blacklist pattern detection
+
+dist/                               # Compiled JavaScript (build output)
+  hooks/                            # Hook entry points (symlink ~/.claude/hooks here)
+  mcp/server.js                     # MCP server entry point
+  agents/                           # Compiled agents
+  utils/                            # Compiled utilities
 ```
 
 ## Unified Agent Execution
@@ -178,7 +198,10 @@ Centralized agent configurations with documentation:
 - `TOOL_APPEAL_AGENT` - haiku, direct
 - `ERROR_ACK_AGENT` - haiku, direct
 - `PLAN_VALIDATE_AGENT` - sonnet, direct
+- `CLAUDE_MD_VALIDATE_AGENT` - sonnet, direct
 - `INTENT_VALIDATE_AGENT` - haiku, direct
+- `STYLE_DRIFT_AGENT` - haiku, direct
+- `VALIDATE_INTENT_AGENT` - haiku, direct (MCP tool)
 
 ### `anthropic-client.ts`
 Singleton factory for Anthropic client. Used by direct mode agents.

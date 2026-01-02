@@ -2,21 +2,23 @@
 
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
-1. **MCP Server** - For `check`, `confirm`, `commit` agents (portable, works with any MCP client)
-2. **PreToolUse Hook** - Multi-layer safety gate with `tool-approve`, `tool-appeal`, `error-acknowledge`, and `plan-validate` agents
+1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent` agents (portable, works with any MCP client)
+2. **PreToolUse Hook** - Multi-layer safety gate with `tool-approve`, `tool-appeal`, `error-acknowledge`, `plan-validate`, `style-drift`, and `claude-md-validate` agents
 3. **Stop Hook** - For `intent-validate` agent (detects when AI goes off-track)
 
 ## Agents
 
-The framework implements 11 specialized agents organized into three categories:
+The framework implements 12 specialized agents organized into three categories:
 
 ### MCP Tools (User-Facing)
 
-| Agent   | Model  | Purpose                                                      |
-| ------- | ------ | ------------------------------------------------------------ |
-| check   | sonnet | Run linter + make check, return summary with recommendations |
-| confirm | opus   | Binary quality gate: CONFIRMED or DECLINED                   |
-| commit  | haiku  | Generate minimal commit message + execute git commit         |
+| Agent           | Model  | Purpose                                                      |
+| --------------- | ------ | ------------------------------------------------------------ |
+| check           | sonnet | Run linter + make check, return summary with recommendations |
+| confirm         | opus   | Binary quality gate: CONFIRMED or DECLINED                   |
+| commit          | haiku  | Generate minimal commit message + execute git commit         |
+| push            | -      | Execute git push with logging                                |
+| validate_intent | haiku  | Check if AI followed user intentions (post-session review)   |
 
 ### Validation Agents (Hook-Triggered)
 
@@ -34,12 +36,6 @@ The framework implements 11 specialized agents organized into three categories:
 | ------------ | ----- | -------------------------------------------------- |
 | tool-approve | haiku | Approve/deny tools based on CLAUDE.md + safety rules |
 | tool-appeal  | haiku | Review denials with conversation context           |
-
-### Simple Wrapper
-
-| Agent | Purpose                    |
-| ----- | -------------------------- |
-| push  | Execute git push with logging |
 
 ## Agent Chaining
 
@@ -249,9 +245,9 @@ When detected, it injects a course-correction message to get Claude back on trac
 ### Programmatic Usage
 
 ```typescript
-import { runCheckAgent } from './agents/check.js';
-import { runConfirmAgent } from './agents/confirm.js';
-import { runCommitAgent } from './agents/commit.js';
+import { runCheckAgent } from './agents/mcp/check.js';
+import { runConfirmAgent } from './agents/mcp/confirm.js';
+import { runCommitAgent } from './agents/mcp/commit.js';
 
 const checkResult = await runCheckAgent('/path/to/project');
 console.log(checkResult);
