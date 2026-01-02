@@ -75,9 +75,10 @@ See `ARCHITECTURE.md` for detailed documentation on design decisions.
 # Register MCP server
 claude mcp add agent-framework node $(pwd)/dist/mcp/server.js
 
-# Copy hook config to project
-cp claude-integration/settings.json /your/project/.claude/settings.json
-# Update paths in settings.json to point to dist/hooks/*.js
+# Symlink to ~/.claude:
+ln -s $(pwd)/dist/hooks ~/.claude/hooks
+ln -s $(pwd)/claude/commands ~/.claude/commands
+ln -s $(pwd)/claude/settings.json ~/.claude/settings.json
 ```
 
 ## Testing MCP Server

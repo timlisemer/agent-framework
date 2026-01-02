@@ -85,12 +85,13 @@ npm install
 # Build
 npm run build
 
-# Register MCP server with Claude Code
+# Register MCP server with Claude Code (see claude/mcp.json for config)
 claude mcp add agent-framework node $(pwd)/dist/mcp/server.js
 
-# Copy hook config to your project
-cp claude-integration/settings.json /your/project/.claude/settings.json
-# Update the paths in settings.json to point to your dist/hooks/*.js
+# Symlink to ~/.claude:
+ln -s $(pwd)/dist/hooks ~/.claude/hooks
+ln -s $(pwd)/claude/commands ~/.claude/commands
+ln -s $(pwd)/claude/settings.json ~/.claude/settings.json
 ```
 
 ## Claude Code Tool Names
