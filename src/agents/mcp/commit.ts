@@ -23,12 +23,12 @@
  * @module commit
  */
 
-import { runAgent } from '../../utils/agent-runner.js';
-import { COMMIT_AGENT } from '../../utils/agent-configs.js';
-import { runCommand } from '../../utils/command.js';
-import { getUncommittedChanges } from '../../utils/git-utils.js';
-import { logToHomeAssistant } from '../../utils/logger.js';
-import { runConfirmAgent } from './confirm.js';
+import { runAgent } from "../../utils/agent-runner.js";
+import { COMMIT_AGENT } from "../../utils/agent-configs.js";
+import { runCommand } from "../../utils/command.js";
+import { getUncommittedChanges } from "../../utils/git-utils.js";
+import { logToHomeAssistant } from "../../utils/logger.js";
+import { runConfirmAgent } from "./confirm.js";
 
 /**
  * Parse the LLM response to extract size and message.

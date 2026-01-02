@@ -31,8 +31,40 @@ import {
   APPEAL_COUNTS,
   ERROR_CHECK_COUNTS,
   PLAN_VALIDATE_COUNTS,
+  RECENT_TOOL_APPROVAL_COUNTS,
   STYLE_DRIFT_COUNTS,
 } from "../utils/transcript-presets.js";
+
+/**
+ * Output structured JSON to allow the tool call and exit.
+ */
+function outputAllow(): never {
+  console.log(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+      },
+    })
+  );
+  process.exit(0);
+}
+
+/**
+ * Output structured JSON to deny the tool call with a reason and exit.
+ */
+function outputDeny(reason: string): never {
+  console.log(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: reason,
+      },
+    })
+  );
+  process.exit(0);
+}
 
 // Retry tracking for workaround detection
 const DENIAL_CACHE_FILE = "/tmp/claude-hook-denials.json";
@@ -201,28 +233,12 @@ async function main() {
     );
 
     if (appeal.approved) {
-      console.log(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: "PreToolUse",
-            permissionDecision: "allow",
-          },
-        })
-      );
-      process.exit(0);
+      outputAllow();
     }
 
-    console.log(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason:
-            "Confirm requires explicit user approval. Use /commit or explicitly request confirm.",
-        },
-      })
+    outputDeny(
+      "Confirm requires explicit user approval. Use /commit or explicitly request confirm."
     );
-    process.exit(0);
   }
 
   // Auto-approve low-risk tools and ALL MCP tools
@@ -251,15 +267,7 @@ async function main() {
     LOW_RISK_TOOLS.includes(input.tool_name) ||
     input.tool_name.startsWith("mcp__")
   ) {
-    console.log(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "allow",
-        },
-      })
-    );
-    process.exit(0);
+    outputAllow();
   }
 
   // First-response intent check - detect if AI's first tool call ignores user question/request
@@ -293,16 +301,9 @@ async function main() {
           problem: `First response: ${input.tool_name}`,
           answer: `BLOCKED: ${intentResult.reason}`,
         });
-        console.log(
-          JSON.stringify({
-            hookSpecificOutput: {
-              hookEventName: "PreToolUse",
-              permissionDecision: "deny",
-              permissionDecisionReason: `First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`,
-            },
-          })
+        outputDeny(
+          `First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`
         );
-        process.exit(0);
       }
       // Appeal passed - continue to other checks
       logToHomeAssistant({
@@ -377,16 +378,7 @@ async function main() {
           problem: `${input.tool_name} blocked for ignoring errors`,
           answer: finalReason,
         });
-        console.log(
-          JSON.stringify({
-            hookSpecificOutput: {
-              hookEventName: "PreToolUse",
-              permissionDecision: "deny",
-              permissionDecisionReason: `Error acknowledgment required: ${finalReason}`,
-            },
-          })
-        );
-        process.exit(0);
+        outputDeny(`Error acknowledgment required: ${finalReason}`);
       }
     }
   }
@@ -409,9 +401,10 @@ async function main() {
       ) {
         // Skip validation if ExitPlanMode was recently approved
         // This means user approved the plan and AI is now writing it
-        const recentContext = await readTranscriptExact(input.transcript_path, {
-          counts: { toolResult: 10 },
-        });
+        const recentContext = await readTranscriptExact(
+          input.transcript_path,
+          RECENT_TOOL_APPROVAL_COUNTS
+        );
         const hasExitPlanModeApproval = recentContext.toolResult.some(
           (r) =>
             r.content.includes("ExitPlanMode") &&
@@ -424,15 +417,7 @@ async function main() {
             problem: `Plan ${input.tool_name.toLowerCase()} to ${filePath}`,
             answer: "ExitPlanMode approved - skipping validation",
           });
-          console.log(
-            JSON.stringify({
-              hookSpecificOutput: {
-                hookEventName: "PreToolUse",
-                permissionDecision: "allow",
-              },
-            })
-          );
-          process.exit(0);
+          outputAllow();
         }
 
         // Get current plan and conversation context
@@ -462,27 +447,10 @@ async function main() {
             problem: `Plan ${input.tool_name.toLowerCase()} to ${filePath}`,
             answer: `DRIFT: ${validation.reason}`,
           });
-          console.log(
-            JSON.stringify({
-              hookSpecificOutput: {
-                hookEventName: "PreToolUse",
-                permissionDecision: "deny",
-                permissionDecisionReason: `Plan drift detected: ${validation.reason}`,
-              },
-            })
-          );
-          process.exit(0);
+          outputDeny(`Plan drift detected: ${validation.reason}`);
         }
         // Plan validated - allow write
-        console.log(
-          JSON.stringify({
-            hookSpecificOutput: {
-              hookEventName: "PreToolUse",
-              permissionDecision: "allow",
-            },
-          })
-        );
-        process.exit(0);
+        outputAllow();
       }
 
       // CLAUDE.md validation - detect Write/Edit to any CLAUDE.md file
@@ -520,27 +488,10 @@ async function main() {
             problem: `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
             answer: `REJECTED: ${(validation.reason ?? "").slice(0, 200)}`,
           });
-          console.log(
-            JSON.stringify({
-              hookSpecificOutput: {
-                hookEventName: "PreToolUse",
-                permissionDecision: "deny",
-                permissionDecisionReason: `CLAUDE.md validation failed: ${validation.reason}`,
-              },
-            })
-          );
-          process.exit(0);
+          outputDeny(`CLAUDE.md validation failed: ${validation.reason}`);
         }
         // CLAUDE.md validated - allow write
-        console.log(
-          JSON.stringify({
-            hookSpecificOutput: {
-              hookEventName: "PreToolUse",
-              permissionDecision: "allow",
-            },
-          })
-        );
-        process.exit(0);
+        outputAllow();
       }
 
       const trusted = isTrustedPath(filePath, projectDir);
@@ -578,29 +529,12 @@ async function main() {
               problem: `Edit ${filePath}`,
               answer: `STYLE DRIFT: ${styleDriftResult.reason}`,
             });
-            console.log(
-              JSON.stringify({
-                hookSpecificOutput: {
-                  hookEventName: "PreToolUse",
-                  permissionDecision: "deny",
-                  permissionDecisionReason: `Style drift detected: ${styleDriftResult.reason}`,
-                },
-              })
-            );
-            process.exit(0);
+            outputDeny(`Style drift detected: ${styleDriftResult.reason}`);
           }
         }
 
         // Low risk - auto-approve (passed style-drift check or not applicable)
-        console.log(
-          JSON.stringify({
-            hookSpecificOutput: {
-              hookEventName: "PreToolUse",
-              permissionDecision: "allow",
-            },
-          })
-        );
-        process.exit(0);
+        outputAllow();
       }
       // High risk - fall through to LLM approval
     }
@@ -649,28 +583,11 @@ async function main() {
     }
 
     // Output structured JSON to deny and provide feedback to Claude
-    console.log(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: finalReason,
-        },
-      })
-    );
-    process.exit(0);
+    outputDeny(finalReason ?? "Tool denied");
   }
 
   // Explicitly allow approved tools
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "allow",
-      },
-    })
-  );
-  process.exit(0);
+  outputAllow();
 }
 
 main().catch((err) => {

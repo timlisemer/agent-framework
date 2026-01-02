@@ -39,7 +39,7 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
  *
  * @param toolName - Name of the tool being called
  * @param toolInput - Input parameters for the tool
- * @param projectDir - The project directory for context
+ * @param workingDir - The project directory for context
  * @returns Approval result with optional denial reason
  *
  * @example
@@ -53,11 +53,11 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 export async function approveTool(
   toolName: string,
   toolInput: unknown,
-  projectDir: string
+  workingDir: string
 ): Promise<{ approved: boolean; reason?: string }> {
   // Load CLAUDE.md if exists (project-specific rules)
   let rules = "";
-  const claudeMdPath = path.join(projectDir, "CLAUDE.md");
+  const claudeMdPath = path.join(workingDir, "CLAUDE.md");
   if (fs.existsSync(claudeMdPath)) {
     rules = fs.readFileSync(claudeMdPath, "utf-8");
   }
@@ -73,10 +73,10 @@ export async function approveTool(
 
   // Run initial evaluation via unified runner
   const initialResponse = await runAgent(
-    { ...TOOL_APPROVE_AGENT, workingDir: projectDir },
+    { ...TOOL_APPROVE_AGENT, workingDir },
     {
       prompt: "Evaluate this tool call for safety and compliance.",
-      context: `PROJECT DIRECTORY: ${projectDir}
+      context: `PROJECT DIRECTORY: ${workingDir}
 
 PROJECT RULES (from CLAUDE.md):
 ${rules || "No project-specific rules."}

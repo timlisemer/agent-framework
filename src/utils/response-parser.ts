@@ -6,7 +6,7 @@
  * and ensure consistent behavior.
  */
 
-import type Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from "@anthropic-ai/sdk";
 
 /**
  * Result of parsing a decision from LLM output.

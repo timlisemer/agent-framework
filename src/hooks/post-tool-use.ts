@@ -1,7 +1,7 @@
 import "../utils/load-env.js";
 import { type PostToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { clearAckCache } from "../utils/ack-cache.js";
-import { logToHomeAssistant } from '../utils/logger.js';
+import { logToHomeAssistant } from "../utils/logger.js";
 
 async function main() {
   const input: PostToolUseHookInput = await new Promise((resolve) => {

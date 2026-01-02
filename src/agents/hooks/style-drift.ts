@@ -101,7 +101,7 @@ function extractStylePreferences(claudeMdContent: string): string {
  *
  * @param toolName - Name of the tool being called (should be "Edit")
  * @param toolInput - Input parameters for the tool
- * @param projectDir - The project directory for context
+ * @param workingDir - The project directory for context
  * @param userMessages - Recent user messages to check if style change was requested
  * @returns Approval result with optional denial reason
  *
@@ -121,7 +121,7 @@ function extractStylePreferences(claudeMdContent: string): string {
 export async function checkStyleDrift(
   toolName: string,
   toolInput: unknown,
-  projectDir: string,
+  workingDir: string,
   userMessages?: string
 ): Promise<{ approved: boolean; reason?: string }> {
   // Only check Edit tool (has old/new comparison)
@@ -149,7 +149,7 @@ export async function checkStyleDrift(
 
   // Load CLAUDE.md for style preferences
   let stylePreferences = "";
-  const claudeMdPath = path.join(projectDir, "CLAUDE.md");
+  const claudeMdPath = path.join(workingDir, "CLAUDE.md");
   if (fs.existsSync(claudeMdPath)) {
     const content = fs.readFileSync(claudeMdPath, "utf-8");
     stylePreferences = extractStylePreferences(content);
@@ -159,7 +159,7 @@ export async function checkStyleDrift(
 
   // Run style drift check via unified runner
   const initialResponse = await runAgent(
-    { ...STYLE_DRIFT_AGENT, workingDir: projectDir },
+    { ...STYLE_DRIFT_AGENT, workingDir },
     {
       prompt: "Check if this edit contains unrequested style-only changes.",
       context: `STYLE PREFERENCES (from CLAUDE.md):

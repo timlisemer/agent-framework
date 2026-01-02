@@ -35,11 +35,11 @@
  * @module confirm
  */
 
-import { runAgent } from '../../utils/agent-runner.js';
-import { CONFIRM_AGENT } from '../../utils/agent-configs.js';
-import { getUncommittedChanges } from '../../utils/git-utils.js';
-import { logToHomeAssistant } from '../../utils/logger.js';
-import { runCheckAgent } from './check.js';
+import { runAgent } from "../../utils/agent-runner.js";
+import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
+import { getUncommittedChanges } from "../../utils/git-utils.js";
+import { logToHomeAssistant } from "../../utils/logger.js";
+import { runCheckAgent } from "./check.js";
 
 /**
  * Run the confirm agent to evaluate code changes.

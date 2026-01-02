@@ -26,7 +26,7 @@ function mapLevelToEventType(level: string): TelemetryEventType {
 
 function extractDecision(answer: string): string | undefined {
   const match = answer.match(
-    /^(APPROVED|DENIED|CONFIRMED|DECLINED|OK|BLOCK|DRIFT|INTERVENE|OVERTURN|UPHOLD)/
+    /^(APPROVED|DENIED|CONFIRMED|DECLINED|OK|BLOCK|DRIFT|INTERVENE|OVERTURN|UPHOLD|ALIGNED|DRIFTED)/
   );
   return match ? match[1] : undefined;
 }

@@ -1,5 +1,5 @@
-import * as fs from 'fs';
-import * as crypto from 'crypto';
+import * as fs from "fs";
+import * as crypto from "crypto";
 
 const ACK_CACHE_FILE = '/tmp/claude-error-acks.json';
 const ACK_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes

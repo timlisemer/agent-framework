@@ -11,7 +11,7 @@
  * the exact count of each message type is collected (or transcript exhausted).
  */
 
-import type { TranscriptReadOptions } from './transcript.js';
+import type { TranscriptReadOptions } from "./transcript.js";
 
 /**
  * For error acknowledgment checks.
@@ -119,4 +119,14 @@ export const FIRST_RESPONSE_INTENT_COUNTS: TranscriptReadOptions = {
  */
 export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
   counts: { user: 3, assistant: 3 },
+};
+
+/**
+ * For checking recent tool approvals (e.g., ExitPlanMode).
+ *
+ * Only tool results needed - checking if a specific tool was recently approved.
+ * Used to skip redundant validations when user already approved an action.
+ */
+export const RECENT_TOOL_APPROVAL_COUNTS: TranscriptReadOptions = {
+  counts: { toolResult: 10 },
 };

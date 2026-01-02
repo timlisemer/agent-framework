@@ -45,13 +45,3 @@ export interface ConversationContext {
   lastAssistantMessage: string;
 }
 
-// Legacy types kept for backwards compatibility
-export interface IntentValidationResult {
-  decision: "ALLOW" | "WARN" | "BLOCK";
-  reason?: string;
-}
-
-export interface IntentContext {
-  userMessages: UserMessage[];
-  fullIntent: string;
-}

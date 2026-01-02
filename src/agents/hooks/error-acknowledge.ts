@@ -28,16 +28,16 @@
  * @module error-acknowledge
  */
 
-import { getModelId } from '../../types.js';
+import { getModelId } from "../../types.js";
 import {
   isErrorAcknowledged,
   markErrorAcknowledged,
-} from '../../utils/ack-cache.js';
-import { runAgent } from '../../utils/agent-runner.js';
-import { ERROR_ACK_AGENT } from '../../utils/agent-configs.js';
-import { getAnthropicClient } from '../../utils/anthropic-client.js';
-import { logToHomeAssistant } from '../../utils/logger.js';
-import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
+} from "../../utils/ack-cache.js";
+import { runAgent } from "../../utils/agent-runner.js";
+import { ERROR_ACK_AGENT } from "../../utils/agent-configs.js";
+import { getAnthropicClient } from "../../utils/anthropic-client.js";
+import { logToHomeAssistant } from "../../utils/logger.js";
+import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 
 // Pattern to extract issue text from transcript for caching
 const ISSUE_EXTRACT_PATTERN =

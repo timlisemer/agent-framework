@@ -1,7 +1,7 @@
-import { appealDenial } from '../agents/hooks/tool-appeal.js';
-import { logToHomeAssistant } from './logger.js';
-import { readTranscriptExact, formatTranscriptResult } from './transcript.js';
-import { APPEAL_COUNTS } from './transcript-presets.js';
+import { appealDenial } from "../agents/hooks/tool-appeal.js";
+import { logToHomeAssistant } from "./logger.js";
+import { readTranscriptExact, formatTranscriptResult } from "./transcript.js";
+import { APPEAL_COUNTS } from "./transcript-presets.js";
 
 export interface CheckResult {
   approved: boolean;

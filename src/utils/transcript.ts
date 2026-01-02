@@ -1,4 +1,4 @@
-import * as fs from 'fs';
+import * as fs from "fs";
 
 export interface TranscriptMessage {
   role: 'user' | 'assistant' | 'tool_result';

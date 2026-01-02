@@ -38,12 +38,12 @@
  * @module check
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import { runAgent } from '../../utils/agent-runner.js';
-import { CHECK_AGENT } from '../../utils/agent-configs.js';
-import { runCommand } from '../../utils/command.js';
-import { getUncommittedChanges } from '../../utils/git-utils.js';
+import * as fs from "fs";
+import * as path from "path";
+import { runAgent } from "../../utils/agent-runner.js";
+import { CHECK_AGENT } from "../../utils/agent-configs.js";
+import { runCommand } from "../../utils/command.js";
+import { getUncommittedChanges } from "../../utils/git-utils.js";
 
 /**
  * Detect which linter is configured for the project.

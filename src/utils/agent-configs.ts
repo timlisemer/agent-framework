@@ -54,7 +54,7 @@
  * @module agent-configs
  */
 
-import type { AgentConfig } from './agent-runner.js';
+import type { AgentConfig } from "./agent-runner.js";
 
 // ============================================================================
 // MCP AGENTS
