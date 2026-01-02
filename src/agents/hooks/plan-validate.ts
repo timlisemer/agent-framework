@@ -37,29 +37,39 @@ import { retryUntilValid, startsWithAny } from '../../utils/retry.js';
 /**
  * Validate that a plan aligns with user intent.
  *
- * @param planContent - The plan content being written
- * @param userMessages - User messages from the conversation
+ * @param currentPlan - The full current plan file (null if new file)
+ * @param toolName - The tool being used (Write or Edit)
+ * @param toolInput - The tool input with content or old_string/new_string
+ * @param conversationContext - Formatted conversation context
  * @returns Approval result with optional drift feedback
  *
  * @example
  * ```typescript
- * const result = await validatePlanIntent(planContent, userMessages);
+ * const result = await validatePlanIntent(currentPlan, "Edit", toolInput, context);
  * if (!result.approved) {
  *   console.log('Plan drift:', result.reason);
  * }
  * ```
  */
 export async function validatePlanIntent(
-  planContent: string,
-  userMessages: string
+  currentPlan: string | null,
+  toolName: "Write" | "Edit",
+  toolInput: { content?: string; old_string?: string; new_string?: string },
+  conversationContext: string
 ): Promise<{ approved: boolean; reason?: string }> {
-  // No user messages yet - nothing to validate against
-  if (!userMessages.trim()) {
+  // No conversation yet - nothing to validate against
+  if (!conversationContext.trim()) {
     return { approved: true };
   }
 
-  // Empty plan content - allow (might be initial file creation)
-  if (!planContent.trim()) {
+  // Format proposed edit based on tool type
+  const proposedEdit =
+    toolName === "Write"
+      ? toolInput.content ?? ""
+      : `old_string: ${toolInput.old_string ?? ""}\nnew_string: ${toolInput.new_string ?? ""}`;
+
+  // Empty proposed edit - allow
+  if (!proposedEdit.trim()) {
     return { approved: true };
   }
 
@@ -68,18 +78,8 @@ export async function validatePlanIntent(
     const initialResponse = await runAgent(
       { ...PLAN_VALIDATE_AGENT },
       {
-        prompt: 'Check if this plan aligns with the user request.',
-        context: `USER MESSAGES:
-${userMessages}
-
----
-
-PLAN CONTENT:
-${planContent}
-
----
-
-Does this plan align with the user's request, or has it drifted?`,
+        prompt: "Check if this plan aligns with the user request.",
+        context: `CONVERSATION:\n${conversationContext}\n\nCURRENT PLAN:\n${currentPlan ?? "(new plan)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}`,
       }
     );
 
@@ -87,24 +87,24 @@ Does this plan align with the user's request, or has it drifted?`,
     const anthropic = getAnthropicClient();
     const decision = await retryUntilValid(
       anthropic,
-      getModelId('sonnet'), // Standardized on Sonnet for both initial and retry
+      getModelId("sonnet"),
       initialResponse,
-      `Plan validation for: ${planContent.substring(0, 100)}...`,
+      `Plan validation for: ${proposedEdit.substring(0, 100)}...`,
       {
         maxRetries: 2,
-        formatValidator: (text) => startsWithAny(text, ['OK', 'DRIFT:']),
-        formatReminder: 'Reply with exactly: OK or DRIFT: <feedback>',
+        formatValidator: (text) => startsWithAny(text, ["OK", "DRIFT:"]),
+        formatReminder: "Reply with exactly: OK or DRIFT: <feedback>",
         maxTokens: 150,
       }
     );
 
-    if (decision.startsWith('DRIFT:')) {
-      const feedback = decision.replace('DRIFT:', '').trim();
+    if (decision.startsWith("DRIFT:")) {
+      const feedback = decision.replace("DRIFT:", "").trim();
 
       logToHomeAssistant({
-        agent: 'plan-validate',
-        level: 'decision',
-        problem: `Plan write: ${planContent.substring(0, 100)}...`,
+        agent: "plan-validate",
+        level: "decision",
+        problem: `Plan ${toolName.toLowerCase()}: ${proposedEdit.substring(0, 100)}...`,
         answer: `DRIFT: ${feedback}`,
       });
 
@@ -115,19 +115,19 @@ Does this plan align with the user's request, or has it drifted?`,
     }
 
     logToHomeAssistant({
-      agent: 'plan-validate',
-      level: 'decision',
-      problem: `Plan write: ${planContent.substring(0, 100)}...`,
-      answer: 'OK',
+      agent: "plan-validate",
+      level: "decision",
+      problem: `Plan ${toolName.toLowerCase()}: ${proposedEdit.substring(0, 100)}...`,
+      answer: "OK",
     });
 
     return { approved: true };
   } catch (err) {
     // On issue, fail open (allow the write)
     logToHomeAssistant({
-      agent: 'plan-validate',
-      level: 'info',
-      problem: 'Validation issue',
+      agent: "plan-validate",
+      level: "info",
+      problem: "Validation issue",
       answer: String(err),
     });
 

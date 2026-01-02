@@ -1,94 +1,106 @@
 /**
  * CLAUDE.md Validation Agent
  *
- * Validates CLAUDE.md file edits by spawning a built-in Explore subagent
- * to investigate the source repository for documentation patterns.
+ * Validates CLAUDE.md file edits against hardcoded agent-framework rules.
+ * Uses direct mode with all rules embedded in the system prompt.
  *
  * ## FLOW
  *
- * 1. Check session cache for previously fetched rules
- * 2. Run SDK agent with Task tool enabled
- * 3. Agent spawns Explore subagent to investigate GitHub repo
- * 4. Compare proposed content against discovered patterns
- * 5. Return APPROVED or REJECTED verdict
- *
- * ## SESSION CACHING
- *
- * GitHub rules are cached per Claude Code session to avoid repeated
- * exploration. Cache is invalidated when transcript_path changes
- * (indicating a new session).
+ * 1. Receive current file content and proposed edit
+ * 2. Run direct agent with structured context
+ * 3. Retry if format is invalid
+ * 4. Return OK or DRIFT with feedback
  *
  * @module claude-md-validate
  */
 
-import { runAgent } from '../../utils/agent-runner.js';
-import { CLAUDE_MD_VALIDATE_AGENT } from '../../utils/agent-configs.js';
-import { setRewindSession, detectRewind } from '../../utils/rewind-cache.js';
-
-// Session cache for GitHub rules (fetched once per session)
-let cachedRules: string | null = null;
-let cacheSessionId: string | null = null;
-
-/**
- * Clear the cached rules (called on rewind detection).
- */
-export function clearCachedRules(): void {
-  cachedRules = null;
-}
+import { getModelId } from "../../types.js";
+import { runAgent } from "../../utils/agent-runner.js";
+import { CLAUDE_MD_VALIDATE_AGENT } from "../../utils/agent-configs.js";
+import { getAnthropicClient } from "../../utils/anthropic-client.js";
+import { logToHomeAssistant } from "../../utils/logger.js";
+import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 
 /**
- * Validate CLAUDE.md content against project conventions.
+ * Validate CLAUDE.md content against agent-framework rules.
  *
- * Uses a sonnet SDK agent that spawns a built-in Explore subagent
- * to fetch documentation patterns from the GitHub repo.
- *
- * @param content - The proposed CLAUDE.md content to validate
- * @param sessionId - Session identifier (transcript_path) for caching
- * @returns Validation result with approved status and reason
+ * @param currentContent - The full current file content (null if new file)
+ * @param toolName - The tool being used (Write or Edit)
+ * @param toolInput - The tool input with content or old_string/new_string
+ * @returns Validation result with approved status and optional reason
  *
  * @example
  * ```typescript
- * const result = await validateClaudeMd(newContent, input.transcript_path);
+ * const result = await validateClaudeMd(currentContent, "Edit", toolInput);
  * if (!result.approved) {
- *   // Block the Write/Edit operation
+ *   console.log('CLAUDE.md drift:', result.reason);
  * }
  * ```
  */
 export async function validateClaudeMd(
-  content: string,
-  sessionId: string
-): Promise<{ approved: boolean; reason: string }> {
-  // Set session for rewind detection
-  setRewindSession(sessionId);
+  currentContent: string | null,
+  toolName: "Write" | "Edit",
+  toolInput: { content?: string; old_string?: string; new_string?: string }
+): Promise<{ approved: boolean; reason?: string }> {
+  // Format proposed edit based on tool type
+  const proposedEdit =
+    toolName === "Write"
+      ? toolInput.content ?? ""
+      : `old_string: ${toolInput.old_string ?? ""}\nnew_string: ${toolInput.new_string ?? ""}`;
 
-  // Check for rewind - if detected, clear cached rules
-  const rewound = await detectRewind(sessionId);
-  if (rewound) {
-    cachedRules = null;
+  // Empty proposed edit - allow
+  if (!proposedEdit.trim()) {
+    return { approved: true };
   }
 
-  // Invalidate cache on new session
-  if (cacheSessionId !== sessionId) {
-    cachedRules = null;
-    cacheSessionId = sessionId;
-  }
+  try {
+    const initialResponse = await runAgent(
+      { ...CLAUDE_MD_VALIDATE_AGENT, workingDir: process.cwd() },
+      {
+        prompt: "Validate this CLAUDE.md content.",
+        context: `CURRENT FILE:\n${currentContent ?? "(new file)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}`,
+      }
+    );
 
-  const result = await runAgent(
-    { ...CLAUDE_MD_VALIDATE_AGENT, workingDir: process.cwd() },
-    {
-      prompt: 'Validate this CLAUDE.md content:',
-      context: `PROPOSED CLAUDE.MD CONTENT:\n${content}${cachedRules ? `\n\nCACHED RULES (skip exploration, use these):\n${cachedRules}` : ''}`,
+    const anthropic = getAnthropicClient();
+    const decision = await retryUntilValid(
+      anthropic,
+      getModelId("sonnet"),
+      initialResponse,
+      "CLAUDE.md validation",
+      {
+        maxRetries: 2,
+        formatValidator: (text) => startsWithAny(text, ["OK", "DRIFT:"]),
+        formatReminder: "Reply: OK or DRIFT: <feedback>",
+        maxTokens: 150,
+      }
+    );
+
+    if (decision.startsWith("DRIFT:")) {
+      const feedback = decision.replace("DRIFT:", "").trim();
+      logToHomeAssistant({
+        agent: "claude-md-validate",
+        level: "decision",
+        problem: `CLAUDE.md ${toolName.toLowerCase()}`,
+        answer: `DRIFT: ${feedback}`,
+      });
+      return { approved: false, reason: feedback };
     }
-  );
 
-  // Cache explorer findings for future validations in this session
-  const findingsMatch = result.match(
-    /## Explorer Findings\n([\s\S]*?)(?=\n## Validation)/
-  );
-  if (findingsMatch) {
-    cachedRules = findingsMatch[1].trim();
+    logToHomeAssistant({
+      agent: "claude-md-validate",
+      level: "decision",
+      problem: `CLAUDE.md ${toolName.toLowerCase()}`,
+      answer: "OK",
+    });
+    return { approved: true };
+  } catch (err) {
+    logToHomeAssistant({
+      agent: "claude-md-validate",
+      level: "info",
+      problem: "Validation error",
+      answer: String(err),
+    });
+    return { approved: true }; // Fail open on errors
   }
-
-  const approved = result.includes('APPROVED');
-  return { approved, reason: result };
 }

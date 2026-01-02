@@ -20,6 +20,7 @@ import {
   isFirstResponseChecked,
   markFirstResponseChecked,
 } from "../utils/rewind-cache.js";
+import { readPlanContent } from "../utils/session-utils.js";
 import { checkWithAppeal } from "../utils/pre-tool-use-utils.js";
 import {
   readTranscriptExact,
@@ -434,45 +435,43 @@ async function main() {
           process.exit(0);
         }
 
-        // Write uses 'content', Edit uses 'new_string'
-        const content =
-          input.tool_name === "Write"
-            ? (input.tool_input as { content?: string }).content
-            : (input.tool_input as { new_string?: string }).new_string;
-        if (content) {
-          const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
-          // Format both user and assistant messages for plan validation
-          // Assistant context helps catch user approvals and confirmations
-          const conversationContext = formatTranscriptResult(planResult);
+        // Get current plan and conversation context
+        const currentPlan = readPlanContent(input.transcript_path);
+        const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
+        const conversationContext = formatTranscriptResult(planResult);
 
-          // Wrap plan validation with appeal (like style-drift)
-          // Use minimal appealContext to avoid flooding appeal with plan content
-          const validation = await checkWithAppeal(
-            () => validatePlanIntent(content, conversationContext),
-            input.tool_name,
-            input.tool_input,
-            input.transcript_path,
-            { appealContext: `Plan ${input.tool_name.toLowerCase()} to ${filePath}` }
+        // Wrap plan validation with appeal
+        const validation = await checkWithAppeal(
+          () =>
+            validatePlanIntent(
+              currentPlan,
+              input.tool_name as "Write" | "Edit",
+              input.tool_input as { content?: string; old_string?: string; new_string?: string },
+              conversationContext
+            ),
+          input.tool_name,
+          input.tool_input,
+          input.transcript_path,
+          { appealContext: `Plan ${input.tool_name.toLowerCase()} to ${filePath}` }
+        );
+
+        if (!validation.approved) {
+          logToHomeAssistant({
+            agent: "pre-tool-use-hook",
+            level: "decision",
+            problem: `Plan ${input.tool_name.toLowerCase()} to ${filePath}`,
+            answer: `DRIFT: ${validation.reason}`,
+          });
+          console.log(
+            JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "deny",
+                permissionDecisionReason: `Plan drift detected: ${validation.reason}`,
+              },
+            })
           );
-
-          if (!validation.approved) {
-            logToHomeAssistant({
-              agent: "pre-tool-use-hook",
-              level: "decision",
-              problem: `Plan ${input.tool_name.toLowerCase()} to ${filePath}`,
-              answer: `DRIFT: ${validation.reason}`,
-            });
-            console.log(
-              JSON.stringify({
-                hookSpecificOutput: {
-                  hookEventName: "PreToolUse",
-                  permissionDecision: "deny",
-                  permissionDecisionReason: `Plan drift detected: ${validation.reason}`,
-                },
-              })
-            );
-            process.exit(0);
-          }
+          process.exit(0);
         }
         // Plan validated - allow write
         console.log(
@@ -491,57 +490,46 @@ async function main() {
         (input.tool_name === "Write" || input.tool_name === "Edit") &&
         filePath.endsWith("CLAUDE.md")
       ) {
-        let content: string | undefined;
-        if (input.tool_name === "Write") {
-          content = (input.tool_input as { content?: string }).content;
-        } else {
-          // Edit tool - reconstruct full file content after edit
-          const toolInput = input.tool_input as {
-            old_string?: string;
-            new_string?: string;
-          };
-          try {
-            const currentContent = fs.readFileSync(filePath, "utf-8");
-            if (toolInput.old_string && toolInput.new_string) {
-              content = currentContent.replace(
-                toolInput.old_string,
-                toolInput.new_string
-              );
-            }
-          } catch {
-            content = undefined; // File doesn't exist - skip validation
-          }
+        // Get current file content (null if doesn't exist)
+        let currentContent: string | null = null;
+        try {
+          currentContent = fs.readFileSync(filePath, "utf-8");
+        } catch {
+          // File doesn't exist - that's OK for new files
         }
 
-        if (content) {
-          const validation = await checkWithAppeal(
-            () => validateClaudeMd(content!, input.transcript_path),
-            input.tool_name,
-            input.tool_input,
-            input.transcript_path,
-            {
-              appealContext: `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
-            }
-          );
-
-          if (!validation.approved) {
-            logToHomeAssistant({
-              agent: "pre-tool-use-hook",
-              level: "decision",
-              problem: `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
-              answer: `REJECTED: ${(validation.reason ?? "").slice(0, 200)}`,
-            });
-            console.log(
-              JSON.stringify({
-                hookSpecificOutput: {
-                  hookEventName: "PreToolUse",
-                  permissionDecision: "deny",
-                  permissionDecisionReason: `CLAUDE.md validation failed: ${validation.reason}`,
-                },
-              })
-            );
-            process.exit(0);
+        const validation = await checkWithAppeal(
+          () =>
+            validateClaudeMd(
+              currentContent,
+              input.tool_name as "Write" | "Edit",
+              input.tool_input as { content?: string; old_string?: string; new_string?: string }
+            ),
+          input.tool_name,
+          input.tool_input,
+          input.transcript_path,
+          {
+            appealContext: `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
           }
+        );
+
+        if (!validation.approved) {
+          logToHomeAssistant({
+            agent: "pre-tool-use-hook",
+            level: "decision",
+            problem: `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
+            answer: `REJECTED: ${(validation.reason ?? "").slice(0, 200)}`,
+          });
+          console.log(
+            JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "deny",
+                permissionDecisionReason: `CLAUDE.md validation failed: ${validation.reason}`,
+              },
+            })
+          );
+          process.exit(0);
         }
         // CLAUDE.md validated - allow write
         console.log(
