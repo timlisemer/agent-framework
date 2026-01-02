@@ -20,6 +20,12 @@ import {
   isFirstResponseChecked,
   markFirstResponseChecked,
 } from "../utils/rewind-cache.js";
+import {
+  setDenialSession,
+  checkDenialUserInteraction,
+  recordDenial,
+  MAX_SIMILAR_DENIALS,
+} from "../utils/denial-cache.js";
 import { readPlanContent } from "../utils/session-utils.js";
 import { checkWithAppeal } from "../utils/pre-tool-use-utils.js";
 import {
@@ -66,62 +72,6 @@ function outputDeny(reason: string): never {
   process.exit(0);
 }
 
-// Retry tracking for workaround detection
-const DENIAL_CACHE_FILE = "/tmp/claude-hook-denials.json";
-const MAX_SIMILAR_DENIALS = 3;
-const DENIAL_EXPIRY_MS = 60 * 1000; // 1 minute
-
-interface DenialEntry {
-  count: number;
-  timestamp: number;
-}
-
-interface DenialCache {
-  sessionId?: string;
-  denials: { [pattern: string]: DenialEntry };
-}
-
-let denialSessionId: string | undefined;
-
-function setDenialSession(transcriptPath: string): void {
-  denialSessionId = transcriptPath;
-}
-
-function loadDenials(): { [pattern: string]: DenialEntry } {
-  try {
-    if (fs.existsSync(DENIAL_CACHE_FILE)) {
-      const data = fs.readFileSync(DENIAL_CACHE_FILE, "utf-8");
-      const cache: DenialCache = JSON.parse(data);
-
-      // Clear cache if session changed (new Claude Code session)
-      if (denialSessionId && cache.sessionId && cache.sessionId !== denialSessionId) {
-        return {};
-      }
-
-      // Clean expired entries
-      const now = Date.now();
-      const denials = cache.denials || {};
-      for (const key of Object.keys(denials)) {
-        if (now - denials[key].timestamp > DENIAL_EXPIRY_MS) {
-          delete denials[key];
-        }
-      }
-      return denials;
-    }
-  } catch {
-    // Ignore errors, return empty cache
-  }
-  return {};
-}
-
-function saveDenials(denials: { [pattern: string]: DenialEntry }): void {
-  try {
-    const cache: DenialCache = { sessionId: denialSessionId, denials };
-    fs.writeFileSync(DENIAL_CACHE_FILE, JSON.stringify(cache));
-  } catch {
-    // Ignore write errors
-  }
-}
 
 // File tools that benefit from path-based risk classification
 const FILE_TOOLS = ["Read", "Write", "Edit", "NotebookEdit"];
@@ -320,10 +270,11 @@ async function main() {
   const errorCheckResult = await readTranscriptExact(input.transcript_path, ERROR_CHECK_COUNTS);
   const errorCheckTranscript = formatTranscriptResult(errorCheckResult);
 
-  // Clear ack cache if user has sent a new message (any user interaction = fresh start)
+  // Clear caches if user has sent a new message (any user interaction = fresh start)
   const lastUserMessage = errorCheckResult.user[errorCheckResult.user.length - 1];
   if (lastUserMessage) {
     checkUserInteraction(lastUserMessage.content);
+    checkDenialUserInteraction(lastUserMessage.content);
     // Record user message for rewind detection
     recordUserMessage(lastUserMessage.content, lastUserMessage.index);
   }
@@ -564,20 +515,15 @@ async function main() {
     let finalReason = decision.reason;
     const pattern = detectWorkaroundPattern(input.tool_name, input.tool_input);
     if (pattern) {
-      const denials = loadDenials();
-      denials[pattern] = {
-        count: (denials[pattern]?.count || 0) + 1,
-        timestamp: Date.now(),
-      };
-      saveDenials(denials);
+      const count = recordDenial(pattern);
 
-      if (denials[pattern].count >= MAX_SIMILAR_DENIALS) {
-        finalReason += ` CRITICAL: You have attempted ${denials[pattern].count} similar workarounds for '${pattern}'. STOP trying alternatives. Either use the approved MCP tool, ask the user for guidance, or acknowledge that this action cannot be performed.`;
+      if (count >= MAX_SIMILAR_DENIALS) {
+        finalReason += ` CRITICAL: You have attempted ${count} similar workarounds for '${pattern}'. STOP trying alternatives. Either use the approved MCP tool, ask the user for guidance, or acknowledge that this action cannot be performed.`;
         logToHomeAssistant({
           agent: "pre-tool-use-hook",
           level: "escalation",
           problem: `Repeated workaround attempts: ${pattern}`,
-          answer: `Count: ${denials[pattern].count}`,
+          answer: `Count: ${count}`,
         });
       }
     }

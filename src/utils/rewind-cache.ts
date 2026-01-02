@@ -1,87 +1,42 @@
 import * as fs from "fs";
-import * as crypto from "crypto";
+import { CacheManager } from "./cache-manager.js";
 import { clearAckCache } from "./ack-cache.js";
+import { clearDenialCache } from "./denial-cache.js";
 import { logToHomeAssistant } from "./logger.js";
 
 const REWIND_CACHE_FILE = "/tmp/claude-rewind-cache.json";
-const DENIAL_CACHE_FILE = "/tmp/claude-hook-denials.json";
-const MAX_CACHED_MESSAGES = 20; // Keep last N user messages
+const REWIND_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_CACHED_MESSAGES = 20;
 
 interface CachedUserMessage {
-  hash: string; // MD5 first 8 chars
-  snippet: string; // First 100 chars for transcript search
-  index: number; // Transcript line when captured
+  hash: string;
+  snippet: string;
+  index: number;
+  timestamp: number;
 }
 
-interface RewindCache {
-  sessionId: string;
+interface RewindData {
   userMessages: CachedUserMessage[];
   firstResponseChecked: boolean;
-  lastUserMessageHash: string;
 }
 
-// Current session ID, set via setRewindSession()
-let currentSessionId: string | undefined;
+const cacheManager = new CacheManager<RewindData>({
+  filePath: REWIND_CACHE_FILE,
+  defaultData: () => ({ userMessages: [], firstResponseChecked: false }),
+  expiryMs: REWIND_EXPIRY_MS,
+  maxEntries: MAX_CACHED_MESSAGES,
+  getTimestamp: (e) => (e as CachedUserMessage).timestamp,
+  getEntries: (d) => d.userMessages,
+  setEntries: (d, e) => ({ ...d, userMessages: e as CachedUserMessage[] }),
+});
 
 function hashMessage(msg: string): string {
+  const crypto = require("crypto");
   return crypto.createHash("md5").update(msg).digest("hex").slice(0, 8);
 }
 
 export function setRewindSession(transcriptPath: string): void {
-  currentSessionId = transcriptPath;
-}
-
-function loadRewindCache(): RewindCache {
-  try {
-    if (fs.existsSync(REWIND_CACHE_FILE)) {
-      const data = JSON.parse(
-        fs.readFileSync(REWIND_CACHE_FILE, "utf-8")
-      ) as RewindCache;
-
-      // Clear cache if session changed (new Claude Code session)
-      if (
-        currentSessionId &&
-        data.sessionId &&
-        data.sessionId !== currentSessionId
-      ) {
-        return {
-          sessionId: currentSessionId,
-          userMessages: [],
-          firstResponseChecked: false,
-          lastUserMessageHash: "",
-        };
-      }
-
-      data.sessionId = currentSessionId || "";
-      return data;
-    }
-  } catch {
-    // Ignore errors, return empty cache
-  }
-  return {
-    sessionId: currentSessionId || "",
-    userMessages: [],
-    firstResponseChecked: false,
-    lastUserMessageHash: "",
-  };
-}
-
-function saveRewindCache(cache: RewindCache): void {
-  try {
-    fs.writeFileSync(REWIND_CACHE_FILE, JSON.stringify(cache));
-  } catch {
-    // Ignore write errors
-  }
-}
-
-function clearDenialCache(): void {
-  try {
-    if (fs.existsSync(DENIAL_CACHE_FILE)) {
-      fs.unlinkSync(DENIAL_CACHE_FILE);
-    }
-  } catch {
-    // Ignore errors
-  }
+  cacheManager.setSession(transcriptPath);
 }
 
 /**
@@ -91,13 +46,7 @@ function clearDenialCache(): void {
 export function invalidateAllCaches(): void {
   clearAckCache();
   clearDenialCache();
-  try {
-    if (fs.existsSync(REWIND_CACHE_FILE)) {
-      fs.unlinkSync(REWIND_CACHE_FILE);
-    }
-  } catch {
-    // Ignore errors
-  }
+  cacheManager.clear();
 }
 
 /**
@@ -110,31 +59,24 @@ export function invalidateAllCaches(): void {
 export function recordUserMessage(msg: string, index: number): void {
   if (!msg) return;
 
-  const cache = loadRewindCache();
+  const data = cacheManager.load();
   const hash = hashMessage(msg);
   const snippet = msg.slice(0, 100);
 
   // Check if this message is already cached (avoid duplicates)
-  const exists = cache.userMessages.some((m) => m.hash === hash);
+  const exists = data.userMessages.some((m) => m.hash === hash);
   if (exists) return;
 
-  // Add new message
-  cache.userMessages.push({ hash, snippet, index });
+  // Add new message with timestamp
+  data.userMessages.push({ hash, snippet, index, timestamp: Date.now() });
 
-  // Keep only last N messages
-  if (cache.userMessages.length > MAX_CACHED_MESSAGES) {
-    cache.userMessages = cache.userMessages.slice(-MAX_CACHED_MESSAGES);
+  // Update first response flag on new user message
+  const lastMessage = data.userMessages[data.userMessages.length - 2];
+  if (!lastMessage || lastMessage.hash !== hash) {
+    data.firstResponseChecked = false;
   }
 
-  // Update last user message hash for first-response tracking
-  const currentHash = hash;
-  if (cache.lastUserMessageHash !== currentHash) {
-    // New user message - reset first response flag
-    cache.firstResponseChecked = false;
-    cache.lastUserMessageHash = currentHash;
-  }
-
-  saveRewindCache(cache);
+  cacheManager.save(data);
 }
 
 /**
@@ -145,10 +87,10 @@ export function recordUserMessage(msg: string, index: number): void {
  * @returns true if rewind detected (caches cleared), false otherwise
  */
 export async function detectRewind(transcriptPath: string): Promise<boolean> {
-  const cache = loadRewindCache();
+  const data = cacheManager.load();
 
   // No cached messages - nothing to detect
-  if (cache.userMessages.length === 0) {
+  if (data.userMessages.length === 0) {
     return false;
   }
 
@@ -162,10 +104,8 @@ export async function detectRewind(transcriptPath: string): Promise<boolean> {
   }
 
   // Check if ANY cached message is missing from transcript
-  for (const cached of cache.userMessages) {
-    // Search for the snippet in the transcript
+  for (const cached of data.userMessages) {
     if (!transcriptContent.includes(cached.snippet)) {
-      // Message not found - rewind detected!
       logToHomeAssistant({
         agent: "rewind-cache",
         level: "info",
@@ -173,7 +113,6 @@ export async function detectRewind(transcriptPath: string): Promise<boolean> {
         answer: `Missing message: "${cached.snippet.slice(0, 50)}..."`,
       });
 
-      // Clear all caches
       invalidateAllCaches();
       return true;
     }
@@ -186,24 +125,20 @@ export async function detectRewind(transcriptPath: string): Promise<boolean> {
  * Check if first response intent has already been checked for this user turn.
  */
 export function isFirstResponseChecked(): boolean {
-  const cache = loadRewindCache();
-  return cache.firstResponseChecked;
+  const data = cacheManager.load();
+  return data.firstResponseChecked;
 }
 
 /**
  * Mark first response intent as checked for this user turn.
  */
 export function markFirstResponseChecked(): void {
-  const cache = loadRewindCache();
-  cache.firstResponseChecked = true;
-  saveRewindCache(cache);
+  cacheManager.update((data) => ({ ...data, firstResponseChecked: true }));
 }
 
 /**
  * Reset the first response flag (called on rewind or new user message).
  */
 export function resetFirstResponseFlag(): void {
-  const cache = loadRewindCache();
-  cache.firstResponseChecked = false;
-  saveRewindCache(cache);
+  cacheManager.update((data) => ({ ...data, firstResponseChecked: false }));
 }

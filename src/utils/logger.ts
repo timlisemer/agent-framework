@@ -31,7 +31,7 @@ function extractDecision(answer: string): string | undefined {
   return match ? match[1] : undefined;
 }
 
-export async function logToHomeAssistant(log: AgentLog): Promise<void> {
+export function logToHomeAssistant(log: AgentLog): void {
   trackEvent({
     eventType: mapLevelToEventType(log.level),
     agentName: log.agent,

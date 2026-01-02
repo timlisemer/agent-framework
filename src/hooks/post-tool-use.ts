@@ -12,11 +12,11 @@ async function main() {
 
   // Clear error acknowledgment cache on ANY successful tool
   clearAckCache();
-  await logToHomeAssistant({
-    agent: 'post-tool-use',
-    level: 'info',
+  logToHomeAssistant({
+    agent: "post-tool-use",
+    level: "info",
     problem: `${input.tool_name} succeeded`,
-    answer: 'Cleared error acknowledgment cache',
+    answer: "Cleared error acknowledgment cache",
   });
 
   process.exit(0);

@@ -42,7 +42,7 @@ export async function checkWithAppeal(
   );
 
   if (appeal.approved) {
-    await logToHomeAssistant({
+    logToHomeAssistant({
       agent: "check-with-appeal",
       level: "decision",
       problem: appealDescription,
