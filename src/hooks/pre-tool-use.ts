@@ -3,9 +3,8 @@ import { type PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
-import { approveTool } from "../agents/hooks/tool-approve.js";
-import { appealDenial } from "../agents/hooks/tool-appeal.js";
-import { validatePlanIntent } from "../agents/hooks/plan-validate.js";
+import { checkToolApproval } from "../agents/hooks/tool-approve.js";
+import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
 import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
@@ -34,7 +33,6 @@ import {
   hasErrorPatterns,
 } from "../utils/transcript.js";
 import {
-  APPEAL_COUNTS,
   ERROR_CHECK_COUNTS,
   PLAN_VALIDATE_COUNTS,
   RECENT_TOOL_APPROVAL_COUNTS,
@@ -171,24 +169,19 @@ async function main() {
   // Block confirm tool from Claude Code - requires explicit user approval
   // Internal agents (like commit) call runConfirmAgent() directly, bypassing this hook
   if (input.tool_name === "mcp__agent-framework__confirm") {
-    const result = await readTranscriptExact(input.transcript_path, {
-      counts: { user: 5, assistant: 5 },
-    });
-    const transcript = formatTranscriptResult(result);
-    const toolDescription = `${input.tool_name} with ${JSON.stringify(input.tool_input).slice(0, 200)}`;
-    const appeal = await appealDenial(
-      toolDescription,
-      transcript,
-      "Confirm requires explicit user approval. Use /commit or explicitly request confirm."
+    const denyReason =
+      "Confirm requires explicit user approval. Use /commit or explicitly request confirm.";
+    const result = await checkWithAppeal(
+      async () => ({ approved: false, reason: denyReason }),
+      input.tool_name,
+      input.tool_input,
+      input.transcript_path
     );
 
-    if (appeal.approved) {
-      outputAllow();
+    if (!result.approved) {
+      outputDeny(result.reason ?? denyReason);
     }
-
-    outputDeny(
-      "Confirm requires explicit user approval. Use /commit or explicitly request confirm."
-    );
+    outputAllow();
   }
 
   // Auto-approve low-risk tools and ALL MCP tools
@@ -225,43 +218,43 @@ async function main() {
   // Gate: only run once per user turn (reset when user sends new message or rewinds)
   const ACTION_TOOLS = ["Edit", "Write", "NotebookEdit", "Bash", "Agent", "Task"];
   if (ACTION_TOOLS.includes(input.tool_name) && !isFirstResponseChecked()) {
-    const intentResult = await checkIntentAlignment(
-      input.tool_name,
-      input.tool_input,
-      input.transcript_path
-    );
-
     // Mark as checked so we don't run again for subsequent tool calls in same turn
     markFirstResponseChecked();
 
-    if (!intentResult.approved) {
-      // Appeal the denial
-      const appealResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
-      const appealTranscript = formatTranscriptResult(appealResult);
-      const appeal = await appealDenial(
-        `${input.tool_name} as first response`,
-        appealTranscript,
-        intentResult.reason || "First action misaligned with user request"
-      );
-
-      if (!appeal.approved) {
-        logToHomeAssistant({
-          agent: "pre-tool-use-hook",
-          level: "decision",
-          problem: `First response: ${input.tool_name}`,
-          answer: `BLOCKED: ${intentResult.reason}`,
-        });
-        outputDeny(
-          `First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`
+    const intentResult = await checkWithAppeal(
+      async () => {
+        const result = await checkIntentAlignment(
+          input.tool_name,
+          input.tool_input,
+          input.transcript_path
         );
+        return result;
+      },
+      input.tool_name,
+      input.tool_input,
+      input.transcript_path,
+      {
+        appealContext: `${input.tool_name} as first response`,
+        onAppealSuccess: () =>
+          logToHomeAssistant({
+            agent: "pre-tool-use-hook",
+            level: "info",
+            problem: `First response intent appealed: ${input.tool_name}`,
+            answer: "APPEALED - continuing",
+          }),
       }
-      // Appeal passed - continue to other checks
+    );
+
+    if (!intentResult.approved) {
       logToHomeAssistant({
         agent: "pre-tool-use-hook",
-        level: "info",
-        problem: `First response intent appealed: ${input.tool_name}`,
-        answer: "APPEALED - continuing",
+        level: "decision",
+        problem: `First response: ${input.tool_name}`,
+        answer: `BLOCKED: ${intentResult.reason}`,
       });
+      outputDeny(
+        `First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`
+      );
     }
   }
 
@@ -293,44 +286,46 @@ async function main() {
     // Continue to next checks (don't require explicit ack)
   } else if (quickCheck.needsCheck) {
     // Step 2: Only call Haiku if error/directive patterns detected
-    const ackResult = await checkErrorAcknowledgment(
-      errorCheckTranscript,
+    // Track the reason for potential markErrorAcknowledged call
+    let blockReason = "";
+
+    const ackResult = await checkWithAppeal(
+      async () => {
+        const result = await checkErrorAcknowledgment(
+          errorCheckTranscript,
+          input.tool_name,
+          input.tool_input
+        );
+        if (result.startsWith("BLOCK:")) {
+          blockReason = result.substring(7).trim();
+          return { approved: false, reason: blockReason };
+        }
+        return { approved: true };
+      },
       input.tool_name,
-      input.tool_input
-    );
-    if (ackResult.startsWith("BLOCK:")) {
-      const reason = ackResult.substring(7).trim();
-
-      // Appeal the error-acknowledge denial
-      const appealResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
-      const appealTranscript = formatTranscriptResult(appealResult);
-      const errorToolDescription = `${input.tool_name} with ${JSON.stringify(input.tool_input).slice(0, 200)}`;
-      const appeal = await appealDenial(
-        errorToolDescription,
-        appealTranscript,
-        reason
-      );
-
-      if (appeal.approved) {
-        // Mark error as acknowledged since appeal passed
-        markErrorAcknowledged(reason);
-        logToHomeAssistant({
-          agent: "pre-tool-use-hook",
-          level: "decision",
-          problem: `${input.tool_name} error-acknowledge appealed`,
-          answer: "APPEALED - continuing",
-        });
-        // Continue to next checks (don't exit)
-      } else {
-        const finalReason = appeal.reason ?? reason;
-        logToHomeAssistant({
-          agent: "pre-tool-use-hook",
-          level: "decision",
-          problem: `${input.tool_name} blocked for ignoring errors`,
-          answer: finalReason,
-        });
-        outputDeny(`Error acknowledgment required: ${finalReason}`);
+      input.tool_input,
+      input.transcript_path,
+      {
+        onAppealSuccess: () => {
+          markErrorAcknowledged(blockReason);
+          logToHomeAssistant({
+            agent: "pre-tool-use-hook",
+            level: "decision",
+            problem: `${input.tool_name} error-acknowledge appealed`,
+            answer: "APPEALED - continuing",
+          });
+        },
       }
+    );
+
+    if (!ackResult.approved) {
+      logToHomeAssistant({
+        agent: "pre-tool-use-hook",
+        level: "decision",
+        problem: `${input.tool_name} blocked for ignoring errors`,
+        answer: ackResult.reason ?? blockReason,
+      });
+      outputDeny(`Error acknowledgment required: ${ackResult.reason ?? blockReason}`);
     }
   }
 
@@ -379,7 +374,7 @@ async function main() {
         // Wrap plan validation with appeal
         const validation = await checkWithAppeal(
           () =>
-            validatePlanIntent(
+            checkPlanIntent(
               currentPlan,
               input.tool_name as "Write" | "Edit",
               input.tool_input as { content?: string; old_string?: string; new_string?: string },
@@ -497,7 +492,7 @@ async function main() {
 
   // Tool approval with automatic appeal on denial
   const decision = await checkWithAppeal(
-    () => approveTool(input.tool_name, input.tool_input, projectDir),
+    () => checkToolApproval(input.tool_name, input.tool_input, projectDir),
     input.tool_name,
     input.tool_input,
     input.transcript_path

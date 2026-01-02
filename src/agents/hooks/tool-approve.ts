@@ -44,13 +44,13 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
  *
  * @example
  * ```typescript
- * const result = await approveTool('Bash', { command: 'rm -rf /' }, '/path/to/project');
+ * const result = await checkToolApproval('Bash', { command: 'rm -rf /' }, '/path/to/project');
  * if (!result.approved) {
  *   console.log('Denied:', result.reason);
  * }
  * ```
  */
-export async function approveTool(
+export async function checkToolApproval(
   toolName: string,
   toolInput: unknown,
   workingDir: string
@@ -91,7 +91,7 @@ Input: ${JSON.stringify(toolInput)}`,
   const anthropic = getAnthropicClient();
   const decision = await retryUntilValid(
     anthropic,
-    getModelId("haiku"),
+    getModelId(TOOL_APPROVE_AGENT.tier),
     initialResponse,
     toolDescription,
     {

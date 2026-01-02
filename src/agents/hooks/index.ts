@@ -31,10 +31,10 @@
  * - intent-align (stop): Checks stop response for plain text questions, unanswered questions
  */
 
-export { approveTool } from './tool-approve.js';
-export { appealDenial } from './tool-appeal.js';
+export { checkToolApproval } from './tool-approve.js';
+export { checkAppeal } from './tool-appeal.js';
 export { checkErrorAcknowledgment } from './error-acknowledge.js';
-export { validatePlanIntent } from './plan-validate.js';
+export { checkPlanIntent } from './plan-validate.js';
 export { checkForOffTopic, extractConversationContext } from './intent-validate.js';
 export { checkStyleDrift } from './style-drift.js';
 export { checkIntentAlignment, checkStopIntentAlignment } from './intent-align.js';

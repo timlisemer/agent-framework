@@ -108,6 +108,20 @@ ${diff || '(no diff)'}`,
     }
   );
 
+  // Step 6: Validate output has expected sections
+  const hasInvestigation = result.includes('## Investigation');
+  const hasResults = result.includes('## Results');
+  const hasVerdict = result.includes('## Verdict');
+
+  if (!hasInvestigation || !hasResults || !hasVerdict) {
+    logToHomeAssistant({
+      agent: 'confirm',
+      level: 'warning',
+      problem: workingDir,
+      answer: `Incomplete output: investigation=${hasInvestigation}, results=${hasResults}, verdict=${hasVerdict}`,
+    });
+  }
+
   // Log the final decision
   logToHomeAssistant({
     agent: 'confirm',

@@ -45,13 +45,13 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
  *
  * @example
  * ```typescript
- * const result = await validatePlanIntent(currentPlan, "Edit", toolInput, context);
+ * const result = await checkPlanIntent(currentPlan, "Edit", toolInput, context);
  * if (!result.approved) {
  *   console.log('Plan drift:', result.reason);
  * }
  * ```
  */
-export async function validatePlanIntent(
+export async function checkPlanIntent(
   currentPlan: string | null,
   toolName: "Write" | "Edit",
   toolInput: { content?: string; old_string?: string; new_string?: string },
@@ -87,7 +87,7 @@ export async function validatePlanIntent(
     const anthropic = getAnthropicClient();
     const decision = await retryUntilValid(
       anthropic,
-      getModelId("sonnet"),
+      getModelId(PLAN_VALIDATE_AGENT.tier),
       initialResponse,
       `Plan validation for: ${proposedEdit.substring(0, 100)}...`,
       {

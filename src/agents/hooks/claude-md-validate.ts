@@ -65,7 +65,7 @@ export async function validateClaudeMd(
     const anthropic = getAnthropicClient();
     const decision = await retryUntilValid(
       anthropic,
-      getModelId("sonnet"),
+      getModelId(CLAUDE_MD_VALIDATE_AGENT.tier),
       initialResponse,
       "CLAUDE.md validation",
       {

@@ -54,8 +54,8 @@ async function main() {
 
     console.log(
       JSON.stringify({
-        continue: true,
-        systemMessage: result.systemMessage,
+        decision: "block",
+        reason: result.systemMessage,
       })
     );
     process.exit(0);

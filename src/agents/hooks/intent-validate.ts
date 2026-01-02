@@ -151,7 +151,7 @@ ${context.lastAssistantMessage}`,
     const anthropic = getAnthropicClient();
     const decision = await retryUntilValid(
       anthropic,
-      getModelId("haiku"),
+      getModelId(INTENT_VALIDATE_AGENT.tier),
       initialResponse,
       "Intent validation for assistant response",
       {

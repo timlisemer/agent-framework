@@ -37,7 +37,7 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
  *
  * @example
  * ```typescript
- * const result = await appealDenial(
+ * const result = await checkAppeal(
  *   'Bash with {"command": "curl ..."}',
  *   transcript,
  *   'Network requests denied by default'
@@ -47,7 +47,7 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
  * }
  * ```
  */
-export async function appealDenial(
+export async function checkAppeal(
   toolDescription: string,
   transcript: string,
   originalReason: string
@@ -70,7 +70,7 @@ ${transcript}`,
   const anthropic = getAnthropicClient();
   const decision = await retryUntilValid(
     anthropic,
-    getModelId('haiku'),
+    getModelId(TOOL_APPEAL_AGENT.tier),
     initialResponse,
     toolDescription,
     {

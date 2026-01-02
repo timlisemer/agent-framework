@@ -410,3 +410,109 @@ Your final response should be your complete analysis in the required format.`;
     return `[SDK ERROR] ${errorMessage}`;
   }
 }
+
+/**
+ * Options for retry behavior in runAgentWithRetry.
+ */
+export interface AgentRetryOptions {
+  /**
+   * Maximum number of retry attempts.
+   * @default 2
+   */
+  maxRetries?: number;
+
+  /**
+   * Function to validate if the response format is acceptable.
+   * Return true if format is valid, false to trigger retry.
+   */
+  formatValidator: (text: string) => boolean;
+
+  /**
+   * Message to send on retry, reminding the model of expected format.
+   */
+  formatReminder: string;
+
+  /**
+   * Context description for retry messages.
+   * @example "Tool approval for Bash command"
+   */
+  context?: string;
+
+  /**
+   * Max tokens for retry requests.
+   * @default 100
+   */
+  maxTokens?: number;
+}
+
+/**
+ * Run an agent with automatic format retry.
+ *
+ * Combines runAgent + retryUntilValid into a single call.
+ * Use this when you need the agent to output a specific format
+ * and want automatic retries if the format is wrong.
+ *
+ * @param config - Agent configuration
+ * @param input - Prompt and optional context
+ * @param retryOptions - Format validation and retry settings
+ * @returns The validated response text
+ *
+ * @example
+ * ```typescript
+ * const decision = await runAgentWithRetry(
+ *   { ...TOOL_APPROVE_AGENT, workingDir: cwd },
+ *   { prompt: 'Evaluate:', context: toolCall },
+ *   {
+ *     formatValidator: (text) => text.startsWith('APPROVE') || text.startsWith('DENY:'),
+ *     formatReminder: 'Reply with EXACTLY: APPROVE or DENY: <reason>',
+ *   }
+ * );
+ * ```
+ */
+export async function runAgentWithRetry(
+  config: AgentConfig,
+  input: AgentInput,
+  retryOptions: AgentRetryOptions
+): Promise<string> {
+  // Get initial response
+  const initialResponse = await runAgent(config, input);
+
+  // Check if already valid
+  if (retryOptions.formatValidator(initialResponse)) {
+    return initialResponse;
+  }
+
+  // Retry until valid
+  const {
+    maxRetries = 2,
+    formatValidator,
+    formatReminder,
+    context,
+    maxTokens = 100,
+  } = retryOptions;
+
+  const client = getAnthropicClient();
+  const contextDesc = context ?? input.prompt.slice(0, 100);
+
+  let decision = initialResponse;
+  let retries = 0;
+
+  while (!formatValidator(decision) && retries < maxRetries) {
+    retries++;
+
+    const retryResponse = await client.messages.create({
+      model: getModelId(config.tier),
+      max_tokens: maxTokens,
+      messages: [
+        {
+          role: "user",
+          content: `Invalid format: "${decision}". You are evaluating: ${contextDesc}. ${formatReminder}`,
+        },
+      ],
+    });
+
+    decision = extractTextFromResponse(retryResponse);
+  }
+
+  return decision;
+}

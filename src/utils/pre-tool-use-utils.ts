@@ -1,12 +1,11 @@
-import { appealDenial } from "../agents/hooks/tool-appeal.js";
+import { checkAppeal } from "../agents/hooks/tool-appeal.js";
+import { type CheckResult } from "../types.js";
 import { logToHomeAssistant } from "./logger.js";
 import { readTranscriptExact, formatTranscriptResult } from "./transcript.js";
 import { APPEAL_COUNTS } from "./transcript-presets.js";
 
-export interface CheckResult {
-  approved: boolean;
-  reason?: string;
-}
+// Re-export CheckResult for backwards compatibility
+export type { CheckResult } from "../types.js";
 
 export interface CheckWithAppealOptions {
   /** Custom context for appeal (overrides default toolDescription) */
@@ -35,7 +34,7 @@ export async function checkWithAppeal(
   // Use custom appeal context if provided, otherwise default to tool description
   const appealDescription = options?.appealContext ?? `${toolName} with ${JSON.stringify(toolInput).slice(0, 200)}`;
 
-  const appeal = await appealDenial(
+  const appeal = await checkAppeal(
     appealDescription,
     transcript,
     result.reason || "No reason provided"

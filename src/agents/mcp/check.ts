@@ -123,11 +123,22 @@ export async function runCheckAgent(workingDir: string): Promise<string> {
   const checkOutput = `MAKE CHECK OUTPUT (exit code ${check.exitCode}):\n${check.output}`;
 
   // Step 4: Use unified runner for analysis
-  return runAgent(
+  const result = await runAgent(
     { ...CHECK_AGENT, workingDir },
     {
       prompt: 'Summarize the following check results:',
       context: `UNCOMMITTED FILES:\n${status || '(none)'}\n\n${lintOutput}${checkOutput}`,
     }
   );
+
+  // Step 5: Add guidance for unused code errors
+  const hasUnusedCode = /unused|never read|declared but|not used/i.test(result);
+  if (hasUnusedCode && result.includes('Status: FAIL')) {
+    return `${result}
+
+## Action Required
+If you introduced this unused code, investigate why it happened and delete it. We do not accept unused code - it must be removed, not suppressed with underscores, @ts-ignore, or comments.`;
+  }
+
+  return result;
 }

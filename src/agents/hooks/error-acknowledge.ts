@@ -37,6 +37,7 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { ERROR_ACK_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logToHomeAssistant } from "../../utils/logger.js";
+import { parseDecision } from "../../utils/response-parser.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 
 // Pattern to extract issue text from transcript for caching
@@ -96,7 +97,7 @@ Input: ${JSON.stringify(toolInput)}`,
   const anthropic = getAnthropicClient();
   const decision = await retryUntilValid(
     anthropic,
-    getModelId('haiku'),
+    getModelId(ERROR_ACK_AGENT.tier),
     initialResponse,
     toolDescription,
     {
@@ -106,7 +107,9 @@ Input: ${JSON.stringify(toolInput)}`,
     }
   );
 
-  if (decision.startsWith('OK')) {
+  const parsed = parseDecision(decision, ['OK']);
+
+  if (parsed.approved) {
     // Mark issue as acknowledged so future checks skip it
     if (issueMatch) {
       markErrorAcknowledged(issueMatch[0]);
@@ -120,15 +123,14 @@ Input: ${JSON.stringify(toolInput)}`,
     return 'OK';
   }
 
-  if (decision.startsWith('BLOCK:')) {
-    const reason = decision.substring(7).trim();
+  if (parsed.reason) {
     logToHomeAssistant({
       agent: 'error-acknowledge',
       level: 'decision',
       problem: toolDescription,
-      answer: `BLOCKED: ${reason}`,
+      answer: `BLOCKED: ${parsed.reason}`,
     });
-    return decision;
+    return `BLOCK: ${parsed.reason}`;
   }
 
   // Default to OK if response is malformed after retries (fail open)

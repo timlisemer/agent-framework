@@ -29,7 +29,7 @@
  * @module intent-align
  */
 
-import { getModelId } from "../../types.js";
+import { getModelId, type CheckResult, type StopCheckResult } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { FIRST_RESPONSE_INTENT_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
@@ -41,10 +41,8 @@ import {
   FIRST_RESPONSE_STOP_COUNTS,
 } from "../../utils/transcript-presets.js";
 
-export interface IntentAlignmentResult {
-  approved: boolean;
-  reason?: string;
-}
+// Re-export CheckResult as IntentAlignmentResult for backwards compatibility
+export type IntentAlignmentResult = CheckResult;
 
 /**
  * Check if the AI's tool call aligns with the user's request.
@@ -121,7 +119,7 @@ Input: ${JSON.stringify(toolInput, null, 2).slice(0, 500)}`;
   const anthropic = getAnthropicClient();
   const decision = await retryUntilValid(
     anthropic,
-    getModelId("sonnet"),
+    getModelId(FIRST_RESPONSE_INTENT_AGENT.tier),
     initialResponse,
     toolDescription,
     {
@@ -159,10 +157,64 @@ Input: ${JSON.stringify(toolInput, null, 2).slice(0, 500)}`;
   };
 }
 
-export interface StopIntentResult {
-  approved: boolean;
-  reason?: string;
-  systemMessage?: string;
+// Re-export StopCheckResult as StopIntentResult for backwards compatibility
+export type StopIntentResult = StopCheckResult;
+
+/**
+ * Use AI to classify a stop response as either an intermediate question,
+ * plan approval request, or OK (legitimate).
+ */
+async function classifyStopResponse(
+  userText: string,
+  assistantText: string
+): Promise<"INTERMEDIATE_QUESTION" | "PLAN_APPROVAL" | "OK"> {
+  const context = `USER MESSAGE:
+${userText}
+
+ASSISTANT RESPONSE:
+${assistantText}`;
+
+  const systemPrompt = `You classify AI assistant responses that end with questions.
+
+INTERMEDIATE_QUESTION - Use when:
+- AI asks a clarifying question about implementation details
+- AI confirms a specific technical choice before proceeding
+- AI asks about behavior/correctness of something specific
+- AI seeks confirmation on ONE specific aspect, not the whole plan
+- Question is about code, output, or a specific step
+
+Examples: "Does this output format look correct?", "Should I use async here?", "Is the behavior identical?"
+
+PLAN_APPROVAL - Use when:
+- AI has written a complete plan and asks for overall approval
+- AI asks "ready to implement?" or "shall I start coding?"
+- AI is in plan mode presenting a finished plan for sign-off
+- AI explicitly says "here's my plan" or "here's what I'll do"
+
+Examples: "Here's my plan. Ready to proceed?", "Does this plan look good?"
+
+OK - Use when:
+- AI makes a rhetorical statement (not expecting answer)
+- Response is appropriate completion
+- User already approved what AI is asking about
+
+Reply with EXACTLY one of: INTERMEDIATE_QUESTION, PLAN_APPROVAL, or OK`;
+
+  const response = await runAgent(
+    {
+      name: "stop-classify",
+      tier: "haiku",
+      mode: "direct",
+      maxTokens: 50,
+      systemPrompt,
+    },
+    { prompt: "Classify this response.", context }
+  );
+
+  const trimmed = response.trim().toUpperCase();
+  if (trimmed.includes("PLAN_APPROVAL")) return "PLAN_APPROVAL";
+  if (trimmed.includes("INTERMEDIATE_QUESTION")) return "INTERMEDIATE_QUESTION";
+  return "OK";
 }
 
 // Patterns indicating AI is asking plain text questions (should use AskUserQuestion)
@@ -293,23 +345,28 @@ export async function checkStopIntentAlignment(
     return { approved: true };
   }
 
-  // Check 1: Plain text questions (should use AskUserQuestion)
+  // Check 1: Plain text questions - use AI to classify
   const questionCheck = hasPlainTextQuestion(assistantText);
   if (questionCheck.detected) {
-    if (questionCheck.type === "plan_approval") {
+    // Use AI to determine if this is an intermediate question or plan approval
+    const classification = await classifyStopResponse(userText, assistantText);
+
+    if (classification === "PLAN_APPROVAL") {
       return {
         approved: false,
         reason: "Plain text plan approval detected",
         systemMessage:
           "Do not ask for plan approval in plain text. Use the ExitPlanMode tool to present the plan with structured approval options.",
       };
+    } else if (classification === "INTERMEDIATE_QUESTION") {
+      return {
+        approved: false,
+        reason: "Plain text question detected",
+        systemMessage:
+          "Do not ask questions in plain text. Use the AskUserQuestion tool to present structured options to the user.",
+      };
     }
-    return {
-      approved: false,
-      reason: "Plain text question detected",
-      systemMessage:
-        "Do not ask questions in plain text. Use the AskUserQuestion tool to present structured options to the user.",
-    };
+    // classification === "OK" - allow it
   }
 
   // Check 2: User asked a question that wasn't addressed

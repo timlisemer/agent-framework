@@ -22,6 +22,28 @@ export interface AgentResult {
   output: string;
 }
 
+/**
+ * Standard result type for hook agent checks.
+ *
+ * All hook agents should return this type (or an extension of it).
+ */
+export interface CheckResult {
+  /** Whether the check passed */
+  approved: boolean;
+  /** Reason for denial (only present when approved=false) */
+  reason?: string;
+}
+
+/**
+ * Extended result type for stop hook checks.
+ *
+ * Adds systemMessage for injecting corrective guidance.
+ */
+export interface StopCheckResult extends CheckResult {
+  /** System message to inject when blocking the stop */
+  systemMessage?: string;
+}
+
 // Off-topic / conversation alignment check result
 export interface OffTopicCheckResult {
   decision: "OK" | "INTERVENE";

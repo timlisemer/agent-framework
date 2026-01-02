@@ -189,7 +189,7 @@ Does this edit contain ONLY style changes that were NOT requested by the user?`,
   const anthropic = getAnthropicClient();
   const decision = await retryUntilValid(
     anthropic,
-    getModelId("haiku"),
+    getModelId(STYLE_DRIFT_AGENT.tier),
     initialResponse,
     toolDescription,
     {
