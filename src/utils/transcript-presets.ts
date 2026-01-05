@@ -11,7 +11,8 @@
  * the exact count of each message type is collected (or transcript exhausted).
  */
 
-import type { TranscriptReadOptions } from "./transcript.js";
+import { ALL } from 'dns';
+import type { TranscriptReadOptions } from './transcript.js';
 
 /**
  * For error acknowledgment checks.
@@ -65,7 +66,7 @@ export const OFF_TOPIC_COUNTS: TranscriptReadOptions = {
  * Always includes first user message to capture initial request.
  */
 export const PLAN_VALIDATE_COUNTS: TranscriptReadOptions = {
-  counts: { user: 20, assistant: 10 },
+  counts: { user: ALL, assistant: 10 },
   includeFirstUserMessage: true,
 };
 
@@ -96,7 +97,8 @@ export const STYLE_DRIFT_COUNTS: TranscriptReadOptions = {
  * Focus is on request vs response alignment, not intermediate tool calls.
  */
 export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
-  counts: { user: 10, assistant: 5 },
+  counts: { user: ALL, assistant: 5 },
+  includeFirstUserMessage: true,
 };
 
 /**
