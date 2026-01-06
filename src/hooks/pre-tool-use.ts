@@ -497,6 +497,14 @@ async function main() {
       {
         onAppealSuccess: () => {
           markErrorAcknowledged(blockReason);
+          // Also cache the ORIGINAL error pattern (what cache check looks for)
+          // This fixes cache key mismatch: error-ack output format vs original error text
+          const originalIssue = errorCheckTranscript.match(
+            /error TS\d+[^\n]*|Error:[^\n]*|failed[^\n]*|FAILED[^\n]*/i
+          );
+          if (originalIssue) {
+            markErrorAcknowledged(originalIssue[0]);
+          }
           logToHomeAssistant({
             agent: "pre-tool-use-hook",
             level: "decision",

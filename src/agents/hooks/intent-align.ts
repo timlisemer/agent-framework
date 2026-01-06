@@ -179,38 +179,35 @@ export type StopIntentResult = StopCheckResult;
 async function classifyStopResponse(
   userText: string,
   assistantText: string
-): Promise<"INTERMEDIATE_QUESTION" | "PLAN_APPROVAL" | "OK"> {
+): Promise<"QUESTION" | "PLAN_APPROVAL" | "OK"> {
   const context = `USER MESSAGE:
 ${userText}
 
 ASSISTANT RESPONSE:
 ${assistantText}`;
 
-  const systemPrompt = `You classify AI assistant responses that end with questions.
-
-INTERMEDIATE_QUESTION - Use when:
-- AI asks a clarifying question about implementation details
-- AI confirms a specific technical choice before proceeding
-- AI asks about behavior/correctness of something specific
-- AI seeks confirmation on ONE specific aspect, not the whole plan
-- Question is about code, output, or a specific step
-
-Examples: "Does this output format look correct?", "Should I use async here?", "Is the behavior identical?"
+  const systemPrompt = `You classify AI assistant responses that contain questions.
 
 PLAN_APPROVAL - Use when:
-- AI has written a complete plan and asks for overall approval
-- AI asks "ready to implement?" or "shall I start coding?"
-- AI is in plan mode presenting a finished plan for sign-off
-- AI explicitly says "here's my plan" or "here's what I'll do"
+- AI has written a PLAN and asks for approval before implementation
+- AI presents an approach and asks "ready to implement?" or "shall I start?"
+- AI explicitly says "here's my plan" or "here's what I'll do" and asks for approval
+- Key: Asking approval of a PLAN before doing work
 
 Examples: "Here's my plan. Ready to proceed?", "Does this plan look good?"
 
-OK - Use when:
-- AI makes a rhetorical statement (not expecting answer)
-- Response is appropriate completion
-- User already approved what AI is asking about
+QUESTION - Use when:
+- Any other question that expects user input
+- AI asks about next action (commit, push, deploy)
+- AI asks a clarifying or technical question
+- AI seeks confirmation on anything
 
-Reply with EXACTLY one of: INTERMEDIATE_QUESTION, PLAN_APPROVAL, or OK`;
+Examples: "Should I commit?", "Should I use async here?", "Want me to push?"
+
+OK - Use when:
+- Not actually a question (rhetorical, self-directed)
+
+Reply with EXACTLY one of: PLAN_APPROVAL, QUESTION, or OK`;
 
   const response = await runAgent(
     {
@@ -225,7 +222,7 @@ Reply with EXACTLY one of: INTERMEDIATE_QUESTION, PLAN_APPROVAL, or OK`;
 
   const trimmed = response.trim().toUpperCase();
   if (trimmed.includes("PLAN_APPROVAL")) return "PLAN_APPROVAL";
-  if (trimmed.includes("INTERMEDIATE_QUESTION")) return "INTERMEDIATE_QUESTION";
+  if (trimmed.includes("QUESTION")) return "QUESTION";
   return "OK";
 }
 
@@ -370,7 +367,7 @@ export async function checkStopIntentAlignment(
         systemMessage:
           "Do not ask for plan approval in plain text. Use the ExitPlanMode tool to present the plan with structured approval options.",
       };
-    } else if (classification === "INTERMEDIATE_QUESTION") {
+    } else if (classification === "QUESTION") {
       return {
         approved: false,
         reason: "Plain text question detected",

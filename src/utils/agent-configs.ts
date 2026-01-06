@@ -483,6 +483,7 @@ Claude UNDERSTOOD the issue if ANY of these are true:
 - EXPLICITLY mentioned the specific error (e.g., "the hook flagged...", "I see the error...")
 - Already moved on after fixing (successful tool call after the error)
 - Current tool call IS the suggested alternative from the denial
+- User explicitly overrode/dismissed the error ("ignore the hook", "override", "proceed anyway", "continue")
 
 Vague phrases like "let me try", "let me update" WITHOUT referencing the error do NOT count as acknowledgment.
 
