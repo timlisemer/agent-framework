@@ -480,9 +480,11 @@ NOT real issues (ignore these):
 
 Claude UNDERSTOOD the issue if ANY of these are true:
 - Corrected its command (e.g., removed disallowed flag like "head", "tail", "|")
-- Mentioned the issue even briefly ("I acknowledge", "let me try", etc.)
+- EXPLICITLY mentioned the specific error (e.g., "the hook flagged...", "I see the error...")
 - Already moved on after fixing (successful tool call after the error)
 - Current tool call IS the suggested alternative from the denial
+
+Vague phrases like "let me try", "let me update" WITHOUT referencing the error do NOT count as acknowledgment.
 
 Claude IGNORED the issue if ALL of these are true:
 - No acknowledgment text AND no behavioral correction
@@ -508,7 +510,10 @@ Your response MUST be EXACTLY one of:
 
 OK
 OR
-BLOCK: [ISSUE: "<exact error with file:line or error code>"] <what to acknowledge>
+BLOCK: [ISSUE: "<exact error>"] [CONTEXT: "<brief summary of AI response and tool call>"] <what to acknowledge>
+
+Example:
+BLOCK: [ISSUE: "First response misalignment: replacing with #"] [CONTEXT: "AI said 'Let me update the plan', now Edit plan.md with new content"] AI proceeded without acknowledging the misalignment error
 
 NO other text.`,
 };
@@ -873,6 +878,15 @@ export const FIRST_RESPONSE_INTENT_AGENT: Omit<AgentConfig, "workingDir"> = {
 2. AI ACKNOWLEDGMENT (optional): Any text the AI sent before this tool call
 3. TOOL CALL: The tool the AI is attempting to use
 4. RECENT TOOL RESULTS (optional): Results from recent tool calls showing what was accomplished
+
+## CODE BLOCKS IN MARKDOWN FILES
+
+When evaluating Edit tool calls on markdown files (.md):
+- Markdown files commonly contain fenced code blocks
+- Code blocks may include language-specific comments (# for bash/python, // for JS)
+- A "#" character in new_string is NOT "replacing with hash" if it's part of code syntax
+- Focus on SEMANTIC alignment, not character-level content
+- Plan files (~/.claude/plans/) are EXPECTED to contain code examples
 
 ## PRIORITY 1: QUESTIONS REQUIRE TEXT RESPONSES
 
