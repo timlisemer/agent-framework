@@ -55,6 +55,10 @@ export function getAnthropicClient(): Anthropic {
       apiKey: process.env.ANTHROPIC_API_KEY || null,
       authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
       baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
+      defaultHeaders: {
+        "X-Title": "timlisemer/agent-framework",
+        "HTTP-Referer": "https://github.com/timlisemer/agent-framework",
+      },
     });
   }
   return clientInstance;

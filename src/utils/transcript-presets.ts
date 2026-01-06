@@ -11,8 +11,10 @@
  * the exact count of each message type is collected (or transcript exhausted).
  */
 
-import { ALL } from 'dns';
 import type { TranscriptReadOptions } from './transcript.js';
+
+/** Use Infinity to collect all messages of a type (scanner will exhaust transcript) */
+const ALL = Infinity;
 
 /**
  * For error acknowledgment checks.
@@ -66,8 +68,11 @@ export const OFF_TOPIC_COUNTS: TranscriptReadOptions = {
  * Always includes first user message to capture initial request.
  */
 export const PLAN_VALIDATE_COUNTS: TranscriptReadOptions = {
-  counts: { user: ALL, assistant: 10 },
+  counts: { user: ALL, assistant: 10, toolResult: 10 },
   includeFirstUserMessage: true,
+  toolResultOptions: {
+    trim: false,
+  },
 };
 
 /**
