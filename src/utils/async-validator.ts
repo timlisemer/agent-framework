@@ -26,7 +26,7 @@
 import { checkIntentAlignment } from "../agents/hooks/intent-align.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
 import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
-import { writePendingValidation, clearPendingValidation } from "./pending-validation-cache.js";
+import { writePendingValidation, clearPendingValidation, setValidationSession } from "./pending-validation-cache.js";
 import { readTranscriptExact, formatTranscriptResult } from "./transcript.js";
 import { ERROR_CHECK_COUNTS } from "./transcript-presets.js";
 import { logToHomeAssistant } from "./logger.js";
@@ -77,6 +77,9 @@ function parseArgs(args: string[]): ValidatorArgs {
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const { tool, file, transcript } = args;
+
+  // Set session for cache isolation (prevents subagent results from bleeding into main session)
+  setValidationSession(transcript);
 
   // Parse tool input if provided
   let toolInput: unknown = { file_path: file };

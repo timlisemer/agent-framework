@@ -193,17 +193,26 @@ The PreToolUse hook was causing ~3 second delays for trusted file operations due
 
 The hook uses **two validation modes** based on context:
 
-**Strict Mode** (Plan Mode or Untrusted Paths)
-- All validations run synchronously before tool execution
-- Full safety checks: intent, error-ack, style-drift, tool-approve
-- ~2-4 seconds per tool call (acceptable during planning)
+**Strict Mode** triggers:
+1. First tool after user message (intent alignment most critical here)
+2. After any denial (one-shot, resets after next tool)
+3. After tool errors (one-shot, resets after next tool)
+4. Large edits (>20 lines changed)
+5. Session start (first 3 tools)
+6. Plan mode (unless subagent)
+7. Special files (CLAUDE.md, plan files)
+8. Untrusted or sensitive paths
 
-**Lazy Mode** (Regular Mode + Trusted Paths)
+All validations run synchronously (~2-4 seconds per tool call).
+
+**Lazy Mode** (when none of the above triggers apply):
 - Fast TypeScript checks run first (~10ms)
 - If TS says "safe": allow immediately, spawn background validator
 - Background validator runs all LLM checks asynchronously
 - Failures caught on next tool call
 - ~10ms per tool call (instant response)
+
+**Subagent Behavior**: All Task-spawned subagents get lazy validation - they are typically read-only exploration agents that don't need strict validation even when the parent is in plan mode.
 
 ### Decision Flow
 
@@ -269,6 +278,7 @@ Tool N+1 (any)
 | File | Purpose | Expiry |
 |------|---------|--------|
 | `/tmp/claude-pending-validation.json` | Async validation results | 5 minutes |
+| `/tmp/claude-strict-mode.json` | Strict mode state (tool count, denial/error flags) | Session-scoped |
 
 ## Shared Utilities
 

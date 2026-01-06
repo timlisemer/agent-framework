@@ -74,6 +74,8 @@ See `ARCHITECTURE.md` for detailed documentation on design decisions.
 | `src/agents/hooks/`              | Hook agents (tool-approve, style-drift, etc.) |
 | `src/utils/agent-configs.ts`     | Centralized agent configurations            |
 | `src/utils/anthropic-client.ts`  | Singleton Anthropic client factory          |
+| `src/utils/strict-mode-tracker.ts` | Tracks strict validation rules             |
+| `src/utils/subagent-detector.ts` | Detects if running as subagent (Task-spawned) |
 | `claude/settings.json`           | Hook configuration for Claude Code          |
 
 ## Integration

@@ -555,6 +555,12 @@ OVER-ENGINEERING DRIFT (→ DRIFT):
 - Plan includes time estimates like "Week 1:", "Day 1:", "takes 2-3 days", "Month 1:"
 - Plan includes manual build/check commands like "make check", "npm run build", "tsc" - these should use the check MCP tool instead
 
+UNREQUESTED PARAMETERS DRIFT (→ DRIFT):
+- Plan adds behavioral parameters (timeouts, thresholds, expiry times, counts) that user did not specify
+- Plan adds constants or magic numbers without user explicitly requesting them
+- Example: User says "after denial, use strict for next tool" but plan adds "30 minute expiry" - this is DRIFT
+- If user specifies behavior without numbers, plan should NOT invent numbers - ask for clarification instead
+
 NOTE: Numbered task organization like "Phase 1:", "Step 1:", "Task 1:" is ALLOWED - these organize work sequentially, not estimate time
 
 STRUCTURAL DRIFT (for non-trivial multi-file plans → DRIFT):
@@ -592,11 +598,11 @@ ALLOW (→ OK):
 - Plans adapting sections to their specific needs
 
 RULES:
-- Be PERMISSIVE - only block clear misalignment
-- Incomplete ≠ Drifted - partial plans are fine (plans are built iteratively)
+- Be PERMISSIVE for incomplete plans - partial plans are fine (built iteratively)
 - Don't require every detail - focus on direction
 - Small fixes don't need full structure
-- When in doubt, allow
+- BUT: Be STRICT about behavioral changes - if user didn't specify a parameter, don't invent it
+- When plan adds numbers/thresholds user didn't mention, flag as DRIFT
 
 Reply with EXACTLY:
 OK
@@ -660,6 +666,11 @@ These commands should NOT appear in CLAUDE.md code examples:
 - Wrong execution modes (direct vs sdk)
 - Claims that contradict actual framework behavior
 - Debug code documented as acceptable (console.log, print, dbg!)
+
+### Wrong File for Content (→ DRIFT)
+- Detailed documentation belongs in README.md or ARCHITECTURE.md, not CLAUDE.md
+- CLAUDE.md should be concise instructions for Claude, not comprehensive docs
+- Long explanatory sections should be moved to proper documentation files
 
 ### Sensitive Content (→ DRIFT)
 - Documenting access to sensitive paths: .env, credentials, .ssh, .aws, secrets, .key, .pem

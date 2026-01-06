@@ -41,11 +41,20 @@ import {
   STYLE_DRIFT_COUNTS,
 } from "../utils/transcript-presets.js";
 import { isPlanModeActive } from "../utils/plan-mode-detector.js";
-import { isExploreAgent } from "../utils/explore-agent-detector.js";
+import { isSubagent } from "../utils/subagent-detector.js";
 import {
   checkPendingValidation,
   clearPendingValidation,
+  setValidationSession,
 } from "../utils/pending-validation-cache.js";
+import {
+  setStrictModeSession,
+  shouldUseStrictMode,
+  recordDenial as recordStrictDenial,
+  recordError as recordStrictError,
+  incrementToolCount,
+  clearOneShots,
+} from "../utils/strict-mode-tracker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,6 +78,8 @@ function outputAllow(): never {
  * Output structured JSON to deny the tool call with a reason and exit.
  */
 function outputDeny(reason: string): never {
+  // Record denial so next tool uses strict mode
+  recordStrictDenial();
   console.log(
     JSON.stringify({
       hookSpecificOutput: {
@@ -198,6 +209,10 @@ async function main() {
 
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
+  // Set sessions for all caches (ensures isolation between main session and subagents)
+  setValidationSession(input.transcript_path);
+  setStrictModeSession(input.transcript_path);
+
   // ============================================================
   // STEP 1: Check pending validation from previous async validator
   // This catches failures from lazy validation on previous tool calls
@@ -205,6 +220,7 @@ async function main() {
   const pendingFailure = checkPendingValidation();
   if (pendingFailure?.status === "failed") {
     clearPendingValidation(); // Don't block repeatedly
+    recordStrictError(); // Next tool will use strict mode
     logToHomeAssistant({
       agent: "pre-tool-use-hook",
       level: "decision",
@@ -249,6 +265,7 @@ async function main() {
   // STEP 3: Fast-path for FILE_TOOLS on trusted paths (LAZY VALIDATION)
   // In regular mode: allow immediately, validate async
   // In plan mode: fall through to strict validation
+  // Strict mode rules: first tool, post-denial, post-error, large edits, session start
   // ============================================================
   if (FILE_TOOLS.includes(input.tool_name)) {
     const filePath =
@@ -259,31 +276,58 @@ async function main() {
       const trusted = isTrustedPath(filePath, projectDir);
       const sensitive = isSensitivePath(filePath);
       const planMode = isPlanModeActive(input.transcript_path);
-      const exploreAgent = isExploreAgent(input.transcript_path);
+      const subagent = isSubagent(input.transcript_path);
 
-      // Fast path: trusted + not sensitive + (not plan mode OR explore agent) + not special file
-      // Explore agents use lazy mode even in plan mode (they're read-only investigation)
+      // Fast path: trusted + not sensitive + (not plan mode OR subagent) + not special file
+      // All subagents get lazy mode (they are typically read-only exploration)
       const plansDir = path.join(os.homedir(), ".claude", "plans");
       const isPlanFile = isPathInDirectory(filePath, plansDir);
       const isClaudeMd = filePath.endsWith("CLAUDE.md");
 
-      if (trusted && !sensitive && (!planMode || exploreAgent) && !isPlanFile && !isClaudeMd) {
-        // LAZY VALIDATION: Allow immediately, validate async
-        logToHomeAssistant({
-          agent: "pre-tool-use-hook",
-          level: "info",
-          problem: `${input.tool_name} ${filePath}`,
-          answer: exploreAgent && planMode
-            ? "Explore agent in plan mode - using lazy validation"
-            : "Fast-path: trusted path, spawning async validator",
-        });
+      // Base eligibility for lazy validation
+      const baseEligible = trusted && !sensitive && (!planMode || subagent) && !isPlanFile && !isClaudeMd;
 
-        spawnAsyncValidator(input.tool_name, filePath, input.transcript_path, input.tool_input);
-        outputAllow();
+      if (baseEligible) {
+        // Check first-response rule: first tool after user message uses strict
+        if (!isFirstResponseChecked()) {
+          logToHomeAssistant({
+            agent: "pre-tool-use-hook",
+            level: "info",
+            problem: `${input.tool_name} ${filePath}`,
+            answer: "First tool after user message - using strict validation",
+          });
+          // Fall through to strict validation
+        } else {
+          // Check other strict mode rules
+          const strictCheck = shouldUseStrictMode(input.tool_name, input.tool_input);
+          if (!strictCheck.strict) {
+            // LAZY VALIDATION: Allow immediately, validate async
+            logToHomeAssistant({
+              agent: "pre-tool-use-hook",
+              level: "info",
+              problem: `${input.tool_name} ${filePath}`,
+              answer: subagent && planMode
+                ? "Subagent in plan mode - using lazy validation"
+                : "Fast-path: trusted path, spawning async validator",
+            });
+
+            spawnAsyncValidator(input.tool_name, filePath, input.transcript_path, input.tool_input);
+            outputAllow();
+          } else {
+            // Strict mode triggered by rules
+            logToHomeAssistant({
+              agent: "pre-tool-use-hook",
+              level: "info",
+              problem: `${input.tool_name} ${filePath}`,
+              answer: `Strict mode: ${strictCheck.reason}`,
+            });
+            // Fall through to strict validation
+          }
+        }
       }
 
-      // Plan mode (non-explore) or special files: fall through to strict validation
-      if (planMode && !exploreAgent) {
+      // Plan mode (non-subagent) or special files: fall through to strict validation
+      if (planMode && !subagent) {
         logToHomeAssistant({
           agent: "pre-tool-use-hook",
           level: "info",
@@ -689,6 +733,11 @@ async function main() {
     // Output structured JSON to deny and provide feedback to Claude
     outputDeny(finalReason ?? "Tool denied");
   }
+
+  // Strict validation passed - update state
+  markFirstResponseChecked();
+  incrementToolCount();
+  clearOneShots();
 
   // Explicitly allow approved tools
   outputAllow();

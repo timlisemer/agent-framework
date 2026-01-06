@@ -1,16 +1,15 @@
 /**
- * Explore Agent Detector
+ * Subagent Detector
  *
  * Detects if the current session is running as a subagent (spawned via Task tool).
- * Subagents (including Explore agents) have different transcript metadata:
+ * Subagents have different transcript metadata:
  * - isSidechain: true
  * - agentId: string (e.g., "a792db3")
  *
- * This detection is used to enforce lazy validation for subagents even when
- * the parent session is in plan mode, since subagents are typically read-only
- * investigation agents that don't need strict validation.
+ * All subagents get lazy validation - they are typically read-only exploration
+ * agents that don't need strict validation even when the parent is in plan mode.
  *
- * @module explore-agent-detector
+ * @module subagent-detector
  */
 
 import * as fs from "fs";
@@ -21,7 +20,10 @@ interface TranscriptMetadata {
 }
 
 /**
- * Check if the current session is a subagent (Explore or other Task-spawned agent).
+ * Check if the current session is a subagent (spawned via Task tool).
+ *
+ * All subagents get lazy validation - they are typically read-only exploration
+ * agents that don't need strict validation even when the parent is in plan mode.
  *
  * Detection is based on transcript metadata:
  * - Regular sessions have isSidechain: false and no agentId
@@ -46,10 +48,3 @@ export function isSubagent(transcriptPath: string): boolean {
     return false;
   }
 }
-
-/**
- * Alias for clarity in pre-tool-use hook.
- * Explore agents are a type of subagent with read-only access.
- * We treat all subagents as "explore-like" for lazy validation purposes.
- */
-export const isExploreAgent = isSubagent;
