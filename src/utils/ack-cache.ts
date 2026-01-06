@@ -1,4 +1,5 @@
 import { CacheManager } from "./cache-manager.js";
+import { hashString } from "./hash-utils.js";
 
 const ACK_CACHE_FILE = "/tmp/claude-error-acks.json";
 const ACK_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
@@ -24,25 +25,19 @@ const cacheManager = new CacheManager<AckData>({
   setEntries: (d, e) => ({ ...d, entries: e as AckEntry[] }),
 });
 
-function hashError(error: string): string {
-  // Use same hash as cache-manager for consistency
-  const crypto = require("crypto");
-  return crypto.createHash("md5").update(error).digest("hex").slice(0, 8);
-}
-
 export function setSession(transcriptPath: string): void {
   cacheManager.setSession(transcriptPath);
 }
 
 export function isErrorAcknowledged(errorSnippet: string): boolean {
   const data = cacheManager.load();
-  const hash = hashError(errorSnippet);
+  const hash = hashString(errorSnippet);
   return data.entries.some((e) => e.errorHash === hash);
 }
 
 export function markErrorAcknowledged(errorSnippet: string): void {
   const data = cacheManager.load();
-  const hash = hashError(errorSnippet);
+  const hash = hashString(errorSnippet);
 
   // Don't duplicate
   if (data.entries.some((e) => e.errorHash === hash)) return;

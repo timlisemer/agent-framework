@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import { CacheManager } from "./cache-manager.js";
+import { hashString } from "./hash-utils.js";
 import { clearAckCache } from "./ack-cache.js";
 import { clearDenialCache } from "./denial-cache.js";
 import { logToHomeAssistant } from "./logger.js";
@@ -30,11 +31,6 @@ const cacheManager = new CacheManager<RewindData>({
   setEntries: (d, e) => ({ ...d, userMessages: e as CachedUserMessage[] }),
 });
 
-function hashMessage(msg: string): string {
-  const crypto = require("crypto");
-  return crypto.createHash("md5").update(msg).digest("hex").slice(0, 8);
-}
-
 export function setRewindSession(transcriptPath: string): void {
   cacheManager.setSession(transcriptPath);
 }
@@ -60,7 +56,7 @@ export function recordUserMessage(msg: string, index: number): void {
   if (!msg) return;
 
   const data = cacheManager.load();
-  const hash = hashMessage(msg);
+  const hash = hashString(msg);
   const snippet = msg.slice(0, 100);
 
   // Check if this message is already cached (avoid duplicates)
@@ -70,9 +66,11 @@ export function recordUserMessage(msg: string, index: number): void {
   // Add new message with timestamp
   data.userMessages.push({ hash, snippet, index, timestamp: Date.now() });
 
-  // Update first response flag on new user message
-  const lastMessage = data.userMessages[data.userMessages.length - 2];
-  if (!lastMessage || lastMessage.hash !== hash) {
+  // Reset first response flag when a new unique user message is added.
+  // After pushing, length-2 is the previous last message (before we added this one).
+  // If there was no previous message or it differs from current, reset the flag.
+  const previousMessage = data.userMessages[data.userMessages.length - 2];
+  if (!previousMessage || previousMessage.hash !== hash) {
     data.firstResponseChecked = false;
   }
 

@@ -101,25 +101,3 @@ export function parseDecision(
     approved: false,
   };
 }
-
-/**
- * Extract reason from a prefixed decision string.
- *
- * Utility for cases where you know the format and just need the reason.
- *
- * @param text - Full decision string (e.g., "DENY: file outside project")
- * @param prefix - Prefix to strip (e.g., "DENY: ")
- * @returns The reason, or undefined if prefix not found
- *
- * @example
- * ```typescript
- * const reason = extractReason("DENY: sensitive file", "DENY: ");
- * // reason = "sensitive file"
- * ```
- */
-export function extractReason(text: string, prefix: string): string | undefined {
-  if (text.startsWith(prefix)) {
-    return text.substring(prefix.length).trim() || undefined;
-  }
-  return undefined;
-}

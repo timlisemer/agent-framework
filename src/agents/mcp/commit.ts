@@ -47,14 +47,23 @@ function parseCommitResponse(
   response: string
 ): { size: string; message: string } | null {
   const sizeMatch = response.match(/SIZE:\s*(SMALL|MEDIUM|LARGE)/i);
-  const messageMatch = response.match(/MESSAGE:\s*\n([\s\S]+?)(?:\n\n|$)/);
 
   if (!sizeMatch) return null;
 
   const size = sizeMatch[1].toUpperCase();
-  const message = messageMatch
-    ? messageMatch[1].trim()
-    : response.split('MESSAGE:')[1]?.trim() || '';
+
+  // Try to extract message with newline after MESSAGE:
+  const messageMatch = response.match(/MESSAGE:\s*\n([\s\S]+?)(?:\n\n|$)/);
+  let message = messageMatch ? messageMatch[1].trim() : "";
+
+  // Fallback: try MESSAGE: on same line or with any whitespace
+  if (!message) {
+    const fallbackMatch = response.match(/MESSAGE:\s*([\s\S]+?)(?:\n\n|$)/);
+    message = fallbackMatch ? fallbackMatch[1].trim() : "";
+  }
+
+  // Validate message is not empty
+  if (!message) return null;
 
   return { size, message };
 }

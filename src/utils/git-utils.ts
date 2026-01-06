@@ -1,6 +1,14 @@
 import { runCommand } from "./command.js";
 
 /**
+ * Escape a file path for use in shell commands.
+ * Uses single quotes and escapes any embedded single quotes.
+ */
+function shellEscape(filePath: string): string {
+  return "'" + filePath.replace(/'/g, "'\\''") + "'";
+}
+
+/**
  * ============================================================================
  * GIT UTILITIES FOR UNCOMMITTED CODE ANALYSIS
  * ============================================================================
@@ -122,7 +130,8 @@ export function getUncommittedChanges(workingDir: string): GitChanges {
    */
   let untrackedDiff = "";
   for (const file of (untrackedFiles.output || "").split("\n").filter(Boolean)) {
-    const fileDiff = runCommand(`git diff --no-index /dev/null "${file}" 2>/dev/null || true`, workingDir);
+    const escapedFile = shellEscape(file);
+    const fileDiff = runCommand(`git diff --no-index /dev/null ${escapedFile} 2>/dev/null || true`, workingDir);
     untrackedDiff += fileDiff.output || "";
   }
 

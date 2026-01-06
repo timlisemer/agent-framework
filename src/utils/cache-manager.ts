@@ -1,5 +1,5 @@
 import * as fs from "fs";
-import * as crypto from "crypto";
+import { hashString } from "./hash-utils.js";
 
 /**
  * Generic cache state wrapper with session and user message tracking.
@@ -28,10 +28,6 @@ export interface CacheConfig<T> {
   getEntries?: (data: T) => unknown[];
   /** Function to set entries array on data (required for expiryMs/maxEntries) */
   setEntries?: (data: T, entries: unknown[]) => T;
-}
-
-function hashMessage(msg: string): string {
-  return crypto.createHash("md5").update(msg).digest("hex").slice(0, 8);
 }
 
 /**
@@ -90,7 +86,7 @@ export class CacheManager<T> {
   checkUserMessage(userMessage: string | undefined): boolean {
     if (!userMessage) return false;
 
-    const currentHash = hashMessage(userMessage);
+    const currentHash = hashString(userMessage);
 
     // Load existing state to check lastUserMessageHash
     try {
