@@ -33,10 +33,16 @@ interface TranscriptMetadata {
  * @returns true if this is a subagent session
  */
 export function isSubagent(transcriptPath: string): boolean {
+  let fd: number | undefined;
   try {
-    const content = fs.readFileSync(transcriptPath, "utf-8");
-    // Parse only the first line (metadata)
-    const firstLine = content.split("\n")[0];
+    // Read only first 512 bytes (sufficient for metadata JSON) instead of entire file
+    fd = fs.openSync(transcriptPath, "r");
+    const buffer = Buffer.alloc(512);
+    fs.readSync(fd, buffer, 0, 512, 0);
+    fs.closeSync(fd);
+    fd = undefined;
+
+    const firstLine = buffer.toString("utf-8").split("\n")[0];
     if (!firstLine) return false;
 
     const entry: TranscriptMetadata = JSON.parse(firstLine);
@@ -45,6 +51,13 @@ export function isSubagent(transcriptPath: string): boolean {
     return entry.isSidechain === true && typeof entry.agentId === "string";
   } catch {
     // Can't read transcript - assume not a subagent (fail-safe to strict mode)
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Ignore close errors
+      }
+    }
     return false;
   }
 }

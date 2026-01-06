@@ -214,58 +214,10 @@ async function main() {
   setStrictModeSession(input.transcript_path);
 
   // ============================================================
-  // STEP 1: Check pending validation from previous async validator
-  // This catches failures from lazy validation on previous tool calls
-  // ============================================================
-  const pendingFailure = checkPendingValidation();
-  if (pendingFailure?.status === "failed") {
-    clearPendingValidation(); // Don't block repeatedly
-    recordStrictError(); // Next tool will use strict mode
-    logToHomeAssistant({
-      agent: "pre-tool-use-hook",
-      level: "decision",
-      problem: `Previous ${pendingFailure.toolName} async validation`,
-      answer: `FAILED: ${pendingFailure.failureReason}`,
-    });
-    outputDeny(`Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`);
-  }
-
-  // ============================================================
-  // STEP 2: Auto-approve low-risk tools (MOVED UP - before rewind detection)
-  // These tools are read-only or have no filesystem/system impact
-  // ============================================================
-  const LOW_RISK_TOOLS = [
-    // Read-only search/navigation
-    "LSP", // Language server protocol queries
-    "Grep", // File content search
-    "Glob", // File pattern matching
-    "WebSearch", // Web search
-    "WebFetch", // Fetch web content
-
-    // MCP resource reading (read-only)
-    "ListMcpResources", // List available MCP resources
-    "ReadMcpResource", // Read an MCP resource
-
-    // Internal/meta tools (low impact)
-    "TodoWrite", // Task list management (internal to Claude)
-    "TaskOutput", // Read output from background tasks
-    "AskUserQuestion", // Prompts user for input (safe)
-    "ExitPlanMode", // Exit plan mode (internal to Claude)
-    "EnterPlanMode", // Enter plan mode (internal to Claude)
-    "Skill", // Invoke skills like /commit (user-initiated)
-  ];
-  if (
-    LOW_RISK_TOOLS.includes(input.tool_name) ||
-    input.tool_name.startsWith("mcp__")
-  ) {
-    outputAllow();
-  }
-
-  // ============================================================
-  // STEP 3: Fast-path for FILE_TOOLS on trusted paths (LAZY VALIDATION)
+  // STEP 1: Fast-path for FILE_TOOLS on trusted paths (LAZY VALIDATION)
+  // MUST run before checkPendingValidation() to avoid unnecessary cache I/O
   // In regular mode: allow immediately, validate async
   // In plan mode: fall through to strict validation
-  // Strict mode rules: first tool, post-denial, post-error, large edits, session start
   // ============================================================
   if (FILE_TOOLS.includes(input.tool_name)) {
     const filePath =
@@ -336,6 +288,54 @@ async function main() {
         });
       }
     }
+  }
+
+  // ============================================================
+  // STEP 2: Check pending validation from previous async validator
+  // This catches failures from lazy validation on previous tool calls
+  // ============================================================
+  const pendingFailure = checkPendingValidation();
+  if (pendingFailure?.status === "failed") {
+    clearPendingValidation(); // Don't block repeatedly
+    recordStrictError(); // Next tool will use strict mode
+    logToHomeAssistant({
+      agent: "pre-tool-use-hook",
+      level: "decision",
+      problem: `Previous ${pendingFailure.toolName} async validation`,
+      answer: `FAILED: ${pendingFailure.failureReason}`,
+    });
+    outputDeny(`Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`);
+  }
+
+  // ============================================================
+  // STEP 3: Auto-approve low-risk tools
+  // These tools are read-only or have no filesystem/system impact
+  // ============================================================
+  const LOW_RISK_TOOLS = [
+    // Read-only search/navigation
+    "LSP", // Language server protocol queries
+    "Grep", // File content search
+    "Glob", // File pattern matching
+    "WebSearch", // Web search
+    "WebFetch", // Fetch web content
+
+    // MCP resource reading (read-only)
+    "ListMcpResources", // List available MCP resources
+    "ReadMcpResource", // Read an MCP resource
+
+    // Internal/meta tools (low impact)
+    "TodoWrite", // Task list management (internal to Claude)
+    "TaskOutput", // Read output from background tasks
+    "AskUserQuestion", // Prompts user for input (safe)
+    "ExitPlanMode", // Exit plan mode (internal to Claude)
+    "EnterPlanMode", // Enter plan mode (internal to Claude)
+    "Skill", // Invoke skills like /commit (user-initiated)
+  ];
+  if (
+    LOW_RISK_TOOLS.includes(input.tool_name) ||
+    input.tool_name.startsWith("mcp__")
+  ) {
+    outputAllow();
   }
 
   // ============================================================
@@ -502,7 +502,8 @@ async function main() {
         const result = await checkErrorAcknowledgment(
           errorCheckTranscript,
           input.tool_name,
-          input.tool_input
+          input.tool_input,
+          input.transcript_path
         );
         if (result.startsWith("BLOCK:")) {
           blockReason = result.substring(7).trim();

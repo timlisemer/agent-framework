@@ -118,7 +118,7 @@ async function main(): Promise<void> {
     // Validation 2: Error Acknowledgment
     const errorResult = await readTranscriptExact(transcript, ERROR_CHECK_COUNTS);
     const errorTranscript = formatTranscriptResult(errorResult);
-    const ackResult = await checkErrorAcknowledgment(errorTranscript, tool, toolInput);
+    const ackResult = await checkErrorAcknowledgment(errorTranscript, tool, toolInput, transcript);
     if (ackResult.startsWith("BLOCK:")) {
       const reason = ackResult.substring(7).trim();
       writePendingValidation({

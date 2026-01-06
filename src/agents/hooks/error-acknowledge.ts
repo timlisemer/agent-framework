@@ -39,6 +39,7 @@ import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logToHomeAssistant } from "../../utils/logger.js";
 import { parseDecision } from "../../utils/response-parser.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { isSubagent } from "../../utils/subagent-detector.js";
 
 // Pattern to extract issue text from transcript for caching
 const ISSUE_EXTRACT_PATTERN =
@@ -50,11 +51,12 @@ const ISSUE_EXTRACT_PATTERN =
  * @param transcript - Recent conversation transcript
  * @param toolName - Name of the tool being called
  * @param toolInput - Input parameters for the tool
+ * @param transcriptPath - Optional path to transcript file (used for subagent detection)
  * @returns "OK" if acknowledged, or "BLOCK: ..." with issue details
  *
  * @example
  * ```typescript
- * const result = await checkErrorAcknowledgment(transcript, 'Edit', { file_path: '...' });
+ * const result = await checkErrorAcknowledgment(transcript, 'Edit', { file_path: '...' }, '/path/to/transcript');
  * if (result.startsWith('BLOCK:')) {
  *   // AI needs to acknowledge the issue first
  * }
@@ -63,8 +65,19 @@ const ISSUE_EXTRACT_PATTERN =
 export async function checkErrorAcknowledgment(
   transcript: string,
   toolName: string,
-  toolInput: unknown
+  toolInput: unknown,
+  transcriptPath?: string
 ): Promise<string> {
+  // Skip error acknowledgment checks for subagents (Task-spawned agents)
+  if (transcriptPath && isSubagent(transcriptPath)) {
+    logToHomeAssistant({
+      agent: "error-acknowledge",
+      level: "info",
+      problem: toolName,
+      answer: "Skipped - subagent session",
+    });
+    return "OK";
+  }
   // Check if the issue in this transcript was already acknowledged
   const issueMatch = transcript.match(ISSUE_EXTRACT_PATTERN);
   if (issueMatch && isErrorAcknowledged(issueMatch[0])) {
