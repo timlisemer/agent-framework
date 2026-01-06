@@ -3,6 +3,8 @@ import { type PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
+import { fork } from "child_process";
+import { fileURLToPath } from "url";
 import { checkToolApproval } from "../agents/hooks/tool-approve.js";
 import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
 import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
@@ -38,6 +40,14 @@ import {
   RECENT_TOOL_APPROVAL_COUNTS,
   STYLE_DRIFT_COUNTS,
 } from "../utils/transcript-presets.js";
+import { isPlanModeActive } from "../utils/plan-mode-detector.js";
+import {
+  checkPendingValidation,
+  clearPendingValidation,
+} from "../utils/pending-validation-cache.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Output structured JSON to allow the tool call and exit.
@@ -142,6 +152,41 @@ function matchesSuggestedAlternative(toolName: string, transcript: string): bool
   return false;
 }
 
+/**
+ * Spawn the async validator as a background process.
+ * The validator will run all LLM-based validations and write results to cache.
+ * If any validation fails, the next tool call will be blocked.
+ */
+function spawnAsyncValidator(
+  toolName: string,
+  filePath: string,
+  transcriptPath: string,
+  toolInput: unknown
+): void {
+  const validatorPath = path.join(__dirname, "../utils/async-validator.js");
+
+  try {
+    const child = fork(
+      validatorPath,
+      [
+        "--tool", toolName,
+        "--file", filePath,
+        "--transcript", transcriptPath,
+        "--input", JSON.stringify(toolInput),
+      ],
+      { detached: true, stdio: "ignore" }
+    );
+    child.unref();
+  } catch (error) {
+    // Log error but don't block - fail-open for performance
+    logToHomeAssistant({
+      agent: "pre-tool-use-hook",
+      level: "error",
+      problem: "Failed to spawn async validator",
+      answer: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 async function main() {
   const input: PreToolUseHookInput = await new Promise((resolve) => {
@@ -149,6 +194,105 @@ async function main() {
     process.stdin.on("data", (chunk) => (data += chunk));
     process.stdin.on("end", () => resolve(JSON.parse(data)));
   });
+
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+
+  // ============================================================
+  // STEP 1: Check pending validation from previous async validator
+  // This catches failures from lazy validation on previous tool calls
+  // ============================================================
+  const pendingFailure = checkPendingValidation();
+  if (pendingFailure?.status === "failed") {
+    clearPendingValidation(); // Don't block repeatedly
+    logToHomeAssistant({
+      agent: "pre-tool-use-hook",
+      level: "decision",
+      problem: `Previous ${pendingFailure.toolName} async validation`,
+      answer: `FAILED: ${pendingFailure.failureReason}`,
+    });
+    outputDeny(`Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`);
+  }
+
+  // ============================================================
+  // STEP 2: Auto-approve low-risk tools (MOVED UP - before rewind detection)
+  // These tools are read-only or have no filesystem/system impact
+  // ============================================================
+  const LOW_RISK_TOOLS = [
+    // Read-only search/navigation
+    "LSP", // Language server protocol queries
+    "Grep", // File content search
+    "Glob", // File pattern matching
+    "WebSearch", // Web search
+    "WebFetch", // Fetch web content
+
+    // MCP resource reading (read-only)
+    "ListMcpResources", // List available MCP resources
+    "ReadMcpResource", // Read an MCP resource
+
+    // Internal/meta tools (low impact)
+    "TodoWrite", // Task list management (internal to Claude)
+    "TaskOutput", // Read output from background tasks
+    "AskUserQuestion", // Prompts user for input (safe)
+    "ExitPlanMode", // Exit plan mode (internal to Claude)
+    "EnterPlanMode", // Enter plan mode (internal to Claude)
+    "Skill", // Invoke skills like /commit (user-initiated)
+  ];
+  if (
+    LOW_RISK_TOOLS.includes(input.tool_name) ||
+    input.tool_name.startsWith("mcp__")
+  ) {
+    outputAllow();
+  }
+
+  // ============================================================
+  // STEP 3: Fast-path for FILE_TOOLS on trusted paths (LAZY VALIDATION)
+  // In regular mode: allow immediately, validate async
+  // In plan mode: fall through to strict validation
+  // ============================================================
+  if (FILE_TOOLS.includes(input.tool_name)) {
+    const filePath =
+      (input.tool_input as { file_path?: string }).file_path ||
+      (input.tool_input as { path?: string }).path;
+
+    if (filePath) {
+      const trusted = isTrustedPath(filePath, projectDir);
+      const sensitive = isSensitivePath(filePath);
+      const planMode = isPlanModeActive(input.transcript_path);
+
+      // Fast path: trusted + not sensitive + not plan mode + not special file
+      const plansDir = path.join(os.homedir(), ".claude", "plans");
+      const isPlanFile = isPathInDirectory(filePath, plansDir);
+      const isClaudeMd = filePath.endsWith("CLAUDE.md");
+
+      if (trusted && !sensitive && !planMode && !isPlanFile && !isClaudeMd) {
+        // LAZY VALIDATION: Allow immediately, validate async
+        logToHomeAssistant({
+          agent: "pre-tool-use-hook",
+          level: "info",
+          problem: `${input.tool_name} ${filePath}`,
+          answer: "Fast-path: trusted path, spawning async validator",
+        });
+
+        spawnAsyncValidator(input.tool_name, filePath, input.transcript_path, input.tool_input);
+        outputAllow();
+      }
+
+      // Plan mode or special files: fall through to strict validation
+      if (planMode) {
+        logToHomeAssistant({
+          agent: "pre-tool-use-hook",
+          level: "info",
+          problem: `${input.tool_name} ${filePath}`,
+          answer: "Plan mode active - using strict validation",
+        });
+      }
+    }
+  }
+
+  // ============================================================
+  // STRICT VALIDATION PATH
+  // Reached when: plan mode, untrusted paths, special files, or non-FILE_TOOLS
+  // ============================================================
 
   // Set session ID for cache invalidation on new session
   setSession(input.transcript_path);
@@ -181,35 +325,6 @@ async function main() {
     if (!result.approved) {
       outputDeny(result.reason ?? denyReason);
     }
-    outputAllow();
-  }
-
-  // Auto-approve low-risk tools and ALL MCP tools
-  // These tools are read-only or have no filesystem/system impact
-  const LOW_RISK_TOOLS = [
-    // Read-only search/navigation
-    "LSP", // Language server protocol queries
-    "Grep", // File content search
-    "Glob", // File pattern matching
-    "WebSearch", // Web search
-    "WebFetch", // Fetch web content
-
-    // MCP resource reading (read-only)
-    "ListMcpResources", // List available MCP resources
-    "ReadMcpResource", // Read an MCP resource
-
-    // Internal/meta tools (low impact)
-    "TodoWrite", // Task list management (internal to Claude)
-    "TaskOutput", // Read output from background tasks
-    "AskUserQuestion", // Prompts user for input (safe)
-    "ExitPlanMode", // Exit plan mode (internal to Claude)
-    "EnterPlanMode", // Enter plan mode (internal to Claude)
-    "Skill", // Invoke skills like /commit (user-initiated)
-  ];
-  if (
-    LOW_RISK_TOOLS.includes(input.tool_name) ||
-    input.tool_name.startsWith("mcp__")
-  ) {
     outputAllow();
   }
 
@@ -329,9 +444,8 @@ async function main() {
     }
   }
 
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-
-  // Path-based risk classification for file tools
+  // Path-based risk classification for file tools (STRICT PATH)
+  // This section handles: plan files, CLAUDE.md, and untrusted paths
   // Low risk: inside project or ~/.claude, and not sensitive
   // High risk: outside trusted dirs or sensitive files
   if (FILE_TOOLS.includes(input.tool_name)) {

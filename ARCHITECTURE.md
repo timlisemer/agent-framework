@@ -180,6 +180,96 @@ Tool call received
 └─> Workaround detection (escalate after 3 similar denials)
 ```
 
+## Performance Optimization: Lazy Validation
+
+### Problem
+
+The PreToolUse hook was causing ~3 second delays for trusted file operations due to:
+- Rewind detection reading entire transcript (~400-1200ms)
+- Multiple transcript reads for error-ack, style-drift (~300-600ms each)
+- Synchronous LLM validation calls (~500-1000ms each)
+
+### Solution: Hybrid Validation Strategy
+
+The hook uses **two validation modes** based on context:
+
+**Strict Mode** (Plan Mode or Untrusted Paths)
+- All validations run synchronously before tool execution
+- Full safety checks: intent, error-ack, style-drift, tool-approve
+- ~2-4 seconds per tool call (acceptable during planning)
+
+**Lazy Mode** (Regular Mode + Trusted Paths)
+- Fast TypeScript checks run first (~10ms)
+- If TS says "safe": allow immediately, spawn background validator
+- Background validator runs all LLM checks asynchronously
+- Failures caught on next tool call
+- ~10ms per tool call (instant response)
+
+### Decision Flow
+
+```
+Tool Call
+    │
+    ├─ Check pending validation cache (catch previous failures)
+    │
+    ├─ LOW_RISK_TOOLS (Grep, Glob, etc.)
+    │       └─> Instant allow (~1ms)
+    │
+    ├─ FILE_TOOLS (Read, Write, Edit)
+    │       │
+    │       ├─ Fast TS Checks (~10ms)
+    │       │   ├─ isTrustedPath()
+    │       │   ├─ isSensitivePath()
+    │       │   └─ isPlanModeActive()
+    │       │
+    │       ├─ TS "SAFE" + Regular Mode
+    │       │       └─> Allow + Async Validator (~10ms)
+    │       │
+    │       ├─ TS "SAFE" + Plan Mode
+    │       │       └─> Strict validation (~2-4s)
+    │       │
+    │       └─ Special files (plan/CLAUDE.md) or untrusted
+    │               └─> Strict validation (~2-4s)
+    │
+    └─ HIGH_RISK_TOOLS (Bash, Agent, etc.)
+            └─> Strict validation (~1-2s)
+```
+
+### Lazy Validation Flow
+
+```
+Tool N (trusted, regular mode)
+    │
+    ├─ Check pending validation cache → no failures
+    ├─ Fast TS checks → "SAFE"
+    ├─ Allow immediately (tool executes)
+    └─ Spawn async-validator.ts (background process)
+            │
+            └─ Runs: intent, error-ack, style-drift
+            └─ Writes result to pending validation cache
+
+Tool N+1 (any)
+    │
+    ├─ Check pending validation cache
+    │       └─ If FAILED: deny with reason
+    │       └─ If PASSED: continue normally
+    └─ ...
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/utils/pending-validation-cache.ts` | Stores async validation results between tool calls |
+| `src/utils/async-validator.ts` | Background process for async LLM validation |
+| `src/utils/plan-mode-detector.ts` | Detects if plan mode is active |
+
+### Temporary Files
+
+| File | Purpose | Expiry |
+|------|---------|--------|
+| `/tmp/claude-pending-validation.json` | Async validation results | 5 minutes |
+
 ## Shared Utilities
 
 ### `agent-runner.ts`

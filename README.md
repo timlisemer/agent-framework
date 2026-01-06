@@ -72,6 +72,31 @@ The `commit` agent enforces the complete verification chain before committing.
 └─ Workaround detection: Escalate after 3 similar denied attempts
 ```
 
+## Performance
+
+### Trusted Path Optimization
+
+For file operations (Read, Write, Edit) on trusted paths in regular mode:
+- **Response time**: ~10ms (instant)
+- **Validation**: Runs asynchronously in background
+- **Failure detection**: On next tool call
+
+### Strict Mode (Plan Mode)
+
+In plan mode, all validations run synchronously:
+- **Response time**: ~2-4 seconds
+- **Validation**: Blocking, before tool execution
+- **Failure detection**: Immediate
+
+### Why Two Modes?
+
+| Mode | Priority | Behavior |
+|------|----------|----------|
+| Plan mode | Design accuracy | Catch issues before execution |
+| Regular mode | Implementation speed | Instant response, async validation |
+
+See [ARCHITECTURE.md](ARCHITECTURE.md#performance-optimization-lazy-validation) for technical details.
+
 ## Build & Install
 
 ```bash
