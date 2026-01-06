@@ -109,8 +109,14 @@ export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
  * More assistant messages to catch acknowledgments in the current turn.
  */
 export const FIRST_RESPONSE_INTENT_COUNTS: TranscriptReadOptions = {
-  counts: { user: 3, assistant: 5 },
+  // consider giving it git diff tool results as well
+  counts: { user: 3, assistant: 5, toolResult: 3 },
   includeFirstUserMessage: true,
+  toolResultOptions: {
+    trim: true,
+    maxLines: 10,
+    excludeToolNames: ['Task', 'Agent', 'TaskOutput'],
+  },
 };
 
 /**

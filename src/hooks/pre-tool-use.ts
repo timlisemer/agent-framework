@@ -11,7 +11,7 @@ import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
 import { checkIntentAlignment } from "../agents/hooks/intent-align.js";
-import { detectWorkaroundPattern } from "../utils/command-patterns.js";
+import { detectWorkaroundPattern, getBlacklistHighlights } from "../utils/command-patterns.js";
 import { logToHomeAssistant } from "../utils/logger.js";
 import { markErrorAcknowledged, setSession, checkUserInteraction } from "../utils/ack-cache.js";
 import {
@@ -41,6 +41,7 @@ import {
   STYLE_DRIFT_COUNTS,
 } from "../utils/transcript-presets.js";
 import { isPlanModeActive } from "../utils/plan-mode-detector.js";
+import { isExploreAgent } from "../utils/explore-agent-detector.js";
 import {
   checkPendingValidation,
   clearPendingValidation,
@@ -258,27 +259,31 @@ async function main() {
       const trusted = isTrustedPath(filePath, projectDir);
       const sensitive = isSensitivePath(filePath);
       const planMode = isPlanModeActive(input.transcript_path);
+      const exploreAgent = isExploreAgent(input.transcript_path);
 
-      // Fast path: trusted + not sensitive + not plan mode + not special file
+      // Fast path: trusted + not sensitive + (not plan mode OR explore agent) + not special file
+      // Explore agents use lazy mode even in plan mode (they're read-only investigation)
       const plansDir = path.join(os.homedir(), ".claude", "plans");
       const isPlanFile = isPathInDirectory(filePath, plansDir);
       const isClaudeMd = filePath.endsWith("CLAUDE.md");
 
-      if (trusted && !sensitive && !planMode && !isPlanFile && !isClaudeMd) {
+      if (trusted && !sensitive && (!planMode || exploreAgent) && !isPlanFile && !isClaudeMd) {
         // LAZY VALIDATION: Allow immediately, validate async
         logToHomeAssistant({
           agent: "pre-tool-use-hook",
           level: "info",
           problem: `${input.tool_name} ${filePath}`,
-          answer: "Fast-path: trusted path, spawning async validator",
+          answer: exploreAgent && planMode
+            ? "Explore agent in plan mode - using lazy validation"
+            : "Fast-path: trusted path, spawning async validator",
         });
 
         spawnAsyncValidator(input.tool_name, filePath, input.transcript_path, input.tool_input);
         outputAllow();
       }
 
-      // Plan mode or special files: fall through to strict validation
-      if (planMode) {
+      // Plan mode (non-explore) or special files: fall through to strict validation
+      if (planMode && !exploreAgent) {
         logToHomeAssistant({
           agent: "pre-tool-use-hook",
           level: "info",
@@ -328,10 +333,54 @@ async function main() {
     outputAllow();
   }
 
+  // ============================================================
+  // STEP 3.5: Early blacklist check for Bash commands
+  // Check blacklist patterns BEFORE intent alignment so rule-based
+  // denials happen with proper messages instead of generic "misalignment"
+  // ============================================================
+  if (input.tool_name === "Bash") {
+    const highlights = getBlacklistHighlights(input.tool_name, input.tool_input);
+    if (highlights.length > 0) {
+      const firstHighlight = highlights[0];
+      const alternative = firstHighlight.replace(/\[BLACKLIST: [^\]]+\]\s*/, "");
+      logToHomeAssistant({
+        agent: "pre-tool-use-hook",
+        level: "decision",
+        problem: `Bash blacklist: ${(input.tool_input as { command?: string }).command?.slice(0, 50)}`,
+        answer: `DENIED: ${alternative}`,
+      });
+      outputDeny(`Blacklisted command. ${alternative}`);
+    }
+  }
+
   // First-response intent check - detect if AI's first tool call ignores user question/request
   // Only check for action tools (Edit, Write, Bash, etc.) - investigation tools are fine
   // Gate: only run once per user turn (reset when user sends new message or rewinds)
   const ACTION_TOOLS = ["Edit", "Write", "NotebookEdit", "Bash", "Agent", "Task"];
+
+  // Skip first response intent check if ExitPlanMode was recently approved
+  // User has explicitly approved the plan, allow implementation to proceed
+  if (ACTION_TOOLS.includes(input.tool_name) && !isFirstResponseChecked()) {
+    const recentForIntent = await readTranscriptExact(
+      input.transcript_path,
+      RECENT_TOOL_APPROVAL_COUNTS
+    );
+    const hasExitPlanModeApproval = recentForIntent.toolResult.some(
+      (r) =>
+        r.content.includes("ExitPlanMode") &&
+        (r.content.includes("approved") || r.content.includes("allow"))
+    );
+    if (hasExitPlanModeApproval) {
+      markFirstResponseChecked();
+      logToHomeAssistant({
+        agent: "pre-tool-use-hook",
+        level: "info",
+        problem: `First response: ${input.tool_name}`,
+        answer: "ExitPlanMode approved - skipping intent check",
+      });
+    }
+  }
+
   if (ACTION_TOOLS.includes(input.tool_name) && !isFirstResponseChecked()) {
     // Mark as checked so we don't run again for subsequent tool calls in same turn
     markFirstResponseChecked();

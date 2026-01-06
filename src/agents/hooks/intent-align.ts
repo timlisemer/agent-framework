@@ -98,13 +98,25 @@ export async function checkIntentAlignment(
 
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput).slice(0, 300)}`;
 
+  // Format recent tool results for context
+  const toolResultsText =
+    result.toolResult.length > 0
+      ? `\nRECENT TOOL RESULTS:\n${result.toolResult
+          .map(
+            (r) =>
+              `- ${r.content.slice(0, 300)}${r.content.length > 300 ? "..." : ""}`
+          )
+          .join("\n")}\n`
+      : "";
+
   // Build context for the agent
   const context = `USER MESSAGE:
 ${userRequest}
 
 ${ackText ? `AI ACKNOWLEDGMENT (text before this tool call):\n${ackText}\n` : ""}TOOL CALL:
 Tool: ${toolName}
-Input: ${JSON.stringify(toolInput, null, 2).slice(0, 500)}`;
+Input: ${JSON.stringify(toolInput, null, 2).slice(0, 500)}
+${toolResultsText}`;
 
   // Run alignment check via unified runner
   const initialResponse = await runAgent(

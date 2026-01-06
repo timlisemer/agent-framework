@@ -861,6 +861,7 @@ export const FIRST_RESPONSE_INTENT_AGENT: Omit<AgentConfig, "workingDir"> = {
 1. USER MESSAGE: What the user just said
 2. AI ACKNOWLEDGMENT (optional): Any text the AI sent before this tool call
 3. TOOL CALL: The tool the AI is attempting to use
+4. RECENT TOOL RESULTS (optional): Results from recent tool calls showing what was accomplished
 
 ## PRIORITY 1: QUESTIONS REQUIRE TEXT RESPONSES
 

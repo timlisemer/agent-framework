@@ -268,16 +268,24 @@ async function runDirectAgent(
   config: AgentConfig,
   prompt: string
 ): Promise<string> {
-  const client = getAnthropicClient();
+  try {
+    const client = getAnthropicClient();
 
-  const response = await client.messages.create({
-    model: getModelId(config.tier),
-    max_tokens: config.maxTokens ?? 2000,
-    system: config.systemPrompt,
-    messages: [{ role: 'user', content: prompt }],
-  });
+    const response = await client.messages.create({
+      model: getModelId(config.tier),
+      max_tokens: config.maxTokens ?? 2000,
+      system: config.systemPrompt,
+      messages: [{ role: 'user', content: prompt }],
+    });
 
-  return extractTextFromResponse(response);
+    return extractTextFromResponse(response);
+  } catch (error) {
+    // Return error as string rather than throwing
+    // This allows the caller to handle it gracefully (matches runSdkAgent pattern)
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+    return `[DIRECT ERROR] ${errorMessage}`;
+  }
 }
 
 /**
@@ -500,18 +508,25 @@ export async function runAgentWithRetry(
   while (!formatValidator(decision) && retries < maxRetries) {
     retries++;
 
-    const retryResponse = await client.messages.create({
-      model: getModelId(config.tier),
-      max_tokens: maxTokens,
-      messages: [
-        {
-          role: "user",
-          content: `Invalid format: "${decision}". You are evaluating: ${contextDesc}. ${formatReminder}`,
-        },
-      ],
-    });
+    try {
+      const retryResponse = await client.messages.create({
+        model: getModelId(config.tier),
+        max_tokens: maxTokens,
+        messages: [
+          {
+            role: "user",
+            content: `Invalid format: "${decision}". You are evaluating: ${contextDesc}. ${formatReminder}`,
+          },
+        ],
+      });
 
-    decision = extractTextFromResponse(retryResponse);
+      decision = extractTextFromResponse(retryResponse);
+    } catch (error) {
+      // Return error as string rather than throwing (matches runDirectAgent pattern)
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      return `[RETRY ERROR] ${errorMessage}`;
+    }
   }
 
   return decision;

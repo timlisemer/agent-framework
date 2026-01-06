@@ -86,18 +86,25 @@ export async function retryUntilValid(
   while (!formatValidator(decision) && retries < maxRetries) {
     retries++;
 
-    const retryResponse = await client.messages.create({
-      model,
-      max_tokens: maxTokens,
-      messages: [
-        {
-          role: 'user',
-          content: `Invalid format: "${decision}". You are evaluating: ${context}. ${formatReminder}`,
-        },
-      ],
-    });
+    try {
+      const retryResponse = await client.messages.create({
+        model,
+        max_tokens: maxTokens,
+        messages: [
+          {
+            role: 'user',
+            content: `Invalid format: "${decision}". You are evaluating: ${context}. ${formatReminder}`,
+          },
+        ],
+      });
 
-    decision = extractTextFromResponse(retryResponse);
+      decision = extractTextFromResponse(retryResponse);
+    } catch (error) {
+      // Return error as string rather than throwing
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      return `[RETRY ERROR] ${errorMessage}`;
+    }
   }
 
   return decision;
