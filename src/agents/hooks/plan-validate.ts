@@ -33,6 +33,7 @@ import { PLAN_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logToHomeAssistant } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { isSubagent } from "../../utils/subagent-detector.js";
 
 /**
  * Validate that a plan aligns with user intent.
@@ -41,11 +42,12 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
  * @param toolName - The tool being used (Write or Edit)
  * @param toolInput - The tool input with content or old_string/new_string
  * @param conversationContext - Formatted conversation context
+ * @param transcriptPath - Path to the transcript file (for subagent detection)
  * @returns Approval result with optional drift feedback
  *
  * @example
  * ```typescript
- * const result = await checkPlanIntent(currentPlan, "Edit", toolInput, context);
+ * const result = await checkPlanIntent(currentPlan, "Edit", toolInput, context, transcriptPath);
  * if (!result.approved) {
  *   console.log('Plan drift:', result.reason);
  * }
@@ -55,8 +57,20 @@ export async function checkPlanIntent(
   currentPlan: string | null,
   toolName: "Write" | "Edit",
   toolInput: { content?: string; old_string?: string; new_string?: string },
-  conversationContext: string
+  conversationContext: string,
+  transcriptPath: string
 ): Promise<{ approved: boolean; reason?: string }> {
+  // Skip plan validation for subagents (Task-spawned agents)
+  if (isSubagent(transcriptPath)) {
+    logToHomeAssistant({
+      agent: "plan-validate",
+      level: "info",
+      problem: `Plan ${toolName.toLowerCase()}`,
+      answer: "Skipped - subagent session",
+    });
+    return { approved: true };
+  }
+
   // No conversation yet - nothing to validate against
   if (!conversationContext.trim()) {
     return { approved: true };

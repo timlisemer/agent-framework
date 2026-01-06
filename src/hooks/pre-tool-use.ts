@@ -20,6 +20,7 @@ import {
   recordUserMessage,
   isFirstResponseChecked,
   markFirstResponseChecked,
+  invalidateAllCaches,
 } from "../utils/rewind-cache.js";
 import {
   setDenialSession,
@@ -395,12 +396,14 @@ async function main() {
         (r.content.includes("approved") || r.content.includes("allow"))
     );
     if (hasExitPlanModeApproval) {
+      // Clear ALL caches when plan is approved - user approval counts as fresh start
+      invalidateAllCaches();
       markFirstResponseChecked();
       logToHomeAssistant({
         agent: "pre-tool-use-hook",
         level: "info",
         problem: `First response: ${input.tool_name}`,
-        answer: "ExitPlanMode approved - skipping intent check",
+        answer: "ExitPlanMode approved - cleared caches and skipping intent check",
       });
     }
   }
@@ -574,7 +577,8 @@ async function main() {
               currentPlan,
               input.tool_name as "Write" | "Edit",
               input.tool_input as { content?: string; old_string?: string; new_string?: string },
-              conversationContext
+              conversationContext,
+              input.transcript_path
             ),
           input.tool_name,
           input.tool_input,
@@ -613,7 +617,8 @@ async function main() {
             validateClaudeMd(
               currentContent,
               input.tool_name as "Write" | "Edit",
-              input.tool_input as { content?: string; old_string?: string; new_string?: string }
+              input.tool_input as { content?: string; old_string?: string; new_string?: string },
+              input.transcript_path
             ),
           input.tool_name,
           input.tool_input,

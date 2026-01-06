@@ -35,6 +35,7 @@ import { FIRST_RESPONSE_INTENT_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logToHomeAssistant } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
 import {
   INTENT_ALIGNMENT_COUNTS,
@@ -72,6 +73,17 @@ export async function checkIntentAlignment(
   toolInput: unknown,
   transcriptPath: string
 ): Promise<IntentAlignmentResult> {
+  // Skip intent alignment checks for subagents (Task-spawned agents)
+  if (isSubagent(transcriptPath)) {
+    logToHomeAssistant({
+      agent: "intent-align",
+      level: "info",
+      problem: toolName,
+      answer: "Skipped - subagent session",
+    });
+    return { approved: true };
+  }
+
   // Read transcript to get context
   const result = await readTranscriptExact(
     transcriptPath,
@@ -188,21 +200,29 @@ ${assistantText}`;
 
   const systemPrompt = `You classify AI assistant responses that contain questions.
 
-PLAN_APPROVAL - Use when:
-- AI has written a PLAN and asks for approval before implementation
-- AI presents an approach and asks "ready to implement?" or "shall I start?"
-- AI explicitly says "here's my plan" or "here's what I'll do" and asks for approval
-- Key: Asking approval of a PLAN before doing work
+PLAN_APPROVAL - ONLY use when ALL of these are true:
+- AI has laid out a DETAILED multi-step implementation plan
+- AI explicitly uses words like "plan", "approach", "strategy", "implementation"
+- AI asks for approval BEFORE starting any work
+- This is about FUTURE work, not recovering from a failure
 
-Examples: "Here's my plan. Ready to proceed?", "Does this plan look good?"
+Examples of PLAN_APPROVAL:
+- "Here's my plan: 1. Create the component 2. Add tests 3. Update docs. Ready to proceed?"
+- "I'll approach this by first refactoring X, then adding Y. Does this look good?"
+
+NOT PLAN_APPROVAL (these are QUESTION):
+- "Would you like me to: 1. Fix X 2. Retry Y" (offering options, not a detailed plan)
+- "The commit failed. Should I update the README and try again?" (error recovery)
+- "Want me to push now?" (next action question)
 
 QUESTION - Use when:
-- Any other question that expects user input
-- AI asks about next action (commit, push, deploy)
-- AI asks a clarifying or technical question
-- AI seeks confirmation on anything
+- AI asks about next action to take
+- AI offers simple options or choices
+- AI asks for clarification
+- AI asks follow-up after a failure/error/block
+- AI uses "Would you like me to" with simple options
 
-Examples: "Should I commit?", "Should I use async here?", "Want me to push?"
+Examples: "Should I commit?", "Want me to fix this?", "Would you like me to retry?"
 
 OK - Use when:
 - Not actually a question (rhetorical, self-directed)
@@ -321,6 +341,25 @@ function hasPlainTextQuestion(assistantText: string): {
 }
 
 /**
+ * Check if context indicates this is an operational follow-up, not plan approval.
+ * Returns true if we should skip PLAN_APPROVAL classification.
+ */
+function isOperationalContext(userText: string, assistantText: string): boolean {
+  // User ran a command - any follow-up is operational
+  if (userText.trim().startsWith("/")) return true;
+
+  // AI mentions failure/error/decline - this is error recovery, not planning
+  const errorPatterns = [
+    /(?:was |been |got )?(?:declined|rejected|failed|blocked)/i,
+    /(?:error|issue|problem) (?:occurred|detected|found)/i,
+    /could not|cannot|couldn't/i,
+  ];
+  if (errorPatterns.some((p) => p.test(assistantText))) return true;
+
+  return false;
+}
+
+/**
  * Check if the AI's stop (text-only response) is appropriate.
  *
  * This catches scenarios where the AI:
@@ -334,6 +373,17 @@ function hasPlainTextQuestion(assistantText: string): {
 export async function checkStopIntentAlignment(
   transcriptPath: string
 ): Promise<StopIntentResult> {
+  // Skip stop intent checks for subagents (Task-spawned agents)
+  if (isSubagent(transcriptPath)) {
+    logToHomeAssistant({
+      agent: "intent-align-stop",
+      level: "info",
+      problem: "stop response",
+      answer: "Skipped - subagent session",
+    });
+    return { approved: true };
+  }
+
   const result = await readTranscriptExact(
     transcriptPath,
     FIRST_RESPONSE_STOP_COUNTS
@@ -357,6 +407,16 @@ export async function checkStopIntentAlignment(
   // Check 1: Plain text questions - use AI to classify
   const questionCheck = hasPlainTextQuestion(assistantText);
   if (questionCheck.detected) {
+    // Skip PLAN_APPROVAL if this is clearly operational context
+    if (isOperationalContext(userText, assistantText)) {
+      return {
+        approved: false,
+        reason: "Plain text question detected",
+        systemMessage:
+          "Do not ask questions in plain text. Use the AskUserQuestion tool to present structured options to the user.",
+      };
+    }
+
     // Use AI to determine if this is an intermediate question or plan approval
     const classification = await classifyStopResponse(userText, assistantText);
 

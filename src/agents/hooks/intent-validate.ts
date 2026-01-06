@@ -40,6 +40,7 @@ import { INTENT_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logToHomeAssistant } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
 import { OFF_TOPIC_COUNTS } from "../../utils/transcript-presets.js";
 
@@ -121,6 +122,17 @@ export async function extractConversationContext(
 export async function checkForOffTopic(
   transcriptPath: string
 ): Promise<OffTopicCheckResult> {
+  // Skip off-topic checks for subagents (Task-spawned agents)
+  if (isSubagent(transcriptPath)) {
+    logToHomeAssistant({
+      agent: "off-topic-check",
+      level: "info",
+      problem: "off-topic check",
+      answer: "Skipped - subagent session",
+    });
+    return { decision: "OK" };
+  }
+
   const context = await extractConversationContext(transcriptPath);
 
   // No conversation yet - nothing to check

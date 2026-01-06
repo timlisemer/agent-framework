@@ -20,6 +20,7 @@ import { CLAUDE_MD_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logToHomeAssistant } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { isSubagent } from "../../utils/subagent-detector.js";
 
 /**
  * Validate CLAUDE.md content against agent-framework rules.
@@ -27,11 +28,12 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
  * @param currentContent - The full current file content (null if new file)
  * @param toolName - The tool being used (Write or Edit)
  * @param toolInput - The tool input with content or old_string/new_string
+ * @param transcriptPath - Path to the transcript file (for subagent detection)
  * @returns Validation result with approved status and optional reason
  *
  * @example
  * ```typescript
- * const result = await validateClaudeMd(currentContent, "Edit", toolInput);
+ * const result = await validateClaudeMd(currentContent, "Edit", toolInput, transcriptPath);
  * if (!result.approved) {
  *   console.log('CLAUDE.md drift:', result.reason);
  * }
@@ -40,8 +42,20 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 export async function validateClaudeMd(
   currentContent: string | null,
   toolName: "Write" | "Edit",
-  toolInput: { content?: string; old_string?: string; new_string?: string }
+  toolInput: { content?: string; old_string?: string; new_string?: string },
+  transcriptPath: string
 ): Promise<{ approved: boolean; reason?: string }> {
+  // Skip CLAUDE.md validation for subagents (Task-spawned agents)
+  if (isSubagent(transcriptPath)) {
+    logToHomeAssistant({
+      agent: "claude-md-validate",
+      level: "info",
+      problem: `CLAUDE.md ${toolName.toLowerCase()}`,
+      answer: "Skipped - subagent session",
+    });
+    return { approved: true };
+  }
+
   // Format proposed edit based on tool type
   const proposedEdit =
     toolName === "Write"
