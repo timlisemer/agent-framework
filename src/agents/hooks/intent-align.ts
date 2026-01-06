@@ -37,7 +37,7 @@ import { logToHomeAssistant } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
 import {
-  FIRST_RESPONSE_INTENT_COUNTS,
+  INTENT_ALIGNMENT_COUNTS,
   FIRST_RESPONSE_STOP_COUNTS,
 } from "../../utils/transcript-presets.js";
 
@@ -75,7 +75,7 @@ export async function checkIntentAlignment(
   // Read transcript to get context
   const result = await readTranscriptExact(
     transcriptPath,
-    FIRST_RESPONSE_INTENT_COUNTS
+    INTENT_ALIGNMENT_COUNTS
   );
 
   if (result.user.length === 0) {

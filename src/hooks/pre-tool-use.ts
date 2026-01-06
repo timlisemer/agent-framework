@@ -11,7 +11,7 @@ import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
 import { checkIntentAlignment } from "../agents/hooks/intent-align.js";
-import { detectWorkaroundPattern, getBlacklistHighlights } from "../utils/command-patterns.js";
+import { detectWorkaroundPattern } from "../utils/command-patterns.js";
 import { logToHomeAssistant } from "../utils/logger.js";
 import { markErrorAcknowledged, setSession, checkUserInteraction } from "../utils/ack-cache.js";
 import {
@@ -375,26 +375,6 @@ async function main() {
       outputDeny(result.reason ?? denyReason);
     }
     outputAllow();
-  }
-
-  // ============================================================
-  // STEP 3.5: Early blacklist check for Bash commands
-  // Check blacklist patterns BEFORE intent alignment so rule-based
-  // denials happen with proper messages instead of generic "misalignment"
-  // ============================================================
-  if (input.tool_name === "Bash") {
-    const highlights = getBlacklistHighlights(input.tool_name, input.tool_input);
-    if (highlights.length > 0) {
-      const firstHighlight = highlights[0];
-      const alternative = firstHighlight.replace(/\[BLACKLIST: [^\]]+\]\s*/, "");
-      logToHomeAssistant({
-        agent: "pre-tool-use-hook",
-        level: "decision",
-        problem: `Bash blacklist: ${(input.tool_input as { command?: string }).command?.slice(0, 50)}`,
-        answer: `DENIED: ${alternative}`,
-      });
-      outputDeny(`Blacklisted command. ${alternative}`);
-    }
   }
 
   // First-response intent check - detect if AI's first tool call ignores user question/request

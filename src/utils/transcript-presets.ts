@@ -107,20 +107,19 @@ export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
 };
 
 /**
- * For first-response-intent checks.
+ * For intent alignment checks.
  *
- * Gets last user message and any assistant text before the current tool call.
+ * Gets all user messages to preserve AskUserQuestion responses and plan acceptances.
  * Includes first user message to capture original request context.
  * More assistant messages to catch acknowledgments in the current turn.
  */
-export const FIRST_RESPONSE_INTENT_COUNTS: TranscriptReadOptions = {
-  // consider giving it git diff tool results as well
-  counts: { user: 3, assistant: 5, toolResult: 3 },
+export const INTENT_ALIGNMENT_COUNTS: TranscriptReadOptions = {
+  counts: { user: ALL, assistant: 5, toolResult: 3 },
   includeFirstUserMessage: true,
   toolResultOptions: {
     trim: true,
     maxLines: 10,
-    excludeToolNames: ['Task', 'Agent', 'TaskOutput'],
+    excludeToolNames: ["Task", "Agent", "TaskOutput"],
   },
 };
 
