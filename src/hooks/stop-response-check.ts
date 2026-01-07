@@ -1,4 +1,7 @@
 import "../utils/load-env.js";
+import { initializeTelemetry } from "../telemetry/index.js";
+initializeTelemetry();
+
 import { type StopHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { checkStopIntentAlignment } from "../agents/hooks/intent-align.js";
 import { logToHomeAssistant } from "../utils/logger.js";

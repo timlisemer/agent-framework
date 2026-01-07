@@ -1,4 +1,7 @@
 import "../utils/load-env.js";
+import { initializeTelemetry } from "../telemetry/index.js";
+initializeTelemetry();
+
 import { type PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import * as path from "path";
 import * as os from "os";

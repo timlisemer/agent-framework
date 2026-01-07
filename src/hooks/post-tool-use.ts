@@ -1,4 +1,7 @@
 import "../utils/load-env.js";
+import { initializeTelemetry } from "../telemetry/index.js";
+initializeTelemetry();
+
 import { type PostToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { clearAckCache } from "../utils/ack-cache.js";
 import { logToHomeAssistant } from "../utils/logger.js";
