@@ -31,7 +31,7 @@ import {
   MAX_SIMILAR_DENIALS,
 } from "../utils/denial-cache.js";
 import { readPlanContent } from "../utils/session-utils.js";
-import { checkWithAppeal } from "../utils/pre-tool-use-utils.js";
+import { appealHelper } from "../agents/hooks/tool-appeal.js";
 import {
   readTranscriptExact,
   formatTranscriptResult,
@@ -328,27 +328,39 @@ async function main() {
   if (input.tool_name === "mcp__agent-framework__confirm") {
     const denyReason =
       "Confirm requires explicit user approval. Use /commit or explicitly request confirm.";
-    const result = await checkWithAppeal(
-      async () => ({ approved: false, reason: denyReason }),
+
+    // Get transcript for appeal
+    const transcriptResult = await readTranscriptExact(input.transcript_path, RECENT_TOOL_APPROVAL_COUNTS);
+    const transcript = formatTranscriptResult(transcriptResult);
+
+    // Call appeal helper to check if user approved
+    const appeal = await appealHelper(
       input.tool_name,
-      input.tool_input,
-      input.transcript_path,
-      { workingDir: projectDir, hookName: "PreToolUse" }
+      `${input.tool_name} with ${JSON.stringify(input.tool_input).slice(0, 200)}`,
+      transcript,
+      denyReason,
+      projectDir,
+      "PreToolUse",
+      "Confirm tool blocked by default - checking if user explicitly requested it"
     );
 
-    if (!result.approved) {
-      outputDeny(result.reason ?? denyReason);
+    if (!appeal.overturned) {
+      outputDeny(denyReason);
     }
     outputAllow();
   }
 
-  // First-response intent check - detect if AI's first tool call ignores user question/request
-  // Only check for action tools (Edit, Write, Bash, etc.) - investigation tools are fine
-  // Gate: only run once per user turn (reset when user sends new message or rewinds)
+  // ============================================================
+  // STRICT VALIDATION FLOW
+  // Step 1: Error-Acknowledge
+  // Step 2: Intent-Validate
+  // Step 3: Path-Based Agents (plan, claudemd, style-drift)
+  // Step 4: Tool-Approve (with lazy mode optimization)
+  // ============================================================
+
   const ACTION_TOOLS = ["Edit", "Write", "NotebookEdit", "Bash", "Agent", "Task"];
 
-  // Skip first response intent check if ExitPlanMode was recently approved
-  // User has explicitly approved the plan, allow implementation to proceed
+  // Check if ExitPlanMode was recently approved - skip intent check
   if (ACTION_TOOLS.includes(input.tool_name) && !isFirstResponseChecked()) {
     const recentForIntent = await readTranscriptExact(
       input.transcript_path,
@@ -366,43 +378,11 @@ async function main() {
     }
   }
 
-  // Collect context from earlier checks to pass to tool-approve for final decision
-  const additionalContext: string[] = [];
-
-  if (ACTION_TOOLS.includes(input.tool_name) && !isFirstResponseChecked()) {
-    // Mark as checked so we don't run again for subsequent tool calls in same turn
-    markFirstResponseChecked();
-
-    const intentResult = await checkWithAppeal(
-      async () => {
-        const result = await checkIntentAlignment(
-          input.tool_name,
-          input.tool_input,
-          input.transcript_path,
-          projectDir,
-          "PreToolUse"
-        );
-        return result;
-      },
-      input.tool_name,
-      input.tool_input,
-      input.transcript_path,
-      {
-        workingDir: projectDir,
-        hookName: "PreToolUse",
-        appealContext: `${input.tool_name} as first response`,
-      }
-    );
-
-    if (!intentResult.approved) {
-      additionalContext.push(
-        `INTENT_CONCERN: First response misalignment - ${intentResult.reason}. Please respond to the user's message first.`
-      );
-    }
-  }
-
-  // Error acknowledgment check - detect if AI is ignoring errors
-  // Step 1: Quick pattern check (TypeScript only, no LLM)
+  // ============================================================
+  // STEP 1: ERROR-ACKNOWLEDGE
+  // TS Pre-check: hasErrorPatterns() on TOOL_RESULT lines
+  // If triggered: LLM → if block → appealHelper → decide
+  // ============================================================
   const errorCheckResult = await readTranscriptExact(input.transcript_path, ERROR_CHECK_COUNTS);
   const errorCheckTranscript = formatTranscriptResult(errorCheckResult);
 
@@ -415,75 +395,114 @@ async function main() {
     recordUserMessage(lastUserMessage.content, lastUserMessage.index);
   }
 
-  // Only check TOOL_RESULT lines for error patterns to avoid false positives from Read tool (source code)
-  const quickCheck = hasErrorPatterns(errorCheckTranscript, { toolResultsOnly: true });
+  // TS Pre-check: Only check TOOL_RESULT lines for error patterns
+  const errorPreCheck = hasErrorPatterns(errorCheckTranscript, { toolResultsOnly: true });
 
   // Skip error-ack if tool matches suggested alternative (conservative exact match)
-  if (quickCheck.needsCheck && !matchesSuggestedAlternative(input.tool_name, errorCheckTranscript)) {
-    // Step 2: Only call Haiku if error/directive patterns detected
-    // Track the reason for potential markErrorAcknowledged call
-    let blockReason = "";
+  if (errorPreCheck.needsCheck && !matchesSuggestedAlternative(input.tool_name, errorCheckTranscript)) {
+    // Run error-acknowledge LLM agent
+    const ackResult = await checkErrorAcknowledgment(
+      errorCheckTranscript,
+      input.tool_name,
+      input.tool_input,
+      projectDir,
+      input.transcript_path,
+      "PreToolUse"
+    );
 
-    const ackResult = await checkWithAppeal(
-      async () => {
-        const result = await checkErrorAcknowledgment(
-          errorCheckTranscript,
-          input.tool_name,
-          input.tool_input,
-          projectDir,
-          input.transcript_path,
-          "PreToolUse"
+    if (ackResult.startsWith("BLOCK:")) {
+      const blockReason = ackResult.substring(7).trim();
+
+      // Call appeal helper
+      const appeal = await appealHelper(
+        input.tool_name,
+        `${input.tool_name} with ${JSON.stringify(input.tool_input).slice(0, 200)}`,
+        errorCheckTranscript,
+        blockReason,
+        projectDir,
+        "PreToolUse",
+        `error-acknowledge blocked: ${blockReason}`
+      );
+
+      if (appeal.overturned) {
+        // User approved - cache the error as acknowledged and continue flow
+        markErrorAcknowledged(blockReason);
+        const originalIssue = errorCheckTranscript.match(
+          /error TS\d+[^\n]*|Error:[^\n]*|failed[^\n]*|FAILED[^\n]*/i
         );
-        if (result.startsWith("BLOCK:")) {
-          blockReason = result.substring(7).trim();
-          return { approved: false, reason: blockReason };
+        if (originalIssue) {
+          markErrorAcknowledged(originalIssue[0]);
         }
-        return { approved: true };
-      },
+        // Continue to next step
+      } else {
+        // User did not approve - block
+        outputDeny(`Error acknowledgment required: ${blockReason}`);
+      }
+    }
+    // If ackResult is "OK", continue to next step
+  }
+
+  // ============================================================
+  // STEP 2: INTENT-VALIDATE
+  // TS Pre-check: isFirstResponseChecked() = false + ACTION_TOOLS
+  // If triggered: LLM → if block → appealHelper → decide
+  // ============================================================
+  if (ACTION_TOOLS.includes(input.tool_name) && !isFirstResponseChecked()) {
+    // Mark as checked so we don't run again for subsequent tool calls in same turn
+    markFirstResponseChecked();
+
+    // Run intent-alignment LLM agent
+    const intentResult = await checkIntentAlignment(
       input.tool_name,
       input.tool_input,
       input.transcript_path,
-      {
-        workingDir: projectDir,
-        hookName: "PreToolUse",
-        onAppealSuccess: () => {
-          markErrorAcknowledged(blockReason);
-          // Also cache the ORIGINAL error pattern (what cache check looks for)
-          // This fixes cache key mismatch: error-ack output format vs original error text
-          const originalIssue = errorCheckTranscript.match(
-            /error TS\d+[^\n]*|Error:[^\n]*|failed[^\n]*|FAILED[^\n]*/i
-          );
-          if (originalIssue) {
-            markErrorAcknowledged(originalIssue[0]);
-          }
-        },
-      }
+      projectDir,
+      "PreToolUse"
     );
 
-    if (!ackResult.approved) {
-      additionalContext.push(
-        `ERROR_ACK_CONCERN: Error acknowledgment required - ${ackResult.reason ?? blockReason}`
+    if (!intentResult.approved) {
+      // Get transcript for appeal
+      const intentTranscriptResult = await readTranscriptExact(input.transcript_path, RECENT_TOOL_APPROVAL_COUNTS);
+      const intentTranscript = formatTranscriptResult(intentTranscriptResult);
+
+      // Call appeal helper
+      const appeal = await appealHelper(
+        input.tool_name,
+        `${input.tool_name} as first response`,
+        intentTranscript,
+        intentResult.reason || "First response misalignment",
+        projectDir,
+        "PreToolUse",
+        `intent-validate blocked: ${intentResult.reason}`
       );
+
+      if (!appeal.overturned) {
+        // User did not approve - block
+        outputDeny(`First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`);
+      }
+      // If overturned, continue to next step
     }
   }
 
-  // Path-based risk classification for file tools (STRICT PATH)
-  // This section handles: plan files, CLAUDE.md, and untrusted paths
-  // Low risk: inside project or ~/.claude, and not sensitive
-  // High risk: outside trusted dirs or sensitive files
+  // ============================================================
+  // STEP 3: PATH-BASED AGENTS (only for FILE_TOOLS)
+  // 3a. Plan-Validate: (Write|Edit) + path in ~/.claude/plans/
+  // 3b. ClaudeMD-Validate: (Write|Edit) + path.endsWith("CLAUDE.md")
+  // 3c. Style-Drift: Edit + trusted path
+  // ============================================================
   if (FILE_TOOLS.includes(input.tool_name)) {
     const filePath =
       (input.tool_input as { file_path?: string }).file_path ||
       (input.tool_input as { path?: string }).path;
+
     if (filePath) {
-      // Plan file drift detection - validate plan content against user intent
+      // 3a. PLAN-VALIDATE
       const plansDir = path.join(os.homedir(), ".claude", "plans");
       if (
         (input.tool_name === "Write" || input.tool_name === "Edit") &&
         isPathInDirectory(filePath, plansDir)
       ) {
         // Skip validation if ExitPlanMode was recently approved
-        // This means user approved the plan and AI is now writing it
         const recentContext = await readTranscriptExact(
           input.transcript_path,
           RECENT_TOOL_APPROVAL_COUNTS
@@ -502,36 +521,38 @@ async function main() {
         const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
         const conversationContext = formatTranscriptResult(planResult);
 
-        // Wrap plan validation with appeal
-        const validation = await checkWithAppeal(
-          () =>
-            checkPlanIntent(
-              currentPlan,
-              input.tool_name as "Write" | "Edit",
-              input.tool_input as { content?: string; old_string?: string; new_string?: string },
-              conversationContext,
-              input.transcript_path,
-              projectDir,
-              "PreToolUse"
-            ),
-          input.tool_name,
-          input.tool_input,
+        // Run plan-validate LLM agent
+        const validation = await checkPlanIntent(
+          currentPlan,
+          input.tool_name as "Write" | "Edit",
+          input.tool_input as { content?: string; old_string?: string; new_string?: string },
+          conversationContext,
           input.transcript_path,
-          {
-            workingDir: projectDir,
-            hookName: "PreToolUse",
-            appealContext: `Plan ${input.tool_name.toLowerCase()} to ${filePath}`,
-          }
+          projectDir,
+          "PreToolUse"
         );
 
         if (!validation.approved) {
-          outputDeny(`Plan drift detected: ${validation.reason}`);
+          // Call appeal helper
+          const appeal = await appealHelper(
+            input.tool_name,
+            `Plan ${input.tool_name.toLowerCase()} to ${filePath}`,
+            conversationContext,
+            validation.reason || "Plan drift detected",
+            projectDir,
+            "PreToolUse",
+            `plan-validate blocked: ${validation.reason}`
+          );
+
+          if (!appeal.overturned) {
+            outputDeny(`Plan drift detected: ${validation.reason}`);
+          }
         }
-        // Plan validated - allow write
+        // Plan validated or appeal overturned - allow write
         outputAllow();
       }
 
-      // CLAUDE.md validation - detect Write/Edit to any CLAUDE.md file
+      // 3b. CLAUDE-MD-VALIDATE
       if (
         (input.tool_name === "Write" || input.tool_name === "Edit") &&
         filePath.endsWith("CLAUDE.md")
@@ -544,30 +565,37 @@ async function main() {
           // File doesn't exist - that's OK for new files
         }
 
-        const validation = await checkWithAppeal(
-          () =>
-            validateClaudeMd(
-              currentContent,
-              input.tool_name as "Write" | "Edit",
-              input.tool_input as { content?: string; old_string?: string; new_string?: string },
-              input.transcript_path,
-              projectDir,
-              "PreToolUse"
-            ),
-          input.tool_name,
-          input.tool_input,
+        // Run claude-md-validate LLM agent
+        const validation = await validateClaudeMd(
+          currentContent,
+          input.tool_name as "Write" | "Edit",
+          input.tool_input as { content?: string; old_string?: string; new_string?: string },
           input.transcript_path,
-          {
-            workingDir: projectDir,
-            hookName: "PreToolUse",
-            appealContext: `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
-          }
+          projectDir,
+          "PreToolUse"
         );
 
         if (!validation.approved) {
-          outputDeny(`CLAUDE.md validation failed: ${validation.reason}`);
+          // Get transcript for appeal
+          const mdTranscriptResult = await readTranscriptExact(input.transcript_path, RECENT_TOOL_APPROVAL_COUNTS);
+          const mdTranscript = formatTranscriptResult(mdTranscriptResult);
+
+          // Call appeal helper
+          const appeal = await appealHelper(
+            input.tool_name,
+            `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
+            mdTranscript,
+            validation.reason || "CLAUDE.md validation failed",
+            projectDir,
+            "PreToolUse",
+            `claude-md-validate blocked: ${validation.reason}`
+          );
+
+          if (!appeal.overturned) {
+            outputDeny(`CLAUDE.md validation failed: ${validation.reason}`);
+          }
         }
-        // CLAUDE.md validated - allow write
+        // CLAUDE.md validated or appeal overturned - allow write
         outputAllow();
       }
 
@@ -575,8 +603,7 @@ async function main() {
       const sensitive = isSensitivePath(filePath);
 
       if (trusted && !sensitive) {
-        // Low risk path - but check for style drift on Edit tool
-        // Edit has old_string/new_string for comparison; Write/NotebookEdit lack old content
+        // 3c. STYLE-DRIFT (only for Edit on trusted paths)
         if (input.tool_name === "Edit") {
           // Get user messages to check if style change was requested
           const transcriptResult = await readTranscriptExact(
@@ -585,57 +612,95 @@ async function main() {
           );
           const userMessages = formatTranscriptResult(transcriptResult);
 
-          // Check for style drift with automatic appeal on denial
-          const styleDriftResult = await checkWithAppeal(
-            () =>
-              checkStyleDrift(
-                input.tool_name,
-                input.tool_input,
-                projectDir,
-                userMessages,
-                "PreToolUse"
-              ),
+          // Run style-drift LLM agent
+          const styleDriftResult = await checkStyleDrift(
             input.tool_name,
             input.tool_input,
-            input.transcript_path,
-            { workingDir: projectDir, hookName: "PreToolUse" }
+            projectDir,
+            userMessages,
+            "PreToolUse"
           );
 
           if (!styleDriftResult.approved) {
-            outputDeny(`Style drift detected: ${styleDriftResult.reason}`);
+            // Call appeal helper
+            const appeal = await appealHelper(
+              input.tool_name,
+              `Edit to ${filePath}`,
+              userMessages,
+              styleDriftResult.reason || "Style drift detected",
+              projectDir,
+              "PreToolUse",
+              `style-drift blocked: ${styleDriftResult.reason}`
+            );
+
+            if (!appeal.overturned) {
+              outputDeny(`Style drift detected: ${styleDriftResult.reason}`);
+            }
           }
         }
 
         // Low risk - auto-approve (passed style-drift check or not applicable)
         outputAllow();
       }
-      // High risk - fall through to LLM approval
+      // High risk (untrusted or sensitive) - fall through to tool-approve
     }
   }
 
-  // Tool approval with automatic appeal on denial
-  const decision = await checkWithAppeal(
-    () => checkToolApproval(input.tool_name, input.tool_input, projectDir, "PreToolUse"),
+  // ============================================================
+  // STEP 4: TOOL-APPROVE (final gate)
+  // TS Pre-check: getBlacklistHighlights() for Bash commands
+  // Lazy mode: skip LLM if no blacklist matches
+  // Otherwise: LLM → if block → appealHelper → decide
+  // ============================================================
+
+  // Determine if we're in lazy mode (regular mode + trusted paths already handled)
+  // At this point we're in strict validation, but we can still use lazy mode
+  // for tool-approve if there are no blacklist violations
+  const planMode = isPlanModeActive(input.transcript_path);
+  const subagent = isSubagent(input.transcript_path);
+  const lazyMode = !planMode || subagent; // Lazy mode when not in plan mode, or is subagent
+
+  // Run tool-approve LLM agent with lazy mode option
+  const decision = await checkToolApproval(
     input.tool_name,
     input.tool_input,
-    input.transcript_path,
-    { workingDir: projectDir, hookName: "PreToolUse", additionalContext }
+    projectDir,
+    "PreToolUse",
+    { lazyMode }
   );
 
   if (!decision.approved) {
-    // Track workaround patterns for escalation
-    let finalReason = decision.reason;
-    const pattern = detectWorkaroundPattern(input.tool_name, input.tool_input);
-    if (pattern) {
-      const count = recordDenial(pattern);
+    // Get transcript for appeal
+    const approveTranscriptResult = await readTranscriptExact(input.transcript_path, RECENT_TOOL_APPROVAL_COUNTS);
+    const approveTranscript = formatTranscriptResult(approveTranscriptResult);
 
-      if (count >= MAX_SIMILAR_DENIALS) {
-        finalReason += ` CRITICAL: You have attempted ${count} similar workarounds for '${pattern}'. STOP trying alternatives. Either use the approved MCP tool, ask the user for guidance, or acknowledge that this action cannot be performed.`;
+    // Call appeal helper
+    const appeal = await appealHelper(
+      input.tool_name,
+      `${input.tool_name} with ${JSON.stringify(input.tool_input).slice(0, 200)}`,
+      approveTranscript,
+      decision.reason || "Tool denied",
+      projectDir,
+      "PreToolUse",
+      `tool-approve blocked: ${decision.reason}`
+    );
+
+    if (!appeal.overturned) {
+      // Track workaround patterns for escalation
+      let finalReason = decision.reason;
+      const pattern = detectWorkaroundPattern(input.tool_name, input.tool_input);
+      if (pattern) {
+        const count = recordDenial(pattern);
+
+        if (count >= MAX_SIMILAR_DENIALS) {
+          finalReason += ` CRITICAL: You have attempted ${count} similar workarounds for '${pattern}'. STOP trying alternatives. Either use the approved MCP tool, ask the user for guidance, or acknowledge that this action cannot be performed.`;
+        }
       }
-    }
 
-    // Output structured JSON to deny and provide feedback to Claude
-    outputDeny(finalReason ?? "Tool denied");
+      // Output structured JSON to deny and provide feedback to Claude
+      outputDeny(finalReason ?? "Tool denied");
+    }
+    // Appeal overturned - continue to allow
   }
 
   // Strict validation passed - update state

@@ -1,21 +1,22 @@
 /**
- * Tool Appeal Agent - Review Denied Tool Calls
+ * Tool Appeal Agent - Helper for Denied Tool Calls
  *
- * This agent reviews tool calls that were initially denied to check if
- * the user explicitly approved the operation or if there's a mismatch.
+ * This agent is a HELPER called by other agents after they block a tool.
+ * It reviews the denial and returns whether to overturn it.
+ * The CALLING agent decides what to do with the result.
  *
  * ## FLOW
  *
- * 1. Receive denial reason and transcript context
- * 2. Run unified agent to evaluate appeal
+ * 1. Receive denial reason and transcript context from calling agent
+ * 2. Run LLM to evaluate if user approved the operation
  * 3. Retry if format is invalid
- * 4. Return UPHOLD, OVERTURN to approve, or OVERTURN with new reason
+ * 4. Return { overturned: boolean } - caller decides what to do
  *
  * ## CRITICAL
  *
- * The original denial is ALWAYS technically correct. This agent only checks:
- * - Did user explicitly request this operation?
- * - Is there a clear mismatch between user request and AI action?
+ * - This agent does NOT make final decisions
+ * - It only checks if user explicitly approved the operation
+ * - The calling agent handles the response in TypeScript
  *
  * @module tool-appeal
  */
@@ -28,43 +29,50 @@ import { logAgentDecision } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 
 /**
- * Review an appeal for a denied tool call.
+ * Appeal helper - called by other agents after they block a tool.
+ * Returns whether user has approved this operation.
+ *
+ * The CALLING agent decides what to do with the result.
  *
  * @param toolName - Name of the tool being appealed
  * @param toolDescription - Human-readable description of the tool call
  * @param transcript - Recent conversation context
- * @param originalReason - The original denial reason
+ * @param originalReason - The original denial reason from the calling agent
  * @param workingDir - Working directory for context
  * @param hookName - Hook that triggered this check (for telemetry)
- * @returns Approval result with optional new reason
+ * @param additionalContext - Extra context from calling agent (e.g., why it blocked)
+ * @returns { overturned: boolean } - caller decides what to do
  *
  * @example
  * ```typescript
- * const result = await checkAppeal(
+ * const result = await appealHelper(
  *   'Bash',
  *   'Bash with {"command": "curl ..."}',
  *   transcript,
  *   'Network requests denied by default',
  *   '/path/to/project',
- *   'PreToolUse'
+ *   'PreToolUse',
+ *   'error-acknowledge blocked because AI ignored build error'
  * );
- * if (result.approved) {
- *   // User explicitly approved this operation
+ * if (result.overturned) {
+ *   // User approved - caller continues flow
+ * } else {
+ *   // User did not approve - caller blocks tool
  * }
  * ```
  */
-export async function checkAppeal(
+export async function appealHelper(
   toolName: string,
   toolDescription: string,
   transcript: string,
   originalReason: string,
   workingDir: string,
   hookName: string,
-  additionalContext?: string[]
-): Promise<{ approved: boolean; reason?: string }> {
-  // Build concerns section from previous check results (intent-align, error-acknowledge)
-  const concernsSection = additionalContext?.length
-    ? `\n=== PREVIOUS CHECK CONCERNS ===\n${additionalContext.join("\n")}\n=== END CONCERNS ===\n`
+  additionalContext?: string
+): Promise<{ overturned: boolean }> {
+  // Build context section from calling agent
+  const contextSection = additionalContext
+    ? `\n=== CALLER CONTEXT ===\n${additionalContext}\n=== END CONTEXT ===\n`
     : "";
 
   // Run appeal evaluation via unified runner
@@ -74,7 +82,7 @@ export async function checkAppeal(
       prompt: "Review this appeal for a denied tool call.",
       context: `BLOCK REASON: ${originalReason}
 TOOL CALL: ${toolDescription}
-${concernsSection}
+${contextSection}
 RECENT CONVERSATION:
 ${transcript}`,
     }
@@ -92,62 +100,25 @@ ${transcript}`,
       formatValidator: (text) =>
         startsWithAny(text, ["UPHOLD", "OVERTURN:", "DENY:", "DENY"]),
       formatReminder:
-        "Reply with EXACTLY: UPHOLD, OVERTURN: APPROVE, or OVERTURN: <reason>",
+        "Reply with EXACTLY: UPHOLD or OVERTURN: APPROVE",
     }
   );
 
-  // Check for approval (overturn)
-  if (decision.startsWith("OVERTURN: APPROVE") || decision === "APPROVE") {
-    logAgentDecision({
-      agent: "tool-appeal",
-      hookName,
-      decision: "OVERTURN",
-      toolName,
-      workingDir,
-      latencyMs: result.latencyMs,
-      modelTier: result.modelTier,
-      success: result.success,
-      errorCount: result.errorCount,
-      decisionReason: "OVERTURNED → APPROVED",
-    });
-    return { approved: true };
-  }
-
-  // Parse block/uphold - extract reason if provided
-  let reason: string | undefined;
-  const normalizedDecision = decision.trim().toUpperCase();
-
-  // CODE-LEVEL SAFEGUARD: If response contains UPHOLD in any form, ALWAYS return undefined
-  // This ensures the original tool-approve reason is used, regardless of LLM output
-  if (normalizedDecision.includes("UPHOLD")) {
-    reason = undefined;
-  } else if (decision.startsWith("OVERTURN: ")) {
-    // Overturn with new reason - ONLY case where appeal provides a reason
-    reason = decision.replace("OVERTURN: ", "");
-    if (reason === "APPROVE") reason = undefined; // Already handled above, but safety
-  } else if (decision.startsWith("DENY: ")) {
-    // Old format compatibility - appeal provides reason
-    reason = decision.replace("DENY: ", "");
-  } else if (normalizedDecision === "DENY") {
-    // Bare DENY - defer to original
-    reason = undefined;
-  } else {
-    // Truly malformed - treat as uphold to be safe (defer to original)
-    reason = undefined;
-  }
+  // Check for overturn (user approved)
+  const overturned = decision.startsWith("OVERTURN: APPROVE") || decision === "APPROVE";
 
   logAgentDecision({
     agent: "tool-appeal",
     hookName,
-    decision: "UPHOLD",
+    decision: overturned ? "OVERTURN" : "UPHOLD",
     toolName,
     workingDir,
     latencyMs: result.latencyMs,
     modelTier: result.modelTier,
     success: result.success,
     errorCount: result.errorCount,
-    decisionReason: reason ? `BLOCKED: ${reason}` : "UPHELD (using original reason)",
+    decisionReason: overturned ? "User approved operation" : "User did not approve",
   });
 
-  return { approved: false, reason };
+  return { overturned };
 }

@@ -26,13 +26,18 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { getModelId } from "../../types.js";
+import { getModelId, MODEL_TIERS } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { TOOL_APPROVE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { getBlacklistHighlights } from "../../utils/command-patterns.js";
 import { logAgentDecision } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+
+export interface ToolApprovalOptions {
+  /** Skip LLM if no blacklist matches (for lazy mode) */
+  lazyMode?: boolean;
+}
 
 /**
  * Evaluate a tool call for safety and compliance.
@@ -41,6 +46,7 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
  * @param toolInput - Input parameters for the tool
  * @param workingDir - The project directory for context
  * @param hookName - Hook that triggered this check (for telemetry)
+ * @param options - Optional settings (e.g., lazyMode to skip LLM if no blacklist)
  * @returns Approval result with optional denial reason
  *
  * @example
@@ -55,8 +61,29 @@ export async function checkToolApproval(
   toolName: string,
   toolInput: unknown,
   workingDir: string,
-  hookName: string
+  hookName: string,
+  options?: ToolApprovalOptions
 ): Promise<{ approved: boolean; reason?: string }> {
+  // Get blacklist pattern highlights for this tool call
+  const highlights = getBlacklistHighlights(toolName, toolInput);
+
+  // Lazy mode: skip LLM if no blacklist violations
+  if (options?.lazyMode && highlights.length === 0) {
+    logAgentDecision({
+      agent: "tool-approve",
+      hookName,
+      decision: "APPROVED",
+      toolName,
+      workingDir,
+      latencyMs: 0,
+      modelTier: MODEL_TIERS.HAIKU,
+      success: true,
+      errorCount: 0,
+      decisionReason: "Lazy mode: no blacklist violations",
+    });
+    return { approved: true };
+  }
+
   // Load CLAUDE.md if exists (project-specific rules)
   let rules = "";
   const claudeMdPath = path.join(workingDir, "CLAUDE.md");
@@ -65,9 +92,6 @@ export async function checkToolApproval(
   }
 
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput)}`;
-
-  // Get blacklist pattern highlights for this tool call
-  const highlights = getBlacklistHighlights(toolName, toolInput);
   const highlightSection =
     highlights.length > 0
       ? `\n=== BLACKLISTED PATTERNS DETECTED ===\n${highlights.join("\n")}\n=== END BLACKLIST ===\n`

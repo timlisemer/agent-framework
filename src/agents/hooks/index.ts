@@ -32,7 +32,7 @@
  */
 
 export { checkToolApproval } from './tool-approve.js';
-export { checkAppeal } from './tool-appeal.js';
+export { appealHelper } from './tool-appeal.js';
 export { checkErrorAcknowledgment } from './error-acknowledge.js';
 export { checkPlanIntent } from './plan-validate.js';
 export { checkForOffTopic, extractConversationContext } from './intent-validate.js';
