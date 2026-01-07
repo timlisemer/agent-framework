@@ -366,6 +366,9 @@ async function main() {
     }
   }
 
+  // Collect context from earlier checks to pass to tool-approve for final decision
+  const additionalContext: string[] = [];
+
   if (ACTION_TOOLS.includes(input.tool_name) && !isFirstResponseChecked()) {
     // Mark as checked so we don't run again for subsequent tool calls in same turn
     markFirstResponseChecked();
@@ -392,8 +395,8 @@ async function main() {
     );
 
     if (!intentResult.approved) {
-      outputDeny(
-        `First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`
+      additionalContext.push(
+        `INTENT_CONCERN: First response misalignment - ${intentResult.reason}. Please respond to the user's message first.`
       );
     }
   }
@@ -458,7 +461,9 @@ async function main() {
     );
 
     if (!ackResult.approved) {
-      outputDeny(`Error acknowledgment required: ${ackResult.reason ?? blockReason}`);
+      additionalContext.push(
+        `ERROR_ACK_CONCERN: Error acknowledgment required - ${ackResult.reason ?? blockReason}`
+      );
     }
   }
 
@@ -610,7 +615,7 @@ async function main() {
 
   // Tool approval with automatic appeal on denial
   const decision = await checkWithAppeal(
-    () => checkToolApproval(input.tool_name, input.tool_input, projectDir, "PreToolUse"),
+    () => checkToolApproval(input.tool_name, input.tool_input, projectDir, "PreToolUse", additionalContext),
     input.tool_name,
     input.tool_input,
     input.transcript_path,
