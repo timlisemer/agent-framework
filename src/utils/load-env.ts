@@ -1,7 +1,7 @@
 import { config } from "dotenv";
 import { fileURLToPath } from "url";
 import { dirname, resolve } from "path";
-import { existsSync, lstatSync, readlinkSync } from "fs";
+import { existsSync, lstatSync, readlinkSync, readFileSync } from "fs";
 
 /**
  * Load .env from the project root, following symlinks to find the real location.
@@ -56,4 +56,25 @@ const envPath = resolve(projectRoot, ".env");
 
 if (existsSync(envPath)) {
   config({ path: envPath, quiet: true });
+
+  // Fix dotenv bug: it treats # as comment even in unquoted values
+  // Re-parse critical env vars that might contain # or other special chars
+  const criticalVars = ["AGENT_FRAMEWORK_API_KEY", "POSTGRES_PASSWORD"];
+  try {
+    const envContent = readFileSync(envPath, "utf-8");
+    for (const varName of criticalVars) {
+      const match = envContent.match(new RegExp(`^${varName}=(.*)$`, "m"));
+      if (match) {
+        let value = match[1].trim();
+        // Remove surrounding quotes if present
+        if ((value.startsWith('"') && value.endsWith('"')) ||
+            (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+        process.env[varName] = value;
+      }
+    }
+  } catch {
+    // Ignore parse errors, dotenv values are still available
+  }
 }
