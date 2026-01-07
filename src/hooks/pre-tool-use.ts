@@ -615,11 +615,11 @@ async function main() {
 
   // Tool approval with automatic appeal on denial
   const decision = await checkWithAppeal(
-    () => checkToolApproval(input.tool_name, input.tool_input, projectDir, "PreToolUse", additionalContext),
+    () => checkToolApproval(input.tool_name, input.tool_input, projectDir, "PreToolUse"),
     input.tool_name,
     input.tool_input,
     input.transcript_path,
-    { workingDir: projectDir, hookName: "PreToolUse" }
+    { workingDir: projectDir, hookName: "PreToolUse", additionalContext }
   );
 
   if (!decision.approved) {

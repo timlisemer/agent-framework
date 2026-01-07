@@ -55,8 +55,7 @@ export async function checkToolApproval(
   toolName: string,
   toolInput: unknown,
   workingDir: string,
-  hookName: string,
-  additionalContext?: string[]
+  hookName: string
 ): Promise<{ approved: boolean; reason?: string }> {
   // Load CLAUDE.md if exists (project-specific rules)
   let rules = "";
@@ -74,11 +73,6 @@ export async function checkToolApproval(
       ? `\n=== BLACKLISTED PATTERNS DETECTED ===\n${highlights.join("\n")}\n=== END BLACKLIST ===\n`
       : "";
 
-  // Build concerns section from previous check results (intent-align, error-acknowledge)
-  const concernsSection = additionalContext?.length
-    ? `\n=== PREVIOUS CHECK CONCERNS ===\n${additionalContext.join("\n")}\n=== END CONCERNS ===\n`
-    : "";
-
   // Run initial evaluation via unified runner
   const result = await runAgent(
     { ...TOOL_APPROVE_AGENT, workingDir },
@@ -88,7 +82,7 @@ export async function checkToolApproval(
 
 PROJECT RULES (from CLAUDE.md):
 ${rules || "No project-specific rules."}
-${highlightSection}${concernsSection}
+${highlightSection}
 TOOL TO EVALUATE:
 Tool: ${toolName}
 Input: ${JSON.stringify(toolInput)}`,

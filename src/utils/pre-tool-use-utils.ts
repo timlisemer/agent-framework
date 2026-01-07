@@ -15,6 +15,8 @@ export interface CheckWithAppealOptions {
   appealContext?: string;
   /** Callback when appeal succeeds */
   onAppealSuccess?: () => void;
+  /** Additional context from earlier checks (intent-align, error-acknowledge) for appeal */
+  additionalContext?: string[];
 }
 
 export async function checkWithAppeal(
@@ -43,7 +45,8 @@ export async function checkWithAppeal(
     transcript,
     result.reason || "No reason provided",
     options.workingDir,
-    options.hookName
+    options.hookName,
+    options.additionalContext
   );
 
   if (appeal.approved) {

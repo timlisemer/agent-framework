@@ -59,8 +59,14 @@ export async function checkAppeal(
   transcript: string,
   originalReason: string,
   workingDir: string,
-  hookName: string
+  hookName: string,
+  additionalContext?: string[]
 ): Promise<{ approved: boolean; reason?: string }> {
+  // Build concerns section from previous check results (intent-align, error-acknowledge)
+  const concernsSection = additionalContext?.length
+    ? `\n=== PREVIOUS CHECK CONCERNS ===\n${additionalContext.join("\n")}\n=== END CONCERNS ===\n`
+    : "";
+
   // Run appeal evaluation via unified runner
   const result = await runAgent(
     { ...TOOL_APPEAL_AGENT },
@@ -68,7 +74,7 @@ export async function checkAppeal(
       prompt: "Review this appeal for a denied tool call.",
       context: `BLOCK REASON: ${originalReason}
 TOOL CALL: ${toolDescription}
-
+${concernsSection}
 RECENT CONVERSATION:
 ${transcript}`,
     }
