@@ -1,5 +1,4 @@
 import * as fs from "fs";
-import lockfile from "proper-lockfile";
 import { hashString } from "./hash-utils.js";
 
 /**
@@ -32,20 +31,8 @@ export interface CacheConfig<T> {
 }
 
 /**
- * Ensure a file exists for locking purposes.
- * proper-lockfile requires the file to exist before locking.
- */
-async function ensureFileExists(filePath: string): Promise<void> {
-  try {
-    await fs.promises.access(filePath);
-  } catch {
-    await fs.promises.writeFile(filePath, "{}");
-  }
-}
-
-/**
  * Generic file-based cache manager with full feature set.
- * All operations are async and use file locking for safe concurrent access.
+ * All operations are async and use atomic writes for safe concurrent access.
  *
  * All caches support:
  * - Session invalidation (clears on new Claude Code session)
@@ -103,27 +90,16 @@ export class CacheManager<T> {
     const currentHash = hashString(userMessage);
 
     try {
-      await ensureFileExists(this.config.filePath);
-      const release = await lockfile.lock(this.config.filePath, {
-        retries: { retries: 5, minTimeout: 50, maxTimeout: 500 },
-      });
+      const raw = await fs.promises.readFile(this.config.filePath, "utf-8");
+      const state: CacheState<T> = JSON.parse(raw);
 
-      try {
-        const raw = await fs.promises.readFile(this.config.filePath, "utf-8");
-        const state: CacheState<T> = JSON.parse(raw);
-
-        if (state.lastUserMessageHash && state.lastUserMessageHash !== currentHash) {
-          this.lastUserMessageHash = currentHash;
-          await this.clearInternal();
-          return true;
-        }
-      } catch {
-        // File doesn't exist or is corrupted
-      } finally {
-        await release();
+      if (state.lastUserMessageHash && state.lastUserMessageHash !== currentHash) {
+        this.lastUserMessageHash = currentHash;
+        await this.clear();
+        return true;
       }
     } catch {
-      // Ignore locking errors
+      // File doesn't exist or is corrupted - that's fine
     }
 
     this.lastUserMessageHash = currentHash;
@@ -142,94 +118,71 @@ export class CacheManager<T> {
    */
   async load(): Promise<T> {
     try {
-      await ensureFileExists(this.config.filePath);
-      const release = await lockfile.lock(this.config.filePath, {
-        retries: { retries: 5, minTimeout: 50, maxTimeout: 500 },
-      });
+      const raw = await fs.promises.readFile(this.config.filePath, "utf-8");
+      const state: CacheState<T> = JSON.parse(raw);
 
-      try {
-        const raw = await fs.promises.readFile(this.config.filePath, "utf-8");
-        const state: CacheState<T> = JSON.parse(raw);
-
-        // Clear cache if session changed (new Claude Code session)
-        if (
-          this.sessionId &&
-          state.sessionId &&
-          state.sessionId !== this.sessionId
-        ) {
-          return this.config.defaultData();
-        }
-
-        // Update lastUserMessageHash from file if not set
-        if (!this.lastUserMessageHash && state.lastUserMessageHash) {
-          this.lastUserMessageHash = state.lastUserMessageHash;
-        }
-
-        let data = state.data;
-
-        // Apply time expiry and max entries if configured
-        if (this.config.getEntries && this.config.setEntries) {
-          let entries = this.config.getEntries(data);
-
-          // Time-based expiry
-          if (this.config.expiryMs && this.config.getTimestamp) {
-            const now = Date.now();
-            const expiryMs = this.config.expiryMs;
-            const getTimestamp = this.config.getTimestamp;
-            entries = entries.filter((e) => now - getTimestamp(e) < expiryMs);
-          }
-
-          // Max entries limit (keep newest)
-          if (this.config.maxEntries && entries.length > this.config.maxEntries) {
-            entries = entries.slice(-this.config.maxEntries);
-          }
-
-          data = this.config.setEntries(data, entries);
-        }
-
-        return data;
-      } finally {
-        await release();
+      // Clear cache if session changed (new Claude Code session)
+      if (
+        this.sessionId &&
+        state.sessionId &&
+        state.sessionId !== this.sessionId
+      ) {
+        return this.config.defaultData();
       }
+
+      // Update lastUserMessageHash from file if not set
+      if (!this.lastUserMessageHash && state.lastUserMessageHash) {
+        this.lastUserMessageHash = state.lastUserMessageHash;
+      }
+
+      let data = state.data;
+
+      // Apply time expiry and max entries if configured
+      if (this.config.getEntries && this.config.setEntries) {
+        let entries = this.config.getEntries(data);
+
+        // Time-based expiry
+        if (this.config.expiryMs && this.config.getTimestamp) {
+          const now = Date.now();
+          const expiryMs = this.config.expiryMs;
+          const getTimestamp = this.config.getTimestamp;
+          entries = entries.filter((e) => now - getTimestamp(e) < expiryMs);
+        }
+
+        // Max entries limit (keep newest)
+        if (this.config.maxEntries && entries.length > this.config.maxEntries) {
+          entries = entries.slice(-this.config.maxEntries);
+        }
+
+        data = this.config.setEntries(data, entries);
+      }
+
+      return data;
     } catch {
-      // Ignore errors, return default
+      // File doesn't exist or is corrupted - return default
+      return this.config.defaultData();
     }
-    return this.config.defaultData();
   }
 
   /**
    * Save cache data to file with current session ID and user message hash.
+   * Uses atomic write (temp file + rename) for safe concurrent access.
    */
   async save(data: T): Promise<void> {
     try {
-      await ensureFileExists(this.config.filePath);
-      const release = await lockfile.lock(this.config.filePath, {
-        retries: { retries: 5, minTimeout: 50, maxTimeout: 500 },
-      });
+      const state: CacheState<T> = {
+        sessionId: this.sessionId,
+        lastUserMessageHash: this.lastUserMessageHash,
+        data,
+      };
+      const content = JSON.stringify(state);
 
-      try {
-        const state: CacheState<T> = {
-          sessionId: this.sessionId,
-          lastUserMessageHash: this.lastUserMessageHash,
-          data,
-        };
-        await fs.promises.writeFile(this.config.filePath, JSON.stringify(state));
-      } finally {
-        await release();
-      }
+      // Atomic write: write to temp file, then rename
+      const tempPath = `${this.config.filePath}.${process.pid}.tmp`;
+      await fs.promises.writeFile(tempPath, content);
+      await fs.promises.rename(tempPath, this.config.filePath);
     } catch {
-      // Ignore write errors
-    }
-  }
-
-  /**
-   * Internal clear without locking (for use within locked sections).
-   */
-  private async clearInternal(): Promise<void> {
-    try {
-      await fs.promises.unlink(this.config.filePath);
-    } catch {
-      // Ignore errors
+      // Ignore write errors - cache is best-effort
     }
   }
 
@@ -238,70 +191,44 @@ export class CacheManager<T> {
    */
   async clear(): Promise<void> {
     try {
-      await ensureFileExists(this.config.filePath);
-      const release = await lockfile.lock(this.config.filePath, {
-        retries: { retries: 5, minTimeout: 50, maxTimeout: 500 },
-      });
-
-      try {
-        await fs.promises.unlink(this.config.filePath);
-      } catch {
-        // Ignore errors
-      } finally {
-        await release();
-      }
+      await fs.promises.unlink(this.config.filePath);
     } catch {
-      // Ignore locking errors
+      // Ignore errors - file may not exist
     }
   }
 
   /**
    * Load, modify with callback, and save in one operation.
-   * Uses file locking to ensure atomicity across processes.
    */
   async update(fn: (data: T) => T): Promise<void> {
     try {
-      await ensureFileExists(this.config.filePath);
-      const release = await lockfile.lock(this.config.filePath, {
-        retries: { retries: 5, minTimeout: 50, maxTimeout: 500 },
-      });
-
+      let data: T;
       try {
-        let data: T;
-        try {
-          const raw = await fs.promises.readFile(this.config.filePath, "utf-8");
-          const state: CacheState<T> = JSON.parse(raw);
+        const raw = await fs.promises.readFile(this.config.filePath, "utf-8");
+        const state: CacheState<T> = JSON.parse(raw);
 
-          // Clear cache if session changed
-          if (
-            this.sessionId &&
-            state.sessionId &&
-            state.sessionId !== this.sessionId
-          ) {
-            data = this.config.defaultData();
-          } else {
-            // Update lastUserMessageHash from file if not set
-            if (!this.lastUserMessageHash && state.lastUserMessageHash) {
-              this.lastUserMessageHash = state.lastUserMessageHash;
-            }
-            data = state.data;
-          }
-        } catch {
+        // Clear cache if session changed
+        if (
+          this.sessionId &&
+          state.sessionId &&
+          state.sessionId !== this.sessionId
+        ) {
           data = this.config.defaultData();
+        } else {
+          // Update lastUserMessageHash from file if not set
+          if (!this.lastUserMessageHash && state.lastUserMessageHash) {
+            this.lastUserMessageHash = state.lastUserMessageHash;
+          }
+          data = state.data;
         }
-
-        const updated = fn(data);
-        const newState: CacheState<T> = {
-          sessionId: this.sessionId,
-          lastUserMessageHash: this.lastUserMessageHash,
-          data: updated,
-        };
-        await fs.promises.writeFile(this.config.filePath, JSON.stringify(newState));
-      } finally {
-        await release();
+      } catch {
+        data = this.config.defaultData();
       }
+
+      const updated = fn(data);
+      await this.save(updated);
     } catch {
-      // Ignore errors
+      // Ignore errors - cache is best-effort
     }
   }
 }
