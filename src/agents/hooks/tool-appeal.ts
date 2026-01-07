@@ -25,7 +25,7 @@ import { getModelId } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { TOOL_APPEAL_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logAgentDecision } from "../../utils/logger.js";
+import { logApprove, logDeny } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 
 /**
@@ -107,18 +107,11 @@ ${transcript}`,
   // Check for overturn (user approved)
   const overturned = decision.startsWith("OVERTURN: APPROVE") || decision === "APPROVE";
 
-  logAgentDecision({
-    agent: "tool-appeal",
-    hookName,
-    decision: overturned ? "OVERTURN" : "UPHOLD",
-    toolName,
-    workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    success: result.success,
-    errorCount: result.errorCount,
-    decisionReason: overturned ? "User approved operation" : "User did not approve",
-  });
+  if (overturned) {
+    logApprove(result, "tool-appeal", hookName, toolName, workingDir, "direct", "User approved operation");
+  } else {
+    logDeny(result, "tool-appeal", hookName, toolName, workingDir, "User did not approve");
+  }
 
   return { overturned };
 }

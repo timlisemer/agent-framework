@@ -345,3 +345,44 @@ Standard configurations for different use cases:
 |------|---------|--------|
 | `/tmp/claude-hook-denials.json` | Workaround tracking | 1 minute |
 | `/tmp/claude-error-acks.json` | Error acknowledgment cache | 5 minutes |
+
+## Telemetry
+
+Telemetry is sent to a remote endpoint for monitoring agent decisions.
+
+### Kill Switch
+Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all telemetry.
+
+### Telemetry API
+
+**Decision** (required) - one of:
+| Decision | Category | When to Use |
+|----------|----------|-------------|
+| `APPROVE` | Authorization | Agent approved tool execution |
+| `DENY` | Authorization | Agent blocked tool execution |
+| `CONFIRM` | Quality | Check/confirm agent validated code |
+| `SUCCESS` | Outcome | Operation completed without errors |
+| `ERROR` | Outcome | Provider error occurred (API failures, etc.) |
+
+**Mode** (required) - execution mode:
+| Mode | Description |
+|------|-------------|
+| `direct` | Direct execution mode |
+| `lazy` | Lazy evaluation mode |
+
+### Agent Telemetry Coverage
+
+| File | Calls | Decision Values | Mode |
+|------|-------|-----------------|------|
+| `check.ts` | 1 | `CONFIRM` | `direct` |
+| `confirm.ts` | 1 | `CONFIRM` | `direct` |
+| `commit.ts` | 3 | `CONFIRM`, `ERROR` | `direct` |
+| `error-acknowledge.ts` | 3 | `APPROVE`, `DENY` | `direct` |
+| `tool-approve.ts` | 3 | `APPROVE`, `DENY` | `direct` or `lazy` |
+| `tool-appeal.ts` | 1 | `APPROVE`, `DENY` | `direct` |
+| `intent-align.ts` | 5 | `APPROVE`, `DENY` | `direct` |
+| `intent-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |
+| `plan-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |
+| `claude-md-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |
+| `style-drift.ts` | 2 | `APPROVE`, `DENY` | `direct` |
+| `push.ts` | 0 | — | — |

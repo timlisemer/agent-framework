@@ -5,6 +5,7 @@ export type {
   BatchTelemetryRequest,
   BatchTelemetryResponse,
   DecisionType,
+  TelemetryMode,
 } from "./types.js";
 
 export {

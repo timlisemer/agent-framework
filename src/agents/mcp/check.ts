@@ -44,7 +44,7 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { CHECK_AGENT } from "../../utils/agent-configs.js";
 import { runCommand } from "../../utils/command.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
-import { logAgentDecision } from "../../utils/logger.js";
+import { logConfirm } from "../../utils/logger.js";
 
 const HOOK_NAME = "mcp__agent-framework__check";
 
@@ -120,18 +120,14 @@ export async function runCheckAgent(workingDir: string): Promise<string> {
   // Determine pass/fail status
   const isPassing = result.output.includes("Status: PASS");
 
-  logAgentDecision({
-    agent: "check",
-    hookName: HOOK_NAME,
-    decision: isPassing ? "OK" : "BLOCK",
-    toolName: HOOK_NAME,
+  logConfirm(
+    result,
+    "check",
+    HOOK_NAME,
+    HOOK_NAME,
     workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    success: result.success,
-    errorCount: result.errorCount,
-    decisionReason: isPassing ? "All checks passed" : "Checks failed",
-  });
+    isPassing ? "All checks passed" : "Checks failed"
+  );
 
   // Step 5: Add guidance for unused code errors
   const hasUnusedCode = /unused|never read|declared but|not used/i.test(result.output);

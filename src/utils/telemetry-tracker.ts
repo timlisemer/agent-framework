@@ -9,6 +9,7 @@ import type {
   TelemetryEvent,
   TelemetryEventType,
   DecisionType,
+  TelemetryMode,
 } from "../telemetry/types.js";
 import { getModelId, type ModelTier } from "../types.js";
 
@@ -22,6 +23,8 @@ export interface TrackAgentParams {
   hookName: string;
   /** Decision result from the agent */
   decision: DecisionType;
+  /** Execution mode (direct or lazy) */
+  mode: TelemetryMode;
   /** Tool being evaluated (for hooks) or the MCP tool itself */
   toolName: string;
   /** Working directory path */
@@ -62,8 +65,8 @@ function determineEventType(
     return "hook_decision";
   }
 
-  // MCP agents - check for commit-related decisions
-  if (decision === "CONFIRMED" || decision === "DECLINED") {
+  // MCP agents - check for quality decisions
+  if (decision === "CONFIRM") {
     return "agent_execution";
   }
 
@@ -82,7 +85,8 @@ function determineEventType(
  * trackAgentExecution({
  *   agentName: "tool-approve",
  *   hookName: "PreToolUse",
- *   decision: "APPROVED",
+ *   decision: "APPROVE",
+ *   mode: "direct",
  *   toolName: "Bash",
  *   workingDir: "/home/user/project",
  *   latencyMs: 150,
@@ -97,6 +101,7 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     agentName,
     hookName,
     decision,
+    mode,
     toolName,
     workingDir,
     latencyMs,
@@ -113,6 +118,7 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     agentName,
     hookName,
     decision,
+    mode,
     toolName,
     workingDir,
     latencyMs,
@@ -128,41 +134,49 @@ export function trackAgentExecution(params: TrackAgentParams): void {
 }
 
 /**
- * Normalize various decision formats to standard DecisionType.
+ * Map agent output keywords to telemetry DecisionType.
  *
- * Agent outputs may use slightly different formats (e.g., "APPROVE" vs "APPROVED").
- * This function normalizes them to the canonical form.
+ * Agent outputs use various keywords (APPROVE, DENY, OK, BLOCK, etc.)
+ * that need to be mapped to the telemetry API's decision types.
  */
 export function normalizeDecision(raw: string): DecisionType | null {
   const trimmed = raw.trim().toUpperCase();
 
-  // Direct matches
-  const directMatches: DecisionType[] = [
-    "APPROVED",
-    "DENIED",
-    "CONFIRMED",
-    "DECLINED",
-    "OK",
-    "BLOCK",
-    "ALIGNED",
-    "DRIFTED",
-    "UPHOLD",
-    "OVERTURN",
-    "INTERVENE",
-    "DRIFT",
-  ];
-
-  for (const decision of directMatches) {
-    if (trimmed.startsWith(decision)) {
-      return decision;
-    }
+  // Map to APPROVE
+  if (
+    trimmed.startsWith("APPROVE") ||
+    trimmed.startsWith("OK") ||
+    trimmed.startsWith("ALIGNED") ||
+    trimmed.startsWith("OVERTURN") ||
+    trimmed.startsWith("SUCCESS")
+  ) {
+    return "APPROVE";
   }
 
-  // Handle short forms
-  if (trimmed.startsWith("APPROVE")) return "APPROVED";
-  if (trimmed.startsWith("DENY")) return "DENIED";
-  if (trimmed.startsWith("CONFIRM")) return "CONFIRMED";
-  if (trimmed.startsWith("DECLINE")) return "DECLINED";
+  // Map to DENY
+  if (
+    trimmed.startsWith("DENY") ||
+    trimmed.startsWith("DENIED") ||
+    trimmed.startsWith("BLOCK") ||
+    trimmed.startsWith("UPHOLD") ||
+    trimmed.startsWith("INTERVENE") ||
+    trimmed.startsWith("DRIFT")
+  ) {
+    return "DENY";
+  }
+
+  // Map to CONFIRM
+  if (
+    trimmed.startsWith("CONFIRM") ||
+    trimmed.startsWith("DECLINED")
+  ) {
+    return "CONFIRM";
+  }
+
+  // Map to ERROR
+  if (trimmed.startsWith("ERROR")) {
+    return "ERROR";
+  }
 
   return null;
 }
@@ -171,12 +185,12 @@ export function normalizeDecision(raw: string): DecisionType | null {
  * Extract decision from agent output text.
  *
  * Agents typically start their output with the decision word.
- * This function extracts and normalizes that decision.
+ * This function extracts and maps it to a telemetry DecisionType.
  *
  * @example
  * ```typescript
- * extractDecision("APPROVED - Command is safe") // "APPROVED"
- * extractDecision("DENY: Dangerous operation")  // "DENIED"
+ * extractDecision("APPROVED - Command is safe") // "APPROVE"
+ * extractDecision("DENY: Dangerous operation")  // "DENY"
  * extractDecision("Some random text")           // null
  * ```
  */

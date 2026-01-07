@@ -31,8 +31,9 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { TOOL_APPROVE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { getBlacklistHighlights } from "../../utils/command-patterns.js";
-import { logAgentDecision } from "../../utils/logger.js";
+import { logApprove, logDeny } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import type { AgentExecutionResult } from "../../utils/agent-runner.js";
 
 export interface ToolApprovalOptions {
   /** Skip LLM if no blacklist matches (for lazy mode) */
@@ -69,18 +70,15 @@ export async function checkToolApproval(
 
   // Lazy mode: skip LLM if no blacklist violations
   if (options?.lazyMode && highlights.length === 0) {
-    logAgentDecision({
-      agent: "tool-approve",
-      hookName,
-      decision: "APPROVED",
-      toolName,
-      workingDir,
+    const lazyResult: AgentExecutionResult = {
+      output: "APPROVE",
       latencyMs: 0,
       modelTier: MODEL_TIERS.HAIKU,
+      modelName: getModelId(MODEL_TIERS.HAIKU),
       success: true,
       errorCount: 0,
-      decisionReason: "Lazy mode: no blacklist violations",
-    });
+    };
+    logApprove(lazyResult, "tool-approve", hookName, toolName, workingDir, "lazy", "No blacklist violations");
     return { approved: true };
   }
 
@@ -131,18 +129,7 @@ Input: ${JSON.stringify(toolInput)}`,
   );
 
   if (decision.startsWith("APPROVE")) {
-    logAgentDecision({
-      agent: "tool-approve",
-      hookName,
-      decision: "APPROVED",
-      toolName,
-      workingDir,
-      latencyMs: result.latencyMs,
-      modelTier: result.modelTier,
-      success: result.success,
-      errorCount: result.errorCount,
-      decisionReason: decision,
-    });
+    logApprove(result, "tool-approve", hookName, toolName, workingDir, "direct", decision);
     return { approved: true };
   }
 
@@ -151,18 +138,7 @@ Input: ${JSON.stringify(toolInput)}`,
     ? decision.replace("DENY: ", "")
     : `Malformed response: ${decision}`;
 
-  logAgentDecision({
-    agent: "tool-approve",
-    hookName,
-    decision: "DENIED",
-    toolName,
-    workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    success: result.success,
-    errorCount: result.errorCount,
-    decisionReason: reason,
-  });
+  logDeny(result, "tool-approve", hookName, toolName, workingDir, reason);
 
   return {
     approved: false,

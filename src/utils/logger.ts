@@ -6,7 +6,7 @@
  */
 
 import { trackAgentExecution, extractDecision } from "./telemetry-tracker.js";
-import type { DecisionType } from "../telemetry/types.js";
+import type { DecisionType, TelemetryMode } from "../telemetry/types.js";
 import type { ModelTier } from "../types.js";
 import type { AgentExecutionResult } from "./agent-runner.js";
 
@@ -18,8 +18,10 @@ export interface AgentLog {
   agent: string;
   /** Hook or MCP tool name */
   hookName: string;
-  /** Decision result (APPROVED, DENIED, etc.) */
+  /** Decision result (APPROVE, DENY, CONFIRM, SUCCESS, ERROR) */
   decision: DecisionType;
+  /** Execution mode (direct or lazy) */
+  mode: TelemetryMode;
   /** Tool being evaluated or MCP tool itself */
   toolName: string;
   /** Working directory path */
@@ -49,7 +51,8 @@ export interface AgentLog {
  * logAgentDecision({
  *   agent: "tool-approve",
  *   hookName: "PreToolUse",
- *   decision: "APPROVED",
+ *   decision: "APPROVE",
+ *   mode: "direct",
  *   toolName: "Bash",
  *   workingDir: "/home/user/project",
  *   latencyMs: 150,
@@ -64,6 +67,7 @@ export function logAgentDecision(log: AgentLog): void {
     agentName: log.agent,
     hookName: log.hookName,
     decision: log.decision,
+    mode: log.mode,
     toolName: log.toolName,
     workingDir: log.workingDir,
     latencyMs: log.latencyMs,
@@ -88,6 +92,7 @@ export function logAgentDecision(log: AgentLog): void {
  *   hookName: "PreToolUse",
  *   toolName: "Bash",
  *   workingDir: "/home/user/project",
+ *   mode: "direct",
  * });
  * ```
  */
@@ -98,18 +103,20 @@ export function logAgentResult(
     hookName: string;
     toolName: string;
     workingDir: string;
+    mode: TelemetryMode;
     decisionOverride?: DecisionType;
     decisionReason?: string;
     extraData?: Record<string, unknown>;
   }
 ): void {
   const decision =
-    context.decisionOverride ?? extractDecision(result.output) ?? "BLOCK";
+    context.decisionOverride ?? extractDecision(result.output) ?? "DENY";
 
   logAgentDecision({
     agent: context.agent,
     hookName: context.hookName,
     decision,
+    mode: context.mode,
     toolName: context.toolName,
     workingDir: context.workingDir,
     latencyMs: result.latencyMs,
@@ -118,6 +125,111 @@ export function logAgentResult(
     errorCount: result.errorCount,
     decisionReason: context.decisionReason ?? result.output.slice(0, 1000),
     extraData: context.extraData,
+  });
+}
+
+/**
+ * Log an APPROVE decision (agent approved tool execution).
+ */
+export function logApprove(
+  result: AgentExecutionResult,
+  agent: string,
+  hookName: string,
+  toolName: string,
+  workingDir: string,
+  mode: TelemetryMode,
+  reason?: string
+): void {
+  logAgentDecision({
+    agent,
+    hookName,
+    decision: "APPROVE",
+    mode,
+    toolName,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: reason,
+  });
+}
+
+/**
+ * Log a DENY decision (agent blocked tool execution).
+ */
+export function logDeny(
+  result: AgentExecutionResult,
+  agent: string,
+  hookName: string,
+  toolName: string,
+  workingDir: string,
+  reason: string
+): void {
+  logAgentDecision({
+    agent,
+    hookName,
+    decision: "DENY",
+    mode: "direct",
+    toolName,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: reason,
+  });
+}
+
+/**
+ * Log a CONFIRM decision (check/confirm agent validated code).
+ */
+export function logConfirm(
+  result: AgentExecutionResult,
+  agent: string,
+  hookName: string,
+  toolName: string,
+  workingDir: string,
+  reason?: string
+): void {
+  logAgentDecision({
+    agent,
+    hookName,
+    decision: "CONFIRM",
+    mode: "direct",
+    toolName,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: reason,
+  });
+}
+
+/**
+ * Log an ERROR decision (provider error occurred).
+ */
+export function logError(
+  result: AgentExecutionResult,
+  agent: string,
+  hookName: string,
+  toolName: string,
+  workingDir: string,
+  reason: string
+): void {
+  logAgentDecision({
+    agent,
+    hookName,
+    decision: "ERROR",
+    mode: "direct",
+    toolName,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: false,
+    errorCount: result.errorCount,
+    decisionReason: reason,
   });
 }
 

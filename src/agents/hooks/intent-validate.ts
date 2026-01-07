@@ -38,7 +38,7 @@ import {
 import { runAgent } from "../../utils/agent-runner.js";
 import { INTENT_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logAgentDecision } from "../../utils/logger.js";
+import { logApprove, logDeny } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
@@ -175,18 +175,7 @@ ${context.lastAssistantMessage}`,
     if (decision.startsWith("INTERVENE:")) {
       const feedback = decision.replace("INTERVENE:", "").trim();
 
-      logAgentDecision({
-        agent: "off-topic-check",
-        hookName,
-        decision: "INTERVENE",
-        toolName: "StopResponse",
-        workingDir,
-        latencyMs: result.latencyMs,
-        modelTier: result.modelTier,
-        success: result.success,
-        errorCount: result.errorCount,
-        decisionReason: feedback,
-      });
+      logDeny(result, "off-topic-check", hookName, "StopResponse", workingDir, feedback);
 
       return {
         decision: "INTERVENE",
@@ -194,18 +183,7 @@ ${context.lastAssistantMessage}`,
       };
     }
 
-    logAgentDecision({
-      agent: "off-topic-check",
-      hookName,
-      decision: "OK",
-      toolName: "StopResponse",
-      workingDir,
-      latencyMs: result.latencyMs,
-      modelTier: result.modelTier,
-      success: result.success,
-      errorCount: result.errorCount,
-      decisionReason: "OK",
-    });
+    logApprove(result, "off-topic-check", hookName, "StopResponse", workingDir, "direct", "On-topic");
 
     return { decision: "OK" };
   } catch {

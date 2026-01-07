@@ -2,6 +2,12 @@ import "../utils/load-env.js";
 import type { TelemetryConfig, TelemetryEvent } from "./types.js";
 import { TelemetryQueue } from "./queue.js";
 
+/**
+ * Master switch to disable all telemetry.
+ * Set to false to completely disable telemetry collection.
+ */
+export const TELEMETRY_ENABLED = true;
+
 let instance: TelemetryClient | null = null;
 let currentSessionId: string | undefined;
 
@@ -141,6 +147,8 @@ export function getSessionId(): string {
 export function trackEvent(
   event: Omit<TelemetryEvent, "hostId" | "timestamp">
 ): void {
+  if (!TELEMETRY_ENABLED) return;
+
   const client = TelemetryClient.getInstance();
   if (client) {
     client

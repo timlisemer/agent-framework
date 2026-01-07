@@ -10,7 +10,7 @@
 import { runAgent } from "../../utils/agent-runner.js";
 import { VALIDATE_INTENT_AGENT } from "../../utils/agent-configs.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
-import { logAgentDecision } from "../../utils/logger.js";
+import { logApprove, logDeny } from "../../utils/logger.js";
 import {
   readTranscriptExact,
   formatTranscriptResult,
@@ -99,18 +99,26 @@ ${planContent}`,
 
   const isAligned = result.output.includes("ALIGNED");
 
-  logAgentDecision({
-    agent: "validate-intent",
-    hookName: HOOK_NAME,
-    decision: isAligned ? "ALIGNED" : "DRIFTED",
-    toolName: HOOK_NAME,
-    workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    success: result.success,
-    errorCount: result.errorCount,
-    decisionReason: result.output.slice(0, 500),
-  });
+  if (isAligned) {
+    logApprove(
+      result,
+      "validate-intent",
+      HOOK_NAME,
+      HOOK_NAME,
+      workingDir,
+      "direct",
+      result.output.slice(0, 500)
+    );
+  } else {
+    logDeny(
+      result,
+      "validate-intent",
+      HOOK_NAME,
+      HOOK_NAME,
+      workingDir,
+      result.output.slice(0, 500)
+    );
+  }
 
   return result.output;
 }

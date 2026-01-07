@@ -31,7 +31,7 @@ import { getModelId } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { PLAN_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logAgentDecision } from "../../utils/logger.js";
+import { logApprove, logDeny } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 
@@ -113,18 +113,7 @@ export async function checkPlanIntent(
     if (decision.startsWith("DRIFT:")) {
       const feedback = decision.replace("DRIFT:", "").trim();
 
-      logAgentDecision({
-        agent: "plan-validate",
-        hookName,
-        decision: "DRIFT",
-        toolName,
-        workingDir,
-        latencyMs: result.latencyMs,
-        modelTier: result.modelTier,
-        success: result.success,
-        errorCount: result.errorCount,
-        decisionReason: feedback,
-      });
+      logDeny(result, "plan-validate", hookName, toolName, workingDir, feedback);
 
       return {
         approved: false,
@@ -132,18 +121,7 @@ export async function checkPlanIntent(
       };
     }
 
-    logAgentDecision({
-      agent: "plan-validate",
-      hookName,
-      decision: "OK",
-      toolName,
-      workingDir,
-      latencyMs: result.latencyMs,
-      modelTier: result.modelTier,
-      success: result.success,
-      errorCount: result.errorCount,
-      decisionReason: "OK",
-    });
+    logApprove(result, "plan-validate", hookName, toolName, workingDir, "direct", "Plan aligned");
 
     return { approved: true };
   } catch {

@@ -36,7 +36,7 @@ import { getModelId } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { STYLE_DRIFT_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logAgentDecision } from "../../utils/logger.js";
+import { logApprove, logDeny } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 
 /**
@@ -205,18 +205,7 @@ Does this edit contain ONLY style changes that were NOT requested by the user?`,
   );
 
   if (decision.startsWith("APPROVE")) {
-    logAgentDecision({
-      agent: "style-drift",
-      hookName,
-      decision: "APPROVED",
-      toolName,
-      workingDir,
-      latencyMs: result.latencyMs,
-      modelTier: result.modelTier,
-      success: result.success,
-      errorCount: result.errorCount,
-      decisionReason: decision,
-    });
+    logApprove(result, "style-drift", hookName, toolName, workingDir, "direct", decision);
     return { approved: true };
   }
 
@@ -225,18 +214,7 @@ Does this edit contain ONLY style changes that were NOT requested by the user?`,
     ? decision.replace("DENY: ", "")
     : `Malformed response: ${decision}`;
 
-  logAgentDecision({
-    agent: "style-drift",
-    hookName,
-    decision: "DENIED",
-    toolName,
-    workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    success: result.success,
-    errorCount: result.errorCount,
-    decisionReason: reason,
-  });
+  logDeny(result, "style-drift", hookName, toolName, workingDir, reason);
 
   return {
     approved: false,

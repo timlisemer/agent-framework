@@ -18,7 +18,7 @@ import { getModelId } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CLAUDE_MD_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logAgentDecision } from "../../utils/logger.js";
+import { logApprove, logDeny } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 
@@ -90,33 +90,11 @@ export async function validateClaudeMd(
 
     if (decision.startsWith("DRIFT:")) {
       const feedback = decision.replace("DRIFT:", "").trim();
-      logAgentDecision({
-        agent: "claude-md-validate",
-        hookName,
-        decision: "DRIFT",
-        toolName,
-        workingDir,
-        latencyMs: result.latencyMs,
-        modelTier: result.modelTier,
-        success: result.success,
-        errorCount: result.errorCount,
-        decisionReason: feedback,
-      });
+      logDeny(result, "claude-md-validate", hookName, toolName, workingDir, feedback);
       return { approved: false, reason: feedback };
     }
 
-    logAgentDecision({
-      agent: "claude-md-validate",
-      hookName,
-      decision: "OK",
-      toolName,
-      workingDir,
-      latencyMs: result.latencyMs,
-      modelTier: result.modelTier,
-      success: result.success,
-      errorCount: result.errorCount,
-      decisionReason: "OK",
-    });
+    logApprove(result, "claude-md-validate", hookName, toolName, workingDir, "direct", "Valid CLAUDE.md edit");
     return { approved: true };
   } catch {
     // Fail open on errors - no telemetry for failed checks

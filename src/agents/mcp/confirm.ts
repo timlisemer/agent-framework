@@ -19,7 +19,7 @@
 import { runAgent } from "../../utils/agent-runner.js";
 import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
-import { logAgentDecision } from "../../utils/logger.js";
+import { logConfirm } from "../../utils/logger.js";
 import { runCheckAgent } from "./check.js";
 
 const HOOK_NAME = "mcp__agent-framework__confirm";
@@ -70,20 +70,14 @@ ${diff || "(no diff)"}`,
     }
   );
 
-  const isConfirmed = result.output.includes("CONFIRMED");
-
-  logAgentDecision({
-    agent: "confirm",
-    hookName: HOOK_NAME,
-    decision: isConfirmed ? "CONFIRMED" : "DECLINED",
-    toolName: HOOK_NAME,
+  logConfirm(
+    result,
+    "confirm",
+    HOOK_NAME,
+    HOOK_NAME,
     workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    success: result.success,
-    errorCount: result.errorCount,
-    decisionReason: result.output.slice(0, 500),
-  });
+    result.output.slice(0, 500)
+  );
 
   return result.output;
 }

@@ -30,10 +30,10 @@
  */
 
 import { getModelId, MODEL_TIERS, type CheckResult, type StopCheckResult, type ModelTier } from "../../types.js";
-import { runAgent } from "../../utils/agent-runner.js";
+import { runAgent, type AgentExecutionResult } from "../../utils/agent-runner.js";
 import { FIRST_RESPONSE_INTENT_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logAgentDecision } from "../../utils/logger.js";
+import { logApprove, logDeny } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
@@ -154,18 +154,7 @@ ${toolResultsText}`;
   );
 
   if (decision.startsWith("OK")) {
-    logAgentDecision({
-      agent: "intent-align",
-      hookName,
-      decision: "OK",
-      toolName,
-      workingDir,
-      latencyMs: result.latencyMs,
-      modelTier: result.modelTier,
-      success: result.success,
-      errorCount: result.errorCount,
-      decisionReason: "OK - aligned with request",
-    });
+    logApprove(result, "intent-align", hookName, toolName, workingDir, "direct", "Aligned with request");
     return { approved: true };
   }
 
@@ -174,18 +163,7 @@ ${toolResultsText}`;
     ? decision.substring(7).trim()
     : `Misaligned response: ${decision}`;
 
-  logAgentDecision({
-    agent: "intent-align",
-    hookName,
-    decision: "BLOCK",
-    toolName,
-    workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    success: result.success,
-    errorCount: result.errorCount,
-    decisionReason: reason,
-  });
+  logDeny(result, "intent-align", hookName, toolName, workingDir, reason);
 
   return {
     approved: false,
@@ -445,19 +423,18 @@ export async function checkStopIntentAlignment(
     // Use AI to determine if this is an intermediate question or plan approval
     const classifyResult = await classifyStopResponse(userText, assistantText, workingDir);
 
+    // Build AgentExecutionResult for logging
+    const classifyAgentResult: AgentExecutionResult = {
+      output: classifyResult.classification,
+      latencyMs: classifyResult.latencyMs,
+      modelTier: classifyResult.modelTier,
+      modelName: getModelId(classifyResult.modelTier),
+      success: classifyResult.success,
+      errorCount: classifyResult.errorCount,
+    };
+
     if (classifyResult.classification === "PLAN_APPROVAL") {
-      logAgentDecision({
-        agent: "stop-classify",
-        hookName,
-        decision: "BLOCK",
-        toolName: "StopResponse",
-        workingDir,
-        latencyMs: classifyResult.latencyMs,
-        modelTier: classifyResult.modelTier,
-        success: classifyResult.success,
-        errorCount: classifyResult.errorCount,
-        decisionReason: "Plain text plan approval detected",
-      });
+      logDeny(classifyAgentResult, "stop-classify", hookName, "StopResponse", workingDir, "Plain text plan approval detected");
       return {
         approved: false,
         reason: "Plain text plan approval detected",
@@ -465,18 +442,7 @@ export async function checkStopIntentAlignment(
           "Do not ask for plan approval in plain text. Use the ExitPlanMode tool to present the plan with structured approval options.",
       };
     } else if (classifyResult.classification === "QUESTION") {
-      logAgentDecision({
-        agent: "stop-classify",
-        hookName,
-        decision: "BLOCK",
-        toolName: "StopResponse",
-        workingDir,
-        latencyMs: classifyResult.latencyMs,
-        modelTier: classifyResult.modelTier,
-        success: classifyResult.success,
-        errorCount: classifyResult.errorCount,
-        decisionReason: "Plain text question detected",
-      });
+      logDeny(classifyAgentResult, "stop-classify", hookName, "StopResponse", workingDir, "Plain text question detected");
       return {
         approved: false,
         reason: "Plain text question detected",
@@ -485,18 +451,7 @@ export async function checkStopIntentAlignment(
       };
     }
     // classification === "OK" - allow it
-    logAgentDecision({
-      agent: "stop-classify",
-      hookName,
-      decision: "OK",
-      toolName: "StopResponse",
-      workingDir,
-      latencyMs: classifyResult.latencyMs,
-      modelTier: classifyResult.modelTier,
-      success: classifyResult.success,
-      errorCount: classifyResult.errorCount,
-      decisionReason: "OK - legitimate stop response",
-    });
+    logApprove(classifyAgentResult, "stop-classify", hookName, "StopResponse", workingDir, "direct", "Legitimate stop response");
   }
 
   // Check 2: User asked a question that wasn't addressed

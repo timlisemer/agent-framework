@@ -27,7 +27,7 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { COMMIT_AGENT } from "../../utils/agent-configs.js";
 import { runCommand } from "../../utils/command.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
-import { logAgentDecision } from "../../utils/logger.js";
+import { logConfirm, logError } from "../../utils/logger.js";
 import { runConfirmAgent } from "./confirm.js";
 
 const HOOK_NAME = "mcp__agent-framework__commit";
@@ -94,18 +94,7 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
   const parsed = parseCommitResponse(result.output);
 
   if (!parsed || !parsed.message) {
-    logAgentDecision({
-      agent: "commit",
-      hookName: HOOK_NAME,
-      decision: "DECLINED",
-      toolName: HOOK_NAME,
-      workingDir,
-      latencyMs: result.latencyMs,
-      modelTier: result.modelTier,
-      success: result.success,
-      errorCount: result.errorCount,
-      decisionReason: "Failed to parse commit message",
-    });
+    logError(result, "commit", HOOK_NAME, HOOK_NAME, workingDir, "Failed to parse commit message");
     return `ERROR: Failed to parse commit message from LLM response: ${result.output}`;
   }
 
@@ -114,36 +103,14 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
   const commit = runCommand(commitCmd, workingDir);
 
   if (commit.exitCode !== 0) {
-    logAgentDecision({
-      agent: "commit",
-      hookName: HOOK_NAME,
-      decision: "DECLINED",
-      toolName: HOOK_NAME,
-      workingDir,
-      latencyMs: result.latencyMs,
-      modelTier: result.modelTier,
-      success: result.success,
-      errorCount: result.errorCount,
-      decisionReason: `Commit failed: ${commit.output}`,
-    });
+    logError(result, "commit", HOOK_NAME, HOOK_NAME, workingDir, `Commit failed: ${commit.output}`);
     return `ERROR: Commit failed: ${commit.output}`;
   }
 
   const hashResult = runCommand("git rev-parse --short HEAD", workingDir);
   const hash = hashResult.output.trim();
 
-  logAgentDecision({
-    agent: "commit",
-    hookName: HOOK_NAME,
-    decision: "CONFIRMED",
-    toolName: HOOK_NAME,
-    workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    success: result.success,
-    errorCount: result.errorCount,
-    decisionReason: `Committed: ${hash}`,
-  });
+  logConfirm(result, "commit", HOOK_NAME, HOOK_NAME, workingDir, `Committed: ${hash}`);
 
   return `${confirmResult}\n\nSIZE: ${parsed.size}\n${parsed.message}\nHASH: ${hash}`;
 }

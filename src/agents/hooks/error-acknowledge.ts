@@ -36,7 +36,7 @@ import {
 import { runAgent } from "../../utils/agent-runner.js";
 import { ERROR_ACK_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logAgentDecision } from "../../utils/logger.js";
+import { logApprove, logDeny } from "../../utils/logger.js";
 import { parseDecision } from "../../utils/response-parser.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
@@ -120,49 +120,16 @@ Input: ${JSON.stringify(toolInput)}`,
     if (issueMatch) {
       markErrorAcknowledged(issueMatch[0]);
     }
-    logAgentDecision({
-      agent: "error-acknowledge",
-      hookName,
-      decision: "OK",
-      toolName,
-      workingDir,
-      latencyMs: result.latencyMs,
-      modelTier: result.modelTier,
-      success: result.success,
-      errorCount: result.errorCount,
-      decisionReason: "OK",
-    });
+    logApprove(result, "error-acknowledge", hookName, toolName, workingDir, "direct", "Acknowledged");
     return "OK";
   }
 
   if (parsed.reason) {
-    logAgentDecision({
-      agent: "error-acknowledge",
-      hookName,
-      decision: "BLOCK",
-      toolName,
-      workingDir,
-      latencyMs: result.latencyMs,
-      modelTier: result.modelTier,
-      success: result.success,
-      errorCount: result.errorCount,
-      decisionReason: parsed.reason,
-    });
+    logDeny(result, "error-acknowledge", hookName, toolName, workingDir, parsed.reason);
     return `BLOCK: ${parsed.reason}`;
   }
 
   // Default to OK if response is malformed after retries (fail open)
-  logAgentDecision({
-    agent: "error-acknowledge",
-    hookName,
-    decision: "OK",
-    toolName,
-    workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    success: result.success,
-    errorCount: result.errorCount,
-    decisionReason: `Malformed response after retries: ${decision}`,
-  });
+  logApprove(result, "error-acknowledge", hookName, toolName, workingDir, "direct", `Malformed: ${decision}`);
   return "OK";
 }

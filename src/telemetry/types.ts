@@ -7,19 +7,22 @@ export type TelemetryEventType =
   | "escalation"
   | "commit";
 
-export type DecisionType =
-  | "APPROVED"
-  | "DENIED"
-  | "CONFIRMED"
-  | "DECLINED"
-  | "OK"
-  | "BLOCK"
-  | "ALIGNED"
-  | "DRIFTED"
-  | "UPHOLD"
-  | "OVERTURN"
-  | "INTERVENE"
-  | "DRIFT";
+/**
+ * Decision types expected by the telemetry API.
+ * - APPROVE: Agent approved tool execution
+ * - DENY: Agent blocked tool execution
+ * - CONFIRM: Check/confirm agent validated code
+ * - SUCCESS: Operation completed without errors
+ * - ERROR: Provider error occurred (API failures, etc.)
+ */
+export type DecisionType = "APPROVE" | "DENY" | "CONFIRM" | "SUCCESS" | "ERROR";
+
+/**
+ * Execution mode for telemetry.
+ * - direct: Direct execution mode
+ * - lazy: Lazy evaluation mode (fast path with deferred validation)
+ */
+export type TelemetryMode = "direct" | "lazy";
 
 /**
  * Telemetry event matching the new API spec.
@@ -35,6 +38,7 @@ export interface TelemetryEvent {
   agentName: string;
   hookName: string; // "PreToolUse" | "PostToolUse" | "Stop" | MCP tool name
   decision: DecisionType;
+  mode: TelemetryMode; // Execution mode (direct or lazy)
   toolName: string;
   workingDir: string;
   latencyMs: number;
