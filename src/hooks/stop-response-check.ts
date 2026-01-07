@@ -4,7 +4,6 @@ initializeTelemetry();
 
 import { type StopHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { checkStopIntentAlignment } from "../agents/hooks/intent-align.js";
-import { logToHomeAssistant } from "../utils/logger.js";
 import {
   setRewindSession,
   detectRewind,
@@ -35,26 +34,17 @@ async function main() {
   const rewound = await detectRewind(input.transcript_path);
 
   if (rewound) {
-    logToHomeAssistant({
-      agent: "stop-response-check",
-      level: "info",
-      problem: "Rewind detected",
-      answer: "Cleared caches, skipping stop check",
-    });
     // After rewind, don't inject errors - let AI continue fresh
     process.exit(0);
   }
 
-  const result = await checkStopIntentAlignment(input.transcript_path);
+  const result = await checkStopIntentAlignment(
+    input.transcript_path,
+    process.env.CLAUDE_PROJECT_DIR || process.cwd(),
+    "Stop"
+  );
 
   if (!result.approved && result.systemMessage) {
-    logToHomeAssistant({
-      agent: "stop-response-check",
-      level: "decision",
-      problem: result.reason || "Stop check failed",
-      answer: result.systemMessage.slice(0, 100),
-    });
-
     console.log(
       JSON.stringify({
         decision: "block",

@@ -27,95 +27,57 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { COMMIT_AGENT } from "../../utils/agent-configs.js";
 import { runCommand } from "../../utils/command.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
-import { logToHomeAssistant } from "../../utils/logger.js";
+import { logAgentDecision } from "../../utils/logger.js";
 import { runConfirmAgent } from "./confirm.js";
+
+const HOOK_NAME = "mcp__agent-framework__commit";
 
 /**
  * Parse the LLM response to extract size and message.
- *
- * Expected format:
- * ```
- * SIZE: SMALL|MEDIUM|LARGE
- * MESSAGE:
- * <commit message>
- * ```
- *
- * @param response - Raw LLM output
- * @returns Parsed size and message, or null if parsing fails
  */
 function parseCommitResponse(
   response: string
 ): { size: string; message: string } | null {
   const sizeMatch = response.match(/SIZE:\s*(SMALL|MEDIUM|LARGE)/i);
-
   if (!sizeMatch) return null;
 
   const size = sizeMatch[1].toUpperCase();
-
-  // Try to extract message with newline after MESSAGE:
   const messageMatch = response.match(/MESSAGE:\s*\n([\s\S]+?)(?:\n\n|$)/);
   let message = messageMatch ? messageMatch[1].trim() : "";
 
-  // Fallback: try MESSAGE: on same line or with any whitespace
   if (!message) {
     const fallbackMatch = response.match(/MESSAGE:\s*([\s\S]+?)(?:\n\n|$)/);
     message = fallbackMatch ? fallbackMatch[1].trim() : "";
   }
 
-  // Validate message is not empty
   if (!message) return null;
-
   return { size, message };
 }
 
 /**
  * Run the commit agent to generate and execute a git commit.
  *
- * This agent enforces the confirm quality gate before committing.
- * If confirm DECLINES, no commit is made.
- *
  * @param workingDir - The project directory to commit
  * @returns Result with confirm output, message size, and commit hash
- *
- * @example
- * ```typescript
- * const result = await runCommitAgent('/path/to/project');
- * if (result.includes('HASH:')) {
- *   // Commit successful
- * }
- * ```
  */
 export async function runCommitAgent(workingDir: string): Promise<string> {
-  // Pre-check: skip LLM call if nothing to commit
   const { status, diff, diffStat } = getUncommittedChanges(workingDir);
 
   if (!status.trim()) {
-    logToHomeAssistant({
-      agent: 'commit',
-      level: 'info',
-      problem: workingDir,
-      answer: 'SKIPPED: nothing to commit',
-    });
-    return 'SKIPPED: nothing to commit';
+    return "SKIPPED: nothing to commit";
   }
 
   // Confirm changes before generating commit message
   const confirmResult = await runConfirmAgent(workingDir);
-  if (confirmResult.includes('DECLINED')) {
-    logToHomeAssistant({
-      agent: 'commit',
-      level: 'info',
-      problem: workingDir,
-      answer: confirmResult.slice(0, 500),
-    });
+  if (confirmResult.includes("DECLINED")) {
     return confirmResult;
   }
 
-  // Generate commit message via unified runner
-  const llmOutput = await runAgent(
+  // Generate commit message
+  const result = await runAgent(
     { ...COMMIT_AGENT, workingDir },
     {
-      prompt: 'Generate a commit message based on the analysis and stats below.',
+      prompt: "Generate a commit message based on the analysis and stats below.",
       context: `CONFIRM AGENT ANALYSIS:
 ${confirmResult}
 
@@ -125,21 +87,26 @@ DIFF STATS:
 ${diffStat}
 
 DIFF (for context):
-${diff.slice(0, 8000)}${diff.length > 8000 ? '\n... (truncated)' : ''}`,
+${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
     }
   );
 
-  const parsed = parseCommitResponse(llmOutput);
+  const parsed = parseCommitResponse(result.output);
 
   if (!parsed || !parsed.message) {
-    const error = `ERROR: Failed to parse commit message from LLM response: ${llmOutput}`;
-    logToHomeAssistant({
-      agent: 'commit',
-      level: 'error',
-      problem: workingDir,
-      answer: error,
+    logAgentDecision({
+      agent: "commit",
+      hookName: HOOK_NAME,
+      decision: "DECLINED",
+      toolName: HOOK_NAME,
+      workingDir,
+      latencyMs: result.latencyMs,
+      modelTier: result.modelTier,
+      success: result.success,
+      errorCount: result.errorCount,
+      decisionReason: "Failed to parse commit message",
     });
-    return error;
+    return `ERROR: Failed to parse commit message from LLM response: ${result.output}`;
   }
 
   // Execute the commit
@@ -147,28 +114,36 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? '\n... (truncated)' : ''}`,
   const commit = runCommand(commitCmd, workingDir);
 
   if (commit.exitCode !== 0) {
-    const error = `ERROR: Commit failed: ${commit.output}`;
-    logToHomeAssistant({
-      agent: 'commit',
-      level: 'error',
-      problem: workingDir,
-      answer: error,
+    logAgentDecision({
+      agent: "commit",
+      hookName: HOOK_NAME,
+      decision: "DECLINED",
+      toolName: HOOK_NAME,
+      workingDir,
+      latencyMs: result.latencyMs,
+      modelTier: result.modelTier,
+      success: result.success,
+      errorCount: result.errorCount,
+      decisionReason: `Commit failed: ${commit.output}`,
     });
-    return error;
+    return `ERROR: Commit failed: ${commit.output}`;
   }
 
-  // Extract commit hash
-  const hashResult = runCommand('git rev-parse --short HEAD', workingDir);
+  const hashResult = runCommand("git rev-parse --short HEAD", workingDir);
   const hash = hashResult.output.trim();
 
-  const output = `${confirmResult}\n\nSIZE: ${parsed.size}\n${parsed.message}\nHASH: ${hash}`;
-
-  logToHomeAssistant({
-    agent: 'commit',
-    level: 'info',
-    problem: workingDir,
-    answer: output.slice(0, 500),
+  logAgentDecision({
+    agent: "commit",
+    hookName: HOOK_NAME,
+    decision: "CONFIRMED",
+    toolName: HOOK_NAME,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: `Committed: ${hash}`,
   });
 
-  return output;
+  return `${confirmResult}\n\nSIZE: ${parsed.size}\n${parsed.message}\nHASH: ${hash}`;
 }

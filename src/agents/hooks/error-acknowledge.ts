@@ -36,7 +36,7 @@ import {
 import { runAgent } from "../../utils/agent-runner.js";
 import { ERROR_ACK_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logToHomeAssistant } from "../../utils/logger.js";
+import { logAgentDecision } from "../../utils/logger.js";
 import { parseDecision } from "../../utils/response-parser.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
@@ -51,12 +51,14 @@ const ISSUE_EXTRACT_PATTERN =
  * @param transcript - Recent conversation transcript
  * @param toolName - Name of the tool being called
  * @param toolInput - Input parameters for the tool
+ * @param workingDir - Working directory for context
  * @param transcriptPath - Optional path to transcript file (used for subagent detection)
+ * @param hookName - Hook that triggered this check (for telemetry)
  * @returns "OK" if acknowledged, or "BLOCK: ..." with issue details
  *
  * @example
  * ```typescript
- * const result = await checkErrorAcknowledgment(transcript, 'Edit', { file_path: '...' }, '/path/to/transcript');
+ * const result = await checkErrorAcknowledgment(transcript, 'Edit', { file_path: '...' }, '/path/to/project', '/path/to/transcript', 'PreToolUse');
  * if (result.startsWith('BLOCK:')) {
  *   // AI needs to acknowledge the issue first
  * }
@@ -66,37 +68,28 @@ export async function checkErrorAcknowledgment(
   transcript: string,
   toolName: string,
   toolInput: unknown,
-  transcriptPath?: string
+  workingDir: string,
+  transcriptPath: string,
+  hookName: string
 ): Promise<string> {
   // Skip error acknowledgment checks for subagents (Task-spawned agents)
   if (transcriptPath && isSubagent(transcriptPath)) {
-    logToHomeAssistant({
-      agent: "error-acknowledge",
-      level: "info",
-      problem: toolName,
-      answer: "Skipped - subagent session",
-    });
     return "OK";
   }
-  // Check if the issue in this transcript was already acknowledged
+
+  // Check if the issue in this transcript was already acknowledged (cached)
   const issueMatch = transcript.match(ISSUE_EXTRACT_PATTERN);
   if (issueMatch && isErrorAcknowledged(issueMatch[0])) {
-    logToHomeAssistant({
-      agent: 'error-acknowledge',
-      level: 'decision',
-      problem: `${toolName} (cached)`,
-      answer: 'OK - issue already acknowledged',
-    });
-    return 'OK';
+    return "OK";
   }
 
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput).slice(0, 100)}`;
 
   // Run acknowledgment check via unified runner
-  const initialResponse = await runAgent(
+  const result = await runAgent(
     { ...ERROR_ACK_AGENT },
     {
-      prompt: 'Check if the AI has acknowledged issues in this transcript.',
+      prompt: "Check if the AI has acknowledged issues in this transcript.",
       context: `TRANSCRIPT (recent messages):
 ${transcript}
 
@@ -111,47 +104,65 @@ Input: ${JSON.stringify(toolInput)}`,
   const decision = await retryUntilValid(
     anthropic,
     getModelId(ERROR_ACK_AGENT.tier),
-    initialResponse,
+    result.output,
     toolDescription,
     {
       maxRetries: 1, // Only 1 retry for error-acknowledge
-      formatValidator: (text) => startsWithAny(text, ['OK', 'BLOCK:']),
-      formatReminder: 'Reply with EXACTLY: OK or BLOCK: <message>',
+      formatValidator: (text) => startsWithAny(text, ["OK", "BLOCK:"]),
+      formatReminder: "Reply with EXACTLY: OK or BLOCK: <message>",
     }
   );
 
-  const parsed = parseDecision(decision, ['OK']);
+  const parsed = parseDecision(decision, ["OK"]);
 
   if (parsed.approved) {
     // Mark issue as acknowledged so future checks skip it
     if (issueMatch) {
       markErrorAcknowledged(issueMatch[0]);
     }
-    logToHomeAssistant({
-      agent: 'error-acknowledge',
-      level: 'decision',
-      problem: toolDescription,
-      answer: 'OK',
+    logAgentDecision({
+      agent: "error-acknowledge",
+      hookName,
+      decision: "OK",
+      toolName,
+      workingDir,
+      latencyMs: result.latencyMs,
+      modelTier: result.modelTier,
+      success: result.success,
+      errorCount: result.errorCount,
+      decisionReason: "OK",
     });
-    return 'OK';
+    return "OK";
   }
 
   if (parsed.reason) {
-    logToHomeAssistant({
-      agent: 'error-acknowledge',
-      level: 'decision',
-      problem: toolDescription,
-      answer: `BLOCKED: ${parsed.reason}`,
+    logAgentDecision({
+      agent: "error-acknowledge",
+      hookName,
+      decision: "BLOCK",
+      toolName,
+      workingDir,
+      latencyMs: result.latencyMs,
+      modelTier: result.modelTier,
+      success: result.success,
+      errorCount: result.errorCount,
+      decisionReason: parsed.reason,
     });
     return `BLOCK: ${parsed.reason}`;
   }
 
   // Default to OK if response is malformed after retries (fail open)
-  logToHomeAssistant({
-    agent: 'error-acknowledge',
-    level: 'info',
-    problem: toolDescription,
-    answer: `Malformed response after retries: ${decision}`,
+  logAgentDecision({
+    agent: "error-acknowledge",
+    hookName,
+    decision: "OK",
+    toolName,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: `Malformed response after retries: ${decision}`,
   });
-  return 'OK';
+  return "OK";
 }

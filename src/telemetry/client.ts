@@ -1,7 +1,6 @@
-import '../utils/load-env.js';
-import type { TelemetryConfig, TelemetryEvent } from './types.js';
-import { TelemetryQueue } from './queue.js';
-import { sanitizeToolInput } from './sanitizer.js';
+import "../utils/load-env.js";
+import type { TelemetryConfig, TelemetryEvent } from "./types.js";
+import { TelemetryQueue } from "./queue.js";
 
 let instance: TelemetryClient | null = null;
 let currentSessionId: string | undefined;
@@ -16,7 +15,6 @@ export class TelemetryClient {
       batchSize: 10,
       flushIntervalMs: 5000,
       maxQueueSize: 1000,
-      enableHomeAssistant: true,
       ...config,
     };
     this.queue = new TelemetryQueue(this.config.maxQueueSize);
@@ -39,15 +37,12 @@ export class TelemetryClient {
   }
 
   async track(
-    event: Omit<TelemetryEvent, 'hostId' | 'timestamp'>
+    event: Omit<TelemetryEvent, "hostId" | "timestamp">
   ): Promise<void> {
     const fullEvent: TelemetryEvent = {
       ...event,
       hostId: this.config.hostId,
       timestamp: new Date().toISOString(),
-      toolInput: event.toolInput
-        ? sanitizeToolInput(event.toolInput)
-        : undefined,
     };
 
     this.queue.enqueue(fullEvent);
@@ -60,7 +55,7 @@ export class TelemetryClient {
   private startFlushTimer(): void {
     this.flushTimer = setInterval(() => {
       this.flush().catch((err) => {
-        console.error('[Telemetry] Flush error:', err);
+        console.error("[Telemetry] Flush error:", err);
       });
     }, this.config.flushIntervalMs);
   }
@@ -75,10 +70,10 @@ export class TelemetryClient {
       const response = await fetch(
         `${this.config.endpoint}/api/v1/telemetry/batch`,
         {
-          method: 'POST',
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
-            'X-API-Key': this.config.apiKey,
+            "Content-Type": "application/json",
+            "X-API-Key": this.config.apiKey,
           },
           body: JSON.stringify({ events }),
           signal: AbortSignal.timeout(5000),
@@ -91,7 +86,7 @@ export class TelemetryClient {
       }
     } catch (error) {
       events.forEach((e) => this.queue.enqueue(e));
-      if (error instanceof Error && error.name !== 'TimeoutError') {
+      if (error instanceof Error && error.name !== "TimeoutError") {
         console.error(`[Telemetry] Network error: ${error.message}`);
       }
     }
@@ -119,7 +114,7 @@ export function getSessionId(): string {
 }
 
 export function trackEvent(
-  event: Omit<TelemetryEvent, 'hostId' | 'timestamp'>
+  event: Omit<TelemetryEvent, "hostId" | "timestamp">
 ): void {
   const client = TelemetryClient.getInstance();
   if (client) {
@@ -139,7 +134,7 @@ export function initializeTelemetry(): TelemetryClient | null {
 
   if (!hostId || !endpoint || !apiKey) {
     console.error(
-      '[Telemetry] Missing required env vars: TELEMETRY_HOST_ID, TELEMETRY_ENDPOINT, AGENT_FRAMEWORK_API_KEY'
+      "[Telemetry] Missing required env vars: TELEMETRY_HOST_ID, TELEMETRY_ENDPOINT, AGENT_FRAMEWORK_API_KEY"
     );
     return null;
   }
@@ -148,6 +143,5 @@ export function initializeTelemetry(): TelemetryClient | null {
     hostId,
     endpoint,
     apiKey,
-    enableHomeAssistant: process.env.WEBHOOK_ID_AGENT_LOGS !== undefined,
   });
 }

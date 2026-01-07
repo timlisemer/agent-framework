@@ -4,33 +4,13 @@
  * This agent evaluates whether the AI correctly followed user intentions
  * by analyzing the conversation, code changes, and plan (if exists).
  *
- * ## FLOW
- *
- * 1. Gather conversation transcript (user + assistant messages)
- * 2. Get uncommitted code changes (git diff)
- * 3. Find and read plan file (if exists for this session)
- * 4. Run sonnet agent to evaluate alignment
- * 5. Return verdict (ALIGNED or DRIFTED)
- *
- * ## INPUT DATA
- *
- * - Transcript: USER:/ASSISTANT: conversation (no tool results)
- * - Git diff: All uncommitted changes
- * - Plan: Content of ~/.claude/plans/{slug}.md if exists
- *
- * ## PLAN FILE RESOLUTION
- *
- * 1. Extract session ID from transcript path
- * 2. Read session JSONL to find `slug` field
- * 3. Load plan from ~/.claude/plans/{slug}.md
- *
  * @module validate-intent
  */
 
 import { runAgent } from "../../utils/agent-runner.js";
 import { VALIDATE_INTENT_AGENT } from "../../utils/agent-configs.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
-import { logToHomeAssistant } from "../../utils/logger.js";
+import { logAgentDecision } from "../../utils/logger.js";
 import {
   readTranscriptExact,
   formatTranscriptResult,
@@ -38,22 +18,14 @@ import {
 import { VALIDATE_INTENT_COUNTS } from "../../utils/transcript-presets.js";
 import { readPlanContent } from "../../utils/session-utils.js";
 
+const HOOK_NAME = "mcp__agent-framework__validate_intent";
+
 /**
  * Run the validate-intent agent to check user intention alignment.
  *
  * @param workingDir - The project directory to evaluate
  * @param transcriptPath - Path to the conversation transcript
  * @returns Structured verdict with ALIGNED or DRIFTED
- *
- * @example
- * ```typescript
- * const result = await runValidateIntentAgent('/path/to/project', '/path/to/transcript.jsonl');
- * if (result.includes('ALIGNED')) {
- *   // AI followed user intentions
- * } else {
- *   // Review the drift reason
- * }
- * ```
  */
 export async function runValidateIntentAgent(
   workingDir: string,
@@ -68,7 +40,6 @@ export async function runValidateIntentAgent(
     );
     conversationContext = formatTranscriptResult(transcriptResult);
 
-    // Skip if no meaningful conversation
     if (transcriptResult.user.length === 0) {
       return `## Analysis
 - Request: No user messages found
@@ -79,14 +50,12 @@ export async function runValidateIntentAgent(
 ALIGNED: No user requests to evaluate`;
     }
   } catch {
-    // Continue with empty transcript - we can still evaluate changes
     conversationContext = "(transcript read error)";
   }
 
   // Step 2: Get uncommitted code changes
   const { status, diff } = getUncommittedChanges(workingDir);
 
-  // Skip if no changes
   if (!diff && !status) {
     return `## Analysis
 - Request: User request identified
@@ -128,13 +97,20 @@ ${planContent}`,
     }
   );
 
-  // Log the decision
-  logToHomeAssistant({
+  const isAligned = result.output.includes("ALIGNED");
+
+  logAgentDecision({
     agent: "validate-intent",
-    level: "decision",
-    problem: workingDir,
-    answer: result.slice(0, 500),
+    hookName: HOOK_NAME,
+    decision: isAligned ? "ALIGNED" : "DRIFTED",
+    toolName: HOOK_NAME,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: result.output.slice(0, 500),
   });
 
-  return result;
+  return result.output;
 }

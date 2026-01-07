@@ -18,7 +18,7 @@ import { getModelId } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CLAUDE_MD_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logToHomeAssistant } from "../../utils/logger.js";
+import { logAgentDecision } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 
@@ -29,11 +29,13 @@ import { isSubagent } from "../../utils/subagent-detector.js";
  * @param toolName - The tool being used (Write or Edit)
  * @param toolInput - The tool input with content or old_string/new_string
  * @param transcriptPath - Path to the transcript file (for subagent detection)
+ * @param workingDir - Working directory for context
+ * @param hookName - Hook that triggered this check (for telemetry)
  * @returns Validation result with approved status and optional reason
  *
  * @example
  * ```typescript
- * const result = await validateClaudeMd(currentContent, "Edit", toolInput, transcriptPath);
+ * const result = await validateClaudeMd(currentContent, "Edit", toolInput, transcriptPath, cwd, "PreToolUse");
  * if (!result.approved) {
  *   console.log('CLAUDE.md drift:', result.reason);
  * }
@@ -43,16 +45,12 @@ export async function validateClaudeMd(
   currentContent: string | null,
   toolName: "Write" | "Edit",
   toolInput: { content?: string; old_string?: string; new_string?: string },
-  transcriptPath: string
+  transcriptPath: string,
+  workingDir: string,
+  hookName: string
 ): Promise<{ approved: boolean; reason?: string }> {
   // Skip CLAUDE.md validation for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
-    logToHomeAssistant({
-      agent: "claude-md-validate",
-      level: "info",
-      problem: `CLAUDE.md ${toolName.toLowerCase()}`,
-      answer: "Skipped - subagent session",
-    });
     return { approved: true };
   }
 
@@ -68,8 +66,8 @@ export async function validateClaudeMd(
   }
 
   try {
-    const initialResponse = await runAgent(
-      { ...CLAUDE_MD_VALIDATE_AGENT, workingDir: process.cwd() },
+    const result = await runAgent(
+      { ...CLAUDE_MD_VALIDATE_AGENT, workingDir },
       {
         prompt: "Validate this CLAUDE.md content.",
         context: `CURRENT FILE:\n${currentContent ?? "(new file)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}`,
@@ -80,7 +78,7 @@ export async function validateClaudeMd(
     const decision = await retryUntilValid(
       anthropic,
       getModelId(CLAUDE_MD_VALIDATE_AGENT.tier),
-      initialResponse,
+      result.output,
       "CLAUDE.md validation",
       {
         maxRetries: 2,
@@ -92,29 +90,36 @@ export async function validateClaudeMd(
 
     if (decision.startsWith("DRIFT:")) {
       const feedback = decision.replace("DRIFT:", "").trim();
-      logToHomeAssistant({
+      logAgentDecision({
         agent: "claude-md-validate",
-        level: "decision",
-        problem: `CLAUDE.md ${toolName.toLowerCase()}`,
-        answer: `DRIFT: ${feedback}`,
+        hookName,
+        decision: "DRIFT",
+        toolName,
+        workingDir,
+        latencyMs: result.latencyMs,
+        modelTier: result.modelTier,
+        success: result.success,
+        errorCount: result.errorCount,
+        decisionReason: feedback,
       });
       return { approved: false, reason: feedback };
     }
 
-    logToHomeAssistant({
+    logAgentDecision({
       agent: "claude-md-validate",
-      level: "decision",
-      problem: `CLAUDE.md ${toolName.toLowerCase()}`,
-      answer: "OK",
+      hookName,
+      decision: "OK",
+      toolName,
+      workingDir,
+      latencyMs: result.latencyMs,
+      modelTier: result.modelTier,
+      success: result.success,
+      errorCount: result.errorCount,
+      decisionReason: "OK",
     });
     return { approved: true };
-  } catch (err) {
-    logToHomeAssistant({
-      agent: "claude-md-validate",
-      level: "info",
-      problem: "Validation error",
-      answer: String(err),
-    });
-    return { approved: true }; // Fail open on errors
+  } catch {
+    // Fail open on errors - no telemetry for failed checks
+    return { approved: true };
   }
 }

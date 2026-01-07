@@ -1,14 +1,29 @@
-export type ModelTier = "haiku" | "sonnet" | "opus";
+// Branded type to enforce using MODEL_TIERS constants instead of string literals
+declare const ModelTierBrand: unique symbol;
+type ModelTierBranded = { readonly [ModelTierBrand]: never };
+
+// Base tier values (internal use only)
+type ModelTierValue = "haiku" | "sonnet" | "opus";
+
+// Exported branded type - string literals won't satisfy this
+export type ModelTier = ModelTierValue & ModelTierBranded;
+
+// Constants that MUST be used instead of string literals
+export const MODEL_TIERS = {
+  HAIKU: "haiku" as ModelTier,
+  SONNET: "sonnet" as ModelTier,
+  OPUS: "opus" as ModelTier,
+} as const;
 
 // Model IDs defined ONCE here. Update when Anthropic releases new versions.
-export const MODEL_IDS: Record<ModelTier, string> = {
-  haiku: 'x-ai/grok-4.1-fast',
-  sonnet: 'google/gemini-3-flash-preview',
-  opus: 'anthropic/claude-opus-4.5',
+export const MODEL_IDS: Record<ModelTierValue, string> = {
+  haiku: "x-ai/grok-4.1-fast",
+  sonnet: "google/gemini-3-flash-preview",
+  opus: "anthropic/claude-opus-4.5",
 };
 
 export function getModelId(tier: ModelTier): string {
-  return MODEL_IDS[tier];
+  return MODEL_IDS[tier as ModelTierValue];
 }
 
 // Set SDK environment variables to use our model IDs

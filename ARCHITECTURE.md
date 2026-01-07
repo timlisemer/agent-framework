@@ -52,7 +52,7 @@ src/                                # TypeScript source
     retry.ts                        # Generic format validation retry
     transcript-presets.ts           # Standard transcript configurations
     transcript.ts                   # Transcript reading utilities
-    logger.ts                       # Home Assistant logging
+    logger.ts                       # Telemetry logging
     ack-cache.ts                    # Error acknowledgment cache
     git-utils.ts                    # Git operations (status, diff)
     command.ts                      # Safe command execution
@@ -334,7 +334,6 @@ Standard configurations for different use cases:
 | `ANTHROPIC_AUTH_TOKEN` | No | Alternative auth token |
 | `ANTHROPIC_BASE_URL` | No | Custom API endpoint |
 | `CLAUDE_PROJECT_DIR` | Auto | Set by Claude Code |
-| `WEBHOOK_ID_AGENT_LOGS` | No | Home Assistant webhook ID |
 
 ## Temporary Files
 

@@ -55,6 +55,7 @@
  */
 
 import type { AgentConfig } from "./agent-runner.js";
+import { MODEL_TIERS } from "../types.js";
 
 // ============================================================================
 // MCP AGENTS
@@ -73,7 +74,7 @@ import type { AgentConfig } from "./agent-runner.js";
  */
 export const CHECK_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'check',
-  tier: 'sonnet',
+  tier: MODEL_TIERS.SONNET,
   mode: 'direct',
   maxTokens: 2000,
   systemPrompt: `You are a check tool runner. Your ONLY job is to summarize check results.
@@ -132,7 +133,7 @@ REPORTING RULES:
  */
 export const CONFIRM_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'confirm',
-  tier: 'opus',
+  tier: MODEL_TIERS.OPUS,
   mode: 'sdk',
   maxTokens: 2000,
   maxTurns: 15,
@@ -211,7 +212,7 @@ This is a gate, not a review.`,
  */
 export const COMMIT_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'commit',
-  tier: 'haiku',
+  tier: MODEL_TIERS.HAIKU,
   mode: 'direct',
   maxTokens: 1000,
   systemPrompt: `You are a commit message generator. Generate a commit message based on the provided analysis and diff stats.
@@ -296,7 +297,7 @@ refactor: restructure agents directory
  */
 export const TOOL_APPROVE_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'tool-approve',
-  tier: 'haiku',
+  tier: MODEL_TIERS.HAIKU,
   mode: 'direct',
   maxTokens: 1000,
   systemPrompt: `You are a tool approval gate. Evaluate tool calls for safety and compliance.
@@ -395,7 +396,7 @@ NO other text before the decision word.`,
  */
 export const TOOL_APPEAL_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'tool-appeal',
-  tier: 'haiku',
+  tier: MODEL_TIERS.HAIKU,
   mode: 'direct',
   maxTokens: 500,
   systemPrompt: `You are reviewing an appeal. The tool call was initially blocked for a technical reason.
@@ -454,7 +455,7 @@ NO other text before the decision word.`,
  */
 export const ERROR_ACK_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'error-acknowledge',
-  tier: 'haiku',
+  tier: MODEL_TIERS.HAIKU,
   mode: 'direct',
   maxTokens: 500,
   systemPrompt: `You are an issue acknowledgment validator.
@@ -533,7 +534,7 @@ NO other text.`,
  */
 export const PLAN_VALIDATE_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'plan-validate',
-  tier: 'sonnet',
+  tier: MODEL_TIERS.SONNET,
   mode: 'direct',
   maxTokens: 500,
   systemPrompt: `You are a plan-intent alignment checker. Your job is to detect when an AI's plan has DRIFTED from what the user actually requested.
@@ -628,7 +629,7 @@ DRIFT: <specific feedback about what contradicts user's request or what structur
  */
 export const CLAUDE_MD_VALIDATE_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'claude-md-validate',
-  tier: 'sonnet',
+  tier: MODEL_TIERS.SONNET,
   mode: 'direct',
   maxTokens: 500,
   systemPrompt: `You validate CLAUDE.md files against agent-framework rules.
@@ -714,7 +715,7 @@ Reply: OK or DRIFT: <specific issue found>`,
  */
 export const INTENT_VALIDATE_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'intent-validate',
-  tier: 'haiku',
+  tier: MODEL_TIERS.HAIKU,
   mode: 'direct',
   maxTokens: 300,
   systemPrompt: `You are a conversation-alignment detector. Your job is to catch when an AI assistant has gone off-track and is about to waste the user's time.
@@ -784,7 +785,7 @@ RULES:
  */
 export const STYLE_DRIFT_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'style-drift',
-  tier: 'haiku',
+  tier: MODEL_TIERS.HAIKU,
   mode: 'direct',
   maxTokens: 500,
   systemPrompt: `You are a style drift detector. Your ONLY job is to detect when code edits contain STYLE-ONLY changes that were NOT requested.
@@ -868,7 +869,7 @@ NO other text before the decision word.`,
  */
 export const FIRST_RESPONSE_INTENT_AGENT: Omit<AgentConfig, "workingDir"> = {
   name: "first-response-intent",
-  tier: "sonnet",
+  tier: MODEL_TIERS.SONNET,
   mode: "direct",
   maxTokens: 500,
   systemPrompt: `You validate whether the AI's first tool call after a user message aligns with what the user asked.
@@ -973,7 +974,7 @@ NO other text before the decision word.`,
  */
 export const VALIDATE_INTENT_AGENT: Omit<AgentConfig, "workingDir"> = {
   name: "validate-intent",
-  tier: "sonnet",
+  tier: MODEL_TIERS.SONNET,
   mode: "direct",
   maxTokens: 1500,
   systemPrompt: `You are an intent alignment validator. Your job is to determine if the AI correctly followed the user's intentions.

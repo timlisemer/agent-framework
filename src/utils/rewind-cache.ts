@@ -3,7 +3,6 @@ import { CacheManager } from "./cache-manager.js";
 import { hashString } from "./hash-utils.js";
 import { clearAckCache } from "./ack-cache.js";
 import { clearDenialCache } from "./denial-cache.js";
-import { logToHomeAssistant } from "./logger.js";
 
 const REWIND_CACHE_FILE = "/tmp/claude-rewind-cache.json";
 const REWIND_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
@@ -104,13 +103,6 @@ export async function detectRewind(transcriptPath: string): Promise<boolean> {
   // Check if ANY cached message is missing from transcript
   for (const cached of data.userMessages) {
     if (!transcriptContent.includes(cached.snippet)) {
-      logToHomeAssistant({
-        agent: "rewind-cache",
-        level: "info",
-        problem: "Rewind detected",
-        answer: `Missing message: "${cached.snippet.slice(0, 50)}..."`,
-      });
-
       invalidateAllCaches();
       return true;
     }

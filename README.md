@@ -239,25 +239,7 @@ AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
 
 # Optional - set by Claude Code automatically
 CLAUDE_PROJECT_DIR=/path/to/project
-
-# Optional - Home Assistant logging
-WEBHOOK_ID_AGENT_LOGS=your-webhook-id
 ```
-
-## Home Assistant Integration
-
-All agents log decisions to Home Assistant via webhook for monitoring and debugging:
-
-```typescript
-interface AgentLog {
-  agent: string;    // Agent name (e.g., 'tool-approve', 'commit')
-  level: string;    // 'info', 'error', 'decision', 'escalation'
-  problem: string;  // What was evaluated
-  answer: string;   // The decision made
-}
-```
-
-Set `WEBHOOK_ID_AGENT_LOGS` environment variable to enable logging. Logs are fire-and-forget (non-blocking).
 
 ## Usage
 

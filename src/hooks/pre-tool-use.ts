@@ -15,7 +15,6 @@ import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
 import { checkIntentAlignment } from "../agents/hooks/intent-align.js";
 import { detectWorkaroundPattern } from "../utils/command-patterns.js";
-import { logToHomeAssistant } from "../utils/logger.js";
 import { markErrorAcknowledged, setSession, checkUserInteraction } from "../utils/ack-cache.js";
 import {
   setRewindSession,
@@ -193,14 +192,8 @@ function spawnAsyncValidator(
       { detached: true, stdio: "ignore" }
     );
     child.unref();
-  } catch (error) {
-    // Log error but don't block - fail-open for performance
-    logToHomeAssistant({
-      agent: "pre-tool-use-hook",
-      level: "error",
-      problem: "Failed to spawn async validator",
-      answer: error instanceof Error ? error.message : String(error),
-    });
+  } catch {
+    // Fail-open for performance - don't block on spawn errors
   }
 }
 
@@ -246,51 +239,19 @@ async function main() {
       if (baseEligible) {
         // Check first-response rule: first tool after user message uses strict
         if (!isFirstResponseChecked()) {
-          logToHomeAssistant({
-            agent: "pre-tool-use-hook",
-            level: "info",
-            problem: `${input.tool_name} ${filePath}`,
-            answer: "First tool after user message - using strict validation",
-          });
           // Fall through to strict validation
         } else {
           // Check other strict mode rules
           const strictCheck = shouldUseStrictMode(input.tool_name, input.tool_input);
           if (!strictCheck.strict) {
             // LAZY VALIDATION: Allow immediately, validate async
-            logToHomeAssistant({
-              agent: "pre-tool-use-hook",
-              level: "info",
-              problem: `${input.tool_name} ${filePath}`,
-              answer: subagent && planMode
-                ? "Subagent in plan mode - using lazy validation"
-                : "Fast-path: trusted path, spawning async validator",
-            });
-
             spawnAsyncValidator(input.tool_name, filePath, input.transcript_path, input.tool_input);
             outputAllow();
-          } else {
-            // Strict mode triggered by rules
-            logToHomeAssistant({
-              agent: "pre-tool-use-hook",
-              level: "info",
-              problem: `${input.tool_name} ${filePath}`,
-              answer: `Strict mode: ${strictCheck.reason}`,
-            });
-            // Fall through to strict validation
           }
+          // Strict mode triggered by rules - fall through
         }
       }
-
       // Plan mode (non-subagent) or special files: fall through to strict validation
-      if (planMode && !subagent) {
-        logToHomeAssistant({
-          agent: "pre-tool-use-hook",
-          level: "info",
-          problem: `${input.tool_name} ${filePath}`,
-          answer: "Plan mode active - using strict validation",
-        });
-      }
     }
   }
 
@@ -302,12 +263,6 @@ async function main() {
   if (pendingFailure?.status === "failed") {
     clearPendingValidation(); // Don't block repeatedly
     recordStrictError(); // Next tool will use strict mode
-    logToHomeAssistant({
-      agent: "pre-tool-use-hook",
-      level: "decision",
-      problem: `Previous ${pendingFailure.toolName} async validation`,
-      answer: `FAILED: ${pendingFailure.failureReason}`,
-    });
     outputDeny(`Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`);
   }
 
@@ -353,15 +308,7 @@ async function main() {
   setRewindSession(input.transcript_path);
 
   // Detect rewind - if user rewound, clear all caches
-  const rewound = await detectRewind(input.transcript_path);
-  if (rewound) {
-    logToHomeAssistant({
-      agent: "pre-tool-use-hook",
-      level: "info",
-      problem: "Rewind detected",
-      answer: "Cleared all caches, re-validating fresh",
-    });
-  }
+  await detectRewind(input.transcript_path);
 
   // Block confirm tool from Claude Code - requires explicit user approval
   // Internal agents (like commit) call runConfirmAgent() directly, bypassing this hook
@@ -372,7 +319,8 @@ async function main() {
       async () => ({ approved: false, reason: denyReason }),
       input.tool_name,
       input.tool_input,
-      input.transcript_path
+      input.transcript_path,
+      { workingDir: projectDir, hookName: "PreToolUse" }
     );
 
     if (!result.approved) {
@@ -402,12 +350,6 @@ async function main() {
       // Clear ALL caches when plan is approved - user approval counts as fresh start
       invalidateAllCaches();
       markFirstResponseChecked();
-      logToHomeAssistant({
-        agent: "pre-tool-use-hook",
-        level: "info",
-        problem: `First response: ${input.tool_name}`,
-        answer: "ExitPlanMode approved - cleared caches and skipping intent check",
-      });
     }
   }
 
@@ -420,7 +362,9 @@ async function main() {
         const result = await checkIntentAlignment(
           input.tool_name,
           input.tool_input,
-          input.transcript_path
+          input.transcript_path,
+          projectDir,
+          "PreToolUse"
         );
         return result;
       },
@@ -428,24 +372,13 @@ async function main() {
       input.tool_input,
       input.transcript_path,
       {
+        workingDir: projectDir,
+        hookName: "PreToolUse",
         appealContext: `${input.tool_name} as first response`,
-        onAppealSuccess: () =>
-          logToHomeAssistant({
-            agent: "pre-tool-use-hook",
-            level: "info",
-            problem: `First response intent appealed: ${input.tool_name}`,
-            answer: "APPEALED - continuing",
-          }),
       }
     );
 
     if (!intentResult.approved) {
-      logToHomeAssistant({
-        agent: "pre-tool-use-hook",
-        level: "decision",
-        problem: `First response: ${input.tool_name}`,
-        answer: `BLOCKED: ${intentResult.reason}`,
-      });
       outputDeny(
         `First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`
       );
@@ -470,15 +403,7 @@ async function main() {
   const quickCheck = hasErrorPatterns(errorCheckTranscript, { toolResultsOnly: true });
 
   // Skip error-ack if tool matches suggested alternative (conservative exact match)
-  if (quickCheck.needsCheck && matchesSuggestedAlternative(input.tool_name, errorCheckTranscript)) {
-    logToHomeAssistant({
-      agent: "pre-tool-use-hook",
-      level: "info",
-      problem: `${input.tool_name} matches suggested alternative`,
-      answer: "Skipping error-ack check",
-    });
-    // Continue to next checks (don't require explicit ack)
-  } else if (quickCheck.needsCheck) {
+  if (quickCheck.needsCheck && !matchesSuggestedAlternative(input.tool_name, errorCheckTranscript)) {
     // Step 2: Only call Haiku if error/directive patterns detected
     // Track the reason for potential markErrorAcknowledged call
     let blockReason = "";
@@ -489,7 +414,9 @@ async function main() {
           errorCheckTranscript,
           input.tool_name,
           input.tool_input,
-          input.transcript_path
+          projectDir,
+          input.transcript_path,
+          "PreToolUse"
         );
         if (result.startsWith("BLOCK:")) {
           blockReason = result.substring(7).trim();
@@ -501,6 +428,8 @@ async function main() {
       input.tool_input,
       input.transcript_path,
       {
+        workingDir: projectDir,
+        hookName: "PreToolUse",
         onAppealSuccess: () => {
           markErrorAcknowledged(blockReason);
           // Also cache the ORIGINAL error pattern (what cache check looks for)
@@ -511,23 +440,11 @@ async function main() {
           if (originalIssue) {
             markErrorAcknowledged(originalIssue[0]);
           }
-          logToHomeAssistant({
-            agent: "pre-tool-use-hook",
-            level: "decision",
-            problem: `${input.tool_name} error-acknowledge appealed`,
-            answer: "APPEALED - continuing",
-          });
         },
       }
     );
 
     if (!ackResult.approved) {
-      logToHomeAssistant({
-        agent: "pre-tool-use-hook",
-        level: "decision",
-        problem: `${input.tool_name} blocked for ignoring errors`,
-        answer: ackResult.reason ?? blockReason,
-      });
       outputDeny(`Error acknowledgment required: ${ackResult.reason ?? blockReason}`);
     }
   }
@@ -559,12 +476,6 @@ async function main() {
             (r.content.includes("approved") || r.content.includes("allow"))
         );
         if (hasExitPlanModeApproval) {
-          logToHomeAssistant({
-            agent: "pre-tool-use-hook",
-            level: "info",
-            problem: `Plan ${input.tool_name.toLowerCase()} to ${filePath}`,
-            answer: "ExitPlanMode approved - skipping validation",
-          });
           outputAllow();
         }
 
@@ -581,21 +492,21 @@ async function main() {
               input.tool_name as "Write" | "Edit",
               input.tool_input as { content?: string; old_string?: string; new_string?: string },
               conversationContext,
-              input.transcript_path
+              input.transcript_path,
+              projectDir,
+              "PreToolUse"
             ),
           input.tool_name,
           input.tool_input,
           input.transcript_path,
-          { appealContext: `Plan ${input.tool_name.toLowerCase()} to ${filePath}` }
+          {
+            workingDir: projectDir,
+            hookName: "PreToolUse",
+            appealContext: `Plan ${input.tool_name.toLowerCase()} to ${filePath}`,
+          }
         );
 
         if (!validation.approved) {
-          logToHomeAssistant({
-            agent: "pre-tool-use-hook",
-            level: "decision",
-            problem: `Plan ${input.tool_name.toLowerCase()} to ${filePath}`,
-            answer: `DRIFT: ${validation.reason}`,
-          });
           outputDeny(`Plan drift detected: ${validation.reason}`);
         }
         // Plan validated - allow write
@@ -621,23 +532,21 @@ async function main() {
               currentContent,
               input.tool_name as "Write" | "Edit",
               input.tool_input as { content?: string; old_string?: string; new_string?: string },
-              input.transcript_path
+              input.transcript_path,
+              projectDir,
+              "PreToolUse"
             ),
           input.tool_name,
           input.tool_input,
           input.transcript_path,
           {
+            workingDir: projectDir,
+            hookName: "PreToolUse",
             appealContext: `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
           }
         );
 
         if (!validation.approved) {
-          logToHomeAssistant({
-            agent: "pre-tool-use-hook",
-            level: "decision",
-            problem: `CLAUDE.md ${input.tool_name.toLowerCase()} to ${filePath}`,
-            answer: `REJECTED: ${(validation.reason ?? "").slice(0, 200)}`,
-          });
           outputDeny(`CLAUDE.md validation failed: ${validation.reason}`);
         }
         // CLAUDE.md validated - allow write
@@ -665,20 +574,16 @@ async function main() {
                 input.tool_name,
                 input.tool_input,
                 projectDir,
-                userMessages
+                userMessages,
+                "PreToolUse"
               ),
             input.tool_name,
             input.tool_input,
-            input.transcript_path
+            input.transcript_path,
+            { workingDir: projectDir, hookName: "PreToolUse" }
           );
 
           if (!styleDriftResult.approved) {
-            logToHomeAssistant({
-              agent: "pre-tool-use-hook",
-              level: "decision",
-              problem: `Edit ${filePath}`,
-              answer: `STYLE DRIFT: ${styleDriftResult.reason}`,
-            });
             outputDeny(`Style drift detected: ${styleDriftResult.reason}`);
           }
         }
@@ -690,24 +595,14 @@ async function main() {
     }
   }
 
-  const toolDescription = `${input.tool_name} with ${JSON.stringify(
-    input.tool_input
-  )}`;
-
   // Tool approval with automatic appeal on denial
   const decision = await checkWithAppeal(
-    () => checkToolApproval(input.tool_name, input.tool_input, projectDir),
+    () => checkToolApproval(input.tool_name, input.tool_input, projectDir, "PreToolUse"),
     input.tool_name,
     input.tool_input,
-    input.transcript_path
+    input.transcript_path,
+    { workingDir: projectDir, hookName: "PreToolUse" }
   );
-
-  logToHomeAssistant({
-    agent: "pre-tool-use-hook",
-    level: "decision",
-    problem: toolDescription,
-    answer: decision.approved ? "ALLOWED" : `DENIED: ${decision.reason}`,
-  });
 
   if (!decision.approved) {
     // Track workaround patterns for escalation
@@ -718,12 +613,6 @@ async function main() {
 
       if (count >= MAX_SIMILAR_DENIALS) {
         finalReason += ` CRITICAL: You have attempted ${count} similar workarounds for '${pattern}'. STOP trying alternatives. Either use the approved MCP tool, ask the user for guidance, or acknowledge that this action cannot be performed.`;
-        logToHomeAssistant({
-          agent: "pre-tool-use-hook",
-          level: "escalation",
-          problem: `Repeated workaround attempts: ${pattern}`,
-          answer: `Count: ${count}`,
-        });
       }
     }
 

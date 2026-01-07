@@ -29,7 +29,6 @@ import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
 import { writePendingValidation, clearPendingValidation, setValidationSession } from "./pending-validation-cache.js";
 import { readTranscriptExact, formatTranscriptResult } from "./transcript.js";
 import { ERROR_CHECK_COUNTS } from "./transcript-presets.js";
-import { logToHomeAssistant } from "./logger.js";
 
 interface ValidatorArgs {
   tool: string;
@@ -97,19 +96,13 @@ async function main(): Promise<void> {
     // Validation 1: Intent Alignment (for action tools)
     const actionTools = ["Edit", "Write", "NotebookEdit", "Bash", "Agent", "Task"];
     if (actionTools.includes(tool)) {
-      const intentResult = await checkIntentAlignment(tool, toolInput, transcript);
+      const intentResult = await checkIntentAlignment(tool, toolInput, transcript, projectDir, "PreToolUse");
       if (!intentResult.approved) {
         writePendingValidation({
           status: "failed",
           toolName: tool,
           filePath: file,
           failureReason: `Intent misalignment: ${intentResult.reason}`,
-        });
-        logToHomeAssistant({
-          agent: "async-validator",
-          level: "decision",
-          problem: `${tool} intent check`,
-          answer: `FAILED: ${intentResult.reason}`,
         });
         return;
       }
@@ -118,7 +111,7 @@ async function main(): Promise<void> {
     // Validation 2: Error Acknowledgment
     const errorResult = await readTranscriptExact(transcript, ERROR_CHECK_COUNTS);
     const errorTranscript = formatTranscriptResult(errorResult);
-    const ackResult = await checkErrorAcknowledgment(errorTranscript, tool, toolInput, transcript);
+    const ackResult = await checkErrorAcknowledgment(errorTranscript, tool, toolInput, projectDir, transcript, "PreToolUse");
     if (ackResult.startsWith("BLOCK:")) {
       const reason = ackResult.substring(7).trim();
       writePendingValidation({
@@ -127,30 +120,18 @@ async function main(): Promise<void> {
         filePath: file,
         failureReason: `Error not acknowledged: ${reason}`,
       });
-      logToHomeAssistant({
-        agent: "async-validator",
-        level: "decision",
-        problem: `${tool} error-ack check`,
-        answer: `FAILED: ${reason}`,
-      });
       return;
     }
 
     // Validation 3: Style Drift (Edit tool only)
     if (tool === "Edit") {
-      const styleResult = await checkStyleDrift(tool, toolInput, projectDir);
+      const styleResult = await checkStyleDrift(tool, toolInput, projectDir, undefined, "PreToolUse");
       if (!styleResult.approved) {
         writePendingValidation({
           status: "failed",
           toolName: tool,
           filePath: file,
           failureReason: `Style drift: ${styleResult.reason}`,
-        });
-        logToHomeAssistant({
-          agent: "async-validator",
-          level: "decision",
-          problem: `${tool} style-drift check`,
-          answer: `FAILED: ${styleResult.reason}`,
         });
         return;
       }
@@ -162,22 +143,10 @@ async function main(): Promise<void> {
       toolName: tool,
       filePath: file,
     });
-
-    logToHomeAssistant({
-      agent: "async-validator",
-      level: "info",
-      problem: `${tool} async validation`,
-      answer: "PASSED",
-    });
   } catch (error) {
     // On error, fail-open (treat as passed)
     // This ensures we don't block tools due to validator issues
-    logToHomeAssistant({
-      agent: "async-validator",
-      level: "error",
-      problem: `${tool} async validation error`,
-      answer: error instanceof Error ? error.message : String(error),
-    });
+    console.error(`[async-validator] Error: ${error instanceof Error ? error.message : String(error)}`);
 
     // Clear any pending validation to avoid blocking
     clearPendingValidation();

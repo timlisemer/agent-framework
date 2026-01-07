@@ -38,7 +38,7 @@ import {
 import { runAgent } from "../../utils/agent-runner.js";
 import { INTENT_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logToHomeAssistant } from "../../utils/logger.js";
+import { logAgentDecision } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
@@ -93,7 +93,7 @@ export async function extractConversationContext(
       userMessages,
       assistantMessages,
       conversationSummary,
-      lastAssistantMessage: lastAssistantMessage?.text || '',
+      lastAssistantMessage: lastAssistantMessage?.text || "",
     };
   } catch {
     return {
@@ -109,27 +109,25 @@ export async function extractConversationContext(
  * Check if AI has gone off-topic in its response.
  *
  * @param transcriptPath - Path to the transcript file
+ * @param workingDir - Working directory for context
+ * @param hookName - Hook that triggered this check (for telemetry)
  * @returns Check result with optional intervention feedback
  *
  * @example
  * ```typescript
- * const result = await checkForOffTopic(transcriptPath);
+ * const result = await checkForOffTopic(transcriptPath, cwd, "Stop");
  * if (result.decision === 'INTERVENE') {
  *   console.log('Off-topic:', result.feedback);
  * }
  * ```
  */
 export async function checkForOffTopic(
-  transcriptPath: string
+  transcriptPath: string,
+  workingDir: string,
+  hookName: string
 ): Promise<OffTopicCheckResult> {
   // Skip off-topic checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
-    logToHomeAssistant({
-      agent: "off-topic-check",
-      level: "info",
-      problem: "off-topic check",
-      answer: "Skipped - subagent session",
-    });
     return { decision: "OK" };
   }
 
@@ -144,7 +142,7 @@ export async function checkForOffTopic(
 
   try {
     // Run off-topic check via unified runner
-    const initialResponse = await runAgent(
+    const result = await runAgent(
       { ...INTENT_VALIDATE_AGENT },
       {
         prompt:
@@ -164,7 +162,7 @@ ${context.lastAssistantMessage}`,
     const decision = await retryUntilValid(
       anthropic,
       getModelId(INTENT_VALIDATE_AGENT.tier),
-      initialResponse,
+      result.output,
       "Intent validation for assistant response",
       {
         maxRetries: 2,
@@ -177,11 +175,17 @@ ${context.lastAssistantMessage}`,
     if (decision.startsWith("INTERVENE:")) {
       const feedback = decision.replace("INTERVENE:", "").trim();
 
-      logToHomeAssistant({
+      logAgentDecision({
         agent: "off-topic-check",
-        level: "decision",
-        problem: `Assistant stopped with: ${context.lastAssistantMessage.substring(0, 100)}...`,
-        answer: `INTERVENE: ${feedback}`,
+        hookName,
+        decision: "INTERVENE",
+        toolName: "StopResponse",
+        workingDir,
+        latencyMs: result.latencyMs,
+        modelTier: result.modelTier,
+        success: result.success,
+        errorCount: result.errorCount,
+        decisionReason: feedback,
       });
 
       return {
@@ -190,26 +194,25 @@ ${context.lastAssistantMessage}`,
       };
     }
 
-    logToHomeAssistant({
+    logAgentDecision({
       agent: "off-topic-check",
-      level: "decision",
-      problem: `Assistant stopped with: ${context.lastAssistantMessage.substring(0, 100)}...`,
-      answer: "OK",
+      hookName,
+      decision: "OK",
+      toolName: "StopResponse",
+      workingDir,
+      latencyMs: result.latencyMs,
+      modelTier: result.modelTier,
+      success: result.success,
+      errorCount: result.errorCount,
+      decisionReason: "OK",
     });
 
     return { decision: "OK" };
-  } catch (err) {
-    // On issue, fail open (don't intervene)
-    logToHomeAssistant({
-      agent: "off-topic-check",
-      level: "info",
-      problem: "Check issue",
-      answer: String(err),
-    });
-
+  } catch {
+    // On error, fail open (don't intervene) - no telemetry for failed checks
     return {
       decision: "OK",
-      feedback: "Check issue - skipped",
+      feedback: "Check error - skipped",
     };
   }
 }

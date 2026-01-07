@@ -44,38 +44,35 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { CHECK_AGENT } from "../../utils/agent-configs.js";
 import { runCommand } from "../../utils/command.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
+import { logAgentDecision } from "../../utils/logger.js";
+
+const HOOK_NAME = "mcp__agent-framework__check";
 
 /**
  * Detect which linter is configured for the project.
- *
- * Checks for common linter configuration files and returns the appropriate
- * command to run. Supports ESLint, Cargo/Clippy, Ruff/Pylint, and golangci-lint.
- *
- * @param workingDir - The project directory to check
- * @returns The lint command to run, or null if no linter found
  */
 function detectLinter(workingDir: string): string | null {
   const checks = [
     {
       files: [
-        'eslint.config.js',
-        'eslint.config.mjs',
-        'eslint.config.cjs',
-        '.eslintrc.js',
-        '.eslintrc.json',
-        '.eslintrc.yml',
-        '.eslintrc',
+        "eslint.config.js",
+        "eslint.config.mjs",
+        "eslint.config.cjs",
+        ".eslintrc.js",
+        ".eslintrc.json",
+        ".eslintrc.yml",
+        ".eslintrc",
       ],
-      cmd: 'npx eslint . 2>&1',
+      cmd: "npx eslint . 2>&1",
     },
-    { files: ['Cargo.toml'], cmd: 'cargo clippy 2>&1 || cargo check 2>&1' },
+    { files: ["Cargo.toml"], cmd: "cargo clippy 2>&1 || cargo check 2>&1" },
     {
-      files: ['pyproject.toml', 'setup.py'],
-      cmd: 'ruff check . 2>&1 || pylint . 2>&1',
+      files: ["pyproject.toml", "setup.py"],
+      cmd: "ruff check . 2>&1 || pylint . 2>&1",
     },
     {
-      files: ['go.mod'],
-      cmd: 'golangci-lint run 2>&1 || go vet ./... 2>&1',
+      files: ["go.mod"],
+      cmd: "golangci-lint run 2>&1 || go vet ./... 2>&1",
     },
   ];
 
@@ -92,26 +89,15 @@ function detectLinter(workingDir: string): string | null {
 /**
  * Run the check agent to summarize linter and type-check results.
  *
- * This agent does NOT analyze or suggest fixes - it only reports what the
- * tools said. The output is structured for easy parsing by other agents.
- *
  * @param workingDir - The project directory to check
  * @returns Structured summary with errors, warnings, and status
- *
- * @example
- * ```typescript
- * const result = await runCheckAgent('/path/to/project');
- * if (result.includes('Status: PASS')) {
- *   // All checks passed
- * }
- * ```
  */
 export async function runCheckAgent(workingDir: string): Promise<string> {
   // Step 1: Get uncommitted files info
   const { status } = getUncommittedChanges(workingDir);
 
   // Step 2: Run linter if configured
-  let lintOutput = '';
+  let lintOutput = "";
   const lintCmd = detectLinter(workingDir);
   if (lintCmd) {
     const lint = runCommand(lintCmd, workingDir);
@@ -119,26 +105,42 @@ export async function runCheckAgent(workingDir: string): Promise<string> {
   }
 
   // Step 3: Run make check
-  const check = runCommand('make check 2>&1', workingDir);
+  const check = runCommand("make check 2>&1", workingDir);
   const checkOutput = `MAKE CHECK OUTPUT (exit code ${check.exitCode}):\n${check.output}`;
 
   // Step 4: Use unified runner for analysis
   const result = await runAgent(
     { ...CHECK_AGENT, workingDir },
     {
-      prompt: 'Summarize the following check results:',
-      context: `UNCOMMITTED FILES:\n${status || '(none)'}\n\n${lintOutput}${checkOutput}`,
+      prompt: "Summarize the following check results:",
+      context: `UNCOMMITTED FILES:\n${status || "(none)"}\n\n${lintOutput}${checkOutput}`,
     }
   );
 
+  // Determine pass/fail status
+  const isPassing = result.output.includes("Status: PASS");
+
+  logAgentDecision({
+    agent: "check",
+    hookName: HOOK_NAME,
+    decision: isPassing ? "OK" : "BLOCK",
+    toolName: HOOK_NAME,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: isPassing ? "All checks passed" : "Checks failed",
+  });
+
   // Step 5: Add guidance for unused code errors
-  const hasUnusedCode = /unused|never read|declared but|not used/i.test(result);
-  if (hasUnusedCode && result.includes('Status: FAIL')) {
-    return `${result}
+  const hasUnusedCode = /unused|never read|declared but|not used/i.test(result.output);
+  if (hasUnusedCode && result.output.includes("Status: FAIL")) {
+    return `${result.output}
 
 ## Action Required
 If you introduced this unused code, investigate why it happened and delete it. We do not accept unused code - it must be removed, not suppressed with underscores, @ts-ignore, or comments.`;
   }
 
-  return result;
+  return result.output;
 }

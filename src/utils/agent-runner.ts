@@ -76,7 +76,6 @@ import { query } from "@anthropic-ai/claude-agent-sdk";
 import { getAnthropicClient } from "./anthropic-client.js";
 import { getModelId, type ModelTier } from "../types.js";
 import { extractTextFromResponse } from "./response-parser.js";
-import { logToHomeAssistant } from "./logger.js";
 
 /**
  * Read-only tools available to SDK mode agents.
@@ -89,7 +88,7 @@ import { logToHomeAssistant } from "./logger.js";
  * Bash is explicitly NOT included to prevent command execution.
  * Git data should be passed via the prompt context instead.
  */
-const SDK_TOOLS = ['Read', 'Glob', 'Grep'] as const;
+const SDK_TOOLS = ["Read", "Glob", "Grep"] as const;
 
 /**
  * Configuration for an agent.
@@ -101,7 +100,6 @@ const SDK_TOOLS = ['Read', 'Glob', 'Grep'] as const;
 export interface AgentConfig {
   /**
    * Agent name for logging and identification.
-   * Used in Home Assistant logs and error messages.
    * @example 'confirm', 'check', 'tool-approve'
    */
   name: string;
@@ -123,7 +121,7 @@ export interface AgentConfig {
    * - 'direct': Single API call, no tools, fastest
    * - 'sdk': Multi-turn with Read/Glob/Grep tools
    */
-  mode: 'direct' | 'sdk';
+  mode: "direct" | "sdk";
 
   /**
    * System prompt defining agent behavior.
@@ -191,15 +189,40 @@ export interface AgentInput {
 }
 
 /**
+ * Result of an agent execution.
+ *
+ * Contains both the output and metadata for telemetry tracking.
+ * Callers should use this to track telemetry with full context.
+ */
+export interface AgentExecutionResult {
+  /** The agent's text output */
+  output: string;
+  /** Operation latency in milliseconds */
+  latencyMs: number;
+  /** Model tier used */
+  modelTier: ModelTier;
+  /** Actual model name/ID */
+  modelName: string;
+  /** Whether the agent executed successfully (no LLM errors) */
+  success: boolean;
+  /** Number of LLM errors encountered */
+  errorCount: number;
+}
+
+/**
  * Run an agent with the specified configuration.
  *
  * This is the main entry point for agent execution. It automatically
  * selects the appropriate execution mode based on config.mode and
- * handles logging.
+ * returns execution metadata for telemetry.
+ *
+ * Note: This function no longer logs telemetry directly. Callers are
+ * responsible for tracking telemetry using the returned metadata and
+ * their knowledge of hookName/toolName context.
  *
  * @param config - Agent configuration (typically from agent-configs.ts)
  * @param input - Prompt and optional context
- * @returns The agent's text output
+ * @returns Execution result with output and metadata
  *
  * @example
  * ```typescript
@@ -209,22 +232,25 @@ export interface AgentInput {
  *   { prompt: 'Evaluate:', context: diff }
  * );
  *
- * // With inline config (not recommended - use agent-configs.ts)
- * const result = await runAgent(
- *   {
- *     name: 'custom',
- *     tier: 'haiku',
- *     mode: 'direct',
- *     systemPrompt: 'You are a validator...',
- *   },
- *   { prompt: 'Validate this input' }
- * );
+ * // Track telemetry with full context
+ * trackAgentExecution({
+ *   agentName: "confirm",
+ *   hookName: "mcp__agent-framework__confirm",
+ *   decision: extractDecision(result.output) ?? "DECLINED",
+ *   toolName: "mcp__agent-framework__confirm",
+ *   workingDir: cwd,
+ *   latencyMs: result.latencyMs,
+ *   modelTier: result.modelTier,
+ *   success: result.success,
+ *   errorCount: result.errorCount,
+ *   decisionReason: result.output.slice(0, 500),
+ * });
  * ```
  */
 export async function runAgent(
   config: AgentConfig,
   input: AgentInput
-): Promise<string> {
+): Promise<AgentExecutionResult> {
   const startTime = Date.now();
 
   // Combine prompt and context
@@ -233,24 +259,37 @@ export async function runAgent(
     : input.prompt;
 
   // Execute based on mode
-  const result =
-    config.mode === 'sdk'
-      ? await runSdkAgent(config, fullPrompt)
-      : await runDirectAgent(config, fullPrompt);
+  let output: string;
+  let success = true;
+  let errorCount = 0;
+
+  try {
+    output =
+      config.mode === "sdk"
+        ? await runSdkAgent(config, fullPrompt)
+        : await runDirectAgent(config, fullPrompt);
+
+    // Detect error responses
+    if (output.startsWith("[DIRECT ERROR]") || output.startsWith("[SDK ERROR]")) {
+      success = false;
+      errorCount = 1;
+    }
+  } catch (error) {
+    output = error instanceof Error ? error.message : String(error);
+    success = false;
+    errorCount = 1;
+  }
 
   const latencyMs = Date.now() - startTime;
 
-  // Log execution (fire and forget - don't await)
-  logToHomeAssistant({
-    agent: config.name,
-    level: 'info',
-    problem: config.workingDir || 'unknown',
-    answer: result.slice(0, 500),
+  return {
+    output,
     latencyMs,
     modelTier: config.tier,
-  });
-
-  return result;
+    modelName: getModelId(config.tier),
+    success,
+    errorCount,
+  };
 }
 
 /**
@@ -275,7 +314,7 @@ async function runDirectAgent(
       model: getModelId(config.tier),
       max_tokens: config.maxTokens ?? 2000,
       system: config.systemPrompt,
-      messages: [{ role: 'user', content: prompt }],
+      messages: [{ role: "user", content: prompt }],
     });
 
     return extractTextFromResponse(response);
@@ -356,33 +395,33 @@ Your final response should be your complete analysis in the required format.`;
         systemPrompt: enhancedSystemPrompt,
         tools,
         allowedTools: tools, // Auto-approve these tools
-        permissionMode: 'bypassPermissions',
+        permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         maxTurns: config.maxTurns ?? 10,
       },
     });
 
     // Collect output from streaming response
-    let finalResult = '';
-    let lastAssistantContent = '';
+    let finalResult = "";
+    let lastAssistantContent = "";
 
     for await (const message of q) {
       // Prefer 'result' message type - this is the final output
-      if (message.type === 'result') {
-        if ('result' in message && typeof message.result === 'string') {
+      if (message.type === "result") {
+        if ("result" in message && typeof message.result === "string") {
           finalResult = message.result;
         }
         break;
       }
 
       // Track assistant messages as fallback
-      if (message.type === 'assistant') {
-        if ('message' in message) {
+      if (message.type === "assistant") {
+        if ("message" in message) {
           // Handle message object with content
           const msg = message.message;
-          if (msg && typeof msg === 'object' && 'content' in msg) {
+          if (msg && typeof msg === "object" && "content" in msg) {
             const content = msg.content;
-            if (typeof content === 'string') {
+            if (typeof content === "string") {
               lastAssistantContent = content;
             } else if (Array.isArray(content)) {
               // Extract text from content blocks
@@ -390,17 +429,17 @@ Your final response should be your complete analysis in the required format.`;
               for (const block of content) {
                 if (
                   block &&
-                  typeof block === 'object' &&
-                  'type' in block &&
-                  block.type === 'text' &&
-                  'text' in block &&
-                  typeof block.text === 'string'
+                  typeof block === "object" &&
+                  "type" in block &&
+                  block.type === "text" &&
+                  "text" in block &&
+                  typeof block.text === "string"
                 ) {
                   textBlocks.push(block.text);
                 }
               }
               if (textBlocks.length > 0) {
-                lastAssistantContent = textBlocks.join('\n');
+                lastAssistantContent = textBlocks.join("\n");
               }
             }
           }
@@ -409,7 +448,7 @@ Your final response should be your complete analysis in the required format.`;
     }
 
     // Return result, falling back to last assistant content
-    return finalResult || lastAssistantContent || '[SDK ERROR] No output received';
+    return finalResult || lastAssistantContent || "[SDK ERROR] No output received";
   } catch (error) {
     // Return error as string rather than throwing
     // This allows the caller to handle it gracefully
@@ -463,11 +502,11 @@ export interface AgentRetryOptions {
  * @param config - Agent configuration
  * @param input - Prompt and optional context
  * @param retryOptions - Format validation and retry settings
- * @returns The validated response text
+ * @returns The execution result with validated response
  *
  * @example
  * ```typescript
- * const decision = await runAgentWithRetry(
+ * const result = await runAgentWithRetry(
  *   { ...TOOL_APPROVE_AGENT, workingDir: cwd },
  *   { prompt: 'Evaluate:', context: toolCall },
  *   {
@@ -481,13 +520,15 @@ export async function runAgentWithRetry(
   config: AgentConfig,
   input: AgentInput,
   retryOptions: AgentRetryOptions
-): Promise<string> {
+): Promise<AgentExecutionResult> {
+  const startTime = Date.now();
+
   // Get initial response
-  const initialResponse = await runAgent(config, input);
+  const initialResult = await runAgent(config, input);
 
   // Check if already valid
-  if (retryOptions.formatValidator(initialResponse)) {
-    return initialResponse;
+  if (retryOptions.formatValidator(initialResult.output)) {
+    return initialResult;
   }
 
   // Retry until valid
@@ -502,8 +543,9 @@ export async function runAgentWithRetry(
   const client = getAnthropicClient();
   const contextDesc = context ?? input.prompt.slice(0, 100);
 
-  let decision = initialResponse;
+  let decision = initialResult.output;
   let retries = 0;
+  let totalErrorCount = initialResult.errorCount;
 
   while (!formatValidator(decision) && retries < maxRetries) {
     retries++;
@@ -525,9 +567,24 @@ export async function runAgentWithRetry(
       // Return error as string rather than throwing (matches runDirectAgent pattern)
       const errorMessage =
         error instanceof Error ? error.message : String(error);
-      return `[RETRY ERROR] ${errorMessage}`;
+      totalErrorCount++;
+      return {
+        output: `[RETRY ERROR] ${errorMessage}`,
+        latencyMs: Date.now() - startTime,
+        modelTier: config.tier,
+        modelName: getModelId(config.tier),
+        success: false,
+        errorCount: totalErrorCount,
+      };
     }
   }
 
-  return decision;
+  return {
+    output: decision,
+    latencyMs: Date.now() - startTime,
+    modelTier: config.tier,
+    modelName: getModelId(config.tier),
+    success: true,
+    errorCount: totalErrorCount,
+  };
 }

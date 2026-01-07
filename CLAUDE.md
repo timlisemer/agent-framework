@@ -108,7 +108,6 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 - `ANTHROPIC_API_KEY` - Required
 - `AGENT_FRAMEWORK_ROOT` - Required, path to agent-framework repo
 - `CLAUDE_PROJECT_DIR` - Set automatically by Claude Code
-- `WEBHOOK_ID_AGENT_LOGS` - Optional, enables Home Assistant logging
 
 ## Code Style
 

@@ -29,11 +29,11 @@
  * @module intent-align
  */
 
-import { getModelId, type CheckResult, type StopCheckResult } from "../../types.js";
+import { getModelId, MODEL_TIERS, type CheckResult, type StopCheckResult, type ModelTier } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { FIRST_RESPONSE_INTENT_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logToHomeAssistant } from "../../utils/logger.js";
+import { logAgentDecision } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
@@ -54,6 +54,8 @@ export type IntentAlignmentResult = CheckResult;
  * @param toolName - Name of the tool being called
  * @param toolInput - Input parameters for the tool
  * @param transcriptPath - Path to the transcript file
+ * @param workingDir - Working directory for context
+ * @param hookName - Hook that triggered this check (for telemetry)
  * @returns Check result with approval status and optional reason
  *
  * @example
@@ -61,7 +63,9 @@ export type IntentAlignmentResult = CheckResult;
  * const result = await checkIntentAlignment(
  *   'Edit',
  *   { file_path: 'src/auth.ts', ... },
- *   transcriptPath
+ *   transcriptPath,
+ *   cwd,
+ *   'PreToolUse'
  * );
  * if (!result.approved) {
  *   // Block: AI's action doesn't match user request
@@ -71,37 +75,33 @@ export type IntentAlignmentResult = CheckResult;
 export async function checkIntentAlignment(
   toolName: string,
   toolInput: unknown,
-  transcriptPath: string
+  transcriptPath: string,
+  workingDir: string,
+  hookName: string
 ): Promise<IntentAlignmentResult> {
   // Skip intent alignment checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
-    logToHomeAssistant({
-      agent: "intent-align",
-      level: "info",
-      problem: toolName,
-      answer: "Skipped - subagent session",
-    });
     return { approved: true };
   }
 
   // Read transcript to get context
-  const result = await readTranscriptExact(
+  const transcriptResult = await readTranscriptExact(
     transcriptPath,
     INTENT_ALIGNMENT_COUNTS
   );
 
-  if (result.user.length === 0) {
+  if (transcriptResult.user.length === 0) {
     // No user message found - skip check
     return { approved: true };
   }
 
   // Get last user message
-  const lastUserMessage = result.user[result.user.length - 1];
+  const lastUserMessage = transcriptResult.user[transcriptResult.user.length - 1];
   const lastUserIndex = lastUserMessage.index;
   const userRequest = lastUserMessage.content;
 
   // Get assistant messages AFTER the last user message (acknowledgments)
-  const assistantAfterUser = result.assistant.filter(
+  const assistantAfterUser = transcriptResult.assistant.filter(
     (msg) => msg.index > lastUserIndex
   );
 
@@ -112,8 +112,8 @@ export async function checkIntentAlignment(
 
   // Format recent tool results for context
   const toolResultsText =
-    result.toolResult.length > 0
-      ? `\nRECENT TOOL RESULTS:\n${result.toolResult
+    transcriptResult.toolResult.length > 0
+      ? `\nRECENT TOOL RESULTS:\n${transcriptResult.toolResult
           .map(
             (r) =>
               `- ${r.content.slice(0, 300)}${r.content.length > 300 ? "..." : ""}`
@@ -131,7 +131,7 @@ Input: ${JSON.stringify(toolInput, null, 2).slice(0, 500)}
 ${toolResultsText}`;
 
   // Run alignment check via unified runner
-  const initialResponse = await runAgent(
+  const result = await runAgent(
     { ...FIRST_RESPONSE_INTENT_AGENT },
     {
       prompt: "Check if this tool call aligns with the user's request.",
@@ -144,7 +144,7 @@ ${toolResultsText}`;
   const decision = await retryUntilValid(
     anthropic,
     getModelId(FIRST_RESPONSE_INTENT_AGENT.tier),
-    initialResponse,
+    result.output,
     toolDescription,
     {
       maxRetries: 1,
@@ -154,11 +154,17 @@ ${toolResultsText}`;
   );
 
   if (decision.startsWith("OK")) {
-    logToHomeAssistant({
+    logAgentDecision({
       agent: "intent-align",
-      level: "decision",
-      problem: `Tool: ${toolName}`,
-      answer: "OK - aligned with request",
+      hookName,
+      decision: "OK",
+      toolName,
+      workingDir,
+      latencyMs: result.latencyMs,
+      modelTier: result.modelTier,
+      success: result.success,
+      errorCount: result.errorCount,
+      decisionReason: "OK - aligned with request",
     });
     return { approved: true };
   }
@@ -168,11 +174,17 @@ ${toolResultsText}`;
     ? decision.substring(7).trim()
     : `Misaligned response: ${decision}`;
 
-  logToHomeAssistant({
+  logAgentDecision({
     agent: "intent-align",
-    level: "decision",
-    problem: `Tool: ${toolName}`,
-    answer: `BLOCKED: ${reason}`,
+    hookName,
+    decision: "BLOCK",
+    toolName,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: reason,
   });
 
   return {
@@ -190,8 +202,9 @@ export type StopIntentResult = StopCheckResult;
  */
 async function classifyStopResponse(
   userText: string,
-  assistantText: string
-): Promise<"QUESTION" | "PLAN_APPROVAL" | "OK"> {
+  assistantText: string,
+  workingDir: string
+): Promise<{ classification: "QUESTION" | "PLAN_APPROVAL" | "OK"; latencyMs: number; modelTier: ModelTier; success: boolean; errorCount: number }> {
   const context = `USER MESSAGE:
 ${userText}
 
@@ -232,18 +245,32 @@ Reply with EXACTLY one of: PLAN_APPROVAL, QUESTION, or OK`;
   const response = await runAgent(
     {
       name: "stop-classify",
-      tier: "haiku",
+      tier: MODEL_TIERS.HAIKU,
       mode: "direct",
       maxTokens: 50,
       systemPrompt,
+      workingDir,
     },
     { prompt: "Classify this response.", context }
   );
 
-  const trimmed = response.trim().toUpperCase();
-  if (trimmed.includes("PLAN_APPROVAL")) return "PLAN_APPROVAL";
-  if (trimmed.includes("QUESTION")) return "QUESTION";
-  return "OK";
+  const trimmed = response.output.trim().toUpperCase();
+  let classification: "QUESTION" | "PLAN_APPROVAL" | "OK";
+  if (trimmed.includes("PLAN_APPROVAL")) {
+    classification = "PLAN_APPROVAL";
+  } else if (trimmed.includes("QUESTION")) {
+    classification = "QUESTION";
+  } else {
+    classification = "OK";
+  }
+
+  return {
+    classification,
+    latencyMs: response.latencyMs,
+    modelTier: response.modelTier,
+    success: response.success,
+    errorCount: response.errorCount,
+  };
 }
 
 // Patterns indicating AI is asking plain text questions (should use AskUserQuestion)
@@ -368,19 +395,17 @@ function isOperationalContext(userText: string, assistantText: string): boolean 
  * - Doesn't answer the user's question
  *
  * @param transcriptPath - Path to the transcript file
+ * @param workingDir - Working directory for context
+ * @param hookName - Hook that triggered this check (for telemetry)
  * @returns Check result with approval status, reason, and optional system message
  */
 export async function checkStopIntentAlignment(
-  transcriptPath: string
+  transcriptPath: string,
+  workingDir: string,
+  hookName: string
 ): Promise<StopIntentResult> {
   // Skip stop intent checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
-    logToHomeAssistant({
-      agent: "intent-align-stop",
-      level: "info",
-      problem: "stop response",
-      answer: "Skipped - subagent session",
-    });
     return { approved: true };
   }
 
@@ -418,16 +443,40 @@ export async function checkStopIntentAlignment(
     }
 
     // Use AI to determine if this is an intermediate question or plan approval
-    const classification = await classifyStopResponse(userText, assistantText);
+    const classifyResult = await classifyStopResponse(userText, assistantText, workingDir);
 
-    if (classification === "PLAN_APPROVAL") {
+    if (classifyResult.classification === "PLAN_APPROVAL") {
+      logAgentDecision({
+        agent: "stop-classify",
+        hookName,
+        decision: "BLOCK",
+        toolName: "StopResponse",
+        workingDir,
+        latencyMs: classifyResult.latencyMs,
+        modelTier: classifyResult.modelTier,
+        success: classifyResult.success,
+        errorCount: classifyResult.errorCount,
+        decisionReason: "Plain text plan approval detected",
+      });
       return {
         approved: false,
         reason: "Plain text plan approval detected",
         systemMessage:
           "Do not ask for plan approval in plain text. Use the ExitPlanMode tool to present the plan with structured approval options.",
       };
-    } else if (classification === "QUESTION") {
+    } else if (classifyResult.classification === "QUESTION") {
+      logAgentDecision({
+        agent: "stop-classify",
+        hookName,
+        decision: "BLOCK",
+        toolName: "StopResponse",
+        workingDir,
+        latencyMs: classifyResult.latencyMs,
+        modelTier: classifyResult.modelTier,
+        success: classifyResult.success,
+        errorCount: classifyResult.errorCount,
+        decisionReason: "Plain text question detected",
+      });
       return {
         approved: false,
         reason: "Plain text question detected",
@@ -436,6 +485,18 @@ export async function checkStopIntentAlignment(
       };
     }
     // classification === "OK" - allow it
+    logAgentDecision({
+      agent: "stop-classify",
+      hookName,
+      decision: "OK",
+      toolName: "StopResponse",
+      workingDir,
+      latencyMs: classifyResult.latencyMs,
+      modelTier: classifyResult.modelTier,
+      success: classifyResult.success,
+      errorCount: classifyResult.errorCount,
+      decisionReason: "OK - legitimate stop response",
+    });
   }
 
   // Check 2: User asked a question that wasn't addressed

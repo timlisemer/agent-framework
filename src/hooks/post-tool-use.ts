@@ -4,10 +4,10 @@ initializeTelemetry();
 
 import { type PostToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { clearAckCache } from "../utils/ack-cache.js";
-import { logToHomeAssistant } from "../utils/logger.js";
 
 async function main() {
-  const input: PostToolUseHookInput = await new Promise((resolve) => {
+  // Read input but we only use this hook for side effects
+  await new Promise<PostToolUseHookInput>((resolve) => {
     let data = '';
     process.stdin.on('data', (chunk) => (data += chunk));
     process.stdin.on('end', () => resolve(JSON.parse(data)));
@@ -15,12 +15,6 @@ async function main() {
 
   // Clear error acknowledgment cache on ANY successful tool
   clearAckCache();
-  logToHomeAssistant({
-    agent: "post-tool-use",
-    level: "info",
-    problem: `${input.tool_name} succeeded`,
-    answer: "Cleared error acknowledgment cache",
-  });
 
   process.exit(0);
 }

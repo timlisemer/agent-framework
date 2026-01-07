@@ -36,7 +36,7 @@ import { getModelId } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { STYLE_DRIFT_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logToHomeAssistant } from "../../utils/logger.js";
+import { logAgentDecision } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 
 /**
@@ -103,6 +103,7 @@ function extractStylePreferences(claudeMdContent: string): string {
  * @param toolInput - Input parameters for the tool
  * @param workingDir - The project directory for context
  * @param userMessages - Recent user messages to check if style change was requested
+ * @param hookName - Hook that triggered this check (for telemetry)
  * @returns Approval result with optional denial reason
  *
  * @example
@@ -111,7 +112,8 @@ function extractStylePreferences(claudeMdContent: string): string {
  *   "Edit",
  *   { file_path: "src/foo.ts", old_string: "'hello'", new_string: '"hello"' },
  *   "/path/to/project",
- *   "fix the login bug"
+ *   "fix the login bug",
+ *   "PreToolUse"
  * );
  * if (!result.approved) {
  *   console.log("Style drift:", result.reason);
@@ -122,7 +124,8 @@ export async function checkStyleDrift(
   toolName: string,
   toolInput: unknown,
   workingDir: string,
-  userMessages?: string
+  userMessages: string | undefined,
+  hookName: string
 ): Promise<{ approved: boolean; reason?: string }> {
   // Only check Edit tool (has old/new comparison)
   if (toolName !== "Edit") {
@@ -158,7 +161,7 @@ export async function checkStyleDrift(
   const toolDescription = `Edit ${file_path}`;
 
   // Run style drift check via unified runner
-  const initialResponse = await runAgent(
+  const result = await runAgent(
     { ...STYLE_DRIFT_AGENT, workingDir },
     {
       prompt: "Check if this edit contains unrequested style-only changes.",
@@ -190,7 +193,7 @@ Does this edit contain ONLY style changes that were NOT requested by the user?`,
   const decision = await retryUntilValid(
     anthropic,
     getModelId(STYLE_DRIFT_AGENT.tier),
-    initialResponse,
+    result.output,
     toolDescription,
     {
       maxRetries: 2,
@@ -200,11 +203,17 @@ Does this edit contain ONLY style changes that were NOT requested by the user?`,
   );
 
   if (decision.startsWith("APPROVE")) {
-    logToHomeAssistant({
+    logAgentDecision({
       agent: "style-drift",
-      level: "decision",
-      problem: toolDescription,
-      answer: "APPROVED",
+      hookName,
+      decision: "APPROVED",
+      toolName,
+      workingDir,
+      latencyMs: result.latencyMs,
+      modelTier: result.modelTier,
+      success: result.success,
+      errorCount: result.errorCount,
+      decisionReason: decision,
     });
     return { approved: true };
   }
@@ -214,11 +223,17 @@ Does this edit contain ONLY style changes that were NOT requested by the user?`,
     ? decision.replace("DENY: ", "")
     : `Malformed response: ${decision}`;
 
-  logToHomeAssistant({
+  logAgentDecision({
     agent: "style-drift",
-    level: "decision",
-    problem: toolDescription,
-    answer: `DENIED: ${reason}`,
+    hookName,
+    decision: "DENIED",
+    toolName,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: reason,
   });
 
   return {

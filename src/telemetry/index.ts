@@ -4,6 +4,7 @@ export type {
   TelemetryConfig,
   BatchTelemetryRequest,
   BatchTelemetryResponse,
+  DecisionType,
 } from "./types.js";
 
 export {
@@ -15,5 +16,3 @@ export {
 } from "./client.js";
 
 export { TelemetryQueue } from "./queue.js";
-
-export { sanitizeToolInput } from "./sanitizer.js";

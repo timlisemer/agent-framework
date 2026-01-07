@@ -31,7 +31,7 @@ import { getModelId } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { PLAN_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logToHomeAssistant } from "../../utils/logger.js";
+import { logAgentDecision } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 
@@ -43,11 +43,13 @@ import { isSubagent } from "../../utils/subagent-detector.js";
  * @param toolInput - The tool input with content or old_string/new_string
  * @param conversationContext - Formatted conversation context
  * @param transcriptPath - Path to the transcript file (for subagent detection)
+ * @param workingDir - Working directory for context
+ * @param hookName - Hook that triggered this check (for telemetry)
  * @returns Approval result with optional drift feedback
  *
  * @example
  * ```typescript
- * const result = await checkPlanIntent(currentPlan, "Edit", toolInput, context, transcriptPath);
+ * const result = await checkPlanIntent(currentPlan, "Edit", toolInput, context, transcriptPath, cwd, "PreToolUse");
  * if (!result.approved) {
  *   console.log('Plan drift:', result.reason);
  * }
@@ -58,16 +60,12 @@ export async function checkPlanIntent(
   toolName: "Write" | "Edit",
   toolInput: { content?: string; old_string?: string; new_string?: string },
   conversationContext: string,
-  transcriptPath: string
+  transcriptPath: string,
+  workingDir: string,
+  hookName: string
 ): Promise<{ approved: boolean; reason?: string }> {
   // Skip plan validation for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
-    logToHomeAssistant({
-      agent: "plan-validate",
-      level: "info",
-      problem: `Plan ${toolName.toLowerCase()}`,
-      answer: "Skipped - subagent session",
-    });
     return { approved: true };
   }
 
@@ -89,7 +87,7 @@ export async function checkPlanIntent(
 
   try {
     // Run plan validation via unified runner
-    const initialResponse = await runAgent(
+    const result = await runAgent(
       { ...PLAN_VALIDATE_AGENT },
       {
         prompt: "Check if this plan aligns with the user request.",
@@ -102,7 +100,7 @@ export async function checkPlanIntent(
     const decision = await retryUntilValid(
       anthropic,
       getModelId(PLAN_VALIDATE_AGENT.tier),
-      initialResponse,
+      result.output,
       `Plan validation for: ${proposedEdit.substring(0, 100)}...`,
       {
         maxRetries: 2,
@@ -115,11 +113,17 @@ export async function checkPlanIntent(
     if (decision.startsWith("DRIFT:")) {
       const feedback = decision.replace("DRIFT:", "").trim();
 
-      logToHomeAssistant({
+      logAgentDecision({
         agent: "plan-validate",
-        level: "decision",
-        problem: `Plan ${toolName.toLowerCase()}: ${proposedEdit.substring(0, 100)}...`,
-        answer: `DRIFT: ${feedback}`,
+        hookName,
+        decision: "DRIFT",
+        toolName,
+        workingDir,
+        latencyMs: result.latencyMs,
+        modelTier: result.modelTier,
+        success: result.success,
+        errorCount: result.errorCount,
+        decisionReason: feedback,
       });
 
       return {
@@ -128,23 +132,22 @@ export async function checkPlanIntent(
       };
     }
 
-    logToHomeAssistant({
+    logAgentDecision({
       agent: "plan-validate",
-      level: "decision",
-      problem: `Plan ${toolName.toLowerCase()}: ${proposedEdit.substring(0, 100)}...`,
-      answer: "OK",
+      hookName,
+      decision: "OK",
+      toolName,
+      workingDir,
+      latencyMs: result.latencyMs,
+      modelTier: result.modelTier,
+      success: result.success,
+      errorCount: result.errorCount,
+      decisionReason: "OK",
     });
 
     return { approved: true };
-  } catch (err) {
-    // On issue, fail open (allow the write)
-    logToHomeAssistant({
-      agent: "plan-validate",
-      level: "info",
-      problem: "Validation issue",
-      answer: String(err),
-    });
-
+  } catch {
+    // On error, fail open (allow the write) - no telemetry for failed checks
     return { approved: true };
   }
 }

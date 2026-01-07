@@ -31,7 +31,7 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { TOOL_APPROVE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { getBlacklistHighlights } from "../../utils/command-patterns.js";
-import { logToHomeAssistant } from "../../utils/logger.js";
+import { logAgentDecision } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 
 /**
@@ -40,11 +40,12 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
  * @param toolName - Name of the tool being called
  * @param toolInput - Input parameters for the tool
  * @param workingDir - The project directory for context
+ * @param hookName - Hook that triggered this check (for telemetry)
  * @returns Approval result with optional denial reason
  *
  * @example
  * ```typescript
- * const result = await checkToolApproval('Bash', { command: 'rm -rf /' }, '/path/to/project');
+ * const result = await checkToolApproval('Bash', { command: 'rm -rf /' }, '/path/to/project', 'PreToolUse');
  * if (!result.approved) {
  *   console.log('Denied:', result.reason);
  * }
@@ -53,7 +54,8 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 export async function checkToolApproval(
   toolName: string,
   toolInput: unknown,
-  workingDir: string
+  workingDir: string,
+  hookName: string
 ): Promise<{ approved: boolean; reason?: string }> {
   // Load CLAUDE.md if exists (project-specific rules)
   let rules = "";
@@ -72,7 +74,7 @@ export async function checkToolApproval(
       : "";
 
   // Run initial evaluation via unified runner
-  const initialResponse = await runAgent(
+  const result = await runAgent(
     { ...TOOL_APPROVE_AGENT, workingDir },
     {
       prompt: "Evaluate this tool call for safety and compliance.",
@@ -92,7 +94,7 @@ Input: ${JSON.stringify(toolInput)}`,
   const decision = await retryUntilValid(
     anthropic,
     getModelId(TOOL_APPROVE_AGENT.tier),
-    initialResponse,
+    result.output,
     toolDescription,
     {
       maxRetries: 2,
@@ -102,11 +104,17 @@ Input: ${JSON.stringify(toolInput)}`,
   );
 
   if (decision.startsWith("APPROVE")) {
-    logToHomeAssistant({
+    logAgentDecision({
       agent: "tool-approve",
-      level: "decision",
-      problem: toolDescription,
-      answer: "APPROVED",
+      hookName,
+      decision: "APPROVED",
+      toolName,
+      workingDir,
+      latencyMs: result.latencyMs,
+      modelTier: result.modelTier,
+      success: result.success,
+      errorCount: result.errorCount,
+      decisionReason: decision,
     });
     return { approved: true };
   }
@@ -116,11 +124,17 @@ Input: ${JSON.stringify(toolInput)}`,
     ? decision.replace("DENY: ", "")
     : `Malformed response: ${decision}`;
 
-  logToHomeAssistant({
+  logAgentDecision({
     agent: "tool-approve",
-    level: "decision",
-    problem: toolDescription,
-    answer: `DENIED: ${reason}`,
+    hookName,
+    decision: "DENIED",
+    toolName,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: reason,
   });
 
   return {

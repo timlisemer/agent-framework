@@ -1,6 +1,5 @@
 import { checkAppeal } from "../agents/hooks/tool-appeal.js";
 import { type CheckResult } from "../types.js";
-import { logToHomeAssistant } from "./logger.js";
 import { readTranscriptExact, formatTranscriptResult } from "./transcript.js";
 import { APPEAL_COUNTS } from "./transcript-presets.js";
 
@@ -8,6 +7,10 @@ import { APPEAL_COUNTS } from "./transcript-presets.js";
 export type { CheckResult } from "../types.js";
 
 export interface CheckWithAppealOptions {
+  /** Working directory for telemetry */
+  workingDir: string;
+  /** Hook name for telemetry */
+  hookName: string;
   /** Custom context for appeal (overrides default toolDescription) */
   appealContext?: string;
   /** Callback when appeal succeeds */
@@ -19,7 +22,7 @@ export async function checkWithAppeal(
   toolName: string,
   toolInput: unknown,
   transcriptPath: string,
-  options?: CheckWithAppealOptions
+  options: CheckWithAppealOptions
 ): Promise<CheckResult> {
   const result = await check();
 
@@ -32,21 +35,18 @@ export async function checkWithAppeal(
   const transcript = formatTranscriptResult(transcriptResult);
 
   // Use custom appeal context if provided, otherwise default to tool description
-  const appealDescription = options?.appealContext ?? `${toolName} with ${JSON.stringify(toolInput).slice(0, 200)}`;
+  const appealDescription = options.appealContext ?? `${toolName} with ${JSON.stringify(toolInput).slice(0, 200)}`;
 
   const appeal = await checkAppeal(
+    toolName,
     appealDescription,
     transcript,
-    result.reason || "No reason provided"
+    result.reason || "No reason provided",
+    options.workingDir,
+    options.hookName
   );
 
   if (appeal.approved) {
-    logToHomeAssistant({
-      agent: "check-with-appeal",
-      level: "decision",
-      problem: appealDescription,
-      answer: "APPEALED",
-    });
     options?.onAppealSuccess?.();
     return { approved: true };
   }

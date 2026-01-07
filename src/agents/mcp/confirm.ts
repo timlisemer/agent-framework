@@ -13,66 +13,34 @@
  * 4. Run SDK agent with investigation capabilities
  * 5. Return verdict (CONFIRMED or DECLINED)
  *
- * ## SDK MODE
- *
- * Unlike other agents, confirm uses the Claude SDK for multi-turn interactions.
- * This allows it to:
- * - Read additional files to understand context
- * - Search the codebase for related code
- * - Verify documentation matches implementation
- *
- * Git data (status, diff) is still provided via prompt to avoid Bash access.
- *
- * ## EVALUATION CATEGORIES
- *
- * 1. Files: Check for unwanted files (node_modules, .env, etc.)
- * 2. Code Quality: No bugs, debug code, or unused code workarounds
- * 3. Security: No hardcoded secrets or vulnerabilities
- * 4. Documentation: Updated if changes require it
- *
- * All categories must PASS for CONFIRMED. Any FAIL means DECLINED.
- *
  * @module confirm
  */
 
 import { runAgent } from "../../utils/agent-runner.js";
 import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
-import { logToHomeAssistant } from "../../utils/logger.js";
+import { logAgentDecision } from "../../utils/logger.js";
 import { runCheckAgent } from "./check.js";
+
+const HOOK_NAME = "mcp__agent-framework__confirm";
 
 /**
  * Run the confirm agent to evaluate code changes.
  *
- * This is the main quality gate before commits. It first runs the check
- * agent (linter/type-check), then evaluates the changes using an SDK agent
- * that can investigate the codebase.
- *
  * @param workingDir - The project directory to evaluate
  * @returns Structured verdict with CONFIRMED or DECLINED
- *
- * @example
- * ```typescript
- * const result = await runConfirmAgent('/path/to/project');
- * if (result.includes('CONFIRMED')) {
- *   // Safe to commit
- * } else {
- *   // Fix issues first
- * }
- * ```
  */
 export async function runConfirmAgent(workingDir: string): Promise<string> {
-  // Step 1: Run check agent first (linter/type-check must pass)
+  // Step 1: Run check agent first
   const checkResult = await runCheckAgent(workingDir);
 
-  // Step 2: Parse check results for errors
   const errorMatch = checkResult.match(/Errors:\s*(\d+)/i);
   const errorCount = errorMatch ? parseInt(errorMatch[1], 10) : 0;
   const statusMatch = checkResult.match(/Status:\s*(PASS|FAIL)/i);
-  const checkStatus = statusMatch ? statusMatch[1].toUpperCase() : 'UNKNOWN';
+  const checkStatus = statusMatch ? statusMatch[1].toUpperCase() : "UNKNOWN";
 
-  // Step 3: If check failed, decline immediately
-  if (checkStatus === 'FAIL' || errorCount > 0) {
+  // Step 2: If check failed, decline immediately
+  if (checkStatus === "FAIL" || errorCount > 0) {
     const result = `## Results
 - Files: SKIP
 - Code Quality: SKIP
@@ -82,53 +50,40 @@ export async function runConfirmAgent(workingDir: string): Promise<string> {
 ## Verdict
 DECLINED: check failed with ${errorCount} error(s)`;
 
-    logToHomeAssistant({
-      agent: 'confirm',
-      level: 'decision',
-      problem: workingDir,
-      answer: result,
-    });
-
+    // Note: No telemetry here since no LLM was called - check agent handles its own telemetry
     return result;
   }
 
-  // Step 4: Get git data to pass via prompt (no Bash access for SDK agent)
+  // Step 3: Get git data
   const { status, diff } = getUncommittedChanges(workingDir);
 
-  // Step 5: Run SDK agent with investigation capabilities
+  // Step 4: Run SDK agent
   const result = await runAgent(
     { ...CONFIRM_AGENT, workingDir },
     {
-      prompt: 'Evaluate these code changes:',
+      prompt: "Evaluate these code changes:",
       context: `GIT STATUS (files changed):
-${status || '(no changes)'}
+${status || "(no changes)"}
 
 GIT DIFF (all uncommitted changes):
-${diff || '(no diff)'}`,
+${diff || "(no diff)"}`,
     }
   );
 
-  // Step 6: Validate output has expected sections
-  const hasInvestigation = result.includes('## Investigation');
-  const hasResults = result.includes('## Results');
-  const hasVerdict = result.includes('## Verdict');
+  const isConfirmed = result.output.includes("CONFIRMED");
 
-  if (!hasInvestigation || !hasResults || !hasVerdict) {
-    logToHomeAssistant({
-      agent: 'confirm',
-      level: 'warning',
-      problem: workingDir,
-      answer: `Incomplete output: investigation=${hasInvestigation}, results=${hasResults}, verdict=${hasVerdict}`,
-    });
-  }
-
-  // Log the final decision
-  logToHomeAssistant({
-    agent: 'confirm',
-    level: 'decision',
-    problem: workingDir,
-    answer: result.slice(0, 500),
+  logAgentDecision({
+    agent: "confirm",
+    hookName: HOOK_NAME,
+    decision: isConfirmed ? "CONFIRMED" : "DECLINED",
+    toolName: HOOK_NAME,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: result.output.slice(0, 500),
   });
 
-  return result;
+  return result.output;
 }
