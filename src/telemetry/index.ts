@@ -13,6 +13,7 @@ export {
   setSessionId,
   getSessionId,
   initializeTelemetry,
+  flushTelemetry,
 } from "./client.js";
 
 export { TelemetryQueue } from "./queue.js";

@@ -6,6 +6,8 @@ A TypeScript framework for custom AI agents using the Anthropic API. Agents are 
 2. **PreToolUse Hook** - Multi-layer safety gate with `tool-approve`, `tool-appeal`, `error-acknowledge`, `plan-validate`, `style-drift`, and `claude-md-validate` agents
 3. **Stop Hook** - For `intent-validate` agent (detects when AI goes off-track)
 
+See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
+
 ## Agents
 
 The framework implements 12 specialized agents organized into three categories:
@@ -239,6 +241,15 @@ AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
 
 # Optional - set by Claude Code automatically
 CLAUDE_PROJECT_DIR=/path/to/project
+
+# Optional - alternative API endpoint (e.g., OpenRouter)
+# ANTHROPIC_BASE_URL=https://openrouter.ai/api
+# ANTHROPIC_AUTH_TOKEN=your-openrouter-api-key
+
+# Optional - telemetry (all three required if enabled)
+# TELEMETRY_HOST_ID=your-host-id
+# TELEMETRY_ENDPOINT=https://your-telemetry-endpoint.com
+# AGENT_FRAMEWORK_API_KEY=your-api-key
 ```
 
 ## Usage

@@ -100,6 +100,31 @@ export class TelemetryClient {
     await this.flush();
   }
 
+  /**
+   * Fire-and-forget flush for process exit.
+   * Initiates the request and allows minimal time for handoff to OS.
+   */
+  flushSync(): void {
+    if (this.queue.isEmpty()) return;
+
+    // Drain ALL events (not just batch size)
+    const events = this.queue.drain(this.config.maxQueueSize);
+    if (events.length === 0) return;
+
+    // Fire-and-forget - initiate request before exit
+    fetch(`${this.config.endpoint}/api/v1/telemetry/batch`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": this.config.apiKey,
+      },
+      body: JSON.stringify({ events }),
+      keepalive: true,
+    }).catch(() => {
+      // Silent failure - telemetry is best-effort
+    });
+  }
+
   getConfig(): Required<TelemetryConfig> {
     return this.config;
   }
@@ -124,6 +149,17 @@ export function trackEvent(
         sessionId: event.sessionId || getSessionId(),
       })
       .catch(() => {});
+  }
+}
+
+/**
+ * Flush telemetry queue before process exit.
+ * Fire-and-forget - does not wait for response.
+ */
+export function flushTelemetry(): void {
+  const client = TelemetryClient.getInstance();
+  if (client) {
+    client.flushSync();
   }
 }
 

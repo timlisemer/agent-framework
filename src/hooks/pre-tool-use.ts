@@ -1,5 +1,5 @@
 import "../utils/load-env.js";
-import { initializeTelemetry } from "../telemetry/index.js";
+import { initializeTelemetry, flushTelemetry } from "../telemetry/index.js";
 initializeTelemetry();
 
 import { type PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
@@ -63,6 +63,19 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
+ * Exit process after flushing telemetry.
+ * Uses a small delay to allow the fetch request to initiate.
+ */
+function exitAfterFlush(code = 0): never {
+  flushTelemetry();
+  setTimeout(() => process.exit(code), 5);
+  // TypeScript needs infinite loop for 'never' type - setTimeout will exit
+  while (true) {
+    // This never executes
+  }
+}
+
+/**
  * Output structured JSON to allow the tool call and exit.
  */
 function outputAllow(): never {
@@ -74,7 +87,7 @@ function outputAllow(): never {
       },
     })
   );
-  process.exit(0);
+  exitAfterFlush(0);
 }
 
 /**
@@ -92,7 +105,7 @@ function outputDeny(reason: string): never {
       },
     })
   );
-  process.exit(0);
+  exitAfterFlush(0);
 }
 
 

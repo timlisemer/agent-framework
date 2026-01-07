@@ -1,5 +1,5 @@
 import "../utils/load-env.js";
-import { initializeTelemetry } from "../telemetry/index.js";
+import { initializeTelemetry, flushTelemetry } from "../telemetry/index.js";
 initializeTelemetry();
 
 import { type StopHookInput } from "@anthropic-ai/claude-agent-sdk";
@@ -22,6 +22,15 @@ import {
  * If detected, it injects a system message to course-correct the AI.
  */
 
+/**
+ * Exit process after flushing telemetry.
+ * Uses a small delay to allow the fetch request to initiate.
+ */
+function exitAfterFlush(code = 0): void {
+  flushTelemetry();
+  setTimeout(() => process.exit(code), 5);
+}
+
 async function main() {
   const input: StopHookInput = await new Promise((resolve) => {
     let data = "";
@@ -35,7 +44,8 @@ async function main() {
 
   if (rewound) {
     // After rewind, don't inject errors - let AI continue fresh
-    process.exit(0);
+    exitAfterFlush(0);
+    return;
   }
 
   const result = await checkStopIntentAlignment(
@@ -51,13 +61,14 @@ async function main() {
         reason: result.systemMessage,
       })
     );
-    process.exit(0);
+    exitAfterFlush(0);
+    return;
   }
 
-  process.exit(0);
+  exitAfterFlush(0);
 }
 
 main().catch((err) => {
   console.error(err);
-  process.exit(0);
+  exitAfterFlush(0);
 });

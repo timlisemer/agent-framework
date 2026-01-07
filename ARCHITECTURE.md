@@ -334,6 +334,10 @@ Standard configurations for different use cases:
 | `ANTHROPIC_AUTH_TOKEN` | No | Alternative auth token |
 | `ANTHROPIC_BASE_URL` | No | Custom API endpoint |
 | `CLAUDE_PROJECT_DIR` | Auto | Set by Claude Code |
+| `AGENT_FRAMEWORK_ROOT` | Yes (hooks) | Path to agent-framework directory |
+| `TELEMETRY_HOST_ID` | No | Telemetry host identifier |
+| `TELEMETRY_ENDPOINT` | No | Telemetry service URL |
+| `AGENT_FRAMEWORK_API_KEY` | No | Telemetry API key |
 
 ## Temporary Files
 
