@@ -66,12 +66,8 @@ export async function recordUserMessage(msg: string, index: number): Promise<voi
   data.userMessages.push({ hash, snippet, index, timestamp: Date.now() });
 
   // Reset first response flag when a new unique user message is added.
-  // After pushing, length-2 is the previous last message (before we added this one).
-  // If there was no previous message or it differs from current, reset the flag.
-  const previousMessage = data.userMessages[data.userMessages.length - 2];
-  if (!previousMessage || previousMessage.hash !== hash) {
-    data.firstResponseChecked = false;
-  }
+  // Since we already checked for duplicates above, this is always a new message.
+  data.firstResponseChecked = false;
 
   await cacheManager.save(data);
 }

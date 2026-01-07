@@ -118,7 +118,7 @@ Input: ${JSON.stringify(toolInput)}`,
   if (parsed.approved) {
     // Mark issue as acknowledged so future checks skip it
     if (issueMatch) {
-      markErrorAcknowledged(issueMatch[0]);
+      await markErrorAcknowledged(issueMatch[0]);
     }
     logApprove(result, "error-acknowledge", hookName, toolName, workingDir, "direct", "Acknowledged");
     return "OK";

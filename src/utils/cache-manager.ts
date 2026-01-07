@@ -199,32 +199,11 @@ export class CacheManager<T> {
 
   /**
    * Load, modify with callback, and save in one operation.
+   * Uses load() to ensure expiry/max entries are applied consistently.
    */
   async update(fn: (data: T) => T): Promise<void> {
     try {
-      let data: T;
-      try {
-        const raw = await fs.promises.readFile(this.config.filePath, "utf-8");
-        const state: CacheState<T> = JSON.parse(raw);
-
-        // Clear cache if session changed
-        if (
-          this.sessionId &&
-          state.sessionId &&
-          state.sessionId !== this.sessionId
-        ) {
-          data = this.config.defaultData();
-        } else {
-          // Update lastUserMessageHash from file if not set
-          if (!this.lastUserMessageHash && state.lastUserMessageHash) {
-            this.lastUserMessageHash = state.lastUserMessageHash;
-          }
-          data = state.data;
-        }
-      } catch {
-        data = this.config.defaultData();
-      }
-
+      const data = await this.load();
       const updated = fn(data);
       await this.save(updated);
     } catch {

@@ -98,7 +98,7 @@ ${transcript}`,
     {
       maxRetries: 2,
       formatValidator: (text) =>
-        startsWithAny(text, ["UPHOLD", "OVERTURN:", "DENY:", "DENY"]),
+        startsWithAny(text, ["UPHOLD", "OVERTURN: APPROVE"]),
       formatReminder:
         "Reply with EXACTLY: UPHOLD or OVERTURN: APPROVE",
     }

@@ -14,12 +14,17 @@ export interface PendingValidation {
 }
 
 interface PendingValidationData {
-  validation?: PendingValidation;
+  entries: PendingValidation[];
 }
 
 const cacheManager = new CacheManager<PendingValidationData>({
   filePath: "/tmp/claude-pending-validation.json",
-  defaultData: () => ({}),
+  defaultData: () => ({ entries: [] }),
+  expiryMs: PENDING_VALIDATION_EXPIRY_MS,
+  maxEntries: 1,
+  getTimestamp: (e) => (e as PendingValidation).timestamp,
+  getEntries: (d) => d.entries,
+  setEntries: (d, e) => ({ ...d, entries: e as PendingValidation[] }),
 });
 
 /**
@@ -36,22 +41,18 @@ export function setValidationSession(transcriptPath: string): void {
 /**
  * Check if there's a failed validation from a previous tool call.
  * Returns the failed validation if one exists and hasn't expired.
+ * Expiry is handled automatically by CacheManager.
  *
  * @returns The failed validation or null if none exists
  */
 export async function checkPendingValidation(): Promise<PendingValidation | null> {
   const data = await cacheManager.load();
-  if (!data.validation) return null;
-
-  // Check expiry
-  if (Date.now() - data.validation.timestamp > PENDING_VALIDATION_EXPIRY_MS) {
-    await clearPendingValidation();
-    return null;
-  }
+  const validation = data.entries[0];
+  if (!validation) return null;
 
   // Only return if failed (passed validations don't need action)
-  if (data.validation.status === "failed") {
-    return data.validation;
+  if (validation.status === "failed") {
+    return validation;
   }
 
   return null;
@@ -70,7 +71,7 @@ export async function writePendingValidation(
     timestamp: Date.now(),
   };
 
-  await cacheManager.update(() => ({ validation: fullValidation }));
+  await cacheManager.update(() => ({ entries: [fullValidation] }));
 }
 
 /**
@@ -78,23 +79,17 @@ export async function writePendingValidation(
  * Called after reporting a failure to the user or when user sends new message.
  */
 export async function clearPendingValidation(): Promise<void> {
-  await cacheManager.update(() => ({}));
+  await cacheManager.update(() => ({ entries: [] }));
 }
 
 /**
  * Check if there's any pending validation (including passed ones).
  * Useful for debugging and status checks.
+ * Expiry is handled automatically by CacheManager.
  *
  * @returns The validation or null if none exists
  */
 export async function getPendingValidationStatus(): Promise<PendingValidation | null> {
   const data = await cacheManager.load();
-  if (!data.validation) return null;
-
-  // Check expiry
-  if (Date.now() - data.validation.timestamp > PENDING_VALIDATION_EXPIRY_MS) {
-    return null;
-  }
-
-  return data.validation;
+  return data.entries[0] ?? null;
 }

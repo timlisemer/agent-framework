@@ -358,7 +358,10 @@ export async function readTranscriptExact(
 
           if (text) {
             // Found the first user message - prepend it if not already there
-            collected.user.unshift({ role: "user", content: text, index: i });
+            const alreadyCollected = collected.user.some((m) => m.index === i);
+            if (!alreadyCollected) {
+              collected.user.unshift({ role: "user", content: text, index: i });
+            }
             break;
           }
         } catch {

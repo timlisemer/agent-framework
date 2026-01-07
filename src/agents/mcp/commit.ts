@@ -42,11 +42,12 @@ function parseCommitResponse(
   if (!sizeMatch) return null;
 
   const size = sizeMatch[1].toUpperCase();
-  const messageMatch = response.match(/MESSAGE:\s*\n([\s\S]+?)(?:\n\n|$)/);
+  // Capture everything after MESSAGE: to the end, allowing blank lines in LARGE commits
+  const messageMatch = response.match(/MESSAGE:\s*\n([\s\S]+)$/);
   let message = messageMatch ? messageMatch[1].trim() : "";
 
   if (!message) {
-    const fallbackMatch = response.match(/MESSAGE:\s*([\s\S]+?)(?:\n\n|$)/);
+    const fallbackMatch = response.match(/MESSAGE:\s*([\s\S]+)$/);
     message = fallbackMatch ? fallbackMatch[1].trim() : "";
   }
 
