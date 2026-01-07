@@ -38,11 +38,11 @@ export function setStrictModeSession(transcriptPath: string): void {
  * @param toolInput - Input parameters for the tool
  * @returns Object with strict flag and optional reason
  */
-export function shouldUseStrictMode(
+export async function shouldUseStrictMode(
   toolName: string,
   toolInput: unknown
-): { strict: boolean; reason?: string } {
-  const data = cacheManager.load();
+): Promise<{ strict: boolean; reason?: string }> {
+  const data = await cacheManager.load();
 
   // Rule 1: Session start - first N tools always strict
   if (data.sessionToolCount < SESSION_START_STRICT_COUNT) {
@@ -77,37 +77,37 @@ export function shouldUseStrictMode(
  * Record that a tool was denied.
  * Next tool call will use strict mode (one-shot).
  */
-export function recordDenial(): void {
-  cacheManager.update((d) => ({ ...d, lastDenied: true }));
+export async function recordDenial(): Promise<void> {
+  await cacheManager.update((d) => ({ ...d, lastDenied: true }));
 }
 
 /**
  * Record that a tool had an error (e.g., async validation failure).
  * Next tool call will use strict mode (one-shot).
  */
-export function recordError(): void {
-  cacheManager.update((d) => ({ ...d, lastError: true }));
+export async function recordError(): Promise<void> {
+  await cacheManager.update((d) => ({ ...d, lastError: true }));
 }
 
 /**
  * Increment the session tool count.
  * Call this after strict validation passes.
  */
-export function incrementToolCount(): void {
-  cacheManager.update((d) => ({ ...d, sessionToolCount: d.sessionToolCount + 1 }));
+export async function incrementToolCount(): Promise<void> {
+  await cacheManager.update((d) => ({ ...d, sessionToolCount: d.sessionToolCount + 1 }));
 }
 
 /**
  * Clear one-shot flags (lastDenied, lastError).
  * Call this after strict validation completes.
  */
-export function clearOneShots(): void {
-  cacheManager.update((d) => ({ ...d, lastDenied: false, lastError: false }));
+export async function clearOneShots(): Promise<void> {
+  await cacheManager.update((d) => ({ ...d, lastDenied: false, lastError: false }));
 }
 
 /**
  * Get current strict mode data for debugging.
  */
-export function getStrictModeData(): StrictModeData {
-  return cacheManager.load();
+export async function getStrictModeData(): Promise<StrictModeData> {
+  return await cacheManager.load();
 }

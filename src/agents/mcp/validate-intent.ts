@@ -69,7 +69,7 @@ ALIGNED: No code changes to evaluate`;
   // Step 3: Find and read plan file
   let planContent = "(no plan file for this session)";
   try {
-    const plan = readPlanContent(transcriptPath);
+    const plan = await readPlanContent(transcriptPath);
     if (plan) {
       planContent = plan;
     }

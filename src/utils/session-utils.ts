@@ -27,9 +27,9 @@ interface SessionMetadata {
  * Extract the slug from a session JSONL file.
  * Reads the first few lines to find the slug field.
  */
-export function extractSlugFromSession(transcriptPath: string): string | null {
+export async function extractSlugFromSession(transcriptPath: string): Promise<string | null> {
   try {
-    const content = fs.readFileSync(transcriptPath, "utf-8");
+    const content = await fs.promises.readFile(transcriptPath, "utf-8");
     const lines = content.split("\n").filter(Boolean).slice(0, 10);
 
     for (const line of lines) {
@@ -52,28 +52,30 @@ export function extractSlugFromSession(transcriptPath: string): string | null {
  * Resolve the plan file path from transcript path.
  * Returns null if no plan exists for this session.
  */
-export function resolvePlanPath(transcriptPath: string): string | null {
-  const slug = extractSlugFromSession(transcriptPath);
+export async function resolvePlanPath(transcriptPath: string): Promise<string | null> {
+  const slug = await extractSlugFromSession(transcriptPath);
   if (!slug) return null;
 
   const planPath = path.join(os.homedir(), ".claude", "plans", `${slug}.md`);
 
-  if (fs.existsSync(planPath)) {
+  try {
+    await fs.promises.access(planPath);
     return planPath;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 /**
  * Read plan file content.
  * Returns null if plan doesn't exist.
  */
-export function readPlanContent(transcriptPath: string): string | null {
-  const planPath = resolvePlanPath(transcriptPath);
+export async function readPlanContent(transcriptPath: string): Promise<string | null> {
+  const planPath = await resolvePlanPath(transcriptPath);
   if (!planPath) return null;
 
   try {
-    return fs.readFileSync(planPath, "utf-8");
+    return await fs.promises.readFile(planPath, "utf-8");
   } catch {
     return null;
   }

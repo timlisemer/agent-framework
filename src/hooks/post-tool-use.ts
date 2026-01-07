@@ -14,7 +14,7 @@ async function main() {
   });
 
   // Clear error acknowledgment cache on ANY successful tool
-  clearAckCache();
+  await clearAckCache();
 
   process.exit(0);
 }

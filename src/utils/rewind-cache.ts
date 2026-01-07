@@ -38,10 +38,10 @@ export function setRewindSession(transcriptPath: string): void {
  * Clear ALL caches (ack, denial, rewind).
  * Called when rewind is detected.
  */
-export function invalidateAllCaches(): void {
-  clearAckCache();
-  clearDenialCache();
-  cacheManager.clear();
+export async function invalidateAllCaches(): Promise<void> {
+  await clearAckCache();
+  await clearDenialCache();
+  await cacheManager.clear();
 }
 
 /**
@@ -51,10 +51,10 @@ export function invalidateAllCaches(): void {
  * @param msg - The user message content
  * @param index - The transcript line index
  */
-export function recordUserMessage(msg: string, index: number): void {
+export async function recordUserMessage(msg: string, index: number): Promise<void> {
   if (!msg) return;
 
-  const data = cacheManager.load();
+  const data = await cacheManager.load();
   const hash = hashString(msg);
   const snippet = msg.slice(0, 100);
 
@@ -73,7 +73,7 @@ export function recordUserMessage(msg: string, index: number): void {
     data.firstResponseChecked = false;
   }
 
-  cacheManager.save(data);
+  await cacheManager.save(data);
 }
 
 /**
@@ -84,7 +84,7 @@ export function recordUserMessage(msg: string, index: number): void {
  * @returns true if rewind detected (caches cleared), false otherwise
  */
 export async function detectRewind(transcriptPath: string): Promise<boolean> {
-  const data = cacheManager.load();
+  const data = await cacheManager.load();
 
   // No cached messages - nothing to detect
   if (data.userMessages.length === 0) {
@@ -103,7 +103,7 @@ export async function detectRewind(transcriptPath: string): Promise<boolean> {
   // Check if ANY cached message is missing from transcript
   for (const cached of data.userMessages) {
     if (!transcriptContent.includes(cached.snippet)) {
-      invalidateAllCaches();
+      await invalidateAllCaches();
       return true;
     }
   }
@@ -114,21 +114,21 @@ export async function detectRewind(transcriptPath: string): Promise<boolean> {
 /**
  * Check if first response intent has already been checked for this user turn.
  */
-export function isFirstResponseChecked(): boolean {
-  const data = cacheManager.load();
+export async function isFirstResponseChecked(): Promise<boolean> {
+  const data = await cacheManager.load();
   return data.firstResponseChecked;
 }
 
 /**
  * Mark first response intent as checked for this user turn.
  */
-export function markFirstResponseChecked(): void {
-  cacheManager.update((data) => ({ ...data, firstResponseChecked: true }));
+export async function markFirstResponseChecked(): Promise<void> {
+  await cacheManager.update((data) => ({ ...data, firstResponseChecked: true }));
 }
 
 /**
  * Reset the first response flag (called on rewind or new user message).
  */
-export function resetFirstResponseFlag(): void {
-  cacheManager.update((data) => ({ ...data, firstResponseChecked: false }));
+export async function resetFirstResponseFlag(): Promise<void> {
+  await cacheManager.update((data) => ({ ...data, firstResponseChecked: false }));
 }

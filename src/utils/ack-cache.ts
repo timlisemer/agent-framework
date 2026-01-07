@@ -29,14 +29,14 @@ export function setSession(transcriptPath: string): void {
   cacheManager.setSession(transcriptPath);
 }
 
-export function isErrorAcknowledged(errorSnippet: string): boolean {
-  const data = cacheManager.load();
+export async function isErrorAcknowledged(errorSnippet: string): Promise<boolean> {
+  const data = await cacheManager.load();
   const hash = hashString(errorSnippet);
   return data.entries.some((e) => e.errorHash === hash);
 }
 
-export function markErrorAcknowledged(errorSnippet: string): void {
-  const data = cacheManager.load();
+export async function markErrorAcknowledged(errorSnippet: string): Promise<void> {
+  const data = await cacheManager.load();
   const hash = hashString(errorSnippet);
 
   // Don't duplicate
@@ -47,11 +47,11 @@ export function markErrorAcknowledged(errorSnippet: string): void {
     errorSnippet: errorSnippet.slice(0, 100),
     acknowledgedAt: Date.now(),
   });
-  cacheManager.save(data);
+  await cacheManager.save(data);
 }
 
-export function clearAckCache(): void {
-  cacheManager.clear();
+export async function clearAckCache(): Promise<void> {
+  await cacheManager.clear();
 }
 
 /**
@@ -60,6 +60,6 @@ export function clearAckCache(): void {
  *
  * Call this at the start of pre-tool-use hook.
  */
-export function checkUserInteraction(lastUserMessage: string | undefined): void {
-  cacheManager.checkUserMessage(lastUserMessage);
+export async function checkUserInteraction(lastUserMessage: string | undefined): Promise<void> {
+  await cacheManager.checkUserMessage(lastUserMessage);
 }

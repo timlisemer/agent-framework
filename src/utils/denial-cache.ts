@@ -35,15 +35,15 @@ export function setDenialSession(transcriptPath: string): void {
  *
  * Call this at the start of pre-tool-use hook.
  */
-export function checkDenialUserInteraction(lastUserMessage: string | undefined): void {
-  cacheManager.checkUserMessage(lastUserMessage);
+export async function checkDenialUserInteraction(lastUserMessage: string | undefined): Promise<void> {
+  await cacheManager.checkUserMessage(lastUserMessage);
 }
 
 /**
  * Load denial entries, cleaning expired ones.
  */
-export function loadDenials(): Map<string, { count: number; timestamp: number }> {
-  const data = cacheManager.load();
+export async function loadDenials(): Promise<Map<string, { count: number; timestamp: number }>> {
+  const data = await cacheManager.load();
   const map = new Map<string, { count: number; timestamp: number }>();
   for (const entry of data.entries) {
     map.set(entry.pattern, { count: entry.count, timestamp: entry.timestamp });
@@ -54,8 +54,8 @@ export function loadDenials(): Map<string, { count: number; timestamp: number }>
 /**
  * Record a denial for a pattern. Returns the updated count.
  */
-export function recordDenial(pattern: string): number {
-  const data = cacheManager.load();
+export async function recordDenial(pattern: string): Promise<number> {
+  const data = await cacheManager.load();
   const existing = data.entries.find((e) => e.pattern === pattern);
 
   if (existing) {
@@ -69,15 +69,15 @@ export function recordDenial(pattern: string): number {
     });
   }
 
-  cacheManager.save(data);
+  await cacheManager.save(data);
   return existing ? existing.count : 1;
 }
 
 /**
  * Get denial count for a pattern.
  */
-export function getDenialCount(pattern: string): number {
-  const data = cacheManager.load();
+export async function getDenialCount(pattern: string): Promise<number> {
+  const data = await cacheManager.load();
   const entry = data.entries.find((e) => e.pattern === pattern);
   return entry?.count ?? 0;
 }
@@ -85,15 +85,15 @@ export function getDenialCount(pattern: string): number {
 /**
  * Check if pattern has exceeded max similar denials threshold.
  */
-export function isWorkaroundEscalation(pattern: string): boolean {
-  return getDenialCount(pattern) >= MAX_SIMILAR_DENIALS;
+export async function isWorkaroundEscalation(pattern: string): Promise<boolean> {
+  return (await getDenialCount(pattern)) >= MAX_SIMILAR_DENIALS;
 }
 
 /**
  * Clear all denial entries.
  */
-export function clearDenialCache(): void {
-  cacheManager.clear();
+export async function clearDenialCache(): Promise<void> {
+  await cacheManager.clear();
 }
 
 export { MAX_SIMILAR_DENIALS };

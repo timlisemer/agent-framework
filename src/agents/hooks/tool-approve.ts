@@ -87,8 +87,11 @@ export async function checkToolApproval(
   // Load CLAUDE.md if exists (project-specific rules)
   let rules = "";
   const claudeMdPath = path.join(workingDir, "CLAUDE.md");
-  if (fs.existsSync(claudeMdPath)) {
-    rules = fs.readFileSync(claudeMdPath, "utf-8");
+  try {
+    await fs.promises.access(claudeMdPath);
+    rules = await fs.promises.readFile(claudeMdPath, "utf-8");
+  } catch {
+    // No CLAUDE.md, that's fine
   }
 
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput)}`;

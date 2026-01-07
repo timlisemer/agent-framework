@@ -79,7 +79,7 @@ export async function checkErrorAcknowledgment(
 
   // Check if the issue in this transcript was already acknowledged (cached)
   const issueMatch = transcript.match(ISSUE_EXTRACT_PATTERN);
-  if (issueMatch && isErrorAcknowledged(issueMatch[0])) {
+  if (issueMatch && (await isErrorAcknowledged(issueMatch[0]))) {
     return "OK";
   }
 

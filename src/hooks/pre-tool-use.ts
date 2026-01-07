@@ -92,10 +92,9 @@ function outputAllow(): never {
 
 /**
  * Output structured JSON to deny the tool call with a reason and exit.
+ * Note: Caller should call recordStrictDenial() before this if needed.
  */
 function outputDeny(reason: string): never {
-  // Record denial so next tool uses strict mode
-  recordStrictDenial();
   console.log(
     JSON.stringify({
       hookSpecificOutput: {
@@ -251,11 +250,12 @@ async function main() {
 
       if (baseEligible) {
         // Check first-response rule: first tool after user message uses strict
-        if (!isFirstResponseChecked()) {
+        const firstResponseChecked = await isFirstResponseChecked();
+        if (!firstResponseChecked) {
           // Fall through to strict validation
         } else {
           // Check other strict mode rules
-          const strictCheck = shouldUseStrictMode(input.tool_name, input.tool_input);
+          const strictCheck = await shouldUseStrictMode(input.tool_name, input.tool_input);
           if (!strictCheck.strict) {
             // LAZY VALIDATION: Allow immediately, validate async
             spawnAsyncValidator(input.tool_name, filePath, input.transcript_path, input.tool_input);
@@ -272,10 +272,11 @@ async function main() {
   // STEP 2: Check pending validation from previous async validator
   // This catches failures from lazy validation on previous tool calls
   // ============================================================
-  const pendingFailure = checkPendingValidation();
+  const pendingFailure = await checkPendingValidation();
   if (pendingFailure?.status === "failed") {
-    clearPendingValidation(); // Don't block repeatedly
-    recordStrictError(); // Next tool will use strict mode
+    await clearPendingValidation(); // Don't block repeatedly
+    await recordStrictError(); // Next tool will use strict mode
+    await recordStrictDenial();
     outputDeny(`Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`);
   }
 
@@ -345,6 +346,7 @@ async function main() {
     );
 
     if (!appeal.overturned) {
+      await recordStrictDenial();
       outputDeny(denyReason);
     }
     outputAllow();
@@ -361,7 +363,8 @@ async function main() {
   const ACTION_TOOLS = ["Edit", "Write", "NotebookEdit", "Bash", "Agent", "Task"];
 
   // Check if ExitPlanMode was recently approved - skip intent check
-  if (ACTION_TOOLS.includes(input.tool_name) && !isFirstResponseChecked()) {
+  const firstResponseChecked = await isFirstResponseChecked();
+  if (ACTION_TOOLS.includes(input.tool_name) && !firstResponseChecked) {
     const recentForIntent = await readTranscriptExact(
       input.transcript_path,
       RECENT_TOOL_APPROVAL_COUNTS
@@ -373,8 +376,8 @@ async function main() {
     );
     if (hasExitPlanModeApproval) {
       // Clear ALL caches when plan is approved - user approval counts as fresh start
-      invalidateAllCaches();
-      markFirstResponseChecked();
+      await invalidateAllCaches();
+      await markFirstResponseChecked();
     }
   }
 
@@ -389,10 +392,10 @@ async function main() {
   // Clear caches if user has sent a new message (any user interaction = fresh start)
   const lastUserMessage = errorCheckResult.user[errorCheckResult.user.length - 1];
   if (lastUserMessage) {
-    checkUserInteraction(lastUserMessage.content);
-    checkDenialUserInteraction(lastUserMessage.content);
+    await checkUserInteraction(lastUserMessage.content);
+    await checkDenialUserInteraction(lastUserMessage.content);
     // Record user message for rewind detection
-    recordUserMessage(lastUserMessage.content, lastUserMessage.index);
+    await recordUserMessage(lastUserMessage.content, lastUserMessage.index);
   }
 
   // TS Pre-check: Only check TOOL_RESULT lines for error patterns
@@ -426,16 +429,17 @@ async function main() {
 
       if (appeal.overturned) {
         // User approved - cache the error as acknowledged and continue flow
-        markErrorAcknowledged(blockReason);
+        await markErrorAcknowledged(blockReason);
         const originalIssue = errorCheckTranscript.match(
           /error TS\d+[^\n]*|Error:[^\n]*|failed[^\n]*|FAILED[^\n]*/i
         );
         if (originalIssue) {
-          markErrorAcknowledged(originalIssue[0]);
+          await markErrorAcknowledged(originalIssue[0]);
         }
         // Continue to next step
       } else {
         // User did not approve - block
+        await recordStrictDenial();
         outputDeny(`Error acknowledgment required: ${blockReason}`);
       }
     }
@@ -447,9 +451,10 @@ async function main() {
   // TS Pre-check: isFirstResponseChecked() = false + ACTION_TOOLS
   // If triggered: LLM → if block → appealHelper → decide
   // ============================================================
-  if (ACTION_TOOLS.includes(input.tool_name) && !isFirstResponseChecked()) {
+  const currentFirstResponseChecked = await isFirstResponseChecked();
+  if (ACTION_TOOLS.includes(input.tool_name) && !currentFirstResponseChecked) {
     // Mark as checked so we don't run again for subsequent tool calls in same turn
-    markFirstResponseChecked();
+    await markFirstResponseChecked();
 
     // Run intent-alignment LLM agent
     const intentResult = await checkIntentAlignment(
@@ -478,6 +483,7 @@ async function main() {
 
       if (!appeal.overturned) {
         // User did not approve - block
+        await recordStrictDenial();
         outputDeny(`First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`);
       }
       // If overturned, continue to next step
@@ -517,7 +523,7 @@ async function main() {
         }
 
         // Get current plan and conversation context
-        const currentPlan = readPlanContent(input.transcript_path);
+        const currentPlan = await readPlanContent(input.transcript_path);
         const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
         const conversationContext = formatTranscriptResult(planResult);
 
@@ -545,6 +551,7 @@ async function main() {
           );
 
           if (!appeal.overturned) {
+            await recordStrictDenial();
             outputDeny(`Plan drift detected: ${validation.reason}`);
           }
         }
@@ -560,7 +567,7 @@ async function main() {
         // Get current file content (null if doesn't exist)
         let currentContent: string | null = null;
         try {
-          currentContent = fs.readFileSync(filePath, "utf-8");
+          currentContent = await fs.promises.readFile(filePath, "utf-8");
         } catch {
           // File doesn't exist - that's OK for new files
         }
@@ -592,6 +599,7 @@ async function main() {
           );
 
           if (!appeal.overturned) {
+            await recordStrictDenial();
             outputDeny(`CLAUDE.md validation failed: ${validation.reason}`);
           }
         }
@@ -634,6 +642,7 @@ async function main() {
             );
 
             if (!appeal.overturned) {
+              await recordStrictDenial();
               outputDeny(`Style drift detected: ${styleDriftResult.reason}`);
             }
           }
@@ -690,7 +699,7 @@ async function main() {
       let finalReason = decision.reason;
       const pattern = detectWorkaroundPattern(input.tool_name, input.tool_input);
       if (pattern) {
-        const count = recordDenial(pattern);
+        const count = await recordDenial(pattern);
 
         if (count >= MAX_SIMILAR_DENIALS) {
           finalReason += ` CRITICAL: You have attempted ${count} similar workarounds for '${pattern}'. STOP trying alternatives. Either use the approved MCP tool, ask the user for guidance, or acknowledge that this action cannot be performed.`;
@@ -698,15 +707,16 @@ async function main() {
       }
 
       // Output structured JSON to deny and provide feedback to Claude
+      await recordStrictDenial();
       outputDeny(finalReason ?? "Tool denied");
     }
     // Appeal overturned - continue to allow
   }
 
   // Strict validation passed - update state
-  markFirstResponseChecked();
-  incrementToolCount();
-  clearOneShots();
+  await markFirstResponseChecked();
+  await incrementToolCount();
+  await clearOneShots();
 
   // Explicitly allow approved tools
   outputAllow();

@@ -98,7 +98,7 @@ async function main(): Promise<void> {
     if (actionTools.includes(tool)) {
       const intentResult = await checkIntentAlignment(tool, toolInput, transcript, projectDir, "PreToolUse");
       if (!intentResult.approved) {
-        writePendingValidation({
+        await writePendingValidation({
           status: "failed",
           toolName: tool,
           filePath: file,
@@ -114,7 +114,7 @@ async function main(): Promise<void> {
     const ackResult = await checkErrorAcknowledgment(errorTranscript, tool, toolInput, projectDir, transcript, "PreToolUse");
     if (ackResult.startsWith("BLOCK:")) {
       const reason = ackResult.substring(7).trim();
-      writePendingValidation({
+      await writePendingValidation({
         status: "failed",
         toolName: tool,
         filePath: file,
@@ -127,7 +127,7 @@ async function main(): Promise<void> {
     if (tool === "Edit") {
       const styleResult = await checkStyleDrift(tool, toolInput, projectDir, undefined, "PreToolUse");
       if (!styleResult.approved) {
-        writePendingValidation({
+        await writePendingValidation({
           status: "failed",
           toolName: tool,
           filePath: file,
@@ -138,7 +138,7 @@ async function main(): Promise<void> {
     }
 
     // All validations passed
-    writePendingValidation({
+    await writePendingValidation({
       status: "passed",
       toolName: tool,
       filePath: file,
@@ -149,7 +149,7 @@ async function main(): Promise<void> {
     console.error(`[async-validator] Error: ${error instanceof Error ? error.message : String(error)}`);
 
     // Clear any pending validation to avoid blocking
-    clearPendingValidation();
+    await clearPendingValidation();
   }
 }
 

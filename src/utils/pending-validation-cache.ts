@@ -39,13 +39,13 @@ export function setValidationSession(transcriptPath: string): void {
  *
  * @returns The failed validation or null if none exists
  */
-export function checkPendingValidation(): PendingValidation | null {
-  const data = cacheManager.load();
+export async function checkPendingValidation(): Promise<PendingValidation | null> {
+  const data = await cacheManager.load();
   if (!data.validation) return null;
 
   // Check expiry
   if (Date.now() - data.validation.timestamp > PENDING_VALIDATION_EXPIRY_MS) {
-    clearPendingValidation();
+    await clearPendingValidation();
     return null;
   }
 
@@ -62,23 +62,23 @@ export function checkPendingValidation(): PendingValidation | null {
  *
  * @param validation - The validation result to write
  */
-export function writePendingValidation(
+export async function writePendingValidation(
   validation: Omit<PendingValidation, "timestamp">
-): void {
+): Promise<void> {
   const fullValidation: PendingValidation = {
     ...validation,
     timestamp: Date.now(),
   };
 
-  cacheManager.update(() => ({ validation: fullValidation }));
+  await cacheManager.update(() => ({ validation: fullValidation }));
 }
 
 /**
  * Clear the pending validation cache.
  * Called after reporting a failure to the user or when user sends new message.
  */
-export function clearPendingValidation(): void {
-  cacheManager.update(() => ({}));
+export async function clearPendingValidation(): Promise<void> {
+  await cacheManager.update(() => ({}));
 }
 
 /**
@@ -87,8 +87,8 @@ export function clearPendingValidation(): void {
  *
  * @returns The validation or null if none exists
  */
-export function getPendingValidationStatus(): PendingValidation | null {
-  const data = cacheManager.load();
+export async function getPendingValidationStatus(): Promise<PendingValidation | null> {
+  const data = await cacheManager.load();
   if (!data.validation) return null;
 
   // Check expiry
