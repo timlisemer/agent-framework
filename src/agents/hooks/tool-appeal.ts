@@ -77,7 +77,7 @@ export async function appealHelper(
 
   // Run appeal evaluation via unified runner
   const result = await runAgent(
-    { ...TOOL_APPEAL_AGENT },
+    { ...TOOL_APPEAL_AGENT, workingDir },
     {
       prompt: "Review this appeal for a denied tool call.",
       context: `BLOCK REASON: ${originalReason}

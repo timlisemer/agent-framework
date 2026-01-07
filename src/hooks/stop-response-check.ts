@@ -32,10 +32,18 @@ function exitAfterFlush(code = 0): void {
 }
 
 async function main() {
-  const input: StopHookInput = await new Promise((resolve) => {
+  const input: StopHookInput = await new Promise((resolve, reject) => {
     let data = "";
+    const timeout = setTimeout(() => reject(new Error("stdin timeout")), 30000);
     process.stdin.on("data", (chunk) => (data += chunk));
-    process.stdin.on("end", () => resolve(JSON.parse(data)));
+    process.stdin.on("end", () => {
+      clearTimeout(timeout);
+      try {
+        resolve(JSON.parse(data));
+      } catch (e) {
+        reject(e);
+      }
+    });
   });
 
   // Set session and check for rewind

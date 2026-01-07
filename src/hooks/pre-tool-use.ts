@@ -63,19 +63,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * Exit process after flushing telemetry.
- * Uses a small delay to allow the fetch request to initiate.
- */
-function exitAfterFlush(code = 0): never {
-  flushTelemetry();
-  setTimeout(() => process.exit(code), 5);
-  // TypeScript needs infinite loop for 'never' type - setTimeout will exit
-  while (true) {
-    // This never executes
-  }
-}
-
-/**
  * Output structured JSON to allow the tool call and exit.
  */
 function outputAllow(): never {
@@ -87,7 +74,8 @@ function outputAllow(): never {
       },
     })
   );
-  exitAfterFlush(0);
+  flushTelemetry();
+  process.exit(0);
 }
 
 /**
@@ -104,7 +92,8 @@ function outputDeny(reason: string): never {
       },
     })
   );
-  exitAfterFlush(0);
+  flushTelemetry();
+  process.exit(0);
 }
 
 
@@ -210,10 +199,18 @@ function spawnAsyncValidator(
 }
 
 async function main() {
-  const input: PreToolUseHookInput = await new Promise((resolve) => {
+  const input: PreToolUseHookInput = await new Promise((resolve, reject) => {
     let data = "";
+    const timeout = setTimeout(() => reject(new Error("stdin timeout")), 30000);
     process.stdin.on("data", (chunk) => (data += chunk));
-    process.stdin.on("end", () => resolve(JSON.parse(data)));
+    process.stdin.on("end", () => {
+      clearTimeout(timeout);
+      try {
+        resolve(JSON.parse(data));
+      } catch (e) {
+        reject(e);
+      }
+    });
   });
 
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();

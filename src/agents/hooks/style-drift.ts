@@ -153,9 +153,11 @@ export async function checkStyleDrift(
   // Load CLAUDE.md for style preferences
   let stylePreferences = "";
   const claudeMdPath = path.join(workingDir, "CLAUDE.md");
-  if (fs.existsSync(claudeMdPath)) {
-    const content = fs.readFileSync(claudeMdPath, "utf-8");
+  try {
+    const content = await fs.promises.readFile(claudeMdPath, "utf-8");
     stylePreferences = extractStylePreferences(content);
+  } catch {
+    // File doesn't exist or read error - use defaults
   }
 
   const toolDescription = `Edit ${file_path}`;
