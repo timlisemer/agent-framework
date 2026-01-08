@@ -49,11 +49,17 @@ server.registerTool(
     title: "Confirm",
     description: "Binary code quality gate. Analyzes git diff and returns CONFIRMED or DECLINED. Cannot ask questions or request context.",
     inputSchema: {
-      working_dir: z.string().optional().describe("Working directory (defaults to cwd)")
+      working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
+      model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Model tier for evaluation (default: opus)"),
+      extra_context: z.string().optional().describe("Additional instructions or areas to focus on")
     }
   },
   async (args) => {
-    const result = await runConfirmAgent(args.working_dir || process.cwd());
+    const result = await runConfirmAgent(
+      args.working_dir || process.cwd(),
+      args.model_tier,
+      args.extra_context
+    );
     return { content: [{ type: "text", text: result }] };
   }
 );
@@ -64,11 +70,17 @@ server.registerTool(
     title: "Commit",
     description: "Generate minimal commit message based on diff and execute git commit (no push).",
     inputSchema: {
-      working_dir: z.string().optional().describe("Working directory (defaults to cwd)")
+      working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
+      model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Passed to confirm agent (default: opus)"),
+      extra_context: z.string().optional().describe("Passed to confirm agent")
     }
   },
   async (args) => {
-    const result = await runCommitAgent(args.working_dir || process.cwd());
+    const result = await runCommitAgent(
+      args.working_dir || process.cwd(),
+      args.model_tier,
+      args.extra_context
+    );
     return { content: [{ type: "text", text: result }] };
   }
 );

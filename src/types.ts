@@ -52,6 +52,24 @@ export function getModelId(tier: ModelTier): string {
   return MODEL_IDS[tier as ModelTierValue];
 }
 
+/**
+ * Parse a tier name string to a branded ModelTier.
+ * Defaults to OPUS if the input is invalid or not provided.
+ */
+export function parseTierName(name?: string): ModelTier {
+  if (!name) return MODEL_TIERS.OPUS;
+  switch (name.toLowerCase()) {
+    case "haiku":
+      return MODEL_TIERS.HAIKU;
+    case "sonnet":
+      return MODEL_TIERS.SONNET;
+    case "opus":
+      return MODEL_TIERS.OPUS;
+    default:
+      return MODEL_TIERS.OPUS;
+  }
+}
+
 // Set SDK environment variables to use our model IDs
 // This ensures internal SDK sub-agents use our configured models
 process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = MODEL_IDS.haiku;

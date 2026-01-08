@@ -16,7 +16,7 @@
  * @module confirm
  */
 
-import { EXECUTION_TYPES } from "../../types.js";
+import { EXECUTION_TYPES, parseTierName } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
@@ -29,9 +29,16 @@ const HOOK_NAME = "mcp__agent-framework__confirm";
  * Run the confirm agent to evaluate code changes.
  *
  * @param workingDir - The project directory to evaluate
+ * @param tierName - Optional model tier (haiku/sonnet/opus, defaults to opus)
+ * @param extraContext - Optional extra instructions for the evaluation
  * @returns Structured verdict with CONFIRMED or DECLINED
  */
-export async function runConfirmAgent(workingDir: string): Promise<string> {
+export async function runConfirmAgent(
+  workingDir: string,
+  tierName?: string,
+  extraContext?: string
+): Promise<string> {
+  const tier = parseTierName(tierName);
   // Step 1: Run check agent first
   const checkResult = await runCheckAgent(workingDir);
 
@@ -58,16 +65,16 @@ DECLINED: check failed with ${errorCount} error(s)`;
   // Step 3: Get git data
   const { status, diff } = getUncommittedChanges(workingDir);
 
-  // Step 4: Run SDK agent
+  // Step 4: Run SDK agent with dynamic tier
   const result = await runAgent(
-    { ...CONFIRM_AGENT, workingDir },
+    { ...CONFIRM_AGENT, tier, workingDir },
     {
       prompt: "Evaluate these code changes:",
       context: `GIT STATUS (files changed):
 ${status || "(no changes)"}
 
 GIT DIFF (all uncommitted changes):
-${diff || "(no diff)"}`,
+${diff || "(no diff)"}${extraContext ? `\n\nUSER INSTRUCTIONS:\n${extraContext}` : ""}`,
     }
   );
 

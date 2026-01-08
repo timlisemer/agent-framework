@@ -60,17 +60,23 @@ function parseCommitResponse(
  * Run the commit agent to generate and execute a git commit.
  *
  * @param workingDir - The project directory to commit
+ * @param confirmTierName - Passed through to confirm agent (does not affect commit agent tier)
+ * @param confirmExtraContext - Passed through to confirm agent
  * @returns Result with confirm output, message size, and commit hash
  */
-export async function runCommitAgent(workingDir: string): Promise<string> {
+export async function runCommitAgent(
+  workingDir: string,
+  confirmTierName?: string,
+  confirmExtraContext?: string
+): Promise<string> {
   const { status, diff, diffStat } = getUncommittedChanges(workingDir);
 
   if (!status.trim()) {
     return "SKIPPED: nothing to commit";
   }
 
-  // Confirm changes before generating commit message
-  const confirmResult = await runConfirmAgent(workingDir);
+  // Confirm changes before generating commit message (pass through tier/context)
+  const confirmResult = await runConfirmAgent(workingDir, confirmTierName, confirmExtraContext);
   if (confirmResult.includes("DECLINED")) {
     return confirmResult;
   }
