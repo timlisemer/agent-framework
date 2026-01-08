@@ -32,11 +32,11 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { getModelId, EXECUTION_TYPES, MODEL_TIERS } from "../../types.js";
+import { getModelId, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { STYLE_DRIFT_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 
 /**
@@ -129,19 +129,13 @@ export async function checkStyleDrift(
 ): Promise<{ approved: boolean; reason?: string }> {
   // Only check Edit tool (has old/new comparison)
   if (toolName !== "Edit") {
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "style-drift", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Non-Edit tool"
-    );
+    logFastPathApproval("style-drift", hookName, toolName, workingDir, "Non-Edit tool");
     return { approved: true };
   }
 
   // Validate input structure
   if (!isEditToolInput(toolInput)) {
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "style-drift", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Invalid input structure"
-    );
+    logFastPathApproval("style-drift", hookName, toolName, workingDir, "Invalid input structure");
     return { approved: true };
   }
 
@@ -150,19 +144,13 @@ export async function checkStyleDrift(
   // Early exits - not style drift scenarios
   if (!old_string.trim()) {
     // Insertion (new code) - always approve
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "style-drift", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Insertion (new code)"
-    );
+    logFastPathApproval("style-drift", hookName, toolName, workingDir, "Insertion (new code)");
     return { approved: true };
   }
 
   if (!new_string.trim()) {
     // Deletion - functional change, always approve
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "style-drift", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Deletion"
-    );
+    logFastPathApproval("style-drift", hookName, toolName, workingDir, "Deletion");
     return { approved: true };
   }
 

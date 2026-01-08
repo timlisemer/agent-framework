@@ -8,10 +8,9 @@
  */
 
 import { EXECUTION_TYPES } from "../../types.js";
-import { runAgent } from "../../utils/agent-runner.js";
+import { runAgentWithTelemetry } from "../../utils/agent-runner.js";
 import { VALIDATE_INTENT_AGENT } from "../../utils/agent-configs.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
-import { logApprove, logDeny } from "../../utils/logger.js";
 import {
   readTranscriptExact,
   formatTranscriptResult,
@@ -78,8 +77,9 @@ ALIGNED: No code changes to evaluate`;
     // No plan is fine
   }
 
-  // Step 4: Run the validation agent
-  const result = await runAgent(
+  // Step 4: Run the validation agent with auto-telemetry
+  // Note: ALIGNED → APPROVE, DRIFTED → DENY via extractDecision()
+  const result = await runAgentWithTelemetry(
     { ...VALIDATE_INTENT_AGENT, workingDir },
     {
       prompt: "Evaluate if the AI followed user intentions:",
@@ -95,32 +95,15 @@ ${diff || "(no diff)"}
 
 PLAN FILE:
 ${planContent}`,
+    },
+    {
+      agent: "validate-intent",
+      hookName: HOOK_NAME,
+      toolName: HOOK_NAME,
+      workingDir,
+      executionType: EXECUTION_TYPES.LLM,
     }
   );
-
-  const isAligned = result.output.includes("ALIGNED");
-
-  if (isAligned) {
-    logApprove(
-      result,
-      "validate-intent",
-      HOOK_NAME,
-      HOOK_NAME,
-      workingDir,
-      EXECUTION_TYPES.LLM,
-      result.output.slice(0, 500)
-    );
-  } else {
-    logDeny(
-      result,
-      "validate-intent",
-      HOOK_NAME,
-      HOOK_NAME,
-      workingDir,
-      EXECUTION_TYPES.LLM,
-      result.output.slice(0, 500)
-    );
-  }
 
   return result.output;
 }

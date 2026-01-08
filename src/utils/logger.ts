@@ -8,7 +8,13 @@
 import { trackAgentExecution, extractDecision } from "./telemetry-tracker.js";
 import { getExecutionMode } from "./execution-context.js";
 import type { DecisionType } from "../telemetry/types.js";
-import type { ModelTier, ExecutionType } from "../types.js";
+import {
+  MODEL_TIERS,
+  EXECUTION_TYPES,
+  getModelId,
+  type ModelTier,
+  type ExecutionType,
+} from "../types.js";
 import type { AgentExecutionResult } from "./agent-runner.js";
 
 /**
@@ -242,6 +248,56 @@ export function logError(
     errorCount: result.errorCount,
     decisionReason: reason,
   });
+}
+
+/**
+ * Log a fast-path approval for TypeScript-only decisions.
+ *
+ * Use this for early-exit approvals where no LLM was called:
+ * - Subagent skips
+ * - Empty edit approvals
+ * - Trusted file fast-paths
+ * - Low-risk tool bypasses
+ *
+ * Creates a synthetic AgentExecutionResult with zero latency
+ * and logs it as an APPROVE with TYPESCRIPT execution type.
+ *
+ * @example
+ * ```typescript
+ * // Instead of:
+ * logApprove(
+ *   { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0,
+ *     modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+ *   "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Subagent skip"
+ * );
+ *
+ * // Use:
+ * logFastPathApproval("response-align", hookName, toolName, workingDir, "Subagent skip");
+ * ```
+ */
+export function logFastPathApproval(
+  agent: string,
+  hookName: string,
+  toolName: string,
+  workingDir: string,
+  reason: string
+): void {
+  logApprove(
+    {
+      output: "APPROVE",
+      latencyMs: 0,
+      success: true,
+      errorCount: 0,
+      modelTier: MODEL_TIERS.HAIKU,
+      modelName: getModelId(MODEL_TIERS.HAIKU),
+    },
+    agent,
+    hookName,
+    toolName,
+    workingDir,
+    EXECUTION_TYPES.TYPESCRIPT,
+    reason
+  );
 }
 
 // Re-export for convenience

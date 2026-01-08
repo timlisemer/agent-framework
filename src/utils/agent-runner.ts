@@ -74,8 +74,9 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { getAnthropicClient } from "./anthropic-client.js";
-import { getModelId, type ModelTier } from "../types.js";
+import { getModelId, type ModelTier, type ExecutionType } from "../types.js";
 import { extractTextFromResponse } from "./response-parser.js";
+import { logAgentDecision, extractDecision } from "./logger.js";
 
 /**
  * Read-only tools available to SDK mode agents.
@@ -587,4 +588,96 @@ export async function runAgentWithRetry(
     success: true,
     errorCount: totalErrorCount,
   };
+}
+
+/**
+ * Context required for automatic telemetry logging.
+ *
+ * This provides the hook/tool context that the agent runner cannot
+ * infer on its own. Combined with AgentExecutionResult metadata,
+ * this gives complete telemetry data.
+ */
+export interface TelemetryContext {
+  /** Agent name (e.g., "tool-approve", "commit") */
+  agent: string;
+  /** Hook or MCP tool name */
+  hookName: string;
+  /** Tool being evaluated or MCP tool itself */
+  toolName: string;
+  /** Working directory path */
+  workingDir: string;
+  /** Execution type - whether LLM was called or pure TypeScript */
+  executionType: ExecutionType;
+  /** Optional custom reason (defaults to output.slice(0, 1000)) */
+  decisionReason?: string;
+}
+
+/**
+ * Run an agent with automatic telemetry logging.
+ *
+ * This is the preferred entry point when you want telemetry to be
+ * handled automatically. It wraps runAgent() and logs the decision
+ * based on the agent's output, making it impossible to forget telemetry.
+ *
+ * ## Decision Extraction
+ *
+ * The decision is automatically extracted from the agent's output using
+ * extractDecision(), which recognizes common patterns like:
+ * - APPROVE, OK, ALIGNED, SUCCESS → "APPROVE"
+ * - DENY, DENIED, BLOCK, UPHOLD → "DENY"
+ * - CONFIRM, DECLINED → "CONFIRM"
+ * - ERROR → "ERROR"
+ *
+ * If no decision is extracted, defaults to "DENY" for safety.
+ *
+ * @param config - Agent configuration (typically from agent-configs.ts)
+ * @param input - Prompt and optional context
+ * @param telemetry - Context for telemetry logging
+ * @returns Execution result with output and metadata
+ *
+ * @example
+ * ```typescript
+ * const result = await runAgentWithTelemetry(
+ *   { ...TOOL_APPROVE_AGENT, workingDir: cwd },
+ *   { prompt: 'Evaluate:', context: toolCall },
+ *   {
+ *     agent: "tool-approve",
+ *     hookName: "PreToolUse",
+ *     toolName: "Bash",
+ *     workingDir: cwd,
+ *     executionType: EXECUTION_TYPES.LLM,
+ *   }
+ * );
+ *
+ * // Telemetry is already logged - just use the result
+ * if (result.output.startsWith("APPROVE")) {
+ *   return { approved: true };
+ * }
+ * ```
+ */
+export async function runAgentWithTelemetry(
+  config: AgentConfig,
+  input: AgentInput,
+  telemetry: TelemetryContext
+): Promise<AgentExecutionResult> {
+  const result = await runAgent(config, input);
+
+  // Auto-extract decision from output (APPROVE/DENY/CONFIRM/ERROR)
+  const decision = extractDecision(result.output) ?? "DENY";
+
+  logAgentDecision({
+    agent: telemetry.agent,
+    hookName: telemetry.hookName,
+    decision,
+    executionType: telemetry.executionType,
+    toolName: telemetry.toolName,
+    workingDir: telemetry.workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: telemetry.decisionReason ?? result.output.slice(0, 1000),
+  });
+
+  return result;
 }

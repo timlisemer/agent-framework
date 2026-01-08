@@ -59,8 +59,8 @@ import {
   clearOneShots,
 } from "../utils/strict-mode-tracker.js";
 import { setExecutionMode } from "../utils/execution-context.js";
-import { EXECUTION_MODES, EXECUTION_TYPES, MODEL_TIERS, getModelId } from "../types.js";
-import { logApprove } from "../utils/logger.js";
+import { EXECUTION_MODES } from "../types.js";
+import { logFastPathApproval } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -260,10 +260,7 @@ async function main() {
             // LAZY VALIDATION: Allow immediately, validate async
             setExecutionMode(EXECUTION_MODES.LAZY);
             spawnAsyncValidator(input.tool_name, filePath, input.transcript_path, input.tool_input);
-            logApprove(
-              { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-              "lazy-validation", "PreToolUse", input.tool_name, projectDir, EXECUTION_TYPES.TYPESCRIPT, "Trusted file fast-path approval"
-            );
+            logFastPathApproval("lazy-validation", "PreToolUse", input.tool_name, projectDir, "Trusted file fast-path approval");
             outputAllow();
           }
           // Strict mode triggered by rules - fall through
@@ -328,10 +325,7 @@ async function main() {
     LOW_RISK_TOOLS.includes(input.tool_name) ||
     input.tool_name.startsWith("mcp__")
   ) {
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "low-risk-bypass", "PreToolUse", input.tool_name, projectDir, EXECUTION_TYPES.TYPESCRIPT, "Low-risk tool auto-approval"
-    );
+    logFastPathApproval("low-risk-bypass", "PreToolUse", input.tool_name, projectDir, "Low-risk tool auto-approval");
     outputAllow();
   }
 
@@ -373,10 +367,7 @@ async function main() {
       await recordStrictDenial();
       outputDeny(denyReason);
     }
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "appeal-overturn", "PreToolUse", input.tool_name, projectDir, EXECUTION_TYPES.LLM, "Appeal overturned - confirm tool"
-    );
+    logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - confirm tool");
     outputAllow();
   }
 
@@ -473,10 +464,7 @@ async function main() {
         if (originalIssue) {
           await markErrorAcknowledged(originalIssue[0]);
         }
-        logApprove(
-          { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-          "appeal-overturn", "PreToolUse", input.tool_name, projectDir, EXECUTION_TYPES.LLM, "Appeal overturned - error-ack"
-        );
+        logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - error-ack");
         // Continue to next step
       } else {
         // User did not approve - block
@@ -528,10 +516,7 @@ async function main() {
         await recordStrictDenial();
         outputDeny(`First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`);
       }
-      logApprove(
-        { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-        "appeal-overturn", "PreToolUse", input.tool_name, projectDir, EXECUTION_TYPES.LLM, "Appeal overturned - response-align"
-      );
+      logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - response-align");
       // If overturned, continue to next step
     }
   }
@@ -600,10 +585,7 @@ async function main() {
             await recordStrictDenial();
             outputDeny(`Plan drift detected: ${validation.reason}`);
           }
-          logApprove(
-            { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-            "appeal-overturn", "PreToolUse", input.tool_name, projectDir, EXECUTION_TYPES.LLM, "Appeal overturned - plan-validate"
-          );
+          logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - plan-validate");
         }
         // Plan validated or appeal overturned - allow write
         outputAllow();
@@ -652,10 +634,7 @@ async function main() {
             await recordStrictDenial();
             outputDeny(`CLAUDE.md validation failed: ${validation.reason}`);
           }
-          logApprove(
-            { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-            "appeal-overturn", "PreToolUse", input.tool_name, projectDir, EXECUTION_TYPES.LLM, "Appeal overturned - claude-md"
-          );
+          logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - claude-md");
         }
         // CLAUDE.md validated or appeal overturned - allow write
         outputAllow();
@@ -699,10 +678,7 @@ async function main() {
               await recordStrictDenial();
               outputDeny(`Style drift detected: ${styleDriftResult.reason}`);
             }
-            logApprove(
-              { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-              "appeal-overturn", "PreToolUse", input.tool_name, projectDir, EXECUTION_TYPES.LLM, "Appeal overturned - style-drift"
-            );
+            logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - style-drift");
           }
         }
 
@@ -776,10 +752,7 @@ async function main() {
       await recordStrictDenial();
       outputDeny(finalReason ?? "Tool denied");
     }
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "appeal-overturn", "PreToolUse", input.tool_name, projectDir, EXECUTION_TYPES.LLM, "Appeal overturned - tool-approve"
-    );
+    logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - tool-approve");
     // Appeal overturned - continue to allow
   }
 

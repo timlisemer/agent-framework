@@ -26,15 +26,14 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { getModelId, MODEL_TIERS, EXECUTION_MODES, EXECUTION_TYPES } from "../../types.js";
+import { getModelId, EXECUTION_MODES, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { TOOL_APPROVE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { getBlacklistHighlights } from "../../utils/command-patterns.js";
 import { setExecutionMode } from "../../utils/execution-context.js";
-import { logApprove, logDeny } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
-import type { AgentExecutionResult } from "../../utils/agent-runner.js";
 
 export interface ToolApprovalOptions {
   /** Skip LLM if no blacklist matches (for lazy mode) */
@@ -72,15 +71,7 @@ export async function checkToolApproval(
   // Lazy mode: skip LLM if no blacklist violations
   if (options?.lazyMode && highlights.length === 0) {
     setExecutionMode(EXECUTION_MODES.LAZY);
-    const lazyResult: AgentExecutionResult = {
-      output: "APPROVE",
-      latencyMs: 0,
-      modelTier: MODEL_TIERS.HAIKU,
-      modelName: getModelId(MODEL_TIERS.HAIKU),
-      success: true,
-      errorCount: 0,
-    };
-    logApprove(lazyResult, "tool-approve", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "No blacklist violations");
+    logFastPathApproval("tool-approve", hookName, toolName, workingDir, "No blacklist violations");
     return { approved: true };
   }
 

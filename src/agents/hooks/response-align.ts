@@ -38,7 +38,7 @@ import { getModelId, MODEL_TIERS, EXECUTION_TYPES, type CheckResult, type StopCh
 import { runAgent, type AgentExecutionResult } from "../../utils/agent-runner.js";
 import { RESPONSE_ALIGN_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
@@ -134,10 +134,7 @@ export async function checkResponseAlignment(
 ): Promise<ResponseAlignmentResult> {
   // Skip response alignment checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Subagent skip"
-    );
+    logFastPathApproval("response-align", hookName, toolName, workingDir, "Subagent skip");
     return { approved: true };
   }
 
@@ -149,10 +146,7 @@ export async function checkResponseAlignment(
 
   if (transcriptResult.user.length === 0) {
     // No user message found - skip check
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "No user message"
-    );
+    logFastPathApproval("response-align", hookName, toolName, workingDir, "No user message");
     return { approved: true };
   }
 
@@ -162,10 +156,7 @@ export async function checkResponseAlignment(
     (tr) => tr.content.includes("User answered") || tr.content.includes("answered Claude's questions") || tr.content.includes("→")
   );
   if (hasUserToolAnswer) {
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Fresh AskUserQuestion answer"
-    );
+    logFastPathApproval("response-align", hookName, toolName, workingDir, "Fresh AskUserQuestion answer");
     return { approved: true };
   }
 

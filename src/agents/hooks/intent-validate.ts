@@ -31,7 +31,6 @@
 import {
   getModelId,
   EXECUTION_TYPES,
-  MODEL_TIERS,
   type OffTopicCheckResult,
   type ConversationContext,
   type UserMessage,
@@ -40,7 +39,7 @@ import {
 import { runAgent } from "../../utils/agent-runner.js";
 import { INTENT_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
@@ -130,10 +129,7 @@ export async function checkForOffTopic(
 ): Promise<OffTopicCheckResult> {
   // Skip off-topic checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.TYPESCRIPT, "Subagent skip"
-    );
+    logFastPathApproval("off-topic-check", hookName, "StopResponse", workingDir, "Subagent skip");
     return { decision: "OK" };
   }
 
@@ -141,10 +137,7 @@ export async function checkForOffTopic(
 
   // No conversation yet - nothing to check
   if (context.userMessages.length === 0 || !context.lastAssistantMessage) {
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.TYPESCRIPT, "No conversation yet"
-    );
+    logFastPathApproval("off-topic-check", hookName, "StopResponse", workingDir, "No conversation yet");
     return {
       decision: "OK",
     };
@@ -198,10 +191,7 @@ ${context.lastAssistantMessage}`,
     return { decision: "OK" };
   } catch {
     // On error, fail open (don't intervene)
-    logApprove(
-      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
-      "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.TYPESCRIPT, "Error path - fail open"
-    );
+    logFastPathApproval("off-topic-check", hookName, "StopResponse", workingDir, "Error path - fail open");
     return {
       decision: "OK",
       feedback: "Check error - skipped",
