@@ -96,6 +96,9 @@ export async function retryUntilValid(
             content: `Invalid format: "${decision}". You are evaluating: ${context}. ${formatReminder}`,
           },
         ],
+        // OpenRouter: request usage/cost data in response
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ...({ usage: { include: true } } as any),
       });
 
       decision = extractTextFromResponse(retryResponse);

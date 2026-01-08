@@ -77,6 +77,7 @@ import { getAnthropicClient } from "./anthropic-client.js";
 import { getModelId, type ModelTier, type ExecutionType } from "../types.js";
 import { extractTextFromResponse } from "./response-parser.js";
 import { logAgentDecision, extractDecision } from "./logger.js";
+import { fetchOpenRouterCost, isOpenRouterEnabled } from "./openrouter-cost.js";
 
 /**
  * Read-only tools available to SDK mode agents.
@@ -353,18 +354,42 @@ async function runDirectAgent(
     });
 
     // Extract usage data from response
-    // OpenRouter uses: prompt_tokens, completion_tokens, total_tokens, cost
-    // Anthropic SDK uses: input_tokens, output_tokens
+    // OpenRouter returns: input_tokens, output_tokens, cache_read_input_tokens
+    // OpenAI-compatible returns: prompt_tokens, completion_tokens, total_tokens, cost
+    // Anthropic SDK returns: input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens
     const rawUsage = (response as unknown as { usage?: Record<string, unknown> })
       .usage as Record<string, unknown> | undefined;
+    let promptTokens = (rawUsage?.prompt_tokens ?? rawUsage?.input_tokens) as number | undefined;
+    let completionTokens = (rawUsage?.completion_tokens ?? rawUsage?.output_tokens) as number | undefined;
+    let cachedTokens = (rawUsage?.cache_read_input_tokens as number | undefined) ??
+      (rawUsage?.prompt_tokens_details as Record<string, unknown> | undefined)?.cached_tokens as number | undefined;
+    let reasoningTokens = (rawUsage?.completion_tokens_details as Record<string, unknown> | undefined)?.reasoning_tokens as number | undefined;
+    let cost = rawUsage?.cost as number | undefined;
+
+    // OpenRouter doesn't return cost in the response - fetch from generation endpoint
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const generationId = (response as any).id as string | undefined;
+    if (isOpenRouterEnabled() && generationId && !cost) {
+      const genData = await fetchOpenRouterCost(generationId);
+      if (genData) {
+        cost = genData.total_cost;
+        // Also get more accurate token counts from generation data
+        promptTokens = genData.native_tokens_prompt ?? promptTokens;
+        completionTokens = genData.native_tokens_completion ?? completionTokens;
+        cachedTokens = genData.native_tokens_cached ?? cachedTokens;
+        reasoningTokens = genData.native_tokens_reasoning ?? reasoningTokens;
+      }
+    }
+
     const usage = rawUsage ? {
-      // Handle both OpenRouter and Anthropic field names
-      promptTokens: (rawUsage.prompt_tokens ?? rawUsage.input_tokens) as number | undefined,
-      completionTokens: (rawUsage.completion_tokens ?? rawUsage.output_tokens) as number | undefined,
-      totalTokens: rawUsage.total_tokens as number | undefined,
-      cachedTokens: (rawUsage.prompt_tokens_details as Record<string, unknown> | undefined)?.cached_tokens as number | undefined,
-      reasoningTokens: (rawUsage.completion_tokens_details as Record<string, unknown> | undefined)?.reasoning_tokens as number | undefined,
-      cost: rawUsage.cost as number | undefined,
+      promptTokens,
+      completionTokens,
+      // Calculate total if not provided
+      totalTokens: (rawUsage.total_tokens as number | undefined) ??
+        (promptTokens && completionTokens ? promptTokens + completionTokens : undefined),
+      cachedTokens,
+      reasoningTokens,
+      cost,
     } : undefined;
 
     return {
@@ -639,6 +664,9 @@ export async function runAgentWithRetry(
             content: `Invalid format: "${decision}". You are evaluating: ${contextDesc}. ${formatReminder}`,
           },
         ],
+        // OpenRouter: request usage/cost data in response
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ...({ usage: { include: true } } as any),
       });
 
       decision = extractTextFromResponse(retryResponse);
