@@ -14,6 +14,7 @@ import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
 import { checkResponseAlignment } from "../agents/hooks/response-align.js";
+import { checkQuestionValidity } from "../agents/hooks/question-validate.js";
 import { detectWorkaroundPattern } from "../utils/command-patterns.js";
 import { markErrorAcknowledged, setSession, checkUserInteraction } from "../utils/ack-cache.js";
 import {
@@ -42,6 +43,7 @@ import {
   ERROR_CHECK_COUNTS,
   PLAN_VALIDATE_COUNTS,
   STYLE_DRIFT_COUNTS,
+  QUESTION_VALIDATE_COUNTS,
 } from "../utils/transcript-presets.js";
 import { isPlanModeActive } from "../utils/plan-mode-detector.js";
 import { isSubagent } from "../utils/subagent-detector.js";
@@ -316,7 +318,6 @@ async function main() {
     // Internal/meta tools (low impact)
     "TodoWrite", // Task list management (internal to Claude)
     "TaskOutput", // Read output from background tasks
-    "AskUserQuestion", // Prompts user for input (safe)
     "ExitPlanMode", // Exit plan mode (internal to Claude)
     "EnterPlanMode", // Enter plan mode (internal to Claude)
     "Skill", // Invoke skills like /commit (user-initiated)
@@ -326,6 +327,48 @@ async function main() {
     input.tool_name.startsWith("mcp__")
   ) {
     logFastPathApproval("low-risk-bypass", "PreToolUse", input.tool_name, projectDir, "Low-risk tool auto-approval");
+    outputAllow();
+  }
+
+  // ============================================================
+  // STEP 4: AskUserQuestion validation
+  // Validates questions before showing to user - catches:
+  // - Questions about unseen content (e.g., plan not displayed)
+  // - Questions user already answered earlier
+  // - Workflow violations (asking implementation questions before plan approved)
+  // ============================================================
+  if (input.tool_name === "AskUserQuestion") {
+    const questionTranscript = await readTranscriptExact(input.transcript_path, QUESTION_VALIDATE_COUNTS);
+    const questionContext = formatTranscriptResult(questionTranscript);
+
+    const validation = await checkQuestionValidity(
+      input.tool_input,
+      questionContext,
+      input.transcript_path,
+      projectDir,
+      "PreToolUse"
+    );
+
+    if (!validation.approved) {
+      // Call appeal helper to check if user context overrides block
+      const appeal = await appealHelper(
+        input.tool_name,
+        `AskUserQuestion: ${JSON.stringify(input.tool_input).slice(0, 200)}`,
+        questionContext,
+        validation.reason || "Question validation failed",
+        projectDir,
+        "PreToolUse",
+        `question-validate blocked: ${validation.reason}`
+      );
+
+      if (!appeal.overturned) {
+        await recordStrictDenial();
+        outputDeny(validation.reason || "Question validation failed - show referenced content first");
+      }
+    }
+
+    // Question validated or appeal overturned - allow
+    logFastPathApproval("question-validate", "PreToolUse", input.tool_name, projectDir, "Question validated");
     outputAllow();
   }
 

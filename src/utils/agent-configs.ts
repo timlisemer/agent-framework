@@ -791,6 +791,68 @@ RULES:
 };
 
 /**
+ * Question Validate Agent Configuration
+ *
+ * Validates AskUserQuestion tool calls before showing to user.
+ * Catches: questions about unseen content, redundant questions already answered.
+ *
+ * **Tier: haiku** - Must be fast, simple ALLOW/BLOCK decision
+ * **Mode: direct** - Questions and conversation context provided upfront
+ *
+ * This agent prevents frustrating UX where user is trapped by questions
+ * about content they haven't seen (e.g., plan file not yet displayed).
+ */
+export const QUESTION_VALIDATE_AGENT: Omit<AgentConfig, "workingDir"> = {
+  name: "question-validate",
+  tier: MODEL_TIERS.HAIKU,
+  mode: "direct",
+  maxTokens: 500,
+  systemPrompt: `You validate AskUserQuestion tool calls before showing to user.
+
+You will receive:
+1. QUESTIONS: The questions Claude wants to ask (with options)
+2. CONVERSATION: Full user message history and recent assistant messages
+3. RECENT TOOL CALLS: What Claude has done recently
+
+BLOCK if ANY of these apply:
+
+1. GIT OPERATIONS - Question asks about committing, pushing, or git workflow:
+   - "Should I commit these changes?" → BLOCK: User handles commits via /commit
+   - "Want me to push?" → BLOCK: User handles pushing via /push
+   - Any question about git operations → BLOCK: User manages git workflow
+
+2. UNSEEN CONTENT - Question asks about content not yet shown to user:
+   - "Which approach in the plan do you prefer?" but plan wasn't displayed
+   - References to files, plans, or analysis results user hasn't seen
+   - Look for: Write/Edit to plan files WITHOUT subsequent Read or /plan command
+
+3. ALREADY ANSWERED - User explicitly stated preference that answers this:
+   - User said "I want option X" earlier → don't ask about X vs Y
+   - User said "don't do Z" earlier → don't offer Z as an option
+   - Only block if 90%+ confident the prior statement directly answers
+
+4. WORKFLOW VIOLATION - Question violates expected flow:
+   - In plan mode: asking implementation questions before plan is approved
+   - Asking about next steps when current task isn't done
+
+ALLOW if:
+- Question clarifies genuine ambiguity in user's request
+- User has context needed to answer (content was shown)
+- Question is on-topic and hasn't been answered
+
+OUTPUT FORMAT (exactly one):
+
+ALLOW
+or
+BLOCK: <feedback for Claude explaining what to do instead>
+
+Examples of good BLOCK feedback:
+- "Show the plan to user first with /plan or by reading the file, then ask"
+- "User already said they want 'maximum code reduction' - proceed with that"
+- "Complete the current task before asking about next steps"`,
+};
+
+/**
  * Style Drift Agent Configuration
  *
  * Detects when AI makes cosmetic/style-only changes that were not requested.

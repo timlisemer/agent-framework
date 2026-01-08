@@ -142,3 +142,20 @@ export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
 export const RECENT_TOOL_APPROVAL_COUNTS: TranscriptReadOptions = {
   counts: { toolResult: 10 },
 };
+
+/**
+ * For question validation (AskUserQuestion tool).
+ *
+ * ALL user messages - to find if user already answered the question.
+ * Recent assistant messages - to check if referenced content was shown.
+ * Recent tool results - to see what Claude has done (Write to plan, etc.).
+ */
+export const QUESTION_VALIDATE_COUNTS: TranscriptReadOptions = {
+  counts: { user: ALL, assistant: 5, toolResult: 10 },
+  includeFirstUserMessage: true,
+  toolResultOptions: {
+    trim: true,
+    maxLines: 30,
+    excludeToolNames: ["Task", "Agent", "TaskOutput"],
+  },
+};
