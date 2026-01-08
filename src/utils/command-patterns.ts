@@ -44,6 +44,9 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
 
   // Nix formatting - should use check tool
   { pattern: /\balejandra\b/, name: 'alejandra', alternative: 'Use mcp__agent-framework__check' },
+
+  // SSH remote execution
+  { pattern: /\bssh\s+/, name: 'ssh', alternative: 'Remote execution denied' },
 ];
 
 /**

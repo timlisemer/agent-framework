@@ -41,7 +41,7 @@ export const ERROR_CHECK_COUNTS: TranscriptReadOptions = {
  * Includes first user message to capture initial request context.
  */
 export const APPEAL_COUNTS: TranscriptReadOptions = {
-  counts: { user: 10, assistant: 10 },
+  counts: { user: ALL, assistant: 10 },
   includeFirstUserMessage: true,
 };
 

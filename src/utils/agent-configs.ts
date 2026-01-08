@@ -373,6 +373,10 @@ sqlite3: APPROVE only for read-only operations.
 11. curl/wget commands (network requests)
     - DENY by default (requires explicit user permission)
 
+12. ssh commands (remote execution)
+    - DENY: ssh <host> <command>
+    - AI tools (Read, Grep, Glob) cannot operate over SSH
+
 ===== OUTPUT FORMAT (STRICT) =====
 Your response MUST start with EXACTLY one of:
 

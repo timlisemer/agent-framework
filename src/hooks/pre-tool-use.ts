@@ -38,9 +38,9 @@ import {
   hasErrorPatterns,
 } from "../utils/transcript.js";
 import {
+  APPEAL_COUNTS,
   ERROR_CHECK_COUNTS,
   PLAN_VALIDATE_COUNTS,
-  RECENT_TOOL_APPROVAL_COUNTS,
   STYLE_DRIFT_COUNTS,
 } from "../utils/transcript-presets.js";
 import { isPlanModeActive } from "../utils/plan-mode-detector.js";
@@ -328,7 +328,7 @@ async function main() {
       "Confirm requires explicit user approval. Use /commit or explicitly request confirm.";
 
     // Get transcript for appeal
-    const transcriptResult = await readTranscriptExact(input.transcript_path, RECENT_TOOL_APPROVAL_COUNTS);
+    const transcriptResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
     const transcript = formatTranscriptResult(transcriptResult);
 
     // Call appeal helper to check if user approved
@@ -364,7 +364,7 @@ async function main() {
   if (ACTION_TOOLS.includes(input.tool_name) && !firstResponseChecked) {
     const recentForIntent = await readTranscriptExact(
       input.transcript_path,
-      RECENT_TOOL_APPROVAL_COUNTS
+      APPEAL_COUNTS
     );
     const hasExitPlanModeApproval = recentForIntent.toolResult.some(
       (r) =>
@@ -465,7 +465,7 @@ async function main() {
 
     if (!intentResult.approved) {
       // Get transcript for appeal
-      const intentTranscriptResult = await readTranscriptExact(input.transcript_path, RECENT_TOOL_APPROVAL_COUNTS);
+      const intentTranscriptResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
       const intentTranscript = formatTranscriptResult(intentTranscriptResult);
 
       // Call appeal helper
@@ -509,7 +509,7 @@ async function main() {
         // Skip validation if ExitPlanMode was recently approved
         const recentContext = await readTranscriptExact(
           input.transcript_path,
-          RECENT_TOOL_APPROVAL_COUNTS
+          APPEAL_COUNTS
         );
         const hasExitPlanModeApproval = recentContext.toolResult.some(
           (r) =>
@@ -582,7 +582,7 @@ async function main() {
 
         if (!validation.approved) {
           // Get transcript for appeal
-          const mdTranscriptResult = await readTranscriptExact(input.transcript_path, RECENT_TOOL_APPROVAL_COUNTS);
+          const mdTranscriptResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
           const mdTranscript = formatTranscriptResult(mdTranscriptResult);
 
           // Call appeal helper
@@ -667,6 +667,14 @@ async function main() {
   const subagent = isSubagent(input.transcript_path);
   const lazyMode = !planMode || subagent; // Lazy mode when not in plan mode, or is subagent
 
+  // Block ExitPlanMode if plan file is empty
+  if (input.tool_name === "ExitPlanMode") {
+    const planContent = await readPlanContent(input.transcript_path);
+    if (!planContent || planContent.trim() === "") {
+      outputDeny("Cannot exit plan mode without a plan. Write your plan to the plan file first.");
+    }
+  }
+
   // Run tool-approve LLM agent with lazy mode option
   const decision = await checkToolApproval(
     input.tool_name,
@@ -678,7 +686,7 @@ async function main() {
 
   if (!decision.approved) {
     // Get transcript for appeal
-    const approveTranscriptResult = await readTranscriptExact(input.transcript_path, RECENT_TOOL_APPROVAL_COUNTS);
+    const approveTranscriptResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
     const approveTranscript = formatTranscriptResult(approveTranscriptResult);
 
     // Call appeal helper

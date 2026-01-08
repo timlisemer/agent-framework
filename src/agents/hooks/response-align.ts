@@ -504,7 +504,7 @@ export async function checkStopResponseAlignment(
         approved: false,
         reason: "Plain text plan approval detected",
         systemMessage:
-          "Do not ask for plan approval in plain text. Use the ExitPlanMode tool to present the plan with structured approval options.",
+          "Do not ask for plan approval in plain text. Write your plan to the plan file, then exit plan mode using the ExitPlanMode tool.",
       };
     } else if (classifyResult.classification === "QUESTION") {
       logDeny(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, "Plain text question detected");
