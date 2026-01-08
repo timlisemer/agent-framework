@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 description: Commit staged changes and push to remote (user)
 allowed-tools: mcp__agent-framework__commit, mcp__agent-framework__push
 ---

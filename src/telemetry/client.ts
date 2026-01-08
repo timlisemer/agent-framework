@@ -1,6 +1,12 @@
 import "../utils/load-env.js";
+import { fork } from "child_process";
+import * as path from "path";
+import { fileURLToPath } from "url";
 import type { TelemetryConfig, TelemetryEvent } from "./types.js";
 import { TelemetryQueue } from "./queue.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Master switch to disable all telemetry.
@@ -92,8 +98,8 @@ export class TelemetryClient {
       }
     } catch (error) {
       events.forEach((e) => this.queue.enqueue(e));
-      if (error instanceof Error && error.name !== "TimeoutError") {
-        console.error(`[Telemetry] Network error: ${error.message}`);
+      if (error instanceof Error) {
+        console.error(`[Telemetry] ${error.name === "TimeoutError" ? "Timeout" : "Network"} error: ${error.message}`);
       }
     }
   }
@@ -108,7 +114,8 @@ export class TelemetryClient {
 
   /**
    * Fire-and-forget flush for process exit.
-   * Initiates the request and allows minimal time for handoff to OS.
+   * Spawns a detached child process to send telemetry, ensuring the request
+   * completes even after the parent process exits.
    */
   flushSync(): void {
     if (this.queue.isEmpty()) return;
@@ -117,18 +124,30 @@ export class TelemetryClient {
     const events = this.queue.drain(this.config.maxQueueSize);
     if (events.length === 0) return;
 
-    // Fire-and-forget - initiate request before exit
-    fetch(`${this.config.endpoint}/api/v1/telemetry/batch`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": this.config.apiKey,
-      },
-      body: JSON.stringify({ events }),
-      keepalive: true,
-    }).catch(() => {
-      // Silent failure - telemetry is best-effort
-    });
+    // Spawn detached child process to send telemetry
+    const senderPath = path.join(__dirname, "../utils/telemetry-sender.js");
+
+    try {
+      const child = fork(
+        senderPath,
+        [JSON.stringify(events), this.config.endpoint, this.config.apiKey],
+        { detached: true, stdio: "ignore" }
+      );
+      child.unref(); // Allow parent to exit immediately
+    } catch (error) {
+      // Fallback to fire-and-forget fetch (best effort)
+      fetch(`${this.config.endpoint}/api/v1/telemetry/batch`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": this.config.apiKey,
+        },
+        body: JSON.stringify({ events }),
+        keepalive: true,
+      }).catch((e) => {
+        console.error("[Telemetry] Flush error:", e instanceof Error ? e.message : e);
+      });
+    }
   }
 
   getConfig(): Required<TelemetryConfig> {
@@ -156,7 +175,7 @@ export function trackEvent(
         ...event,
         sessionId: event.sessionId || getSessionId(),
       })
-      .catch(() => {});
+      .catch((e) => console.error("[Telemetry] Track error:", e instanceof Error ? e.message : e));
   }
 }
 

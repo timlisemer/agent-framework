@@ -177,22 +177,36 @@ export function hasErrorPatterns(
 
 /**
  * Detect if content is a slash command system prompt.
- * These have YAML frontmatter with allowed-tools/description metadata.
+ * These have YAML frontmatter with allowed-tools/description metadata,
+ * OR contain body patterns that indicate slash command instructions.
  */
 function isSlashCommandPrompt(content: string): boolean {
   // Check for YAML frontmatter pattern at start
-  if (!content.startsWith("---")) {
-    return false;
+  if (content.startsWith("---")) {
+    const frontmatterEnd = content.indexOf("---", 3);
+    if (frontmatterEnd !== -1) {
+      const frontmatter = content.slice(0, frontmatterEnd + 3);
+      if (/allowed-tools:|description:/.test(frontmatter)) {
+        return true;
+      }
+    }
   }
 
-  // Look for slash command metadata indicators
-  const frontmatterEnd = content.indexOf("---", 3);
-  if (frontmatterEnd === -1) {
-    return false;
+  // Check for slash command body patterns (when frontmatter is stripped)
+  // These patterns indicate slash command instructions, not user constraints
+  const bodyPatterns = [
+    /IMMEDIATELY call the mcp__/i,
+    /CRITICAL:.*(?:Do NOT|only use).*(?:tools?|mcp)/i,
+    /allowed-tools.*mcp__/i,
+  ];
+
+  for (const pattern of bodyPatterns) {
+    if (pattern.test(content)) {
+      return true;
+    }
   }
 
-  const frontmatter = content.slice(0, frontmatterEnd + 3);
-  return /allowed-tools:|description:/.test(frontmatter);
+  return false;
 }
 
 function extractTextFromContent(content: string | ContentBlock[]): string {

@@ -31,6 +31,7 @@
 import {
   getModelId,
   EXECUTION_TYPES,
+  MODEL_TIERS,
   type OffTopicCheckResult,
   type ConversationContext,
   type UserMessage,
@@ -129,6 +130,10 @@ export async function checkForOffTopic(
 ): Promise<OffTopicCheckResult> {
   // Skip off-topic checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.TYPESCRIPT, "Subagent skip"
+    );
     return { decision: "OK" };
   }
 
@@ -136,6 +141,10 @@ export async function checkForOffTopic(
 
   // No conversation yet - nothing to check
   if (context.userMessages.length === 0 || !context.lastAssistantMessage) {
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.TYPESCRIPT, "No conversation yet"
+    );
     return {
       decision: "OK",
     };
@@ -188,7 +197,11 @@ ${context.lastAssistantMessage}`,
 
     return { decision: "OK" };
   } catch {
-    // On error, fail open (don't intervene) - no telemetry for failed checks
+    // On error, fail open (don't intervene)
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.TYPESCRIPT, "Error path - fail open"
+    );
     return {
       decision: "OK",
       feedback: "Check error - skipped",

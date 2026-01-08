@@ -14,7 +14,7 @@
  * @module claude-md-validate
  */
 
-import { getModelId, EXECUTION_TYPES } from "../../types.js";
+import { getModelId, EXECUTION_TYPES, MODEL_TIERS } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CLAUDE_MD_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
@@ -51,6 +51,10 @@ export async function validateClaudeMd(
 ): Promise<{ approved: boolean; reason?: string }> {
   // Skip CLAUDE.md validation for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Subagent skip"
+    );
     return { approved: true };
   }
 
@@ -62,6 +66,10 @@ export async function validateClaudeMd(
 
   // Empty proposed edit - allow
   if (!proposedEdit.trim()) {
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Empty proposed edit"
+    );
     return { approved: true };
   }
 
@@ -97,7 +105,11 @@ export async function validateClaudeMd(
     logApprove(result, "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Valid CLAUDE.md edit");
     return { approved: true };
   } catch {
-    // Fail open on errors - no telemetry for failed checks
+    // Fail open on errors
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Error path - fail open"
+    );
     return { approved: true };
   }
 }

@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 description: Generate and execute a git commit using the agent framework
 allowed-tools: mcp__agent-framework__commit
 ---

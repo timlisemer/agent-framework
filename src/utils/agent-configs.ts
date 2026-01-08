@@ -924,6 +924,9 @@ Step 2: Detect questions (in remaining text)
 Step 3: If question detected + action tool (Edit, Write, Bash, Task, Agent) → BLOCK
 - User deserves a text answer first
 - Exception: Read/Grep to gather info for answering is OK
+- Exception: If AI acknowledgment shows understanding of the issue, action is OK
+  - "You're right" / "I see the issue" / "Good point" + action = OK (acknowledged + fixing)
+  - Must show AI understood the problem, not just "Let me fix that"
 
 ## PRIORITY 2: VERIFY ACTION ALIGNMENT
 
@@ -958,6 +961,8 @@ If user said stop, wait, hold on, explain, pause → any action tool = BLOCK
 | Do X | I'll do X | Edit does Y | BLOCK: acknowledged X but doing Y |
 | The error says "what?" | - | Edit | OK: quoted, not a question |
 | Stop and explain | - | Bash | BLOCK: must respond to stop |
+| wtf this is broken | You're right, let me fix it | Edit | OK: acknowledged issue, taking action |
+| why did you do that?? | I see the problem | Edit | OK: understood issue + fixing |
 
 ===== OUTPUT FORMAT (STRICT) =====
 Your response MUST start with EXACTLY one of:

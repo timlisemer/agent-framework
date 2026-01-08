@@ -1,4 +1,5 @@
 ---
+disable-model-invocation: true
 description: Analyze uncommitted changes and confirm code quality (user)
 allowed-tools: mcp__agent-framework__confirm
 ---

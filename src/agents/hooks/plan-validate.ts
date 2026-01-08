@@ -27,7 +27,7 @@
  * @module plan-validate
  */
 
-import { getModelId, EXECUTION_TYPES } from "../../types.js";
+import { getModelId, EXECUTION_TYPES, MODEL_TIERS } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { PLAN_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
@@ -66,11 +66,19 @@ export async function checkPlanIntent(
 ): Promise<{ approved: boolean; reason?: string }> {
   // Skip plan validation for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Subagent skip"
+    );
     return { approved: true };
   }
 
   // No conversation yet - nothing to validate against
   if (!conversationContext.trim()) {
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "No conversation context"
+    );
     return { approved: true };
   }
 
@@ -82,6 +90,10 @@ export async function checkPlanIntent(
 
   // Empty proposed edit - allow
   if (!proposedEdit.trim()) {
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Empty proposed edit"
+    );
     return { approved: true };
   }
 
@@ -125,7 +137,11 @@ export async function checkPlanIntent(
 
     return { approved: true };
   } catch {
-    // On error, fail open (allow the write) - no telemetry for failed checks
+    // On error, fail open (allow the write)
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Error path - fail open"
+    );
     return { approved: true };
   }
 }

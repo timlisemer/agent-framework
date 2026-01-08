@@ -134,6 +134,10 @@ export async function checkResponseAlignment(
 ): Promise<ResponseAlignmentResult> {
   // Skip response alignment checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Subagent skip"
+    );
     return { approved: true };
   }
 
@@ -145,6 +149,10 @@ export async function checkResponseAlignment(
 
   if (transcriptResult.user.length === 0) {
     // No user message found - skip check
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "No user message"
+    );
     return { approved: true };
   }
 
@@ -154,6 +162,10 @@ export async function checkResponseAlignment(
     (tr) => tr.content.includes("User answered") || tr.content.includes("answered Claude's questions") || tr.content.includes("→")
   );
   if (hasUserToolAnswer) {
+    logApprove(
+      { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0, modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+      "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Fresh AskUserQuestion answer"
+    );
     return { approved: true };
   }
 
@@ -255,15 +267,26 @@ export type StopIntentResult = StopCheckResult;
 async function classifyStopResponse(
   userText: string,
   assistantText: string,
-  workingDir: string
-): Promise<{ classification: "QUESTION" | "PLAN_APPROVAL" | "OK"; latencyMs: number; modelTier: ModelTier; success: boolean; errorCount: number }> {
+  workingDir: string,
+  stopHookError?: string
+): Promise<{ classification: "QUESTION" | "PLAN_APPROVAL" | "IGNORED_ERROR" | "OK"; latencyMs: number; modelTier: ModelTier; success: boolean; errorCount: number }> {
+  const stopHookSection = stopHookError
+    ? `\nPREVIOUS STOP HOOK ERROR:\n${stopHookError}\n`
+    : "";
+
   const context = `USER MESSAGE:
 ${userText}
-
+${stopHookSection}
 ASSISTANT RESPONSE:
 ${assistantText}`;
 
-  const systemPrompt = `You classify AI assistant responses that contain questions.
+  const systemPrompt = `You classify AI assistant responses.
+
+IGNORED_ERROR - Use when:
+- There is a PREVIOUS STOP HOOK ERROR in the context
+- The AI's response does NOT address or acknowledge that error
+- The AI just continued as if nothing happened
+- Examples: Error said "use AskUserQuestion" but AI just answered without using it
 
 PLAN_APPROVAL - ONLY use when ALL of these are true:
 - AI has laid out a DETAILED multi-step implementation plan
@@ -291,8 +314,9 @@ Examples: "Should I commit?", "Want me to fix this?", "Would you like me to retr
 
 OK - Use when:
 - Not actually a question (rhetorical, self-directed)
+- AI properly addressed a previous stop hook error
 
-Reply with EXACTLY one of: PLAN_APPROVAL, QUESTION, or OK`;
+Reply with EXACTLY one of: IGNORED_ERROR, PLAN_APPROVAL, QUESTION, or OK`;
 
   const response = await runAgent(
     {
@@ -307,8 +331,10 @@ Reply with EXACTLY one of: PLAN_APPROVAL, QUESTION, or OK`;
   );
 
   const trimmed = response.output.trim().toUpperCase();
-  let classification: "QUESTION" | "PLAN_APPROVAL" | "OK";
-  if (trimmed.includes("PLAN_APPROVAL")) {
+  let classification: "QUESTION" | "PLAN_APPROVAL" | "IGNORED_ERROR" | "OK";
+  if (trimmed.includes("IGNORED_ERROR")) {
+    classification = "IGNORED_ERROR";
+  } else if (trimmed.includes("PLAN_APPROVAL")) {
     classification = "PLAN_APPROVAL";
   } else if (trimmed.includes("QUESTION")) {
     classification = "QUESTION";
@@ -481,11 +507,17 @@ export async function checkStopResponseAlignment(
     return { approved: true };
   }
 
-  // Check 1: Plain text questions - use AI to classify
+  // Check for previous stop hook errors (used as hint for LLM)
+  const stopHookErrorPattern = /Error: Stop hook -|Stop hook.*feedback/i;
+  const stopHookError = result.user.find(m => stopHookErrorPattern.test(m.content));
+
+  // Check 1: Plain text questions OR previous stop hook error - use AI to classify
   const questionCheck = hasPlainTextQuestion(assistantText);
-  if (questionCheck.detected) {
-    // Skip PLAN_APPROVAL if this is clearly operational context
-    if (isOperationalContext(userText, assistantText)) {
+  const needsLLMCheck = questionCheck.detected || stopHookError;
+
+  if (needsLLMCheck) {
+    // Skip PLAN_APPROVAL if this is clearly operational context (but still check for ignored errors)
+    if (questionCheck.detected && isOperationalContext(userText, assistantText) && !stopHookError) {
       return {
         approved: false,
         reason: "Plain text question detected",
@@ -494,8 +526,13 @@ export async function checkStopResponseAlignment(
       };
     }
 
-    // Use AI to determine if this is an intermediate question or plan approval
-    const classifyResult = await classifyStopResponse(userText, assistantText, workingDir);
+    // Use AI to determine classification (pass stop hook error as hint)
+    const classifyResult = await classifyStopResponse(
+      userText,
+      assistantText,
+      workingDir,
+      stopHookError?.content
+    );
 
     // Build AgentExecutionResult for logging
     const classifyAgentResult: AgentExecutionResult = {
@@ -507,7 +544,15 @@ export async function checkStopResponseAlignment(
       errorCount: classifyResult.errorCount,
     };
 
-    if (classifyResult.classification === "PLAN_APPROVAL") {
+    if (classifyResult.classification === "IGNORED_ERROR") {
+      logDeny(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, "Previous stop hook error ignored");
+      return {
+        approved: false,
+        reason: "Previous stop hook error ignored",
+        systemMessage:
+          "Error: Stop hook - You ignored the previous stop hook error. Address the feedback before continuing.",
+      };
+    } else if (classifyResult.classification === "PLAN_APPROVAL") {
       logDeny(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, "Plain text plan approval detected");
       return {
         approved: false,
