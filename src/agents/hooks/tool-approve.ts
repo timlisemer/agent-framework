@@ -78,7 +78,7 @@ export async function checkToolApproval(
       success: true,
       errorCount: 0,
     };
-    logApprove(lazyResult, "tool-approve", hookName, toolName, workingDir, "lazy", "No blacklist violations");
+    logApprove(lazyResult, "tool-approve", hookName, toolName, workingDir, "lazy", "typescript", "No blacklist violations");
     return { approved: true };
   }
 
@@ -129,7 +129,7 @@ Input: ${JSON.stringify(toolInput)}`,
   );
 
   if (decision.startsWith("APPROVE")) {
-    logApprove(result, "tool-approve", hookName, toolName, workingDir, "direct", decision);
+    logApprove(result, "tool-approve", hookName, toolName, workingDir, "direct", "llm", decision);
     return { approved: true };
   }
 
@@ -138,7 +138,7 @@ Input: ${JSON.stringify(toolInput)}`,
     ? decision.replace("DENY: ", "")
     : `Malformed response: ${decision}`;
 
-  logDeny(result, "tool-approve", hookName, toolName, workingDir, reason);
+  logDeny(result, "tool-approve", hookName, toolName, workingDir, "llm", reason);
 
   return {
     approved: false,

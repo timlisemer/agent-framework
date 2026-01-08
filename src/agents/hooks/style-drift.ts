@@ -205,7 +205,7 @@ Does this edit contain ONLY style changes that were NOT requested by the user?`,
   );
 
   if (decision.startsWith("APPROVE")) {
-    logApprove(result, "style-drift", hookName, toolName, workingDir, "direct", decision);
+    logApprove(result, "style-drift", hookName, toolName, workingDir, "direct", "llm", decision);
     return { approved: true };
   }
 
@@ -214,7 +214,7 @@ Does this edit contain ONLY style changes that were NOT requested by the user?`,
     ? decision.replace("DENY: ", "")
     : `Malformed response: ${decision}`;
 
-  logDeny(result, "style-drift", hookName, toolName, workingDir, reason);
+  logDeny(result, "style-drift", hookName, toolName, workingDir, "llm", reason);
 
   return {
     approved: false,

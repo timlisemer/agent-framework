@@ -120,16 +120,16 @@ Input: ${JSON.stringify(toolInput)}`,
     if (issueMatch) {
       await markErrorAcknowledged(issueMatch[0]);
     }
-    logApprove(result, "error-acknowledge", hookName, toolName, workingDir, "direct", "Acknowledged");
+    logApprove(result, "error-acknowledge", hookName, toolName, workingDir, "direct", "llm", "Acknowledged");
     return "OK";
   }
 
   if (parsed.reason) {
-    logDeny(result, "error-acknowledge", hookName, toolName, workingDir, parsed.reason);
+    logDeny(result, "error-acknowledge", hookName, toolName, workingDir, "llm", parsed.reason);
     return `BLOCK: ${parsed.reason}`;
   }
 
   // Default to OK if response is malformed after retries (fail open)
-  logApprove(result, "error-acknowledge", hookName, toolName, workingDir, "direct", `Malformed: ${decision}`);
+  logApprove(result, "error-acknowledge", hookName, toolName, workingDir, "direct", "llm", `Malformed: ${decision}`);
   return "OK";
 }

@@ -10,6 +10,7 @@ import type {
   TelemetryEventType,
   DecisionType,
   TelemetryMode,
+  ExecutionType,
 } from "../telemetry/types.js";
 import { getModelId, type ModelTier } from "../types.js";
 
@@ -25,14 +26,16 @@ export interface TrackAgentParams {
   decision: DecisionType;
   /** Execution mode (direct or lazy) */
   mode: TelemetryMode;
+  /** Execution type - whether LLM was called or pure TypeScript */
+  executionType: ExecutionType;
   /** Tool being evaluated (for hooks) or the MCP tool itself */
   toolName: string;
   /** Working directory path */
   workingDir: string;
   /** Operation latency in milliseconds */
   latencyMs: number;
-  /** Model tier used */
-  modelTier: ModelTier;
+  /** Model tier used (required when executionType="llm") */
+  modelTier?: ModelTier;
   /** Whether the agent executed successfully (even if it DENIED) */
   success: boolean;
   /** Number of LLM errors encountered (defaults to 0) */
@@ -102,6 +105,7 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     hookName,
     decision,
     mode,
+    executionType,
     toolName,
     workingDir,
     latencyMs,
@@ -119,15 +123,18 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     hookName,
     decision,
     mode,
+    executionType,
     toolName,
     workingDir,
     latencyMs,
-    modelTier,
-    modelName: getModelId(modelTier),
     errorCount,
     success,
     decisionReason,
     extraData,
+    // Only include model info when LLM was called
+    ...(executionType === "llm" && modelTier
+      ? { modelTier, modelName: getModelId(modelTier) }
+      : {}),
   };
 
   trackEvent(event);

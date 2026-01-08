@@ -175,7 +175,7 @@ ${context.lastAssistantMessage}`,
     if (decision.startsWith("INTERVENE:")) {
       const feedback = decision.replace("INTERVENE:", "").trim();
 
-      logDeny(result, "off-topic-check", hookName, "StopResponse", workingDir, feedback);
+      logDeny(result, "off-topic-check", hookName, "StopResponse", workingDir, "llm", feedback);
 
       return {
         decision: "INTERVENE",
@@ -183,7 +183,7 @@ ${context.lastAssistantMessage}`,
       };
     }
 
-    logApprove(result, "off-topic-check", hookName, "StopResponse", workingDir, "direct", "On-topic");
+    logApprove(result, "off-topic-check", hookName, "StopResponse", workingDir, "direct", "llm", "On-topic");
 
     return { decision: "OK" };
   } catch {

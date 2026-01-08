@@ -25,6 +25,13 @@ export type DecisionType = "APPROVE" | "DENY" | "CONFIRM" | "SUCCESS" | "ERROR";
 export type TelemetryMode = "direct" | "lazy";
 
 /**
+ * Execution type for telemetry.
+ * - llm: Agent called an LLM for decision
+ * - typescript: Pure TypeScript execution (lazy/fast path, no LLM call)
+ */
+export type ExecutionType = "llm" | "typescript";
+
+/**
  * Telemetry event matching the new API spec.
  *
  * Key concept: success=true even for DENIED decisions.
@@ -39,13 +46,16 @@ export interface TelemetryEvent {
   hookName: string; // "PreToolUse" | "PostToolUse" | "Stop" | MCP tool name
   decision: DecisionType;
   mode: TelemetryMode; // Execution mode (direct or lazy)
+  executionType: ExecutionType; // Whether LLM was called or pure TypeScript
   toolName: string;
   workingDir: string;
   latencyMs: number;
-  modelTier: ModelTier;
-  modelName: string; // Actual model ID (e.g., claude-3-haiku-20240307)
   errorCount: number; // LLM errors (0 if none)
   success: boolean; // true if agent ran without errors
+
+  // Required only when executionType="llm"
+  modelTier?: ModelTier;
+  modelName?: string; // Actual model ID (e.g., claude-3-haiku-20240307)
 
   // Optional fields
   timestamp?: string; // ISO 8601, defaults to server time

@@ -126,6 +126,7 @@ export async function runCheckAgent(workingDir: string): Promise<string> {
     HOOK_NAME,
     HOOK_NAME,
     workingDir,
+    "llm",
     isPassing ? "All checks passed" : "Checks failed"
   );
 

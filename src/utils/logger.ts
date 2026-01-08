@@ -6,7 +6,7 @@
  */
 
 import { trackAgentExecution, extractDecision } from "./telemetry-tracker.js";
-import type { DecisionType, TelemetryMode } from "../telemetry/types.js";
+import type { DecisionType, TelemetryMode, ExecutionType } from "../telemetry/types.js";
 import type { ModelTier } from "../types.js";
 import type { AgentExecutionResult } from "./agent-runner.js";
 
@@ -22,14 +22,16 @@ export interface AgentLog {
   decision: DecisionType;
   /** Execution mode (direct or lazy) */
   mode: TelemetryMode;
+  /** Execution type - whether LLM was called or pure TypeScript */
+  executionType: ExecutionType;
   /** Tool being evaluated or MCP tool itself */
   toolName: string;
   /** Working directory path */
   workingDir: string;
   /** Operation latency in milliseconds */
   latencyMs: number;
-  /** Model tier used */
-  modelTier: ModelTier;
+  /** Model tier used (required when executionType="llm") */
+  modelTier?: ModelTier;
   /** Whether the agent executed successfully */
   success: boolean;
   /** Number of LLM errors (defaults to 0) */
@@ -68,6 +70,7 @@ export function logAgentDecision(log: AgentLog): void {
     hookName: log.hookName,
     decision: log.decision,
     mode: log.mode,
+    executionType: log.executionType,
     toolName: log.toolName,
     workingDir: log.workingDir,
     latencyMs: log.latencyMs,
@@ -104,6 +107,7 @@ export function logAgentResult(
     toolName: string;
     workingDir: string;
     mode: TelemetryMode;
+    executionType: ExecutionType;
     decisionOverride?: DecisionType;
     decisionReason?: string;
     extraData?: Record<string, unknown>;
@@ -117,6 +121,7 @@ export function logAgentResult(
     hookName: context.hookName,
     decision,
     mode: context.mode,
+    executionType: context.executionType,
     toolName: context.toolName,
     workingDir: context.workingDir,
     latencyMs: result.latencyMs,
@@ -138,6 +143,7 @@ export function logApprove(
   toolName: string,
   workingDir: string,
   mode: TelemetryMode,
+  executionType: ExecutionType,
   reason?: string
 ): void {
   logAgentDecision({
@@ -145,6 +151,7 @@ export function logApprove(
     hookName,
     decision: "APPROVE",
     mode,
+    executionType,
     toolName,
     workingDir,
     latencyMs: result.latencyMs,
@@ -164,6 +171,7 @@ export function logDeny(
   hookName: string,
   toolName: string,
   workingDir: string,
+  executionType: ExecutionType,
   reason: string
 ): void {
   logAgentDecision({
@@ -171,6 +179,7 @@ export function logDeny(
     hookName,
     decision: "DENY",
     mode: "direct",
+    executionType,
     toolName,
     workingDir,
     latencyMs: result.latencyMs,
@@ -190,6 +199,7 @@ export function logConfirm(
   hookName: string,
   toolName: string,
   workingDir: string,
+  executionType: ExecutionType,
   reason?: string
 ): void {
   logAgentDecision({
@@ -197,6 +207,7 @@ export function logConfirm(
     hookName,
     decision: "CONFIRM",
     mode: "direct",
+    executionType,
     toolName,
     workingDir,
     latencyMs: result.latencyMs,
@@ -216,6 +227,7 @@ export function logError(
   hookName: string,
   toolName: string,
   workingDir: string,
+  executionType: ExecutionType,
   reason: string
 ): void {
   logAgentDecision({
@@ -223,6 +235,7 @@ export function logError(
     hookName,
     decision: "ERROR",
     mode: "direct",
+    executionType,
     toolName,
     workingDir,
     latencyMs: result.latencyMs,

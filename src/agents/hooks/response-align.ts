@@ -213,7 +213,7 @@ ${toolResultsText}`;
   );
 
   if (decision.startsWith("OK")) {
-    logApprove(result, "response-align", hookName, toolName, workingDir, "direct", "Aligned with request");
+    logApprove(result, "response-align", hookName, toolName, workingDir, "direct", "llm", "Aligned with request");
     return { approved: true };
   }
 
@@ -222,7 +222,7 @@ ${toolResultsText}`;
     ? decision.substring(7).trim()
     : `Misaligned response: ${decision}`;
 
-  logDeny(result, "response-align", hookName, toolName, workingDir, reason);
+  logDeny(result, "response-align", hookName, toolName, workingDir, "llm", reason);
 
   return {
     approved: false,
@@ -499,7 +499,7 @@ export async function checkStopResponseAlignment(
     };
 
     if (classifyResult.classification === "PLAN_APPROVAL") {
-      logDeny(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, "Plain text plan approval detected");
+      logDeny(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, "llm", "Plain text plan approval detected");
       return {
         approved: false,
         reason: "Plain text plan approval detected",
@@ -507,7 +507,7 @@ export async function checkStopResponseAlignment(
           "Do not ask for plan approval in plain text. Write your plan to the plan file, then exit plan mode using the ExitPlanMode tool.",
       };
     } else if (classifyResult.classification === "QUESTION") {
-      logDeny(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, "Plain text question detected");
+      logDeny(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, "llm", "Plain text question detected");
       return {
         approved: false,
         reason: "Plain text question detected",
@@ -516,7 +516,7 @@ export async function checkStopResponseAlignment(
       };
     }
     // classification === "OK" - allow it
-    logApprove(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, "direct", "Legitimate stop response");
+    logApprove(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, "direct", "llm", "Legitimate stop response");
   }
 
   // Check 2: User asked a question that wasn't addressed

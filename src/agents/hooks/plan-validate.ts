@@ -113,7 +113,7 @@ export async function checkPlanIntent(
     if (decision.startsWith("DRIFT:")) {
       const feedback = decision.replace("DRIFT:", "").trim();
 
-      logDeny(result, "plan-validate", hookName, toolName, workingDir, feedback);
+      logDeny(result, "plan-validate", hookName, toolName, workingDir, "llm", feedback);
 
       return {
         approved: false,
@@ -121,7 +121,7 @@ export async function checkPlanIntent(
       };
     }
 
-    logApprove(result, "plan-validate", hookName, toolName, workingDir, "direct", "Plan aligned");
+    logApprove(result, "plan-validate", hookName, toolName, workingDir, "direct", "llm", "Plan aligned");
 
     return { approved: true };
   } catch {

@@ -90,11 +90,11 @@ export async function validateClaudeMd(
 
     if (decision.startsWith("DRIFT:")) {
       const feedback = decision.replace("DRIFT:", "").trim();
-      logDeny(result, "claude-md-validate", hookName, toolName, workingDir, feedback);
+      logDeny(result, "claude-md-validate", hookName, toolName, workingDir, "llm", feedback);
       return { approved: false, reason: feedback };
     }
 
-    logApprove(result, "claude-md-validate", hookName, toolName, workingDir, "direct", "Valid CLAUDE.md edit");
+    logApprove(result, "claude-md-validate", hookName, toolName, workingDir, "direct", "llm", "Valid CLAUDE.md edit");
     return { approved: true };
   } catch {
     // Fail open on errors - no telemetry for failed checks

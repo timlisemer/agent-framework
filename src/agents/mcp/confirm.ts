@@ -76,6 +76,7 @@ ${diff || "(no diff)"}`,
     HOOK_NAME,
     HOOK_NAME,
     workingDir,
+    "llm",
     result.output.slice(0, 500)
   );
 

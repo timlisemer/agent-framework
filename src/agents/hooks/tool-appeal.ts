@@ -108,9 +108,9 @@ ${transcript}`,
   const overturned = decision.startsWith("OVERTURN: APPROVE") || decision === "APPROVE";
 
   if (overturned) {
-    logApprove(result, "tool-appeal", hookName, toolName, workingDir, "direct", "User approved operation");
+    logApprove(result, "tool-appeal", hookName, toolName, workingDir, "direct", "llm", "User approved operation");
   } else {
-    logDeny(result, "tool-appeal", hookName, toolName, workingDir, "User did not approve");
+    logDeny(result, "tool-appeal", hookName, toolName, workingDir, "llm", "User did not approve");
   }
 
   return { overturned };
