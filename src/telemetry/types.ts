@@ -12,13 +12,14 @@ export type TelemetryEventType =
 
 /**
  * Decision types expected by the telemetry API.
- * - APPROVE: Agent approved tool execution
+ * - APPROVE: Agent approved tool execution (final decision)
+ * - CONTINUE: Intermediate validation passed, continuing to next check
  * - DENY: Agent blocked tool execution
  * - CONFIRM: Check/confirm agent validated code
  * - SUCCESS: Operation completed without errors
  * - ERROR: Provider error occurred (API failures, etc.)
  */
-export type DecisionType = "APPROVE" | "DENY" | "CONFIRM" | "SUCCESS" | "ERROR";
+export type DecisionType = "APPROVE" | "CONTINUE" | "DENY" | "CONFIRM" | "SUCCESS" | "ERROR";
 
 /**
  * Telemetry event matching the new API spec.

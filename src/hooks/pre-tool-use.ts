@@ -62,7 +62,7 @@ import {
 } from "../utils/strict-mode-tracker.js";
 import { setExecutionMode } from "../utils/execution-context.js";
 import { EXECUTION_MODES } from "../types.js";
-import { logFastPathApproval } from "../utils/logger.js";
+import { logFastPathApproval, logFastPathContinue } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -507,15 +507,17 @@ async function main() {
         if (originalIssue) {
           await markErrorAcknowledged(originalIssue[0]);
         }
-        logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - error-ack");
+        logFastPathContinue("error-acknowledge", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - continuing to next check");
         // Continue to next step
       } else {
         // User did not approve - block
         await recordStrictDenial();
         outputDeny(`Error acknowledgment required: ${blockReason}`);
       }
+    } else {
+      // ackResult is "OK" - log continue and proceed to next step
+      logFastPathContinue("error-acknowledge", "PreToolUse", input.tool_name, projectDir, "Error acknowledged - continuing to next check");
     }
-    // If ackResult is "OK", continue to next step
   }
 
   // ============================================================
@@ -559,8 +561,11 @@ async function main() {
         await recordStrictDenial();
         outputDeny(`First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`);
       }
-      logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - response-align");
+      logFastPathContinue("response-align", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - continuing to next check");
       // If overturned, continue to next step
+    } else {
+      // Response aligned - log continue and proceed to next step
+      logFastPathContinue("response-align", "PreToolUse", input.tool_name, projectDir, "Response aligned - continuing to next check");
     }
   }
 
@@ -721,7 +726,10 @@ async function main() {
               await recordStrictDenial();
               outputDeny(`Style drift detected: ${styleDriftResult.reason}`);
             }
-            logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - style-drift");
+            logFastPathContinue("style-drift", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - continuing to approval");
+          } else {
+            // Style check passed - log continue
+            logFastPathContinue("style-drift", "PreToolUse", input.tool_name, projectDir, "Style check passed - continuing to approval");
           }
         }
 

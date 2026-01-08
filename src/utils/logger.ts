@@ -251,6 +251,70 @@ export function logError(
 }
 
 /**
+ * Log a CONTINUE decision (intermediate validation passed, continuing to next check).
+ * Mode is automatically read from the execution context.
+ */
+export function logContinue(
+  result: AgentExecutionResult,
+  agent: string,
+  hookName: string,
+  toolName: string,
+  workingDir: string,
+  executionType: ExecutionType,
+  reason?: string
+): void {
+  logAgentDecision({
+    agent,
+    hookName,
+    decision: "CONTINUE",
+    executionType,
+    toolName,
+    workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: reason,
+  });
+}
+
+/**
+ * Log a fast-path continue for TypeScript-only intermediate decisions.
+ *
+ * Use this for intermediate validation passes where no LLM was called:
+ * - Error-ack "OK" result
+ * - Response-align approved
+ * - Style-drift approved (before final approval)
+ *
+ * Creates a synthetic AgentExecutionResult with zero latency
+ * and logs it as a CONTINUE with TYPESCRIPT execution type.
+ */
+export function logFastPathContinue(
+  agent: string,
+  hookName: string,
+  toolName: string,
+  workingDir: string,
+  reason: string
+): void {
+  logContinue(
+    {
+      output: "CONTINUE",
+      latencyMs: 0,
+      success: true,
+      errorCount: 0,
+      modelTier: MODEL_TIERS.HAIKU,
+      modelName: getModelId(MODEL_TIERS.HAIKU),
+    },
+    agent,
+    hookName,
+    toolName,
+    workingDir,
+    EXECUTION_TYPES.TYPESCRIPT,
+    reason
+  );
+}
+
+/**
  * Log a fast-path approval for TypeScript-only decisions.
  *
  * Use this for early-exit approvals where no LLM was called:
