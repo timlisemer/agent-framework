@@ -162,9 +162,15 @@ export function hasErrorPatterns(
     }
   }
 
-  // Always check user patterns against full transcript (user frustration can be anywhere)
+  // Only check USER: lines for user frustration patterns
+  // (avoids false positives from ASSISTANT/TOOL_RESULT prefixes matching [A-Z]{5,})
+  const userLines = transcript
+    .split('\n')
+    .filter((l) => l.startsWith('USER:'))
+    .join('\n');
+
   for (const pattern of userPatterns) {
-    if (pattern.test(transcript)) {
+    if (pattern.test(userLines)) {
       indicators.push(`user:${pattern.source}`);
     }
   }
