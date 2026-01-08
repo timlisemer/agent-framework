@@ -20,7 +20,9 @@ The framework implements 14 specialized agents organized into three categories:
 | confirm         | opus   | Binary quality gate: CONFIRMED or DECLINED                   |
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
-| validate_intent | sonnet | Check if AI followed user intentions (post-session review)   |
+| validate_intent | sonnet | Manual post-session review (requires transcript_path)        |
+
+**Note on validate_intent**: Unlike other MCP tools, `validate_intent` is not auto-triggered. It's a manual post-session review tool that analyzes a conversation transcript to check if the AI followed user intentions. Requires `transcript_path` parameter pointing to a `.jsonl` transcript file. Returns `ALIGNED` or `DRIFTED` verdict.
 
 ### Validation Agents (Hook-Triggered)
 
