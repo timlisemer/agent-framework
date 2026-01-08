@@ -347,12 +347,16 @@ async function runDirectAgent(
       max_tokens: config.maxTokens ?? 2000,
       system: config.systemPrompt,
       messages: [{ role: "user", content: prompt }],
+      // OpenRouter: request usage/cost data in response
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...({ usage: { include: true } } as any),
     });
 
     // Extract usage data from response
     // OpenRouter uses: prompt_tokens, completion_tokens, total_tokens, cost
     // Anthropic SDK uses: input_tokens, output_tokens
-    const rawUsage = response.usage as unknown as Record<string, unknown> | undefined;
+    const rawUsage = (response as unknown as { usage?: Record<string, unknown> })
+      .usage as Record<string, unknown> | undefined;
     const usage = rawUsage ? {
       // Handle both OpenRouter and Anthropic field names
       promptTokens: (rawUsage.prompt_tokens ?? rawUsage.input_tokens) as number | undefined,
