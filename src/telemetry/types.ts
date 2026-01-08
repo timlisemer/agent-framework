@@ -57,6 +57,9 @@ export interface TelemetryEvent {
   // Cost tracking (USD)
   cost?: number;
 
+  // Client version (e.g., "1.0.42")
+  clientVersion?: string;
+
   // Optional fields
   timestamp?: string; // ISO 8601, defaults to server time
   decisionReason?: string;

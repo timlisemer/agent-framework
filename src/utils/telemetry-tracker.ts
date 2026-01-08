@@ -13,6 +13,7 @@ import type {
   ExecutionType,
 } from "../telemetry/types.js";
 import { getModelId, type ModelTier } from "../types.js";
+import { VERSION } from "../version.js";
 
 /**
  * Parameters for tracking an agent execution.
@@ -149,6 +150,7 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     success,
     decisionReason,
     extraData,
+    clientVersion: VERSION,
     // Only include model info and usage when LLM was called
     ...(executionType === "llm" && modelTier
       ? {
