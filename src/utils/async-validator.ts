@@ -29,6 +29,7 @@ import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
 import { writePendingValidation, clearPendingValidation, setValidationSession } from "./pending-validation-cache.js";
 import { readTranscriptExact, formatTranscriptResult } from "./transcript.js";
 import { ERROR_CHECK_COUNTS } from "./transcript-presets.js";
+import { hashString } from "./hash-utils.js";
 
 interface ValidatorArgs {
   tool: string;
@@ -93,6 +94,11 @@ async function main(): Promise<void> {
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
   try {
+    // Read transcript early to get user message hash for staleness check
+    const errorResult = await readTranscriptExact(transcript, ERROR_CHECK_COUNTS);
+    const lastUserMessage = errorResult.user[errorResult.user.length - 1];
+    const userMessageHash = lastUserMessage ? hashString(lastUserMessage.content) : undefined;
+
     // Validation 1: Response Alignment (preamble + intent check)
     // Runs for all tools now (expanded from action tools only)
     const intentResult = await checkResponseAlignment(tool, toolInput, transcript, projectDir, "PreToolUse");
@@ -102,12 +108,12 @@ async function main(): Promise<void> {
         toolName: tool,
         filePath: file,
         failureReason: `Response misalignment: ${intentResult.reason}`,
+        userMessageHash,
       });
       return;
     }
 
     // Validation 2: Error Acknowledgment
-    const errorResult = await readTranscriptExact(transcript, ERROR_CHECK_COUNTS);
     const errorTranscript = formatTranscriptResult(errorResult);
     const ackResult = await checkErrorAcknowledgment(errorTranscript, tool, toolInput, projectDir, transcript, "PreToolUse");
     if (ackResult.startsWith("BLOCK:")) {
@@ -117,6 +123,7 @@ async function main(): Promise<void> {
         toolName: tool,
         filePath: file,
         failureReason: `Error not acknowledged: ${reason}`,
+        userMessageHash,
       });
       return;
     }
@@ -130,6 +137,7 @@ async function main(): Promise<void> {
           toolName: tool,
           filePath: file,
           failureReason: `Style drift: ${styleResult.reason}`,
+          userMessageHash,
         });
         return;
       }
@@ -140,6 +148,7 @@ async function main(): Promise<void> {
       status: "passed",
       toolName: tool,
       filePath: file,
+      userMessageHash,
     });
   } catch (error) {
     // On error, fail-open (treat as passed)

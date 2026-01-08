@@ -15,6 +15,32 @@ export const MODEL_TIERS = {
   OPUS: "opus" as ModelTier,
 } as const;
 
+// Branded type for telemetry execution mode
+declare const TelemetryModeBrand: unique symbol;
+type TelemetryModeBranded = { readonly [TelemetryModeBrand]: never };
+
+type TelemetryModeValue = "direct" | "lazy";
+
+export type TelemetryMode = TelemetryModeValue & TelemetryModeBranded;
+
+export const EXECUTION_MODES = {
+  DIRECT: "direct" as TelemetryMode,
+  LAZY: "lazy" as TelemetryMode,
+} as const;
+
+// Branded type for execution type (LLM vs TypeScript)
+declare const ExecutionTypeBrand: unique symbol;
+type ExecutionTypeBranded = { readonly [ExecutionTypeBrand]: never };
+
+type ExecutionTypeValue = "llm" | "typescript";
+
+export type ExecutionType = ExecutionTypeValue & ExecutionTypeBranded;
+
+export const EXECUTION_TYPES = {
+  LLM: "llm" as ExecutionType,
+  TYPESCRIPT: "typescript" as ExecutionType,
+} as const;
+
 // Model IDs defined ONCE here. Update when Anthropic releases new versions.
 export const MODEL_IDS: Record<ModelTierValue, string> = {
   haiku: "x-ai/grok-4.1-fast",

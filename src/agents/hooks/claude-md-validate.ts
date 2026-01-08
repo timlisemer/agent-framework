@@ -14,7 +14,7 @@
  * @module claude-md-validate
  */
 
-import { getModelId } from "../../types.js";
+import { getModelId, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CLAUDE_MD_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
@@ -90,11 +90,11 @@ export async function validateClaudeMd(
 
     if (decision.startsWith("DRIFT:")) {
       const feedback = decision.replace("DRIFT:", "").trim();
-      logDeny(result, "claude-md-validate", hookName, toolName, workingDir, "llm", feedback);
+      logDeny(result, "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, feedback);
       return { approved: false, reason: feedback };
     }
 
-    logApprove(result, "claude-md-validate", hookName, toolName, workingDir, "direct", "llm", "Valid CLAUDE.md edit");
+    logApprove(result, "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Valid CLAUDE.md edit");
     return { approved: true };
   } catch {
     // Fail open on errors - no telemetry for failed checks

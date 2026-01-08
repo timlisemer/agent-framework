@@ -16,6 +16,7 @@
  * @module confirm
  */
 
+import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
@@ -76,7 +77,7 @@ ${diff || "(no diff)"}`,
     HOOK_NAME,
     HOOK_NAME,
     workingDir,
-    "llm",
+    EXECUTION_TYPES.LLM,
     result.output.slice(0, 500)
   );
 

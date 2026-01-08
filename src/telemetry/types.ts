@@ -1,4 +1,7 @@
-import type { ModelTier } from "../types.js";
+import type { ModelTier, TelemetryMode, ExecutionType } from "../types.js";
+
+// Re-export for convenience
+export type { TelemetryMode, ExecutionType };
 
 export type TelemetryEventType =
   | "agent_execution"
@@ -16,20 +19,6 @@ export type TelemetryEventType =
  * - ERROR: Provider error occurred (API failures, etc.)
  */
 export type DecisionType = "APPROVE" | "DENY" | "CONFIRM" | "SUCCESS" | "ERROR";
-
-/**
- * Execution mode for telemetry.
- * - direct: Direct execution mode
- * - lazy: Lazy evaluation mode (fast path with deferred validation)
- */
-export type TelemetryMode = "direct" | "lazy";
-
-/**
- * Execution type for telemetry.
- * - llm: Agent called an LLM for decision
- * - typescript: Pure TypeScript execution (lazy/fast path, no LLM call)
- */
-export type ExecutionType = "llm" | "typescript";
 
 /**
  * Telemetry event matching the new API spec.

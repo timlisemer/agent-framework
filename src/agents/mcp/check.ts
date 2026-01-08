@@ -40,6 +40,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CHECK_AGENT } from "../../utils/agent-configs.js";
 import { runCommand } from "../../utils/command.js";
@@ -126,7 +127,7 @@ export async function runCheckAgent(workingDir: string): Promise<string> {
     HOOK_NAME,
     HOOK_NAME,
     workingDir,
-    "llm",
+    EXECUTION_TYPES.LLM,
     isPassing ? "All checks passed" : "Checks failed"
   );
 

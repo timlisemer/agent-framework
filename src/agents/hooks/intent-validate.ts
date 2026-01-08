@@ -30,6 +30,7 @@
 
 import {
   getModelId,
+  EXECUTION_TYPES,
   type OffTopicCheckResult,
   type ConversationContext,
   type UserMessage,
@@ -175,7 +176,7 @@ ${context.lastAssistantMessage}`,
     if (decision.startsWith("INTERVENE:")) {
       const feedback = decision.replace("INTERVENE:", "").trim();
 
-      logDeny(result, "off-topic-check", hookName, "StopResponse", workingDir, "llm", feedback);
+      logDeny(result, "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, feedback);
 
       return {
         decision: "INTERVENE",
@@ -183,7 +184,7 @@ ${context.lastAssistantMessage}`,
       };
     }
 
-    logApprove(result, "off-topic-check", hookName, "StopResponse", workingDir, "direct", "llm", "On-topic");
+    logApprove(result, "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, "On-topic");
 
     return { decision: "OK" };
   } catch {

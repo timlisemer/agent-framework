@@ -28,7 +28,7 @@
  * @module error-acknowledge
  */
 
-import { getModelId } from "../../types.js";
+import { getModelId, EXECUTION_TYPES } from "../../types.js";
 import {
   isErrorAcknowledged,
   markErrorAcknowledged,
@@ -120,16 +120,16 @@ Input: ${JSON.stringify(toolInput)}`,
     if (issueMatch) {
       await markErrorAcknowledged(issueMatch[0]);
     }
-    logApprove(result, "error-acknowledge", hookName, toolName, workingDir, "direct", "llm", "Acknowledged");
+    logApprove(result, "error-acknowledge", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Acknowledged");
     return "OK";
   }
 
   if (parsed.reason) {
-    logDeny(result, "error-acknowledge", hookName, toolName, workingDir, "llm", parsed.reason);
+    logDeny(result, "error-acknowledge", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, parsed.reason);
     return `BLOCK: ${parsed.reason}`;
   }
 
   // Default to OK if response is malformed after retries (fail open)
-  logApprove(result, "error-acknowledge", hookName, toolName, workingDir, "direct", "llm", `Malformed: ${decision}`);
+  logApprove(result, "error-acknowledge", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
   return "OK";
 }

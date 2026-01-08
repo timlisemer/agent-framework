@@ -26,11 +26,12 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { getModelId, MODEL_TIERS } from "../../types.js";
+import { getModelId, MODEL_TIERS, EXECUTION_MODES, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { TOOL_APPROVE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { getBlacklistHighlights } from "../../utils/command-patterns.js";
+import { setExecutionMode } from "../../utils/execution-context.js";
 import { logApprove, logDeny } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import type { AgentExecutionResult } from "../../utils/agent-runner.js";
@@ -70,6 +71,7 @@ export async function checkToolApproval(
 
   // Lazy mode: skip LLM if no blacklist violations
   if (options?.lazyMode && highlights.length === 0) {
+    setExecutionMode(EXECUTION_MODES.LAZY);
     const lazyResult: AgentExecutionResult = {
       output: "APPROVE",
       latencyMs: 0,
@@ -78,7 +80,7 @@ export async function checkToolApproval(
       success: true,
       errorCount: 0,
     };
-    logApprove(lazyResult, "tool-approve", hookName, toolName, workingDir, "lazy", "typescript", "No blacklist violations");
+    logApprove(lazyResult, "tool-approve", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "No blacklist violations");
     return { approved: true };
   }
 
@@ -129,7 +131,7 @@ Input: ${JSON.stringify(toolInput)}`,
   );
 
   if (decision.startsWith("APPROVE")) {
-    logApprove(result, "tool-approve", hookName, toolName, workingDir, "direct", "llm", decision);
+    logApprove(result, "tool-approve", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, decision);
     return { approved: true };
   }
 
@@ -138,7 +140,7 @@ Input: ${JSON.stringify(toolInput)}`,
     ? decision.replace("DENY: ", "")
     : `Malformed response: ${decision}`;
 
-  logDeny(result, "tool-approve", hookName, toolName, workingDir, "llm", reason);
+  logDeny(result, "tool-approve", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, reason);
 
   return {
     approved: false,

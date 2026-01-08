@@ -21,7 +21,7 @@
  * @module tool-appeal
  */
 
-import { getModelId } from "../../types.js";
+import { getModelId, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { TOOL_APPEAL_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
@@ -108,9 +108,9 @@ ${transcript}`,
   const overturned = decision.startsWith("OVERTURN: APPROVE") || decision === "APPROVE";
 
   if (overturned) {
-    logApprove(result, "tool-appeal", hookName, toolName, workingDir, "direct", "llm", "User approved operation");
+    logApprove(result, "tool-appeal", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "User approved operation");
   } else {
-    logDeny(result, "tool-appeal", hookName, toolName, workingDir, "llm", "User did not approve");
+    logDeny(result, "tool-appeal", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "User did not approve");
   }
 
   return { overturned };

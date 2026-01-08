@@ -58,6 +58,8 @@ import {
   incrementToolCount,
   clearOneShots,
 } from "../utils/strict-mode-tracker.js";
+import { setExecutionMode } from "../utils/execution-context.js";
+import { EXECUTION_MODES } from "../types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -255,6 +257,7 @@ async function main() {
           const strictCheck = await shouldUseStrictMode(input.tool_name, input.tool_input);
           if (!strictCheck.strict) {
             // LAZY VALIDATION: Allow immediately, validate async
+            setExecutionMode(EXECUTION_MODES.LAZY);
             spawnAsyncValidator(input.tool_name, filePath, input.transcript_path, input.tool_input);
             outputAllow();
           }
@@ -268,7 +271,22 @@ async function main() {
   // ============================================================
   // STEP 2: Check pending validation from previous async validator
   // This catches failures from lazy validation on previous tool calls
+  // BUT first check if user sent a new message (clears stale validations)
   // ============================================================
+
+  // Read transcript early to detect new user messages before checking pending validation
+  const earlyTranscriptResult = await readTranscriptExact(input.transcript_path, ERROR_CHECK_COUNTS);
+
+  // Check if user sent a new message or answered AskUserQuestion - clears stale pending validations
+  const hasAskUserAnswerEarly = earlyTranscriptResult.toolResult.some(
+    (tr) => tr.content.includes("User answered") || tr.content.includes("answered Claude's questions") || tr.content.includes("→")
+  );
+
+  // Clear pending validation if user provided new input (invalidates stale async validation failures)
+  if (hasAskUserAnswerEarly) {
+    await clearPendingValidation();
+  }
+
   const pendingFailure = await checkPendingValidation();
   if (pendingFailure?.status === "failed") {
     await clearPendingValidation(); // Don't block repeatedly

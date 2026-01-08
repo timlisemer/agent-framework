@@ -7,6 +7,7 @@
  * @module validate-intent
  */
 
+import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { VALIDATE_INTENT_AGENT } from "../../utils/agent-configs.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
@@ -106,8 +107,7 @@ ${planContent}`,
       HOOK_NAME,
       HOOK_NAME,
       workingDir,
-      "direct",
-      "llm",
+      EXECUTION_TYPES.LLM,
       result.output.slice(0, 500)
     );
   } else {
@@ -117,7 +117,7 @@ ${planContent}`,
       HOOK_NAME,
       HOOK_NAME,
       workingDir,
-      "llm",
+      EXECUTION_TYPES.LLM,
       result.output.slice(0, 500)
     );
   }

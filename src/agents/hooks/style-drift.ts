@@ -32,7 +32,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { getModelId } from "../../types.js";
+import { getModelId, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { STYLE_DRIFT_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
@@ -205,7 +205,7 @@ Does this edit contain ONLY style changes that were NOT requested by the user?`,
   );
 
   if (decision.startsWith("APPROVE")) {
-    logApprove(result, "style-drift", hookName, toolName, workingDir, "direct", "llm", decision);
+    logApprove(result, "style-drift", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, decision);
     return { approved: true };
   }
 
@@ -214,7 +214,7 @@ Does this edit contain ONLY style changes that were NOT requested by the user?`,
     ? decision.replace("DENY: ", "")
     : `Malformed response: ${decision}`;
 
-  logDeny(result, "style-drift", hookName, toolName, workingDir, "llm", reason);
+  logDeny(result, "style-drift", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, reason);
 
   return {
     approved: false,

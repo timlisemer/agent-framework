@@ -23,6 +23,7 @@
  * @module commit
  */
 
+import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { COMMIT_AGENT } from "../../utils/agent-configs.js";
 import { runCommand } from "../../utils/command.js";
@@ -95,7 +96,7 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
   const parsed = parseCommitResponse(result.output);
 
   if (!parsed || !parsed.message) {
-    logError(result, "commit", HOOK_NAME, HOOK_NAME, workingDir, "llm", "Failed to parse commit message");
+    logError(result, "commit", HOOK_NAME, HOOK_NAME, workingDir, EXECUTION_TYPES.LLM, "Failed to parse commit message");
     return `ERROR: Failed to parse commit message from LLM response: ${result.output}`;
   }
 
@@ -104,14 +105,14 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
   const commit = runCommand(commitCmd, workingDir);
 
   if (commit.exitCode !== 0) {
-    logError(result, "commit", HOOK_NAME, HOOK_NAME, workingDir, "llm", `Commit failed: ${commit.output}`);
+    logError(result, "commit", HOOK_NAME, HOOK_NAME, workingDir, EXECUTION_TYPES.LLM, `Commit failed: ${commit.output}`);
     return `ERROR: Commit failed: ${commit.output}`;
   }
 
   const hashResult = runCommand("git rev-parse --short HEAD", workingDir);
   const hash = hashResult.output.trim();
 
-  logConfirm(result, "commit", HOOK_NAME, HOOK_NAME, workingDir, "llm", `Committed: ${hash}`);
+  logConfirm(result, "commit", HOOK_NAME, HOOK_NAME, workingDir, EXECUTION_TYPES.LLM, `Committed: ${hash}`);
 
   return `${confirmResult}\n\nSIZE: ${parsed.size}\n${parsed.message}\nHASH: ${hash}`;
 }

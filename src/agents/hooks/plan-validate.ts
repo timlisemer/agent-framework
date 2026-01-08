@@ -27,7 +27,7 @@
  * @module plan-validate
  */
 
-import { getModelId } from "../../types.js";
+import { getModelId, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { PLAN_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
@@ -113,7 +113,7 @@ export async function checkPlanIntent(
     if (decision.startsWith("DRIFT:")) {
       const feedback = decision.replace("DRIFT:", "").trim();
 
-      logDeny(result, "plan-validate", hookName, toolName, workingDir, "llm", feedback);
+      logDeny(result, "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, feedback);
 
       return {
         approved: false,
@@ -121,7 +121,7 @@ export async function checkPlanIntent(
       };
     }
 
-    logApprove(result, "plan-validate", hookName, toolName, workingDir, "direct", "llm", "Plan aligned");
+    logApprove(result, "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Plan aligned");
 
     return { approved: true };
   } catch {

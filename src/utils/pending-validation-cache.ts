@@ -11,6 +11,8 @@ export interface PendingValidation {
   timestamp: number;
   status: "pending" | "passed" | "failed";
   failureReason?: string;
+  /** Hash of the last user message when validation was stored */
+  userMessageHash?: string;
 }
 
 interface PendingValidationData {
@@ -40,22 +42,37 @@ export function setValidationSession(transcriptPath: string): void {
 
 /**
  * Check if there's a failed validation from a previous tool call.
- * Returns the failed validation if one exists and hasn't expired.
+ * Returns the failed validation if one exists, hasn't expired, and is still relevant.
  * Expiry is handled automatically by CacheManager.
  *
- * @returns The failed validation or null if none exists
+ * @param currentUserMessageHash - Hash of the current last user message (optional)
+ *        If provided and different from stored hash, validation is stale and skipped.
+ * @returns The failed validation or null if none exists or is stale
  */
-export async function checkPendingValidation(): Promise<PendingValidation | null> {
+export async function checkPendingValidation(
+  currentUserMessageHash?: string
+): Promise<PendingValidation | null> {
   const data = await cacheManager.load();
   const validation = data.entries[0];
   if (!validation) return null;
 
   // Only return if failed (passed validations don't need action)
-  if (validation.status === "failed") {
-    return validation;
+  if (validation.status !== "failed") {
+    return null;
   }
 
-  return null;
+  // Check if validation is stale (user sent a new message since validation was stored)
+  if (
+    currentUserMessageHash &&
+    validation.userMessageHash &&
+    currentUserMessageHash !== validation.userMessageHash
+  ) {
+    // User message changed - validation is stale, clear it
+    await clearPendingValidation();
+    return null;
+  }
+
+  return validation;
 }
 
 /**

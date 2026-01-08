@@ -6,8 +6,9 @@
  */
 
 import { trackAgentExecution, extractDecision } from "./telemetry-tracker.js";
-import type { DecisionType, TelemetryMode, ExecutionType } from "../telemetry/types.js";
-import type { ModelTier } from "../types.js";
+import { getExecutionMode } from "./execution-context.js";
+import type { DecisionType } from "../telemetry/types.js";
+import type { ModelTier, ExecutionType } from "../types.js";
 import type { AgentExecutionResult } from "./agent-runner.js";
 
 /**
@@ -20,8 +21,6 @@ export interface AgentLog {
   hookName: string;
   /** Decision result (APPROVE, DENY, CONFIRM, SUCCESS, ERROR) */
   decision: DecisionType;
-  /** Execution mode (direct or lazy) */
-  mode: TelemetryMode;
   /** Execution type - whether LLM was called or pure TypeScript */
   executionType: ExecutionType;
   /** Tool being evaluated or MCP tool itself */
@@ -47,6 +46,7 @@ export interface AgentLog {
  *
  * This is the main entry point for logging agent activity.
  * It wraps trackAgentExecution with a consistent interface.
+ * Mode is automatically read from the execution context.
  *
  * @example
  * ```typescript
@@ -54,7 +54,7 @@ export interface AgentLog {
  *   agent: "tool-approve",
  *   hookName: "PreToolUse",
  *   decision: "APPROVE",
- *   mode: "direct",
+ *   executionType: "llm",
  *   toolName: "Bash",
  *   workingDir: "/home/user/project",
  *   latencyMs: 150,
@@ -69,7 +69,7 @@ export function logAgentDecision(log: AgentLog): void {
     agentName: log.agent,
     hookName: log.hookName,
     decision: log.decision,
-    mode: log.mode,
+    mode: getExecutionMode(),
     executionType: log.executionType,
     toolName: log.toolName,
     workingDir: log.workingDir,
@@ -86,6 +86,7 @@ export function logAgentDecision(log: AgentLog): void {
  * Helper to log an agent execution result with context.
  *
  * Combines AgentExecutionResult with hook/tool context for telemetry.
+ * Mode is automatically read from the execution context.
  *
  * @example
  * ```typescript
@@ -95,7 +96,7 @@ export function logAgentDecision(log: AgentLog): void {
  *   hookName: "PreToolUse",
  *   toolName: "Bash",
  *   workingDir: "/home/user/project",
- *   mode: "direct",
+ *   executionType: "llm",
  * });
  * ```
  */
@@ -106,7 +107,6 @@ export function logAgentResult(
     hookName: string;
     toolName: string;
     workingDir: string;
-    mode: TelemetryMode;
     executionType: ExecutionType;
     decisionOverride?: DecisionType;
     decisionReason?: string;
@@ -120,7 +120,6 @@ export function logAgentResult(
     agent: context.agent,
     hookName: context.hookName,
     decision,
-    mode: context.mode,
     executionType: context.executionType,
     toolName: context.toolName,
     workingDir: context.workingDir,
@@ -135,6 +134,7 @@ export function logAgentResult(
 
 /**
  * Log an APPROVE decision (agent approved tool execution).
+ * Mode is automatically read from the execution context.
  */
 export function logApprove(
   result: AgentExecutionResult,
@@ -142,7 +142,6 @@ export function logApprove(
   hookName: string,
   toolName: string,
   workingDir: string,
-  mode: TelemetryMode,
   executionType: ExecutionType,
   reason?: string
 ): void {
@@ -150,7 +149,6 @@ export function logApprove(
     agent,
     hookName,
     decision: "APPROVE",
-    mode,
     executionType,
     toolName,
     workingDir,
@@ -164,6 +162,7 @@ export function logApprove(
 
 /**
  * Log a DENY decision (agent blocked tool execution).
+ * Mode is automatically read from the execution context.
  */
 export function logDeny(
   result: AgentExecutionResult,
@@ -178,7 +177,6 @@ export function logDeny(
     agent,
     hookName,
     decision: "DENY",
-    mode: "direct",
     executionType,
     toolName,
     workingDir,
@@ -192,6 +190,7 @@ export function logDeny(
 
 /**
  * Log a CONFIRM decision (check/confirm agent validated code).
+ * Mode is automatically read from the execution context.
  */
 export function logConfirm(
   result: AgentExecutionResult,
@@ -206,7 +205,6 @@ export function logConfirm(
     agent,
     hookName,
     decision: "CONFIRM",
-    mode: "direct",
     executionType,
     toolName,
     workingDir,
@@ -220,6 +218,7 @@ export function logConfirm(
 
 /**
  * Log an ERROR decision (provider error occurred).
+ * Mode is automatically read from the execution context.
  */
 export function logError(
   result: AgentExecutionResult,
@@ -234,7 +233,6 @@ export function logError(
     agent,
     hookName,
     decision: "ERROR",
-    mode: "direct",
     executionType,
     toolName,
     workingDir,
