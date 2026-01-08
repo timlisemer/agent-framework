@@ -34,6 +34,8 @@ src/                                # TypeScript source
       intent-validate.ts            # Detects off-topic AI behavior
       style-drift.ts                # Detects unrequested style changes
       claude-md-validate.ts         # Validates CLAUDE.md edits
+      response-align.ts             # Validates response aligns with request
+      question-validate.ts          # Validates AskUserQuestion calls
       index.ts                      # Barrel export
 
   hooks/                            # Claude Code hook entry points
@@ -127,11 +129,11 @@ interface AgentConfig {
 
 Models are centrally configured in `src/types.ts`:
 
-| Tier   | Mode   | Usage                                                  |
-|--------|--------|--------------------------------------------------------|
-| haiku  | direct | Fast tasks: tool-approve, tool-appeal, error-ack, intent-validate, commit |
-| sonnet | direct | Detailed analysis: check, plan-validate                |
-| opus   | sdk    | Complex decisions: confirm (code quality gate)         |
+| Tier   | Mode   | Agents                                                                       |
+|--------|--------|------------------------------------------------------------------------------|
+| haiku  | direct | tool-approve, tool-appeal, error-ack, intent-validate, commit, style-drift, question-validate |
+| sonnet | direct | check, plan-validate, claude-md-validate, response-align, validate-intent    |
+| opus   | sdk    | confirm (code quality gate with investigation)                               |
 
 ## Agent Chains
 
@@ -166,12 +168,19 @@ The PreToolUse hook is the main safety gate (~400 lines):
 ```
 Tool call received
 ├─> Auto-approve if low-risk (LSP, Grep, Glob, MCP tools)
-├─> Error acknowledgment check
+├─> Error acknowledgment check (Haiku)
 │   ├─> Quick pattern check (no LLM)
 │   └─> If patterns found: Haiku decides (block or allow)
+├─> Response alignment check (Sonnet)
+│   └─> Validates first response aligns with user request
 ├─> Path classification (for file tools)
 │   ├─> Plan validation (Sonnet) if writing to ~/.claude/plans/
+│   ├─> CLAUDE.md validation (Sonnet) for CLAUDE.md edits
 │   └─> Trusted paths (project/~/.claude) + not sensitive → allow
+├─> Question validation (Haiku) for AskUserQuestion
+│   └─> Blocks questions about unseen content or redundant questions
+├─> Style drift check (Haiku) for Edit tool
+│   └─> Blocks unrequested style-only changes
 ├─> Tool approve (Haiku) → decision
 │   └─> If denied:
 │       └─> Appeal (Haiku) with transcript
@@ -293,6 +302,7 @@ Centralized agent configurations with documentation:
 - `CHECK_AGENT` - sonnet, direct
 - `CONFIRM_AGENT` - opus, SDK
 - `COMMIT_AGENT` - haiku, direct
+- `VALIDATE_INTENT_AGENT` - sonnet, direct (MCP tool)
 - `TOOL_APPROVE_AGENT` - haiku, direct
 - `TOOL_APPEAL_AGENT` - haiku, direct
 - `ERROR_ACK_AGENT` - haiku, direct
@@ -300,7 +310,8 @@ Centralized agent configurations with documentation:
 - `CLAUDE_MD_VALIDATE_AGENT` - sonnet, direct
 - `INTENT_VALIDATE_AGENT` - haiku, direct
 - `STYLE_DRIFT_AGENT` - haiku, direct
-- `VALIDATE_INTENT_AGENT` - haiku, direct (MCP tool)
+- `RESPONSE_ALIGN_AGENT` - sonnet, direct
+- `QUESTION_VALIDATE_AGENT` - haiku, direct
 
 ### `anthropic-client.ts`
 Singleton factory for Anthropic client. Used by direct mode agents.
@@ -377,6 +388,7 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 | `check.ts` | 1 | `CONFIRM` | `direct` |
 | `confirm.ts` | 1 | `CONFIRM` | `direct` |
 | `commit.ts` | 3 | `CONFIRM`, `ERROR` | `direct` |
+| `validate-intent.ts` | 1 | `CONFIRM` | `direct` |
 | `error-acknowledge.ts` | 3 | `APPROVE`, `DENY` | `direct` |
 | `tool-approve.ts` | 3 | `APPROVE`, `DENY` | `direct` or `lazy` |
 | `tool-appeal.ts` | 1 | `APPROVE`, `DENY` | `direct` |
@@ -385,4 +397,5 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 | `plan-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |
 | `claude-md-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |
 | `style-drift.ts` | 2 | `APPROVE`, `DENY` | `direct` |
+| `question-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |
 | `push.ts` | 0 | — | — |

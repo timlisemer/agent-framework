@@ -3,14 +3,14 @@
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
 1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent` agents (portable, works with any MCP client)
-2. **PreToolUse Hook** - Multi-layer safety gate with `tool-approve`, `tool-appeal`, `error-acknowledge`, `plan-validate`, `style-drift`, and `claude-md-validate` agents
+2. **PreToolUse Hook** - Multi-layer safety gate with `tool-approve`, `tool-appeal`, `error-acknowledge`, `response-align`, `plan-validate`, `style-drift`, `claude-md-validate`, and `question-validate` agents
 3. **Stop Hook** - For `intent-validate` agent (detects when AI goes off-track)
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
 
 ## Agents
 
-The framework implements 12 specialized agents organized into three categories:
+The framework implements 14 specialized agents organized into three categories:
 
 ### MCP Tools (User-Facing)
 
@@ -20,7 +20,7 @@ The framework implements 12 specialized agents organized into three categories:
 | confirm         | opus   | Binary quality gate: CONFIRMED or DECLINED                   |
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
-| validate_intent | haiku  | Check if AI followed user intentions (post-session review)   |
+| validate_intent | sonnet | Check if AI followed user intentions (post-session review)   |
 
 ### Validation Agents (Hook-Triggered)
 
@@ -31,6 +31,8 @@ The framework implements 12 specialized agents organized into three categories:
 | error-acknowledge| haiku  | PreToolUse  | Detect when AI ignores errors or feedback      |
 | style-drift      | haiku  | PreToolUse  | Detect unrequested cosmetic/style changes      |
 | claude-md-validate| sonnet | PreToolUse  | Validate CLAUDE.md edits against conventions   |
+| response-align   | sonnet | PreToolUse  | Validate AI response aligns with user request  |
+| question-validate| haiku  | PreToolUse  | Validate AskUserQuestion before showing to user|
 
 ### Approval Agents (PreToolUse Hook)
 
@@ -61,9 +63,19 @@ The `commit` agent enforces the complete verification chain before committing.
 ├─ error-acknowledge: Check if AI is ignoring errors
 │  └─ BLOCK if errors not acknowledged
 │
+├─ response-align: Validate first response aligns with user request
+│  └─ BLOCK if AI asked question then continued, or action misaligned
+│
 ├─ Path-based classification for file tools
 │  ├─ Trusted path (project dir or ~/.claude) + not sensitive → ALLOW
-│  └─ plan-validate: Check for plan drift on ~/.claude/plans writes
+│  ├─ plan-validate: Check for plan drift on ~/.claude/plans writes
+│  └─ claude-md-validate: Validate CLAUDE.md edits
+│
+├─ question-validate: For AskUserQuestion tool
+│  └─ BLOCK if asking about unseen content or redundant questions
+│
+├─ style-drift: For Edit tool
+│  └─ DENY if style-only changes not requested
 │
 ├─ tool-approve: Evaluate tool call against CLAUDE.md + rules
 │  └─ DENY → tool-appeal: Review with transcript context
