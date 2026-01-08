@@ -395,6 +395,15 @@ async function main() {
     await recordUserMessage(lastUserMessage.content, lastUserMessage.index);
   }
 
+  // Also clear caches if user answered via AskUserQuestion tool
+  // (tool result with answer indicator means fresh user input)
+  const hasAskUserAnswer = errorCheckResult.toolResult.some(
+    (tr) => tr.content.includes("User answered") || tr.content.includes("answered Claude's questions") || tr.content.includes("→")
+  );
+  if (hasAskUserAnswer) {
+    await invalidateAllCaches();
+  }
+
   // TS Pre-check: Only check TOOL_RESULT lines for error patterns
   const errorPreCheck = hasErrorPatterns(errorCheckTranscript, { toolResultsOnly: true });
 

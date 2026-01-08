@@ -148,6 +148,15 @@ export async function checkResponseAlignment(
     return { approved: true };
   }
 
+  // Check if user answered via AskUserQuestion tool (tool result with answer indicator)
+  // This means user provided fresh input that supersedes any prior stop hook feedback
+  const hasUserToolAnswer = transcriptResult.toolResult.some(
+    (tr) => tr.content.includes("User answered") || tr.content.includes("answered Claude's questions") || tr.content.includes("→")
+  );
+  if (hasUserToolAnswer) {
+    return { approved: true };
+  }
+
   // Get last user message
   const lastUserMessage = transcriptResult.user[transcriptResult.user.length - 1];
   const lastUserIndex = lastUserMessage.index;
@@ -481,7 +490,7 @@ export async function checkStopResponseAlignment(
         approved: false,
         reason: "Plain text question detected",
         systemMessage:
-          "Do not ask questions in plain text. Use the AskUserQuestion tool to present structured options to the user.",
+          "Error: Stop hook - Do not ask questions in plain text. Use the AskUserQuestion tool to present structured options to the user.",
       };
     }
 
@@ -504,7 +513,7 @@ export async function checkStopResponseAlignment(
         approved: false,
         reason: "Plain text plan approval detected",
         systemMessage:
-          "Do not ask for plan approval in plain text. Write your plan to the plan file, then exit plan mode using the ExitPlanMode tool.",
+          "Error: Stop hook - Do not ask for plan approval in plain text. Write your plan to the plan file, then exit plan mode using the ExitPlanMode tool.",
       };
     } else if (classifyResult.classification === "QUESTION") {
       logDeny(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, "llm", "Plain text question detected");
@@ -512,7 +521,7 @@ export async function checkStopResponseAlignment(
         approved: false,
         reason: "Plain text question detected",
         systemMessage:
-          "Do not ask questions in plain text. Use the AskUserQuestion tool to present structured options to the user.",
+          "Error: Stop hook - Do not ask questions in plain text. Use the AskUserQuestion tool to present structured options to the user.",
       };
     }
     // classification === "OK" - allow it
@@ -533,7 +542,7 @@ export async function checkStopResponseAlignment(
         return {
           approved: false,
           reason: "User question not answered",
-          systemMessage: `You didn't answer the user's question: "${userQuestion}"\nPlease respond to what they asked.`,
+          systemMessage: `Error: Stop hook - You didn't answer the user's question: "${userQuestion}"\nPlease respond to what they asked.`,
         };
       }
     }
@@ -550,7 +559,7 @@ export async function checkStopResponseAlignment(
       approved: false,
       reason: "AI stopped without clear reason",
       systemMessage:
-        "If you're unsure how to proceed, please explain what's blocking you so the user can help.",
+        "Error: Stop hook - If you're unsure how to proceed, please explain what's blocking you so the user can help.",
     };
   }
 
