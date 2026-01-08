@@ -1,37 +1,42 @@
 /**
- * Intent Alignment Agent - Tool Call Alignment Check
+ * Response Alignment Agent - Unified Response Validation
  *
- * This agent validates that the AI's tool call or stop response
- * aligns with what the user actually requested. It catches scenarios where
- * the AI ignores user questions or does something unrelated to the request.
+ * This agent validates that the AI's response (tool call or stop) aligns with
+ * what the user actually requested. It catches scenarios where the AI ignores
+ * user questions, asks clarifications then continues anyway, or does something
+ * unrelated to the request.
  *
  * ## FLOW
  *
  * 1. Read transcript to get last user message and any AI acknowledgment
- * 2. Run sonnet agent to check alignment
- * 3. Retry if format is invalid
- * 4. Return OK or BLOCK with reason
+ * 2. Check for preamble violations (AI asked question/clarification then continued)
+ * 3. Run sonnet agent to check alignment
+ * 4. Retry if format is invalid
+ * 5. Return OK or BLOCK with reason
  *
  * ## KEY SCENARIOS DETECTED
  *
+ * - AI asked clarification then continued with tools (preamble violation)
  * - User asks question, AI does tool call instead of answering
  * - User requests X, AI does Y (unrelated action)
  * - User says stop/explain, AI continues with tools
  * - AI acknowledged X but then did Y
  *
- * ## ACKNOWLEDGMENT HANDLING
+ * ## PREAMBLE HANDLING
  *
- * The "possible but not required thought/ack message" is handled by:
- * - Extracting any assistant text AFTER the last user message
- * - Passing it as context to the agent
- * - Agent verifies the tool matches both user request AND acknowledgment
+ * The AI acknowledgment text is checked for clarification patterns:
+ * - "I need to clarify" / "Let me clarify"
+ * - "Before I proceed" / "Just to confirm"
+ * - Questions directed at the user
  *
- * @module intent-align
+ * If detected, the LLM decides if it's a genuine violation or rhetorical.
+ *
+ * @module response-align
  */
 
 import { getModelId, MODEL_TIERS, type CheckResult, type StopCheckResult, type ModelTier } from "../../types.js";
 import { runAgent, type AgentExecutionResult } from "../../utils/agent-runner.js";
-import { FIRST_RESPONSE_INTENT_AGENT } from "../../utils/agent-configs.js";
+import { RESPONSE_ALIGN_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logApprove, logDeny } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
@@ -42,11 +47,59 @@ import {
   FIRST_RESPONSE_STOP_COUNTS,
 } from "../../utils/transcript-presets.js";
 
-// Re-export CheckResult as IntentAlignmentResult for backwards compatibility
+// Re-export CheckResult as ResponseAlignmentResult for backwards compatibility
+export type ResponseAlignmentResult = CheckResult;
+
+// Legacy alias for backwards compatibility
 export type IntentAlignmentResult = CheckResult;
+
+// Patterns indicating AI is asking a question/clarification that should wait for user response
+const PREAMBLE_CONCERN_PATTERNS = [
+  /I need to clarify/i,
+  /let me clarify/i,
+  /to clarify/i,
+  /before I proceed/i,
+  /before we continue/i,
+  /just to confirm/i,
+  /to make sure/i,
+  /I'm not sure if/i,
+  /I'm uncertain/i,
+];
+
+/**
+ * Check if the AI acknowledgment contains potential preamble violations.
+ * Returns true if the LLM should be alerted to check this.
+ */
+function hasPreambleConcern(ackText: string): boolean {
+  if (!ackText) return false;
+
+  // Check for explicit clarification patterns
+  for (const pattern of PREAMBLE_CONCERN_PATTERNS) {
+    if (pattern.test(ackText)) {
+      return true;
+    }
+  }
+
+  // Check for direct questions to user (ends with ? and seems directed at user)
+  const sentences = ackText.split(/[.!]\s*/);
+  for (const sentence of sentences) {
+    if (sentence.trim().endsWith("?")) {
+      // Skip rhetorical/self-directed questions
+      if (!/^(?:I wonder|wondering|why (?:does|is|would) (?:this|that))/i.test(sentence)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
 
 /**
  * Check if the AI's tool call aligns with the user's request.
+ *
+ * This function validates:
+ * 1. Preamble violations - AI asked clarification then continued anyway
+ * 2. Intent alignment - Tool call matches user's request
  *
  * Note: The "first tool call" gating is now handled by rewind-cache.ts.
  * This function always runs the full alignment check when called.
@@ -60,7 +113,7 @@ export type IntentAlignmentResult = CheckResult;
  *
  * @example
  * ```typescript
- * const result = await checkIntentAlignment(
+ * const result = await checkResponseAlignment(
  *   'Edit',
  *   { file_path: 'src/auth.ts', ... },
  *   transcriptPath,
@@ -72,14 +125,14 @@ export type IntentAlignmentResult = CheckResult;
  * }
  * ```
  */
-export async function checkIntentAlignment(
+export async function checkResponseAlignment(
   toolName: string,
   toolInput: unknown,
   transcriptPath: string,
   workingDir: string,
   hookName: string
-): Promise<IntentAlignmentResult> {
-  // Skip intent alignment checks for subagents (Task-spawned agents)
+): Promise<ResponseAlignmentResult> {
+  // Skip response alignment checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
     return { approved: true };
   }
@@ -121,18 +174,24 @@ export async function checkIntentAlignment(
           .join("\n")}\n`
       : "";
 
+  // Check for preamble concerns and add to context if detected
+  const preambleConcern = hasPreambleConcern(ackText);
+  const preambleSection = preambleConcern
+    ? `\n⚠️ PREAMBLE CONCERN: The AI acknowledgment appears to contain a question or clarification directed at the user. Check if the AI should have waited for user response before proceeding with this tool call.\n`
+    : "";
+
   // Build context for the agent
   const context = `USER MESSAGE:
 ${userRequest}
 
-${ackText ? `AI ACKNOWLEDGMENT (text before this tool call):\n${ackText}\n` : ""}TOOL CALL:
+${ackText ? `AI ACKNOWLEDGMENT (text before this tool call):\n${ackText}\n` : ""}${preambleSection}TOOL CALL:
 Tool: ${toolName}
 Input: ${JSON.stringify(toolInput, null, 2).slice(0, 500)}
 ${toolResultsText}`;
 
   // Run alignment check via unified runner
   const result = await runAgent(
-    { ...FIRST_RESPONSE_INTENT_AGENT },
+    { ...RESPONSE_ALIGN_AGENT },
     {
       prompt: "Check if this tool call aligns with the user's request.",
       context,
@@ -143,7 +202,7 @@ ${toolResultsText}`;
   const anthropic = getAnthropicClient();
   const decision = await retryUntilValid(
     anthropic,
-    getModelId(FIRST_RESPONSE_INTENT_AGENT.tier),
+    getModelId(RESPONSE_ALIGN_AGENT.tier),
     result.output,
     toolDescription,
     {
@@ -154,7 +213,7 @@ ${toolResultsText}`;
   );
 
   if (decision.startsWith("OK")) {
-    logApprove(result, "intent-align", hookName, toolName, workingDir, "direct", "Aligned with request");
+    logApprove(result, "response-align", hookName, toolName, workingDir, "direct", "Aligned with request");
     return { approved: true };
   }
 
@@ -163,7 +222,7 @@ ${toolResultsText}`;
     ? decision.substring(7).trim()
     : `Misaligned response: ${decision}`;
 
-  logDeny(result, "intent-align", hookName, toolName, workingDir, reason);
+  logDeny(result, "response-align", hookName, toolName, workingDir, reason);
 
   return {
     approved: false,
@@ -171,7 +230,13 @@ ${toolResultsText}`;
   };
 }
 
-// Re-export StopCheckResult as StopIntentResult for backwards compatibility
+// Legacy alias for backwards compatibility
+export const checkIntentAlignment = checkResponseAlignment;
+
+// Re-export StopCheckResult as StopResponseResult for backwards compatibility
+export type StopResponseResult = StopCheckResult;
+
+// Legacy alias
 export type StopIntentResult = StopCheckResult;
 
 /**
@@ -222,7 +287,7 @@ Reply with EXACTLY one of: PLAN_APPROVAL, QUESTION, or OK`;
 
   const response = await runAgent(
     {
-      name: "stop-classify",
+      name: "response-align-stop",
       tier: MODEL_TIERS.HAIKU,
       mode: "direct",
       maxTokens: 50,
@@ -377,12 +442,12 @@ function isOperationalContext(userText: string, assistantText: string): boolean 
  * @param hookName - Hook that triggered this check (for telemetry)
  * @returns Check result with approval status, reason, and optional system message
  */
-export async function checkStopIntentAlignment(
+export async function checkStopResponseAlignment(
   transcriptPath: string,
   workingDir: string,
   hookName: string
-): Promise<StopIntentResult> {
-  // Skip stop intent checks for subagents (Task-spawned agents)
+): Promise<StopResponseResult> {
+  // Skip stop response checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
     return { approved: true };
   }
@@ -434,7 +499,7 @@ export async function checkStopIntentAlignment(
     };
 
     if (classifyResult.classification === "PLAN_APPROVAL") {
-      logDeny(classifyAgentResult, "stop-classify", hookName, "StopResponse", workingDir, "Plain text plan approval detected");
+      logDeny(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, "Plain text plan approval detected");
       return {
         approved: false,
         reason: "Plain text plan approval detected",
@@ -442,7 +507,7 @@ export async function checkStopIntentAlignment(
           "Do not ask for plan approval in plain text. Use the ExitPlanMode tool to present the plan with structured approval options.",
       };
     } else if (classifyResult.classification === "QUESTION") {
-      logDeny(classifyAgentResult, "stop-classify", hookName, "StopResponse", workingDir, "Plain text question detected");
+      logDeny(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, "Plain text question detected");
       return {
         approved: false,
         reason: "Plain text question detected",
@@ -451,7 +516,7 @@ export async function checkStopIntentAlignment(
       };
     }
     // classification === "OK" - allow it
-    logApprove(classifyAgentResult, "stop-classify", hookName, "StopResponse", workingDir, "direct", "Legitimate stop response");
+    logApprove(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, "direct", "Legitimate stop response");
   }
 
   // Check 2: User asked a question that wasn't addressed
@@ -491,3 +556,6 @@ export async function checkStopIntentAlignment(
 
   return { approved: true };
 }
+
+// Legacy alias for backwards compatibility
+export const checkStopIntentAlignment = checkStopResponseAlignment;

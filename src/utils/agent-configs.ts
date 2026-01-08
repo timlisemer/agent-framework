@@ -337,6 +337,7 @@ sqlite3: APPROVE only for read-only operations.
 1. cd command (ANY form, no exceptions)
    - DENY: cd /path, cd && cmd, cd /path && cmd, etc.
    - AIs must stay in their starting directory - changing dirs causes state confusion
+   - SUGGEST: Most CLI tools have flags to specify working directory (--cwd, --prefix, -C, --dir). Use those instead.
 
 2. Bash commands that duplicate AI tools
    - cat/head/tail → use Read tool
@@ -854,19 +855,20 @@ NO other text before the decision word.`,
  *
  * Handles quoted text: "what?" inside quotes is not a question.
  */
-export const FIRST_RESPONSE_INTENT_AGENT: Omit<AgentConfig, "workingDir"> = {
-  name: "first-response-intent",
+export const RESPONSE_ALIGN_AGENT: Omit<AgentConfig, "workingDir"> = {
+  name: "response-align",
   tier: MODEL_TIERS.SONNET,
   mode: "direct",
   maxTokens: 500,
-  systemPrompt: `You validate whether the AI's first tool call after a user message aligns with what the user asked.
+  systemPrompt: `You validate whether the AI's response (text + tool call) aligns with what the user asked.
 
 ## CONTEXT YOU RECEIVE
 
 1. USER MESSAGE: What the user just said
 2. AI ACKNOWLEDGMENT (optional): Any text the AI sent before this tool call
-3. TOOL CALL: The tool the AI is attempting to use
-4. RECENT TOOL RESULTS (optional): Results from recent tool calls showing what was accomplished
+3. PREAMBLE CONCERN (optional): Warning if AI acknowledgment looks like a question to user
+4. TOOL CALL: The tool the AI is attempting to use
+5. RECENT TOOL RESULTS (optional): Results from recent tool calls showing what was accomplished
 
 ## CODE BLOCKS IN MARKDOWN FILES
 
@@ -877,9 +879,33 @@ When evaluating Edit tool calls on markdown files (.md):
 - Focus on SEMANTIC alignment, not character-level content
 - Plan files (~/.claude/plans/) are EXPECTED to contain code examples
 
+## PRIORITY 0: PREAMBLE VIOLATIONS (CHECK FIRST!)
+
+The AI ACKNOWLEDGMENT may contain questions or clarifications directed at the user.
+If so, the AI should WAIT for the user's response, not continue with tools.
+
+PREAMBLE VIOLATION PATTERNS:
+- "I need to clarify" / "Let me clarify" / "To clarify"
+- "Before I proceed" / "Before we continue"
+- "Just to confirm" / "To make sure"
+- Direct questions ending with ? directed at user
+- Expressing uncertainty: "I'm not sure if" / "I'm uncertain"
+
+If AI acknowledgment contains any of these → BLOCK
+UNLESS the question is clearly rhetorical or self-directed.
+
+Examples:
+| Acknowledgment | Tool | Result |
+|---------------|------|--------|
+| "I need to clarify - did you mean X or Y?" | Edit | BLOCK: asked user question, should wait |
+| "Let me clarify what you meant..." | Read | BLOCK: clarification, should wait |
+| "Just to confirm - you want X?" | Bash | BLOCK: asked confirmation, should wait |
+| "I wonder why this failed..." | Read | OK: self-directed, not asking user |
+| "Let me read the file to understand" | Read | OK: not a question to user |
+
 ## PRIORITY 1: QUESTIONS REQUIRE TEXT RESPONSES
 
-BEFORE checking anything else, determine if the user asked a question.
+AFTER checking preamble, determine if the user asked a question.
 
 Step 1: Strip quoted text
 - Remove all text inside "..." or '...' before checking
@@ -917,6 +943,8 @@ If user said stop, wait, hold on, explain, pause → any action tool = BLOCK
 
 | User Message | Ack | Tool | Result |
 |-------------|-----|------|--------|
+| Continue | I need to clarify - X or Y? | Read | BLOCK: preamble asks question, should wait |
+| Do X | Just to confirm - you want X? | Edit | BLOCK: preamble asks confirmation |
 | What does this do? | - | Edit | BLOCK: question needs answer first |
 | wtf are you doing | - | Bash | BLOCK: frustration = question, answer first |
 | What does this do? | - | Read | OK: gathering info to answer |
@@ -936,6 +964,7 @@ BLOCK: <specific reason>
 
 Examples:
 OK
+BLOCK: Preamble asks question - AI should wait for user response
 BLOCK: User asked a question - answer first, then use tools
 BLOCK: User asked about login but AI is editing payment file
 BLOCK: AI acknowledged fixing X but is doing Y instead
@@ -943,6 +972,9 @@ BLOCK: User said stop but AI is proceeding with action
 
 NO other text before the decision word.`,
 };
+
+// Legacy alias for backwards compatibility
+export const FIRST_RESPONSE_INTENT_AGENT = RESPONSE_ALIGN_AGENT;
 
 /**
  * Validate Intent Agent Configuration

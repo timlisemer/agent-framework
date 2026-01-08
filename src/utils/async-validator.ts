@@ -16,14 +16,14 @@
  *
  * ## Validations Run
  *
- * 1. Intent alignment check (first-response only)
+ * 1. Response alignment check (preamble + intent validation)
  * 2. Error acknowledgment check
  * 3. Style drift check (Edit tool only)
  *
  * @module async-validator
  */
 
-import { checkIntentAlignment } from "../agents/hooks/intent-align.js";
+import { checkResponseAlignment } from "../agents/hooks/response-align.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
 import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
 import { writePendingValidation, clearPendingValidation, setValidationSession } from "./pending-validation-cache.js";
@@ -93,19 +93,17 @@ async function main(): Promise<void> {
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
   try {
-    // Validation 1: Intent Alignment (for action tools)
-    const actionTools = ["Edit", "Write", "NotebookEdit", "Bash", "Agent", "Task"];
-    if (actionTools.includes(tool)) {
-      const intentResult = await checkIntentAlignment(tool, toolInput, transcript, projectDir, "PreToolUse");
-      if (!intentResult.approved) {
-        await writePendingValidation({
-          status: "failed",
-          toolName: tool,
-          filePath: file,
-          failureReason: `Intent misalignment: ${intentResult.reason}`,
-        });
-        return;
-      }
+    // Validation 1: Response Alignment (preamble + intent check)
+    // Runs for all tools now (expanded from action tools only)
+    const intentResult = await checkResponseAlignment(tool, toolInput, transcript, projectDir, "PreToolUse");
+    if (!intentResult.approved) {
+      await writePendingValidation({
+        status: "failed",
+        toolName: tool,
+        filePath: file,
+        failureReason: `Response misalignment: ${intentResult.reason}`,
+      });
+      return;
     }
 
     // Validation 2: Error Acknowledgment

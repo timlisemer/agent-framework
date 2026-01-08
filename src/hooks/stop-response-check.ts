@@ -3,7 +3,7 @@ import { initializeTelemetry, flushTelemetry } from "../telemetry/index.js";
 initializeTelemetry();
 
 import { type StopHookInput } from "@anthropic-ai/claude-agent-sdk";
-import { checkStopIntentAlignment } from "../agents/hooks/intent-align.js";
+import { checkStopResponseAlignment } from "../agents/hooks/response-align.js";
 import {
   setRewindSession,
   detectRewind,
@@ -56,7 +56,7 @@ async function main() {
     return;
   }
 
-  const result = await checkStopIntentAlignment(
+  const result = await checkStopResponseAlignment(
     input.transcript_path,
     process.env.CLAUDE_PROJECT_DIR || process.cwd(),
     "Stop"

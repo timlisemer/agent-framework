@@ -380,7 +380,7 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 | `error-acknowledge.ts` | 3 | `APPROVE`, `DENY` | `direct` |
 | `tool-approve.ts` | 3 | `APPROVE`, `DENY` | `direct` or `lazy` |
 | `tool-appeal.ts` | 1 | `APPROVE`, `DENY` | `direct` |
-| `intent-align.ts` | 5 | `APPROVE`, `DENY` | `direct` |
+| `response-align.ts` | 5 | `APPROVE`, `DENY` | `direct` |
 | `intent-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |
 | `plan-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |
 | `claude-md-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |

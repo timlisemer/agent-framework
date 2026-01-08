@@ -13,7 +13,7 @@ import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
 import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
-import { checkIntentAlignment } from "../agents/hooks/intent-align.js";
+import { checkResponseAlignment } from "../agents/hooks/response-align.js";
 import { detectWorkaroundPattern } from "../utils/command-patterns.js";
 import { markErrorAcknowledged, setSession, checkUserInteraction } from "../utils/ack-cache.js";
 import {
@@ -444,17 +444,18 @@ async function main() {
   }
 
   // ============================================================
-  // STEP 2: INTENT-VALIDATE
-  // TS Pre-check: isFirstResponseChecked() = false + ACTION_TOOLS
+  // STEP 2: RESPONSE-ALIGN
+  // TS Pre-check: isFirstResponseChecked() = false (runs for ALL tools)
+  // Validates: preamble violations + intent alignment
   // If triggered: LLM → if block → appealHelper → decide
   // ============================================================
   const currentFirstResponseChecked = await isFirstResponseChecked();
-  if (ACTION_TOOLS.includes(input.tool_name) && !currentFirstResponseChecked) {
+  if (!currentFirstResponseChecked) {
     // Mark as checked so we don't run again for subsequent tool calls in same turn
     await markFirstResponseChecked();
 
-    // Run intent-alignment LLM agent
-    const intentResult = await checkIntentAlignment(
+    // Run response-alignment LLM agent (validates preamble + intent)
+    const intentResult = await checkResponseAlignment(
       input.tool_name,
       input.tool_input,
       input.transcript_path,

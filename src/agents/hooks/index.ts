@@ -25,10 +25,10 @@
  * - error-acknowledge: Ensures AI acknowledges issues (haiku)
  * - plan-validate: Checks plan drift against user request (sonnet)
  * - style-drift: Detects unrequested style changes (haiku)
- * - intent-align: Checks tool call alignment with user request (sonnet)
+ * - response-align: Checks preamble + tool call alignment with user request (sonnet)
  *
  * Stop Hook (`src/hooks/stop-response-check.ts`):
- * - intent-align (stop): Checks stop response for plain text questions, unanswered questions
+ * - response-align (stop): Checks stop response for plain text questions, unanswered questions
  */
 
 export { checkToolApproval } from './tool-approve.js';
@@ -37,4 +37,10 @@ export { checkErrorAcknowledgment } from './error-acknowledge.js';
 export { checkPlanIntent } from './plan-validate.js';
 export { checkForOffTopic, extractConversationContext } from './intent-validate.js';
 export { checkStyleDrift } from './style-drift.js';
-export { checkIntentAlignment, checkStopIntentAlignment } from './intent-align.js';
+export {
+  checkResponseAlignment,
+  checkStopResponseAlignment,
+  // Legacy aliases for backwards compatibility
+  checkIntentAlignment,
+  checkStopIntentAlignment,
+} from './response-align.js';
