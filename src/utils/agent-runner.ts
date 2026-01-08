@@ -92,6 +92,22 @@ import { logAgentDecision, extractDecision } from "./logger.js";
 const SDK_TOOLS = ["Read", "Glob", "Grep"] as const;
 
 /**
+ * Internal result from agent execution functions.
+ * Contains text output and optional usage data from LLM provider.
+ */
+interface InternalAgentResult {
+  text: string;
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+    cachedTokens?: number;
+    reasoningTokens?: number;
+    cost?: number;
+  };
+}
+
+/**
  * Configuration for an agent.
  *
  * Defines the agent's identity, model tier, execution mode, and behavior.
@@ -208,6 +224,14 @@ export interface AgentExecutionResult {
   success: boolean;
   /** Number of LLM errors encountered */
   errorCount: number;
+  /** Token usage from LLM provider */
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  cachedTokens?: number;
+  reasoningTokens?: number;
+  /** Cost in USD from LLM provider */
+  cost?: number;
 }
 
 /**
@@ -260,23 +284,23 @@ export async function runAgent(
     : input.prompt;
 
   // Execute based on mode
-  let output: string;
+  let result: InternalAgentResult;
   let success = true;
   let errorCount = 0;
 
   try {
-    output =
+    result =
       config.mode === "sdk"
         ? await runSdkAgent(config, fullPrompt)
         : await runDirectAgent(config, fullPrompt);
 
     // Detect error responses
-    if (output.startsWith("[DIRECT ERROR]") || output.startsWith("[SDK ERROR]")) {
+    if (result.text.startsWith("[DIRECT ERROR]") || result.text.startsWith("[SDK ERROR]")) {
       success = false;
       errorCount = 1;
     }
   } catch (error) {
-    output = error instanceof Error ? error.message : String(error);
+    result = { text: error instanceof Error ? error.message : String(error) };
     success = false;
     errorCount = 1;
   }
@@ -284,12 +308,19 @@ export async function runAgent(
   const latencyMs = Date.now() - startTime;
 
   return {
-    output,
+    output: result.text,
     latencyMs,
     modelTier: config.tier,
     modelName: getModelId(config.tier),
     success,
     errorCount,
+    // Pass through usage data
+    promptTokens: result.usage?.promptTokens,
+    completionTokens: result.usage?.completionTokens,
+    totalTokens: result.usage?.totalTokens,
+    cachedTokens: result.usage?.cachedTokens,
+    reasoningTokens: result.usage?.reasoningTokens,
+    cost: result.usage?.cost,
   };
 }
 
@@ -302,12 +333,12 @@ export async function runAgent(
  * @internal
  * @param config - Agent configuration
  * @param prompt - Full prompt (including any context)
- * @returns Agent's text response
+ * @returns Agent's text response with usage data
  */
 async function runDirectAgent(
   config: AgentConfig,
   prompt: string
-): Promise<string> {
+): Promise<InternalAgentResult> {
   try {
     const client = getAnthropicClient();
 
@@ -318,13 +349,30 @@ async function runDirectAgent(
       messages: [{ role: "user", content: prompt }],
     });
 
-    return extractTextFromResponse(response);
+    // Extract usage data from response
+    // OpenRouter uses: prompt_tokens, completion_tokens, total_tokens, cost
+    // Anthropic SDK uses: input_tokens, output_tokens
+    const rawUsage = response.usage as unknown as Record<string, unknown> | undefined;
+    const usage = rawUsage ? {
+      // Handle both OpenRouter and Anthropic field names
+      promptTokens: (rawUsage.prompt_tokens ?? rawUsage.input_tokens) as number | undefined,
+      completionTokens: (rawUsage.completion_tokens ?? rawUsage.output_tokens) as number | undefined,
+      totalTokens: rawUsage.total_tokens as number | undefined,
+      cachedTokens: (rawUsage.prompt_tokens_details as Record<string, unknown> | undefined)?.cached_tokens as number | undefined,
+      reasoningTokens: (rawUsage.completion_tokens_details as Record<string, unknown> | undefined)?.reasoning_tokens as number | undefined,
+      cost: rawUsage.cost as number | undefined,
+    } : undefined;
+
+    return {
+      text: extractTextFromResponse(response),
+      usage,
+    };
   } catch (error) {
     // Return error as string rather than throwing
     // This allows the caller to handle it gracefully (matches runSdkAgent pattern)
     const errorMessage =
       error instanceof Error ? error.message : String(error);
-    return `[DIRECT ERROR] ${errorMessage}`;
+    return { text: `[DIRECT ERROR] ${errorMessage}` };
   }
 }
 
@@ -359,7 +407,7 @@ async function runDirectAgent(
 async function runSdkAgent(
   config: AgentConfig,
   prompt: string
-): Promise<string> {
+): Promise<InternalAgentResult> {
   // Validate workingDir for SDK mode
   if (!config.workingDir) {
     throw new Error(`SDK mode requires workingDir for agent '${config.name}'`);
@@ -406,7 +454,21 @@ Your final response should be your complete analysis in the required format.`;
     let finalResult = "";
     let lastAssistantContent = "";
 
+    // Accumulate usage across all messages
+    let totalPromptTokens = 0;
+    let totalCompletionTokens = 0;
+    let totalCost = 0;
+
     for await (const message of q) {
+      // Extract usage from any message that has it
+      const msgAny = message as Record<string, unknown>;
+      if (msgAny.usage && typeof msgAny.usage === "object") {
+        const usage = msgAny.usage as Record<string, unknown>;
+        totalPromptTokens += (usage.prompt_tokens ?? usage.input_tokens ?? 0) as number;
+        totalCompletionTokens += (usage.completion_tokens ?? usage.output_tokens ?? 0) as number;
+        totalCost += (usage.cost ?? 0) as number;
+      }
+
       // Prefer 'result' message type - this is the final output
       if (message.type === "result") {
         if ("result" in message && typeof message.result === "string") {
@@ -448,14 +510,26 @@ Your final response should be your complete analysis in the required format.`;
       }
     }
 
+    // Build usage object if we have any data
+    const hasUsage = totalPromptTokens > 0 || totalCompletionTokens > 0 || totalCost > 0;
+    const usage = hasUsage ? {
+      promptTokens: totalPromptTokens || undefined,
+      completionTokens: totalCompletionTokens || undefined,
+      totalTokens: (totalPromptTokens + totalCompletionTokens) || undefined,
+      cost: totalCost || undefined,
+    } : undefined;
+
     // Return result, falling back to last assistant content
-    return finalResult || lastAssistantContent || "[SDK ERROR] No output received";
+    return {
+      text: finalResult || lastAssistantContent || "[SDK ERROR] No output received",
+      usage,
+    };
   } catch (error) {
     // Return error as string rather than throwing
     // This allows the caller to handle it gracefully
     const errorMessage =
       error instanceof Error ? error.message : String(error);
-    return `[SDK ERROR] ${errorMessage}`;
+    return { text: `[SDK ERROR] ${errorMessage}` };
   }
 }
 

@@ -3,7 +3,12 @@ description: Commit staged changes and push to remote (user)
 allowed-tools: mcp__agent-framework__commit, mcp__agent-framework__push, AskUserQuestion
 ---
 
-1. Ask the user for preferences using AskUserQuestion with these two questions:
+1. Check if you have worked in multiple different git repositories during this conversation. If you have worked in 2 or more repositories, ask the user using AskUserQuestion:
+   - Question: "Which repositories do you want to commit and push?" with header "Repos" and options listing each repository path you worked in
+   - Set multiSelect to true so the user can select multiple repos
+   - If the user only selects one, proceed with that repo. If multiple, you will run the commit and push process for each selected repo sequentially.
+
+2. Ask the user for preferences using AskUserQuestion with these two questions:
    - Question 1: "Which model tier for code review?" with header "Tier" and options:
      - "opus" with description "Most thorough analysis (default)"
      - "sonnet" with description "Balanced speed and quality"
@@ -14,16 +19,22 @@ allowed-tools: mcp__agent-framework__commit, mcp__agent-framework__push, AskUser
      - "Performance" with description "Extra focus on performance"
    Set multiSelect to false for both questions.
 
-2. Call mcp__agent-framework__commit with:
-   - model_tier: The selected tier from question 1 (just the lowercase word: "opus", "sonnet", or "haiku")
-   - extra_context: If user selected something other than "None" for question 2, pass that as extra context. If they provided custom text via "Other", use that text.
+3. For each selected repository (or the current working directory if only one repo was worked in), perform steps 4-6:
 
-3. Check the commit result:
+4. Call mcp__agent-framework__commit with:
+   - working_dir: The path to the repository
+   - model_tier: The selected tier from question 1 (just the lowercase word: "opus", "sonnet", or "haiku")
+   - extra_context: Build the context as follows:
+     - If multiple repositories are being committed and pushed, prepend: "Note: This is part of a multi-repository commit and push. The user is committing changes to [N] repositories: [list the repo paths]. You are currently evaluating: [current repo path]."
+     - Then append the user's focus preference if they selected something other than "None" for question 2 (or their custom text via "Other").
+
+5. Check the commit result:
    - If it starts with "SKIPPED:" - report that nothing was committed, but still proceed to push
-   - If it contains "DECLINED" - report the reason and DO NOT push
-   - If it contains an error or failure - report the error and DO NOT push
+   - If it contains "DECLINED" - report the reason and DO NOT push this repository
+   - If it contains an error or failure - report the error and DO NOT push this repository
    - Otherwise - report the commit message and proceed
 
-4. Call mcp__agent-framework__push
+6. Call mcp__agent-framework__push with:
+   - working_dir: The path to the repository
 
-5. Report the push result to the user
+7. Report the push result to the user for each repository

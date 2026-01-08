@@ -45,6 +45,18 @@ export interface AgentLog {
   decisionReason?: string;
   /** Additional data */
   extraData?: Record<string, unknown>;
+  /** Token usage - prompt tokens from LLM provider */
+  promptTokens?: number;
+  /** Token usage - completion tokens from LLM provider */
+  completionTokens?: number;
+  /** Token usage - total tokens from LLM provider */
+  totalTokens?: number;
+  /** Token usage - cached prompt tokens */
+  cachedTokens?: number;
+  /** Token usage - reasoning tokens */
+  reasoningTokens?: number;
+  /** Cost in USD from LLM provider */
+  cost?: number;
 }
 
 /**
@@ -85,6 +97,12 @@ export function logAgentDecision(log: AgentLog): void {
     errorCount: log.errorCount,
     decisionReason: log.decisionReason,
     extraData: log.extraData,
+    promptTokens: log.promptTokens,
+    completionTokens: log.completionTokens,
+    totalTokens: log.totalTokens,
+    cachedTokens: log.cachedTokens,
+    reasoningTokens: log.reasoningTokens,
+    cost: log.cost,
   });
 }
 
@@ -135,6 +153,12 @@ export function logAgentResult(
     errorCount: result.errorCount,
     decisionReason: context.decisionReason ?? result.output.slice(0, 1000),
     extraData: context.extraData,
+    promptTokens: result.promptTokens,
+    completionTokens: result.completionTokens,
+    totalTokens: result.totalTokens,
+    cachedTokens: result.cachedTokens,
+    reasoningTokens: result.reasoningTokens,
+    cost: result.cost,
   });
 }
 
@@ -163,6 +187,12 @@ export function logApprove(
     success: result.success,
     errorCount: result.errorCount,
     decisionReason: reason,
+    promptTokens: result.promptTokens,
+    completionTokens: result.completionTokens,
+    totalTokens: result.totalTokens,
+    cachedTokens: result.cachedTokens,
+    reasoningTokens: result.reasoningTokens,
+    cost: result.cost,
   });
 }
 
@@ -191,6 +221,12 @@ export function logDeny(
     success: result.success,
     errorCount: result.errorCount,
     decisionReason: reason,
+    promptTokens: result.promptTokens,
+    completionTokens: result.completionTokens,
+    totalTokens: result.totalTokens,
+    cachedTokens: result.cachedTokens,
+    reasoningTokens: result.reasoningTokens,
+    cost: result.cost,
   });
 }
 
@@ -219,6 +255,12 @@ export function logConfirm(
     success: result.success,
     errorCount: result.errorCount,
     decisionReason: reason,
+    promptTokens: result.promptTokens,
+    completionTokens: result.completionTokens,
+    totalTokens: result.totalTokens,
+    cachedTokens: result.cachedTokens,
+    reasoningTokens: result.reasoningTokens,
+    cost: result.cost,
   });
 }
 
@@ -247,6 +289,12 @@ export function logError(
     success: false,
     errorCount: result.errorCount,
     decisionReason: reason,
+    promptTokens: result.promptTokens,
+    completionTokens: result.completionTokens,
+    totalTokens: result.totalTokens,
+    cachedTokens: result.cachedTokens,
+    reasoningTokens: result.reasoningTokens,
+    cost: result.cost,
   });
 }
 
@@ -275,6 +323,12 @@ export function logContinue(
     success: result.success,
     errorCount: result.errorCount,
     decisionReason: reason,
+    promptTokens: result.promptTokens,
+    completionTokens: result.completionTokens,
+    totalTokens: result.totalTokens,
+    cachedTokens: result.cachedTokens,
+    reasoningTokens: result.reasoningTokens,
+    cost: result.cost,
   });
 }
 

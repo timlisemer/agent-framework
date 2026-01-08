@@ -44,6 +44,18 @@ export interface TrackAgentParams {
   decisionReason?: string;
   /** Additional arbitrary data */
   extraData?: Record<string, unknown>;
+  /** Token usage - prompt tokens from LLM provider */
+  promptTokens?: number;
+  /** Token usage - completion tokens from LLM provider */
+  completionTokens?: number;
+  /** Token usage - total tokens from LLM provider */
+  totalTokens?: number;
+  /** Token usage - cached prompt tokens */
+  cachedTokens?: number;
+  /** Token usage - reasoning tokens */
+  reasoningTokens?: number;
+  /** Cost in USD from LLM provider */
+  cost?: number;
 }
 
 /**
@@ -114,6 +126,12 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     errorCount = 0,
     decisionReason,
     extraData,
+    promptTokens,
+    completionTokens,
+    totalTokens,
+    cachedTokens,
+    reasoningTokens,
+    cost,
   } = params;
 
   const event: Omit<TelemetryEvent, "hostId" | "timestamp"> = {
@@ -131,9 +149,18 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     success,
     decisionReason,
     extraData,
-    // Only include model info when LLM was called
+    // Only include model info and usage when LLM was called
     ...(executionType === "llm" && modelTier
-      ? { modelTier, modelName: getModelId(modelTier) }
+      ? {
+          modelTier,
+          modelName: getModelId(modelTier),
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          cachedTokens,
+          reasoningTokens,
+          cost,
+        }
       : {}),
   };
 

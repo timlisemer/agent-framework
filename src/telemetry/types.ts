@@ -47,6 +47,16 @@ export interface TelemetryEvent {
   modelTier?: ModelTier;
   modelName?: string; // Actual model ID (e.g., claude-3-haiku-20240307)
 
+  // Token usage (only for executionType="llm")
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  cachedTokens?: number;
+  reasoningTokens?: number;
+
+  // Cost tracking (USD)
+  cost?: number;
+
   // Optional fields
   timestamp?: string; // ISO 8601, defaults to server time
   decisionReason?: string;
