@@ -114,12 +114,13 @@ export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
  * More assistant messages to catch acknowledgments in the current turn.
  */
 export const INTENT_ALIGNMENT_COUNTS: TranscriptReadOptions = {
-  counts: { user: ALL, assistant: 5, toolResult: 3 },
+  counts: { user: ALL, assistant: 5, toolResult: 5 },
   includeFirstUserMessage: true,
   toolResultOptions: {
     trim: true,
-    maxLines: 10,
-    excludeToolNames: ["Task", "Agent", "TaskOutput"],
+    maxLines: 5,
+    // NOTE: Do NOT exclude Task/Agent - response-align needs to see that agents were run
+    // Otherwise it incorrectly thinks AI skipped requested agent actions
   },
 };
 
