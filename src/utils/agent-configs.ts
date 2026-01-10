@@ -302,6 +302,18 @@ export const TOOL_APPROVE_AGENT: Omit<AgentConfig, 'workingDir'> = {
   maxTokens: 1000,
   systemPrompt: `You are a tool approval gate. Evaluate tool calls for safety and compliance.
 
+=== BLACKLIST VIOLATIONS (IMMEDIATE DENY) ===
+
+If you see "=== BLACKLISTED PATTERNS DETECTED ===" in the context, you MUST DENY.
+These patterns are detected automatically and represent hard rules:
+- cd command → DENY (no exceptions, use --cwd flags instead)
+- build/check commands → DENY (use mcp__agent-framework__check)
+- cat/head/tail/grep/find → DENY (use Read/Grep/Glob tools)
+- git write operations → DENY (use MCP tools)
+
+Do NOT approve blacklisted patterns even if the command "makes sense" or "seems useful".
+The blacklist exists precisely because these commands should never be used.
+
 === UNIVERSAL RULES ===
 
 - DENY modifying files outside project directory (Edit/Write/NotebookEdit)
@@ -423,14 +435,19 @@ The original block followed strict rules. Your job is to check if the block shou
    AI tools (Read, Grep, Glob, Write) only work on LOCAL FILES in the current filesystem.
    If the denial suggested an AI tool but that tool CANNOT do what the command does, OVERTURN.
 
-   Cases where AI tools CANNOT help:
+   Cases where AI tools CANNOT help (OVERTURN allowed):
    - Remote/container contexts: grep/cat inside ssh, docker exec, kubectl exec, etc.
    - Piped data: echo "str" | grep, cmd | head, process substitution
    - Inline string testing: testing regex against literal strings (not searching files)
    - Command output capture: capturing stdout for further processing
 
+   NEVER OVERTURN via this exception for:
+   - cd commands: --cwd flags exist for most tools (bun --cwd, npm --prefix, cargo --manifest-path)
+   - build/check/typecheck commands: use mcp__agent-framework__check instead
+   - cat/grep/find on local files: AI tools CAN handle these
+
    ASK: "Can the suggested AI tool actually accomplish what this bash command does?"
-   If NO → OVERTURN (the bash command is necessary)
+   If NO AND it's not in the "NEVER OVERTURN" list → OVERTURN (the bash command is necessary)
 
 3. AI USED A VALID ALTERNATIVE APPROACH (for error-acknowledgment blocks):
    If blocked for "not acknowledging" a denial, but the AI used a different valid approach:

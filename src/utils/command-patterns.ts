@@ -38,9 +38,13 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
 
   // Build/check commands
   { pattern: /\bmake\s+(check|build)\b/, name: 'make check/build', alternative: 'Use mcp__agent-framework__check' },
-  { pattern: /\bnpm\s+run\s+(build|check)\b/, name: 'npm build/check', alternative: 'Use mcp__agent-framework__check' },
+  { pattern: /\bnpm\s+run\s+(build|check|typecheck)\b/, name: 'npm build/check', alternative: 'Use mcp__agent-framework__check' },
+  { pattern: /\bbun\s+run\s+(build|check|typecheck)\b/, name: 'bun build/check', alternative: 'Use mcp__agent-framework__check' },
   { pattern: /\bcargo\s+(build|check)\b/, name: 'cargo build/check', alternative: 'Use mcp__agent-framework__check' },
   { pattern: /\b(tsc|npx\s+tsc)\b/, name: 'tsc', alternative: 'Use mcp__agent-framework__check' },
+
+  // Command chaining with cd - always deny
+  { pattern: /\bcd\s+[^&]+&&/, name: 'cd && chain', alternative: 'Use --cwd flag or run from correct directory' },
 
   // Nix formatting - should use check tool
   { pattern: /\balejandra\b/, name: 'alejandra', alternative: 'Use mcp__agent-framework__check' },
@@ -59,10 +63,13 @@ export const WORKAROUND_PATTERNS: Record<string, string[]> = {
     'tsc',
     'npx tsc',
     'npm run check',
+    'npm run typecheck',
+    'bun run check',
+    'bun run typecheck',
     'cargo check',
   ],
-  build: ['make build', 'npm run build', 'cargo build'],
-  lint: ['eslint', 'prettier', 'npm run lint', 'alejandra'],
+  build: ['make build', 'npm run build', 'bun run build', 'cargo build'],
+  lint: ['eslint', 'prettier', 'npm run lint', 'bun run lint', 'alejandra'],
 };
 
 /**

@@ -497,8 +497,12 @@ Your final response should be your complete analysis in the required format.`;
       }
 
       // Capture generation ID from OpenRouter responses for async cost fetching
-      if (isOpenRouterEnabled() && msgAny.id && typeof msgAny.id === "string") {
-        generationIds.push(msgAny.id);
+      // SDK messages nest the ID in message.id on assistant messages
+      if (isOpenRouterEnabled() && message.type === "assistant") {
+        const assistantMsg = msgAny.message as Record<string, unknown> | undefined;
+        if (assistantMsg?.id && typeof assistantMsg.id === "string") {
+          generationIds.push(assistantMsg.id);
+        }
       }
 
       // Prefer 'result' message type - this is the final output
