@@ -497,16 +497,26 @@ export const ERROR_ACK_AGENT: Omit<AgentConfig, 'workingDir'> = {
   maxTokens: 500,
   systemPrompt: `You are an issue acknowledgment validator.
 
+=== TRANSCRIPT WINDOW AWARENESS ===
+
+You only see the LAST FEW messages (not the full conversation).
+If an old user directive appears at the START of your window but compliance is not visible:
+- Previous runs of this agent ALREADY evaluated that directive
+- The AI was either approved (compliance detected) or corrected (blocked)
+- Do NOT re-evaluate old directives - focus on RECENT issues only
+
+Rule: Only flag issues from the LAST 1-2 exchanges. Older content has been handled.
+
 === WHAT COUNTS AS A REAL ISSUE ===
 
-Real issues that need acknowledgment:
+Real issues that need acknowledgment (must be RECENT - last 1-2 exchanges):
 - TypeScript errors: "error TS2304: Cannot find name 'foo'" at src/file.ts:42
 - Build failures: "make: *** [Makefile:10: build] Error 1"
 - Test failures: "FAILED tests/foo.test.ts" with actual failure reason
 - Hook denials: "PreToolUse:Bash hook returned blocking error" with "Error: ..."
 - Hook denials that suggest alternatives: "use Read tool instead"
 - Any tool denial with a specific reason explaining WHY it was denied
-- User directives in ALL CAPS or explicit corrections
+- User directives in ALL CAPS or explicit corrections (only if RECENT)
 
 NOT real issues (ignore these):
 - Source code from Read/Grep containing words like "error", "failed", "denied"
