@@ -105,8 +105,9 @@ interface InternalAgentResult {
     cachedTokens?: number;
     reasoningTokens?: number;
     cost?: number;
-    generationId?: string;
   };
+  /** OpenRouter generation ID - at top level to survive when usage is undefined */
+  generationId?: string;
 }
 
 /**
@@ -325,7 +326,7 @@ export async function runAgent(
     cachedTokens: result.usage?.cachedTokens,
     reasoningTokens: result.usage?.reasoningTokens,
     cost: result.usage?.cost,
-    generationId: result.usage?.generationId,
+    generationId: result.generationId,
   };
 }
 
@@ -384,13 +385,12 @@ async function runDirectAgent(
       cachedTokens,
       reasoningTokens,
       cost,
-      // Pass generationId for server-side async cost fetching
-      generationId,
     } : undefined;
 
     return {
       text: extractTextFromResponse(response),
       usage,
+      generationId,  // At top level, independent of usage
     };
   } catch (error) {
     // Return error as string rather than throwing
@@ -547,20 +547,20 @@ Your final response should be your complete analysis in the required format.`;
     }
 
     // Build usage object if we have any data
-    const hasUsage = totalPromptTokens > 0 || totalCompletionTokens > 0 || totalCost > 0 || generationIds.length > 0;
+    const hasUsage = totalPromptTokens > 0 || totalCompletionTokens > 0 || totalCost > 0;
     const usage = hasUsage ? {
       promptTokens: totalPromptTokens || undefined,
       completionTokens: totalCompletionTokens || undefined,
       totalTokens: (totalPromptTokens + totalCompletionTokens) || undefined,
       cost: totalCost || undefined,
-      // Join multiple generation IDs with comma for multi-turn SDK sessions
-      generationId: generationIds.length > 0 ? generationIds.join(",") : undefined,
     } : undefined;
 
     // Return result, falling back to last assistant content
     return {
       text: finalResult || lastAssistantContent || "[SDK ERROR] No output received",
       usage,
+      // Join multiple generation IDs with comma for multi-turn SDK sessions
+      generationId: generationIds.length > 0 ? generationIds.join(",") : undefined,
     };
   } catch (error) {
     // Return error as string rather than throwing
