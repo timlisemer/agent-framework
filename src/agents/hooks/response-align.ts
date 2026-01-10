@@ -260,7 +260,7 @@ async function classifyStopResponse(
   assistantText: string,
   workingDir: string,
   stopHookError?: string
-): Promise<{ classification: "QUESTION" | "PLAN_APPROVAL" | "IGNORED_ERROR" | "OK"; latencyMs: number; modelTier: ModelTier; success: boolean; errorCount: number }> {
+): Promise<{ classification: "QUESTION" | "PLAN_APPROVAL" | "IGNORED_ERROR" | "OK"; latencyMs: number; modelTier: ModelTier; success: boolean; errorCount: number; generationId?: string }> {
   const stopHookSection = stopHookError
     ? `\nPREVIOUS STOP HOOK ERROR:\n${stopHookError}\n`
     : "";
@@ -345,6 +345,7 @@ Reply with EXACTLY one of: IGNORED_ERROR, PLAN_APPROVAL, QUESTION, or OK`;
     modelTier: response.modelTier,
     success: response.success,
     errorCount: response.errorCount,
+    generationId: response.generationId,
   };
 }
 
@@ -539,6 +540,7 @@ export async function checkStopResponseAlignment(
       modelName: getModelId(classifyResult.modelTier),
       success: classifyResult.success,
       errorCount: classifyResult.errorCount,
+      generationId: classifyResult.generationId,
     };
 
     if (classifyResult.classification === "IGNORED_ERROR") {

@@ -659,6 +659,11 @@ export async function runAgentWithRetry(
   let decision = initialResult.output;
   let retries = 0;
   let totalErrorCount = initialResult.errorCount;
+  // Collect generation IDs from initial + all retry attempts
+  const generationIds: string[] = [];
+  if (initialResult.generationId) {
+    generationIds.push(initialResult.generationId);
+  }
 
   while (!formatValidator(decision) && retries < maxRetries) {
     retries++;
@@ -678,6 +683,13 @@ export async function runAgentWithRetry(
         ...({ usage: { include: true } } as any),
       });
 
+      // Capture generation ID from retry response
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const retryGenerationId = (retryResponse as any).id as string | undefined;
+      if (retryGenerationId) {
+        generationIds.push(retryGenerationId);
+      }
+
       decision = extractTextFromResponse(retryResponse);
     } catch (error) {
       // Return error as string rather than throwing (matches runDirectAgent pattern)
@@ -691,6 +703,7 @@ export async function runAgentWithRetry(
         modelName: getModelId(config.tier),
         success: false,
         errorCount: totalErrorCount,
+        generationId: generationIds.length > 0 ? generationIds.join(",") : undefined,
       };
     }
   }
@@ -702,6 +715,7 @@ export async function runAgentWithRetry(
     modelName: getModelId(config.tier),
     success: true,
     errorCount: totalErrorCount,
+    generationId: generationIds.length > 0 ? generationIds.join(",") : undefined,
   };
 }
 
