@@ -482,31 +482,27 @@ Your final response should be your complete analysis in the required format.`;
     // Accumulate usage across all messages
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
-    let totalCost = 0;
-    // Collect all generation IDs for async cost fetching (comma-separated)
-    const generationIds: string[] = [];
+    // SDK provides cost directly via SDKResultMessage.total_cost_usd
+    // (OpenRouter generation IDs are NOT exposed by the SDK)
+    let sdkCost: number | undefined;
 
     for await (const message of q) {
-      // Extract usage from any message that has it
       const msgAny = message as Record<string, unknown>;
-      if (msgAny.usage && typeof msgAny.usage === "object") {
-        const usage = msgAny.usage as Record<string, unknown>;
-        totalPromptTokens += (usage.prompt_tokens ?? usage.input_tokens ?? 0) as number;
-        totalCompletionTokens += (usage.completion_tokens ?? usage.output_tokens ?? 0) as number;
-        totalCost += (usage.cost ?? 0) as number;
-      }
 
-      // Capture generation ID from OpenRouter responses for async cost fetching
-      // SDK messages nest the ID in message.id on assistant messages
-      if (message.type === "assistant") {
-        const assistantMsg = msgAny.message as Record<string, unknown> | undefined;
-        if (assistantMsg?.id && typeof assistantMsg.id === "string") {
-          generationIds.push(assistantMsg.id);
-        }
-      }
-
-      // Prefer 'result' message type - this is the final output
+      // Prefer 'result' message type - this is the final output with aggregated data
       if (message.type === "result") {
+        // Extract cost from SDK result message (already aggregated by SDK)
+        if (typeof msgAny.total_cost_usd === "number") {
+          sdkCost = msgAny.total_cost_usd;
+        }
+
+        // Extract usage from result message (aggregated token counts)
+        const resultUsage = msgAny.usage as Record<string, unknown> | undefined;
+        if (resultUsage) {
+          totalPromptTokens = (resultUsage.input_tokens ?? 0) as number;
+          totalCompletionTokens = (resultUsage.output_tokens ?? 0) as number;
+        }
+
         if ("result" in message && typeof message.result === "string") {
           finalResult = message.result;
         }
@@ -546,21 +542,22 @@ Your final response should be your complete analysis in the required format.`;
       }
     }
 
-    // Build usage object if we have any data
-    const hasUsage = totalPromptTokens > 0 || totalCompletionTokens > 0 || totalCost > 0;
+    // Build usage object - include SDK cost even if no streaming usage
+    const hasUsage = totalPromptTokens > 0 || totalCompletionTokens > 0 || sdkCost !== undefined;
     const usage = hasUsage ? {
       promptTokens: totalPromptTokens || undefined,
       completionTokens: totalCompletionTokens || undefined,
       totalTokens: (totalPromptTokens + totalCompletionTokens) || undefined,
-      cost: totalCost || undefined,
+      cost: sdkCost,  // SDK provides cost directly via SDKResultMessage.total_cost_usd
     } : undefined;
 
     // Return result, falling back to last assistant content
+    // SDK mode: no generationId (SDK doesn't expose OpenRouter IDs)
+    // Cost is provided directly via usage.cost
     return {
       text: finalResult || lastAssistantContent || "[SDK ERROR] No output received",
       usage,
-      // Join multiple generation IDs with comma for multi-turn SDK sessions
-      generationId: generationIds.length > 0 ? generationIds.join(",") : undefined,
+      generationId: undefined,
     };
   } catch (error) {
     // Return error as string rather than throwing

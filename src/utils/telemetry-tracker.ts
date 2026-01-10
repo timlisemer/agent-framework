@@ -138,11 +138,13 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     generationId,
   } = params;
 
-  // Fail fast: OpenRouter LLM executions must have generationId for cost tracking
-  if (executionType === "llm" && !generationId) {
+  // Fail fast: OpenRouter LLM executions must have either:
+  // 1. generationId for async cost fetching (direct API mode), OR
+  // 2. cost provided directly (SDK mode - SDKResultMessage.total_cost_usd)
+  if (executionType === "llm" && !generationId && cost === undefined) {
     throw new Error(
-      `[Telemetry] LLM execution for agent "${agentName}" missing generationId. ` +
-      "This indicates a bug in the agent runner - all OpenRouter LLM calls must capture response.id"
+      `[Telemetry] LLM execution for agent "${agentName}" missing both generationId and cost. ` +
+      "Direct API calls must capture response.id. SDK calls must provide cost directly from SDKResultMessage."
     );
   }
 
