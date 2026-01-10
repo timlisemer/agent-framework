@@ -259,6 +259,16 @@ async function main() {
           // Check other strict mode rules
           const strictCheck = await shouldUseStrictMode(input.tool_name, input.tool_input);
           if (!strictCheck.strict) {
+            // CRITICAL: Check pending validation BEFORE allowing fast-path
+            // This catches async validator failures from previous lazy-validated tools
+            const pendingFailure = await checkPendingValidation();
+            if (pendingFailure?.status === "failed") {
+              await clearPendingValidation();
+              await recordStrictError();
+              await recordStrictDenial();
+              outputDeny(`Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`);
+            }
+
             // LAZY VALIDATION: Allow immediately, validate async
             setExecutionMode(EXECUTION_MODES.LAZY);
             spawnAsyncValidator(input.tool_name, filePath, input.transcript_path, input.tool_input);
@@ -322,11 +332,66 @@ async function main() {
     "EnterPlanMode", // Enter plan mode (internal to Claude)
     "Skill", // Invoke skills like /commit (user-initiated)
   ];
+
+  // Read-only MCP tools that can be auto-approved (no side effects)
+  const READ_ONLY_MCP_TOOLS = [
+    "mcp__agent-framework__check", // Read-only diagnostics (lint/build check)
+  ];
+
+  // MCP tools that require explicit user approval or slash command invocation
+  // These have side effects (git operations, expensive API calls)
+  const APPROVAL_REQUIRED_MCP_TOOLS = [
+    "mcp__agent-framework__commit", // Creates git commits
+    "mcp__agent-framework__push", // Pushes to remote
+    "mcp__agent-framework__confirm", // Expensive opus-tier analysis
+  ];
+
   if (
     LOW_RISK_TOOLS.includes(input.tool_name) ||
-    input.tool_name.startsWith("mcp__")
+    READ_ONLY_MCP_TOOLS.includes(input.tool_name)
   ) {
     logFastPathApproval("low-risk-bypass", "PreToolUse", input.tool_name, projectDir, "Low-risk tool auto-approval");
+    outputAllow();
+  }
+
+  // ============================================================
+  // STEP 3b: Approval-required MCP tools
+  // These require explicit user approval or slash command invocation
+  // Block by default, allow if user invoked slash command or explicitly approved
+  // ============================================================
+  if (APPROVAL_REQUIRED_MCP_TOOLS.includes(input.tool_name)) {
+    const toolNameMap: Record<string, string> = {
+      "mcp__agent-framework__commit": "commit",
+      "mcp__agent-framework__push": "push",
+      "mcp__agent-framework__confirm": "confirm",
+    };
+    const friendlyName = toolNameMap[input.tool_name] || input.tool_name;
+    const denyReason = `${friendlyName} requires explicit user approval. Use /${friendlyName} slash command or explicitly request ${friendlyName}.`;
+
+    // Get transcript for appeal - WITH slash command context detection
+    const transcriptResult = await readTranscriptExact(input.transcript_path, {
+      ...APPEAL_COUNTS,
+      includeSlashCommandContext: true,
+    });
+    const transcript = formatTranscriptResult(transcriptResult);
+
+    // Call appeal helper to check if user approved via slash command or explicit request
+    const appeal = await appealHelper(
+      input.tool_name,
+      `${input.tool_name} with ${JSON.stringify(input.tool_input).slice(0, 200)}`,
+      transcript,
+      denyReason,
+      projectDir,
+      "PreToolUse",
+      `MCP tool ${friendlyName} blocked by default - checking if user explicitly requested it or invoked /${friendlyName}`,
+      transcriptResult.slashCommandContext
+    );
+
+    if (!appeal.overturned) {
+      await recordStrictDenial();
+      outputDeny(denyReason);
+    }
+    logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, `Appeal overturned - ${friendlyName} tool`);
     outputAllow();
   }
 
@@ -385,34 +450,8 @@ async function main() {
   // Detect rewind - if user rewound, clear all caches
   await detectRewind(input.transcript_path);
 
-  // Block confirm tool from Claude Code - requires explicit user approval
-  // Internal agents (like commit) call runConfirmAgent() directly, bypassing this hook
-  if (input.tool_name === "mcp__agent-framework__confirm") {
-    const denyReason =
-      "Confirm requires explicit user approval. Use /commit or explicitly request confirm.";
-
-    // Get transcript for appeal
-    const transcriptResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
-    const transcript = formatTranscriptResult(transcriptResult);
-
-    // Call appeal helper to check if user approved
-    const appeal = await appealHelper(
-      input.tool_name,
-      `${input.tool_name} with ${JSON.stringify(input.tool_input).slice(0, 200)}`,
-      transcript,
-      denyReason,
-      projectDir,
-      "PreToolUse",
-      "Confirm tool blocked by default - checking if user explicitly requested it"
-    );
-
-    if (!appeal.overturned) {
-      await recordStrictDenial();
-      outputDeny(denyReason);
-    }
-    logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - confirm tool");
-    outputAllow();
-  }
+  // NOTE: confirm/commit/push MCP tools are now handled in STEP 3b
+  // They will never reach this point (STEP 3b calls outputAllow/outputDeny)
 
   // ============================================================
   // STRICT VALIDATION FLOW

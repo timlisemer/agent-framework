@@ -53,6 +53,25 @@ export interface TranscriptReadOptions {
    * the first user message if not already collected.
    */
   includeFirstUserMessage?: boolean;
+
+  /**
+   * Extract slash command context from the transcript.
+   * If true, scans for slash command system prompts and extracts metadata
+   * (command name, allowed-tools) for use in appeal decisions.
+   */
+  includeSlashCommandContext?: boolean;
+}
+
+/**
+ * Extracted slash command metadata.
+ */
+export interface SlashCommandContext {
+  /** The slash command name (e.g., "commit", "push") */
+  commandName: string;
+  /** Description from the slash command frontmatter */
+  description?: string;
+  /** Allowed tools from the slash command frontmatter */
+  allowedTools?: string[];
 }
 
 /**
@@ -67,6 +86,8 @@ export interface TranscriptReadResult {
   toolResult: TranscriptMessage[];
   /** Total messages collected across all types */
   totalCount: number;
+  /** Slash command context if includeSlashCommandContext was true and a slash command was found */
+  slashCommandContext?: SlashCommandContext;
 }
 
 export interface ErrorCheckResult {
@@ -215,6 +236,82 @@ function isSlashCommandPrompt(content: string): boolean {
   return false;
 }
 
+/**
+ * Extract slash command metadata from a slash command system prompt.
+ * Returns null if the content is not a slash command prompt.
+ *
+ * Parses YAML frontmatter to extract:
+ * - description: Human-readable description of the command
+ * - allowed-tools: List of MCP tools this command is allowed to use
+ *
+ * Also attempts to infer the command name from the content or allowed-tools.
+ */
+function extractSlashCommandMetadata(content: string): SlashCommandContext | null {
+  // Must have YAML frontmatter
+  if (!content.startsWith("---")) {
+    return null;
+  }
+
+  const frontmatterEnd = content.indexOf("---", 3);
+  if (frontmatterEnd === -1) {
+    return null;
+  }
+
+  const frontmatter = content.slice(3, frontmatterEnd).trim();
+  if (!/allowed-tools:|description:/.test(frontmatter)) {
+    return null;
+  }
+
+  // Parse frontmatter fields
+  let description: string | undefined;
+  let allowedTools: string[] | undefined;
+  let commandName: string | undefined;
+
+  // Extract description
+  const descMatch = frontmatter.match(/description:\s*(.+)/);
+  if (descMatch) {
+    description = descMatch[1].trim().replace(/^["']|["']$/g, "");
+  }
+
+  // Extract allowed-tools (can be comma-separated or YAML list)
+  const toolsMatch = frontmatter.match(/allowed-tools:\s*(.+)/);
+  if (toolsMatch) {
+    const toolsStr = toolsMatch[1].trim();
+    allowedTools = toolsStr.split(",").map((t) => t.trim()).filter(Boolean);
+  }
+
+  // Infer command name from allowed-tools or description
+  if (allowedTools && allowedTools.length > 0) {
+    // Look for mcp__agent-framework__<command> pattern
+    for (const tool of allowedTools) {
+      const mcpMatch = tool.match(/mcp__agent-framework__(\w+)/);
+      if (mcpMatch) {
+        commandName = mcpMatch[1]; // "commit", "push", "confirm", etc.
+        break;
+      }
+    }
+  }
+
+  // Fallback: try to infer from description
+  if (!commandName && description) {
+    const cmdMatch = description.match(/\b(commit|push|confirm|check)\b/i);
+    if (cmdMatch) {
+      commandName = cmdMatch[1].toLowerCase();
+    }
+  }
+
+  // If we couldn't determine command name, this isn't useful
+  if (!commandName) {
+    return null;
+  }
+
+  return {
+    commandName,
+    description,
+    allowedTools,
+  };
+}
+
 function extractTextFromContent(content: string | ContentBlock[]): string {
   if (typeof content === 'string') {
     return content;
@@ -272,14 +369,15 @@ export async function readTranscriptExact(
     excludeSystemReminders = true,
     excludeSlashCommandPrompts = true,
     includeFirstUserMessage = false,
+    includeSlashCommandContext = false,
   } = options;
 
   const targetUser = counts.user ?? 0;
   const targetAssistant = counts.assistant ?? 0;
   const targetToolResult = counts.toolResult ?? 0;
 
-  const content = await fs.promises.readFile(transcriptPath, 'utf-8');
-  const allLines = content.trim().split('\n');
+  const content = await fs.promises.readFile(transcriptPath, "utf-8");
+  const allLines = content.trim().split("\n");
 
   const collected: TranscriptReadResult = {
     user: [],
@@ -291,20 +389,53 @@ export async function readTranscriptExact(
   // Map tool_use_id -> tool_name for filtering tool_results
   const toolUseIdToName = new Map<string, string>();
 
+  // Track slash command context if requested (scan backwards, use most recent)
+  let slashCommandContext: SlashCommandContext | undefined;
+
   // First pass: build tool_use ID map from entire file
+  // Also extract slash command context if requested
   for (const line of allLines) {
     try {
       const entry: TranscriptEntry = JSON.parse(line);
-      if (entry.message?.role === 'assistant' && Array.isArray(entry.message.content)) {
+      if (entry.message?.role === "assistant" && Array.isArray(entry.message.content)) {
         for (const block of entry.message.content) {
-          if (block.type === 'tool_use' && block.id && block.name) {
+          if (block.type === "tool_use" && block.id && block.name) {
             toolUseIdToName.set(block.id, block.name);
+          }
+        }
+      }
+
+      // Extract slash command context from user messages (forward scan, last one wins)
+      if (includeSlashCommandContext && entry.message?.role === "user") {
+        const msgContent = entry.message.content;
+        let textContent: string | undefined;
+
+        if (typeof msgContent === "string") {
+          textContent = msgContent;
+        } else if (Array.isArray(msgContent)) {
+          for (const block of msgContent) {
+            if (block.type === "text" && block.text) {
+              textContent = block.text;
+              break;
+            }
+          }
+        }
+
+        if (textContent) {
+          const metadata = extractSlashCommandMetadata(textContent);
+          if (metadata) {
+            slashCommandContext = metadata;
           }
         }
       }
     } catch {
       // Skip malformed
     }
+  }
+
+  // Add slash command context to result if found
+  if (slashCommandContext) {
+    collected.slashCommandContext = slashCommandContext;
   }
 
   // Second pass: scan backwards collecting messages until quotas met

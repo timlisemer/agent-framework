@@ -27,6 +27,7 @@ import { TOOL_APPEAL_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logApprove, logDeny } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import type { SlashCommandContext } from "../../utils/transcript.js";
 
 /**
  * Appeal helper - called by other agents after they block a tool.
@@ -41,6 +42,7 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
  * @param workingDir - Working directory for context
  * @param hookName - Hook that triggered this check (for telemetry)
  * @param additionalContext - Extra context from calling agent (e.g., why it blocked)
+ * @param slashCommandContext - Slash command context if a slash command was invoked
  * @returns { overturned: boolean } - caller decides what to do
  *
  * @example
@@ -68,12 +70,26 @@ export async function appealHelper(
   originalReason: string,
   workingDir: string,
   hookName: string,
-  additionalContext?: string
+  additionalContext?: string,
+  slashCommandContext?: SlashCommandContext
 ): Promise<{ overturned: boolean }> {
   // Build context section from calling agent
   const contextSection = additionalContext
     ? `\n=== CALLER CONTEXT ===\n${additionalContext}\n=== END CONTEXT ===\n`
     : "";
+
+  // Build slash command context section if a slash command was invoked
+  let slashCommandSection = "";
+  if (slashCommandContext) {
+    const allowedToolsStr = slashCommandContext.allowedTools?.join(", ") || "none specified";
+    slashCommandSection = `
+=== SLASH COMMAND INVOKED ===
+Command: /${slashCommandContext.commandName}
+Description: ${slashCommandContext.description || "N/A"}
+Allowed tools: ${allowedToolsStr}
+=== END SLASH COMMAND ===
+`;
+  }
 
   // Run appeal evaluation via unified runner
   const result = await runAgent(
@@ -82,7 +98,7 @@ export async function appealHelper(
       prompt: "Review this appeal for a denied tool call.",
       context: `BLOCK REASON: ${originalReason}
 TOOL CALL: ${toolDescription}
-${contextSection}
+${slashCommandSection}${contextSection}
 RECENT CONVERSATION:
 ${transcript}`,
     }

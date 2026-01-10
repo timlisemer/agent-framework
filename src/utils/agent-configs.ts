@@ -456,9 +456,25 @@ export const TOOL_APPEAL_AGENT: Omit<AgentConfig, 'workingDir'> = {
 
 The original block followed strict rules. Your job is to check if the block should be overturned.
 
+=== SLASH COMMAND CONTEXT ===
+
+If you see a "=== SLASH COMMAND INVOKED ===" section in the context, this is STRONG evidence of user approval.
+When a slash command is invoked, the user explicitly chose to run that command.
+
+Example: If you see "Command: /commit" and the blocked tool is "mcp__agent-framework__commit", this is a MATCH.
+The user invoked /commit, so they approved the commit operation. OVERTURN.
+
+Mapping of slash commands to MCP tools:
+- /commit → mcp__agent-framework__commit (creates git commits)
+- /push → mcp__agent-framework__push (pushes to remote), also allows mcp__agent-framework__commit
+- /confirm → mcp__agent-framework__confirm (runs code quality analysis)
+
+If the blocked tool matches the slash command's allowed-tools list, OVERTURN immediately.
+
 === OVERTURN: APPROVE ===
 
 1. USER APPROVED the operation:
+   - SLASH COMMAND INVOKED section shows the tool matches allowed-tools (see above)
    - User explicitly requested this exact tool operation
    - User invoked a slash command requiring this operation (/push, /commit)
    - User explicitly confirmed when asked

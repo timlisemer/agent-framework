@@ -43,6 +43,9 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bcargo\s+(build|check)\b/, name: 'cargo build/check', alternative: 'Use mcp__agent-framework__check' },
   { pattern: /\b(tsc|npx\s+tsc)\b/, name: 'tsc', alternative: 'Use mcp__agent-framework__check' },
 
+  // Test commands - tests may not exist, use check for build verification
+  { pattern: /\btest\b/, name: 'test command', alternative: 'Use mcp__agent-framework__check for build verification' },
+
   // Command chaining with cd - always deny
   { pattern: /\bcd\s+[^&]+&&/, name: 'cd && chain', alternative: 'Use --cwd flag or run from correct directory' },
 
@@ -70,6 +73,7 @@ export const WORKAROUND_PATTERNS: Record<string, string[]> = {
   ],
   build: ['make build', 'npm run build', 'bun run build', 'cargo build'],
   lint: ['eslint', 'prettier', 'npm run lint', 'bun run lint', 'alejandra'],
+  test: ['test'],
 };
 
 /**
