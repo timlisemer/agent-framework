@@ -57,6 +57,9 @@ export interface TelemetryEvent {
   // Cost tracking (USD)
   cost?: number;
 
+  // OpenRouter generation ID for async cost fetching
+  generationId?: string;
+
   // Client version (e.g., "1.0.42")
   clientVersion?: string;
 

@@ -57,6 +57,8 @@ export interface AgentLog {
   reasoningTokens?: number;
   /** Cost in USD from LLM provider */
   cost?: number;
+  /** OpenRouter generation ID for async cost fetching */
+  generationId?: string;
 }
 
 /**
@@ -103,6 +105,7 @@ export function logAgentDecision(log: AgentLog): void {
     cachedTokens: log.cachedTokens,
     reasoningTokens: log.reasoningTokens,
     cost: log.cost,
+    generationId: log.generationId,
   });
 }
 
@@ -159,6 +162,7 @@ export function logAgentResult(
     cachedTokens: result.cachedTokens,
     reasoningTokens: result.reasoningTokens,
     cost: result.cost,
+    generationId: result.generationId,
   });
 }
 
@@ -193,6 +197,7 @@ export function logApprove(
     cachedTokens: result.cachedTokens,
     reasoningTokens: result.reasoningTokens,
     cost: result.cost,
+    generationId: result.generationId,
   });
 }
 
@@ -227,6 +232,7 @@ export function logDeny(
     cachedTokens: result.cachedTokens,
     reasoningTokens: result.reasoningTokens,
     cost: result.cost,
+    generationId: result.generationId,
   });
 }
 
@@ -261,6 +267,7 @@ export function logConfirm(
     cachedTokens: result.cachedTokens,
     reasoningTokens: result.reasoningTokens,
     cost: result.cost,
+    generationId: result.generationId,
   });
 }
 
@@ -295,6 +302,7 @@ export function logError(
     cachedTokens: result.cachedTokens,
     reasoningTokens: result.reasoningTokens,
     cost: result.cost,
+    generationId: result.generationId,
   });
 }
 
@@ -329,6 +337,7 @@ export function logContinue(
     cachedTokens: result.cachedTokens,
     reasoningTokens: result.reasoningTokens,
     cost: result.cost,
+    generationId: result.generationId,
   });
 }
 

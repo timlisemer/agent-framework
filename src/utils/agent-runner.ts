@@ -77,7 +77,7 @@ import { getAnthropicClient } from "./anthropic-client.js";
 import { getModelId, type ModelTier, type ExecutionType } from "../types.js";
 import { extractTextFromResponse } from "./response-parser.js";
 import { logAgentDecision, extractDecision } from "./logger.js";
-import { fetchOpenRouterCost, isOpenRouterEnabled } from "./openrouter-cost.js";
+import { isOpenRouterEnabled } from "./openrouter-cost.js";
 
 /**
  * Read-only tools available to SDK mode agents.
@@ -105,6 +105,7 @@ interface InternalAgentResult {
     cachedTokens?: number;
     reasoningTokens?: number;
     cost?: number;
+    generationId?: string;
   };
 }
 
@@ -233,6 +234,8 @@ export interface AgentExecutionResult {
   reasoningTokens?: number;
   /** Cost in USD from LLM provider */
   cost?: number;
+  /** OpenRouter generation ID for async cost fetching */
+  generationId?: string;
 }
 
 /**
@@ -322,6 +325,7 @@ export async function runAgent(
     cachedTokens: result.usage?.cachedTokens,
     reasoningTokens: result.usage?.reasoningTokens,
     cost: result.usage?.cost,
+    generationId: result.usage?.generationId,
   };
 }
 
@@ -366,20 +370,10 @@ async function runDirectAgent(
     let reasoningTokens = (rawUsage?.completion_tokens_details as Record<string, unknown> | undefined)?.reasoning_tokens as number | undefined;
     let cost = rawUsage?.cost as number | undefined;
 
-    // OpenRouter doesn't return cost in the response - fetch from generation endpoint
+    // Extract generationId from OpenRouter response for async cost fetching
+    // Cost will be fetched by the telemetry server asynchronously
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const generationId = (response as any).id as string | undefined;
-    if (isOpenRouterEnabled() && generationId && !cost) {
-      const genData = await fetchOpenRouterCost(generationId);
-      if (genData) {
-        cost = genData.total_cost;
-        // Also get more accurate token counts from generation data
-        promptTokens = genData.native_tokens_prompt ?? promptTokens;
-        completionTokens = genData.native_tokens_completion ?? completionTokens;
-        cachedTokens = genData.native_tokens_cached ?? cachedTokens;
-        reasoningTokens = genData.native_tokens_reasoning ?? reasoningTokens;
-      }
-    }
+    const generationId = isOpenRouterEnabled() ? (response as any).id as string | undefined : undefined;
 
     const usage = rawUsage ? {
       promptTokens,
@@ -390,6 +384,8 @@ async function runDirectAgent(
       cachedTokens,
       reasoningTokens,
       cost,
+      // Pass generationId for server-side async cost fetching
+      generationId,
     } : undefined;
 
     return {
@@ -487,6 +483,8 @@ Your final response should be your complete analysis in the required format.`;
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
     let totalCost = 0;
+    // Collect all generation IDs for async cost fetching (comma-separated)
+    const generationIds: string[] = [];
 
     for await (const message of q) {
       // Extract usage from any message that has it
@@ -496,6 +494,11 @@ Your final response should be your complete analysis in the required format.`;
         totalPromptTokens += (usage.prompt_tokens ?? usage.input_tokens ?? 0) as number;
         totalCompletionTokens += (usage.completion_tokens ?? usage.output_tokens ?? 0) as number;
         totalCost += (usage.cost ?? 0) as number;
+      }
+
+      // Capture generation ID from OpenRouter responses for async cost fetching
+      if (isOpenRouterEnabled() && msgAny.id && typeof msgAny.id === "string") {
+        generationIds.push(msgAny.id);
       }
 
       // Prefer 'result' message type - this is the final output
@@ -540,12 +543,14 @@ Your final response should be your complete analysis in the required format.`;
     }
 
     // Build usage object if we have any data
-    const hasUsage = totalPromptTokens > 0 || totalCompletionTokens > 0 || totalCost > 0;
+    const hasUsage = totalPromptTokens > 0 || totalCompletionTokens > 0 || totalCost > 0 || generationIds.length > 0;
     const usage = hasUsage ? {
       promptTokens: totalPromptTokens || undefined,
       completionTokens: totalCompletionTokens || undefined,
       totalTokens: (totalPromptTokens + totalCompletionTokens) || undefined,
       cost: totalCost || undefined,
+      // Join multiple generation IDs with comma for multi-turn SDK sessions
+      generationId: generationIds.length > 0 ? generationIds.join(",") : undefined,
     } : undefined;
 
     // Return result, falling back to last assistant content
