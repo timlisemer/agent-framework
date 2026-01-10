@@ -273,11 +273,17 @@ ${assistantText}`;
 
   const systemPrompt = `You classify AI assistant responses.
 
-IGNORED_ERROR - Use when:
+IGNORED_ERROR - Use ONLY when:
 - There is a PREVIOUS STOP HOOK ERROR in the context
-- The AI's response does NOT address or acknowledge that error
-- The AI just continued as if nothing happened
-- Examples: Error said "use AskUserQuestion" but AI just answered without using it
+- The error pointed out a REAL problem the AI should fix
+- The AI's response does NOT address that problem
+
+DO NOT use IGNORED_ERROR when:
+- The AI already completed the task before the stop hook fired
+- The AI is explaining the task is done (e.g., "Pushed successfully", "Changes complete")
+- The stop hook error seems spurious (fired after successful completion)
+- The AI acknowledges confusion about what the hook wants
+- Examples: "The task is complete", "Done", "Pushed to remote" → OK, not IGNORED_ERROR
 
 PLAN_APPROVAL - ONLY use when ALL of these are true:
 - AI has laid out a DETAILED multi-step implementation plan
@@ -588,8 +594,14 @@ export async function checkStopResponseAlignment(
   const trimmedAssistant = assistantText.trim();
   if (
     trimmedAssistant.length < 30 &&
-    !trimmedAssistant.match(/(?:done|completed|finished|ready)/i)
+    !trimmedAssistant.match(/(?:done|completed|finished|ready|pushed|committed|updated|added|removed|fixed|changed|success)/i)
   ) {
+    // Skip if user ran a slash command (skill) - short responses are expected after /push, /commit, etc.
+    const isSkillCompletion = userText.trim().startsWith("/");
+    if (isSkillCompletion) {
+      return { approved: true };
+    }
+
     // Very short response that doesn't indicate completion
     return {
       approved: false,
