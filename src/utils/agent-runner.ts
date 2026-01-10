@@ -77,7 +77,6 @@ import { getAnthropicClient } from "./anthropic-client.js";
 import { getModelId, type ModelTier, type ExecutionType } from "../types.js";
 import { extractTextFromResponse } from "./response-parser.js";
 import { logAgentDecision, extractDecision } from "./logger.js";
-import { isOpenRouterEnabled } from "./openrouter-cost.js";
 
 /**
  * Read-only tools available to SDK mode agents.
@@ -374,7 +373,7 @@ async function runDirectAgent(
     // Extract generationId from OpenRouter response for async cost fetching
     // Cost will be fetched by the telemetry server asynchronously
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const generationId = isOpenRouterEnabled() ? (response as any).id as string | undefined : undefined;
+    const generationId = (response as any).id as string | undefined;
 
     const usage = rawUsage ? {
       promptTokens,
@@ -472,6 +471,7 @@ Your final response should be your complete analysis in the required format.`;
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         maxTurns: config.maxTurns ?? 10,
+        env: process.env, // Pass env to subprocess for auth
       },
     });
 
@@ -498,7 +498,7 @@ Your final response should be your complete analysis in the required format.`;
 
       // Capture generation ID from OpenRouter responses for async cost fetching
       // SDK messages nest the ID in message.id on assistant messages
-      if (isOpenRouterEnabled() && message.type === "assistant") {
+      if (message.type === "assistant") {
         const assistantMsg = msgAny.message as Record<string, unknown> | undefined;
         if (assistantMsg?.id && typeof assistantMsg.id === "string") {
           generationIds.push(assistantMsg.id);

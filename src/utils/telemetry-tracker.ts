@@ -14,7 +14,6 @@ import type {
 } from "../telemetry/types.js";
 import { getModelId, type ModelTier } from "../types.js";
 import { VERSION } from "../version.js";
-import { isOpenRouterEnabled } from "./openrouter-cost.js";
 
 /**
  * Parameters for tracking an agent execution.
@@ -140,7 +139,7 @@ export function trackAgentExecution(params: TrackAgentParams): void {
   } = params;
 
   // Fail fast: OpenRouter LLM executions must have generationId for cost tracking
-  if (isOpenRouterEnabled() && executionType === "llm" && !generationId) {
+  if (executionType === "llm" && !generationId) {
     throw new Error(
       `[Telemetry] LLM execution for agent "${agentName}" missing generationId. ` +
       "This indicates a bug in the agent runner - all OpenRouter LLM calls must capture response.id"
