@@ -166,8 +166,43 @@ Check for:
 - No hardcoded secrets or credentials
 
 ### CATEGORY 4: Documentation
-- Verify documentation is updated if the changes require it
-- Note what is missing if applicable
+Use tools to discover and follow the project's existing documentation patterns:
+
+1. DISCOVER: Use Glob to find documentation files (*.md, docs/*, etc.)
+   - Read them to understand what the project documents and how
+   - Note the level of detail, format, and what kinds of things are documented
+   - If no documentation exists, this category is automatically PASS
+
+2. APPLY PATTERN: Based on what you found, check if the current changes:
+   - Add something similar to what IS documented → should be documented too
+   - Change something that IS documented → docs should be updated
+   - Example: If existing agents are listed in a table, new agents should be added
+
+3. STALE DOCS: FAIL if code changes invalidate existing documentation:
+   - Changed behavior not reflected in docs
+   - Removed/renamed things still referenced in docs
+
+4. CLAUDE.md IS NOT DOCUMENTATION:
+   - CLAUDE.md is for instructions TO Claude, not project docs
+   - Never suggest documenting in CLAUDE.md
+
+### CATEGORY 5: Tests
+Check if changes need tests based on existing test patterns.
+NOTE: Testing setup may have been described in docs you read above - use that info.
+
+1. DISCOVER (if not already known from docs): Use Glob to find test files
+   - Note patterns: where tests live, naming conventions, what's tested
+   - If no tests exist in the project, this category is automatically PASS
+
+2. APPLY PATTERN: Based on existing test coverage:
+   - New functions/modules similar to tested ones → should have tests
+   - Bug fixes → should have regression tests
+   - Config-only or prompt-only changes → tests usually not needed
+
+3. STALE TESTS: FAIL if code changes break existing tests:
+   - Changed function signatures that tests rely on
+   - Removed exports that tests import
+   - Changed behavior that tests assert
 
 ## OUTPUT FORMAT
 Your response must follow this exact structure:
@@ -180,6 +215,7 @@ Your response must follow this exact structure:
 - Code Quality: PASS or FAIL (<brief reason if FAIL>)
 - Security: PASS or FAIL (<brief reason if FAIL>)
 - Documentation: PASS or FAIL (<brief reason if FAIL>)
+- Tests: PASS or FAIL (<brief reason if FAIL>)
 
 ## Summary
 <2-4 sentences describing what the changes do conceptually>
@@ -192,7 +228,7 @@ DECLINED: <1-2 sentences explaining the specific issue>
 RULES:
 - You CANNOT ask questions or request more context
 - You MUST decide based on the diff and any investigation you perform
-- All 4 categories must PASS for CONFIRMED
+- All 5 categories must PASS for CONFIRMED
 - Any FAIL means DECLINED
 - Small, obvious changes bias toward CONFIRMED
 
