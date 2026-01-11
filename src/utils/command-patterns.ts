@@ -54,6 +54,13 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
 
   // SSH remote execution
   { pattern: /\bssh\s+/, name: 'ssh', alternative: 'Remote execution denied' },
+
+  // Run commands - should not be in plans or CLAUDE.md verification sections
+  { pattern: /\bmake\s+run(-\w+)?\b/, name: 'make run', alternative: 'Run commands not allowed' },
+  { pattern: /\bnpm\s+run\s+(start|dev)\b/, name: 'npm start/dev', alternative: 'Run commands not allowed' },
+  { pattern: /\bbun\s+run\s+(start|dev)\b/, name: 'bun start/dev', alternative: 'Run commands not allowed' },
+  { pattern: /\bcargo\s+run\b/, name: 'cargo run', alternative: 'Run commands not allowed' },
+  { pattern: /\bgo\s+run\b/, name: 'go run', alternative: 'Run commands not allowed' },
 ];
 
 /**
@@ -75,6 +82,14 @@ export const WORKAROUND_PATTERNS: Record<string, string[]> = {
   lint: ['eslint', 'prettier', 'npm run lint', 'bun run lint', 'alejandra'],
   test: ['test'],
 };
+
+/**
+ * Generate formatted blacklist text for injection into agent prompts.
+ * Used by plan-validate and claude-md-validate to share rules with tool-approve.
+ */
+export function getBlacklistDescription(): string {
+  return BLACKLIST_PATTERNS.map(({ name, alternative }) => `- ${name} → ${alternative}`).join("\n");
+}
 
 /**
  * Get blacklist highlights for a Bash command.

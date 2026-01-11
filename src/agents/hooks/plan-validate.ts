@@ -34,6 +34,7 @@ import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
+import { getBlacklistDescription } from "../../utils/command-patterns.js";
 
 /**
  * Validate that a plan aligns with user intent.
@@ -94,7 +95,7 @@ export async function checkPlanIntent(
       { ...PLAN_VALIDATE_AGENT },
       {
         prompt: "Check if this plan aligns with the user request.",
-        context: `CONVERSATION:\n${conversationContext}\n\nCURRENT PLAN:\n${currentPlan ?? "(new plan)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}`,
+        context: `CONVERSATION:\n${conversationContext}\n\nCURRENT PLAN:\n${currentPlan ?? "(new plan)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n=== BLACKLISTED COMMANDS ===\n${getBlacklistDescription()}\n=== END BLACKLIST ===`,
       }
     );
 

@@ -673,9 +673,9 @@ DETECT DRIFT (→ DRIFT):
 - Plan is appended to an old plan instead of replacing it
 
 OVER-ENGINEERING DRIFT (→ DRIFT):
-- Plan includes testing/verification sections with manual test instructions - verification should reference the check MCP tool only
 - Plan includes time estimates like "Week 1:", "Day 1:", "takes 2-3 days", "Month 1:"
-- Plan includes manual build/check commands like "make check", "npm run build", "tsc" - these should use the check MCP tool instead
+- Check the === BLACKLISTED COMMANDS === section - any of these commands in a plan = DRIFT
+- Manual descriptions of expected behavior are fine (e.g., "Home shows unavailable until device reports")
 
 UNREQUESTED PARAMETERS DRIFT (→ DRIFT):
 - Plan adds behavioral parameters (timeouts, thresholds, expiry times, counts) that user did not specify
@@ -810,6 +810,7 @@ These commands should NOT appear in CLAUDE.md code examples:
   - Examples: make build, npm run test, cargo check, tsc, go build, pytest, eslint, prettier, etc.
   - No exceptions - all such commands are banned regardless of language or toolchain
 - curl/wget → requires explicit permission, should not be documented as allowed
+- See === BLACKLISTED COMMANDS === section for complete list
 
 ### Delegation Instructions (→ DRIFT)
 - "please run", "could you run", "run it yourself"
