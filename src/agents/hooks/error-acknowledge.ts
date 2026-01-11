@@ -29,10 +29,8 @@
  */
 
 import { getModelId, EXECUTION_TYPES } from "../../types.js";
-import {
-  isErrorAcknowledged,
-  markErrorAcknowledged,
-} from "../../utils/ack-cache.js";
+import { isErrorAcknowledged } from "../../utils/ack-cache.js";
+import { invalidateAllCaches } from "../../utils/rewind-cache.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { ERROR_ACK_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
@@ -116,10 +114,8 @@ Input: ${JSON.stringify(toolInput)}`,
   const parsed = parseDecision(decision, ["OK"]);
 
   if (parsed.approved) {
-    // Mark issue as acknowledged so future checks skip it
-    if (issueMatch) {
-      await markErrorAcknowledged(issueMatch[0]);
-    }
+    // Clear all caches - OK means current state is approved, start fresh next time
+    await invalidateAllCaches();
     logApprove(result, "error-acknowledge", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Acknowledged");
     return "OK";
   }

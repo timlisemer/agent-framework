@@ -21,14 +21,15 @@ const ALL = Infinity;
  *
  * Includes tool results to detect errors in command output.
  * Trims tool output to focus on error-relevant lines.
- * Excludes Task/Agent outputs (too verbose, rarely contain errors).
+ * Includes Task/Agent outputs so error-ack can see directive compliance.
  */
 export const ERROR_CHECK_COUNTS: TranscriptReadOptions = {
   counts: { user: 3, assistant: 3, toolResult: 5 },
   toolResultOptions: {
     trim: true,
     maxLines: 20,
-    excludeToolNames: ['Task', 'Agent', 'TaskOutput'],
+    // NOTE: Do NOT exclude Task/Agent - error-ack needs to see that agents were run
+    // Otherwise it incorrectly thinks directives weren't followed
   },
 };
 
