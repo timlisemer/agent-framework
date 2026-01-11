@@ -761,13 +761,11 @@ These commands should NOT appear in CLAUDE.md code examples:
 - find → should use Glob tool
 - echo > file → should use Write tool
 - git commit/push/add/merge/rebase/reset → should use MCP tools
-- make check/build → should use mcp__agent-framework__check
-- npm run build/check/test → should use mcp__agent-framework__check
-- cargo build/check/test → should use mcp__agent-framework__check
-- tsc/npx tsc → should use mcp__agent-framework__check
-- alejandra → should use mcp__agent-framework__check
+- ANY build/check/typecheck/test/lint/format/run commands → should use mcp__agent-framework__check
+  - This includes ALL languages and tools: make, npm, cargo, tsc, go, python, gradle, maven, etc.
+  - Examples: make build, npm run test, cargo check, tsc, go build, pytest, eslint, prettier, etc.
+  - No exceptions - all such commands are banned regardless of language or toolchain
 - curl/wget → requires explicit permission, should not be documented as allowed
-- make run, cargo run, npm run start/dev → run commands are denied
 
 ### Delegation Instructions (→ DRIFT)
 - "please run", "could you run", "run it yourself"
