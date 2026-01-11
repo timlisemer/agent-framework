@@ -14,6 +14,7 @@ import {
   getModelId,
   type ModelTier,
   type ExecutionType,
+  type ProviderType,
 } from "../types.js";
 import type { AgentExecutionResult } from "./agent-runner.js";
 
@@ -59,6 +60,8 @@ export interface AgentLog {
   cost?: number;
   /** OpenRouter generation ID for async cost fetching */
   generationId?: string;
+  /** Provider type (openrouter or claude-subscription) */
+  provider?: ProviderType;
 }
 
 /**
@@ -106,6 +109,7 @@ export function logAgentDecision(log: AgentLog): void {
     reasoningTokens: log.reasoningTokens,
     cost: log.cost,
     generationId: log.generationId,
+    provider: log.provider,
   });
 }
 
@@ -163,6 +167,7 @@ export function logAgentResult(
     reasoningTokens: result.reasoningTokens,
     cost: result.cost,
     generationId: result.generationId,
+    provider: result.provider,
   });
 }
 
@@ -198,6 +203,7 @@ export function logApprove(
     reasoningTokens: result.reasoningTokens,
     cost: result.cost,
     generationId: result.generationId,
+    provider: result.provider,
   });
 }
 
@@ -233,6 +239,7 @@ export function logDeny(
     reasoningTokens: result.reasoningTokens,
     cost: result.cost,
     generationId: result.generationId,
+    provider: result.provider,
   });
 }
 
@@ -268,6 +275,7 @@ export function logConfirm(
     reasoningTokens: result.reasoningTokens,
     cost: result.cost,
     generationId: result.generationId,
+    provider: result.provider,
   });
 }
 
@@ -303,6 +311,7 @@ export function logError(
     reasoningTokens: result.reasoningTokens,
     cost: result.cost,
     generationId: result.generationId,
+    provider: result.provider,
   });
 }
 
@@ -338,6 +347,7 @@ export function logContinue(
     reasoningTokens: result.reasoningTokens,
     cost: result.cost,
     generationId: result.generationId,
+    provider: result.provider,
   });
 }
 

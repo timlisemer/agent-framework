@@ -41,7 +41,15 @@ export const EXECUTION_TYPES = {
   TYPESCRIPT: "typescript" as ExecutionType,
 } as const;
 
-// Model IDs defined ONCE here. Update when Anthropic releases new versions.
+// Re-export provider types from provider-config
+export {
+  type ProviderType,
+  PROVIDER_TYPES,
+  resolveProvider,
+  requiresCostTracking,
+} from "./utils/provider-config.js";
+
+// Model IDs for OpenRouter (default provider). Update when new models available.
 export const MODEL_IDS: Record<ModelTierValue, string> = {
   haiku: "x-ai/grok-4.1-fast",
   sonnet: "google/gemini-3-flash-preview",

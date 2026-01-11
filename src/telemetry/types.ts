@@ -1,7 +1,7 @@
-import type { ModelTier, TelemetryMode, ExecutionType } from "../types.js";
+import type { ModelTier, TelemetryMode, ExecutionType, ProviderType } from "../types.js";
 
 // Re-export for convenience
-export type { TelemetryMode, ExecutionType };
+export type { TelemetryMode, ExecutionType, ProviderType };
 
 export type TelemetryEventType =
   | "agent_execution"
@@ -59,6 +59,13 @@ export interface TelemetryEvent {
 
   // OpenRouter generation ID for async cost fetching
   generationId?: string;
+
+  // Provider type (openrouter or claude-subscription)
+  // Telemetry server uses this to determine dashboard routing:
+  // - openrouter: Fetch cost from OpenRouter API, include in LLM cost dashboard
+  // - claude-subscription: Skip OpenRouter API call, exclude from LLM cost dashboard
+  //   (event is still fully tracked - tokens, latency, etc. - just not on cost dashboard)
+  provider?: ProviderType;
 
   // Client version (e.g., "1.0.42")
   clientVersion?: string;

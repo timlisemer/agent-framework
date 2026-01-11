@@ -74,7 +74,14 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { getAnthropicClient } from "./anthropic-client.js";
-import { getModelId, type ModelTier, type ExecutionType } from "../types.js";
+import {
+  getModelId,
+  type ModelTier,
+  type ExecutionType,
+  type ProviderType,
+  PROVIDER_TYPES,
+  resolveProvider,
+} from "../types.js";
 import { extractTextFromResponse } from "./response-parser.js";
 import { logAgentDecision, extractDecision } from "./logger.js";
 
@@ -107,6 +114,8 @@ interface InternalAgentResult {
   };
   /** OpenRouter generation ID - at top level to survive when usage is undefined */
   generationId?: string;
+  /** Provider type used for this execution */
+  provider?: ProviderType;
 }
 
 /**
@@ -236,6 +245,8 @@ export interface AgentExecutionResult {
   cost?: number;
   /** OpenRouter generation ID for async cost fetching */
   generationId?: string;
+  /** Provider type used (openrouter or claude-subscription) */
+  provider?: ProviderType;
 }
 
 /**
@@ -326,6 +337,7 @@ export async function runAgent(
     reasoningTokens: result.usage?.reasoningTokens,
     cost: result.usage?.cost,
     generationId: result.generationId,
+    provider: result.provider,
   };
 }
 
@@ -344,11 +356,14 @@ async function runDirectAgent(
   config: AgentConfig,
   prompt: string
 ): Promise<InternalAgentResult> {
+  // Resolve provider for direct mode (currently always openrouter)
+  const provider = resolveProvider(config.tier, "direct");
+
   try {
     const client = getAnthropicClient();
 
     const response = await client.messages.create({
-      model: getModelId(config.tier),
+      model: provider.modelId,
       max_tokens: config.maxTokens ?? 2000,
       system: config.systemPrompt,
       messages: [{ role: "user", content: prompt }],
@@ -390,13 +405,14 @@ async function runDirectAgent(
       text: extractTextFromResponse(response),
       usage,
       generationId,  // At top level, independent of usage
+      provider: provider.type,
     };
   } catch (error) {
     // Return error as string rather than throwing
     // This allows the caller to handle it gracefully (matches runSdkAgent pattern)
     const errorMessage =
       error instanceof Error ? error.message : String(error);
-    return { text: `[DIRECT ERROR] ${errorMessage}` };
+    return { text: `[DIRECT ERROR] ${errorMessage}`, provider: provider.type };
   }
 }
 
@@ -437,6 +453,22 @@ async function runSdkAgent(
     throw new Error(`SDK mode requires workingDir for agent '${config.name}'`);
   }
 
+  // Resolve provider for SDK mode (will throw if openrouter - not supported)
+  const provider = resolveProvider(config.tier, "sdk");
+
+  // Prepare environment for subprocess
+  // For subscription: pass OAuth token so Claude Code uses subscription auth
+  const subprocessEnv = {
+    ...process.env,
+    // Clear OpenRouter-specific vars for subscription mode
+    ...(provider.type === PROVIDER_TYPES.CLAUDE_SUBSCRIPTION
+      ? {
+          // Don't pass OpenRouter base URL to subprocess
+          ANTHROPIC_BASE_URL: undefined,
+        }
+      : {}),
+  };
+
   // Enhance system prompt with tool guidance
   const enhancedSystemPrompt = `${config.systemPrompt}
 
@@ -463,7 +495,7 @@ Your final response should be your complete analysis in the required format.`;
     const q = query({
       prompt,
       options: {
-        model: getModelId(config.tier),
+        model: provider.modelId,
         cwd: config.workingDir,
         systemPrompt: enhancedSystemPrompt,
         tools,
@@ -471,7 +503,7 @@ Your final response should be your complete analysis in the required format.`;
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         maxTurns: config.maxTurns ?? 10,
-        env: process.env, // Pass env to subprocess for auth
+        env: subprocessEnv, // Pass env to subprocess (cleared for subscription)
       },
     });
 
@@ -482,8 +514,10 @@ Your final response should be your complete analysis in the required format.`;
     // Accumulate usage across all messages
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
+    let totalCachedTokens = 0;
     // SDK provides cost directly via SDKResultMessage.total_cost_usd
-    // (OpenRouter generation IDs are NOT exposed by the SDK)
+    // Note: This is Anthropic pricing formula, NOT OpenRouter cost
+    // For subscription mode, we don't track cost (included in subscription)
     let sdkCost: number | undefined;
 
     for await (const message of q) {
@@ -492,7 +526,9 @@ Your final response should be your complete analysis in the required format.`;
       // Prefer 'result' message type - this is the final output with aggregated data
       if (message.type === "result") {
         // Extract cost from SDK result message (already aggregated by SDK)
-        if (typeof msgAny.total_cost_usd === "number") {
+        // Note: This is Anthropic pricing formula, NOT real OpenRouter cost
+        // For subscription mode, we ignore this (cost included in subscription)
+        if (typeof msgAny.total_cost_usd === "number" && provider.type !== PROVIDER_TYPES.CLAUDE_SUBSCRIPTION) {
           sdkCost = msgAny.total_cost_usd;
         }
 
@@ -501,6 +537,20 @@ Your final response should be your complete analysis in the required format.`;
         if (resultUsage) {
           totalPromptTokens = (resultUsage.input_tokens ?? 0) as number;
           totalCompletionTokens = (resultUsage.output_tokens ?? 0) as number;
+          // cache_read_input_tokens from BetaUsage
+          totalCachedTokens = (resultUsage.cache_read_input_tokens ?? 0) as number;
+        }
+
+        // Extract cached tokens from modelUsage (per-model breakdown)
+        // This has cacheReadInputTokens which we sum across all models
+        const modelUsage = msgAny.modelUsage as Record<string, Record<string, unknown>> | undefined;
+        if (modelUsage && totalCachedTokens === 0) {
+          // Sum cacheReadInputTokens across all models
+          for (const modelData of Object.values(modelUsage)) {
+            if (typeof modelData.cacheReadInputTokens === "number") {
+              totalCachedTokens += modelData.cacheReadInputTokens;
+            }
+          }
         }
 
         if ("result" in message && typeof message.result === "string") {
@@ -542,29 +592,32 @@ Your final response should be your complete analysis in the required format.`;
       }
     }
 
-    // Build usage object - include SDK cost even if no streaming usage
-    const hasUsage = totalPromptTokens > 0 || totalCompletionTokens > 0 || sdkCost !== undefined;
+    // Build usage object - include all available token data
+    const hasUsage = totalPromptTokens > 0 || totalCompletionTokens > 0 || totalCachedTokens > 0 || sdkCost !== undefined;
     const usage = hasUsage ? {
       promptTokens: totalPromptTokens || undefined,
       completionTokens: totalCompletionTokens || undefined,
       totalTokens: (totalPromptTokens + totalCompletionTokens) || undefined,
-      cost: sdkCost,  // SDK provides cost directly via SDKResultMessage.total_cost_usd
+      cachedTokens: totalCachedTokens || undefined,
+      // Note: reasoningTokens not available in SDK (OpenRouter-specific)
+      // cost: Only set for non-subscription mode (subscription doesn't track cost)
+      cost: sdkCost,
     } : undefined;
 
     // Return result, falling back to last assistant content
     // SDK mode: no generationId (SDK doesn't expose OpenRouter IDs)
-    // Cost is provided directly via usage.cost
     return {
       text: finalResult || lastAssistantContent || "[SDK ERROR] No output received",
       usage,
       generationId: undefined,
+      provider: provider.type,
     };
   } catch (error) {
     // Return error as string rather than throwing
     // This allows the caller to handle it gracefully
     const errorMessage =
       error instanceof Error ? error.message : String(error);
-    return { text: `[SDK ERROR] ${errorMessage}` };
+    return { text: `[SDK ERROR] ${errorMessage}`, provider: provider.type };
   }
 }
 

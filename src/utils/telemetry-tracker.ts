@@ -12,7 +12,12 @@ import type {
   TelemetryMode,
   ExecutionType,
 } from "../telemetry/types.js";
-import { getModelId, type ModelTier } from "../types.js";
+import {
+  getModelId,
+  type ModelTier,
+  type ProviderType,
+  requiresCostTracking,
+} from "../types.js";
 import { VERSION } from "../version.js";
 
 /**
@@ -59,6 +64,8 @@ export interface TrackAgentParams {
   cost?: number;
   /** OpenRouter generation ID for async cost fetching */
   generationId?: string;
+  /** Provider type (openrouter or claude-subscription) */
+  provider?: ProviderType;
 }
 
 /**
@@ -136,12 +143,13 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     reasoningTokens,
     cost,
     generationId,
+    provider,
   } = params;
 
-  // Fail fast: OpenRouter LLM executions must have either:
-  // 1. generationId for async cost fetching (direct API mode), OR
-  // 2. cost provided directly (SDK mode - SDKResultMessage.total_cost_usd)
-  if (executionType === "llm" && !generationId && cost === undefined) {
+  // Fail fast: OpenRouter LLM executions must have generationId for async cost fetching
+  // Claude subscription mode doesn't require cost tracking (included in subscription)
+  const needsCostTracking = provider ? requiresCostTracking(provider) : true;
+  if (executionType === "llm" && needsCostTracking && !generationId && cost === undefined) {
     throw new Error(
       `[Telemetry] LLM execution for agent "${agentName}" missing both generationId and cost. ` +
       "Direct API calls must capture response.id. SDK calls must provide cost directly from SDKResultMessage."
@@ -164,6 +172,8 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     decisionReason,
     extraData,
     clientVersion: VERSION,
+    // Provider type for telemetry server to know if cost tracking is needed
+    provider,
     // Only include model info and usage when LLM was called
     ...(executionType === "llm" && modelTier
       ? {
