@@ -209,16 +209,6 @@ export function resolveProvider(
     provider = PROVIDER_TYPES.OPENROUTER;
   }
 
-  // Validate: SDK mode with openrouter is not supported
-  if (mode === "sdk" && provider === PROVIDER_TYPES.OPENROUTER) {
-    throw new Error(
-      "SDK mode does not support OpenRouter provider. " +
-      "Claude Code subprocess cannot use custom base URLs. " +
-      "Use 'claude-subscription' for SDK mode by setting " +
-      "AGENT_FRAMEWORK_SDK_PROVIDER=claude-subscription"
-    );
-  }
-
   // Get model ID based on provider
   const modelId = provider === PROVIDER_TYPES.CLAUDE_SUBSCRIPTION
     ? SUBSCRIPTION_MODEL_IDS[tierKey] ?? SUBSCRIPTION_MODEL_IDS.opus
