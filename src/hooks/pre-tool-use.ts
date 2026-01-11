@@ -53,6 +53,11 @@ import {
   setValidationSession,
 } from "../utils/pending-validation-cache.js";
 import {
+  checkConfirmDeclined,
+  clearConfirmState,
+  setConfirmStateSession,
+} from "../utils/confirm-state-cache.js";
+import {
   setStrictModeSession,
   shouldUseStrictMode,
   recordDenial as recordStrictDenial,
@@ -222,6 +227,7 @@ async function main() {
 
   // Set sessions for all caches (ensures isolation between main session and subagents)
   setValidationSession(input.transcript_path);
+  setConfirmStateSession(input.transcript_path);
   setStrictModeSession(input.transcript_path);
 
   // ============================================================
@@ -296,9 +302,11 @@ async function main() {
     (tr) => tr.content.includes("User answered") || tr.content.includes("answered Claude's questions") || tr.content.includes("→")
   );
 
-  // Clear pending validation if user provided new input (invalidates stale async validation failures)
+  // Clear pending validation and confirm state if user provided new input
+  // (invalidates stale async validation failures and confirm DECLINED states)
   if (hasAskUserAnswerEarly) {
     await clearPendingValidation();
+    await clearConfirmState();
   }
 
   const pendingFailure = await checkPendingValidation();
@@ -366,6 +374,20 @@ async function main() {
       "mcp__agent-framework__confirm": "confirm",
     };
     const friendlyName = toolNameMap[input.tool_name] || input.tool_name;
+
+    // CRITICAL: Check if confirm already declined these changes
+    // This prevents AI from bypassing confirm's decision by calling commit again
+    // while the slash command is still in the transcript
+    if (input.tool_name === "mcp__agent-framework__commit") {
+      const confirmState = await checkConfirmDeclined();
+      if (confirmState.declined) {
+        await recordStrictDenial();
+        outputDeny(
+          `Cannot commit: confirm declined - ${confirmState.reason}. Address the issues first, then re-run /push or /commit.`
+        );
+      }
+    }
+
     const denyReason = `${friendlyName} requires explicit user approval. Use /${friendlyName} slash command or explicitly request ${friendlyName}.`;
 
     // Get transcript for appeal - WITH slash command context detection
@@ -506,6 +528,7 @@ async function main() {
   );
   if (hasAskUserAnswer) {
     await invalidateAllCaches();
+    await clearConfirmState();
   }
 
   // TS Pre-check: Only check TOOL_RESULT lines for error patterns

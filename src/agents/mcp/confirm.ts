@@ -19,6 +19,7 @@
 import { EXECUTION_TYPES, parseTierName } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
+import { recordConfirmDeclined } from "../../utils/confirm-state-cache.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
 import { logConfirm } from "../../utils/logger.js";
 import { runCheckAgent } from "./check.js";
@@ -49,6 +50,7 @@ export async function runConfirmAgent(
 
   // Step 2: If check failed, decline immediately
   if (checkStatus === "FAIL" || errorCount > 0) {
+    const declineReason = `check failed with ${errorCount} error(s)`;
     const result = `## Results
 - Files: SKIP
 - Code Quality: SKIP
@@ -56,7 +58,10 @@ export async function runConfirmAgent(
 - Documentation: SKIP
 
 ## Verdict
-DECLINED: check failed with ${errorCount} error(s)`;
+DECLINED: ${declineReason}`;
+
+    // Record DECLINED state to prevent AI from bypassing via repeated commit calls
+    await recordConfirmDeclined(declineReason);
 
     // Note: No telemetry here since no LLM was called - check agent handles its own telemetry
     return result;
@@ -87,6 +92,14 @@ ${diff || "(no diff)"}${extraContext ? `\n\nUSER INSTRUCTIONS:\n${extraContext}`
     EXECUTION_TYPES.LLM,
     result.output.slice(0, 500)
   );
+
+  // Record DECLINED state if the SDK agent declined
+  // This prevents AI from bypassing by calling commit again while slash command is in transcript
+  if (result.output.includes("DECLINED")) {
+    const declineMatch = result.output.match(/DECLINED[:\s]+(.+?)(?:\n|$)/);
+    const declineReason = declineMatch?.[1] || "Code review failed";
+    await recordConfirmDeclined(declineReason);
+  }
 
   return result.output;
 }

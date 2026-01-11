@@ -471,6 +471,18 @@ Mapping of slash commands to MCP tools:
 
 If the blocked tool matches the slash command's allowed-tools list, OVERTURN immediately.
 
+=== STRICT RULES FOR MCP TOOLS (commit/push/confirm) ===
+
+For approval-required MCP tools (mcp__agent-framework__commit, mcp__agent-framework__push, mcp__agent-framework__confirm):
+
+- ONLY overturn if "=== SLASH COMMAND INVOKED ===" section shows the tool matches allowed-tools
+- Implicit approval phrases ("continue", "go ahead", "yes", "proceed", "ok", "sure") are NOT sufficient
+- These tools require EXPLICIT user invocation via slash command (/commit, /push, /confirm)
+- If no slash command section exists, UPHOLD the block
+
+This prevents the AI from bypassing confirm's DECLINED decision by using casual language.
+The user must explicitly re-invoke the slash command to retry after confirm declines.
+
 === OVERTURN: APPROVE ===
 
 1. USER APPROVED the operation:
