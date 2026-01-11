@@ -16,7 +16,6 @@ import {
   getModelId,
   type ModelTier,
   type ProviderType,
-  requiresCostTracking,
 } from "../types.js";
 import { VERSION } from "../version.js";
 
@@ -146,15 +145,8 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     provider,
   } = params;
 
-  // Fail fast: OpenRouter LLM executions must have generationId for async cost fetching
-  // Claude subscription mode doesn't require cost tracking (included in subscription)
-  const needsCostTracking = provider ? requiresCostTracking(provider) : true;
-  if (executionType === "llm" && needsCostTracking && !generationId && cost === undefined) {
-    throw new Error(
-      `[Telemetry] LLM execution for agent "${agentName}" missing both generationId and cost. ` +
-      "Direct API calls must capture response.id. SDK calls must provide cost directly from SDKResultMessage."
-    );
-  }
+  // Cost tracking is optional - only OpenRouter with generationId will have costs fetched
+  // Claude subscription mode doesn't track costs (included in subscription)
 
   const event: Omit<TelemetryEvent, "hostId" | "timestamp"> = {
     sessionId: getSessionId(),

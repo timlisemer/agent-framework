@@ -754,6 +754,7 @@ export async function runAgentWithRetry(
         success: false,
         errorCount: totalErrorCount,
         generationId: generationIds.length > 0 ? generationIds.join(",") : undefined,
+        provider: initialResult.provider,
       };
     }
   }
@@ -766,6 +767,7 @@ export async function runAgentWithRetry(
     success: true,
     errorCount: totalErrorCount,
     generationId: generationIds.length > 0 ? generationIds.join(",") : undefined,
+    provider: initialResult.provider,
   };
 }
 
