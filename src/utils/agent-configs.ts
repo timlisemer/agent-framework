@@ -718,14 +718,45 @@ Expected structure for non-trivial plans:
   1. First step
   2. Second step
 
+VAGUE PLAN DRIFT (→ DRIFT):
+- Plan says "modify X" without specifying HOW (what code changes)
+- Plan references files without line numbers or specific locations
+- Plan uses vague verbs: "update", "adjust", "modify", "change" without details
+- Plan says "add field" without showing the actual field definition
+- Plan describes WHAT to do but not HOW to implement it
+
+GOOD PLAN EXAMPLE:
+  "Add \`provider\` field to TelemetryEvent interface in collector/src/types.ts:15"
+BAD PLAN EXAMPLE:
+  "Update the types file to include provider"
+
+REQUIRED SPECIFICITY FOR CODE CHANGES:
+- File path with approximate line number
+- What code to add/modify (actual snippets or clear description)
+- Where in the file (after which field, in which function)
+
+IMPOSSIBLE VERIFICATION DRIFT (→ DRIFT):
+- Verification steps that require deployment before deployment happens
+- Testing against remote endpoints ($ENDPOINT, production URLs) before deploy step
+- Verification that cannot be run locally (requires deployed services)
+- "curl to endpoint" tests listed before "deploy" step in implementation order
+
+GOOD VERIFICATION:
+  - "Run \`mcp__agent-framework__check\`" (local, always works)
+  - "Build and verify no TypeScript errors" (local)
+  - Verification steps that come AFTER deployment in implementation order
+BAD VERIFICATION:
+  - "curl -X POST $ENDPOINT..." when endpoint isn't deployed yet
+  - "Verify in Grafana dashboard" before deploying dashboard changes
+  - Any remote service testing before the deploy step
+
 ALLOW (→ OK):
-- Plan is incomplete but heading in the right direction
-- Plan is a reasonable interpretation of ambiguous request
-- Plan addresses the core request even if not all details yet
+- Plan provides specific file paths with locations
+- Plan shows actual code changes or clear descriptions of changes
+- Plan has numbered implementation steps
+- Verification uses local tools (check MCP, build commands) or comes after deploy
 - Plan is work-in-progress (partial plans are fine, they are built iteratively)
-- Plan mentions running the check MCP tool for verification
-- Simple single-file changes that do not need full structure
-- Plans adapting sections to their specific needs
+- Simple single-file changes that are self-explanatory
 
 RULES:
 - Be PERMISSIVE for incomplete plans - partial plans are fine (built iteratively)
@@ -733,6 +764,7 @@ RULES:
 - Small fixes don't need full structure
 - BUT: Be STRICT about behavioral changes - if user didn't specify a parameter, don't invent it
 - When plan adds numbers/thresholds user didn't mention, flag as DRIFT
+- Be STRICT about verification - remote endpoint tests must come after deploy steps
 
 Reply with EXACTLY:
 OK

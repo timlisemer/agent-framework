@@ -260,11 +260,69 @@ CLAUDE_PROJECT_DIR=/path/to/project
 # ANTHROPIC_BASE_URL=https://openrouter.ai/api
 # ANTHROPIC_AUTH_TOKEN=your-openrouter-api-key
 
+# Optional - provider configuration (see Provider Configuration section)
+# AGENT_FRAMEWORK_PROVIDER=openrouter
+# AGENT_FRAMEWORK_SDK_PROVIDER=claude-subscription
+
 # Optional - telemetry (all three required if enabled)
 # TELEMETRY_HOST_ID=your-host-id
 # TELEMETRY_ENDPOINT=https://your-telemetry-endpoint.com
 # AGENT_FRAMEWORK_API_KEY=your-api-key
 ```
+
+## Provider Configuration
+
+The framework supports two LLM providers:
+
+| Provider | Description | Cost Tracking |
+|----------|-------------|---------------|
+| `openrouter` | OpenRouter API (default) | Via generation IDs, shown on LLM cost dashboard |
+| `claude-subscription` | Claude Pro/Max subscription | Excluded from cost dashboard (included in subscription) |
+
+### Configuration Methods
+
+**Environment variables** (highest priority):
+```bash
+# Global default
+export AGENT_FRAMEWORK_PROVIDER=openrouter
+
+# Per-mode overrides
+export AGENT_FRAMEWORK_DIRECT_PROVIDER=openrouter
+export AGENT_FRAMEWORK_SDK_PROVIDER=claude-subscription
+```
+
+**Config file** (`.agent-framework.json` in project root or `~/.config/agent-framework/config.json`):
+```json
+{
+  "default": "openrouter",
+  "modes": {
+    "sdk": "claude-subscription"
+  }
+}
+```
+
+### Provider Constraints
+
+- **Direct mode**: Supports both `openrouter` and `claude-subscription`
+- **SDK mode**: Only supports `claude-subscription` (Claude Code subprocess cannot use custom base URLs)
+
+### Recommended Setup
+
+Use OpenRouter for direct API agents (cheaper models like Grok, Gemini) and Claude subscription for SDK mode (confirm agent):
+
+```json
+{
+  "default": "openrouter",
+  "modes": {
+    "sdk": "claude-subscription"
+  }
+}
+```
+
+This gives you:
+- Fast, cheap haiku/sonnet agents via OpenRouter
+- Unlimited confirm agent usage via Claude subscription
+- Full telemetry tracking (events tracked, just excluded from cost dashboard for subscription)
 
 ## Usage
 

@@ -50,6 +50,7 @@ src/                                # TypeScript source
     agent-runner.ts                 # Unified agent execution (direct + SDK)
     agent-configs.ts                # Centralized agent configurations
     anthropic-client.ts             # Singleton Anthropic client factory
+    provider-config.ts              # Provider configuration (openrouter/subscription)
     response-parser.ts              # Text extraction + decision parsing
     retry.ts                        # Generic format validation retry
     transcript-presets.ts           # Standard transcript configurations
@@ -124,6 +125,69 @@ interface AgentConfig {
   maxTurns?: number;      // SDK mode only
 }
 ```
+
+## Provider Configuration
+
+The framework supports two LLM providers with different cost tracking behavior:
+
+| Provider | Description | Cost Tracking |
+|----------|-------------|---------------|
+| `openrouter` | OpenRouter API | Via generation IDs, shown on LLM cost dashboard |
+| `claude-subscription` | Claude Pro/Max subscription | Events tracked (tokens, latency) but excluded from LLM cost dashboard |
+
+### Configuration Hierarchy
+
+Provider resolution follows this priority order:
+
+1. **Mode-specific env var**: `AGENT_FRAMEWORK_DIRECT_PROVIDER`, `AGENT_FRAMEWORK_SDK_PROVIDER`
+2. **Config file mode override**: `.agent-framework.json` → `modes.direct`, `modes.sdk`
+3. **Global env var**: `AGENT_FRAMEWORK_PROVIDER`
+4. **Config file default**: `.agent-framework.json` → `default`
+5. **Hardcoded default**: `openrouter`
+
+### Config File Locations
+
+- Project root: `.agent-framework.json`
+- Global: `~/.config/agent-framework/config.json`
+
+```json
+{
+  "default": "openrouter",
+  "modes": {
+    "sdk": "claude-subscription"
+  }
+}
+```
+
+### SDK Mode Constraint
+
+**SDK mode with OpenRouter is not supported.** The Claude Agent SDK spawns a Claude Code subprocess that cannot use custom base URLs. SDK mode automatically uses `claude-subscription` (or throws an error if explicitly configured for openrouter).
+
+### Provider Model IDs
+
+Each provider uses different model identifiers:
+
+| Tier | OpenRouter ID | Subscription ID |
+|------|---------------|-----------------|
+| haiku | `x-ai/grok-4.1-fast` | `claude-haiku-4-5` |
+| sonnet | `google/gemini-3-flash-preview` | `claude-sonnet-4-5` |
+| opus | `anthropic/claude-opus-4.5` | `claude-opus-4-5` |
+
+### Telemetry Behavior
+
+The `provider` field in telemetry events tells the telemetry server how to handle costs:
+
+- **openrouter**: Fetch cost from OpenRouter API using `generationId`, include in LLM cost dashboard
+- **claude-subscription**: Skip OpenRouter API call, exclude from LLM cost dashboard (event still fully tracked)
+
+### Token Extraction by Mode
+
+| Token Field | Direct Mode | SDK Mode |
+|-------------|-------------|----------|
+| `promptTokens` | From API response | From `SDKResultMessage.usage` |
+| `completionTokens` | From API response | From `SDKResultMessage.usage` |
+| `cachedTokens` | From `usage.cache_read_input_tokens` | From `modelUsage[model].cacheReadInputTokens` |
+| `reasoningTokens` | From OpenRouter response | Not available (OpenRouter-specific) |
 
 ## Model Tiers
 
@@ -346,6 +410,9 @@ Standard configurations for different use cases:
 | `ANTHROPIC_BASE_URL` | No | Custom API endpoint |
 | `CLAUDE_PROJECT_DIR` | Auto | Set by Claude Code |
 | `AGENT_FRAMEWORK_ROOT` | Yes (hooks) | Path to agent-framework directory |
+| `AGENT_FRAMEWORK_PROVIDER` | No | Global provider (openrouter/claude-subscription) |
+| `AGENT_FRAMEWORK_DIRECT_PROVIDER` | No | Provider for direct mode agents |
+| `AGENT_FRAMEWORK_SDK_PROVIDER` | No | Provider for SDK mode agents |
 | `TELEMETRY_HOST_ID` | No | Telemetry host identifier |
 | `TELEMETRY_ENDPOINT` | No | Telemetry service URL |
 | `AGENT_FRAMEWORK_API_KEY` | No | Telemetry API key |

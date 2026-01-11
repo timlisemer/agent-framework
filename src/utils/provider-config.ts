@@ -80,11 +80,11 @@ export interface ResolvedProvider {
   modelId: string;
 }
 
-// Model IDs for Claude subscription (native Anthropic format)
+// Model IDs for Claude subscription (native Anthropic aliases)
 const SUBSCRIPTION_MODEL_IDS: Record<string, string> = {
-  haiku: "claude-3-5-haiku-20241022",
-  sonnet: "claude-sonnet-4-20250514",
-  opus: "claude-opus-4-20250514",
+  haiku: "claude-haiku-4-5",
+  sonnet: "claude-sonnet-4-5",
+  opus: "claude-opus-4-5",
 };
 
 // Model IDs for OpenRouter (from types.ts, duplicated here to avoid circular deps)
