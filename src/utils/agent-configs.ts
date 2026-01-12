@@ -1172,6 +1172,28 @@ If no acknowledgment:
 - "Fix the login bug" + Edit auth.ts → OK
 - "Fix the login bug" + Edit payment.ts → BLOCK
 
+## PRIORITY 2.5: TASK TOOL AGENT TYPE (CHECK FOR Task/Agent TOOLS)
+
+When evaluating Task or Agent tool calls, check if user explicitly requested a specific agent type:
+
+EXPLICIT AGENT TYPE REQUESTS:
+- "start a plan agent" / "run plan agent" / "launch plan agent" → subagent_type MUST be "Plan"
+- "start an explore agent" / "explore the codebase" → subagent_type MUST be "Explore"
+- "start a bash agent" / "run bash commands" → subagent_type MUST be "Bash"
+- Generic "start an agent" / "run an agent" → any subagent_type OK
+
+BLOCK if:
+- User explicitly requested agent type X (e.g., "plan agent")
+- But Task tool has subagent_type: Y (e.g., "Explore")
+- This is a direct contradiction of user's request
+
+| User Message | Tool | subagent_type | Result |
+|-------------|------|---------------|--------|
+| "start a plan agent" | Task | Plan | OK |
+| "start a plan agent" | Task | Explore | BLOCK: User requested Plan agent but starting Explore |
+| "explore the codebase" | Task | Explore | OK |
+| "start an agent to help" | Task | Plan | OK: no specific type requested |
+
 ## PRIORITY 3: STOP/WAIT/EXPLAIN
 
 If user said stop, wait, hold on, explain, pause → any action tool = BLOCK
