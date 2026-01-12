@@ -44,15 +44,21 @@ import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CHECK_AGENT } from "../../utils/agent-configs.js";
 import { runCommand } from "../../utils/command.js";
-import { getUncommittedChanges } from "../../utils/git-utils.js";
+import { getUncommittedChanges, getRepoInfo } from "../../utils/git-utils.js";
 import { logConfirm } from "../../utils/logger.js";
 
 const HOOK_NAME = "mcp__agent-framework__check";
 
 /**
  * Detect which linter is configured for the project.
+ * Checks the target directory first, then falls back to the main repo.
+ *
+ * @returns Object with cmd and the directory to run it in, or null if no linter found
  */
-function detectLinter(workingDir: string): string | null {
+function detectLinter(
+  workingDir: string,
+  mainRepo: string
+): { cmd: string; dir: string } | null {
   const checks = [
     {
       files: [
@@ -77,13 +83,44 @@ function detectLinter(workingDir: string): string | null {
     },
   ];
 
+  // Check target directory first
   for (const { files, cmd } of checks) {
     for (const file of files) {
       if (fs.existsSync(path.join(workingDir, file))) {
-        return cmd;
+        return { cmd, dir: workingDir };
       }
     }
   }
+
+  // Fall back to main repo if different
+  if (mainRepo !== workingDir) {
+    for (const { files, cmd } of checks) {
+      for (const file of files) {
+        if (fs.existsSync(path.join(mainRepo, file))) {
+          return { cmd, dir: mainRepo };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Find the directory containing a Makefile with a check target.
+ * Checks the target directory first, then falls back to the main repo.
+ */
+function findMakefileDir(workingDir: string, mainRepo: string): string | null {
+  // Check target directory first
+  if (fs.existsSync(path.join(workingDir, "Makefile"))) {
+    return workingDir;
+  }
+
+  // Fall back to main repo if different
+  if (mainRepo !== workingDir && fs.existsSync(path.join(mainRepo, "Makefile"))) {
+    return mainRepo;
+  }
+
   return null;
 }
 
@@ -94,20 +131,32 @@ function detectLinter(workingDir: string): string | null {
  * @returns Structured summary with errors, warnings, and status
  */
 export async function runCheckAgent(workingDir: string): Promise<string> {
+  // Get main repo path for fallback
+  const repoInfo = getRepoInfo(workingDir);
+  const mainRepo = repoInfo.mainRepo;
+
   // Step 1: Get uncommitted files info
   const { status } = getUncommittedChanges(workingDir);
 
-  // Step 2: Run linter if configured
+  // Step 2: Run linter if configured (check workingDir first, then main repo)
   let lintOutput = "";
-  const lintCmd = detectLinter(workingDir);
-  if (lintCmd) {
-    const lint = runCommand(lintCmd, workingDir);
-    lintOutput = `LINTER OUTPUT (exit code ${lint.exitCode}):\n${lint.output}\n`;
+  const linter = detectLinter(workingDir, mainRepo);
+  if (linter) {
+    const lint = runCommand(linter.cmd, linter.dir);
+    const lintLocation = linter.dir === workingDir ? "" : ` (from ${path.basename(linter.dir)})`;
+    lintOutput = `LINTER OUTPUT${lintLocation} (exit code ${lint.exitCode}):\n${lint.output}\n`;
   }
 
-  // Step 3: Run make check
-  const check = runCommand("make check 2>&1", workingDir);
-  const checkOutput = `MAKE CHECK OUTPUT (exit code ${check.exitCode}):\n${check.output}`;
+  // Step 3: Run make check (check workingDir first, then main repo)
+  let checkOutput = "";
+  const makefileDir = findMakefileDir(workingDir, mainRepo);
+  if (makefileDir) {
+    const check = runCommand("make check 2>&1", makefileDir);
+    const checkLocation = makefileDir === workingDir ? "" : ` (from ${path.basename(makefileDir)})`;
+    checkOutput = `MAKE CHECK OUTPUT${checkLocation} (exit code ${check.exitCode}):\n${check.output}`;
+  } else {
+    checkOutput = "MAKE CHECK OUTPUT: No Makefile found";
+  }
 
   // Step 4: Use unified runner for analysis
   const result = await runAgent(

@@ -1,3 +1,4 @@
+import path from "path";
 import { runCommand } from "./command.js";
 
 /**
@@ -50,6 +51,34 @@ export interface GitChanges {
 
   /** Summary statistics: files changed, insertions, deletions */
   diffStat: string;
+}
+
+export interface SubmoduleInfo {
+  /** Relative path to the submodule from the parent repo */
+  path: string;
+
+  /** Absolute path to the submodule */
+  absolutePath: string;
+
+  /** Whether the submodule has uncommitted changes */
+  hasChanges: boolean;
+}
+
+export interface RepoInfo {
+  /** Absolute path to the main repository */
+  mainRepo: string;
+
+  /** Name of the main repository (directory name) */
+  mainRepoName: string;
+
+  /** Whether the main repo (excluding submodules) has uncommitted changes */
+  mainRepoHasChanges: boolean;
+
+  /** List of submodules with their status */
+  submodules: SubmoduleInfo[];
+
+  /** List of repos with uncommitted changes (for convenience) */
+  reposWithChanges: Array<{ path: string; name: string }>;
 }
 
 /**
@@ -139,5 +168,101 @@ export function getUncommittedChanges(workingDir: string): GitChanges {
     status: status.output || "",
     diff: (trackedDiff.output || "") + untrackedDiff,
     diffStat: diffStat.output || "",
+  };
+}
+
+/**
+ * Find the topmost git repository by traversing up the directory tree.
+ * This handles the case where we're inside a submodule and need to find the parent repo.
+ */
+function findTopmostRepo(startDir: string): string {
+  // Get the immediate git root
+  const gitRootResult = runCommand("git rev-parse --show-toplevel", startDir);
+  let currentRepo = (gitRootResult.output || "").trim();
+
+  if (!currentRepo) {
+    return startDir;
+  }
+
+  // Traverse up to find if there's a parent git repo
+  let parentDir = path.dirname(currentRepo);
+  while (parentDir && parentDir !== "/" && parentDir !== path.dirname(parentDir)) {
+    // Check if parent directory is inside a git repo
+    const parentGitResult = runCommand("git rev-parse --show-toplevel 2>/dev/null || echo ''", parentDir);
+    const parentRepo = (parentGitResult.output || "").trim();
+
+    if (parentRepo && parentRepo !== currentRepo) {
+      currentRepo = parentRepo;
+      parentDir = path.dirname(currentRepo);
+    } else {
+      break;
+    }
+  }
+
+  return currentRepo;
+}
+
+/**
+ * Get information about the repository structure including submodules.
+ *
+ * This function detects git submodules and checks which repos have uncommitted changes.
+ * Useful for determining which repositories need to be committed/pushed when working
+ * in a project with multiple git repos.
+ *
+ * @param workingDir - The directory to check (will find the git root)
+ * @returns RepoInfo object with main repo and submodule details
+ */
+export function getRepoInfo(workingDir: string): RepoInfo {
+  // Get the absolute path to the git root (topmost parent repo)
+  const mainRepo = findTopmostRepo(workingDir);
+  const mainRepoName = path.basename(mainRepo);
+
+  // Get submodule paths
+  const submoduleResult = runCommand("git submodule --quiet foreach 'echo $sm_path'", mainRepo);
+  const submodulePaths = (submoduleResult.output || "")
+    .split("\n")
+    .map((p: string) => p.trim())
+    .filter(Boolean);
+
+  // Check each submodule for changes
+  const submodules: SubmoduleInfo[] = submodulePaths.map((subPath: string) => {
+    const absolutePath = path.join(mainRepo, subPath);
+    const statusResult = runCommand("git status --porcelain", absolutePath);
+    const hasChanges = Boolean((statusResult.output || "").trim());
+
+    return {
+      path: subPath,
+      absolutePath,
+      hasChanges,
+    };
+  });
+
+  // Check main repo for changes (excluding submodule directories)
+  // Get status and filter out lines that are inside submodule paths
+  const mainStatusResult = runCommand("git status --porcelain --ignore-submodules=all", mainRepo);
+  const mainRepoHasChanges = Boolean((mainStatusResult.output || "").trim());
+
+  // Build list of repos with changes
+  const reposWithChanges: Array<{ path: string; name: string }> = [];
+
+  if (mainRepoHasChanges) {
+    reposWithChanges.push({ path: mainRepo, name: mainRepoName });
+  }
+
+  for (const sub of submodules) {
+    if (sub.hasChanges) {
+      reposWithChanges.push({
+        path: sub.absolutePath,
+        name: path.basename(sub.absolutePath),
+      });
+    }
+  }
+
+  return {
+    mainRepo,
+    mainRepoName,
+    mainRepoHasChanges,
+    submodules,
+    reposWithChanges,
   };
 }

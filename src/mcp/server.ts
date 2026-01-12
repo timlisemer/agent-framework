@@ -7,6 +7,7 @@ import { runConfirmAgent } from "../agents/mcp/confirm.js";
 import { runCommitAgent } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
 import { runValidateIntentAgent } from "../agents/mcp/validate-intent.js";
+import { getRepoInfo } from "../utils/git-utils.js";
 import { initializeTelemetry } from "../telemetry/index.js";
 
 // Ensure PATH includes standard locations for subprocess spawning
@@ -97,6 +98,50 @@ server.registerTool(
   async (args) => {
     const result = await runPushAgent(args.working_dir || process.cwd());
     return { content: [{ type: "text", text: result }] };
+  }
+);
+
+server.registerTool(
+  "list_repos",
+  {
+    title: "List Repos",
+    description: "List all git repositories (main + submodules) and their uncommitted change status. Use this before commit/confirm/push to detect which repos have changes.",
+    inputSchema: {
+      working_dir: z.string().optional().describe("Working directory (defaults to cwd)")
+    }
+  },
+  async (args) => {
+    const info = getRepoInfo(args.working_dir || process.cwd());
+    const lines: string[] = [];
+
+    lines.push(`MAIN REPO: ${info.mainRepo}`);
+    lines.push(`  Name: ${info.mainRepoName}`);
+    lines.push(`  Has changes: ${info.mainRepoHasChanges ? "YES" : "NO"}`);
+
+    if (info.submodules.length > 0) {
+      lines.push("");
+      lines.push("SUBMODULES:");
+      for (const sub of info.submodules) {
+        lines.push(`  - ${sub.path}`);
+        lines.push(`    Absolute path: ${sub.absolutePath}`);
+        lines.push(`    Has changes: ${sub.hasChanges ? "YES" : "NO"}`);
+      }
+    } else {
+      lines.push("");
+      lines.push("SUBMODULES: none");
+    }
+
+    lines.push("");
+    if (info.reposWithChanges.length > 0) {
+      lines.push("REPOS WITH UNCOMMITTED CHANGES:");
+      for (const repo of info.reposWithChanges) {
+        lines.push(`  - ${repo.name}: ${repo.path}`);
+      }
+    } else {
+      lines.push("REPOS WITH UNCOMMITTED CHANGES: none");
+    }
+
+    return { content: [{ type: "text", text: lines.join("\n") }] };
   }
 );
 
