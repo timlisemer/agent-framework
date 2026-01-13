@@ -60,6 +60,13 @@ export interface TranscriptReadOptions {
    * (command name, allowed-tools) for use in appeal decisions.
    */
   includeSlashCommandContext?: boolean;
+
+  /**
+   * Detect plan approval and inject synthetic user message.
+   * If true, scans tool results for ExitPlanMode approval and adds
+   * a synthetic user message indicating the plan was approved.
+   */
+  detectPlanApproval?: boolean;
 }
 
 /**
@@ -370,6 +377,7 @@ export async function readTranscriptExact(
     excludeSlashCommandPrompts = true,
     includeFirstUserMessage = false,
     includeSlashCommandContext = false,
+    detectPlanApproval = false,
   } = options;
 
   const targetUser = counts.user ?? 0;
@@ -519,6 +527,22 @@ export async function readTranscriptExact(
           // Skip malformed
         }
       }
+    }
+  }
+
+  // Detect plan approval and inject synthetic user message
+  if (detectPlanApproval) {
+    const hasPlanApproval = collected.toolResult.some(
+      (r) =>
+        r.content.includes("ExitPlanMode") &&
+        (r.content.includes("approved") || r.content.includes("allow"))
+    );
+    if (hasPlanApproval) {
+      collected.user.push({
+        role: "user",
+        content: "I approved the plan. Proceed with implementation.",
+        index: Infinity, // Sort to end
+      });
     }
   }
 

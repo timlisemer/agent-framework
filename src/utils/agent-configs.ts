@@ -670,6 +670,8 @@ DETECT DRIFT (→ DRIFT):
 - Plan does something fundamentally different than requested
 - Plan ignores a critical aspect the user explicitly mentioned
 - Plan adds major unrelated scope user never asked for
+- Plan adds tasks user never requested (scope creep)
+- Plan proposes documenting in CLAUDE.md (CLAUDE.md is for instructions TO Claude, not documentation)
 - Plan is appended to an old plan instead of replacing it
 
 OVER-ENGINEERING DRIFT (→ DRIFT):
@@ -972,6 +974,12 @@ BLOCK if ANY of these apply:
 4. WORKFLOW VIOLATION - Question violates expected flow:
    - In plan mode: asking implementation questions before plan is approved
    - Asking about next steps when current task isn't done
+
+5. REDUNDANT AFTER CLARIFICATION - User already gave explicit short directive:
+   - User's recent message was brief and clear (e.g., "README", "the tests", "fix it")
+   - Claude now asks multi-option question about the same topic
+   - This forces user to re-explain what they just said
+   - BLOCK: Respect the user's explicit direction without re-asking
 
 ALLOW if:
 - Question clarifies genuine ambiguity in user's request

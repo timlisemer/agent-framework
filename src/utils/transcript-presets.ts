@@ -24,7 +24,7 @@ const ALL = Infinity;
  * Includes Task/Agent outputs so error-ack can see directive compliance.
  */
 export const ERROR_CHECK_COUNTS: TranscriptReadOptions = {
-  counts: { user: 3, assistant: 3, toolResult: 5 },
+  counts: { user: 1, assistant: 1, toolResult: 2 },
   toolResultOptions: {
     trim: true,
     maxLines: 20,
@@ -38,12 +38,13 @@ export const ERROR_CHECK_COUNTS: TranscriptReadOptions = {
  *
  * Includes both user and assistant messages for context.
  * More messages to understand conversation flow.
- * No tool results - appeal focuses on user intent, not tool output.
+ * Minimal tool results to detect plan approval (synthetic user message injected).
  * Includes first user message to capture initial request context.
  */
 export const APPEAL_COUNTS: TranscriptReadOptions = {
-  counts: { user: ALL, assistant: 10 },
+  counts: { user: ALL, assistant: 10, toolResult: 3 },
   includeFirstUserMessage: true,
+  detectPlanApproval: true,
 };
 
 /**
@@ -117,9 +118,10 @@ export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
 export const INTENT_ALIGNMENT_COUNTS: TranscriptReadOptions = {
   counts: { user: ALL, assistant: 5, toolResult: 5 },
   includeFirstUserMessage: true,
+  detectPlanApproval: true,
   toolResultOptions: {
     trim: true,
-    maxLines: 5,
+    maxLines: 100,
     // NOTE: Do NOT exclude Task/Agent - response-align needs to see that agents were run
     // Otherwise it incorrectly thinks AI skipped requested agent actions
   },
