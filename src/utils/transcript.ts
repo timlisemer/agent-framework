@@ -1,5 +1,57 @@
 import * as fs from "fs";
 
+/**
+ * Claude Code Interruption Message Filter
+ *
+ * When a user interrupts a tool call in Claude Code (by pressing Escape),
+ * Claude Code injects an internal message into the tool result like:
+ *
+ *   "The user doesn't want to take this action right now. STOP what you are
+ *    doing and wait for the user to tell you how to proceed."
+ *
+ * or:
+ *
+ *   "[Request interrupted by user for tool use]"
+ *
+ * These messages get logged as tool_result content in the transcript. When
+ * hooks (like response-align) read the transcript, they see these messages
+ * in RECENT TOOL RESULTS and pass them to the LLM for alignment checking.
+ *
+ * The LLM then misinterprets "STOP what you are doing" as something the USER
+ * said, leading to false positives like:
+ *
+ *   "Error: First response misalignment: User said 'STOP what you are doing'
+ *    in the recent tool results..."
+ *
+ * THE USER NEVER SAID THIS - Claude Code's internal interruption handler did.
+ *
+ * These patterns detect and filter out Claude Code's internal interruption
+ * messages to prevent this misattribution. Legitimate user content in tool
+ * results (like AskUserQuestion answers) is preserved.
+ */
+const CLAUDE_CODE_INTERRUPTION_PATTERNS = [
+  // Message injected when user presses Escape during tool execution
+  /The user doesn't want to take this action right now/i,
+  // The "STOP" directive that gets misattributed as user speech
+  /STOP what you are doing and wait for the user/i,
+  // Explicit interruption markers in tool results
+  /\[Request interrupted by user.*\]/i,
+];
+
+/**
+ * Check if tool result content is a Claude Code internal interruption message.
+ *
+ * Returns true if the content matches any of the known Claude Code interruption
+ * patterns. These should be filtered out of tool results to prevent hooks from
+ * misattributing them as user intent.
+ *
+ * @param content - The tool result content to check
+ * @returns true if this is a Claude Code interruption message, false otherwise
+ */
+function isClaudeCodeInterruption(content: string): boolean {
+  return CLAUDE_CODE_INTERRUPTION_PATTERNS.some((p) => p.test(content));
+}
+
 export interface TranscriptMessage {
   role: 'user' | 'assistant' | 'tool_result';
   content: string;
@@ -600,6 +652,17 @@ function processUserEntry(
         }
 
         let toolContent = extractToolResultContent(block);
+
+        // Filter out Claude Code's internal interruption messages.
+        // When a user presses Escape to interrupt a tool call, Claude Code
+        // injects messages like "STOP what you are doing" into the tool result.
+        // Without this filter, hooks would misattribute these as user intent,
+        // causing false positives like "User said STOP" when the user never
+        // said that - Claude Code's interruption handler did.
+        if (toolContent && isClaudeCodeInterruption(toolContent)) {
+          continue;
+        }
+
         if (trim && toolContent) {
           toolContent = trimToolOutput(toolContent, maxLines);
         }
