@@ -527,7 +527,7 @@ export async function readTranscriptExact(
       } else if (role === 'assistant' && collected.assistant.length < targetAssistant) {
         const text = extractTextFromContent(msgContent);
         if (text) {
-          collected.assistant.unshift({ role: 'assistant', content: text, index: i });
+          collected.assistant.push({ role: 'assistant', content: text, index: i });
         }
       }
     } catch {
@@ -638,7 +638,7 @@ function processUserEntry(
       return;
     }
     if (collected.user.length < targetUser) {
-      collected.user.unshift({ role: 'user', content: msgContent, index: lineIndex });
+      collected.user.push({ role: 'user', content: msgContent, index: lineIndex });
     }
   } else if (Array.isArray(msgContent)) {
     for (const block of msgContent) {
@@ -667,7 +667,7 @@ function processUserEntry(
           toolContent = trimToolOutput(toolContent, maxLines);
         }
         if (toolContent) {
-          collected.toolResult.unshift({ role: 'tool_result', content: toolContent, index: lineIndex });
+          collected.toolResult.push({ role: 'tool_result', content: toolContent, index: lineIndex });
         }
       } else if (block.type === 'text' && block.text) {
         if (excludeSystemReminders && block.text.startsWith('<system-reminder>')) {
@@ -677,7 +677,7 @@ function processUserEntry(
           continue;
         }
         if (collected.user.length < targetUser) {
-          collected.user.unshift({ role: 'user', content: block.text, index: lineIndex });
+          collected.user.push({ role: 'user', content: block.text, index: lineIndex });
         }
       }
     }

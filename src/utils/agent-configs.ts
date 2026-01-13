@@ -689,9 +689,13 @@ SOLUTION BRANCHING DRIFT (→ DRIFT):
 - Plan presents multiple solution options like "Option A:", "Option B:", "Approach 1:", "Approach 2:"
 - Plan lists alternatives for the AI or user to choose from later
 - A plan must be a SINGLE clear implementation path, not a decision tree
-- If multiple approaches exist, AI should use AskUserQuestion to clarify BEFORE writing the plan
+- If multiple approaches exist:
+  1. First write the options in chat (full text output so user can read the details)
+  2. Then use AskUserQuestion to ask which approach to proceed with
+  3. Then write the plan with ONLY the chosen approach
 - Example DRIFT: "Option A: Add to logger (Problem: X) / Option B: Wait before flush (Problem: Y)"
 - The plan file is for EXECUTION, not for presenting choices - choices belong in conversation
+- IMPORTANT: Options must be written in chat BEFORE AskUserQuestion so the user can read full details before deciding
 
 NOTE: Numbered task organization like "Phase 1:", "Step 1:", "Task 1:" is ALLOWED - these organize work sequentially, not estimate time
 
@@ -1034,6 +1038,7 @@ Style drift is cosmetic-only changes the AI made without being asked:
 - Import reordering (when imports themselves are unchanged)
 - Comment style changes (// vs /* */ when content unchanged)
 - Brace positioning changes ({ on same line vs new line)
+- Emoji additions (emojis should never be added unless explicitly requested)
 
 ## WHAT IS NOT STYLE DRIFT (ALWAYS APPROVE)?
 
@@ -1076,6 +1081,7 @@ APPROVE
 DENY: quote style change (" to ') - revert to double quotes
 DENY: trailing comma removed - revert to include trailing comma
 DENY: semicolon added - revert to no semicolon
+DENY: emoji added - remove emoji
 
 NO other text before the decision word.`,
 };
