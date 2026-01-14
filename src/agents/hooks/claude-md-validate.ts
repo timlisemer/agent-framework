@@ -21,7 +21,7 @@ import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
-import { getBlacklistDescription } from "../../utils/command-patterns.js";
+import { getBlacklistDescription, getContentBlacklistHighlights } from "../../utils/command-patterns.js";
 
 /**
  * Validate CLAUDE.md content against agent-framework rules.
@@ -69,11 +69,17 @@ export async function validateClaudeMd(
   }
 
   try {
+    // Check for blacklisted commands in proposed edit
+    const blacklistHighlights = getContentBlacklistHighlights(proposedEdit);
+    const blacklistSection = blacklistHighlights.length > 0
+      ? `=== BLACKLISTED PATTERNS DETECTED ===\n${blacklistHighlights.join("\n")}\n=== END VIOLATIONS ===\n\n`
+      : "";
+
     const result = await runAgent(
       { ...CLAUDE_MD_VALIDATE_AGENT, workingDir },
       {
         prompt: "Validate this CLAUDE.md content.",
-        context: `CURRENT FILE:\n${currentContent ?? "(new file)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n=== BLACKLISTED COMMANDS ===\n${getBlacklistDescription()}\n=== END BLACKLIST ===`,
+        context: `CURRENT FILE:\n${currentContent ?? "(new file)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n${blacklistSection}=== BLACKLISTED COMMANDS ===\n${getBlacklistDescription()}\n=== END BLACKLIST ===`,
       }
     );
 

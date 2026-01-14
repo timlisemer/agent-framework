@@ -92,6 +92,27 @@ export function getBlacklistDescription(): string {
 }
 
 /**
+ * Scan content for blacklisted commands.
+ * Returns highlighted violations for injection into agent prompts.
+ * Used by plan-validate and claude-md-validate.
+ */
+export function getContentBlacklistHighlights(content: string): string[] {
+  const highlights: string[] = [];
+  const lines = content.split("\n");
+
+  for (const line of lines) {
+    for (const { pattern, name, alternative } of BLACKLIST_PATTERNS) {
+      if (pattern.test(line)) {
+        highlights.push(`[VIOLATION: ${name}] "${line.trim()}" → ${alternative}`);
+        break; // One highlight per line
+      }
+    }
+  }
+
+  return highlights;
+}
+
+/**
  * Get blacklist highlights for a Bash command.
  * Returns array of violation messages for the LLM.
  */
