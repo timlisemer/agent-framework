@@ -6,7 +6,8 @@
  */
 
 import { trackAgentExecution, extractDecision } from "./telemetry-tracker.js";
-import { getExecutionMode } from "./execution-context.js";
+import { getExecutionMode, getTranscriptPath } from "./execution-context.js";
+import { updateStatusLineState } from "./statusline-state.js";
 import type { DecisionType } from "../telemetry/types.js";
 import {
   MODEL_TIERS,
@@ -111,6 +112,20 @@ export function logAgentDecision(log: AgentLog): void {
     generationId: log.generationId,
     provider: log.provider,
   });
+
+  // Update statusline state (fire-and-forget, non-blocking)
+  const transcriptPath = getTranscriptPath();
+  if (transcriptPath) {
+    updateStatusLineState(transcriptPath, {
+      agent: log.agent,
+      decision: log.decision,
+      toolName: log.toolName,
+      executionType: log.executionType,
+      latencyMs: log.latencyMs,
+    }).catch(() => {
+      // Ignore errors - statusline is best-effort
+    });
+  }
 }
 
 /**

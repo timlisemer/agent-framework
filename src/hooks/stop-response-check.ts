@@ -8,6 +8,7 @@ import {
   setRewindSession,
   detectRewind,
 } from "../utils/rewind-cache.js";
+import { setTranscriptPath } from "../utils/execution-context.js";
 
 /**
  * Stop Hook: Response Check
@@ -48,6 +49,7 @@ async function main() {
 
   // Set session and check for rewind
   setRewindSession(input.transcript_path);
+  setTranscriptPath(input.transcript_path);
   const rewound = await detectRewind(input.transcript_path);
 
   if (rewound) {

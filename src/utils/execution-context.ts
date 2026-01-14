@@ -1,14 +1,17 @@
 /**
- * Execution Context - Process-scoped mode tracking
+ * Execution Context - Process-scoped state tracking
  *
- * Tracks the current execution mode ("lazy" | "direct") within a single
- * Node.js process. Since each hook runs as a separate process, this
- * provides safe isolation without cross-process state.
+ * Tracks process-scoped state within a single Node.js process:
+ * - Execution mode ("lazy" | "direct")
+ * - Transcript path (for session-aware features like statusline)
+ *
+ * Since each hook runs as a separate process, this provides safe
+ * isolation without cross-process state.
  *
  * Usage:
  * - Set mode at decision points (lazy fast-path, tool-approve lazy path)
- * - Logger functions read mode automatically via getExecutionMode()
- * - Default is DIRECT - lazy must be explicitly set
+ * - Set transcript path at hook entry points
+ * - Logger functions read these automatically
  *
  * @module execution-context
  */
@@ -17,6 +20,9 @@ import { EXECUTION_MODES, type TelemetryMode } from "../types.js";
 
 // Default to DIRECT - safer default, lazy must be explicitly set
 let executionMode: TelemetryMode = EXECUTION_MODES.DIRECT;
+
+// Transcript path for session-aware features
+let currentTranscriptPath: string | undefined;
 
 /**
  * Set the execution mode for the current process.
@@ -41,4 +47,27 @@ export function setExecutionMode(mode: TelemetryMode): void {
  */
 export function getExecutionMode(): TelemetryMode {
   return executionMode;
+}
+
+/**
+ * Set the transcript path for the current process.
+ *
+ * Call this at hook entry points where transcript_path is available.
+ * Used by session-aware features like statusline state.
+ *
+ * @param path - The transcript path from hook input
+ */
+export function setTranscriptPath(path: string): void {
+  currentTranscriptPath = path;
+}
+
+/**
+ * Get the current transcript path.
+ *
+ * Called by logger to pass session context to statusline state.
+ *
+ * @returns The transcript path, or undefined if not set
+ */
+export function getTranscriptPath(): string | undefined {
+  return currentTranscriptPath;
 }

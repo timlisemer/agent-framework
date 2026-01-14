@@ -66,7 +66,7 @@ import {
   incrementToolCount,
   clearOneShots,
 } from "../utils/strict-mode-tracker.js";
-import { setExecutionMode } from "../utils/execution-context.js";
+import { setExecutionMode, setTranscriptPath } from "../utils/execution-context.js";
 import { EXECUTION_MODES } from "../types.js";
 import { logFastPathApproval, logFastPathContinue } from "../utils/logger.js";
 
@@ -230,6 +230,7 @@ async function main() {
   setValidationSession(input.transcript_path);
   setConfirmStateSession(input.transcript_path);
   setStrictModeSession(input.transcript_path);
+  setTranscriptPath(input.transcript_path);
 
   // ============================================================
   // STEP 1: Fast-path for FILE_TOOLS on trusted paths (LAZY VALIDATION)
