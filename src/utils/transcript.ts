@@ -773,3 +773,63 @@ export function formatTranscriptResult(result: TranscriptReadResult): string {
 
   return allMessages.map((m) => `${m.prefix}: ${m.content}`).join('\n\n');
 }
+
+/**
+ * Minimum transcript requirements for agent processing.
+ */
+export interface MinimumTranscriptRequirements {
+  /** Minimum user messages required (default: 0) */
+  user?: number;
+  /** Minimum assistant messages required (default: 0) */
+  assistant?: number;
+  /** Minimum tool result messages required (default: 0) */
+  toolResult?: number;
+  /**
+   * If true, require at least one of assistant OR toolResult.
+   * Useful for error-acknowledge which needs context but either type is sufficient.
+   */
+  assistantOrToolResult?: number;
+}
+
+/**
+ * Check if transcript meets minimum requirements for agent processing.
+ *
+ * Agents can skip LLM calls if transcript is empty or has insufficient context.
+ * This is a fast-path optimization to avoid wasting LLM calls when there's
+ * nothing meaningful to analyze.
+ *
+ * @param result - The transcript read result
+ * @param requirements - Minimum counts needed for each message type
+ * @returns true if transcript meets ALL requirements, false to skip LLM
+ *
+ * @example
+ * // Error-acknowledge needs user message AND some context (assistant or tool result)
+ * if (!hasMinimumTranscript(result, { user: 1, assistantOrToolResult: 1 })) {
+ *   return "OK"; // Skip LLM, nothing to check
+ * }
+ *
+ * @example
+ * // Style-drift only needs user messages to check for style requests
+ * if (!hasMinimumTranscript(result, { user: 1 })) {
+ *   return "OK"; // Skip LLM, no user context
+ * }
+ */
+export function hasMinimumTranscript(
+  result: TranscriptReadResult,
+  requirements: MinimumTranscriptRequirements
+): boolean {
+  const { user = 0, assistant = 0, toolResult = 0, assistantOrToolResult } = requirements;
+
+  // Check individual requirements
+  if (result.user.length < user) return false;
+  if (result.assistant.length < assistant) return false;
+  if (result.toolResult.length < toolResult) return false;
+
+  // Check combined assistant OR toolResult requirement
+  if (assistantOrToolResult !== undefined) {
+    const combined = result.assistant.length + result.toolResult.length;
+    if (combined < assistantOrToolResult) return false;
+  }
+
+  return true;
+}

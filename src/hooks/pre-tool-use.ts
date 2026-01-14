@@ -37,6 +37,7 @@ import {
   readTranscriptExact,
   formatTranscriptResult,
   hasErrorPatterns,
+  hasMinimumTranscript,
 } from "../utils/transcript.js";
 import {
   APPEAL_COUNTS,
@@ -534,8 +535,20 @@ async function main() {
   // TS Pre-check: Only check TOOL_RESULT lines for error patterns
   const errorPreCheck = hasErrorPatterns(errorCheckTranscript, { toolResultsOnly: true });
 
+  // Skip error-ack if transcript doesn't have minimum required context.
+  // Error-ack needs: 1 user message AND at least 1 assistant or tool result.
+  // Without this, there's no user directive to check acknowledgment against.
+  const hasErrorAckContext = hasMinimumTranscript(errorCheckResult, {
+    user: 1,
+    assistantOrToolResult: 1,
+  });
+
   // Skip error-ack if tool matches suggested alternative (conservative exact match)
-  if (errorPreCheck.needsCheck && !matchesSuggestedAlternative(input.tool_name, errorCheckTranscript)) {
+  if (
+    errorPreCheck.needsCheck &&
+    hasErrorAckContext &&
+    !matchesSuggestedAlternative(input.tool_name, errorCheckTranscript)
+  ) {
     // Run error-acknowledge LLM agent
     const ackResult = await checkErrorAcknowledgment(
       errorCheckTranscript,
@@ -761,6 +774,9 @@ async function main() {
             input.transcript_path,
             STYLE_DRIFT_COUNTS
           );
+
+          // Style-drift checks against CLAUDE.md preferences.
+          // If blocked, appealHelper will check if user explicitly requested the style change.
           const userMessages = formatTranscriptResult(transcriptResult);
 
           // Run style-drift LLM agent
@@ -773,7 +789,7 @@ async function main() {
           );
 
           if (!styleDriftResult.approved) {
-            // Call appeal helper
+            // Call appeal helper to check if user approved the style change
             const appeal = await appealHelper(
               input.tool_name,
               `Edit to ${filePath}`,
