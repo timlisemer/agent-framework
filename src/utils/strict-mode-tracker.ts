@@ -1,4 +1,4 @@
-import { CacheManager } from "./cache-manager.js";
+import { CacheManager, getTempFilePath } from "./cache-manager.js";
 
 const LARGE_EDIT_THRESHOLD = 20; // lines
 const SESSION_START_STRICT_COUNT = 3; // first N tools always strict
@@ -10,7 +10,7 @@ interface StrictModeData {
 }
 
 const cacheManager = new CacheManager<StrictModeData>({
-  filePath: "/tmp/claude-strict-mode.json",
+  filePath: getTempFilePath("strict-mode.json"),
   defaultData: () => ({ sessionToolCount: 0, lastDenied: false, lastError: false }),
 });
 

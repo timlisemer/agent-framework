@@ -1,4 +1,4 @@
-import { CacheManager } from "./cache-manager.js";
+import { CacheManager, getTempFilePath } from "./cache-manager.js";
 
 const PENDING_VALIDATION_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -20,7 +20,7 @@ interface PendingValidationData {
 }
 
 const cacheManager = new CacheManager<PendingValidationData>({
-  filePath: "/tmp/claude-pending-validation.json",
+  filePath: getTempFilePath("pending-validation.json"),
   defaultData: () => ({ entries: [] }),
   expiryMs: PENDING_VALIDATION_EXPIRY_MS,
   maxEntries: 1,

@@ -10,7 +10,7 @@
  * @module statusline-state
  */
 
-import { CacheManager } from "./cache-manager.js";
+import { CacheManager, getTempFilePath } from "./cache-manager.js";
 import type { DecisionType } from "../telemetry/types.js";
 import type { ExecutionType } from "../types.js";
 
@@ -53,7 +53,7 @@ interface StatusLineData {
 }
 
 const cacheManager = new CacheManager<StatusLineData>({
-  filePath: "/tmp/claude-statusline.json",
+  filePath: getTempFilePath("statusline.json"),
   defaultData: () => ({ entries: [] }),
   expiryMs: STATUSLINE_CONFIG.expiryMs,
   maxEntries: STATUSLINE_CONFIG.maxEntries,

@@ -20,7 +20,7 @@
  * @module confirm-state-cache
  */
 
-import { CacheManager } from "./cache-manager.js";
+import { CacheManager, getTempFilePath } from "./cache-manager.js";
 
 const CONFIRM_STATE_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -38,7 +38,7 @@ interface ConfirmStateData {
 }
 
 const cacheManager = new CacheManager<ConfirmStateData>({
-  filePath: "/tmp/claude-confirm-state.json",
+  filePath: getTempFilePath("confirm-state.json"),
   defaultData: () => ({ entries: [] }),
   expiryMs: CONFIRM_STATE_EXPIRY_MS,
   maxEntries: 1,

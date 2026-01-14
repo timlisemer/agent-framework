@@ -1,6 +1,6 @@
-import { CacheManager } from "./cache-manager.js";
+import { CacheManager, getTempFilePath } from "./cache-manager.js";
 
-const DENIAL_CACHE_FILE = "/tmp/claude-hook-denials.json";
+const DENIAL_CACHE_FILE = getTempFilePath("hook-denials.json");
 const DENIAL_EXPIRY_MS = 60 * 1000; // 1 minute
 const DENIAL_MAX_ENTRIES = 20;
 const MAX_SIMILAR_DENIALS = 3;

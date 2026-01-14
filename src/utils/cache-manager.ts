@@ -1,5 +1,27 @@
 import * as fs from "fs";
+import * as path from "path";
 import { hashString } from "./hash-utils.js";
+
+/**
+ * Base temp directory for all agent-framework cache files.
+ * Using a dedicated subdirectory keeps /tmp clean.
+ */
+const TEMP_BASE_DIR = "/tmp/agent-framework";
+
+/**
+ * Get the path for a cache file within the agent-framework temp directory.
+ * Creates the directory if it doesn't exist.
+ *
+ * @param filename - The cache filename (e.g., "confirm-state.json")
+ * @returns Full path to the cache file
+ */
+export function getTempFilePath(filename: string): string {
+  // Ensure directory exists (sync for simplicity at module load)
+  if (!fs.existsSync(TEMP_BASE_DIR)) {
+    fs.mkdirSync(TEMP_BASE_DIR, { recursive: true });
+  }
+  return path.join(TEMP_BASE_DIR, filename);
+}
 
 /**
  * Generic cache state wrapper with session and user message tracking.

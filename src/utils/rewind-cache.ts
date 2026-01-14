@@ -1,10 +1,10 @@
 import * as fs from "fs";
-import { CacheManager } from "./cache-manager.js";
+import { CacheManager, getTempFilePath } from "./cache-manager.js";
 import { hashString } from "./hash-utils.js";
 import { clearAckCache } from "./ack-cache.js";
 import { clearDenialCache } from "./denial-cache.js";
 
-const REWIND_CACHE_FILE = "/tmp/claude-rewind-cache.json";
+const REWIND_CACHE_FILE = getTempFilePath("rewind-cache.json");
 const REWIND_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_CACHED_MESSAGES = 20;
 

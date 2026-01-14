@@ -1,7 +1,7 @@
-import { CacheManager } from "./cache-manager.js";
+import { CacheManager, getTempFilePath } from "./cache-manager.js";
 import { hashString } from "./hash-utils.js";
 
-const ACK_CACHE_FILE = "/tmp/claude-error-acks.json";
+const ACK_CACHE_FILE = getTempFilePath("error-acks.json");
 const ACK_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 const ACK_MAX_ENTRIES = 20;
 
