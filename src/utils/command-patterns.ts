@@ -36,12 +36,16 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // Git write operations
   { pattern: /\bgit\s+(commit|push|add|merge|rebase|reset)\b/, name: 'git write op', alternative: 'Use MCP tools' },
 
-  // Build/check commands
-  { pattern: /\bmake\s+(check|build)\b/, name: 'make check/build', alternative: 'Use mcp__agent-framework__check' },
-  { pattern: /\bnpm\s+run\s+(build|check|typecheck)\b/, name: 'npm build/check', alternative: 'Use mcp__agent-framework__check' },
-  { pattern: /\bbun\s+run\s+(build|check|typecheck)\b/, name: 'bun build/check', alternative: 'Use mcp__agent-framework__check' },
-  { pattern: /\bcargo\s+(build|check)\b/, name: 'cargo build/check', alternative: 'Use mcp__agent-framework__check' },
-  { pattern: /\b(tsc|npx\s+tsc)\b/, name: 'tsc', alternative: 'Use mcp__agent-framework__check' },
+  // Build/check commands - LLMs should NOT build, only verify with check tool
+  { pattern: /\bmake\s+check\b/, name: "make check", alternative: "Use mcp__agent-framework__check" },
+  { pattern: /\bmake\s+build\b/, name: "make build", alternative: "LLMs are not supposed to build projects. Use mcp__agent-framework__check to verify code compiles" },
+  { pattern: /\bnpm\s+run\s+build\b/, name: "npm build", alternative: "LLMs are not supposed to build projects. Use mcp__agent-framework__check to verify code compiles" },
+  { pattern: /\bnpm\s+run\s+(check|typecheck)\b/, name: "npm check/typecheck", alternative: "Use mcp__agent-framework__check" },
+  { pattern: /\bbun\s+run\s+build\b/, name: "bun build", alternative: "LLMs are not supposed to build projects. Use mcp__agent-framework__check to verify code compiles" },
+  { pattern: /\bbun\s+run\s+(check|typecheck)\b/, name: "bun check/typecheck", alternative: "Use mcp__agent-framework__check" },
+  { pattern: /\bcargo\s+build\b/, name: "cargo build", alternative: "LLMs are not supposed to build projects. Use mcp__agent-framework__check to verify code compiles" },
+  { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: "Use mcp__agent-framework__check" },
+  { pattern: /\b(tsc|npx\s+tsc)\b/, name: "tsc", alternative: "LLMs are not supposed to build projects. Use mcp__agent-framework__check to verify code compiles" },
 
   // Test commands - tests may not exist, use check for build verification
   { pattern: /\btest\b/, name: 'test command', alternative: 'Use mcp__agent-framework__check for build verification' },
