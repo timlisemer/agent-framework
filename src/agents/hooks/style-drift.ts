@@ -38,6 +38,7 @@ import { STYLE_DRIFT_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { detectEmojiAddition } from "../../utils/content-patterns.js";
 
 /**
  * Input shape for Edit tool
@@ -94,24 +95,6 @@ function extractStylePreferences(claudeMdContent: string): string {
   }
 
   return relevantLines.join("\n");
-}
-
-/**
- * Common emoji ranges to detect additions.
- * Covers most used emojis in code/docs context.
- */
-const EMOJI_REGEX =
-  /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{203C}\u{2049}]|[\u{25AA}\u{25AB}\u{25B6}\u{25C0}\u{25FB}-\u{25FE}]|[\u{00A9}\u{00AE}]|[\u{2122}\u{2139}]|[\u{3030}\u{303D}]|[\u{3297}\u{3299}]/gu;
-
-/**
- * Detect if new_string adds emojis not present in old_string.
- */
-function detectEmojiAddition(oldStr: string, newStr: string): string[] {
-  const oldEmojis = new Set(oldStr.match(EMOJI_REGEX) || []);
-  const newEmojis = newStr.match(EMOJI_REGEX) || [];
-
-  const addedEmojis = newEmojis.filter((e) => !oldEmojis.has(e));
-  return [...new Set(addedEmojis)]; // dedupe
 }
 
 /**

@@ -35,6 +35,7 @@ import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js"
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { getBlacklistDescription, getContentBlacklistHighlights } from "../../utils/command-patterns.js";
+import { getRuleViolationHighlights } from "../../utils/content-patterns.js";
 
 /**
  * Validate that a plan aligns with user intent.
@@ -90,10 +91,12 @@ export async function checkPlanIntent(
   }
 
   try {
-    // Check for blacklisted commands in proposed edit
+    // Check for violations in proposed edit
     const blacklistHighlights = getContentBlacklistHighlights(proposedEdit);
-    const blacklistSection = blacklistHighlights.length > 0
-      ? `=== BLACKLISTED PATTERNS DETECTED ===\n${blacklistHighlights.join("\n")}\n=== END VIOLATIONS ===\n\n`
+    const ruleViolations = getRuleViolationHighlights(proposedEdit);
+    const allViolations = [...blacklistHighlights, ...ruleViolations];
+    const violationSection = allViolations.length > 0
+      ? `=== VIOLATIONS DETECTED ===\n${allViolations.join("\n")}\n=== END VIOLATIONS ===\n\n`
       : "";
 
     // Run plan validation via unified runner
@@ -101,7 +104,7 @@ export async function checkPlanIntent(
       { ...PLAN_VALIDATE_AGENT },
       {
         prompt: "Check if this plan aligns with the user request.",
-        context: `CONVERSATION:\n${conversationContext}\n\nCURRENT PLAN:\n${currentPlan ?? "(new plan)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n${blacklistSection}=== BLACKLISTED COMMANDS ===\n${getBlacklistDescription()}\n=== END BLACKLIST ===`,
+        context: `CONVERSATION:\n${conversationContext}\n\nCURRENT PLAN:\n${currentPlan ?? "(new plan)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n${violationSection}=== BLACKLISTED COMMANDS ===\n${getBlacklistDescription()}\n=== END BLACKLIST ===`,
       }
     );
 
