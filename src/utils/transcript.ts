@@ -132,12 +132,6 @@ export interface TranscriptReadOptions {
    */
   includeSlashCommandContext?: boolean;
 
-  /**
-   * Detect plan approval and inject synthetic user message.
-   * If true, scans tool results for ExitPlanMode approval and adds
-   * a synthetic user message indicating the plan was approved.
-   */
-  detectPlanApproval?: boolean;
 }
 
 /**
@@ -182,10 +176,23 @@ interface ContentBlock {
   id?: string; // Tool use ID for tool_use blocks
 }
 
+/**
+ * Todo item structure from TodoWrite tool results.
+ */
+export interface TodoItem {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  activeForm: string;
+}
+
 interface TranscriptEntry {
   message?: {
     role: string;
     content: string | ContentBlock[];
+  };
+  toolUseResult?: {
+    oldTodos?: TodoItem[];
+    newTodos?: TodoItem[];
   };
 }
 
@@ -418,6 +425,33 @@ function extractToolResultContent(block: ContentBlock): string {
 }
 
 /**
+ * Format todo items for synthetic transcript entry.
+ * Groups by status and formats as readable list.
+ */
+function formatTodoState(todos: TodoItem[]): string {
+  const inProgress = todos.filter((t) => t.status === "in_progress");
+  const pending = todos.filter((t) => t.status === "pending");
+  const completed = todos.filter((t) => t.status === "completed");
+
+  const lines: string[] = [];
+
+  if (inProgress.length > 0) {
+    lines.push("In Progress:");
+    inProgress.forEach((t) => lines.push(`  - ${t.content}`));
+  }
+  if (pending.length > 0) {
+    lines.push("Pending:");
+    pending.forEach((t) => lines.push(`  - ${t.content}`));
+  }
+  if (completed.length > 0) {
+    lines.push("Completed:");
+    completed.forEach((t) => lines.push(`  - ${t.content}`));
+  }
+
+  return lines.join("\n");
+}
+
+/**
  * Normalize a count specification to a consistent format.
  *
  * Handles both simple numbers (backward compatible) and CountSpec objects.
@@ -466,7 +500,6 @@ export async function readTranscriptExact(
     excludeSlashCommandPrompts = true,
     includeFirstUserMessage = false,
     includeSlashCommandContext = false,
-    detectPlanApproval = false,
   } = options;
 
   // Normalize count specs to handle both simple numbers and CountSpec objects.
@@ -570,6 +603,18 @@ export async function readTranscriptExact(
 
     try {
       const entry: TranscriptEntry = JSON.parse(allLines[i]);
+
+      // Synthesize tool_result for todo changes
+      // This makes todo state visible to all agents as part of the transcript
+      if (entry.toolUseResult?.newTodos) {
+        const todoSummary = formatTodoState(entry.toolUseResult.newTodos);
+        collected.toolResult.push({
+          role: "tool_result",
+          content: `[TodoWrite] Current tasks:\n${todoSummary}`,
+          index: i,
+        });
+      }
+
       if (!entry.message) continue;
 
       const { role, content: msgContent } = entry.message;
@@ -658,20 +703,19 @@ export async function readTranscriptExact(
     }
   }
 
-  // Detect plan approval and inject synthetic user message
-  if (detectPlanApproval) {
-    const hasPlanApproval = collected.toolResult.some(
-      (r) =>
-        r.content.includes("ExitPlanMode") &&
-        (r.content.includes("approved") || r.content.includes("allow"))
-    );
-    if (hasPlanApproval) {
-      collected.user.push({
-        role: "user",
-        content: "I approved the plan. Proceed with implementation.",
-        index: Infinity, // Sort to end
-      });
-    }
+  // Always synthesize plan approval as user message
+  // This makes plan approval visible to all agents as part of the transcript
+  const hasPlanApproval = collected.toolResult.some(
+    (r) =>
+      r.content.includes("ExitPlanMode") &&
+      (r.content.includes("approved") || r.content.includes("allow"))
+  );
+  if (hasPlanApproval) {
+    collected.user.push({
+      role: "user",
+      content: "I approved the plan. Proceed with implementation.",
+      index: Infinity, // Sort to end
+    });
   }
 
   collected.totalCount =

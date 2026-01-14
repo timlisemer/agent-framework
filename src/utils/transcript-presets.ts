@@ -43,13 +43,12 @@ export const ERROR_CHECK_COUNTS: TranscriptReadOptions = {
  *
  * Includes both user and assistant messages for context.
  * More messages to understand conversation flow.
- * Minimal tool results to detect plan approval (synthetic user message injected).
  * Includes first user message to capture initial request context.
+ * Plan approval and todo state are always synthesized into transcript.
  */
 export const APPEAL_COUNTS: TranscriptReadOptions = {
   counts: { user: ALL, assistant: 10, toolResult: 3 },
   includeFirstUserMessage: true,
-  detectPlanApproval: true,
 };
 
 /**
@@ -123,7 +122,6 @@ export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
 export const INTENT_ALIGNMENT_COUNTS: TranscriptReadOptions = {
   counts: { user: ALL, assistant: 5, toolResult: 5 },
   includeFirstUserMessage: true,
-  detectPlanApproval: true,
   toolResultOptions: {
     trim: true,
     maxLines: 100,
