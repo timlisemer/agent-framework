@@ -399,8 +399,8 @@ async function runDirectAgent(
       // Calculate total if not provided
       totalTokens: (rawUsage.total_tokens as number | undefined) ??
         (promptTokens && completionTokens ? promptTokens + completionTokens : undefined),
-      cachedTokens,
-      reasoningTokens,
+      cachedTokens: cachedTokens || undefined,
+      reasoningTokens: reasoningTokens || undefined,
       cost,
     } : undefined;
 
