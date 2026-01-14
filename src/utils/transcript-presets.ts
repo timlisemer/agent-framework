@@ -11,7 +11,8 @@
  * the exact count of each message type is collected (or transcript exhausted).
  */
 
-import type { TranscriptReadOptions } from './transcript.js';
+import type { TranscriptReadOptions } from "./transcript.js";
+import { validateTranscriptConfig } from "./transcript.js";
 
 /** Use Infinity to collect all messages of a type (scanner will exhaust transcript) */
 const ALL = Infinity;
@@ -135,9 +136,18 @@ export const INTENT_ALIGNMENT_COUNTS: TranscriptReadOptions = {
  *
  * Gets last user message and last assistant response to check for
  * plain text questions, unanswered user questions, and tool usage violations.
+ *
+ * User message has maxStale to prevent false positives on old questions
+ * that were already addressed through planning/implementation cycles.
+ * toolResult is included so the hook can see if work was done between
+ * the user message and now.
  */
 export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
-  counts: { user: 3, assistant: 3 },
+  counts: {
+    user: { count: 3, maxStale: 5 },
+    assistant: 3,
+    toolResult: 2,
+  },
 };
 
 /**
@@ -166,3 +176,12 @@ export const QUESTION_VALIDATE_COUNTS: TranscriptReadOptions = {
     excludeToolNames: ["Task", "Agent", "TaskOutput"],
   },
 };
+
+// =============================================================================
+// COMPILE-TIME VALIDATION
+// =============================================================================
+// Validate all presets with maxStale at module load time.
+// This ensures misconfigured presets are caught early, not at runtime.
+
+validateTranscriptConfig(ERROR_CHECK_COUNTS, "ERROR_CHECK_COUNTS");
+validateTranscriptConfig(FIRST_RESPONSE_STOP_COUNTS, "FIRST_RESPONSE_STOP_COUNTS");

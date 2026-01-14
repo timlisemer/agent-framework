@@ -470,6 +470,70 @@ function normalizeCount(
 }
 
 /**
+ * Validate a transcript configuration for logical consistency.
+ *
+ * The key validation rule: For any message type with `maxStale` set,
+ * the sum of OTHER message type counts must be >= maxStale.
+ *
+ * This ensures that if we exclude stale messages of type X, we have enough
+ * context from other message types to determine if they were addressed.
+ *
+ * Example:
+ * - `user: { count: 3, maxStale: 5 }` requires `assistant.count + toolResult.count >= 5`
+ * - If user messages beyond 5 lines are excluded, we need 5 lines of context
+ *
+ * @param config - The transcript read options to validate
+ * @param configName - Name of the config (for error messages)
+ * @throws Error if validation fails
+ */
+export function validateTranscriptConfig(
+  config: TranscriptReadOptions,
+  configName: string
+): void {
+  const userSpec = normalizeCount(config.counts.user);
+  const assistantSpec = normalizeCount(config.counts.assistant);
+  const toolResultSpec = normalizeCount(config.counts.toolResult);
+
+  // Validate user maxStale: need enough assistant + toolResult context
+  if (userSpec.maxStale !== undefined) {
+    const contextCount = assistantSpec.count + toolResultSpec.count;
+    if (contextCount < userSpec.maxStale) {
+      throw new Error(
+        `TranscriptConfig "${configName}" invalid:\n` +
+        `  user.maxStale (${userSpec.maxStale}) > assistant.count + toolResult.count (${contextCount})\n` +
+        `  Stale user messages will be excluded but there's not enough context\n` +
+        `  to determine if they were addressed. Increase assistant or toolResult counts.`
+      );
+    }
+  }
+
+  // Validate assistant maxStale: need enough user + toolResult context
+  if (assistantSpec.maxStale !== undefined) {
+    const contextCount = userSpec.count + toolResultSpec.count;
+    if (typeof userSpec.count === "number" && contextCount < assistantSpec.maxStale) {
+      throw new Error(
+        `TranscriptConfig "${configName}" invalid:\n` +
+        `  assistant.maxStale (${assistantSpec.maxStale}) > user.count + toolResult.count (${contextCount})\n` +
+        `  Stale assistant messages will be excluded but there's not enough context.`
+      );
+    }
+  }
+
+  // Validate toolResult maxStale: need enough user + assistant context
+  if (toolResultSpec.maxStale !== undefined) {
+    const userCount = typeof userSpec.count === "number" ? userSpec.count : 0;
+    const contextCount = userCount + assistantSpec.count;
+    if (contextCount < toolResultSpec.maxStale) {
+      throw new Error(
+        `TranscriptConfig "${configName}" invalid:\n` +
+        `  toolResult.maxStale (${toolResultSpec.maxStale}) > user.count + assistant.count (${contextCount})\n` +
+        `  Stale tool results will be excluded but there's not enough context.`
+      );
+    }
+  }
+}
+
+/**
  * Read transcript with guaranteed message counts per type.
  *
  * Scans backwards through the transcript file until the requested

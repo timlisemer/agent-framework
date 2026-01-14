@@ -64,3 +64,71 @@ export function detectEmojiAddition(oldStr: string, newStr: string): string[] {
   const addedEmojis = newEmojis.filter((e) => !oldEmojis.has(e));
   return [...new Set(addedEmojis)];
 }
+
+/**
+ * Question patterns for detecting AI questions directed at user.
+ * These should use AskUserQuestion tool instead of plain text.
+ *
+ * Pattern matching is case-insensitive and checks for common question forms
+ * that clearly solicit user input.
+ */
+export const USER_DIRECTED_QUESTION_PATTERNS: ContentPattern[] = [
+  { pattern: /which\b[^?]*\bdo you prefer\?/i, name: "preference question", message: "Use AskUserQuestion tool" },
+  { pattern: /which\b[^?]*\bwould you prefer\?/i, name: "preference question", message: "Use AskUserQuestion tool" },
+  { pattern: /which\b[^?]*\bapproach\b[^?]*\?/i, name: "approach question", message: "Use AskUserQuestion tool" },
+  { pattern: /which\b[^?]*\boption\b[^?]*\?/i, name: "option question", message: "Use AskUserQuestion tool" },
+  { pattern: /should I\b[^?]*\?/i, name: "should-I question", message: "Use AskUserQuestion tool" },
+  { pattern: /do you want\b[^?]*\?/i, name: "want question", message: "Use AskUserQuestion tool" },
+  { pattern: /would you like\b[^?]*\?/i, name: "like question", message: "Use AskUserQuestion tool" },
+  { pattern: /shall I\b[^?]*\?/i, name: "shall-I question", message: "Use AskUserQuestion tool" },
+  { pattern: /can I\b[^?]*\?/i, name: "can-I question", message: "Use AskUserQuestion tool" },
+  { pattern: /do you prefer\b[^?]*\?/i, name: "preference question", message: "Use AskUserQuestion tool" },
+];
+
+/**
+ * Patterns that indicate self-directed or rhetorical questions.
+ * These should NOT be flagged as user-directed questions.
+ */
+const SELF_DIRECTED_PATTERNS = [
+  /^I wonder/i,
+  /^wondering/i,
+  /^why does this/i,
+  /^why is this/i,
+  /^how does this/i,
+  /^let me see/i,
+];
+
+/**
+ * Detect AI questions directed at user that should use AskUserQuestion tool.
+ * Returns array of detected question highlights for feedback.
+ *
+ * Only detects questions that:
+ * 1. End with ? (question mark)
+ * 2. Match user-directed patterns (should I, do you want, which approach, etc.)
+ * 3. Do NOT match self-directed/rhetorical patterns
+ */
+export function detectUserDirectedQuestions(text: string): string[] {
+  const highlights: string[] = [];
+
+  // Must end with ? to be considered a question
+  if (!text.trim().endsWith("?")) {
+    return highlights;
+  }
+
+  // Check if it's self-directed (skip these)
+  for (const pattern of SELF_DIRECTED_PATTERNS) {
+    if (pattern.test(text.trim())) {
+      return highlights;
+    }
+  }
+
+  // Check for user-directed question patterns
+  for (const { pattern, name, message } of USER_DIRECTED_QUESTION_PATTERNS) {
+    if (pattern.test(text)) {
+      highlights.push(`[QUESTION: ${name}] "${text.trim().slice(0, 100)}..." → ${message}`);
+      break; // Only report first match
+    }
+  }
+
+  return highlights;
+}
