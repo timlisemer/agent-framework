@@ -360,6 +360,15 @@ Unified agent execution for both direct API and SDK modes.
 - `runAgent()` - main entry point, dispatches to appropriate mode
 - `runDirectAgent()` - single API call execution
 - `runSdkAgent()` - multi-turn SDK execution with tools
+- Format validation via `formatValidation` config field
+
+#### Format Validation
+
+Agents can define `formatValidation` in their config to ensure LLM output matches expected format:
+- **Direct mode**: Retries with format reminder, falls back if still invalid
+- **SDK mode**: Returns fallback immediately (cannot retry multi-turn)
+
+Validation rules are defined alongside system prompts in `agent-configs.ts`.
 
 ### `agent-configs.ts`
 Centralized agent configurations with documentation:

@@ -196,52 +196,7 @@ export async function checkStyleDrift(
   // Detect style changes with preference flags (default: double quotes)
   const styleChanges = detectStyleChanges(old_string, new_string, "double");
 
-  // Fast-path A.1: Quote changes AWAY from preference → DENY
-  const quoteViolation = styleChanges.find(
-    (c) => c.type === "quote" && c.violatesPreference
-  );
-  if (quoteViolation) {
-    const reason = `quote change (${quoteViolation.direction}) violates project preference - use double quotes`;
-    logDeny(
-      {
-        output: reason,
-        latencyMs: 0,
-        success: true,
-        errorCount: 0,
-        modelTier: STYLE_DRIFT_AGENT.tier,
-        modelName: getModelId(STYLE_DRIFT_AGENT.tier),
-      },
-      "style-drift",
-      hookName,
-      toolName,
-      workingDir,
-      EXECUTION_TYPES.TYPESCRIPT,
-      reason
-    );
-    return { approved: false, reason };
-  }
-
-  // Fast-path A.2: Quote changes TOWARD preference (cleanup) → APPROVE
-  const quoteMatch = styleChanges.find(
-    (c) => c.type === "quote" && c.matchesPreference
-  );
-  if (quoteMatch) {
-    // Only fast-approve if this is the ONLY change (pure cleanup)
-    const otherChanges = styleChanges.filter((c) => c.type !== "quote");
-    if (otherChanges.length === 0) {
-      logFastPathApproval(
-        "style-drift",
-        hookName,
-        toolName,
-        workingDir,
-        "Quote cleanup toward preference"
-      );
-      return { approved: true };
-    }
-    // Otherwise, there are other style changes - continue to LLM check
-  }
-
-  // Fast-path C: No style changes detected → APPROVE
+  // Fast-path: No style changes detected → APPROVE
   if (styleChanges.length === 0) {
     logFastPathApproval(
       "style-drift",

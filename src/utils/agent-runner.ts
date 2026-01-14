@@ -84,6 +84,7 @@ import {
 } from "../types.js";
 import { extractTextFromResponse } from "./response-parser.js";
 import { logAgentDecision, extractDecision, logAgentStarted } from "./logger.js";
+import { retryUntilValid } from "./retry.js";
 
 /**
  * Read-only tools available to SDK mode agents.
@@ -192,6 +193,31 @@ export interface AgentConfig {
    * @example extraTools: ['Task'] // Enable subagent spawning
    */
   extraTools?: string[];
+
+  /**
+   * Output format validation.
+   *
+   * If provided, the runner validates output and handles failures:
+   * - Direct mode: Uses retryUntilValid() to fix malformed output
+   * - SDK mode: Returns fallbackOutput if validation fails (can't retry multi-turn)
+   *
+   * @example
+   * ```typescript
+   * formatValidation: {
+   *   validator: /## Verdict\s*\n(CONFIRMED|DECLINED)/i,
+   *   formatReminder: "Reply with ## Verdict followed by CONFIRMED or DECLINED",
+   *   fallbackOutput: "## Verdict\nDECLINED: Malformed output\n\n## Raw\n$RAW",
+   * }
+   * ```
+   */
+  formatValidation?: {
+    /** Regex to validate output format */
+    validator: RegExp;
+    /** Message for retry (direct mode only) */
+    formatReminder: string;
+    /** Fallback output template when validation fails. Use $RAW for raw output snippet. */
+    fallbackOutput: string;
+  };
 }
 
 /**
@@ -313,6 +339,37 @@ export async function runAgent(
     if (result.text.startsWith("[DIRECT ERROR]") || result.text.startsWith("[SDK ERROR]")) {
       success = false;
       errorCount = 1;
+    }
+
+    // Format validation (if configured)
+    if (config.formatValidation && success) {
+      const { validator, formatReminder, fallbackOutput } = config.formatValidation;
+
+      if (!validator.test(result.text)) {
+        if (config.mode === "direct") {
+          // Direct mode: retry to fix format
+          const client = getAnthropicClient();
+          result.text = await retryUntilValid(
+            client,
+            getModelId(config.tier),
+            result.text,
+            input.prompt.slice(0, 100),
+            { formatValidator: (t) => validator.test(t), formatReminder }
+          );
+
+          // Check if retry succeeded
+          if (!validator.test(result.text)) {
+            result.text = fallbackOutput.replace("$RAW", result.text.slice(0, 500));
+            success = false;
+            errorCount++;
+          }
+        } else {
+          // SDK mode: can't retry multi-turn, use fallback
+          result.text = fallbackOutput.replace("$RAW", result.text.slice(0, 500));
+          success = false;
+          errorCount++;
+        }
+      }
     }
   } catch (error) {
     result = { text: error instanceof Error ? error.message : String(error) };

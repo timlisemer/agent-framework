@@ -115,6 +115,20 @@ REPORTING RULES:
 - Do NOT provide policy guidance
 - Just report what the tools said with enough context to act on it
 - Status is FAIL if Errors > 0, PASS otherwise (warnings alone do not cause FAIL)`,
+  formatValidation: {
+    validator: /## Results[\s\S]*Status:\s*(PASS|FAIL)/i,
+    formatReminder: "Reply with ## Results containing Status: PASS or FAIL",
+    fallbackOutput: `## Results
+- Errors: UNKNOWN
+- Warnings: UNKNOWN
+- Status: FAIL
+
+## Errors
+Check agent returned malformed output.
+
+## Raw Output
+$RAW`,
+  },
 };
 
 /**
@@ -233,6 +247,22 @@ RULES:
 - Small, obvious changes bias toward CONFIRMED
 
 This is a gate, not a review.`,
+  formatValidation: {
+    validator: /## Verdict\s*\n(CONFIRMED|DECLINED)/i,
+    formatReminder: "Reply with ## Verdict followed by CONFIRMED or DECLINED",
+    fallbackOutput: `## Results
+- Files: UNKNOWN
+- Code Quality: UNKNOWN
+- Security: UNKNOWN
+- Documentation: UNKNOWN
+- Tests: UNKNOWN
+
+## Verdict
+DECLINED: Agent returned malformed output
+
+## Raw Output
+$RAW`,
+  },
 };
 
 /**
@@ -1315,4 +1345,18 @@ Example ALIGNED verdicts:
 Example DRIFTED verdicts:
 - "User asked to fix login bug but AI refactored database schema instead"
 - "Plan added UI redesign that user never requested"`,
+  formatValidation: {
+    validator: /## Verdict\s*\n(ALIGNED|DRIFTED)/i,
+    formatReminder: "Reply with ## Verdict followed by ALIGNED or DRIFTED",
+    fallbackOutput: `## Analysis
+- Request: Unable to parse
+- Plan: Unable to parse
+- Changes: Unable to parse
+
+## Verdict
+DRIFTED: Agent returned malformed output
+
+## Raw Output
+$RAW`,
+  },
 };
