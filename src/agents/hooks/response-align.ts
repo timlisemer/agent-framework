@@ -271,7 +271,7 @@ async function classifyStopResponse(
 
   // Add question hint section if regex detected potential questions
   const questionHintSection = questionHint && questionHint.length > 0
-    ? `\n=== QUESTION PATTERN DETECTED (REGEX) ===\nThe following patterns were detected by regex analysis:\n${questionHint.join("\n")}\n\nThis is a STRONG HINT that the response contains a user-directed question.\nPlease confirm if this should be classified as QUESTION.\n=== END HINT ===\n`
+    ? `\n=== POTENTIAL QUESTION PATTERNS (REGEX) ===\nThe following patterns were detected by regex analysis:\n${questionHint.join("\n")}\n\nThese MAY indicate questions. Verify semantically - question words in relative clauses (e.g., "handle what is being said", "debug what i am telling you") are NOT questions.\n=== END HINT ===\n`
     : "";
 
   const context = `USER MESSAGE:
@@ -309,17 +309,32 @@ NOT PLAN_APPROVAL (these are QUESTION):
 - "The commit failed. Should I update the README and try again?" (error recovery)
 - "Want me to push now?" (next action question)
 
-QUESTION - Use when:
-- AI asks about next action to take
-- AI offers simple options or choices
-- AI asks for clarification
-- AI asks follow-up after a failure/error/block
-- AI uses "Would you like me to" with simple options
+QUESTION - Use ONLY when the AI asks something that REQUIRES a decision from the user:
+- AI presents clear options/choices (A or B, option 1 vs 2)
+- AI asks for clarification needed to proceed
+- AI asks yes/no about a SPECIFIC action ("Should I add error handling for this edge case?")
+- AI offers alternatives after failure ("Should I retry with X or try Y instead?")
 
-Examples: "Should I commit?", "Want me to fix this?", "Would you like me to retry?"
+Examples that ARE QUESTION:
+- "Should I use TypeScript or JavaScript?" (clear A/B choice)
+- "Do you want me to: 1. Fix the bug 2. Add tests first?" (options)
+- "The build failed. Should I fix the linting errors or skip them?" (decision needed)
+- "Which approach do you prefer?" (requires user input)
+
+NOT QUESTION (use OK instead):
+- Open-ended "what's next": "Done! Do you have another topic?" "Anything else?" "What would you like to work on next?"
+- Rhetorical: "Why would this fail?" (thinking aloud)
+- Confirmation of completion: "Task complete. Need anything else?"
+- Self-directed: "Let me check if this works..."
+- Relative clauses: "handle what is being said", "debug what i am telling you"
+- Embedded clauses: "the reason why it failed"
+
+KEY TEST: Does the user need to make a SPECIFIC decision to proceed? If the AI is just asking "what's next" after completing work, that's OK - the user can simply give a new task.
 
 OK - Use when:
-- Not actually a question (rhetorical, self-directed)
+- Task completion with open-ended follow-up ("Done. Anything else?")
+- Rhetorical or self-directed questions
+- Relative clauses (question words used as pronouns)
 - AI properly addressed a previous stop hook error
 
 Reply with EXACTLY one of: IGNORED_ERROR, PLAN_APPROVAL, QUESTION, or OK`;
@@ -453,6 +468,60 @@ function hasPlainTextQuestion(assistantText: string): {
 }
 
 /**
+ * Verify if regex-extracted text is actually a question using LLM.
+ * This prevents false positives from relative clauses like "handle what is being said".
+ */
+async function verifyIsActualQuestion(
+  extractedText: string,
+  fullUserMessage: string,
+  workingDir: string
+): Promise<{ isQuestion: boolean; latencyMs: number }> {
+  const startTime = Date.now();
+
+  const systemPrompt = `You determine if extracted text is an actual question the user is asking.
+
+ACTUAL QUESTIONS (user wants an answer):
+- "What should I do next?" - direct question
+- "How does this work?" - seeking explanation
+- "Can you help with X?" - requesting assistance
+
+NOT QUESTIONS (false positives):
+- Relative clauses: "handle what is being said" - the "what" is a relative pronoun, not a question
+- Embedded clauses: "debug what i am telling you" - subordinate clause, not asking anything
+- Noun phrases: "the reason why it failed" - descriptive, not interrogative
+- Mid-sentence question words: "I do not want you to handle what is being said" - statement with embedded clause
+
+KEY TEST: Would the user expect a direct answer to this specific text? If the question word (what/why/how/etc) is embedded mid-sentence or follows a verb like "handle/debug/explain/understand", it's likely a relative clause, NOT a question.
+
+Reply with EXACTLY: QUESTION or NOT_QUESTION`;
+
+  const context = `FULL USER MESSAGE:
+${fullUserMessage}
+
+EXTRACTED TEXT (potential question):
+${extractedText}
+
+Is the extracted text an actual question the user wants answered?`;
+
+  const response = await runAgent(
+    {
+      name: "verify-user-question",
+      tier: MODEL_TIERS.HAIKU,
+      mode: "direct",
+      maxTokens: 20,
+      systemPrompt,
+      workingDir,
+    },
+    { prompt: "Is this an actual question?", context }
+  );
+
+  const trimmed = response.output.trim().toUpperCase();
+  const isQuestion = trimmed.includes("QUESTION") && !trimmed.includes("NOT_QUESTION");
+
+  return { isQuestion, latencyMs: Date.now() - startTime };
+}
+
+/**
  * Check if the AI's stop (text-only response) is appropriate.
  *
  * This catches scenarios where the AI:
@@ -570,11 +639,17 @@ export async function checkStopResponseAlignment(
     if (strippedAssistant.length < 50) {
       // Check if it's just an acknowledgment without substance
       if (/^(?:I'll|Let me|Sure|OK|Okay|Got it|Understood)/.test(assistantText)) {
-        return {
-          approved: false,
-          reason: "User question not answered",
-          systemMessage: `[AUTOGENERATED STOP HOOK FEEDBACK]\nYou didn't answer the user's question: "${userQuestion}"\nPlease respond to what they asked.`,
-        };
+        // Verify with LLM that the extracted text is actually a question
+        // This prevents false positives from relative clauses like "handle what is being said"
+        const verification = await verifyIsActualQuestion(userQuestion, userText, workingDir);
+
+        if (verification.isQuestion) {
+          return {
+            approved: false,
+            reason: "User question not answered",
+            systemMessage: `[AUTOGENERATED STOP HOOK FEEDBACK]\nYou didn't answer the user's question: "${userQuestion}"\nPlease respond to what they asked.`,
+          };
+        }
       }
     }
   }

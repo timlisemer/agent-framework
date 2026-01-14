@@ -598,8 +598,13 @@ Claude UNDERSTOOD the issue if ANY of these are true:
 - User explicitly overrode/dismissed the error ("ignore the hook", "override", "proceed anyway", "continue")
 - User gave an action directive ("undo", "revert", "put it back", "do X") and current tool call performs that action
   - Example: User says "undo that" → AI does Edit to revert → this is COMPLIANCE, not ignoring
+- Claude asked the user questions specifically about the issue (e.g., asking which approach when error was about multiple approaches)
+- User answered questions that directly relate to resolving the error
+  - Example: Error was "Solution Branching with Option A/B", Claude asked "Which approach?", user chose → RESOLVED
+  - Counter-example: Error was "wrong file path", Claude asked unrelated style question → NOT resolved
 
 Vague phrases like "let me try", "let me update" WITHOUT referencing the error do NOT count as acknowledgment.
+However, asking the user questions about HOW TO RESOLVE the specific issue DOES count as engagement (the AI acknowledged by seeking guidance on the problem).
 
 Claude IGNORED the issue if ALL of these are true:
 - No acknowledgment text AND no behavioral correction
@@ -613,6 +618,7 @@ Claude IGNORED the issue if ALL of these are true:
 - Claude already corrected its behavior after the error
 - This tool call directly addresses/fixes the issue
 - Tool call is Read/Grep to investigate further
+- User answered Claude's questions AND the question topic relates to the error (collaborative resolution)
 
 === RETURN "BLOCK" WHEN ===
 

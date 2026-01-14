@@ -456,7 +456,6 @@ async function runSdkAgent(
     throw new Error(`SDK mode requires workingDir for agent '${config.name}'`);
   }
 
-  // Resolve provider for SDK mode (will throw if openrouter - not supported)
   const provider = resolveProvider(config.tier, "sdk");
 
   // Prepare environment for subprocess
