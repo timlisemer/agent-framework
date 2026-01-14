@@ -383,7 +383,10 @@ async function runDirectAgent(
     let cachedTokens = (rawUsage?.cache_read_input_tokens as number | undefined) ??
       (rawUsage?.prompt_tokens_details as Record<string, unknown> | undefined)?.cached_tokens as number | undefined;
     let reasoningTokens = (rawUsage?.completion_tokens_details as Record<string, unknown> | undefined)?.reasoning_tokens as number | undefined;
-    let cost = rawUsage?.cost as number | undefined;
+    // Don't track cost for subscription (included in subscription)
+    let cost = provider.type !== PROVIDER_TYPES.CLAUDE_SUBSCRIPTION
+      ? (rawUsage?.cost as number | undefined)
+      : undefined;
 
     // Extract generationId from OpenRouter response for async cost fetching
     // Cost will be fetched by the telemetry server asynchronously
@@ -515,23 +518,12 @@ Your final response should be your complete analysis in the required format.`;
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
     let totalCachedTokens = 0;
-    // SDK provides cost directly via SDKResultMessage.total_cost_usd
-    // Note: This is Anthropic pricing formula, NOT OpenRouter cost
-    // For subscription mode, we don't track cost (included in subscription)
-    let sdkCost: number | undefined;
 
     for await (const message of q) {
       const msgAny = message as Record<string, unknown>;
 
       // Prefer 'result' message type - this is the final output with aggregated data
       if (message.type === "result") {
-        // Extract cost from SDK result message (already aggregated by SDK)
-        // Note: This is Anthropic pricing formula, NOT real OpenRouter cost
-        // For subscription mode, we ignore this (cost included in subscription)
-        if (typeof msgAny.total_cost_usd === "number" && provider.type !== PROVIDER_TYPES.CLAUDE_SUBSCRIPTION) {
-          sdkCost = msgAny.total_cost_usd;
-        }
-
         // Extract usage from result message (aggregated token counts)
         const resultUsage = msgAny.usage as Record<string, unknown> | undefined;
         if (resultUsage) {
@@ -593,15 +585,13 @@ Your final response should be your complete analysis in the required format.`;
     }
 
     // Build usage object - include all available token data
-    const hasUsage = totalPromptTokens > 0 || totalCompletionTokens > 0 || totalCachedTokens > 0 || sdkCost !== undefined;
+    // Note: SDK mode does not track cost (unreliable) or reasoningTokens (not available)
+    const hasUsage = totalPromptTokens > 0 || totalCompletionTokens > 0 || totalCachedTokens > 0;
     const usage = hasUsage ? {
       promptTokens: totalPromptTokens || undefined,
       completionTokens: totalCompletionTokens || undefined,
       totalTokens: (totalPromptTokens + totalCompletionTokens) || undefined,
       cachedTokens: totalCachedTokens || undefined,
-      // Note: reasoningTokens not available in SDK (OpenRouter-specific)
-      // cost: Only set for non-subscription mode (subscription doesn't track cost)
-      cost: sdkCost,
     } : undefined;
 
     // Return result, falling back to last assistant content
