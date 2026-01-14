@@ -59,14 +59,33 @@ export interface TranscriptMessage {
 }
 
 /**
+ * Count specification for a message type.
+ * Can be a simple number (backward compatible) or an object with staleness.
+ */
+export interface CountSpec {
+  /** Number of this message type to collect */
+  count: number;
+  /**
+   * Maximum transcript lines from scan start (end of file).
+   * Messages found beyond this distance are considered stale and excluded.
+   * Measured in raw transcript entries (lines), not filtered message types.
+   */
+  maxStale?: number;
+}
+
+/**
  * Counts for each message type.
  * Each field specifies exact number of that type to collect.
  * The scanner will read backwards until these counts are satisfied (or transcript exhausted).
+ *
+ * Each field can be:
+ * - A number: backward compatible, no staleness check
+ * - A CountSpec object: { count: N, maxStale?: M }
  */
 export interface MessageCounts {
-  user?: number;
-  assistant?: number;
-  toolResult?: number;
+  user?: number | CountSpec;
+  assistant?: number | CountSpec;
+  toolResult?: number | CountSpec;
 }
 
 /**
@@ -399,6 +418,24 @@ function extractToolResultContent(block: ContentBlock): string {
 }
 
 /**
+ * Normalize a count specification to a consistent format.
+ *
+ * Handles both simple numbers (backward compatible) and CountSpec objects.
+ * This allows existing configs like `user: 3` to work alongside new configs
+ * like `user: { count: 1, maxStale: 1 }`.
+ *
+ * @param spec - Either a number, CountSpec, or undefined
+ * @returns Normalized object with count and optional maxStale
+ */
+function normalizeCount(
+  spec: number | CountSpec | undefined
+): { count: number; maxStale?: number } {
+  if (spec === undefined) return { count: 0 };
+  if (typeof spec === "number") return { count: spec };
+  return { count: spec.count, maxStale: spec.maxStale };
+}
+
+/**
  * Read transcript with guaranteed message counts per type.
  *
  * Scans backwards through the transcript file until the requested
@@ -432,9 +469,15 @@ export async function readTranscriptExact(
     detectPlanApproval = false,
   } = options;
 
-  const targetUser = counts.user ?? 0;
-  const targetAssistant = counts.assistant ?? 0;
-  const targetToolResult = counts.toolResult ?? 0;
+  // Normalize count specs to handle both simple numbers and CountSpec objects.
+  // This enables backward compatibility: `user: 3` works alongside `user: { count: 1, maxStale: 1 }`.
+  const userSpec = normalizeCount(counts.user);
+  const assistantSpec = normalizeCount(counts.assistant);
+  const toolResultSpec = normalizeCount(counts.toolResult);
+
+  const targetUser = userSpec.count;
+  const targetAssistant = assistantSpec.count;
+  const targetToolResult = toolResultSpec.count;
 
   const content = await fs.promises.readFile(transcriptPath, "utf-8");
   const allLines = content.trim().split("\n");
@@ -499,7 +542,23 @@ export async function readTranscriptExact(
   }
 
   // Second pass: scan backwards collecting messages until quotas met
+  //
+  // STALENESS LOGIC:
+  // The maxStale parameter allows excluding messages that are "too old" relative
+  // to the scan start (end of transcript). This prevents hooks from re-checking
+  // user directives that were already processed in previous tool calls.
+  //
+  // Example with maxStale: 1:
+  // - User sends directive at entry N
+  // - AI makes tool call -> adds assistant entry N+1, tool_result entry N+2
+  // - PreToolUse hook runs at N+2, scanDistance=1 for entry N+1, scanDistance=2 for entry N
+  // - User directive at N has scanDistance=2 > maxStale=1, so it's EXCLUDED
+  // - This prevents "AI ignored directive" false positives when AI already addressed it
+  let scanDistance = 0;
+
   for (let i = allLines.length - 1; i >= 0; i--) {
+    scanDistance++; // Track how far back we've scanned from the end
+
     // Early exit if all quotas met
     if (
       collected.user.length >= targetUser &&
@@ -516,18 +575,35 @@ export async function readTranscriptExact(
       const { role, content: msgContent } = entry.message;
 
       if (role === 'user') {
-        processUserEntry(msgContent, i, collected, {
-          targetUser,
-          targetToolResult,
-          excludeSystemReminders,
-          excludeSlashCommandPrompts,
-          toolResultOptions,
-          toolUseIdToName,
-        });
+        // Check staleness: skip user messages beyond maxStale distance.
+        // This prevents old user directives from being re-checked after they've
+        // already been processed by previous hook invocations.
+        const userStale = userSpec.maxStale !== undefined && scanDistance > userSpec.maxStale;
+        const toolResultStale = toolResultSpec.maxStale !== undefined && scanDistance > toolResultSpec.maxStale;
+
+        // Only process if at least one type is still collectible and not stale
+        if (
+          (!userStale && collected.user.length < targetUser) ||
+          (!toolResultStale && collected.toolResult.length < targetToolResult)
+        ) {
+          processUserEntry(msgContent, i, collected, {
+            // Pass 0 as target if stale to prevent collection
+            targetUser: userStale ? 0 : targetUser,
+            targetToolResult: toolResultStale ? 0 : targetToolResult,
+            excludeSystemReminders,
+            excludeSlashCommandPrompts,
+            toolResultOptions,
+            toolUseIdToName,
+          });
+        }
       } else if (role === 'assistant' && collected.assistant.length < targetAssistant) {
-        const text = extractTextFromContent(msgContent);
-        if (text) {
-          collected.assistant.push({ role: 'assistant', content: text, index: i });
+        // Check staleness for assistant messages
+        const assistantStale = assistantSpec.maxStale !== undefined && scanDistance > assistantSpec.maxStale;
+        if (!assistantStale) {
+          const text = extractTextFromContent(msgContent);
+          if (text) {
+            collected.assistant.push({ role: 'assistant', content: text, index: i });
+          }
         }
       }
     } catch {

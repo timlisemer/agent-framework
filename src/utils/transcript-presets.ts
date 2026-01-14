@@ -22,9 +22,14 @@ const ALL = Infinity;
  * Includes tool results to detect errors in command output.
  * Trims tool output to focus on error-relevant lines.
  * Includes Task/Agent outputs so error-ack can see directive compliance.
+ *
+ * User message has maxStale: 1 to prevent stale directive re-checking.
+ * Since error-ack runs on EVERY tool call, a user directive from 2+ entries
+ * back has already been checked. Without maxStale, the same directive would
+ * keep appearing with changing context, causing false "AI ignored directive" blocks.
  */
 export const ERROR_CHECK_COUNTS: TranscriptReadOptions = {
-  counts: { user: 1, assistant: 1, toolResult: 2 },
+  counts: { user: { count: 1, maxStale: 1 }, assistant: 1, toolResult: 2 },
   toolResultOptions: {
     trim: true,
     maxLines: 20,
