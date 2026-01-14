@@ -32,7 +32,7 @@ import { TOOL_APPROVE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { getBlacklistHighlights } from "../../utils/command-patterns.js";
 import { setExecutionMode } from "../../utils/execution-context.js";
-import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 
 export interface ToolApprovalOptions {
@@ -90,6 +90,9 @@ export async function checkToolApproval(
     highlights.length > 0
       ? `\n=== BLACKLISTED PATTERNS DETECTED ===\n${highlights.join("\n")}\n=== END BLACKLIST ===\n`
       : "";
+
+  // Mark agent as running in statusline
+  logAgentStarted("tool-approve", toolName);
 
   // Run initial evaluation via unified runner
   const result = await runAgent(

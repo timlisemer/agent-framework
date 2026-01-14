@@ -31,7 +31,7 @@ import { getModelId, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { PLAN_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { getBlacklistDescription, getContentBlacklistHighlights } from "../../utils/command-patterns.js";
@@ -98,6 +98,9 @@ export async function checkPlanIntent(
     const violationSection = allViolations.length > 0
       ? `=== VIOLATIONS DETECTED ===\n${allViolations.join("\n")}\n=== END VIOLATIONS ===\n\n`
       : "";
+
+    // Mark agent as running in statusline
+    logAgentStarted("plan-validate", toolName);
 
     // Run plan validation via unified runner
     const result = await runAgent(

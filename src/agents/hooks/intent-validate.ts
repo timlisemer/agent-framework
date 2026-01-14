@@ -39,7 +39,7 @@ import {
 import { runAgent } from "../../utils/agent-runner.js";
 import { INTENT_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
@@ -144,6 +144,9 @@ export async function checkForOffTopic(
   }
 
   try {
+    // Mark agent as running in statusline
+    logAgentStarted("intent-validate", "Stop");
+
     // Run off-topic check via unified runner
     const result = await runAgent(
       { ...INTENT_VALIDATE_AGENT },

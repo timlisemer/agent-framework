@@ -83,7 +83,7 @@ import {
   resolveProvider,
 } from "../types.js";
 import { extractTextFromResponse } from "./response-parser.js";
-import { logAgentDecision, extractDecision } from "./logger.js";
+import { logAgentDecision, extractDecision, logAgentStarted } from "./logger.js";
 
 /**
  * Read-only tools available to SDK mode agents.
@@ -830,6 +830,9 @@ export async function runAgentWithTelemetry(
   input: AgentInput,
   telemetry: TelemetryContext
 ): Promise<AgentExecutionResult> {
+  // Mark agent as running in statusline before execution
+  logAgentStarted(telemetry.agent, telemetry.toolName);
+
   const result = await runAgent(config, input);
 
   // Auto-extract decision from output (APPROVE/DENY/CONFIRM/ERROR)

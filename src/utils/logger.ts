@@ -7,7 +7,7 @@
 
 import { trackAgentExecution, extractDecision } from "./telemetry-tracker.js";
 import { getExecutionMode, getTranscriptPath } from "./execution-context.js";
-import { updateStatusLineState } from "./statusline-state.js";
+import { updateStatusLineState, markAgentStarted } from "./statusline-state.js";
 import type { DecisionType } from "../telemetry/types.js";
 import {
   MODEL_TIERS,
@@ -450,6 +450,37 @@ export function logFastPathApproval(
     EXECUTION_TYPES.TYPESCRIPT,
     reason
   );
+}
+
+/**
+ * Log that an agent has started running.
+ *
+ * Use this to mark an agent as "running" in the statusline before
+ * it begins execution. When the agent completes, the normal logging
+ * functions (logApprove, logDeny, etc.) will update the entry to "completed".
+ *
+ * @example
+ * ```typescript
+ * // Before running agent
+ * logAgentStarted("tool-approve", "Bash");
+ *
+ * // Run agent...
+ * const result = await runAgent(config, input);
+ *
+ * // Log completion (this updates the running entry)
+ * logApprove(result, "tool-approve", "PreToolUse", "Bash", workingDir, "llm");
+ * ```
+ */
+export function logAgentStarted(agent: string, toolName: string): void {
+  const transcriptPath = getTranscriptPath();
+  if (transcriptPath) {
+    markAgentStarted(transcriptPath, {
+      agent,
+      toolName,
+    }).catch(() => {
+      // Ignore errors - statusline is best-effort
+    });
+  }
 }
 
 // Re-export for convenience

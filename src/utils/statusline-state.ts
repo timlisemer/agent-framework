@@ -19,10 +19,10 @@ import type { ExecutionType } from "../types.js";
  * Change displayCount to show more/fewer entries.
  */
 export const STATUSLINE_CONFIG = {
-  /** Number of recent decisions to display (change to 3+ for more) */
-  displayCount: 2,
+  /** Number of recent entries to display (we filter dynamically for running + last completed) */
+  displayCount: 10,
   /** Maximum entries to keep in state buffer */
-  maxEntries: 10,
+  maxEntries: 20,
   /** State expiry in milliseconds (5 minutes) */
   expiryMs: 5 * 60 * 1000,
 } as const;
@@ -33,16 +33,20 @@ export const STATUSLINE_CONFIG = {
 export interface StatusLineEntry {
   /** Agent that made the decision (e.g., "tool-approve", "check") */
   agent: string;
-  /** Decision type (APPROVE, DENY, CONFIRM, etc.) */
-  decision: DecisionType;
+  /** Decision type (APPROVE, DENY, CONFIRM, etc.) - undefined when running */
+  decision?: DecisionType;
   /** Tool being evaluated (e.g., "Bash", "Edit") */
   toolName: string;
   /** Timestamp in milliseconds */
   timestamp: number;
-  /** Execution type (llm or typescript) */
-  executionType: ExecutionType;
-  /** Latency in milliseconds */
-  latencyMs: number;
+  /** When the agent started running */
+  startTime: number;
+  /** Execution type (llm or typescript) - undefined when running */
+  executionType?: ExecutionType;
+  /** Latency in milliseconds - undefined when running */
+  latencyMs?: number;
+  /** Status of the agent: running or completed */
+  status: "running" | "completed";
 }
 
 /**
@@ -63,20 +67,84 @@ const cacheManager = new CacheManager<StatusLineData>({
 });
 
 /**
- * Update statusline state with a new decision.
- * Called by logger after each agent decision.
+ * Mark an agent as started (running).
+ * Called before agent execution begins.
  *
  * @param transcriptPath - Session identifier (transcript path)
- * @param entry - Decision entry (without timestamp)
+ * @param entry - Agent info (agent name and tool name)
+ */
+export async function markAgentStarted(
+  transcriptPath: string,
+  entry: { agent: string; toolName: string }
+): Promise<void> {
+  cacheManager.setSession(transcriptPath);
+  const now = Date.now();
+  await cacheManager.update((data) => ({
+    entries: [
+      ...data.entries,
+      {
+        agent: entry.agent,
+        toolName: entry.toolName,
+        timestamp: now,
+        startTime: now,
+        status: "running" as const,
+      },
+    ],
+  }));
+}
+
+/**
+ * Update statusline state with a completed decision.
+ * Called by logger after each agent decision.
+ * This will find and update any running entry for the same agent/tool,
+ * or add a new completed entry if none found.
+ *
+ * @param transcriptPath - Session identifier (transcript path)
+ * @param entry - Decision entry (without timestamp and startTime)
  */
 export async function updateStatusLineState(
   transcriptPath: string,
-  entry: Omit<StatusLineEntry, "timestamp">
+  entry: Omit<StatusLineEntry, "timestamp" | "startTime" | "status">
 ): Promise<void> {
   cacheManager.setSession(transcriptPath);
-  await cacheManager.update((data) => ({
-    entries: [...data.entries, { ...entry, timestamp: Date.now() }],
-  }));
+  const now = Date.now();
+  await cacheManager.update((data) => {
+    // Find the most recent running entry for this agent/tool (search from end)
+    let runningIndex = -1;
+    for (let i = data.entries.length - 1; i >= 0; i--) {
+      const e = data.entries[i];
+      if (e.agent === entry.agent && e.toolName === entry.toolName && e.status === "running") {
+        runningIndex = i;
+        break;
+      }
+    }
+
+    if (runningIndex !== -1) {
+      // Update the running entry to completed
+      const runningEntry = data.entries[runningIndex];
+      const updatedEntries = [...data.entries];
+      updatedEntries[runningIndex] = {
+        ...entry,
+        timestamp: now,
+        startTime: runningEntry.startTime,
+        status: "completed" as const,
+      };
+      return { entries: updatedEntries };
+    }
+
+    // No running entry found, add as new completed entry
+    return {
+      entries: [
+        ...data.entries,
+        {
+          ...entry,
+          timestamp: now,
+          startTime: now,
+          status: "completed" as const,
+        },
+      ],
+    };
+  });
 }
 
 /**

@@ -38,7 +38,7 @@ import { getModelId, MODEL_TIERS, EXECUTION_TYPES, type CheckResult, type StopCh
 import { runAgent, type AgentExecutionResult } from "../../utils/agent-runner.js";
 import { RESPONSE_ALIGN_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
@@ -201,6 +201,9 @@ ${ackText ? `AI ACKNOWLEDGMENT (text before this tool call):\n${ackText}\n` : ""
 Tool: ${toolName}
 Input: ${JSON.stringify(toolInput, null, 2).slice(0, 500)}
 ${toolResultsText}`;
+
+  // Mark agent as running in statusline
+  logAgentStarted("response-align", toolName);
 
   // Run alignment check via unified runner
   const result = await runAgent(

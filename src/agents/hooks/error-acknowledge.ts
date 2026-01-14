@@ -34,7 +34,7 @@ import { invalidateAllCaches } from "../../utils/rewind-cache.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { ERROR_ACK_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny } from "../../utils/logger.js";
+import { logApprove, logDeny, logAgentStarted } from "../../utils/logger.js";
 import { parseDecision } from "../../utils/response-parser.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
@@ -82,6 +82,9 @@ export async function checkErrorAcknowledgment(
   }
 
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput).slice(0, 100)}`;
+
+  // Mark agent as running in statusline
+  logAgentStarted("error-acknowledge", toolName);
 
   // Run acknowledgment check via unified runner
   const result = await runAgent(

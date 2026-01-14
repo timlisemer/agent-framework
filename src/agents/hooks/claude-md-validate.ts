@@ -18,7 +18,7 @@ import { getModelId, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CLAUDE_MD_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { getBlacklistDescription, getContentBlacklistHighlights } from "../../utils/command-patterns.js";
@@ -77,6 +77,9 @@ export async function validateClaudeMd(
     const violationSection = allViolations.length > 0
       ? `=== VIOLATIONS DETECTED ===\n${allViolations.join("\n")}\n=== END VIOLATIONS ===\n\n`
       : "";
+
+    // Mark agent as running in statusline
+    logAgentStarted("claude-md-validate", toolName);
 
     const result = await runAgent(
       { ...CLAUDE_MD_VALIDATE_AGENT, workingDir },

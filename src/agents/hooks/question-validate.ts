@@ -29,7 +29,7 @@ import { getModelId, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { QUESTION_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 
@@ -111,6 +111,9 @@ export async function checkQuestionValidity(
   try {
     // Format questions for the agent
     const formattedQuestions = formatQuestions(input);
+
+    // Mark agent as running in statusline
+    logAgentStarted("question-validate", "AskUserQuestion");
 
     // Run question validation via unified runner
     const result = await runAgent(

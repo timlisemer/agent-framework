@@ -25,7 +25,7 @@ import { getModelId, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { TOOL_APPEAL_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny } from "../../utils/logger.js";
+import { logApprove, logDeny, logAgentStarted } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import type { SlashCommandContext } from "../../utils/transcript.js";
 
@@ -90,6 +90,9 @@ Allowed tools: ${allowedToolsStr}
 === END SLASH COMMAND ===
 `;
   }
+
+  // Mark agent as running in statusline
+  logAgentStarted("tool-appeal", toolName);
 
   // Run appeal evaluation via unified runner
   const result = await runAgent(

@@ -37,7 +37,7 @@ import { getModelId, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { STYLE_DRIFT_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import {
   detectEmojiAddition,
@@ -256,6 +256,9 @@ export async function checkStyleDrift(
   // LLM confirmation: Other style changes (semicolon, trailing comma) need verification
   const hintSection = formatStyleHints(styleChanges);
   const toolDescription = `Edit ${file_path}`;
+
+  // Mark agent as running in statusline
+  logAgentStarted("style-drift", toolName);
 
   const result = await runAgent(
     { ...STYLE_DRIFT_AGENT, workingDir },
