@@ -97,6 +97,24 @@ function extractStylePreferences(claudeMdContent: string): string {
 }
 
 /**
+ * Common emoji ranges to detect additions.
+ * Covers most used emojis in code/docs context.
+ */
+const EMOJI_REGEX =
+  /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{203C}\u{2049}]|[\u{25AA}\u{25AB}\u{25B6}\u{25C0}\u{25FB}-\u{25FE}]|[\u{00A9}\u{00AE}]|[\u{2122}\u{2139}]|[\u{3030}\u{303D}]|[\u{3297}\u{3299}]/gu;
+
+/**
+ * Detect if new_string adds emojis not present in old_string.
+ */
+function detectEmojiAddition(oldStr: string, newStr: string): string[] {
+  const oldEmojis = new Set(oldStr.match(EMOJI_REGEX) || []);
+  const newEmojis = newStr.match(EMOJI_REGEX) || [];
+
+  const addedEmojis = newEmojis.filter((e) => !oldEmojis.has(e));
+  return [...new Set(addedEmojis)]; // dedupe
+}
+
+/**
  * Check an Edit tool call for style drift.
  *
  * @param toolName - Name of the tool being called (should be "Edit")
@@ -152,6 +170,29 @@ export async function checkStyleDrift(
     // Deletion - functional change, always approve
     logFastPathApproval("style-drift", hookName, toolName, workingDir, "Deletion");
     return { approved: true };
+  }
+
+  // Fast-path: Detect emoji additions (always block, even in mixed changes)
+  const addedEmojis = detectEmojiAddition(old_string, new_string);
+  if (addedEmojis.length > 0) {
+    const reason = `emoji added (${addedEmojis.join(", ")}) - remove emoji`;
+    logDeny(
+      {
+        output: reason,
+        latencyMs: 0,
+        success: true,
+        errorCount: 0,
+        modelTier: STYLE_DRIFT_AGENT.tier,
+        modelName: getModelId(STYLE_DRIFT_AGENT.tier),
+      },
+      "style-drift",
+      hookName,
+      toolName,
+      workingDir,
+      EXECUTION_TYPES.TYPESCRIPT,
+      reason
+    );
+    return { approved: false, reason };
   }
 
   // Load CLAUDE.md for style preferences
