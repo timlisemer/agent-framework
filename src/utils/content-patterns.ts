@@ -132,3 +132,111 @@ export function detectUserDirectedQuestions(text: string): string[] {
 
   return highlights;
 }
+
+// ============================================================================
+// STYLE DRIFT DETECTION
+// ============================================================================
+
+/**
+ * Style change detection result.
+ * Follows existing pattern: returns specific findings, not boolean.
+ */
+export interface StyleChange {
+  type: "quote" | "semicolon" | "trailing_comma";
+  direction: string; // e.g., "' → \"" or "added" or "removed"
+  sample: string; // snippet of affected code
+  violatesPreference?: boolean; // true if changing AWAY from preference
+  matchesPreference?: boolean; // true if changing TOWARD preference
+}
+
+/**
+ * Detect style changes between old and new content.
+ * Returns list of changes with preference flags for fast-path decisions.
+ *
+ * @param oldStr - Original content
+ * @param newStr - New content
+ * @param quotePreference - "double" | "single" | null for quote preference
+ */
+export function detectStyleChanges(
+  oldStr: string,
+  newStr: string,
+  quotePreference: "double" | "single" | null = "double"
+): StyleChange[] {
+  const changes: StyleChange[] = [];
+
+  // Quote changes - compare counts
+  const oldSingle = (oldStr.match(/'/g) || []).length;
+  const newSingle = (newStr.match(/'/g) || []).length;
+  const oldDouble = (oldStr.match(/"/g) || []).length;
+  const newDouble = (newStr.match(/"/g) || []).length;
+
+  if (oldSingle !== newSingle || oldDouble !== newDouble) {
+    const goingToSingle = newSingle > oldSingle && newDouble <= oldDouble;
+    const goingToDouble = newDouble > oldDouble && newSingle <= oldSingle;
+    const direction = goingToDouble ? "' → \"" : goingToSingle ? "\" → '" : "mixed";
+
+    changes.push({
+      type: "quote",
+      direction,
+      sample: newStr.slice(0, 50),
+      // Violation: going AWAY from preference
+      violatesPreference:
+        (quotePreference === "double" && goingToSingle) ||
+        (quotePreference === "single" && goingToDouble),
+      // Match: going TOWARD preference (cleanup)
+      matchesPreference:
+        (quotePreference === "double" && goingToDouble) ||
+        (quotePreference === "single" && goingToSingle),
+    });
+  }
+
+  // Semicolon changes - no preference, always needs LLM
+  const oldSemis = (oldStr.match(/;/g) || []).length;
+  const newSemis = (newStr.match(/;/g) || []).length;
+  if (oldSemis !== newSemis) {
+    changes.push({
+      type: "semicolon",
+      direction: newSemis > oldSemis ? "added" : "removed",
+      sample: newStr.slice(0, 50),
+    });
+  }
+
+  // Trailing comma changes - no preference, always needs LLM
+  const oldTrailing = (oldStr.match(/,\s*[\n})\]]/g) || []).length;
+  const newTrailing = (newStr.match(/,\s*[\n})\]]/g) || []).length;
+  if (oldTrailing !== newTrailing) {
+    changes.push({
+      type: "trailing_comma",
+      direction: newTrailing > oldTrailing ? "added" : "removed",
+      sample: newStr.slice(0, 50),
+    });
+  }
+
+  return changes;
+}
+
+/**
+ * Format style changes as hints for LLM prompt injection.
+ * Follows [TYPE: name] message format from other agents.
+ */
+export function formatStyleHints(changes: StyleChange[]): string {
+  if (changes.length === 0) return "";
+
+  const hints = changes.map((c) => {
+    const message =
+      c.type === "semicolon"
+        ? c.direction === "added"
+          ? "semicolons were added"
+          : "semicolons were removed"
+        : c.type === "trailing_comma"
+          ? c.direction === "added"
+            ? "trailing commas were added"
+            : "trailing commas were removed"
+          : `quote style changed: ${c.direction}`;
+    return `[STYLE: ${c.type}] ${message}`;
+  });
+
+  return `=== STYLE CHANGES DETECTED ===
+${hints.join("\n")}
+=== END STYLE HINTS ===\n`;
+}

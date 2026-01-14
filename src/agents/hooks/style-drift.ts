@@ -8,24 +8,25 @@
  * ## FLOW
  *
  * 1. Early exit if not a modification (insertion or deletion)
- * 2. Load CLAUDE.md for project style preferences
- * 3. Run unified agent to check for style drift
- * 4. Retry if format is invalid
- * 5. Return APPROVE or DENY with reason
+ * 2. Fast-path: Emoji additions → DENY
+ * 3. Detect style changes with preference flags
+ * 4. Fast-path: Quote away from preference → DENY
+ * 5. Fast-path: Quote toward preference (only change) → APPROVE
+ * 6. Fast-path: No style changes → APPROVE
+ * 7. LLM confirmation for semicolon/trailing comma changes
  *
- * ## STYLE DRIFT EXAMPLES
+ * ## FAST-PATH DECISIONS
  *
- * - Quote changes: ' to " or " to '
- * - Semicolon changes: ; to (none) or (none) to ;
- * - Trailing comma changes
- * - Import reordering (when imports unchanged)
+ * - Quote " → ' when preference is double → FAST DENY
+ * - Quote ' → " when preference is double → FAST APPROVE
+ * - Emoji additions → FAST DENY
+ * - No style changes detected → FAST APPROVE
  *
- * ## ALWAYS APPROVED
+ * ## LLM CONFIRMATION
  *
- * - Any functional/logic change
- * - New code insertion (empty old_string)
- * - Code deletion (empty new_string)
- * - User-requested style changes
+ * - Semicolon changes → LLM verifies if requested
+ * - Trailing comma changes → LLM verifies if requested
+ * - Mixed quote + other changes → LLM verifies
  *
  * @module style-drift
  */
@@ -38,7 +39,11 @@ import { STYLE_DRIFT_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
-import { detectEmojiAddition } from "../../utils/content-patterns.js";
+import {
+  detectEmojiAddition,
+  detectStyleChanges,
+  formatStyleHints,
+} from "../../utils/content-patterns.js";
 
 /**
  * Input shape for Edit tool
@@ -188,14 +193,76 @@ export async function checkStyleDrift(
     // File doesn't exist or read error - use defaults
   }
 
+  // Detect style changes with preference flags (default: double quotes)
+  const styleChanges = detectStyleChanges(old_string, new_string, "double");
+
+  // Fast-path A.1: Quote changes AWAY from preference → DENY
+  const quoteViolation = styleChanges.find(
+    (c) => c.type === "quote" && c.violatesPreference
+  );
+  if (quoteViolation) {
+    const reason = `quote change (${quoteViolation.direction}) violates project preference - use double quotes`;
+    logDeny(
+      {
+        output: reason,
+        latencyMs: 0,
+        success: true,
+        errorCount: 0,
+        modelTier: STYLE_DRIFT_AGENT.tier,
+        modelName: getModelId(STYLE_DRIFT_AGENT.tier),
+      },
+      "style-drift",
+      hookName,
+      toolName,
+      workingDir,
+      EXECUTION_TYPES.TYPESCRIPT,
+      reason
+    );
+    return { approved: false, reason };
+  }
+
+  // Fast-path A.2: Quote changes TOWARD preference (cleanup) → APPROVE
+  const quoteMatch = styleChanges.find(
+    (c) => c.type === "quote" && c.matchesPreference
+  );
+  if (quoteMatch) {
+    // Only fast-approve if this is the ONLY change (pure cleanup)
+    const otherChanges = styleChanges.filter((c) => c.type !== "quote");
+    if (otherChanges.length === 0) {
+      logFastPathApproval(
+        "style-drift",
+        hookName,
+        toolName,
+        workingDir,
+        "Quote cleanup toward preference"
+      );
+      return { approved: true };
+    }
+    // Otherwise, there are other style changes - continue to LLM check
+  }
+
+  // Fast-path C: No style changes detected → APPROVE
+  if (styleChanges.length === 0) {
+    logFastPathApproval(
+      "style-drift",
+      hookName,
+      toolName,
+      workingDir,
+      "No style changes"
+    );
+    return { approved: true };
+  }
+
+  // LLM confirmation: Other style changes (semicolon, trailing comma) need verification
+  const hintSection = formatStyleHints(styleChanges);
   const toolDescription = `Edit ${file_path}`;
 
-  // Run style drift check via unified runner
   const result = await runAgent(
     { ...STYLE_DRIFT_AGENT, workingDir },
     {
-      prompt: "Check if this edit contains unrequested style-only changes.",
-      context: `STYLE PREFERENCES (from CLAUDE.md):
+      prompt: "Verify if these style changes were requested.",
+      context: `${hintSection}
+STYLE PREFERENCES (from CLAUDE.md):
 ${stylePreferences || "Default: double quotes, follow existing file conventions"}
 
 RECENT USER MESSAGES:
@@ -212,9 +279,7 @@ ${old_string}
 New content:
 \`\`\`
 ${new_string}
-\`\`\`
-
-Does this edit contain ONLY style changes that were NOT requested by the user?`,
+\`\`\``,
     }
   );
 
@@ -233,7 +298,15 @@ Does this edit contain ONLY style changes that were NOT requested by the user?`,
   );
 
   if (decision.startsWith("APPROVE")) {
-    logApprove(result, "style-drift", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, decision);
+    logApprove(
+      result,
+      "style-drift",
+      hookName,
+      toolName,
+      workingDir,
+      EXECUTION_TYPES.LLM,
+      decision
+    );
     return { approved: true };
   }
 
@@ -242,7 +315,15 @@ Does this edit contain ONLY style changes that were NOT requested by the user?`,
     ? decision.replace("DENY: ", "")
     : `Malformed response: ${decision}`;
 
-  logDeny(result, "style-drift", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, reason);
+  logDeny(
+    result,
+    "style-drift",
+    hookName,
+    toolName,
+    workingDir,
+    EXECUTION_TYPES.LLM,
+    reason
+  );
 
   return {
     approved: false,

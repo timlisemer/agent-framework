@@ -1,17 +1,20 @@
 ---
+disable-model-invocation: true
 description: Generate and execute a git commit using the agent framework
 allowed-tools: mcp__agent-framework__commit, mcp__agent-framework__list_repos, AskUserQuestion
 ---
 
-1. First, call mcp__agent-framework__list_repos to detect all repositories and submodules with uncommitted changes.
+1. First, call mcp**agent-framework**list_repos to detect all repositories and submodules with uncommitted changes.
 
 2. Parse the result to identify which repos have changes:
+
    - If ONLY the main repo has changes: proceed with just the main repo
    - If ONLY submodule(s) have changes: proceed with just those submodules
    - If BOTH main repo AND submodule(s) have changes: ask the user which repos to commit using AskUserQuestion with multiSelect=true, listing each repo by name
    - If NO repos have changes: inform the user and stop
 
 3. Build an ORDERED list of repositories to process:
+
    - Submodules MUST be processed FIRST (so the main repo can include updated submodule pointers)
    - The main repo comes LAST, after all submodules are committed
    - You MUST process repositories in this exact order - submodules first, then main repo
@@ -19,6 +22,7 @@ allowed-tools: mcp__agent-framework__commit, mcp__agent-framework__list_repos, A
 4. For each repository in the ordered list (submodules first, then main repo), perform steps 5-7. Do NOT output any text like "Repository 1:" before asking questions - the question text itself already contains the repo name:
 
 5. Ask the user for preferences using AskUserQuestion with these two questions (do NOT output any text before this):
+
    - Question 1: "Which model tier for code review? (for [REPO_NAME])" with header "Tier" and options:
      - "opus" with description "Most thorough analysis (default)"
      - "sonnet" with description "Balanced speed and quality"
@@ -27,9 +31,10 @@ allowed-tools: mcp__agent-framework__commit, mcp__agent-framework__list_repos, A
      - "None" with description "Standard review"
      - "Security" with description "Extra focus on security concerns"
      - "Performance" with description "Extra focus on performance"
-   Set multiSelect to false for both questions. Replace [REPO_NAME] with the repository directory name.
+       Set multiSelect to false for both questions. Replace [REPO_NAME] with the repository directory name.
 
-6. Call mcp__agent-framework__commit with:
+6. Call mcp**agent-framework**commit with:
+
    - working_dir: The absolute path to the repository
    - model_tier: The selected tier from step 5 (just the lowercase word: "opus", "sonnet", or "haiku")
    - extra_context: Build the context as follows:

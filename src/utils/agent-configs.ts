@@ -25,7 +25,7 @@
  * | error-ack       | haiku  | direct | Validate error acknowledgment              |
  * | plan-validate   | sonnet | direct | Check plan alignment with user intent      |
  * | intent-validate | haiku  | direct | Detect off-topic AI behavior               |
- * | style-drift     | haiku  | direct | Detect unrequested style changes           |
+ * | style-drift     | haiku  | direct | Verify regex-detected style changes        |
  *
  * ## MODEL TIER GUIDELINES
  *
@@ -1011,83 +1011,62 @@ Examples of good BLOCK feedback:
 /**
  * Style Drift Agent Configuration
  *
- * Detects when AI makes cosmetic/style-only changes that were not requested.
+ * Verifies style change hints from regex detection.
  *
  * **Tier: haiku** - Must be fast (<100ms), simple approve/deny decision
- * **Mode: direct** - Old/new content provided upfront for comparison
+ * **Mode: direct** - Style hints and content provided upfront
  *
- * This agent protects against unwanted "code cleanup" that changes things like
- * quote styles, semicolons, or whitespace without user consent. Logic changes
- * are ALWAYS approved - this only catches style-only drift.
+ * This agent is called ONLY when regex detects potential style changes
+ * (semicolons, trailing commas). Quote changes are handled by fast-path:
+ * - Quote away from preference → Fast deny (no LLM)
+ * - Quote toward preference → Fast approve (no LLM)
  *
- * Quote preference: double quotes "" by default (easier on German keyboard).
- * CLAUDE.md can override this preference.
+ * The LLM verifies if detected style changes were user-requested.
  */
 export const STYLE_DRIFT_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'style-drift',
   tier: MODEL_TIERS.HAIKU,
   mode: 'direct',
   maxTokens: 500,
-  systemPrompt: `You are a style drift detector. Your ONLY job is to detect when code edits contain STYLE-ONLY changes that were NOT requested.
+  systemPrompt: `You verify style change hints from regex detection.
 
-## CRITICAL PRINCIPLE
+## CONTEXT YOU RECEIVE
 
-Logic/functional changes are ALWAYS approved. You ONLY detect STYLE-ONLY changes.
+1. STYLE CHANGES DETECTED: Regex-detected style differences (semicolons, trailing commas)
+2. STYLE PREFERENCES: From CLAUDE.md or defaults
+3. USER MESSAGES: Recent user context
+4. EDIT CONTENT: The old and new strings
 
-## WHAT IS STYLE DRIFT?
+## YOUR JOB
 
-Style drift is cosmetic-only changes the AI made without being asked:
-- Quote style changes: ' to " or " to ' (when not part of logic change)
-- Semicolon additions or removals (when not part of logic change)
-- Trailing comma additions or removals
-- Whitespace/indentation changes (not part of logic change)
-- Import reordering (when imports themselves are unchanged)
-- Comment style changes (// vs /* */ when content unchanged)
-- Brace positioning changes ({ on same line vs new line)
-- Emoji additions (emojis should never be added unless explicitly requested)
+Verify if detected style changes are legitimate or unrequested drift.
 
-## WHAT IS NOT STYLE DRIFT (ALWAYS APPROVE)?
+## APPROVE IF
 
-- ANY functional/logic change (adding code, modifying behavior, fixing bugs)
-- Removing unused code/imports (functional cleanup)
-- Adding/modifying actual code logic
-- Mixed changes where BOTH style AND logic change together
-- New code insertion (empty old_string)
-- Code deletion (empty new_string)
-- Changes explicitly requested by user in the conversation
+- User requested style/formatting changes ("clean up", "format", "fix style")
+- Style changes are part of functional changes (new code in different style is fine)
+- User's CLAUDE.md allows this style
+- The logic/semantics of code changed (not just cosmetic)
+- Mixed changes where style change accompanies logic change
 
-## QUOTE PREFERENCE
+## DENY IF
 
-Default preference: double quotes ""
-Only flag quote changes if:
-1. The change is PURELY about quotes (no logic change)
-2. The change goes AGAINST the preference (unless CLAUDE.md says otherwise)
+- Style changes are the ONLY modification (pure cosmetic drift)
+- No user request for formatting/cleanup in messages
+- Style goes against stated preferences
 
-If STYLE PREFERENCES section shows different rules, follow those instead.
+## OUTPUT FORMAT (STRICT)
 
-## DECISION LOGIC
-
-1. If old_string is empty: APPROVE (new code insertion, not drift)
-2. If new_string is empty: APPROVE (deletion is functional, not style drift)
-3. Compare old_string and new_string:
-   - If ANY logic/structure differs (different values, added/removed lines, etc.): APPROVE
-   - If ONLY formatting/style differs: Check if user requested style change
-     - If user messages mention style/format/quotes/cleanup: APPROVE
-     - If no such request: DENY with specific style change
-
-===== OUTPUT FORMAT (STRICT) =====
 Your response MUST start with EXACTLY one of:
 
 APPROVE
 OR
-DENY: <specific style change detected> - revert to <original style>
+DENY: <specific issue> - revert to <original style>
 
 Examples:
 APPROVE
-DENY: quote style change (" to ') - revert to double quotes
-DENY: trailing comma removed - revert to include trailing comma
-DENY: semicolon added - revert to no semicolon
-DENY: emoji added - remove emoji
+DENY: semicolon removed without request - keep semicolons
+DENY: trailing comma added without request - remove trailing comma
 
 NO other text before the decision word.`,
 };
