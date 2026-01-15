@@ -674,6 +674,7 @@ async function main() {
             (r.content.includes("approved") || r.content.includes("allow"))
         );
         if (hasExitPlanModeApproval) {
+          logFastPathApproval("exit-plan-mode", "PreToolUse", input.tool_name, projectDir, "ExitPlanMode previously approved");
           outputAllow();
         }
 
@@ -710,6 +711,8 @@ async function main() {
             outputDeny(`Plan drift detected: ${validation.reason}`);
           }
           logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - plan-validate");
+        } else {
+          logFastPathApproval("plan-validate", "PreToolUse", input.tool_name, projectDir, "Plan validation passed");
         }
         // Plan validated or appeal overturned - allow write
         outputAllow();
@@ -759,6 +762,8 @@ async function main() {
             outputDeny(`CLAUDE.md validation failed: ${validation.reason}`);
           }
           logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - claude-md");
+        } else {
+          logFastPathApproval("claude-md-validate", "PreToolUse", input.tool_name, projectDir, "CLAUDE.md validation passed");
         }
         // CLAUDE.md validated or appeal overturned - allow write
         outputAllow();
@@ -813,6 +818,7 @@ async function main() {
         }
 
         // Low risk - auto-approve (passed style-drift check or not applicable)
+        logFastPathApproval("trusted-path", "PreToolUse", input.tool_name, projectDir, "Trusted path auto-approval");
         outputAllow();
       }
       // High risk (untrusted or sensitive) - fall through to tool-approve
@@ -885,6 +891,7 @@ async function main() {
     logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - tool-approve");
     // Appeal overturned - continue to allow
   }
+  // Note: tool-approve agent logs its own decision via logApprove/logDeny
 
   // Strict validation passed - update state
   await markFirstResponseChecked();

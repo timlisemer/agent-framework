@@ -453,6 +453,41 @@ export function logFastPathApproval(
 }
 
 /**
+ * Log a fast-path denial for TypeScript-only decisions.
+ *
+ * Use this for denials where no LLM was called:
+ * - Stop hook detects short response without completion indicators
+ * - Other TypeScript-only deny paths
+ *
+ * Creates a synthetic AgentExecutionResult with zero latency
+ * and logs it as a DENY with TYPESCRIPT execution type.
+ */
+export function logFastPathDeny(
+  agent: string,
+  hookName: string,
+  toolName: string,
+  workingDir: string,
+  reason: string
+): void {
+  logDeny(
+    {
+      output: "DENY",
+      latencyMs: 0,
+      success: true,
+      errorCount: 0,
+      modelTier: MODEL_TIERS.HAIKU,
+      modelName: getModelId(MODEL_TIERS.HAIKU),
+    },
+    agent,
+    hookName,
+    toolName,
+    workingDir,
+    EXECUTION_TYPES.TYPESCRIPT,
+    reason
+  );
+}
+
+/**
  * Log that an agent has started running.
  *
  * Use this to mark an agent as "running" in the statusline before

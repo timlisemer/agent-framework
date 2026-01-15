@@ -38,7 +38,7 @@ import { getModelId, MODEL_TIERS, EXECUTION_TYPES, type CheckResult, type StopCh
 import { runAgent, type AgentExecutionResult } from "../../utils/agent-runner.js";
 import { RESPONSE_ALIGN_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval, logFastPathDeny, logAgentStarted } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
@@ -544,6 +544,7 @@ export async function checkStopResponseAlignment(
 ): Promise<StopResponseResult> {
   // Skip stop response checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
+    logFastPathApproval("response-align-stop", hookName, "StopResponse", workingDir, "Subagent skip");
     return { approved: true };
   }
 
@@ -553,6 +554,7 @@ export async function checkStopResponseAlignment(
   );
 
   if (result.user.length === 0 || result.assistant.length === 0) {
+    logFastPathApproval("response-align-stop", hookName, "StopResponse", workingDir, "No conversation");
     return { approved: true };
   }
 
@@ -564,6 +566,7 @@ export async function checkStopResponseAlignment(
 
   // Only check if assistant message is AFTER user message
   if (lastAssistantMessage.index <= lastUserMessage.index) {
+    logFastPathApproval("response-align-stop", hookName, "StopResponse", workingDir, "Message ordering skip");
     return { approved: true };
   }
 
@@ -647,6 +650,16 @@ export async function checkStopResponseAlignment(
         const verification = await verifyIsActualQuestion(userQuestion, userText, workingDir);
 
         if (verification.isQuestion) {
+          // Log the denial with LLM-based verification info
+          const syntheticResult: AgentExecutionResult = {
+            output: "DENY",
+            latencyMs: verification.latencyMs,
+            modelTier: MODEL_TIERS.HAIKU,
+            modelName: getModelId(MODEL_TIERS.HAIKU),
+            success: true,
+            errorCount: 0,
+          };
+          logDeny(syntheticResult, "response-align-stop", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, "User question not answered");
           return {
             approved: false,
             reason: "User question not answered",
@@ -666,10 +679,12 @@ export async function checkStopResponseAlignment(
     // Skip if user ran a slash command (skill) - short responses are expected after /push, /commit, etc.
     const isSkillCompletion = userText.trim().startsWith("/");
     if (isSkillCompletion) {
+      logFastPathApproval("response-align-stop", hookName, "StopResponse", workingDir, "Skill completion");
       return { approved: true };
     }
 
     // Very short response that doesn't indicate completion
+    logFastPathDeny("response-align-stop", hookName, "StopResponse", workingDir, "AI stopped without clear reason");
     return {
       approved: false,
       reason: "AI stopped without clear reason",
@@ -678,6 +693,7 @@ export async function checkStopResponseAlignment(
     };
   }
 
+  logFastPathApproval("response-align-stop", hookName, "StopResponse", workingDir, "Stop response aligned");
   return { approved: true };
 }
 

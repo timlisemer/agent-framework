@@ -34,7 +34,7 @@ import { invalidateAllCaches } from "../../utils/rewind-cache.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { ERROR_ACK_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logAgentStarted } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
 import { parseDecision } from "../../utils/response-parser.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
@@ -72,12 +72,14 @@ export async function checkErrorAcknowledgment(
 ): Promise<string> {
   // Skip error acknowledgment checks for subagents (Task-spawned agents)
   if (transcriptPath && isSubagent(transcriptPath)) {
+    logFastPathApproval("error-acknowledge", hookName, toolName, workingDir, "Subagent skip");
     return "OK";
   }
 
   // Check if the issue in this transcript was already acknowledged (cached)
   const issueMatch = transcript.match(ISSUE_EXTRACT_PATTERN);
   if (issueMatch && (await isErrorAcknowledged(issueMatch[0]))) {
+    logFastPathApproval("error-acknowledge", hookName, toolName, workingDir, "Cached acknowledgment");
     return "OK";
   }
 
