@@ -205,45 +205,51 @@ ${toolResultsText}`;
   // Mark agent as running in statusline
   logAgentStarted("response-align", toolName);
 
-  // Run alignment check via unified runner
-  const result = await runAgent(
-    { ...RESPONSE_ALIGN_AGENT },
-    {
-      prompt: "Check if this tool call aligns with the user's request.",
-      context,
-    }
-  );
+  try {
+    // Run alignment check via unified runner
+    const result = await runAgent(
+      { ...RESPONSE_ALIGN_AGENT },
+      {
+        prompt: "Check if this tool call aligns with the user's request.",
+        context,
+      }
+    );
 
-  // Retry if format is invalid (must start with OK or BLOCK:)
-  const anthropic = getAnthropicClient();
-  const decision = await retryUntilValid(
-    anthropic,
-    getModelId(RESPONSE_ALIGN_AGENT.tier),
-    result.output,
-    toolDescription,
-    {
-      maxRetries: 1,
-      formatValidator: (text) => startsWithAny(text, ["OK", "BLOCK:"]),
-      formatReminder: "Reply with EXACTLY: OK or BLOCK: <reason>",
-    }
-  );
+    // Retry if format is invalid (must start with OK or BLOCK:)
+    const anthropic = getAnthropicClient();
+    const decision = await retryUntilValid(
+      anthropic,
+      getModelId(RESPONSE_ALIGN_AGENT.tier),
+      result.output,
+      toolDescription,
+      {
+        maxRetries: 1,
+        formatValidator: (text) => startsWithAny(text, ["OK", "BLOCK:"]),
+        formatReminder: "Reply with EXACTLY: OK or BLOCK: <reason>",
+      }
+    );
 
-  if (decision.startsWith("OK")) {
-    logApprove(result, "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Aligned with request");
+    if (decision.startsWith("OK")) {
+      logApprove(result, "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Aligned with request");
+      return { approved: true };
+    }
+
+    // Extract block reason
+    const reason = decision.startsWith("BLOCK: ")
+      ? decision.substring(7).trim()
+      : `Misaligned response: ${decision}`;
+
+    logDeny(result, "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, reason);
+
+    return {
+      approved: false,
+      reason,
+    };
+  } catch {
+    // On error, fail open and log completion to clear "running" status
+    logFastPathApproval("response-align", hookName, toolName, workingDir, "Error path - fail open");
     return { approved: true };
   }
-
-  // Extract block reason
-  const reason = decision.startsWith("BLOCK: ")
-    ? decision.substring(7).trim()
-    : `Misaligned response: ${decision}`;
-
-  logDeny(result, "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, reason);
-
-  return {
-    approved: false,
-    reason,
-  };
 }
 
 // Legacy alias for backwards compatibility

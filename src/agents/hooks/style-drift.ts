@@ -215,11 +215,12 @@ export async function checkStyleDrift(
   // Mark agent as running in statusline
   logAgentStarted("style-drift", toolName);
 
-  const result = await runAgent(
-    { ...STYLE_DRIFT_AGENT, workingDir },
-    {
-      prompt: "Verify if these style changes were requested.",
-      context: `${hintSection}
+  try {
+    const result = await runAgent(
+      { ...STYLE_DRIFT_AGENT, workingDir },
+      {
+        prompt: "Verify if these style changes were requested.",
+        context: `${hintSection}
 STYLE PREFERENCES (from CLAUDE.md):
 ${stylePreferences || "Default: double quotes, follow existing file conventions"}
 
@@ -238,53 +239,58 @@ New content:
 \`\`\`
 ${new_string}
 \`\`\``,
-    }
-  );
+      }
+    );
 
-  // Retry if format is invalid (must start with APPROVE or DENY:)
-  const anthropic = getAnthropicClient();
-  const decision = await retryUntilValid(
-    anthropic,
-    getModelId(STYLE_DRIFT_AGENT.tier),
-    result.output,
-    toolDescription,
-    {
-      maxRetries: 2,
-      formatValidator: (text) => startsWithAny(text, ["APPROVE", "DENY:"]),
-      formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
-    }
-  );
+    // Retry if format is invalid (must start with APPROVE or DENY:)
+    const anthropic = getAnthropicClient();
+    const decision = await retryUntilValid(
+      anthropic,
+      getModelId(STYLE_DRIFT_AGENT.tier),
+      result.output,
+      toolDescription,
+      {
+        maxRetries: 2,
+        formatValidator: (text) => startsWithAny(text, ["APPROVE", "DENY:"]),
+        formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
+      }
+    );
 
-  if (decision.startsWith("APPROVE")) {
-    logApprove(
+    if (decision.startsWith("APPROVE")) {
+      logApprove(
+        result,
+        "style-drift",
+        hookName,
+        toolName,
+        workingDir,
+        EXECUTION_TYPES.LLM,
+        decision
+      );
+      return { approved: true };
+    }
+
+    // Extract reason from denial
+    const reason = decision.startsWith("DENY: ")
+      ? decision.replace("DENY: ", "")
+      : `Malformed response: ${decision}`;
+
+    logDeny(
       result,
       "style-drift",
       hookName,
       toolName,
       workingDir,
       EXECUTION_TYPES.LLM,
-      decision
+      reason
     );
+
+    return {
+      approved: false,
+      reason,
+    };
+  } catch {
+    // On error, fail open and log completion to clear "running" status
+    logFastPathApproval("style-drift", hookName, toolName, workingDir, "Error path - fail open");
     return { approved: true };
   }
-
-  // Extract reason from denial
-  const reason = decision.startsWith("DENY: ")
-    ? decision.replace("DENY: ", "")
-    : `Malformed response: ${decision}`;
-
-  logDeny(
-    result,
-    "style-drift",
-    hookName,
-    toolName,
-    workingDir,
-    EXECUTION_TYPES.LLM,
-    reason
-  );
-
-  return {
-    approved: false,
-    reason,
-  };
 }

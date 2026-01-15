@@ -25,7 +25,7 @@ import { getModelId, EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { TOOL_APPEAL_AGENT } from "../../utils/agent-configs.js";
 import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logAgentStarted } from "../../utils/logger.js";
+import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import type { SlashCommandContext } from "../../utils/transcript.js";
 
@@ -94,43 +94,49 @@ Allowed tools: ${allowedToolsStr}
   // Mark agent as running in statusline
   logAgentStarted("tool-appeal", toolName);
 
-  // Run appeal evaluation via unified runner
-  const result = await runAgent(
-    { ...TOOL_APPEAL_AGENT, workingDir },
-    {
-      prompt: "Review this appeal for a denied tool call.",
-      context: `BLOCK REASON: ${originalReason}
+  try {
+    // Run appeal evaluation via unified runner
+    const result = await runAgent(
+      { ...TOOL_APPEAL_AGENT, workingDir },
+      {
+        prompt: "Review this appeal for a denied tool call.",
+        context: `BLOCK REASON: ${originalReason}
 TOOL CALL: ${toolDescription}
 ${slashCommandSection}${contextSection}
 RECENT CONVERSATION:
 ${transcript}`,
+      }
+    );
+
+    // Retry if format is invalid
+    const anthropic = getAnthropicClient();
+    const decision = await retryUntilValid(
+      anthropic,
+      getModelId(TOOL_APPEAL_AGENT.tier),
+      result.output,
+      toolDescription,
+      {
+        maxRetries: 2,
+        formatValidator: (text) =>
+          startsWithAny(text, ["UPHOLD", "OVERTURN: APPROVE"]),
+        formatReminder:
+          "Reply with EXACTLY: UPHOLD or OVERTURN: APPROVE",
+      }
+    );
+
+    // Check for overturn (user approved)
+    const overturned = decision.startsWith("OVERTURN: APPROVE") || decision === "APPROVE";
+
+    if (overturned) {
+      logApprove(result, "tool-appeal", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "User approved operation");
+    } else {
+      logDeny(result, "tool-appeal", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "User did not approve");
     }
-  );
 
-  // Retry if format is invalid
-  const anthropic = getAnthropicClient();
-  const decision = await retryUntilValid(
-    anthropic,
-    getModelId(TOOL_APPEAL_AGENT.tier),
-    result.output,
-    toolDescription,
-    {
-      maxRetries: 2,
-      formatValidator: (text) =>
-        startsWithAny(text, ["UPHOLD", "OVERTURN: APPROVE"]),
-      formatReminder:
-        "Reply with EXACTLY: UPHOLD or OVERTURN: APPROVE",
-    }
-  );
-
-  // Check for overturn (user approved)
-  const overturned = decision.startsWith("OVERTURN: APPROVE") || decision === "APPROVE";
-
-  if (overturned) {
-    logApprove(result, "tool-appeal", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "User approved operation");
-  } else {
-    logDeny(result, "tool-appeal", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "User did not approve");
+    return { overturned };
+  } catch {
+    // On error, fail closed (uphold denial) and log completion to clear "running" status
+    logFastPathApproval("tool-appeal", hookName, toolName, workingDir, "Error path - fail closed");
+    return { overturned: false };
   }
-
-  return { overturned };
 }

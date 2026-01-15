@@ -88,49 +88,55 @@ export async function checkErrorAcknowledgment(
   // Mark agent as running in statusline
   logAgentStarted("error-acknowledge", toolName);
 
-  // Run acknowledgment check via unified runner
-  const result = await runAgent(
-    { ...ERROR_ACK_AGENT },
-    {
-      prompt: "Check if the AI has acknowledged issues in this transcript.",
-      context: `TRANSCRIPT (recent messages):
+  try {
+    // Run acknowledgment check via unified runner
+    const result = await runAgent(
+      { ...ERROR_ACK_AGENT },
+      {
+        prompt: "Check if the AI has acknowledged issues in this transcript.",
+        context: `TRANSCRIPT (recent messages):
 ${transcript}
 
 CURRENT TOOL CALL:
 Tool: ${toolName}
 Input: ${JSON.stringify(toolInput)}`,
+      }
+    );
+
+    // Retry if format is invalid
+    const anthropic = getAnthropicClient();
+    const decision = await retryUntilValid(
+      anthropic,
+      getModelId(ERROR_ACK_AGENT.tier),
+      result.output,
+      toolDescription,
+      {
+        maxRetries: 1, // Only 1 retry for error-acknowledge
+        formatValidator: (text) => startsWithAny(text, ["OK", "BLOCK:"]),
+        formatReminder: "Reply with EXACTLY: OK or BLOCK: <message>",
+      }
+    );
+
+    const parsed = parseDecision(decision, ["OK"]);
+
+    if (parsed.approved) {
+      // Clear all caches - OK means current state is approved, start fresh next time
+      await invalidateAllCaches();
+      logApprove(result, "error-acknowledge", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Acknowledged");
+      return "OK";
     }
-  );
 
-  // Retry if format is invalid
-  const anthropic = getAnthropicClient();
-  const decision = await retryUntilValid(
-    anthropic,
-    getModelId(ERROR_ACK_AGENT.tier),
-    result.output,
-    toolDescription,
-    {
-      maxRetries: 1, // Only 1 retry for error-acknowledge
-      formatValidator: (text) => startsWithAny(text, ["OK", "BLOCK:"]),
-      formatReminder: "Reply with EXACTLY: OK or BLOCK: <message>",
+    if (parsed.reason) {
+      logDeny(result, "error-acknowledge", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, parsed.reason);
+      return `BLOCK: ${parsed.reason}`;
     }
-  );
 
-  const parsed = parseDecision(decision, ["OK"]);
-
-  if (parsed.approved) {
-    // Clear all caches - OK means current state is approved, start fresh next time
-    await invalidateAllCaches();
-    logApprove(result, "error-acknowledge", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Acknowledged");
+    // Default to OK if response is malformed after retries (fail open)
+    logApprove(result, "error-acknowledge", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
+    return "OK";
+  } catch {
+    // On error, fail open and log completion to clear "running" status
+    logFastPathApproval("error-acknowledge", hookName, toolName, workingDir, "Error path - fail open");
     return "OK";
   }
-
-  if (parsed.reason) {
-    logDeny(result, "error-acknowledge", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, parsed.reason);
-    return `BLOCK: ${parsed.reason}`;
-  }
-
-  // Default to OK if response is malformed after retries (fail open)
-  logApprove(result, "error-acknowledge", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
-  return "OK";
 }
