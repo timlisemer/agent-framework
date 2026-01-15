@@ -80,11 +80,11 @@ import {
   type ExecutionType,
   type ProviderType,
   PROVIDER_TYPES,
+  MODEL_TIERS,
   resolveProvider,
 } from "../types.js";
 import { extractTextFromResponse } from "./response-parser.js";
 import { logAgentDecision, extractDecision, logAgentStarted } from "./logger.js";
-import { retryUntilValid } from "./retry.js";
 
 /**
  * Read-only tools available to SDK mode agents.
@@ -346,25 +346,27 @@ export async function runAgent(
       const { validator, formatReminder, fallbackOutput } = config.formatValidation;
 
       if (!validator.test(result.text)) {
-        if (config.mode === "direct") {
-          // Direct mode: retry to fix format
-          const client = getAnthropicClient();
-          result.text = await retryUntilValid(
-            client,
-            getModelId(config.tier),
-            result.text,
-            input.prompt.slice(0, 100),
-            { formatValidator: (t) => validator.test(t), formatReminder }
-          );
+        // Tiered retry: try progressively cheaper models
+        // opus → sonnet → haiku → haiku (final attempt)
+        const client = getAnthropicClient();
+        const retryTiers = getRetryTiers(config.tier);
 
-          // Check if retry succeeded
-          if (!validator.test(result.text)) {
-            result.text = fallbackOutput.replace("$RAW", result.text.slice(0, 500));
-            success = false;
-            errorCount++;
-          }
-        } else {
-          // SDK mode: can't retry multi-turn, use fallback
+        for (const retryTier of retryTiers) {
+          const retryResponse = await client.messages.create({
+            model: getModelId(retryTier),
+            max_tokens: 500,
+            messages: [{
+              role: "user",
+              content: `Invalid format. ${formatReminder}\n\nOriginal output:\n${result.text.slice(0, 2000)}`,
+            }],
+          });
+          result.text = extractTextFromResponse(retryResponse);
+
+          if (validator.test(result.text)) break;
+        }
+
+        // Check if all retries failed
+        if (!validator.test(result.text)) {
           result.text = fallbackOutput.replace("$RAW", result.text.slice(0, 500));
           success = false;
           errorCount++;
@@ -910,4 +912,27 @@ export async function runAgentWithTelemetry(
   });
 
   return result;
+}
+
+/**
+ * Get retry tiers for format validation failures.
+ *
+ * Returns progressively cheaper models to try reformatting:
+ * - opus → sonnet → haiku → haiku
+ * - sonnet → haiku → haiku
+ * - haiku → haiku → haiku
+ *
+ * @param originalTier - The tier that produced malformed output
+ * @returns Array of tiers to try for retry
+ */
+function getRetryTiers(originalTier: ModelTier): ModelTier[] {
+  switch (originalTier) {
+    case MODEL_TIERS.OPUS:
+      return [MODEL_TIERS.SONNET, MODEL_TIERS.HAIKU, MODEL_TIERS.HAIKU];
+    case MODEL_TIERS.SONNET:
+      return [MODEL_TIERS.HAIKU, MODEL_TIERS.HAIKU];
+    case MODEL_TIERS.HAIKU:
+    default:
+      return [MODEL_TIERS.HAIKU, MODEL_TIERS.HAIKU];
+  }
 }

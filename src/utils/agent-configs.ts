@@ -149,8 +149,8 @@ export const CONFIRM_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'confirm',
   tier: MODEL_TIERS.OPUS,
   mode: 'sdk',
-  maxTokens: 2000,
-  maxTurns: 15,
+  // Note: SDK mode doesn't support maxTokens - uses model defaults
+  maxTurns: 25,  // Increased to allow thorough investigation before verdict
   systemPrompt: `You are a strict code quality gate. You have ONE job: evaluate changes and return a verdict.
 
 The code has already passed linting and type checks. Now evaluate the changes.
