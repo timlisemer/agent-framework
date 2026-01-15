@@ -9,6 +9,7 @@ import {
   detectRewind,
 } from "../utils/rewind-cache.js";
 import { setTranscriptPath } from "../utils/execution-context.js";
+import { flushStatuslineUpdates } from "../utils/logger.js";
 
 /**
  * Stop Hook: Response Check
@@ -24,12 +25,14 @@ import { setTranscriptPath } from "../utils/execution-context.js";
  */
 
 /**
- * Exit process after flushing telemetry.
- * Uses a small delay to allow the fetch request to initiate.
+ * Exit process after flushing telemetry and statusline updates.
  */
 function exitAfterFlush(code = 0): void {
   flushTelemetry();
-  setTimeout(() => process.exit(code), 5);
+  // Flush statusline updates then exit
+  flushStatuslineUpdates().finally(() => process.exit(code));
+  // Fallback timeout in case flush hangs
+  setTimeout(() => process.exit(code), 100);
 }
 
 async function main() {

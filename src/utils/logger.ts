@@ -7,7 +7,12 @@
 
 import { trackAgentExecution, extractDecision } from "./telemetry-tracker.js";
 import { getExecutionMode, getTranscriptPath } from "./execution-context.js";
-import { updateStatusLineState, markAgentStarted } from "./statusline-state.js";
+import {
+  updateStatusLineState,
+  markAgentStarted,
+  trackStatuslinePromise,
+  flushStatuslineUpdates,
+} from "./statusline-state.js";
 import type { DecisionType } from "../telemetry/types.js";
 import {
   MODEL_TIERS,
@@ -116,7 +121,7 @@ export function logAgentDecision(log: AgentLog): void {
   // Update statusline state (fire-and-forget, non-blocking)
   const transcriptPath = getTranscriptPath();
   if (transcriptPath) {
-    updateStatusLineState(transcriptPath, {
+    const promise = updateStatusLineState(transcriptPath, {
       agent: log.agent,
       decision: log.decision,
       toolName: log.toolName,
@@ -125,6 +130,7 @@ export function logAgentDecision(log: AgentLog): void {
     }).catch(() => {
       // Ignore errors - statusline is best-effort
     });
+    trackStatuslinePromise(promise);
   }
 }
 
@@ -509,14 +515,15 @@ export function logFastPathDeny(
 export function logAgentStarted(agent: string, toolName: string): void {
   const transcriptPath = getTranscriptPath();
   if (transcriptPath) {
-    markAgentStarted(transcriptPath, {
+    const promise = markAgentStarted(transcriptPath, {
       agent,
       toolName,
     }).catch(() => {
       // Ignore errors - statusline is best-effort
     });
+    trackStatuslinePromise(promise);
   }
 }
 
 // Re-export for convenience
-export { extractDecision };
+export { extractDecision, flushStatuslineUpdates };

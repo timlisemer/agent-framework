@@ -67,6 +67,31 @@ const cacheManager = new CacheManager<StatusLineData>({
 });
 
 /**
+ * Set of pending statusline update promises.
+ * Used by flushStatuslineUpdates to ensure all writes complete before process exit.
+ */
+const pendingUpdates: Set<Promise<void>> = new Set();
+
+/**
+ * Track a promise and remove it from the set when it completes.
+ * Called by logger.ts to track statusline update promises.
+ */
+export function trackStatuslinePromise(promise: Promise<void>): void {
+  pendingUpdates.add(promise);
+  promise.finally(() => pendingUpdates.delete(promise));
+}
+
+/**
+ * Flush all pending statusline updates.
+ * Call this before process.exit() to ensure all statusline writes complete.
+ *
+ * @returns Promise that resolves when all pending updates are settled
+ */
+export async function flushStatuslineUpdates(): Promise<void> {
+  await Promise.allSettled([...pendingUpdates]);
+}
+
+/**
  * Mark an agent as started (running).
  * Called before agent execution begins.
  *

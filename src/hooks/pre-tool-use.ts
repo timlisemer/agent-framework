@@ -68,7 +68,7 @@ import {
 } from "../utils/strict-mode-tracker.js";
 import { setExecutionMode, setTranscriptPath } from "../utils/execution-context.js";
 import { EXECUTION_MODES } from "../types.js";
-import { logFastPathApproval, logFastPathContinue } from "../utils/logger.js";
+import { logFastPathApproval, logFastPathContinue, flushStatuslineUpdates } from "../utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -86,7 +86,12 @@ function outputAllow(): never {
     })
   );
   flushTelemetry();
-  process.exit(0);
+  // Flush statusline updates then exit
+  flushStatuslineUpdates().finally(() => process.exit(0));
+  // Fallback timeout in case flush hangs
+  setTimeout(() => process.exit(0), 100);
+  // Required for never type - unreachable code
+  while (true) {}
 }
 
 /**
@@ -104,7 +109,12 @@ function outputDeny(reason: string): never {
     })
   );
   flushTelemetry();
-  process.exit(0);
+  // Flush statusline updates then exit
+  flushStatuslineUpdates().finally(() => process.exit(0));
+  // Fallback timeout in case flush hangs
+  setTimeout(() => process.exit(0), 100);
+  // Required for never type - unreachable code
+  while (true) {}
 }
 
 

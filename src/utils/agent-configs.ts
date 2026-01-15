@@ -368,12 +368,19 @@ export const TOOL_APPROVE_AGENT: Omit<AgentConfig, 'workingDir'> = {
   maxTokens: 1000,
   systemPrompt: `You are a tool approval gate. Evaluate tool calls for safety and compliance.
 
+=== CORE PRINCIPLE: AIs DO NOT BUILD PROJECTS ===
+
+AIs are NOT supposed to build projects. They should only CHECK code using mcp__agent-framework__check.
+- Building is the user's responsibility, not the AI's
+- Use mcp__agent-framework__check instead to verify code compiles
+- If an AI needs to verify its changes work, use mcp__agent-framework__check, never build commands
+
 === BLACKLIST VIOLATIONS (IMMEDIATE DENY) ===
 
 If you see "=== BLACKLISTED PATTERNS DETECTED ===" in the context, you MUST DENY.
 These patterns are detected automatically and represent hard rules:
 - cd command → DENY (no exceptions, use --cwd flags instead)
-- build/check commands → DENY (use mcp__agent-framework__check)
+- build/check commands → DENY (AIs are NOT supposed to build projects. Use mcp__agent-framework__check instead to verify code compiles.)
 - cat/head/tail/grep/find → DENY (use Read/Grep/Glob tools)
 - git write operations → DENY (use MCP tools)
 
@@ -446,7 +453,7 @@ sqlite3: APPROVE only for read-only operations.
    - DENY: make check (use MCP tool for better integration)
 
 10. build commands like make build, npm run build, etc.
-    - DENY: AIs are not intended to build the project
+    - DENY: AIs are NOT supposed to build projects. Use mcp__agent-framework__check instead to verify code compiles.
 
 11. curl/wget commands (network requests)
     - DENY by default (requires explicit user permission)
