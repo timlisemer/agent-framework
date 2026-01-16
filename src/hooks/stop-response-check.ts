@@ -26,13 +26,27 @@ import { flushStatuslineUpdates } from "../utils/logger.js";
 
 /**
  * Exit process after flushing telemetry and statusline updates.
+ * Uses process.stdout.write with callback to ensure any output is flushed
+ * before process.exit() - prevents lost output when stdout is piped.
+ *
+ * @param code - Exit code (default 0)
+ * @param output - Optional output to write before exiting
  */
-function exitAfterFlush(code = 0): void {
-  flushTelemetry();
-  // Flush statusline updates then exit
-  flushStatuslineUpdates().finally(() => process.exit(code));
-  // Fallback timeout in case flush hangs
-  setTimeout(() => process.exit(code), 100);
+function exitAfterFlush(code = 0, output?: string): void {
+  // Outer fallback in case write callback never fires
+  setTimeout(() => process.exit(code), 200);
+
+  const doExit = () => {
+    flushTelemetry();
+    flushStatuslineUpdates().finally(() => process.exit(code));
+    setTimeout(() => process.exit(code), 100);
+  };
+
+  if (output) {
+    process.stdout.write(output + "\n", doExit);
+  } else {
+    doExit();
+  }
 }
 
 async function main() {
@@ -68,13 +82,11 @@ async function main() {
   );
 
   if (!result.approved && result.systemMessage) {
-    console.log(
-      JSON.stringify({
-        decision: "block",
-        reason: result.systemMessage,
-      })
-    );
-    exitAfterFlush(0);
+    const output = JSON.stringify({
+      decision: "block",
+      reason: result.systemMessage,
+    });
+    exitAfterFlush(0, output);
     return;
   }
 

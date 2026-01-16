@@ -75,42 +75,50 @@ const __dirname = path.dirname(__filename);
 
 /**
  * Output structured JSON to allow the tool call and exit.
+ * Uses process.stdout.write with callback to ensure output is flushed
+ * before process.exit() - prevents lost output when stdout is piped.
  */
 function outputAllow(): void {
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "allow",
-      },
-    })
-  );
-  flushTelemetry();
-  // Flush statusline updates then exit
-  flushStatuslineUpdates().finally(() => process.exit(0));
-  // Fallback timeout in case flush hangs
-  setTimeout(() => process.exit(0), 100);
+  const output = JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "allow",
+    },
+  });
+
+  // Outer fallback in case write callback never fires
+  setTimeout(() => process.exit(0), 200);
+
+  process.stdout.write(output + "\n", () => {
+    flushTelemetry();
+    flushStatuslineUpdates().finally(() => process.exit(0));
+    setTimeout(() => process.exit(0), 100);
+  });
 }
 
 /**
  * Output structured JSON to deny the tool call with a reason and exit.
+ * Uses process.stdout.write with callback to ensure output is flushed
+ * before process.exit() - prevents lost output when stdout is piped.
  * Note: Caller should call recordStrictDenial() before this if needed.
  */
 function outputDeny(reason: string): void {
-  console.log(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason: reason,
-      },
-    })
-  );
-  flushTelemetry();
-  // Flush statusline updates then exit
-  flushStatuslineUpdates().finally(() => process.exit(0));
-  // Fallback timeout in case flush hangs
-  setTimeout(() => process.exit(0), 100);
+  const output = JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: reason,
+    },
+  });
+
+  // Outer fallback in case write callback never fires
+  setTimeout(() => process.exit(0), 200);
+
+  process.stdout.write(output + "\n", () => {
+    flushTelemetry();
+    flushStatuslineUpdates().finally(() => process.exit(0));
+    setTimeout(() => process.exit(0), 100);
+  });
 }
 
 
