@@ -76,7 +76,7 @@ const __dirname = path.dirname(__filename);
 /**
  * Output structured JSON to allow the tool call and exit.
  */
-function outputAllow(): never {
+function outputAllow(): void {
   console.log(
     JSON.stringify({
       hookSpecificOutput: {
@@ -90,15 +90,13 @@ function outputAllow(): never {
   flushStatuslineUpdates().finally(() => process.exit(0));
   // Fallback timeout in case flush hangs
   setTimeout(() => process.exit(0), 100);
-  // Required for never type - unreachable code
-  while (true) {}
 }
 
 /**
  * Output structured JSON to deny the tool call with a reason and exit.
  * Note: Caller should call recordStrictDenial() before this if needed.
  */
-function outputDeny(reason: string): never {
+function outputDeny(reason: string): void {
   console.log(
     JSON.stringify({
       hookSpecificOutput: {
@@ -113,8 +111,6 @@ function outputDeny(reason: string): never {
   flushStatuslineUpdates().finally(() => process.exit(0));
   // Fallback timeout in case flush hangs
   setTimeout(() => process.exit(0), 100);
-  // Required for never type - unreachable code
-  while (true) {}
 }
 
 
