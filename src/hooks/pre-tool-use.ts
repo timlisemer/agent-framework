@@ -299,6 +299,7 @@ async function main() {
               await recordStrictError();
               await recordStrictDenial();
               outputDeny(`Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`);
+              return;
             }
 
             // LAZY VALIDATION: Allow immediately, validate async
@@ -306,6 +307,7 @@ async function main() {
             spawnAsyncValidator(input.tool_name, filePath, input.transcript_path, input.tool_input);
             logFastPathApproval("lazy-validation", "PreToolUse", input.tool_name, projectDir, "Trusted file fast-path approval");
             outputAllow();
+            return;
           }
           // Strict mode triggered by rules - fall through
         }
@@ -341,6 +343,7 @@ async function main() {
     await recordStrictError(); // Next tool will use strict mode
     await recordStrictDenial();
     outputDeny(`Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`);
+    return;
   }
 
   // ============================================================
@@ -386,6 +389,7 @@ async function main() {
   ) {
     logFastPathApproval("low-risk-bypass", "PreToolUse", input.tool_name, projectDir, "Low-risk tool auto-approval");
     outputAllow();
+    return;
   }
 
   // ============================================================
@@ -411,6 +415,7 @@ async function main() {
         outputDeny(
           `Cannot commit: confirm declined - ${confirmState.reason}. Address the issues first, then re-run /push or /commit.`
         );
+        return;
       }
     }
 
@@ -438,9 +443,11 @@ async function main() {
     if (!appeal.overturned) {
       await recordStrictDenial();
       outputDeny(denyReason);
+      return;
     }
     logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, `Appeal overturned - ${friendlyName} tool`);
     outputAllow();
+    return;
   }
 
   // ============================================================
@@ -477,12 +484,14 @@ async function main() {
       if (!appeal.overturned) {
         await recordStrictDenial();
         outputDeny(validation.reason || "Question validation failed - show referenced content first");
+        return;
       }
     }
 
     // Question validated or appeal overturned - allow
     logFastPathApproval("question-validate", "PreToolUse", input.tool_name, projectDir, "Question validated");
     outputAllow();
+    return;
   }
 
   // ============================================================
@@ -609,10 +618,12 @@ async function main() {
         }
         logFastPathApproval("error-acknowledge", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - user approved");
         outputAllow();
+        return;
       } else {
         // User did not approve - block
         await recordStrictDenial();
         outputDeny(`Error acknowledgment required: ${blockReason}`);
+        return;
       }
     } else {
       // ackResult is "OK" - log continue and proceed to next step
@@ -660,10 +671,12 @@ async function main() {
         // User did not approve - block
         await recordStrictDenial();
         outputDeny(`First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`);
+        return;
       }
       // Appeal overturned - user approved, allow immediately
       logFastPathApproval("response-align", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - user approved");
       outputAllow();
+      return;
     } else {
       // Response aligned - log continue and proceed to next step
       logFastPathContinue("response-align", "PreToolUse", input.tool_name, projectDir, "Response aligned - continuing to next check");
@@ -701,6 +714,7 @@ async function main() {
         if (hasExitPlanModeApproval) {
           logFastPathApproval("exit-plan-mode", "PreToolUse", input.tool_name, projectDir, "ExitPlanMode previously approved");
           outputAllow();
+          return;
         }
 
         // Get current plan and conversation context
@@ -734,6 +748,7 @@ async function main() {
           if (!appeal.overturned) {
             await recordStrictDenial();
             outputDeny(`Plan drift detected: ${validation.reason}`);
+            return;
           }
           logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - plan-validate");
         } else {
@@ -741,6 +756,7 @@ async function main() {
         }
         // Plan validated or appeal overturned - allow write
         outputAllow();
+        return;
       }
 
       // 3b. CLAUDE-MD-VALIDATE
@@ -785,6 +801,7 @@ async function main() {
           if (!appeal.overturned) {
             await recordStrictDenial();
             outputDeny(`CLAUDE.md validation failed: ${validation.reason}`);
+            return;
           }
           logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - claude-md");
         } else {
@@ -792,6 +809,7 @@ async function main() {
         }
         // CLAUDE.md validated or appeal overturned - allow write
         outputAllow();
+        return;
       }
 
       const trusted = isTrustedPath(filePath, projectDir);
@@ -834,10 +852,12 @@ async function main() {
             if (!appeal.overturned) {
               await recordStrictDenial();
               outputDeny(`Style drift detected: ${styleDriftResult.reason}`);
+              return;
             }
             // Appeal overturned - user approved, allow immediately
             logFastPathApproval("style-drift", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - user approved");
             outputAllow();
+            return;
           } else {
             // Style check passed - log continue
             logFastPathContinue("style-drift", "PreToolUse", input.tool_name, projectDir, "Style check passed - continuing to approval");
@@ -847,6 +867,7 @@ async function main() {
         // Low risk - auto-approve (passed style-drift check or not applicable)
         logFastPathApproval("trusted-path", "PreToolUse", input.tool_name, projectDir, "Trusted path auto-approval");
         outputAllow();
+        return;
       }
       // High risk (untrusted or sensitive) - fall through to tool-approve
     }
@@ -871,6 +892,7 @@ async function main() {
     const planContent = await readPlanContent(input.transcript_path);
     if (!planContent || planContent.trim() === "") {
       outputDeny("Cannot exit plan mode without a plan. Write your plan to the plan file first.");
+      return;
     }
   }
 
@@ -914,6 +936,7 @@ async function main() {
       // Output structured JSON to deny and provide feedback to Claude
       await recordStrictDenial();
       outputDeny(finalReason ?? "Tool denied");
+      return;
     }
     logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - tool-approve");
     // Appeal overturned - continue to allow

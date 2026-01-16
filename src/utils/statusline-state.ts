@@ -24,6 +24,21 @@ export const STATUSLINE_CONFIG = {
   expiryMs: 5 * 60 * 1000,
 } as const;
 
+/** How long completed entries stay before being deleted (5 seconds) */
+const COMPLETED_EXPIRY_MS = 5000;
+
+/**
+ * Filter out completed entries older than COMPLETED_EXPIRY_MS.
+ * Running entries are always preserved.
+ */
+function filterExpiredCompleted(entries: StatusLineEntry[]): StatusLineEntry[] {
+  const now = Date.now();
+  return entries.filter((entry) => {
+    if (entry.status === "running") return true;
+    return now - entry.timestamp < COMPLETED_EXPIRY_MS;
+  });
+}
+
 /**
  * Single decision entry for statusline display.
  */
@@ -103,7 +118,7 @@ export async function markAgentStarted(
   const now = Date.now();
   await cacheManager.update((data) => ({
     entries: [
-      ...data.entries,
+      ...filterExpiredCompleted(data.entries),
       {
         agent: entry.agent,
         toolName: entry.toolName,
@@ -131,10 +146,13 @@ export async function updateStatusLineState(
   cacheManager.setSession(transcriptPath);
   const now = Date.now();
   await cacheManager.update((data) => {
+    // Filter out expired completed entries first
+    const entries = filterExpiredCompleted(data.entries);
+
     // Find the most recent running entry for this agent/tool (search from end)
     let runningIndex = -1;
-    for (let i = data.entries.length - 1; i >= 0; i--) {
-      const e = data.entries[i];
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
       if (e.agent === entry.agent && e.toolName === entry.toolName && e.status === "running") {
         runningIndex = i;
         break;
@@ -143,8 +161,8 @@ export async function updateStatusLineState(
 
     if (runningIndex !== -1) {
       // Update the running entry to completed
-      const runningEntry = data.entries[runningIndex];
-      const updatedEntries = [...data.entries];
+      const runningEntry = entries[runningIndex];
+      const updatedEntries = [...entries];
       updatedEntries[runningIndex] = {
         ...entry,
         timestamp: now,
@@ -157,7 +175,7 @@ export async function updateStatusLineState(
     // No running entry found, add as new completed entry
     return {
       entries: [
-        ...data.entries,
+        ...entries,
         {
           ...entry,
           timestamp: now,
@@ -181,6 +199,6 @@ export async function readStatusLineEntries(
 ): Promise<StatusLineEntry[]> {
   cacheManager.setSession(transcriptPath);
   const data = await cacheManager.load();
-  // Return all entries, reversed so newest is first
-  return data.entries.slice().reverse();
+  // Filter expired completed entries and return reversed (newest first)
+  return filterExpiredCompleted(data.entries).reverse();
 }

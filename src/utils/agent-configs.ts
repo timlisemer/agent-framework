@@ -441,8 +441,8 @@ sqlite3: APPROVE only for read-only operations.
    - DENY commands that start processes surviving after Claude Code exits
 
 6. "Run" commands (application execution)
-   - Generally DENY: make run, cargo run, npm run start, npm run dev, docker compose up
-   - ALLOW: npm run build, npm run check, npm run test (these run and exit)
+   - ALWAYS DENY: make run, cargo run, npm run start, npm run dev, docker compose up
+   - No exceptions - run commands start long-running processes
 
 7. Secret/credential exposure
    - Commands that could leak API keys, tokens, passwords
