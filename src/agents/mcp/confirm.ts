@@ -21,7 +21,8 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
 import { recordConfirmDeclined } from "../../utils/confirm-state-cache.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
-import { logConfirm } from "../../utils/logger.js";
+import { logAgentStarted, logConfirm } from "../../utils/logger.js";
+import { setTranscriptPath } from "../../utils/execution-context.js";
 import { runCheckAgent } from "./check.js";
 
 const HOOK_NAME = "mcp__agent-framework__confirm";
@@ -32,16 +33,24 @@ const HOOK_NAME = "mcp__agent-framework__confirm";
  * @param workingDir - The project directory to evaluate
  * @param tierName - Optional model tier (haiku/sonnet/opus, defaults to opus)
  * @param extraContext - Optional extra instructions for the evaluation
+ * @param transcriptPath - Optional transcript path for statusLine updates
  * @returns Structured verdict with CONFIRMED or DECLINED
  */
 export async function runConfirmAgent(
   workingDir: string,
   tierName?: string,
-  extraContext?: string
+  extraContext?: string,
+  transcriptPath?: string
 ): Promise<string> {
+  // Set up execution context for statusLine logging
+  if (transcriptPath) {
+    setTranscriptPath(transcriptPath);
+  }
+  logAgentStarted("confirm", HOOK_NAME);
+
   const tier = parseTierName(tierName);
   // Step 1: Run check agent first
-  const checkResult = await runCheckAgent(workingDir);
+  const checkResult = await runCheckAgent(workingDir, transcriptPath);
 
   const errorMatch = checkResult.match(/Errors:\s*(\d+)/i);
   const errorCount = errorMatch ? parseInt(errorMatch[1], 10) : 0;

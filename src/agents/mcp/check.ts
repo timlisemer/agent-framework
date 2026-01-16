@@ -45,7 +45,8 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { CHECK_AGENT } from "../../utils/agent-configs.js";
 import { runCommand } from "../../utils/command.js";
 import { getUncommittedChanges, getRepoInfo } from "../../utils/git-utils.js";
-import { logConfirm } from "../../utils/logger.js";
+import { logAgentStarted, logConfirm } from "../../utils/logger.js";
+import { setTranscriptPath } from "../../utils/execution-context.js";
 
 const HOOK_NAME = "mcp__agent-framework__check";
 
@@ -128,9 +129,16 @@ function findMakefileDir(workingDir: string, mainRepo: string): string | null {
  * Run the check agent to summarize linter and type-check results.
  *
  * @param workingDir - The project directory to check
+ * @param transcriptPath - Optional transcript path for statusLine updates
  * @returns Structured summary with errors, warnings, and status
  */
-export async function runCheckAgent(workingDir: string): Promise<string> {
+export async function runCheckAgent(workingDir: string, transcriptPath?: string): Promise<string> {
+  // Set up execution context for statusLine logging
+  if (transcriptPath) {
+    setTranscriptPath(transcriptPath);
+  }
+  logAgentStarted("check", HOOK_NAME);
+
   // Get main repo path for fallback
   const repoInfo = getRepoInfo(workingDir);
   const mainRepo = repoInfo.mainRepo;

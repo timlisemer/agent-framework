@@ -28,7 +28,8 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { COMMIT_AGENT } from "../../utils/agent-configs.js";
 import { runCommand } from "../../utils/command.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
-import { logConfirm, logError } from "../../utils/logger.js";
+import { logAgentStarted, logConfirm, logError } from "../../utils/logger.js";
+import { setTranscriptPath } from "../../utils/execution-context.js";
 import { runConfirmAgent } from "./confirm.js";
 
 const HOOK_NAME = "mcp__agent-framework__commit";
@@ -62,13 +63,21 @@ function parseCommitResponse(
  * @param workingDir - The project directory to commit
  * @param confirmTierName - Passed through to confirm agent (does not affect commit agent tier)
  * @param confirmExtraContext - Passed through to confirm agent
+ * @param transcriptPath - Optional transcript path for statusLine updates
  * @returns Result with confirm output, message size, and commit hash
  */
 export async function runCommitAgent(
   workingDir: string,
   confirmTierName?: string,
-  confirmExtraContext?: string
+  confirmExtraContext?: string,
+  transcriptPath?: string
 ): Promise<string> {
+  // Set up execution context for statusLine logging
+  if (transcriptPath) {
+    setTranscriptPath(transcriptPath);
+  }
+  logAgentStarted("commit", HOOK_NAME);
+
   const { status, diff, diffStat } = getUncommittedChanges(workingDir);
 
   if (!status.trim()) {
@@ -76,7 +85,7 @@ export async function runCommitAgent(
   }
 
   // Confirm changes before generating commit message (pass through tier/context)
-  const confirmResult = await runConfirmAgent(workingDir, confirmTierName, confirmExtraContext);
+  const confirmResult = await runConfirmAgent(workingDir, confirmTierName, confirmExtraContext, transcriptPath);
   if (confirmResult.includes("DECLINED")) {
     return confirmResult;
   }

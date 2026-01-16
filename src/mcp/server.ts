@@ -35,11 +35,12 @@ server.registerTool(
     title: "Check",
     description: "Run linter and make check, return summarized results with warning recommendations. Does not access source code.",
     inputSchema: {
-      working_dir: z.string().optional().describe("Working directory (defaults to cwd)")
+      working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
+      transcript_path: z.string().optional().describe("Session transcript path for statusLine")
     }
   },
   async (args) => {
-    const result = await runCheckAgent(args.working_dir || process.cwd());
+    const result = await runCheckAgent(args.working_dir || process.cwd(), args.transcript_path);
     return { content: [{ type: "text", text: result }] };
   }
 );
@@ -52,14 +53,16 @@ server.registerTool(
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
       model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Model tier for evaluation (default: opus)"),
-      extra_context: z.string().optional().describe("Additional instructions or areas to focus on")
+      extra_context: z.string().optional().describe("Additional instructions or areas to focus on"),
+      transcript_path: z.string().optional().describe("Session transcript path for statusLine")
     }
   },
   async (args) => {
     const result = await runConfirmAgent(
       args.working_dir || process.cwd(),
       args.model_tier,
-      args.extra_context
+      args.extra_context,
+      args.transcript_path
     );
     return { content: [{ type: "text", text: result }] };
   }
@@ -73,14 +76,16 @@ server.registerTool(
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
       model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Passed to confirm agent (default: opus)"),
-      extra_context: z.string().optional().describe("Passed to confirm agent")
+      extra_context: z.string().optional().describe("Passed to confirm agent"),
+      transcript_path: z.string().optional().describe("Session transcript path for statusLine")
     }
   },
   async (args) => {
     const result = await runCommitAgent(
       args.working_dir || process.cwd(),
       args.model_tier,
-      args.extra_context
+      args.extra_context,
+      args.transcript_path
     );
     return { content: [{ type: "text", text: result }] };
   }

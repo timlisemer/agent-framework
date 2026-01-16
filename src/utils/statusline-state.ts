@@ -10,6 +10,7 @@
  * @module statusline-state
  */
 
+import * as path from "path";
 import { CacheManager, getTempFilePath } from "./cache-manager.js";
 import type { DecisionType } from "../telemetry/types.js";
 import type { ExecutionType } from "../types.js";
@@ -26,6 +27,17 @@ export const STATUSLINE_CONFIG = {
 
 /** How long completed entries stay before being deleted (5 seconds) */
 const COMPLETED_EXPIRY_MS = 5000;
+
+/**
+ * Get session key from transcript path.
+ * Uses parent directory so subagents share the same session as their parent.
+ * Main session: ~/.claude/projects/{encoded-path}/{session-id}.jsonl
+ * Subagent: ~/.claude/projects/{encoded-path}/agent-{id}.jsonl
+ * Both resolve to the same parent directory, sharing the statusLine.
+ */
+function getSessionKey(transcriptPath: string): string {
+  return path.dirname(transcriptPath);
+}
 
 /**
  * Filter out completed entries older than COMPLETED_EXPIRY_MS.
@@ -114,7 +126,7 @@ export async function markAgentStarted(
   transcriptPath: string,
   entry: { agent: string; toolName: string }
 ): Promise<void> {
-  cacheManager.setSession(transcriptPath);
+  cacheManager.setSession(getSessionKey(transcriptPath));
   const now = Date.now();
   await cacheManager.update((data) => ({
     entries: [
@@ -143,7 +155,7 @@ export async function updateStatusLineState(
   transcriptPath: string,
   entry: Omit<StatusLineEntry, "timestamp" | "startTime" | "status">
 ): Promise<void> {
-  cacheManager.setSession(transcriptPath);
+  cacheManager.setSession(getSessionKey(transcriptPath));
   const now = Date.now();
   await cacheManager.update((data) => {
     // Filter out expired completed entries first
@@ -197,7 +209,7 @@ export async function updateStatusLineState(
 export async function readStatusLineEntries(
   transcriptPath: string
 ): Promise<StatusLineEntry[]> {
-  cacheManager.setSession(transcriptPath);
+  cacheManager.setSession(getSessionKey(transcriptPath));
   const data = await cacheManager.load();
   // Filter expired completed entries and return reversed (newest first)
   return filterExpiredCompleted(data.entries).reverse();
