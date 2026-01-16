@@ -159,16 +159,33 @@ function formatEntry(entry: StatusLineEntry): string {
 }
 
 /**
- * Filter entries to show: all running + last completed.
+ * Filter entries to show: all running (except orphaned) + last N completed.
+ *
+ * Orphan detection: If there's BOTH a running AND completed entry for the
+ * same agent+tool, the running one is orphaned (written after completion
+ * due to race condition) and should be hidden.
  */
 function filterEntries(entries: StatusLineEntry[]): StatusLineEntry[] {
-  const running = entries.filter((e) => e.status === "running");
+  // Build set of agent+tool combos that have completed entries
+  const completedAgentTools = new Set<string>();
+  for (const entry of entries) {
+    if (entry.status === "completed") {
+      completedAgentTools.add(`${entry.agent}:${entry.toolName}`);
+    }
+  }
+
+  // Filter running entries - exclude orphaned ones
+  const running = entries.filter((e) => {
+    if (e.status !== "running") return false;
+    const key = `${e.agent}:${e.toolName}`;
+    // If there's a completed entry for same agent+tool, this running entry is orphaned
+    return !completedAgentTools.has(key);
+  });
+
+  // Get completed entries (newest first since entries are already reversed)
   const completed = entries.filter((e) => e.status === "completed");
+  const lastCompleted = completed.slice(0, 5);
 
-  // Get the most recent completed entry
-  const lastCompleted = completed.length > 0 ? [completed[0]] : [];
-
-  // Return all running + last completed
   return [...running, ...lastCompleted];
 }
 
