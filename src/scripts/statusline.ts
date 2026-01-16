@@ -158,12 +158,18 @@ function formatEntry(entry: StatusLineEntry): string {
   return `${symbol} ${agentName} [${latency}]`;
 }
 
+/** How long to show older completed entries before they fade out (ms) */
+const COMPLETED_FADE_MS = 5000;
+
 /**
  * Filter entries to show: all running (except orphaned) + last N completed.
  *
  * Orphan detection: If there's BOTH a running AND completed entry for the
  * same agent+tool, the running one is orphaned (written after completion
  * due to race condition) and should be hidden.
+ *
+ * Fade out: Completed entries older than 5 seconds are hidden, except for
+ * the most recent completed entry which is always shown.
  */
 function filterEntries(entries: StatusLineEntry[]): StatusLineEntry[] {
   // Build set of agent+tool combos that have completed entries
@@ -184,7 +190,15 @@ function filterEntries(entries: StatusLineEntry[]): StatusLineEntry[] {
 
   // Get completed entries (newest first since entries are already reversed)
   const completed = entries.filter((e) => e.status === "completed");
-  const lastCompleted = completed.slice(0, 5);
+  const now = Date.now();
+
+  // Filter completed: always keep the most recent, others fade after 5 seconds
+  const lastCompleted = completed.slice(0, 5).filter((entry, index) => {
+    // Always keep the most recent completed entry
+    if (index === 0) return true;
+    // Keep others only if they're less than 5 seconds old
+    return now - entry.timestamp < COMPLETED_FADE_MS;
+  });
 
   return [...running, ...lastCompleted];
 }
@@ -232,7 +246,19 @@ async function main(): Promise<void> {
       if (entries.length > 0) {
         const filtered = filterEntries(entries);
         if (filtered.length > 0) {
-          rightSide = filtered.map(formatEntry).join(` ${SYMBOLS.entryDivider} `);
+          // Separate running and completed entries
+          const runningEntries = filtered.filter((e) => e.status === "running");
+          const completedEntries = filtered.filter((e) => e.status === "completed");
+
+          const runningSide = runningEntries.map(formatEntry).join(` ${SYMBOLS.entryDivider} `);
+          const completedSide = completedEntries.map(formatEntry).join(` ${SYMBOLS.entryDivider} `);
+
+          // Join sections with double line ║
+          if (runningSide && completedSide) {
+            rightSide = `${runningSide} ${SYMBOLS.sectionDivider} ${completedSide}`;
+          } else {
+            rightSide = runningSide || completedSide;
+          }
         }
       }
     }
