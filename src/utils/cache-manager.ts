@@ -92,6 +92,55 @@ export class CacheManager<T> {
   }
 
   /**
+   * Acquire a file lock for atomic read-modify-write operations.
+   * Uses exclusive file creation (wx flag) for cross-process locking.
+   * Stale locks (> 1 second old) are automatically removed.
+   */
+  private async acquireLock(): Promise<void> {
+    const lockPath = `${this.config.filePath}.lock`;
+    const maxAttempts = 10;
+    const retryDelay = 10; // ms
+
+    for (let i = 0; i < maxAttempts; i++) {
+      try {
+        await fs.promises.writeFile(lockPath, String(process.pid), { flag: "wx" });
+        return; // Lock acquired
+      } catch (err: unknown) {
+        const error = err as NodeJS.ErrnoException;
+        if (error.code === "EEXIST") {
+          // Lock exists, check if stale (> 1 second old)
+          try {
+            const stat = await fs.promises.stat(lockPath);
+            if (Date.now() - stat.mtimeMs > 1000) {
+              await fs.promises.unlink(lockPath); // Remove stale lock
+              continue;
+            }
+          } catch {
+            // Lock file disappeared, retry
+            continue;
+          }
+          await new Promise((r) => setTimeout(r, retryDelay));
+          continue;
+        }
+        // Other error, proceed without lock
+        return;
+      }
+    }
+    // Failed to acquire lock after max attempts, proceed anyway (best-effort)
+  }
+
+  /**
+   * Release the file lock.
+   */
+  private async releaseLock(): Promise<void> {
+    try {
+      await fs.promises.unlink(`${this.config.filePath}.lock`);
+    } catch {
+      // Ignore errors - lock may not exist
+    }
+  }
+
+  /**
    * Set the current session ID. Call this at the start of each hook invocation.
    * If the session changes, the cache will be cleared on next load.
    */
@@ -221,15 +270,19 @@ export class CacheManager<T> {
 
   /**
    * Load, modify with callback, and save in one operation.
+   * Uses file locking to prevent race conditions with concurrent writes.
    * Uses load() to ensure expiry/max entries are applied consistently.
    */
   async update(fn: (data: T) => T): Promise<void> {
+    await this.acquireLock();
     try {
       const data = await this.load();
       const updated = fn(data);
       await this.save(updated);
     } catch {
       // Ignore errors - cache is best-effort
+    } finally {
+      await this.releaseLock();
     }
   }
 }
