@@ -25,7 +25,6 @@ import { execSync } from "child_process";
 import * as path from "path";
 import {
   readStatusLineEntries,
-  STATUSLINE_CONFIG,
   type StatusLineEntry,
 } from "../utils/statusline-state.js";
 
@@ -168,7 +167,7 @@ const COMPLETED_FADE_MS = 5000;
  * same agent+tool, the running one is orphaned (written after completion
  * due to race condition) and should be hidden.
  *
- * Fade out: Each completed entry fades out individually after 5 seconds.
+ * Fade out: Each completed entry fades out 5 seconds after completion.
  */
 function filterEntries(entries: StatusLineEntry[]): StatusLineEntry[] {
   // Build set of agent+tool combos that have completed entries
@@ -234,10 +233,7 @@ async function main(): Promise<void> {
     // Build right side: agent activity
     let rightSide = "";
     if (input.transcript_path) {
-      const entries = await readStatusLineEntries(
-        input.transcript_path,
-        STATUSLINE_CONFIG.displayCount
-      );
+      const entries = await readStatusLineEntries(input.transcript_path);
 
       if (entries.length > 0) {
         const filtered = filterEntries(entries);

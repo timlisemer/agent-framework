@@ -16,13 +16,10 @@ import type { ExecutionType } from "../types.js";
 
 /**
  * Configuration for statusline display.
- * Change displayCount to show more/fewer entries.
  */
 export const STATUSLINE_CONFIG = {
-  /** Number of recent entries to display (we filter dynamically for running + last completed) */
-  displayCount: 10,
   /** Maximum entries to keep in state buffer */
-  maxEntries: 20,
+  maxEntries: 50,
   /** State expiry in milliseconds (5 minutes) */
   expiryMs: 5 * 60 * 1000,
 } as const;
@@ -173,19 +170,17 @@ export async function updateStatusLineState(
 }
 
 /**
- * Read the N most recent decisions for statusline display.
+ * Read all decisions for statusline display.
  * Called by the statusline script.
  *
  * @param transcriptPath - Session identifier (transcript path)
- * @param count - Number of entries to return (defaults to displayCount)
- * @returns Array of recent decision entries, newest first
+ * @returns Array of decision entries, newest first
  */
 export async function readStatusLineEntries(
-  transcriptPath: string,
-  count: number = STATUSLINE_CONFIG.displayCount
+  transcriptPath: string
 ): Promise<StatusLineEntry[]> {
   cacheManager.setSession(transcriptPath);
   const data = await cacheManager.load();
-  // Return newest N entries, reversed so newest is first
-  return data.entries.slice(-count).reverse();
+  // Return all entries, reversed so newest is first
+  return data.entries.slice().reverse();
 }
