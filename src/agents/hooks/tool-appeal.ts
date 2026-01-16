@@ -94,49 +94,61 @@ Allowed tools: ${allowedToolsStr}
   // Mark agent as running in statusline
   logAgentStarted("tool-appeal", toolName);
 
-  try {
-    // Run appeal evaluation via unified runner
-    const result = await runAgent(
-      { ...TOOL_APPEAL_AGENT, workingDir },
-      {
-        prompt: "Review this appeal for a denied tool call.",
-        context: `BLOCK REASON: ${originalReason}
+  // Retry with exponential backoff, fail closed on final failure
+  const maxRetries = 2;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      // Run appeal evaluation via unified runner
+      const result = await runAgent(
+        { ...TOOL_APPEAL_AGENT, workingDir },
+        {
+          prompt: "Review this appeal for a denied tool call.",
+          context: `BLOCK REASON: ${originalReason}
 TOOL CALL: ${toolDescription}
 ${slashCommandSection}${contextSection}
 RECENT CONVERSATION:
 ${transcript}`,
+        }
+      );
+
+      // Retry if format is invalid
+      const anthropic = getAnthropicClient();
+      const decision = await retryUntilValid(
+        anthropic,
+        getModelId(TOOL_APPEAL_AGENT.tier),
+        result.output,
+        toolDescription,
+        {
+          maxRetries: 2,
+          formatValidator: (text) =>
+            startsWithAny(text, ["UPHOLD", "OVERTURN: APPROVE"]),
+          formatReminder:
+            "Reply with EXACTLY: UPHOLD or OVERTURN: APPROVE",
+        }
+      );
+
+      // Check for overturn (user approved)
+      const overturned = decision.startsWith("OVERTURN: APPROVE") || decision === "APPROVE";
+
+      if (overturned) {
+        logApprove(result, "tool-appeal", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "User approved operation");
+      } else {
+        logDeny(result, "tool-appeal", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "User did not approve");
       }
-    );
 
-    // Retry if format is invalid
-    const anthropic = getAnthropicClient();
-    const decision = await retryUntilValid(
-      anthropic,
-      getModelId(TOOL_APPEAL_AGENT.tier),
-      result.output,
-      toolDescription,
-      {
-        maxRetries: 2,
-        formatValidator: (text) =>
-          startsWithAny(text, ["UPHOLD", "OVERTURN: APPROVE"]),
-        formatReminder:
-          "Reply with EXACTLY: UPHOLD or OVERTURN: APPROVE",
+      return { overturned };
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        // Exponential backoff: 100ms, 200ms
+        await new Promise((resolve) => setTimeout(resolve, 100 * Math.pow(2, attempt)));
       }
-    );
-
-    // Check for overturn (user approved)
-    const overturned = decision.startsWith("OVERTURN: APPROVE") || decision === "APPROVE";
-
-    if (overturned) {
-      logApprove(result, "tool-appeal", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "User approved operation");
-    } else {
-      logDeny(result, "tool-appeal", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "User did not approve");
     }
-
-    return { overturned };
-  } catch {
-    // On error, fail closed (uphold denial) and log completion to clear "running" status
-    logFastPathApproval("tool-appeal", hookName, toolName, workingDir, "Error path - fail closed");
-    return { overturned: false };
   }
+
+  // All retries failed - fail closed (uphold denial)
+  logFastPathApproval("tool-appeal", hookName, toolName, workingDir, `Error after ${maxRetries + 1} attempts - fail closed: ${lastError}`);
+  return { overturned: false };
 }

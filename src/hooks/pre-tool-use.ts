@@ -52,6 +52,7 @@ import {
   checkPendingValidation,
   clearPendingValidation,
   setValidationSession,
+  writePendingValidation,
 } from "../utils/pending-validation-cache.js";
 import {
   checkConfirmDeclined,
@@ -218,8 +219,17 @@ function spawnAsyncValidator(
       { detached: true, stdio: "ignore" }
     );
     child.unref();
-  } catch {
-    // Fail-open for performance - don't block on spawn errors
+  } catch (err) {
+    // Record spawn failure to cache so next tool call can detect it
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    writePendingValidation({
+      toolName,
+      filePath,
+      status: "failed",
+      failureReason: `Async validator spawn failed: ${errorMessage}`,
+    }).catch(() => {
+      // Ignore cache write errors - fail open for performance
+    });
   }
 }
 
@@ -589,7 +599,7 @@ async function main() {
       );
 
       if (appeal.overturned) {
-        // User approved - cache the error as acknowledged and continue flow
+        // User approved - cache the error as acknowledged and allow immediately
         await markErrorAcknowledged(blockReason);
         const originalIssue = errorCheckTranscript.match(
           /error TS\d+[^\n]*|Error:[^\n]*|failed[^\n]*|FAILED[^\n]*/i
@@ -597,8 +607,8 @@ async function main() {
         if (originalIssue) {
           await markErrorAcknowledged(originalIssue[0]);
         }
-        logFastPathContinue("error-acknowledge", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - continuing to next check");
-        // Continue to next step
+        logFastPathApproval("error-acknowledge", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - user approved");
+        outputAllow();
       } else {
         // User did not approve - block
         await recordStrictDenial();
@@ -651,8 +661,9 @@ async function main() {
         await recordStrictDenial();
         outputDeny(`First response misalignment: ${intentResult.reason}. Please respond to the user's message first.`);
       }
-      logFastPathContinue("response-align", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - continuing to next check");
-      // If overturned, continue to next step
+      // Appeal overturned - user approved, allow immediately
+      logFastPathApproval("response-align", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - user approved");
+      outputAllow();
     } else {
       // Response aligned - log continue and proceed to next step
       logFastPathContinue("response-align", "PreToolUse", input.tool_name, projectDir, "Response aligned - continuing to next check");
@@ -824,7 +835,9 @@ async function main() {
               await recordStrictDenial();
               outputDeny(`Style drift detected: ${styleDriftResult.reason}`);
             }
-            logFastPathContinue("style-drift", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - continuing to approval");
+            // Appeal overturned - user approved, allow immediately
+            logFastPathApproval("style-drift", "PreToolUse", input.tool_name, projectDir, "Appeal overturned - user approved");
+            outputAllow();
           } else {
             // Style check passed - log continue
             logFastPathContinue("style-drift", "PreToolUse", input.tool_name, projectDir, "Style check passed - continuing to approval");
@@ -917,6 +930,22 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err);
-  process.exit(1);
+  // Safety net: Always output a valid JSON response before exiting
+  // This prevents Claude Code from prompting for manual confirmation
+  const errorMessage = err instanceof Error ? err.message : String(err);
+  const output = JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: `Hook error: ${errorMessage}. Please try again.`,
+    },
+  });
+
+  process.stdout.write(output + "\n", () => {
+    console.error("PreToolUse hook error:", err);
+    process.exit(1);
+  });
+
+  // Fallback timeout in case write callback never fires
+  setTimeout(() => process.exit(1), 200);
 });

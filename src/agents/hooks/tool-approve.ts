@@ -94,13 +94,18 @@ export async function checkToolApproval(
   // Mark agent as running in statusline
   logAgentStarted("tool-approve", toolName);
 
-  try {
-    // Run initial evaluation via unified runner
-    const result = await runAgent(
-      { ...TOOL_APPROVE_AGENT, workingDir },
-      {
-        prompt: "Evaluate this tool call for safety and compliance.",
-        context: `PROJECT DIRECTORY: ${workingDir}
+  // Retry with exponential backoff, fail closed on final failure
+  const maxRetries = 2;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      // Run initial evaluation via unified runner
+      const result = await runAgent(
+        { ...TOOL_APPROVE_AGENT, workingDir },
+        {
+          prompt: "Evaluate this tool call for safety and compliance.",
+          context: `PROJECT DIRECTORY: ${workingDir}
 
 PROJECT RULES (from CLAUDE.md):
 ${rules || "No project-specific rules."}
@@ -108,42 +113,49 @@ ${highlightSection}
 TOOL TO EVALUATE:
 Tool: ${toolName}
 Input: ${JSON.stringify(toolInput)}`,
-      }
-    );
+        }
+      );
 
-    // Retry if format is invalid (must start with APPROVE or DENY:)
-    const anthropic = getAnthropicClient();
-    const decision = await retryUntilValid(
-      anthropic,
-      getModelId(TOOL_APPROVE_AGENT.tier),
-      result.output,
-      toolDescription,
-      {
-        maxRetries: 2,
-        formatValidator: (text) => startsWithAny(text, ["APPROVE", "DENY:"]),
-        formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
-      }
-    );
+      // Retry if format is invalid (must start with APPROVE or DENY:)
+      const anthropic = getAnthropicClient();
+      const decision = await retryUntilValid(
+        anthropic,
+        getModelId(TOOL_APPROVE_AGENT.tier),
+        result.output,
+        toolDescription,
+        {
+          maxRetries: 2,
+          formatValidator: (text) => startsWithAny(text, ["APPROVE", "DENY:"]),
+          formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
+        }
+      );
 
-    if (decision.startsWith("APPROVE")) {
-      logApprove(result, "tool-approve", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, decision);
-      return { approved: true };
+      if (decision.startsWith("APPROVE")) {
+        logApprove(result, "tool-approve", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, decision);
+        return { approved: true };
+      }
+
+      // Default to DENY for safety - extract reason from response
+      const reason = decision.startsWith("DENY: ")
+        ? decision.replace("DENY: ", "")
+        : `Malformed response: ${decision}`;
+
+      logDeny(result, "tool-approve", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, reason);
+
+      return {
+        approved: false,
+        reason,
+      };
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        // Exponential backoff: 100ms, 200ms
+        await new Promise((resolve) => setTimeout(resolve, 100 * Math.pow(2, attempt)));
+      }
     }
-
-    // Default to DENY for safety - extract reason from response
-    const reason = decision.startsWith("DENY: ")
-      ? decision.replace("DENY: ", "")
-      : `Malformed response: ${decision}`;
-
-    logDeny(result, "tool-approve", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, reason);
-
-    return {
-      approved: false,
-      reason,
-    };
-  } catch {
-    // On error, fail open and log completion to clear "running" status
-    logFastPathApproval("tool-approve", hookName, toolName, workingDir, "Error path - fail open");
-    return { approved: true };
   }
+
+  // All retries failed - fail closed (deny tool)
+  logFastPathApproval("tool-approve", hookName, toolName, workingDir, `Error after ${maxRetries + 1} attempts - fail closed: ${lastError}`);
+  return { approved: false, reason: "Tool approval failed due to internal error - please try again" };
 }
