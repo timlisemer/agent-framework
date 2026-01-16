@@ -162,14 +162,13 @@ function formatEntry(entry: StatusLineEntry): string {
 const COMPLETED_FADE_MS = 5000;
 
 /**
- * Filter entries to show: all running (except orphaned) + last N completed.
+ * Filter entries to show: all running (except orphaned) + recent completed.
  *
  * Orphan detection: If there's BOTH a running AND completed entry for the
  * same agent+tool, the running one is orphaned (written after completion
  * due to race condition) and should be hidden.
  *
- * Fade out: Completed entries older than 5 seconds are hidden, except for
- * the most recent completed entry which is always shown.
+ * Fade out: Each completed entry fades out individually after 5 seconds.
  */
 function filterEntries(entries: StatusLineEntry[]): StatusLineEntry[] {
   // Build set of agent+tool combos that have completed entries
@@ -192,11 +191,8 @@ function filterEntries(entries: StatusLineEntry[]): StatusLineEntry[] {
   const completed = entries.filter((e) => e.status === "completed");
   const now = Date.now();
 
-  // Filter completed: always keep the most recent, others fade after 5 seconds
-  const lastCompleted = completed.slice(0, 5).filter((entry, index) => {
-    // Always keep the most recent completed entry
-    if (index === 0) return true;
-    // Keep others only if they're less than 5 seconds old
+  // Filter completed: each entry fades out individually after 5 seconds
+  const lastCompleted = completed.filter((entry) => {
     return now - entry.timestamp < COMPLETED_FADE_MS;
   });
 
