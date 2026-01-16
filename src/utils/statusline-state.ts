@@ -29,6 +29,35 @@ export const STATUSLINE_CONFIG = {
 const COMPLETED_EXPIRY_MS = 5000;
 
 /**
+ * Schedule cleanup of a completed entry after the fade-out period.
+ * Spawns a non-blocking background task that removes the entry after 5 seconds.
+ * Uses .unref() to prevent the timer from keeping the process alive.
+ */
+function scheduleEntryCleanup(
+  transcriptPath: string,
+  agent: string,
+  toolName: string
+): void {
+  setTimeout(async () => {
+    try {
+      cacheManager.setSession(getSessionKey(transcriptPath));
+      await cacheManager.update((data) => ({
+        entries: data.entries.filter(
+          (e) =>
+            !(
+              e.agent === agent &&
+              e.toolName === toolName &&
+              e.status === "completed"
+            )
+        ),
+      }));
+    } catch {
+      // Ignore cleanup errors - best effort
+    }
+  }, COMPLETED_EXPIRY_MS).unref();
+}
+
+/**
  * Get session key from transcript path.
  * Uses parent directory so subagents share the same session as their parent.
  * Main session: ~/.claude/projects/{encoded-path}/{session-id}.jsonl
@@ -197,6 +226,9 @@ export async function updateStatusLineState(
       ],
     };
   });
+
+  // Schedule cleanup after fade-out period
+  scheduleEntryCleanup(transcriptPath, entry.agent, entry.toolName);
 }
 
 /**
