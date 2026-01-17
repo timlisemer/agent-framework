@@ -12,7 +12,7 @@
  */
 
 import type { TranscriptReadOptions } from "./transcript.js";
-import { validateTranscriptConfig, createTranscriptPreset } from "./transcript.js";
+import { validateTranscriptConfig } from "./transcript.js";
 
 /** Use Infinity to collect all messages of a type (scanner will exhaust transcript) */
 const ALL = Infinity;
@@ -24,22 +24,20 @@ const ALL = Infinity;
  * Trims tool output to focus on error-relevant lines.
  * Includes Task/Agent outputs so error-ack can see directive compliance.
  *
- * User message has maxStale to prevent stale directive re-checking.
+ * User message has maxStale: 1 to prevent stale directive re-checking.
  * Since error-ack runs on EVERY tool call, a user directive from 2+ entries
  * back has already been checked. Without maxStale, the same directive would
  * keep appearing with changing context, causing false "AI ignored directive" blocks.
- *
- * CONSTRAINT: maxStale must be >= assistant + toolResult (enforced at compile time)
  */
-export const ERROR_CHECK_COUNTS = createTranscriptPreset({
-  counts: { user: { count: 1, maxStale: 3 }, assistant: 1, toolResult: 2 },
+export const ERROR_CHECK_COUNTS: TranscriptReadOptions = {
+  counts: { user: { count: 1, maxStale: 1 }, assistant: 1, toolResult: 2 },
   toolResultOptions: {
     trim: true,
     maxLines: 20,
     // NOTE: Do NOT exclude Task/Agent - error-ack needs to see that agents were run
     // Otherwise it incorrectly thinks directives weren't followed
   },
-});
+};
 
 /**
  * For appeal decisions.
@@ -143,16 +141,14 @@ export const INTENT_ALIGNMENT_COUNTS: TranscriptReadOptions = {
  * that were already addressed through planning/implementation cycles.
  * toolResult is included so the hook can see if work was done between
  * the user message and now.
- *
- * CONSTRAINT: maxStale must be >= assistant + toolResult (enforced at compile time)
  */
-export const FIRST_RESPONSE_STOP_COUNTS = createTranscriptPreset({
+export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
   counts: {
     user: { count: 3, maxStale: 5 },
     assistant: 3,
     toolResult: 2,
   },
-});
+};
 
 /**
  * For checking recent tool approvals (e.g., ExitPlanMode).
