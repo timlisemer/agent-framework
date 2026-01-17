@@ -18,11 +18,12 @@ interface CachedUserMessage {
 interface RewindData {
   userMessages: CachedUserMessage[];
   firstResponseChecked: boolean;
+  checkedMessageHashes: Record<string, string[]>;
 }
 
 const cacheManager = new CacheManager<RewindData>({
   filePath: REWIND_CACHE_FILE,
-  defaultData: () => ({ userMessages: [], firstResponseChecked: false }),
+  defaultData: () => ({ userMessages: [], firstResponseChecked: false, checkedMessageHashes: {} }),
   expiryMs: REWIND_EXPIRY_MS,
   maxEntries: MAX_CACHED_MESSAGES,
   getTimestamp: (e) => (e as CachedUserMessage).timestamp,
@@ -177,4 +178,49 @@ export async function hasNewUserMessage(transcriptPath: string): Promise<boolean
   }
 
   return false;
+}
+
+/**
+ * Check if a user message has already been processed by a specific agent.
+ * Uses content hash for parallel-safe coordination.
+ *
+ * @param agentName - The agent name (e.g., "response-align", "error-acknowledge")
+ * @param messageContent - The user message content to check
+ * @returns true if this message was already checked by this agent
+ */
+export async function isMessageCheckedByAgent(
+  agentName: string,
+  messageContent: string
+): Promise<boolean> {
+  const data = await cacheManager.load();
+  const hash = hashString(messageContent);
+  const agentHashes = data.checkedMessageHashes[agentName] || [];
+  return agentHashes.includes(hash);
+}
+
+/**
+ * Mark a user message as checked by a specific agent.
+ * Atomic add - safe for parallel tool calls.
+ *
+ * @param agentName - The agent name (e.g., "response-align", "error-acknowledge")
+ * @param messageContent - The user message content to mark as checked
+ */
+export async function markMessageCheckedByAgent(
+  agentName: string,
+  messageContent: string
+): Promise<void> {
+  const hash = hashString(messageContent);
+  await cacheManager.update((data) => {
+    const agentHashes = data.checkedMessageHashes[agentName] || [];
+    if (!agentHashes.includes(hash)) {
+      return {
+        ...data,
+        checkedMessageHashes: {
+          ...data.checkedMessageHashes,
+          [agentName]: [...agentHashes, hash],
+        },
+      };
+    }
+    return data;
+  });
 }

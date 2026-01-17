@@ -25,6 +25,8 @@ import {
   markFirstResponseChecked,
   invalidateAllCaches,
   hasNewUserMessage,
+  isMessageCheckedByAgent,
+  markMessageCheckedByAgent,
 } from "../utils/rewind-cache.js";
 import {
   setDenialSession,
@@ -588,11 +590,23 @@ async function main() {
   });
 
   // Skip error-ack if tool matches suggested alternative (conservative exact match)
+  // Also skip if this message was already checked by error-acknowledge (per-agent tracking)
+  const lastUserContent = lastUserMessage?.content || "";
+  const errorAckAlreadyChecked = lastUserContent
+    ? await isMessageCheckedByAgent("error-acknowledge", lastUserContent)
+    : false;
+
   if (
     errorPreCheck.needsCheck &&
     hasErrorAckContext &&
-    !matchesSuggestedAlternative(input.tool_name, errorCheckTranscript)
+    !matchesSuggestedAlternative(input.tool_name, errorCheckTranscript) &&
+    !errorAckAlreadyChecked
   ) {
+    // Mark as checked BEFORE running (prevents parallel duplicates)
+    if (lastUserContent) {
+      await markMessageCheckedByAgent("error-acknowledge", lastUserContent);
+    }
+
     // Run error-acknowledge LLM agent
     const ackResult = await checkErrorAcknowledgment(
       errorCheckTranscript,
@@ -643,13 +657,18 @@ async function main() {
 
   // ============================================================
   // STEP 2: RESPONSE-ALIGN
-  // TS Pre-check: isFirstResponseChecked() = false (runs for ALL tools)
+  // Per-agent tracking: runs once per user message for response-align
   // Validates: preamble violations + intent alignment
   // If triggered: LLM → if block → appealHelper → decide
   // ============================================================
-  const currentFirstResponseChecked = await isFirstResponseChecked();
-  if (!currentFirstResponseChecked) {
-    // Mark as checked so we don't run again for subsequent tool calls in same turn
+  const responseAlignAlreadyChecked = lastUserContent
+    ? await isMessageCheckedByAgent("response-align", lastUserContent)
+    : false;
+
+  if (!responseAlignAlreadyChecked && lastUserContent) {
+    // Mark as checked BEFORE running (prevents parallel duplicates)
+    await markMessageCheckedByAgent("response-align", lastUserContent);
+    // Also mark the legacy flag for backward compatibility
     await markFirstResponseChecked();
 
     // Run response-alignment LLM agent (validates preamble + intent)

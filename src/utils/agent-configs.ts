@@ -794,7 +794,6 @@ IMPOSSIBLE VERIFICATION DRIFT (→ DRIFT):
 
 GOOD VERIFICATION:
   - "Run \`mcp__agent-framework__check\`" (local, always works)
-  - "Build and verify no TypeScript errors" (local)
   - Verification steps that come AFTER deployment in implementation order
 BAD VERIFICATION:
   - "curl -X POST $ENDPOINT..." when endpoint isn't deployed yet
@@ -805,7 +804,7 @@ ALLOW (→ OK):
 - Plan provides specific file paths with locations
 - Plan shows actual code changes or clear descriptions of changes
 - Plan has numbered implementation steps
-- Verification uses local tools (check MCP, build commands) or comes after deploy
+- Verification uses mcp__agent-framework__check tool (never manual build/lint/test commands)
 - Plan is work-in-progress (partial plans are fine, they are built iteratively)
 - Simple single-file changes that are self-explanatory
 

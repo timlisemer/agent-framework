@@ -47,6 +47,11 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: "Use mcp__agent-framework__check" },
   { pattern: /\b(tsc|npx\s+tsc)\b/, name: "tsc", alternative: "LLMs are not supposed to build projects. Use mcp__agent-framework__check to verify code compiles" },
 
+  // Lint commands - should use check tool
+  { pattern: /\bnpm\s+run\s+lint\b/, name: "npm lint", alternative: "Use mcp__agent-framework__check" },
+  { pattern: /\bbun\s+run\s+lint\b/, name: "bun lint", alternative: "Use mcp__agent-framework__check" },
+  { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: "Use mcp__agent-framework__check" },
+
   // Test commands - tests may not exist, use check for build verification
   { pattern: /\btest\b/, name: 'test command', alternative: 'Use mcp__agent-framework__check for build verification' },
 

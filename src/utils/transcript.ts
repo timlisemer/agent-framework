@@ -589,6 +589,10 @@ export async function readTranscriptExact(
   // Map tool_use_id -> tool_name for filtering tool_results
   const toolUseIdToName = new Map<string, string>();
 
+  // Track tool_use_ids that are actually collected (not excluded by staleness)
+  // This prevents orphaned tool_result blocks that reference excluded tool_use blocks
+  const collectedToolUseIds = new Set<string>();
+
   // Track slash command context if requested (scan backwards, use most recent)
   let slashCommandContext: SlashCommandContext | undefined;
 
@@ -703,6 +707,7 @@ export async function readTranscriptExact(
             excludeSlashCommandPrompts,
             toolResultOptions,
             toolUseIdToName,
+            collectedToolUseIds,
           });
         }
       } else if (role === 'assistant' && collected.assistant.length < targetAssistant) {
@@ -712,6 +717,14 @@ export async function readTranscriptExact(
           const text = extractTextFromContent(msgContent);
           if (text) {
             collected.assistant.push({ role: 'assistant', content: text, index: i });
+          }
+          // Track tool_use_ids from this assistant message (for orphan prevention)
+          if (Array.isArray(msgContent)) {
+            for (const block of msgContent) {
+              if (block.type === "tool_use" && block.id) {
+                collectedToolUseIds.add(block.id);
+              }
+            }
           }
         }
       }
@@ -802,6 +815,7 @@ function processUserEntry(
     excludeSlashCommandPrompts: boolean;
     toolResultOptions: TranscriptReadOptions['toolResultOptions'];
     toolUseIdToName: Map<string, string>;
+    collectedToolUseIds: Set<string>;
   }
 ): void {
   const {
@@ -811,6 +825,7 @@ function processUserEntry(
     excludeSlashCommandPrompts,
     toolResultOptions,
     toolUseIdToName,
+    collectedToolUseIds,
   } = config;
   const { trim = false, maxLines = 20, excludeToolNames = [] } = toolResultOptions ?? {};
 
@@ -827,6 +842,12 @@ function processUserEntry(
   } else if (Array.isArray(msgContent)) {
     for (const block of msgContent) {
       if (block.type === 'tool_result' && collected.toolResult.length < targetToolResult) {
+        // Skip orphaned tool_results whose tool_use block was excluded by staleness
+        // This prevents API errors: "unexpected tool_use_id found in tool_result blocks"
+        if (block.tool_use_id && !collectedToolUseIds.has(block.tool_use_id)) {
+          continue;
+        }
+
         // Check if this tool should be excluded
         if (block.tool_use_id && excludeToolNames.length > 0) {
           const toolName = toolUseIdToName.get(block.tool_use_id);
