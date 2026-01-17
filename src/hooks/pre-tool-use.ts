@@ -24,6 +24,7 @@ import {
   isFirstResponseChecked,
   markFirstResponseChecked,
   invalidateAllCaches,
+  hasNewUserMessage,
 } from "../utils/rewind-cache.js";
 import {
   setDenialSession,
@@ -284,10 +285,19 @@ async function main() {
 
       if (baseEligible) {
         // Check first-response rule: first tool after user message uses strict
-        const firstResponseChecked = await isFirstResponseChecked();
+        let firstResponseChecked = await isFirstResponseChecked();
         if (!firstResponseChecked) {
           // Fall through to strict validation
         } else {
+          // Check for new user message (race condition: user interrupt during parallel tool calls)
+          // This re-reads transcript and resets firstResponseChecked if new message found
+          const newMessage = await hasNewUserMessage(input.transcript_path);
+          if (newMessage) {
+            firstResponseChecked = false; // Fall through to strict validation
+          }
+        }
+
+        if (firstResponseChecked) {
           // Check other strict mode rules
           const strictCheck = await shouldUseStrictMode(input.tool_name, input.tool_input);
           if (!strictCheck.strict) {

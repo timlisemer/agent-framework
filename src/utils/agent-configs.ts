@@ -739,6 +739,8 @@ SOLUTION BRANCHING DRIFT (→ DRIFT):
 - Example DRIFT: "Option A: Add to logger (Problem: X) / Option B: Wait before flush (Problem: Y)"
 - The plan file is for EXECUTION, not for presenting choices - choices belong in conversation
 - IMPORTANT: Options must be written in chat BEFORE AskUserQuestion so the user can read full details before deciding
+- Even if plan has "Recommended Approach" section, having multiple Option/Approach blocks present is still DRIFT
+- The plan file should contain ONLY the chosen approach, not all alternatives with a recommendation
 
 NOTE: Numbered task organization like "Phase 1:", "Step 1:", "Task 1:" is ALLOWED - these organize work sequentially, not estimate time
 

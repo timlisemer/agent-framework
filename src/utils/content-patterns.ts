@@ -24,6 +24,13 @@ export const RULE_VIOLATION_PATTERNS: ContentPattern[] = [
   { pattern: /\btotal\s*(estimated\s*)?time\b/i, name: "total time estimate", message: "Remove time estimates from plans" },
   { pattern: /\b(week|day|month)\s*\d+:/i, name: "timeline marker", message: "Remove timeline markers from plans" },
   { pattern: /\btakes?\s+\d+/i, name: "duration estimate", message: "Remove duration estimates" },
+  // Solution branching - plans should be single path, not decision trees
+  { pattern: /\boption\s+[a-z]:/i, name: "solution branching", message: "Plan should have single approach, not multiple options" },
+  { pattern: /\boption\s+\d+:/i, name: "solution branching", message: "Plan should have single approach, not multiple options" },
+  { pattern: /\bapproach\s+[a-z]:/i, name: "solution branching", message: "Plan should have single approach, not multiple options" },
+  { pattern: /\bapproach\s+\d+:/i, name: "solution branching", message: "Plan should have single approach, not multiple options" },
+  { pattern: /\balternative\s+[a-z]:/i, name: "solution branching", message: "Plan should have single approach, not multiple options" },
+  { pattern: /\balternative\s+\d+:/i, name: "solution branching", message: "Plan should have single approach, not multiple options" },
 ];
 
 /**

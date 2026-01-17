@@ -128,3 +128,53 @@ export async function markFirstResponseChecked(): Promise<void> {
 export async function resetFirstResponseFlag(): Promise<void> {
   await cacheManager.update((data) => ({ ...data, firstResponseChecked: false }));
 }
+
+/**
+ * Check if transcript has a new user message that isn't cached yet.
+ * Used by lazy path to detect user interrupts during parallel tool calls.
+ *
+ * @param transcriptPath - Path to the transcript file
+ * @returns true if new user message detected (firstResponseChecked reset), false otherwise
+ */
+export async function hasNewUserMessage(transcriptPath: string): Promise<boolean> {
+  const data = await cacheManager.load();
+
+  // Read transcript to find last user message
+  let transcriptContent: string;
+  try {
+    transcriptContent = await fs.promises.readFile(transcriptPath, "utf-8");
+  } catch {
+    return false;
+  }
+
+  // Find last USER: line in transcript
+  const lines = transcriptContent.split("\n");
+  let lastUserContent = "";
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].startsWith("USER:")) {
+      // Collect multi-line user message
+      lastUserContent = lines[i].substring(5).trim();
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j].startsWith("ASSISTANT:") || lines[j].startsWith("TOOL_CALL:") || lines[j].startsWith("TOOL_RESULT:")) {
+          break;
+        }
+        lastUserContent += "\n" + lines[j];
+      }
+      break;
+    }
+  }
+
+  if (!lastUserContent) return false;
+
+  // Check if this message is already cached
+  const msgHash = hashString(lastUserContent);
+  const isCached = data.userMessages.some((m) => m.hash === msgHash);
+
+  if (!isCached) {
+    // New user message! Reset firstResponseChecked so strict path runs
+    await cacheManager.update((d) => ({ ...d, firstResponseChecked: false }));
+    return true;
+  }
+
+  return false;
+}
