@@ -11,6 +11,7 @@
  */
 
 import * as path from "path";
+import { execSync } from "child_process";
 import { CacheManager, getTempFilePath } from "./cache-manager.js";
 import type { DecisionType } from "../telemetry/types.js";
 import type { ExecutionType } from "../types.js";
@@ -58,14 +59,42 @@ function scheduleEntryCleanup(
 }
 
 /**
- * Get session key from transcript path.
- * Uses parent directory so subagents share the same session as their parent.
- * Main session: ~/.claude/projects/{encoded-path}/{session-id}.jsonl
- * Subagent: ~/.claude/projects/{encoded-path}/agent-{id}.jsonl
- * Both resolve to the same parent directory, sharing the statusLine.
+ * Cached process session ID (SID) to avoid repeated shell calls.
+ * The SID is inherited by all child processes, so subagents share
+ * the same SID as their parent Claude Code session.
+ */
+let cachedSid: string | undefined;
+
+/**
+ * Get the Unix process session ID (SID) for the current process.
+ * The SID is inherited by all child processes, making it ideal for
+ * grouping parent sessions with their subagents while isolating
+ * parallel Claude Code instances.
+ */
+function getProcessSessionId(): string {
+  if (cachedSid) return cachedSid;
+  try {
+    cachedSid = execSync(`ps -o sid= -p ${process.pid}`, {
+      encoding: "utf8",
+    }).trim();
+    return cachedSid;
+  } catch {
+    // Fallback to PID if ps fails (shouldn't happen on Unix)
+    return String(process.pid);
+  }
+}
+
+/**
+ * Get session key from transcript path and process session ID.
+ * Combines the project directory with the Unix SID to:
+ * 1. Isolate parallel Claude Code sessions (different SIDs)
+ * 2. Share statusLine between parent and subagents (same SID)
+ * 3. Automatically invalidate when Claude Code exits (SID no longer exists)
  */
 function getSessionKey(transcriptPath: string): string {
-  return path.dirname(transcriptPath);
+  const projectDir = path.dirname(transcriptPath);
+  const sid = getProcessSessionId();
+  return `${projectDir}:${sid}`;
 }
 
 /**

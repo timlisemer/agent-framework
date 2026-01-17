@@ -280,7 +280,7 @@ async function classifyStopResponse(
 
   // Add question hint section if regex detected potential questions
   const questionHintSection = questionHint && questionHint.length > 0
-    ? `\n=== POTENTIAL QUESTION PATTERNS (REGEX) ===\nThe following patterns were detected by regex analysis:\n${questionHint.join("\n")}\n\nThese MAY indicate questions. Verify semantically - question words in relative clauses (e.g., "handle what is being said", "debug what i am telling you") are NOT questions.\n=== END HINT ===\n`
+    ? `\n=== QUESTION PATTERNS DETECTED (REGEX) ===\nThe following patterns were detected and are LIKELY questions requiring user input:\n${questionHint.join("\n")}\n\nIMPORTANT: These patterns have HIGH precedence. Only classify as OK if you are CERTAIN the pattern is a false positive (e.g., relative clauses like "handle what is being said"). When in doubt, classify as QUESTION.\n=== END HINT ===\n`
     : "";
 
   const context = `USER MESSAGE:
@@ -330,6 +330,17 @@ Examples that ARE QUESTION:
 - "The build failed. Should I fix the linting errors or skip them?" (decision needed)
 - "Which approach do you prefer?" (requires user input)
 
+OPTION PRESENTATION (always QUESTION):
+When AI presents structured options in ANY of these formats, it is ALWAYS a QUESTION:
+- "Option A: ... Option B: ..."
+- "1. ... 2. ..." with preference question
+- "A) ... B) ..."
+- "Here are two approaches: ..."
+This includes when followed by ANY question like "prefer?", "want?", "thoughts?"
+Examples:
+- "Option A: Use env vars. Option B: Use process ID. Which do you prefer?" → QUESTION
+- "Here are two ways: 1. Simple approach 2. Complex approach. Which sounds better?" → QUESTION
+
 NOT QUESTION (use OK instead):
 - Open-ended "what's next": "Done! Do you have another topic?" "Anything else?" "What would you like to work on next?"
 - Rhetorical: "Why would this fail?" (thinking aloud)
@@ -338,7 +349,10 @@ NOT QUESTION (use OK instead):
 - Relative clauses: "handle what is being said", "debug what i am telling you"
 - Embedded clauses: "the reason why it failed"
 
-KEY TEST: Does the user need to make a SPECIFIC decision to proceed? If the AI is just asking "what's next" after completing work, that's OK - the user can simply give a new task.
+KEY TEST: Does the user need to make a SPECIFIC decision to proceed?
+- If AI presents options/choices → QUESTION (even if phrased softly)
+- If AI asks "what's next" after completing work → OK
+When regex detected a pattern AND the response contains option presentation, default to QUESTION.
 
 OK - Use when:
 - Task completion with open-ended follow-up ("Done. Anything else?")

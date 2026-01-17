@@ -58,11 +58,6 @@ import {
   writePendingValidation,
 } from "../utils/pending-validation-cache.js";
 import {
-  checkConfirmDeclined,
-  clearConfirmState,
-  setConfirmStateSession,
-} from "../utils/confirm-state-cache.js";
-import {
   setStrictModeSession,
   shouldUseStrictMode,
   recordDenial as recordStrictDenial,
@@ -255,7 +250,6 @@ async function main() {
 
   // Set sessions for all caches (ensures isolation between main session and subagents)
   setValidationSession(input.transcript_path);
-  setConfirmStateSession(input.transcript_path);
   setStrictModeSession(input.transcript_path);
   setTranscriptPath(input.transcript_path);
 
@@ -343,10 +337,9 @@ async function main() {
   );
 
   // Clear pending validation and confirm state if user provided new input
-  // (invalidates stale async validation failures and confirm DECLINED states)
+  // (invalidates stale async validation failures)
   if (hasAskUserAnswerEarly) {
     await clearPendingValidation();
-    await clearConfirmState();
   }
 
   const pendingFailure = await checkPendingValidation();
@@ -387,77 +380,14 @@ async function main() {
     "mcp__agent-framework__check", // Read-only diagnostics (lint/build check)
   ];
 
-  // MCP tools that require explicit user approval or slash command invocation
-  // These have side effects (git operations, expensive API calls)
-  const APPROVAL_REQUIRED_MCP_TOOLS = [
-    "mcp__agent-framework__commit", // Creates git commits
-    "mcp__agent-framework__push", // Pushes to remote
-    "mcp__agent-framework__confirm", // Expensive opus-tier analysis
-  ];
+  // MCP tools that require approval (commit/push/confirm) are handled by tool-approve blacklist
+  // They will be denied by tool-approve and then tool-appeal checks for slash command context
 
   if (
     LOW_RISK_TOOLS.includes(input.tool_name) ||
     READ_ONLY_MCP_TOOLS.includes(input.tool_name)
   ) {
     logFastPathApproval("low-risk-bypass", "PreToolUse", input.tool_name, projectDir, "Low-risk tool auto-approval");
-    outputAllow();
-    return;
-  }
-
-  // ============================================================
-  // STEP 3b: Approval-required MCP tools
-  // These require explicit user approval or slash command invocation
-  // Block by default, allow if user invoked slash command or explicitly approved
-  // ============================================================
-  if (APPROVAL_REQUIRED_MCP_TOOLS.includes(input.tool_name)) {
-    const toolNameMap: Record<string, string> = {
-      "mcp__agent-framework__commit": "commit",
-      "mcp__agent-framework__push": "push",
-      "mcp__agent-framework__confirm": "confirm",
-    };
-    const friendlyName = toolNameMap[input.tool_name] || input.tool_name;
-
-    // CRITICAL: Check if confirm already declined these changes
-    // This prevents AI from bypassing confirm's decision by calling commit again
-    // while the slash command is still in the transcript
-    if (input.tool_name === "mcp__agent-framework__commit") {
-      const confirmState = await checkConfirmDeclined();
-      if (confirmState.declined) {
-        await recordStrictDenial();
-        outputDeny(
-          `Cannot commit: confirm declined - ${confirmState.reason}. Address the issues first, then re-run /push or /commit.`
-        );
-        return;
-      }
-    }
-
-    const denyReason = `${friendlyName} requires explicit user approval. Use /${friendlyName} slash command or explicitly request ${friendlyName}.`;
-
-    // Get transcript for appeal - WITH slash command context detection
-    const transcriptResult = await readTranscriptExact(input.transcript_path, {
-      ...APPEAL_COUNTS,
-      includeSlashCommandContext: true,
-    });
-    const transcript = formatTranscriptResult(transcriptResult);
-
-    // Call appeal helper to check if user approved via slash command or explicit request
-    const appeal = await appealHelper(
-      input.tool_name,
-      `${input.tool_name} with ${JSON.stringify(input.tool_input).slice(0, 200)}`,
-      transcript,
-      denyReason,
-      projectDir,
-      "PreToolUse",
-      `MCP tool ${friendlyName} blocked by default - checking if user explicitly requested it or invoked /${friendlyName}`,
-      transcriptResult.slashCommandContext
-    );
-
-    if (!appeal.overturned) {
-      await recordStrictDenial();
-      outputDeny(denyReason);
-      return;
-    }
-    logFastPathApproval("appeal-overturn", "PreToolUse", input.tool_name, projectDir, `Appeal overturned - ${friendlyName} tool`);
     outputAllow();
     return;
   }
@@ -519,9 +449,6 @@ async function main() {
   // Detect rewind - if user rewound, clear all caches
   await detectRewind(input.transcript_path);
 
-  // NOTE: confirm/commit/push MCP tools are now handled in STEP 3b
-  // They will never reach this point (STEP 3b calls outputAllow/outputDeny)
-
   // ============================================================
   // STRICT VALIDATION FLOW
   // Step 1: Error-Acknowledge
@@ -575,7 +502,6 @@ async function main() {
   );
   if (hasAskUserAnswer) {
     await invalidateAllCaches();
-    await clearConfirmState();
   }
 
   // TS Pre-check: Only check TOOL_RESULT lines for error patterns
@@ -935,8 +861,11 @@ async function main() {
   );
 
   if (!decision.approved) {
-    // Get transcript for appeal
-    const approveTranscriptResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
+    // Get transcript for appeal - WITH slash command context for MCP tools
+    const approveTranscriptResult = await readTranscriptExact(input.transcript_path, {
+      ...APPEAL_COUNTS,
+      includeSlashCommandContext: true,
+    });
     const approveTranscript = formatTranscriptResult(approveTranscriptResult);
 
     // Call appeal helper
@@ -947,7 +876,8 @@ async function main() {
       decision.reason || "Tool denied",
       projectDir,
       "PreToolUse",
-      `tool-approve blocked: ${decision.reason}`
+      `tool-approve blocked: ${decision.reason}`,
+      approveTranscriptResult.slashCommandContext
     );
 
     if (!appeal.overturned) {
