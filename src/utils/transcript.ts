@@ -88,6 +88,110 @@ export interface MessageCounts {
   toolResult?: number | CountSpec;
 }
 
+// =============================================================================
+// COMPILE-TIME VALIDATION TYPES
+// =============================================================================
+// These types enforce maxStale >= contextCount at compile time.
+// If maxStale is smaller than the sum of other counts, the type becomes `never`
+// and TypeScript will error when trying to use it.
+
+/** Build a tuple of length N (for compile-time numeric comparison) */
+type BuildTuple<N extends number, T extends unknown[] = []> =
+  T["length"] extends N ? T : BuildTuple<N, [...T, unknown]>;
+
+/** Check if A >= B at compile time using tuple lengths */
+type GTE<A extends number, B extends number> =
+  BuildTuple<A> extends [...BuildTuple<B>, ...unknown[]] ? true : false;
+
+/** Extract count from a CountSpec or number */
+type ExtractCount<T> = T extends { count: infer C extends number }
+  ? C
+  : T extends number
+    ? T
+    : 0;
+
+/** Extract maxStale from a CountSpec (undefined if not present) */
+type ExtractMaxStale<T> = T extends { maxStale: infer M extends number }
+  ? M
+  : undefined;
+
+/**
+ * Validate that maxStale >= contextCount for user field.
+ * Returns the input type if valid, `never` if invalid.
+ */
+type ValidateUserMaxStale<
+  User,
+  Assistant,
+  ToolResult,
+> = ExtractMaxStale<User> extends number
+  ? GTE<
+      ExtractMaxStale<User>,
+      // @ts-expect-error - TS can't prove this is a number but it will be at runtime
+      ExtractCount<Assistant> extends number ? ExtractCount<ToolResult> extends number
+        ? [...BuildTuple<ExtractCount<Assistant>>, ...BuildTuple<ExtractCount<ToolResult>>]["length"]
+        : never : never
+    > extends true
+    ? User
+    : never
+  : User;
+
+/**
+ * Validated transcript read options.
+ * Use this type instead of TranscriptReadOptions when defining presets with maxStale.
+ * TypeScript will error at compile time if maxStale < contextCount.
+ *
+ * @example
+ * // This will compile:
+ * const valid: ValidatedTranscriptOptions<{ user: { count: 1; maxStale: 5 }; assistant: 2; toolResult: 2 }> = ...
+ *
+ * // This will NOT compile (maxStale: 1 < assistant + toolResult = 4):
+ * const invalid: ValidatedTranscriptOptions<{ user: { count: 1; maxStale: 1 }; assistant: 2; toolResult: 2 }> = ...
+ */
+export type ValidatedTranscriptOptions<
+  Counts extends {
+    user?: number | { count: number; maxStale?: number };
+    assistant?: number | { count: number; maxStale?: number };
+    toolResult?: number | { count: number; maxStale?: number };
+  },
+> = {
+  counts: {
+    user: ValidateUserMaxStale<
+      Counts["user"],
+      Counts["assistant"],
+      Counts["toolResult"]
+    >;
+    assistant: Counts["assistant"];
+    toolResult: Counts["toolResult"];
+  };
+  toolResultOptions?: {
+    trim?: boolean;
+    maxLines?: number;
+    excludeToolNames?: string[];
+  };
+  excludeSystemReminders?: boolean;
+  excludeSlashCommandPrompts?: boolean;
+  includeFirstUserMessage?: boolean;
+};
+
+/**
+ * Helper function to create validated transcript options.
+ * Will cause compile-time error if maxStale < contextCount.
+ */
+export function createTranscriptPreset<
+  const U extends number | { count: number; maxStale?: number } | undefined,
+  const A extends number | undefined,
+  const TR extends number | undefined,
+>(
+  options: TranscriptReadOptions & {
+    counts: { user?: U; assistant?: A; toolResult?: TR };
+  }
+): ValidateUserMaxStale<U, A, TR> extends never
+  ? "ERROR: maxStale must be >= assistant + toolResult"
+  : TranscriptReadOptions {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return options as any;
+}
+
 /**
  * Options for reading transcript with guaranteed counts.
  */
@@ -494,40 +598,41 @@ export function validateTranscriptConfig(
   const assistantSpec = normalizeCount(config.counts.assistant);
   const toolResultSpec = normalizeCount(config.counts.toolResult);
 
-  // Validate user maxStale: need enough assistant + toolResult context
+  // Validate user maxStale: maxStale must be >= context count
+  // If maxStale < contextCount, user messages will be pushed out by collected context
   if (userSpec.maxStale !== undefined) {
     const contextCount = assistantSpec.count + toolResultSpec.count;
-    if (contextCount < userSpec.maxStale) {
+    if (userSpec.maxStale < contextCount) {
       throw new Error(
         `TranscriptConfig "${configName}" invalid:\n` +
-        `  user.maxStale (${userSpec.maxStale}) > assistant.count + toolResult.count (${contextCount})\n` +
-        `  Stale user messages will be excluded but there's not enough context\n` +
-        `  to determine if they were addressed. Increase assistant or toolResult counts.`
+        `  user.maxStale (${userSpec.maxStale}) < assistant.count + toolResult.count (${contextCount})\n` +
+        `  User messages will be excluded because context entries push them beyond maxStale.\n` +
+        `  Increase maxStale or reduce assistant/toolResult counts.`
       );
     }
   }
 
-  // Validate assistant maxStale: need enough user + toolResult context
+  // Validate assistant maxStale: maxStale must be >= context count
   if (assistantSpec.maxStale !== undefined) {
-    const contextCount = userSpec.count + toolResultSpec.count;
-    if (typeof userSpec.count === "number" && contextCount < assistantSpec.maxStale) {
+    const contextCount = (typeof userSpec.count === "number" ? userSpec.count : 0) + toolResultSpec.count;
+    if (assistantSpec.maxStale < contextCount) {
       throw new Error(
         `TranscriptConfig "${configName}" invalid:\n` +
-        `  assistant.maxStale (${assistantSpec.maxStale}) > user.count + toolResult.count (${contextCount})\n` +
-        `  Stale assistant messages will be excluded but there's not enough context.`
+        `  assistant.maxStale (${assistantSpec.maxStale}) < user.count + toolResult.count (${contextCount})\n` +
+        `  Assistant messages will be excluded because context entries push them beyond maxStale.`
       );
     }
   }
 
-  // Validate toolResult maxStale: need enough user + assistant context
+  // Validate toolResult maxStale: maxStale must be >= context count
   if (toolResultSpec.maxStale !== undefined) {
     const userCount = typeof userSpec.count === "number" ? userSpec.count : 0;
     const contextCount = userCount + assistantSpec.count;
-    if (contextCount < toolResultSpec.maxStale) {
+    if (toolResultSpec.maxStale < contextCount) {
       throw new Error(
         `TranscriptConfig "${configName}" invalid:\n` +
-        `  toolResult.maxStale (${toolResultSpec.maxStale}) > user.count + assistant.count (${contextCount})\n` +
-        `  Stale tool results will be excluded but there's not enough context.`
+        `  toolResult.maxStale (${toolResultSpec.maxStale}) < user.count + assistant.count (${contextCount})\n` +
+        `  Tool results will be excluded because context entries push them beyond maxStale.`
       );
     }
   }
