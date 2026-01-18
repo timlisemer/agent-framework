@@ -10,6 +10,7 @@ import {
 } from "../utils/rewind-cache.js";
 import { setTranscriptPath } from "../utils/execution-context.js";
 import { flushStatuslineUpdates } from "../utils/logger.js";
+import { appendSyntheticToolResult } from "../utils/transcript-writer.js";
 
 /**
  * Stop Hook: Response Check
@@ -82,6 +83,8 @@ async function main() {
   );
 
   if (!result.approved && result.systemMessage) {
+    // Append synthetic entry to transcript so agents can see this feedback
+    await appendSyntheticToolResult(input.transcript_path, "Stop", result.systemMessage);
     const output = JSON.stringify({
       decision: "block",
       reason: result.systemMessage,
