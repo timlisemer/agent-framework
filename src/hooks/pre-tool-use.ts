@@ -74,10 +74,9 @@ const __dirname = path.dirname(__filename);
 
 /**
  * Output structured JSON to allow the tool call and exit.
- * Uses process.stdout.write with callback to ensure output is flushed
- * before process.exit() - prevents lost output when stdout is piped.
+ * Uses Promise.race with a fallback timeout to ensure clean exit.
  */
-function outputAllow(): void {
+async function outputAllow(): Promise<never> {
   const output = JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
@@ -85,23 +84,24 @@ function outputAllow(): void {
     },
   });
 
-  // Outer fallback in case write callback never fires
-  setTimeout(() => process.exit(0), 200);
+  process.stdout.write(output + "\n");
+  flushTelemetry();
 
-  process.stdout.write(output + "\n", () => {
-    flushTelemetry();
-    flushStatuslineUpdates().finally(() => process.exit(0));
-    setTimeout(() => process.exit(0), 100);
-  });
+  // Wait for statusline flush or timeout (200ms fallback)
+  await Promise.race([
+    flushStatuslineUpdates(),
+    new Promise((r) => setTimeout(r, 200)),
+  ]);
+
+  process.exit(0);
 }
 
 /**
  * Output structured JSON to deny the tool call with a reason and exit.
- * Uses process.stdout.write with callback to ensure output is flushed
- * before process.exit() - prevents lost output when stdout is piped.
+ * Uses Promise.race with a fallback timeout to ensure clean exit.
  * Note: Caller should call recordStrictDenial() before this if needed.
  */
-function outputDeny(reason: string): void {
+async function outputDeny(reason: string): Promise<never> {
   const output = JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
@@ -110,14 +110,16 @@ function outputDeny(reason: string): void {
     },
   });
 
-  // Outer fallback in case write callback never fires
-  setTimeout(() => process.exit(0), 200);
+  process.stdout.write(output + "\n");
+  flushTelemetry();
 
-  process.stdout.write(output + "\n", () => {
-    flushTelemetry();
-    flushStatuslineUpdates().finally(() => process.exit(0));
-    setTimeout(() => process.exit(0), 100);
-  });
+  // Wait for statusline flush or timeout (200ms fallback)
+  await Promise.race([
+    flushStatuslineUpdates(),
+    new Promise((r) => setTimeout(r, 200)),
+  ]);
+
+  process.exit(0);
 }
 
 
@@ -235,15 +237,18 @@ async function main() {
   const input: PreToolUseHookInput = await new Promise((resolve, reject) => {
     let data = "";
     const timeout = setTimeout(() => reject(new Error("stdin timeout")), 30000);
-    process.stdin.on("data", (chunk) => (data += chunk));
-    process.stdin.on("end", () => {
+    const onData = (chunk: Buffer | string) => (data += chunk);
+    const onEnd = () => {
       clearTimeout(timeout);
+      process.stdin.removeListener("data", onData);
       try {
         resolve(JSON.parse(data));
       } catch (e) {
         reject(e);
       }
-    });
+    };
+    process.stdin.on("data", onData);
+    process.stdin.once("end", onEnd);
   });
 
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
@@ -911,7 +916,7 @@ async function main() {
   outputAllow();
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   // Safety net: Always output a valid JSON response before exiting
   // This prevents Claude Code from prompting for manual confirmation
   const errorMessage = err instanceof Error ? err.message : String(err);
@@ -923,11 +928,10 @@ main().catch((err) => {
     },
   });
 
-  process.stdout.write(output + "\n", () => {
-    console.error("PreToolUse hook error:", err);
-    process.exit(1);
-  });
+  process.stdout.write(output + "\n");
+  console.error("PreToolUse hook error:", err);
 
-  // Fallback timeout in case write callback never fires
-  setTimeout(() => process.exit(1), 200);
+  // Wait briefly for output to flush, then exit
+  await new Promise((r) => setTimeout(r, 200));
+  process.exit(1);
 });

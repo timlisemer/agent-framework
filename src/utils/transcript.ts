@@ -596,44 +596,50 @@ export async function readTranscriptExact(
   // Track slash command context if requested (scan backwards, use most recent)
   let slashCommandContext: SlashCommandContext | undefined;
 
+  // Parse all lines once upfront to avoid triple-parsing (performance optimization)
+  const parsedEntries: (TranscriptEntry | null)[] = allLines.map((line) => {
+    try {
+      return JSON.parse(line) as TranscriptEntry;
+    } catch {
+      return null;
+    }
+  });
+
   // First pass: build tool_use ID map from entire file
   // Also extract slash command context if requested
-  for (const line of allLines) {
-    try {
-      const entry: TranscriptEntry = JSON.parse(line);
-      if (entry.message?.role === "assistant" && Array.isArray(entry.message.content)) {
-        for (const block of entry.message.content) {
-          if (block.type === "tool_use" && block.id && block.name) {
-            toolUseIdToName.set(block.id, block.name);
+  for (const entry of parsedEntries) {
+    if (!entry) continue;
+
+    if (entry.message?.role === "assistant" && Array.isArray(entry.message.content)) {
+      for (const block of entry.message.content) {
+        if (block.type === "tool_use" && block.id && block.name) {
+          toolUseIdToName.set(block.id, block.name);
+        }
+      }
+    }
+
+    // Extract slash command context from user messages (forward scan, last one wins)
+    if (includeSlashCommandContext && entry.message?.role === "user") {
+      const msgContent = entry.message.content;
+      let textContent: string | undefined;
+
+      if (typeof msgContent === "string") {
+        textContent = msgContent;
+      } else if (Array.isArray(msgContent)) {
+        for (const block of msgContent) {
+          if (block.type === "text" && block.text) {
+            textContent = block.text;
+            break;
           }
         }
       }
 
-      // Extract slash command context from user messages (forward scan, last one wins)
-      if (includeSlashCommandContext && entry.message?.role === "user") {
-        const msgContent = entry.message.content;
-        let textContent: string | undefined;
-
-        if (typeof msgContent === "string") {
-          textContent = msgContent;
-        } else if (Array.isArray(msgContent)) {
-          for (const block of msgContent) {
-            if (block.type === "text" && block.text) {
-              textContent = block.text;
-              break;
-            }
-          }
-        }
-
-        if (textContent) {
-          const metadata = extractSlashCommandMetadata(textContent);
-          if (metadata) {
-            slashCommandContext = metadata;
-          }
+      if (textContent) {
+        const metadata = extractSlashCommandMetadata(textContent);
+        if (metadata) {
+          slashCommandContext = metadata;
         }
       }
-    } catch {
-      // Skip malformed
     }
   }
 
@@ -657,7 +663,7 @@ export async function readTranscriptExact(
   // - This prevents "AI ignored directive" false positives when AI already addressed it
   let scanDistance = 0;
 
-  for (let i = allLines.length - 1; i >= 0; i--) {
+  for (let i = parsedEntries.length - 1; i >= 0; i--) {
     scanDistance++; // Track how far back we've scanned from the end
 
     // Early exit if all quotas met
@@ -669,67 +675,64 @@ export async function readTranscriptExact(
       break;
     }
 
-    try {
-      const entry: TranscriptEntry = JSON.parse(allLines[i]);
+    const entry = parsedEntries[i];
+    if (!entry) continue;
 
-      // Synthesize tool_result for todo changes
-      // This makes todo state visible to all agents as part of the transcript
-      if (entry.toolUseResult?.newTodos) {
-        const todoSummary = formatTodoState(entry.toolUseResult.newTodos);
-        collected.toolResult.push({
-          role: "tool_result",
-          content: `[TodoWrite] Current tasks:\n${todoSummary}`,
-          index: i,
+    // Synthesize tool_result for todo changes
+    // This makes todo state visible to all agents as part of the transcript
+    if (entry.toolUseResult?.newTodos) {
+      const todoSummary = formatTodoState(entry.toolUseResult.newTodos);
+      collected.toolResult.push({
+        role: "tool_result",
+        content: `[TodoWrite] Current tasks:\n${todoSummary}`,
+        index: i,
+      });
+    }
+
+    if (!entry.message) continue;
+
+    const { role, content: msgContent } = entry.message;
+
+    if (role === 'user') {
+      // Check staleness: skip user messages beyond maxStale distance.
+      // This prevents old user directives from being re-checked after they've
+      // already been processed by previous hook invocations.
+      const userStale = userSpec.maxStale !== undefined && scanDistance > userSpec.maxStale;
+      const toolResultStale = toolResultSpec.maxStale !== undefined && scanDistance > toolResultSpec.maxStale;
+
+      // Only process if at least one type is still collectible and not stale
+      if (
+        (!userStale && collected.user.length < targetUser) ||
+        (!toolResultStale && collected.toolResult.length < targetToolResult)
+      ) {
+        processUserEntry(msgContent, i, collected, {
+          // Pass 0 as target if stale to prevent collection
+          targetUser: userStale ? 0 : targetUser,
+          targetToolResult: toolResultStale ? 0 : targetToolResult,
+          excludeSystemReminders,
+          excludeSlashCommandPrompts,
+          toolResultOptions,
+          toolUseIdToName,
+          collectedToolUseIds,
         });
       }
-
-      if (!entry.message) continue;
-
-      const { role, content: msgContent } = entry.message;
-
-      if (role === 'user') {
-        // Check staleness: skip user messages beyond maxStale distance.
-        // This prevents old user directives from being re-checked after they've
-        // already been processed by previous hook invocations.
-        const userStale = userSpec.maxStale !== undefined && scanDistance > userSpec.maxStale;
-        const toolResultStale = toolResultSpec.maxStale !== undefined && scanDistance > toolResultSpec.maxStale;
-
-        // Only process if at least one type is still collectible and not stale
-        if (
-          (!userStale && collected.user.length < targetUser) ||
-          (!toolResultStale && collected.toolResult.length < targetToolResult)
-        ) {
-          processUserEntry(msgContent, i, collected, {
-            // Pass 0 as target if stale to prevent collection
-            targetUser: userStale ? 0 : targetUser,
-            targetToolResult: toolResultStale ? 0 : targetToolResult,
-            excludeSystemReminders,
-            excludeSlashCommandPrompts,
-            toolResultOptions,
-            toolUseIdToName,
-            collectedToolUseIds,
-          });
+    } else if (role === 'assistant' && collected.assistant.length < targetAssistant) {
+      // Check staleness for assistant messages
+      const assistantStale = assistantSpec.maxStale !== undefined && scanDistance > assistantSpec.maxStale;
+      if (!assistantStale) {
+        const text = extractTextFromContent(msgContent);
+        if (text) {
+          collected.assistant.push({ role: 'assistant', content: text, index: i });
         }
-      } else if (role === 'assistant' && collected.assistant.length < targetAssistant) {
-        // Check staleness for assistant messages
-        const assistantStale = assistantSpec.maxStale !== undefined && scanDistance > assistantSpec.maxStale;
-        if (!assistantStale) {
-          const text = extractTextFromContent(msgContent);
-          if (text) {
-            collected.assistant.push({ role: 'assistant', content: text, index: i });
-          }
-          // Track tool_use_ids from this assistant message (for orphan prevention)
-          if (Array.isArray(msgContent)) {
-            for (const block of msgContent) {
-              if (block.type === "tool_use" && block.id) {
-                collectedToolUseIds.add(block.id);
-              }
+        // Track tool_use_ids from this assistant message (for orphan prevention)
+        if (Array.isArray(msgContent)) {
+          for (const block of msgContent) {
+            if (block.type === "tool_use" && block.id) {
+              collectedToolUseIds.add(block.id);
             }
           }
         }
       }
-    } catch {
-      // Skip malformed
     }
   }
 
@@ -739,42 +742,38 @@ export async function readTranscriptExact(
 
     // Only scan forward if first message might not be in our collection
     if (firstCollectedIndex > 0) {
-      // Scan forward to find the first valid user message
-      for (let i = 0; i < allLines.length; i++) {
+      // Scan forward to find the first valid user message (using pre-parsed entries)
+      for (let i = 0; i < parsedEntries.length; i++) {
         if (i >= firstCollectedIndex) break; // Stop at our earliest collected message
 
-        try {
-          const entry: TranscriptEntry = JSON.parse(allLines[i]);
-          if (!entry.message || entry.message.role !== "user") continue;
+        const entry = parsedEntries[i];
+        if (!entry || !entry.message || entry.message.role !== "user") continue;
 
-          const msgContent = entry.message.content;
-          let text: string | undefined;
+        const msgContent = entry.message.content;
+        let text: string | undefined;
 
-          if (typeof msgContent === "string") {
-            if (excludeSystemReminders && msgContent.startsWith("<system-reminder>")) continue;
-            if (excludeSlashCommandPrompts && isSlashCommandPrompt(msgContent)) continue;
-            text = msgContent;
-          } else if (Array.isArray(msgContent)) {
-            for (const block of msgContent) {
-              if (block.type === "text" && block.text) {
-                if (excludeSystemReminders && block.text.startsWith("<system-reminder>")) continue;
-                if (excludeSlashCommandPrompts && isSlashCommandPrompt(block.text)) continue;
-                text = block.text;
-                break;
-              }
+        if (typeof msgContent === "string") {
+          if (excludeSystemReminders && msgContent.startsWith("<system-reminder>")) continue;
+          if (excludeSlashCommandPrompts && isSlashCommandPrompt(msgContent)) continue;
+          text = msgContent;
+        } else if (Array.isArray(msgContent)) {
+          for (const block of msgContent) {
+            if (block.type === "text" && block.text) {
+              if (excludeSystemReminders && block.text.startsWith("<system-reminder>")) continue;
+              if (excludeSlashCommandPrompts && isSlashCommandPrompt(block.text)) continue;
+              text = block.text;
+              break;
             }
           }
+        }
 
-          if (text) {
-            // Found the first user message - prepend it if not already there
-            const alreadyCollected = collected.user.some((m) => m.index === i);
-            if (!alreadyCollected) {
-              collected.user.unshift({ role: "user", content: text, index: i });
-            }
-            break;
+        if (text) {
+          // Found the first user message - prepend it if not already there
+          const alreadyCollected = collected.user.some((m) => m.index === i);
+          if (!alreadyCollected) {
+            collected.user.unshift({ role: "user", content: text, index: i });
           }
-        } catch {
-          // Skip malformed
+          break;
         }
       }
     }

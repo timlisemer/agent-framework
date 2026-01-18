@@ -94,7 +94,7 @@ export class CacheManager<T> {
   /**
    * Acquire a file lock for atomic read-modify-write operations.
    * Uses exclusive file creation (wx flag) for cross-process locking.
-   * Stale locks (> 1 second old) are automatically removed.
+   * Stale locks (> 1 second old) are automatically removed using atomic rename.
    */
   private async acquireLock(): Promise<void> {
     const lockPath = `${this.config.filePath}.lock`;
@@ -112,7 +112,14 @@ export class CacheManager<T> {
           try {
             const stat = await fs.promises.stat(lockPath);
             if (Date.now() - stat.mtimeMs > 1000) {
-              await fs.promises.unlink(lockPath); // Remove stale lock
+              // Use atomic rename to avoid TOCTOU race with other processes
+              const tempPath = `${lockPath}.${process.pid}.stale`;
+              try {
+                await fs.promises.rename(lockPath, tempPath);
+                await fs.promises.unlink(tempPath);
+              } catch {
+                // Another process beat us to removing the stale lock, that's fine
+              }
               continue;
             }
           } catch {

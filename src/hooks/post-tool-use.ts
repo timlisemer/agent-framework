@@ -10,15 +10,18 @@ async function main() {
   await new Promise<PostToolUseHookInput>((resolve, reject) => {
     let data = "";
     const timeout = setTimeout(() => reject(new Error("stdin timeout")), 30000);
-    process.stdin.on("data", (chunk) => (data += chunk));
-    process.stdin.on("end", () => {
+    const onData = (chunk: Buffer | string) => (data += chunk);
+    const onEnd = () => {
       clearTimeout(timeout);
+      process.stdin.removeListener("data", onData);
       try {
         resolve(JSON.parse(data));
       } catch (e) {
         reject(e);
       }
-    });
+    };
+    process.stdin.on("data", onData);
+    process.stdin.once("end", onEnd);
   });
 
   // Clear error acknowledgment cache on ANY successful tool

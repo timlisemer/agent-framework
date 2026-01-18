@@ -153,14 +153,15 @@ export async function hasNewUserMessage(transcriptPath: string): Promise<boolean
   let lastUserContent = "";
   for (let i = lines.length - 1; i >= 0; i--) {
     if (lines[i].startsWith("USER:")) {
-      // Collect multi-line user message
-      lastUserContent = lines[i].substring(5).trim();
+      // Collect multi-line user message using array join (avoids O(n²) string concat)
+      const contentParts: string[] = [lines[i].substring(5).trim()];
       for (let j = i + 1; j < lines.length; j++) {
         if (lines[j].startsWith("ASSISTANT:") || lines[j].startsWith("TOOL_CALL:") || lines[j].startsWith("TOOL_RESULT:")) {
           break;
         }
-        lastUserContent += "\n" + lines[j];
+        contentParts.push(lines[j]);
       }
+      lastUserContent = contentParts.join("\n");
       break;
     }
   }
@@ -201,6 +202,7 @@ export async function isMessageCheckedByAgent(
 /**
  * Mark a user message as checked by a specific agent.
  * Atomic add - safe for parallel tool calls.
+ * Limits hashes per agent to MAX_CACHED_MESSAGES (20) to prevent unbounded growth.
  *
  * @param agentName - The agent name (e.g., "response-align", "error-acknowledge")
  * @param messageContent - The user message content to mark as checked
@@ -213,11 +215,13 @@ export async function markMessageCheckedByAgent(
   await cacheManager.update((data) => {
     const agentHashes = data.checkedMessageHashes[agentName] || [];
     if (!agentHashes.includes(hash)) {
+      // Add new hash and trim to MAX_CACHED_MESSAGES (keep most recent)
+      const newHashes = [...agentHashes, hash].slice(-MAX_CACHED_MESSAGES);
       return {
         ...data,
         checkedMessageHashes: {
           ...data.checkedMessageHashes,
-          [agentName]: [...agentHashes, hash],
+          [agentName]: newHashes,
         },
       };
     }

@@ -715,6 +715,8 @@ IMPORTANT CONTEXT RULES:
 - ASSISTANT messages show what was proposed/confirmed
 - If user approved a plan or said "continue", "go ahead", "yes" - the plan is approved
 - If user exited plan mode (ExitPlanMode) - the plan was approved
+- Any value the user states or confirms in the conversation counts as "user specified" - conversations evolve iteratively
+- Later user messages take precedence over earlier ones when they conflict
 - The conversation may contain QUOTED EXAMPLES of desired output formats, code snippets, or sample plans. These are EXAMPLES the user wants the AI to follow, NOT the actual request. The actual request is what the user is asking the AI to do (e.g., modify a prompt, create a feature). Do not confuse quoted examples with the request itself.
 
 DETECT DRIFT (→ DRIFT):

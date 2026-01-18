@@ -151,14 +151,20 @@ const cacheManager = new CacheManager<StatusLineData>({
 /**
  * Set of pending statusline update promises.
  * Used by flushStatuslineUpdates to ensure all writes complete before process exit.
+ * Limited to maxEntries to prevent unbounded growth if promises hang.
  */
 const pendingUpdates: Set<Promise<void>> = new Set();
 
 /**
  * Track a promise and remove it from the set when it completes.
  * Called by logger.ts to track statusline update promises.
+ * Drops new promises if at capacity to prevent memory issues.
  */
 export function trackStatuslinePromise(promise: Promise<void>): void {
+  // Limit to maxEntries (50) to prevent unbounded growth
+  if (pendingUpdates.size >= STATUSLINE_CONFIG.maxEntries) {
+    return;
+  }
   pendingUpdates.add(promise);
   promise.finally(() => pendingUpdates.delete(promise));
 }

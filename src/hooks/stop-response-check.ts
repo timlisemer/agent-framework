@@ -27,42 +27,42 @@ import { appendSyntheticToolResult } from "../utils/transcript-writer.js";
 
 /**
  * Exit process after flushing telemetry and statusline updates.
- * Uses process.stdout.write with callback to ensure any output is flushed
- * before process.exit() - prevents lost output when stdout is piped.
+ * Uses Promise.race with a fallback timeout to ensure clean exit.
  *
  * @param code - Exit code (default 0)
  * @param output - Optional output to write before exiting
  */
-function exitAfterFlush(code = 0, output?: string): void {
-  // Outer fallback in case write callback never fires
-  setTimeout(() => process.exit(code), 200);
-
-  const doExit = () => {
-    flushTelemetry();
-    flushStatuslineUpdates().finally(() => process.exit(code));
-    setTimeout(() => process.exit(code), 100);
-  };
-
+async function exitAfterFlush(code = 0, output?: string): Promise<never> {
   if (output) {
-    process.stdout.write(output + "\n", doExit);
-  } else {
-    doExit();
+    process.stdout.write(output + "\n");
   }
+  flushTelemetry();
+
+  // Wait for statusline flush or timeout (200ms fallback)
+  await Promise.race([
+    flushStatuslineUpdates(),
+    new Promise((r) => setTimeout(r, 200)),
+  ]);
+
+  process.exit(code);
 }
 
 async function main() {
   const input: StopHookInput = await new Promise((resolve, reject) => {
     let data = "";
     const timeout = setTimeout(() => reject(new Error("stdin timeout")), 30000);
-    process.stdin.on("data", (chunk) => (data += chunk));
-    process.stdin.on("end", () => {
+    const onData = (chunk: Buffer | string) => (data += chunk);
+    const onEnd = () => {
       clearTimeout(timeout);
+      process.stdin.removeListener("data", onData);
       try {
         resolve(JSON.parse(data));
       } catch (e) {
         reject(e);
       }
-    });
+    };
+    process.stdin.on("data", onData);
+    process.stdin.once("end", onEnd);
   });
 
   // Set session and check for rewind
