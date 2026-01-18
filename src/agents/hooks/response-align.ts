@@ -41,7 +41,7 @@ import { getAnthropicClient } from "../../utils/anthropic-client.js";
 import { logApprove, logDeny, logFastPathApproval, logFastPathDeny, logAgentStarted } from "../../utils/logger.js";
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
-import { readTranscriptExact } from "../../utils/transcript.js";
+import { readTranscriptExact, type TranscriptMessage } from "../../utils/transcript.js";
 import {
   INTENT_ALIGNMENT_COUNTS,
   FIRST_RESPONSE_STOP_COUNTS,
@@ -93,6 +93,16 @@ function hasPreambleConcern(ackText: string): boolean {
   }
 
   return false;
+}
+
+/**
+ * Find the most recent message by transcript index.
+ * readTranscriptExact scans backwards, so array order doesn't match chronological order.
+ */
+function getMostRecentMessage(messages: TranscriptMessage[]): TranscriptMessage {
+  return messages.reduce((latest, msg) =>
+    msg.index > latest.index ? msg : latest
+  );
 }
 
 /**
@@ -161,8 +171,8 @@ export async function checkResponseAlignment(
     return { approved: true };
   }
 
-  // Get last user message
-  const lastUserMessage = transcriptResult.user[transcriptResult.user.length - 1];
+  // Get most recent user message (highest index, not last in array)
+  const lastUserMessage = getMostRecentMessage(transcriptResult.user);
   const lastUserIndex = lastUserMessage.index;
   const userRequest = lastUserMessage.content;
 
@@ -578,8 +588,8 @@ export async function checkStopResponseAlignment(
     return { approved: true };
   }
 
-  const lastUserMessage = result.user[result.user.length - 1];
-  const lastAssistantMessage = result.assistant[result.assistant.length - 1];
+  const lastUserMessage = getMostRecentMessage(result.user);
+  const lastAssistantMessage = getMostRecentMessage(result.assistant);
 
   const userText = lastUserMessage.content;
   const assistantText = lastAssistantMessage.content;
