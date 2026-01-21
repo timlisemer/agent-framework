@@ -70,7 +70,8 @@ import { MODEL_TIERS } from "../types.js";
  * **Mode: direct** - All context (linter output) provided upfront
  *
  * The agent receives pre-gathered linter/make-check output and classifies
- * each issue as error or warning. Unused code is classified as ERROR.
+ * each issue as error, warning, or info. Unused code is classified as ERROR.
+ * Info captures important output like benchmark results and performance metrics.
  */
 export const CHECK_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'check',
@@ -92,12 +93,19 @@ Output EXACTLY this format:
 ## Warnings
 <Quote each warning with full context needed to locate and fix it>
 
+## Info
+<Important output that is neither error nor warning - max 5 lines total>
+
 CLASSIFICATION RULES:
 1. ERRORS are: compilation failures, type errors, syntax errors, and UNUSED CODE warnings
 2. WARNINGS are: style suggestions, lints, refactoring hints (like "if can be collapsed")
-3. Unused code (unused variables, functions, imports, dead code) counts as ERROR, not warning
+3. INFO is: benchmark results, performance metrics, test summaries, speedup numbers, timing data
+   - Only include if genuinely informative (not routine progress messages)
+   - Max 5 lines - keep it brief
+   - Examples: "CYCLES: 4590, Speedup: 32.2x", "Tests: 42 passed, 0 failed", "Build time: 2.3s"
+4. Unused code (unused variables, functions, imports, dead code) counts as ERROR, not warning
    - Unused code must be deleted, not suppressed with underscores, comments, or annotations
-4. Quote style: project uses double quotes ("") for all strings and imports
+5. Quote style: project uses double quotes ("") for all strings and imports
 
 CONTEXT PRESERVATION RULES (CRITICAL):
 - Include the COMMAND or STEP that produced each error (e.g., "docker buildx build", "tsc", "eslint")
@@ -109,12 +117,13 @@ CONTEXT PRESERVATION RULES (CRITICAL):
 - Example GOOD: "[stage-1 3/15] ADD https://github.com/.../s6-overlay-amd64.tar.xz failed: ERROR 404"
 
 REPORTING RULES:
-- Filter out noise (progress bars, timing info, download progress, etc.)
+- Filter out noise (progress bars, download progress, routine logs, etc.)
 - Do NOT analyze what the errors mean
 - Do NOT suggest fixes or recommendations
 - Do NOT provide policy guidance
 - Just report what the tools said with enough context to act on it
-- Status is FAIL if Errors > 0, PASS otherwise (warnings alone do not cause FAIL)`,
+- Status is FAIL if Errors > 0, PASS otherwise (warnings alone do not cause FAIL)
+- If no info worth reporting, omit the Info section or write "(none)"`,
   formatValidation: {
     validator: /## Results[\s\S]*Status:\s*(PASS|FAIL)/i,
     formatReminder: "Reply with ## Results containing Status: PASS or FAIL",
@@ -383,9 +392,22 @@ These patterns are detected automatically and represent hard rules:
 - build/check commands → DENY (AIs are NOT supposed to build projects. Use mcp__agent-framework__check instead to verify code compiles.)
 - cat/head/tail/grep/find → DENY (use Read/Grep/Glob tools)
 - git write operations → DENY (use MCP tools)
+- Code execution (python, node, ruby, perl) → DENY (add to Makefile check target, then use mcp__agent-framework__check)
 
 Do NOT approve blacklisted patterns even if the command "makes sense" or "seems useful".
 The blacklist exists precisely because these commands should never be used.
+
+=== CODE EXECUTION COMMANDS (SPECIAL HANDLING) ===
+
+When denying python/node/ruby/perl commands (especially complex ones like benchmarks, tests, or verification scripts):
+1. DENY the direct execution
+2. Suggest: "Add this command to your Makefile's 'check' target, then use mcp__agent-framework__check"
+3. The check MCP tool runs 'make check' and will execute these commands properly
+
+Example: python -c "from module import test; test(10, 16)" should be added to Makefile:
+  check:
+      python -c "from module import test; test(10, 16)"
+Then the AI uses mcp__agent-framework__check to run it.
 
 === UNIVERSAL RULES ===
 

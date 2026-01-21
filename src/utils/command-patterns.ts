@@ -65,11 +65,18 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bssh\s+/, name: 'ssh', alternative: 'Remote execution denied' },
 
   // Run commands - should not be in plans or CLAUDE.md verification sections
-  { pattern: /\bmake\s+run(-\w+)?\b/, name: 'make run', alternative: 'Run commands not allowed' },
-  { pattern: /\bnpm\s+run\s+(start|dev)\b/, name: 'npm start/dev', alternative: 'Run commands not allowed' },
-  { pattern: /\bbun\s+run\s+(start|dev)\b/, name: 'bun start/dev', alternative: 'Run commands not allowed' },
-  { pattern: /\bcargo\s+run\b/, name: 'cargo run', alternative: 'Run commands not allowed' },
-  { pattern: /\bgo\s+run\b/, name: 'go run', alternative: 'Run commands not allowed' },
+  { pattern: /\bmake\s+run(-\w+)?\b/, name: "make run", alternative: "Run commands not allowed" },
+  { pattern: /\bnpm\s+run\s+(start|dev)\b/, name: "npm start/dev", alternative: "Run commands not allowed" },
+  { pattern: /\bbun\s+run\s+(start|dev)\b/, name: "bun start/dev", alternative: "Run commands not allowed" },
+  { pattern: /\bcargo\s+run\b/, name: "cargo run", alternative: "Run commands not allowed" },
+  { pattern: /\bgo\s+run\b/, name: "go run", alternative: "Run commands not allowed" },
+
+  // Code execution commands - should be added to Makefile check target
+  { pattern: /\bpython\s+(-c\s+)?/, name: "python", alternative: "Add to Makefile check target, then use mcp__agent-framework__check" },
+  { pattern: /\bpython3\s+(-c\s+)?/, name: "python3", alternative: "Add to Makefile check target, then use mcp__agent-framework__check" },
+  { pattern: /\bnode\s+(-e\s+)?/, name: "node", alternative: "Add to Makefile check target, then use mcp__agent-framework__check" },
+  { pattern: /\bruby\s+(-e\s+)?/, name: "ruby", alternative: "Add to Makefile check target, then use mcp__agent-framework__check" },
+  { pattern: /\bperl\s+(-e\s+)?/, name: "perl", alternative: "Add to Makefile check target, then use mcp__agent-framework__check" },
 ];
 
 /**
@@ -77,19 +84,20 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
  * Maps pattern category to command substrings that match.
  */
 export const WORKAROUND_PATTERNS: Record<string, string[]> = {
-  'type-check': [
-    'make check',
-    'tsc',
-    'npx tsc',
-    'npm run check',
-    'npm run typecheck',
-    'bun run check',
-    'bun run typecheck',
-    'cargo check',
+  "type-check": [
+    "make check",
+    "tsc",
+    "npx tsc",
+    "npm run check",
+    "npm run typecheck",
+    "bun run check",
+    "bun run typecheck",
+    "cargo check",
   ],
-  build: ['make build', 'npm run build', 'bun run build', 'cargo build'],
-  lint: ['eslint', 'prettier', 'npm run lint', 'bun run lint', 'alejandra'],
-  test: ['test'],
+  build: ["make build", "npm run build", "bun run build", "cargo build"],
+  lint: ["eslint", "prettier", "npm run lint", "bun run lint", "alejandra"],
+  test: ["test"],
+  "code-exec": ["python ", "python3 ", "node ", "ruby ", "perl "],
 };
 
 /**

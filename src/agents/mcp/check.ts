@@ -2,7 +2,7 @@
  * Check Agent - Linter and Type-Check Summarizer
  *
  * This agent runs project linters and make check, then summarizes the results
- * without analysis or suggestions. It classifies issues as errors or warnings.
+ * without analysis or suggestions. It classifies issues as errors, warnings, or info.
  *
  * ## FLOW
  *
@@ -15,6 +15,7 @@
  *
  * - ERRORS: Compilation failures, type errors, syntax errors, UNUSED CODE
  * - WARNINGS: Style suggestions, lints, refactoring hints
+ * - INFO: Benchmark results, performance metrics, test summaries (max 5 lines)
  *
  * Unused code is classified as ERROR because it must be deleted, not suppressed.
  *
@@ -31,6 +32,9 @@
  *
  * ## Warnings
  * <quoted warnings>
+ *
+ * ## Info
+ * <important output like benchmarks, max 5 lines>
  * ```
  *
  * Status is FAIL if Errors > 0, PASS otherwise.
