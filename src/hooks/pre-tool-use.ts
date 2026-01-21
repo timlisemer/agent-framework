@@ -336,6 +336,10 @@ async function main() {
   // Read transcript early to detect new user messages before checking pending validation
   const earlyTranscriptResult = await readTranscriptExact(input.transcript_path, ERROR_CHECK_COUNTS);
 
+  // Extract last user message early for low-risk bypass message marking
+  const earlyLastUserMessage = earlyTranscriptResult.user[earlyTranscriptResult.user.length - 1];
+  const earlyLastUserContent = earlyLastUserMessage?.content || "";
+
   // Check if user sent a new message or answered AskUserQuestion - clears stale pending validations
   const hasAskUserAnswerEarly = earlyTranscriptResult.toolResult.some(
     (tr) => tr.content.includes("User answered") || tr.content.includes("answered Claude's questions") || tr.content.includes("→")
@@ -392,6 +396,12 @@ async function main() {
     LOW_RISK_TOOLS.includes(input.tool_name) ||
     READ_ONLY_MCP_TOOLS.includes(input.tool_name)
   ) {
+    // Mark message as checked for response-align BEFORE early return
+    // This ensures subsequent tool calls know the user's request was handled
+    // (prevents duplicate checking after MCP calls like "Run the mcp!!!!")
+    if (earlyLastUserContent) {
+      await markMessageCheckedByAgent("response-align", earlyLastUserContent);
+    }
     logFastPathApproval("low-risk-bypass", "PreToolUse", input.tool_name, projectDir, "Low-risk tool auto-approval");
     outputAllow();
     return;

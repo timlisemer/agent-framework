@@ -1246,6 +1246,31 @@ BLOCK if:
 
 If user said stop, wait, hold on, explain, pause → any action tool = BLOCK
 
+## PRIORITY 4: IMPERATIVE COMMAND SATISFACTION
+
+When user gives a SHORT IMPERATIVE COMMAND with emphasis:
+- "Run the mcp!!!!" / "run mcp" / "use mcp" / "call mcp"
+- "Run check" / "check it" / "do check"
+- "Do X" / "Fix it" / "Just do it"
+- Commands with !, !!, !!!! emphasis
+
+These commands are satisfied by MATCHING TOOL CALLS:
+- "Run the mcp" / "run mcp" / "call mcp" → mcp__* tool call satisfies request
+- "Run check" / "check it" → mcp__agent-framework__check satisfies request
+- "commit" / "push" → mcp__agent-framework__commit/push satisfies request
+
+MCP tool names that satisfy "run the mcp" type requests:
+- mcp__agent-framework__check → satisfies "run mcp", "run check", "check it"
+- mcp__agent-framework__commit → satisfies "commit" commands
+- mcp__agent-framework__push → satisfies "push" commands
+
+| User Message | Tool Call | Result |
+|-------------|-----------|--------|
+| Run the mcp!!!! | mcp__agent-framework__check | OK: MCP call satisfies "run mcp" |
+| run mcp | mcp__agent-framework__check | OK: matches request |
+| check the code | mcp__agent-framework__check | OK: satisfies "check" |
+| Run check | mcp__agent-framework__check | OK: exact match |
+
 ## EXAMPLES
 
 | User Message | Ack | Tool | Result |
