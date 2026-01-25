@@ -752,7 +752,6 @@ DETECT DRIFT (→ DRIFT):
 
 OVER-ENGINEERING DRIFT (→ DRIFT):
 - Plan includes time estimates like "Week 1:", "Day 1:", "takes 2-3 days", "Month 1:"
-- Check the === BLACKLISTED COMMANDS === section - any of these commands in a plan = DRIFT
 - Manual descriptions of expected behavior are fine (e.g., "Home shows unavailable until device reports")
 
 UNREQUESTED PARAMETERS DRIFT (→ DRIFT):
@@ -819,25 +818,29 @@ REQUIRED SPECIFICITY FOR CODE CHANGES:
 - What code to add/modify (actual snippets or clear description)
 - Where in the file (after which field, in which function)
 
-IMPOSSIBLE VERIFICATION DRIFT (→ DRIFT):
-- Verification steps that require deployment before deployment happens
-- Testing against remote endpoints ($ENDPOINT, production URLs) before deploy step
-- Verification that cannot be run locally (requires deployed services)
-- "curl to endpoint" tests listed before "deploy" step in implementation order
+VERIFICATION STRUCTURE (→ DRIFT if wrong):
+Plans with verification SHOULD have two subsections:
+1. Assistant Verification - AI runs \`mcp__agent-framework__check\` (automated)
+2. Manual User Verification - USER runs after AI completes (ssh, curl, browser testing)
 
-GOOD VERIFICATION:
-  - "Run \`mcp__agent-framework__check\`" (local, always works)
-  - Verification steps that come AFTER deployment in implementation order
-BAD VERIFICATION:
-  - "curl -X POST $ENDPOINT..." when endpoint isn't deployed yet
-  - "Verify in Grafana dashboard" before deploying dashboard changes
-  - Any remote service testing before the deploy step
+BLACKLIST COMMANDS IN PLANS:
+- Commands from === BLACKLISTED COMMANDS === are ALLOWED in "Manual User Verification" section
+- Same commands OUTSIDE that section → DRIFT: "Move \`{cmd}\` to Manual User Verification - this section is for user-executed testing (deployed endpoints, SSH, browser). The AI uses mcp__agent-framework__check instead."
+- If command's purpose is testing that mcp__agent-framework__check can handle (lint, build, tests) → DRIFT: suggest using mcp__agent-framework__check
+
+IMPOSSIBLE VERIFICATION (→ DRIFT):
+- Testing remote endpoints BEFORE deployment step in implementation order
+- "curl to endpoint" listed before "deploy" step
+
+GOOD: \`mcp__agent-framework__check\` for Assistant, ssh/curl/browser in Manual User Verification
+BAD: curl in Assistant Verification, or curl before deployment happens
 
 ALLOW (→ OK):
 - Plan provides specific file paths with locations
 - Plan shows actual code changes or clear descriptions of changes
 - Plan has numbered implementation steps
-- Verification uses mcp__agent-framework__check tool (never manual build/lint/test commands)
+- Assistant Verification uses mcp__agent-framework__check
+- Blacklisted commands in "Manual User Verification" section (user runs these, not AI)
 - Plan is work-in-progress (partial plans are fine, they are built iteratively)
 - Simple single-file changes that are self-explanatory
 
@@ -848,6 +851,7 @@ RULES:
 - BUT: Be STRICT about behavioral changes - if user didn't specify a parameter, don't invent it
 - When plan adds numbers/thresholds user didn't mention, flag as DRIFT
 - Be STRICT about verification - remote endpoint tests must come after deploy steps
+- When blacklisted command detected outside Manual User Verification, explain what that section is for
 
 Reply with EXACTLY:
 OK
