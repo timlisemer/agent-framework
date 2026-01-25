@@ -819,9 +819,13 @@ REQUIRED SPECIFICITY FOR CODE CHANGES:
 - Where in the file (after which field, in which function)
 
 VERIFICATION STRUCTURE (→ DRIFT if wrong):
-Plans with verification SHOULD have two subsections:
-1. Assistant Verification - AI runs \`mcp__agent-framework__check\` (automated)
-2. Manual User Verification - USER runs after AI completes (ssh, curl, browser testing)
+Plans with verification MUST use named subsections:
+- "Assistant Verification" - AI runs \`mcp__agent-framework__check\` (automated)
+- "Manual User Verification" - USER runs after AI completes (ssh, curl, browser testing)
+
+Generic "Verification" heading without these subsections → DRIFT: "Rename to 'Assistant Verification' (for AI-executed checks like mcp__agent-framework__check) or 'Manual User Verification' (for user-executed steps like ssh, curl, browser). A generic 'Verification' section is unclear about who executes what."
+
+It's OK to have only one subsection (e.g., just Assistant Verification if no user steps needed).
 
 BLACKLIST COMMANDS IN PLANS:
 - Commands from === BLACKLISTED COMMANDS === are ALLOWED in "Manual User Verification" section
@@ -832,8 +836,8 @@ IMPOSSIBLE VERIFICATION (→ DRIFT):
 - Testing remote endpoints BEFORE deployment step in implementation order
 - "curl to endpoint" listed before "deploy" step
 
-GOOD: \`mcp__agent-framework__check\` for Assistant, ssh/curl/browser in Manual User Verification
-BAD: curl in Assistant Verification, or curl before deployment happens
+GOOD: \`mcp__agent-framework__check\` under Assistant Verification, ssh/curl/browser under Manual User Verification
+BAD: Generic "Verification" section, curl in Assistant Verification, or curl before deployment happens
 
 ALLOW (→ OK):
 - Plan provides specific file paths with locations
