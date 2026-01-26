@@ -818,14 +818,17 @@ REQUIRED SPECIFICITY FOR CODE CHANGES:
 - What code to add/modify (actual snippets or clear description)
 - Where in the file (after which field, in which function)
 
-VERIFICATION STRUCTURE (→ DRIFT if wrong):
+VERIFICATION STRUCTURE (→ DRIFT if wrong - CHECK THIS CAREFULLY):
 Plans with verification MUST use named subsections:
 - "Assistant Verification" - AI runs \`mcp__agent-framework__check\` (automated)
 - "Manual User Verification" - USER runs after AI completes (ssh, curl, browser testing)
 
 Generic "Verification" heading without these subsections → DRIFT: "Rename to 'Assistant Verification' (for AI-executed checks like mcp__agent-framework__check) or 'Manual User Verification' (for user-executed steps like ssh, curl, browser). A generic 'Verification' section is unclear about who executes what."
+This includes: "## Verification", "Verification Steps", "Testing", or any heading with verification content.
+Phrases like "After implementation, X should..." without subsection naming → DRIFT.
 
 It's OK to have only one subsection (e.g., just Assistant Verification if no user steps needed).
+A generic "Verification" heading with NO named subsections is NEVER acceptable → always DRIFT.
 
 BLACKLIST COMMANDS IN PLANS:
 - Commands from === BLACKLISTED COMMANDS === are ALLOWED in "Manual User Verification" section
