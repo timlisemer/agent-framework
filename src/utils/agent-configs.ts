@@ -832,6 +832,7 @@ A generic "Verification" heading with NO named subsections is NEVER acceptable �
 
 BLACKLIST COMMANDS IN PLANS:
 - Commands from === BLACKLISTED COMMANDS === are ALLOWED in "Manual User Verification" section
+- Blacklisted commands in "Manual User Verification" → always OK (user decides what to run)
 - Same commands OUTSIDE that section → DRIFT: "Move \`{cmd}\` to Manual User Verification - this section is for user-executed testing (deployed endpoints, SSH, browser). The AI uses mcp__agent-framework__check instead."
 - If command's purpose is testing that mcp__agent-framework__check can handle (lint, build, tests) → DRIFT: suggest using mcp__agent-framework__check
 
