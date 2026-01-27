@@ -159,7 +159,7 @@ export const CONFIRM_AGENT: Omit<AgentConfig, 'workingDir'> = {
   tier: MODEL_TIERS.OPUS,
   mode: 'sdk',
   // Note: SDK mode doesn't support maxTokens - uses model defaults
-  maxTurns: 25,  // Increased to allow thorough investigation before verdict
+  maxTurns: 50,  // Allow thorough investigation before verdict
   systemPrompt: `You are a strict code quality gate. You have ONE job: evaluate changes and return a verdict.
 
 The code has already passed linting and type checks. Now evaluate the changes.
@@ -488,7 +488,7 @@ sqlite3: APPROVE only for read-only operations.
 
 These MCP tools require explicit user approval via slash command:
 - mcp__agent-framework__commit → DENY (use /commit or /push slash command)
-- mcp__agent-framework__push → DENY (use /push slash command)
+- mcp__agent-framework__push → DENY (use /push or /quickpush slash command)
 - mcp__agent-framework__confirm → DENY (use /commit or /push slash command)
 
 If you see any of these tools, DENY immediately. The tool-appeal agent will check if the user invoked the corresponding slash command.
@@ -535,6 +535,7 @@ The user invoked /commit, so they approved the commit operation. OVERTURN.
 Mapping of slash commands to MCP tools:
 - /commit → mcp__agent-framework__commit (creates git commits)
 - /push → mcp__agent-framework__push (pushes to remote), also allows mcp__agent-framework__commit
+- /quickpush → mcp__agent-framework__push (pushes to remote), also allows mcp__agent-framework__commit
 - /confirm → mcp__agent-framework__confirm (runs code quality analysis)
 
 If the blocked tool matches the slash command's allowed-tools list, OVERTURN immediately.
