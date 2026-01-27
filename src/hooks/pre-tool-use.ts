@@ -257,6 +257,7 @@ async function main() {
   setValidationSession(input.transcript_path);
   setStrictModeSession(input.transcript_path);
   setTranscriptPath(input.transcript_path);
+  setRewindSession(input.transcript_path);
 
   // ============================================================
   // STEP 1: Fast-path for FILE_TOOLS on trusted paths (LAZY VALIDATION)
@@ -459,7 +460,7 @@ async function main() {
   // Set session ID for cache invalidation on new session
   setSession(input.transcript_path);
   setDenialSession(input.transcript_path);
-  setRewindSession(input.transcript_path);
+  // setRewindSession already called at early session setup (line 260)
 
   // Detect rewind - if user rewound, clear all caches
   await detectRewind(input.transcript_path);
