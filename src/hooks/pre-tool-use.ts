@@ -385,17 +385,12 @@ async function main() {
     "Skill", // Invoke skills like /commit (user-initiated)
   ];
 
-  // Read-only MCP tools that can be auto-approved (no side effects)
-  const READ_ONLY_MCP_TOOLS = [
-    "mcp__agent-framework__check", // Read-only diagnostics (lint/build check)
-  ];
-
   // MCP tools that require approval (commit/push/confirm) are handled by tool-approve blacklist
   // They will be denied by tool-approve and then tool-appeal checks for slash command context
 
   if (
     LOW_RISK_TOOLS.includes(input.tool_name) ||
-    READ_ONLY_MCP_TOOLS.includes(input.tool_name)
+    (input.tool_name.startsWith("mcp__") && !/(commit|push|confirm)$/.test(input.tool_name))
   ) {
     // Mark message as checked for response-align BEFORE early return
     // This ensures subsequent tool calls know the user's request was handled
