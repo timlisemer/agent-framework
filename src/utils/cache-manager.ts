@@ -1,12 +1,14 @@
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { hashString } from "./hash-utils.js";
 
 /**
  * Base temp directory for all agent-framework cache files.
- * Using a dedicated subdirectory keeps /tmp clean.
+ * Using a dedicated subdirectory keeps the system temp dir clean.
+ * Resolves to /tmp/agent-framework on Linux, %TEMP%\agent-framework on Windows.
  */
-const TEMP_BASE_DIR = "/tmp/agent-framework";
+const TEMP_BASE_DIR = path.join(os.tmpdir(), "agent-framework");
 
 /**
  * Get the path for a cache file within the agent-framework temp directory.

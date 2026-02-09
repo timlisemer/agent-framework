@@ -1,11 +1,18 @@
 import path from "path";
 import { runCommand } from "./command.js";
 
+const isWindows = process.platform === "win32";
+const NULL_DEVICE = isWindows ? "NUL" : "/dev/null";
+const SUPPRESS_STDERR = isWindows ? "2>NUL" : "2>/dev/null";
+
 /**
  * Escape a file path for use in shell commands.
- * Uses single quotes and escapes any embedded single quotes.
+ * Uses single quotes on Unix, double quotes on Windows (cmd.exe).
  */
 function shellEscape(filePath: string): string {
+  if (isWindows) {
+    return '"' + filePath.replace(/"/g, '""') + '"';
+  }
   return "'" + filePath.replace(/'/g, "'\\''") + "'";
 }
 
@@ -143,24 +150,24 @@ export function getUncommittedChanges(workingDir: string): GitChanges {
   const untrackedFiles = runCommand("git ls-files --others --exclude-standard", workingDir);
 
   /**
-   * COMMAND: git diff --no-index /dev/null "<file>"
+   * COMMAND: git diff --no-index <null-device> "<file>"
    *
    * WHY: This is a trick to generate a diff for a file that git doesn't track.
-   *   --no-index = compare two files outside of git's index
-   *   /dev/null  = empty file (represents "nothing")
-   *   "<file>"   = the actual untracked file
+   *   --no-index    = compare two files outside of git's index
+   *   /dev/null|NUL = empty file (represents "nothing"; NUL on Windows)
+   *   "<file>"      = the actual untracked file
    *
    * This produces output like "diff --git a/dev/null b/file.ts" showing the
    * entire file content as additions (+lines). This way untracked files appear
    * in the same unified diff format as tracked file changes.
    *
-   * The "2>/dev/null || true" suppresses errors and ensures the command always
-   * succeeds (exit code 0) even if the file can't be read.
+   * Stderr is suppressed and the command is forced to succeed (exit 0)
+   * even if the file can't be read.
    */
   let untrackedDiff = "";
   for (const file of (untrackedFiles.output || "").split("\n").filter(Boolean)) {
     const escapedFile = shellEscape(file);
-    const fileDiff = runCommand(`git diff --no-index /dev/null ${escapedFile} 2>/dev/null || true`, workingDir);
+    const fileDiff = runCommand(`git diff --no-index ${NULL_DEVICE} ${escapedFile} ${SUPPRESS_STDERR} || ${isWindows ? "ver >NUL" : "true"}`, workingDir);
     untrackedDiff += fileDiff.output || "";
   }
 
@@ -186,9 +193,9 @@ function findTopmostRepo(startDir: string): string {
 
   // Traverse up to find if there's a parent git repo
   let parentDir = path.dirname(currentRepo);
-  while (parentDir && parentDir !== "/" && parentDir !== path.dirname(parentDir)) {
+  while (parentDir && parentDir !== path.dirname(parentDir)) {
     // Check if parent directory is inside a git repo
-    const parentGitResult = runCommand("git rev-parse --show-toplevel 2>/dev/null || echo ''", parentDir);
+    const parentGitResult = runCommand(`git rev-parse --show-toplevel ${SUPPRESS_STDERR} || ${isWindows ? "echo." : "echo ''"}`, parentDir);
     const parentRepo = (parentGitResult.output || "").trim();
 
     if (parentRepo && parentRepo !== currentRepo) {
@@ -217,11 +224,18 @@ export function getRepoInfo(workingDir: string): RepoInfo {
   const mainRepo = findTopmostRepo(workingDir);
   const mainRepoName = path.basename(mainRepo);
 
-  // Get submodule paths
-  const submoduleResult = runCommand("git submodule --quiet foreach 'echo $sm_path'", mainRepo);
+  // Get submodule paths via `git submodule status` (cross-platform, no shell variable expansion)
+  // Output format: " <hash> <path> (<description>)" or "-<hash> <path>" for uninitialized
+  const submoduleResult = runCommand("git submodule status", mainRepo);
   const submodulePaths = (submoduleResult.output || "")
     .split("\n")
-    .map((p: string) => p.trim())
+    .map((line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return "";
+      // Skip the leading hash (and optional - or + prefix), extract the path
+      const parts = trimmed.split(/\s+/);
+      return parts.length >= 2 ? parts[1] : "";
+    })
     .filter(Boolean);
 
   // Check each submodule for changes

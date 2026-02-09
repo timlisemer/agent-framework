@@ -12,15 +12,18 @@ import { initializeTelemetry } from "../telemetry/index.js";
 
 // Ensure PATH includes standard locations for subprocess spawning
 // Required for Claude Agent SDK to find node when running in Docker via `docker exec`
-const requiredPaths = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/local/sbin', '/usr/sbin', '/sbin'];
-const currentPath = process.env.PATH || '';
-const pathParts = currentPath.split(':').filter(Boolean);
-for (const p of requiredPaths) {
-  if (!pathParts.includes(p)) {
-    pathParts.push(p);
+// Only applies to Unix-like systems (Linux/macOS) - Windows has its own PATH defaults
+if (process.platform !== "win32") {
+  const requiredPaths = ['/usr/local/bin', '/usr/bin', '/bin', '/usr/local/sbin', '/usr/sbin', '/sbin'];
+  const currentPath = process.env.PATH || '';
+  const pathParts = currentPath.split(':').filter(Boolean);
+  for (const p of requiredPaths) {
+    if (!pathParts.includes(p)) {
+      pathParts.push(p);
+    }
   }
+  process.env.PATH = pathParts.join(':');
 }
-process.env.PATH = pathParts.join(':');
 
 initializeTelemetry();
 
