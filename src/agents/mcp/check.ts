@@ -8,7 +8,7 @@
  *
  * 1. Get uncommitted files info
  * 2. Detect and run project linter (ESLint, Cargo, Ruff, etc.)
- * 3. Run make check
+ * 3. Run check target (Justfile preferred, Makefile fallback)
  * 4. Summarize results via unified runner
  *
  * ## CLASSIFICATION
@@ -44,6 +44,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { execSync } from "child_process";
 import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CHECK_AGENT } from "../../utils/agent-configs.js";
@@ -53,6 +54,20 @@ import { logAgentStarted, logConfirm } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 
 const HOOK_NAME = "mcp__agent-framework__check";
+
+/**
+ * Check if a command is available on the system.
+ * Uses `where` on Windows and `command -v` on Unix/macOS.
+ */
+function isCommandAvailable(cmd: string): boolean {
+  try {
+    const check = process.platform === "win32" ? `where ${cmd}` : `command -v ${cmd}`;
+    execSync(check, { stdio: ["pipe", "pipe", "pipe"] });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Detect which linter is configured for the project.
@@ -112,18 +127,33 @@ function detectLinter(
 }
 
 /**
- * Find the directory containing a Makefile with a check target.
- * Checks the target directory first, then falls back to the main repo.
+ * Find a Justfile or Makefile with a check target.
+ * Prefers Justfile over Makefile. Checks target directory first, then main repo.
+ * Verifies that the required tool (just/make) is installed on the system.
+ *
+ * @returns Object with cmd/dir/type, or object with error string, or null if no file found
  */
-function findMakefileDir(workingDir: string, mainRepo: string): string | null {
-  // Check target directory first
-  if (fs.existsSync(path.join(workingDir, "Makefile"))) {
-    return workingDir;
-  }
+function findCheckRunner(
+  workingDir: string,
+  mainRepo: string
+): { cmd: string; dir: string; type: string } | { error: string } | null {
+  const runners = [
+    { file: "justfile", cmd: "just check 2>&1", type: "just", tool: "just" },
+    { file: "Justfile", cmd: "just check 2>&1", type: "just", tool: "just" },
+    { file: "Makefile", cmd: "make check 2>&1", type: "make", tool: "make" },
+  ];
 
-  // Fall back to main repo if different
-  if (mainRepo !== workingDir && fs.existsSync(path.join(mainRepo, "Makefile"))) {
-    return mainRepo;
+  const dirs = mainRepo !== workingDir ? [workingDir, mainRepo] : [workingDir];
+
+  for (const dir of dirs) {
+    for (const { file, cmd, type, tool } of runners) {
+      if (fs.existsSync(path.join(dir, file))) {
+        if (!isCommandAvailable(tool)) {
+          return { error: `Found ${file} in ${dir} but '${tool}' is not installed. Please install '${tool}' to run checks.` };
+        }
+        return { cmd, dir, type };
+      }
+    }
   }
 
   return null;
@@ -159,15 +189,18 @@ export async function runCheckAgent(workingDir: string, transcriptPath?: string)
     lintOutput = `LINTER OUTPUT${lintLocation} (exit code ${lint.exitCode}):\n${lint.output}\n`;
   }
 
-  // Step 3: Run make check (check workingDir first, then main repo)
+  // Step 3: Run check target (Justfile preferred, Makefile fallback)
   let checkOutput = "";
-  const makefileDir = findMakefileDir(workingDir, mainRepo);
-  if (makefileDir) {
-    const check = runCommand("make check 2>&1", makefileDir);
-    const checkLocation = makefileDir === workingDir ? "" : ` (from ${path.basename(makefileDir)})`;
-    checkOutput = `MAKE CHECK OUTPUT${checkLocation} (exit code ${check.exitCode}):\n${check.output}`;
+  const checkRunner = findCheckRunner(workingDir, mainRepo);
+  if (checkRunner && "error" in checkRunner) {
+    checkOutput = `CHECK OUTPUT: ${checkRunner.error}`;
+  } else if (checkRunner) {
+    const check = runCommand(checkRunner.cmd, checkRunner.dir);
+    const label = checkRunner.type === "just" ? "JUST CHECK" : "MAKE CHECK";
+    const checkLocation = checkRunner.dir === workingDir ? "" : ` (from ${path.basename(checkRunner.dir)})`;
+    checkOutput = `${label} OUTPUT${checkLocation} (exit code ${check.exitCode}):\n${check.output}`;
   } else {
-    checkOutput = "MAKE CHECK OUTPUT: No Makefile found";
+    checkOutput = "CHECK OUTPUT: No Justfile or Makefile found. The check agent expects a Justfile with a 'check' recipe, or a Makefile with a 'check' target.";
   }
 
   // Step 4: Use unified runner for analysis
