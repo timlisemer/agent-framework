@@ -18,8 +18,8 @@ import * as fs from "fs";
  * Append a synthetic tool_result entry to the transcript.
  * Format matches Claude Code's JSONL structure.
  *
- * NOTE: We omit tool_use_id to avoid orphan filtering in transcript.ts
- * (lines 847-849 skip tool_results whose tool_use_id has no matching tool_use block)
+ * NOTE: We omit tool_use_id since this is a synthetic entry with no corresponding
+ * tool_use block. The tool name is embedded in the content prefix instead.
  *
  * @param transcriptPath - Path to the transcript JSONL file
  * @param hookName - Name of the hook generating this message (e.g., "Stop")
@@ -36,7 +36,7 @@ export async function appendSyntheticToolResult(
       content: [
         {
           type: "tool_result",
-          // No tool_use_id - avoids orphan filtering
+          // No tool_use_id - synthetic entry, no corresponding tool_use block
           content: `[${hookName} Hook Feedback]\n${message}`,
         },
       ],
