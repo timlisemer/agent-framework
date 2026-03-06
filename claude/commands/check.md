@@ -6,7 +6,7 @@ allowed-tools: mcp__agent-framework__check
 
 1. IMMEDIATELY call mcp__agent-framework__check with no parameters.
 
-   - Do NOT run any Bash commands (make check, npm run build, cargo check, tsc, etc.)
+   - Do NOT run any Bash commands (make check, just check, npm run build, cargo check, tsc, etc.)
    - Do NOT read files or gather context first
    - Do NOT use any other tools
 

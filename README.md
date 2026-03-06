@@ -16,7 +16,7 @@ The framework implements 14 specialized agents organized into three categories:
 
 | Agent           | Model  | Purpose                                                      |
 | --------------- | ------ | ------------------------------------------------------------ |
-| check           | sonnet | Run linter + make check, return summary with recommendations |
+| check           | sonnet | Run linter + make/just check, return summary with recommendations |
 | confirm         | opus   | Binary quality gate: CONFIRMED or DECLINED                   |
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
@@ -332,7 +332,7 @@ Once configured, Claude Code can:
 
 ```
 > Use the check tool to verify code quality
-[Runs linter + make check, returns summary]
+[Runs linter + make/just check, returns summary]
 
 > Run confirm to check my changes
 CONFIRMED

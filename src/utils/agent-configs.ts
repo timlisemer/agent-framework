@@ -69,7 +69,7 @@ import { MODEL_TIERS } from "../types.js";
  * **Tier: sonnet** - Needs to parse complex error output accurately
  * **Mode: direct** - All context (linter output) provided upfront
  *
- * The agent receives pre-gathered linter/make-check output and classifies
+ * The agent receives pre-gathered linter/make/just-check output and classifies
  * each issue as error, warning, or info. Unused code is classified as ERROR.
  * Info captures important output like benchmark results and performance metrics.
  */
@@ -401,10 +401,10 @@ The blacklist exists precisely because these commands should never be used.
 
 When denying python/node/ruby/perl commands (especially complex ones like benchmarks, tests, or verification scripts):
 1. DENY the direct execution
-2. Suggest: "Add this command to your Makefile's 'check' target, then use mcp__agent-framework__check"
-3. The check MCP tool runs 'make check' and will execute these commands properly
+2. Suggest: "Add this command to your Justfile/Makefile 'check' target, then use mcp__agent-framework__check"
+3. The check MCP tool runs the project's Justfile/Makefile check target and will execute these commands properly
 
-Example: python -c "from module import test; test(10, 16)" should be added to Makefile:
+Example: python -c "from module import test; test(10, 16)" should be added to Justfile/Makefile:
   check:
       python -c "from module import test; test(10, 16)"
 Then the AI uses mcp__agent-framework__check to run it.
@@ -452,8 +452,8 @@ sqlite3: APPROVE only for read-only operations.
    - find → use Glob tool
    - echo > file → use Write tool
 
-3. Commands duplicating Makefile targets (check if Makefile exists first)
-   - If project has Makefile, deny raw build commands covered by make targets
+3. Commands duplicating Justfile/Makefile targets (check if Justfile/Makefile exists first)
+   - If project has Justfile/Makefile, deny raw build commands covered by just/make targets
 
 4. Non-read-only git commands
    - DENY: git commit, git push, git merge, git rebase, git reset, git checkout -b, git branch -d, git add
@@ -463,7 +463,7 @@ sqlite3: APPROVE only for read-only operations.
    - DENY commands that start processes surviving after Claude Code exits
 
 6. "Run" commands (application execution)
-   - ALWAYS DENY: make run, cargo run, npm run start, npm run dev, docker compose up
+   - ALWAYS DENY: make run, just run, cargo run, npm run start, npm run dev, docker compose up
    - No exceptions - run commands start long-running processes
 
 7. Secret/credential exposure
@@ -471,16 +471,19 @@ sqlite3: APPROVE only for read-only operations.
 
 8. System modifications outside project
 
-9. make check command
-   - DENY: make check (use MCP tool for better integration)
+9. make/just check command
+   - DENY: make check, just check (use MCP tool for better integration)
 
-10. build commands like make build, npm run build, etc.
+10. build commands like make build, just build, npm run build, etc.
     - DENY: AIs are NOT supposed to build projects. Use mcp__agent-framework__check instead to verify code compiles.
 
-11. curl/wget commands (network requests)
+11. package install commands (npm install, bun install, pnpm install)
+    - DENY: LLMs should not modify project dependencies
+
+12. curl/wget commands (network requests)
     - DENY by default (requires explicit user permission)
 
-12. ssh commands (remote execution)
+13. ssh commands (remote execution)
     - DENY: ssh <host> <command>
     - AI tools (Read, Grep, Glob) cannot operate over SSH
 
@@ -644,7 +647,7 @@ Rule: Only flag issues from the LAST 1-2 exchanges. Older content has been handl
 
 Real issues that need acknowledgment (must be RECENT - last 1-2 exchanges):
 - TypeScript errors: "error TS2304: Cannot find name 'foo'" at src/file.ts:42
-- Build failures: "make: *** [Makefile:10: build] Error 1"
+- Build failures: "make: *** [Makefile:10: build] Error 1" or "just: error: ..."
 - Test failures: "FAILED tests/foo.test.ts" with actual failure reason
 - Hook denials: "PreToolUse:Bash hook returned blocking error" with "Error: ..."
 - Hook denials that suggest alternatives: "use Read tool instead"
@@ -902,8 +905,8 @@ These commands should NOT appear in CLAUDE.md code examples:
 - echo > file → should use Write tool
 - git commit/push/add/merge/rebase/reset → should use MCP tools
 - ANY build/check/typecheck/test/lint/format/run commands → should use mcp__agent-framework__check
-  - This includes ALL languages and tools: make, npm, cargo, tsc, go, python, gradle, maven, etc.
-  - Examples: make build, npm run test, cargo check, tsc, go build, pytest, eslint, prettier, etc.
+  - This includes ALL languages and tools: make, just, npm, cargo, tsc, go, python, gradle, maven, etc.
+  - Examples: make build, just build, npm run test, cargo check, tsc, go build, pytest, eslint, prettier, etc.
   - No exceptions - all such commands are banned regardless of language or toolchain
 - curl/wget → requires explicit permission, should not be documented as allowed
 - See === BLACKLISTED COMMANDS === section for complete list

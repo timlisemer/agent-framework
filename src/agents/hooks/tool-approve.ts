@@ -16,7 +16,7 @@
  *
  * - File operations: Deny outside project, deny sensitive files
  * - Bash: Deny cd, deny tool duplication, deny git write ops
- * - Build: Deny make check/build (use MCP tools)
+ * - Build: Deny make/just check/build (use MCP tools)
  * - Network: Deny curl/wget by default
  *
  * See agent-configs.ts for full rule list.

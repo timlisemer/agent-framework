@@ -1,7 +1,7 @@
 /**
  * Check Agent - Linter and Type-Check Summarizer
  *
- * This agent runs project linters and make check, then summarizes the results
+ * This agent runs project linters and make/just check, then summarizes the results
  * without analysis or suggestions. It classifies issues as errors, warnings, or info.
  *
  * ## FLOW

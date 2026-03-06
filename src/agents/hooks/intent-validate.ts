@@ -178,26 +178,26 @@ ${context.lastAssistantMessage}`,
       }
     );
 
-    if (decision.startsWith("INTERVENE:")) {
-      const feedback = decision.replace("INTERVENE:", "").trim();
-
-      logDeny(result, "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, feedback);
-
-      return {
-        decision: "INTERVENE",
-        feedback,
-      };
+    if (decision.startsWith("OK")) {
+      logApprove(result, "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, "On-topic");
+      return { decision: "OK" };
     }
 
-    logApprove(result, "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, "On-topic");
+    if (decision.startsWith("INTERVENE:")) {
+      const feedback = decision.replace("INTERVENE:", "").trim();
+      logDeny(result, "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, feedback);
+      return { decision: "INTERVENE", feedback };
+    }
 
-    return { decision: "OK" };
+    // Fail closed if response is malformed after retries
+    logDeny(result, "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
+    return { decision: "INTERVENE", feedback: "Malformed response - retry" };
   } catch {
-    // On error, fail open (don't intervene)
-    logFastPathApproval("off-topic-check", hookName, "StopResponse", workingDir, "Error path - fail open");
+    // Fail closed on errors
+    logFastPathApproval("off-topic-check", hookName, "StopResponse", workingDir, "Error path - fail closed");
     return {
-      decision: "OK",
-      feedback: "Check error - skipped",
+      decision: "INTERVENE",
+      feedback: "Error during validation - retry",
     };
   }
 }

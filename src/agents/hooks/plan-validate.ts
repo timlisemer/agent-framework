@@ -126,23 +126,23 @@ export async function checkPlanIntent(
       }
     );
 
-    if (decision.startsWith("DRIFT:")) {
-      const feedback = decision.replace("DRIFT:", "").trim();
-
-      logDeny(result, "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, feedback);
-
-      return {
-        approved: false,
-        reason: feedback,
-      };
+    if (decision.startsWith("OK")) {
+      logApprove(result, "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Plan aligned");
+      return { approved: true };
     }
 
-    logApprove(result, "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Plan aligned");
+    if (decision.startsWith("DRIFT:")) {
+      const feedback = decision.replace("DRIFT:", "").trim();
+      logDeny(result, "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, feedback);
+      return { approved: false, reason: feedback };
+    }
 
-    return { approved: true };
+    // Fail closed if response is malformed after retries
+    logDeny(result, "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
+    return { approved: false, reason: "Malformed response - retry the edit" };
   } catch {
-    // On error, fail open (allow the write)
-    logFastPathApproval("plan-validate", hookName, toolName, workingDir, "Error path - fail open");
-    return { approved: true };
+    // Fail closed on errors
+    logFastPathApproval("plan-validate", hookName, toolName, workingDir, "Error path - fail closed");
+    return { approved: false, reason: "Error during validation - retry the edit" };
   }
 }

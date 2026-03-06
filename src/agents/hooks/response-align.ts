@@ -256,9 +256,9 @@ ${toolResultsText}`;
       reason,
     };
   } catch {
-    // On error, fail open and log completion to clear "running" status
-    logFastPathApproval("response-align", hookName, toolName, workingDir, "Error path - fail open");
-    return { approved: true };
+    // Fail closed on errors
+    logFastPathApproval("response-align", hookName, toolName, workingDir, "Error path - fail closed");
+    return { approved: false, reason: "Error during alignment check - retry" };
   }
 }
 
@@ -290,7 +290,7 @@ async function classifyStopResponse(
 
   // Add question hint section if regex detected potential questions
   const questionHintSection = questionHint && questionHint.length > 0
-    ? `\n=== QUESTION PATTERNS DETECTED (REGEX) ===\nThe following patterns were detected and are LIKELY questions requiring user input:\n${questionHint.join("\n")}\n\nIMPORTANT: These patterns have HIGH precedence. Only classify as OK if you are CERTAIN the pattern is a false positive (e.g., relative clauses like "handle what is being said"). When in doubt, classify as QUESTION.\n=== END HINT ===\n`
+    ? `\n=== QUESTION PATTERNS DETECTED (REGEX) ===\nThe following patterns were detected by regex and may be false positives:\n${questionHint.join("\n")}\n\nNOTE: Use these as a hint but classify based on the full context. Conversational responses, small talk, and polite offers to elaborate are OK even if they match question patterns.\n=== END HINT ===\n`
     : "";
 
   const context = `USER MESSAGE:
@@ -328,9 +328,14 @@ NOT PLAN_APPROVAL (these are QUESTION):
 - "The commit failed. Should I update the README and try again?" (error recovery)
 - "Want me to push now?" (next action question)
 
-QUESTION - Use ONLY when the AI asks something that REQUIRES a decision from the user:
+QUESTION - Use ONLY when ALL of these are true:
+1. The AI asks something that REQUIRES a specific decision from the user
+2. The AI CANNOT proceed with any concrete task/implementation without this answer
+3. The question is about a SPECIFIC technical or implementation choice (not conversational)
+
+Examples:
 - AI presents clear options/choices (A or B, option 1 vs 2)
-- AI asks for clarification needed to proceed
+- AI asks for clarification needed to proceed with implementation
 - AI asks yes/no about a SPECIFIC action ("Should I add error handling for this edge case?")
 - AI offers alternatives after failure ("Should I retry with X or try Y instead?")
 - AI asks "Should X happen?" or "Should X be done?" questions (not just "Should I")
@@ -362,6 +367,9 @@ NOT QUESTION (use OK instead):
 - Self-directed: "Let me check if this works..."
 - Relative clauses: "handle what is being said", "debug what i am telling you"
 - Embedded clauses: "the reason why it failed"
+- Polite elaboration offers: "Would you like me to explain further?", "Should I go into more detail?", "Can I help with anything else?"
+- Soft check-ins: "Does that make sense?", "You know?", "Right?"
+- Conversational responses to casual/social user messages
 
 KEY TEST: Does the user need to make a SPECIFIC decision to proceed?
 - If AI presents options/choices → QUESTION (even if phrased softly)
@@ -374,6 +382,9 @@ OK - Use when:
 - Relative clauses (question words used as pronouns)
 - AI properly addressed a previous stop hook error
 - Brief conversational answers to casual questions (e.g., user asks "are you curious?" → "Yes." is OK)
+- CONVERSATIONAL / SMALL TALK: AI responds to social/casual user messages (greetings, opinions, jokes, chitchat), shares thoughts or perspectives, makes friendly remarks, uses polite/hedging language ("Would you like to hear more?", "I can elaborate if you'd like"), or responds to meta-questions about itself. General discussion that doesn't block any specific task is always OK.
+
+DEFAULT: When in doubt between QUESTION and OK, prefer OK. Only use QUESTION when you are confident the AI is blocked on a specific implementation decision.
 
 Reply with EXACTLY one of: IGNORED_ERROR, PLAN_APPROVAL, QUESTION, or OK`;
 
@@ -418,8 +429,6 @@ const PLAIN_TEXT_QUESTION_PATTERNS = [
   /do you want\b/i,
   /do you prefer\b/i,
   /shall I\b/i,
-  /can I\b/i,
-  /may I\b/i,
   /let me know if\b/i,
   /what would you prefer/i,
 ];

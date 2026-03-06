@@ -139,23 +139,23 @@ export async function checkQuestionValidity(
       }
     );
 
-    if (decision.startsWith("BLOCK:")) {
-      const feedback = decision.replace("BLOCK:", "").trim();
-
-      logDeny(result, "question-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, feedback);
-
-      return {
-        approved: false,
-        reason: feedback,
-      };
+    if (decision.startsWith("ALLOW")) {
+      logApprove(result, "question-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Questions appropriate");
+      return { approved: true };
     }
 
-    logApprove(result, "question-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Questions appropriate");
+    if (decision.startsWith("BLOCK:")) {
+      const feedback = decision.replace("BLOCK:", "").trim();
+      logDeny(result, "question-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, feedback);
+      return { approved: false, reason: feedback };
+    }
 
-    return { approved: true };
+    // Fail closed if response is malformed after retries
+    logDeny(result, "question-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
+    return { approved: false, reason: "Malformed response - retry the question" };
   } catch {
-    // On error, fail open (allow the question)
-    logFastPathApproval("question-validate", hookName, toolName, workingDir, "Error path - fail open");
-    return { approved: true };
+    // Fail closed on errors
+    logFastPathApproval("question-validate", hookName, toolName, workingDir, "Error path - fail closed");
+    return { approved: false, reason: "Error during validation - retry the question" };
   }
 }

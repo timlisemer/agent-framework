@@ -1,4 +1,5 @@
 {
+  "model": "opusplan",
   "alwaysThinkingEnabled": true,
   "statusLine": {
     "type": "command",

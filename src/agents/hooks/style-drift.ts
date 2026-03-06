@@ -289,8 +289,8 @@ ${new_string}
       reason,
     };
   } catch {
-    // On error, fail open and log completion to clear "running" status
-    logFastPathApproval("style-drift", hookName, toolName, workingDir, "Error path - fail open");
-    return { approved: true };
+    // Fail closed on errors
+    logFastPathApproval("style-drift", hookName, toolName, workingDir, "Error path - fail closed");
+    return { approved: false, reason: "Error during style check - retry the edit" };
   }
 }

@@ -7,7 +7,7 @@
  * ## WHY DIRECT API?
  *
  * MCP agents were refactored from SDK streaming to direct API because:
- * - Commands are deterministic (linter, make check, git commands)
+ * - Commands are deterministic (linter, make/just check, git commands)
  * - No agent decision-making needed for tool selection
  * - Single API call is cheaper than multi-turn SDK conversations
  * - Prevents "overthinking" or unwanted tool calls
@@ -20,7 +20,7 @@
  *
  * commit → confirm → check
  *   │         │         │
- *   │         │         └─ Runs linter + make check (sonnet)
+ *   │         │         └─ Runs linter + make/just check (sonnet)
  *   │         └─ Analyzes git diff (opus)
  *   └─ Generates commit message + executes commit (haiku)
  */

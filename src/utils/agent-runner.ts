@@ -429,6 +429,12 @@ async function runDirectAgent(
       // OpenRouter: request usage/cost data in response
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...({ usage: { include: true } } as any),
+    }, {
+      // Disable SDK-level retries — framework's own retry loops (tool-approve,
+      // tool-appeal) handle retries with exponential backoff and fresh attempts.
+      // SDK retrying internally reuses the same connection pool, which just
+      // delays failure surfacing if the connection is broken.
+      maxRetries: 0,
     });
 
     // Extract usage data from response

@@ -131,12 +131,12 @@ Input: ${JSON.stringify(toolInput)}`,
       return `BLOCK: ${parsed.reason}`;
     }
 
-    // Default to OK if response is malformed after retries (fail open)
-    logApprove(result, "error-acknowledge", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
-    return "OK";
+    // Fail closed if response is malformed after retries
+    logDeny(result, "error-acknowledge", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
+    return "BLOCK: Malformed response - acknowledge the error explicitly";
   } catch {
-    // On error, fail open and log completion to clear "running" status
-    logFastPathApproval("error-acknowledge", hookName, toolName, workingDir, "Error path - fail open");
-    return "OK";
+    // Fail closed on error
+    logFastPathApproval("error-acknowledge", hookName, toolName, workingDir, "Error path - fail closed");
+    return "BLOCK: Error checking acknowledgment - acknowledge the error explicitly";
   }
 }

@@ -103,17 +103,24 @@ export async function validateClaudeMd(
       }
     );
 
-    if (decision.startsWith("DRIFT:")) {
-      const feedback = decision.replace("DRIFT:", "").trim();
-      logDeny(result, "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, feedback);
-      return { approved: false, reason: feedback };
+    if (decision.startsWith("OK")) {
+      logApprove(result, "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Valid CLAUDE.md edit");
+      return { approved: true };
     }
 
-    logApprove(result, "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Valid CLAUDE.md edit");
-    return { approved: true };
+    if (decision.startsWith("DRIFT:")) {
+      const feedback = decision.replace("DRIFT:", "").trim();
+      const fullFeedback = `${feedback}\nRemember: these rules apply to ALL content in the CLAUDE.md, not just the current edit.`;
+      logDeny(result, "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, fullFeedback);
+      return { approved: false, reason: fullFeedback };
+    }
+
+    // Fail closed if response is malformed after retries
+    logDeny(result, "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
+    return { approved: false, reason: "Malformed response - retry the edit" };
   } catch {
-    // Fail open on errors
-    logFastPathApproval("claude-md-validate", hookName, toolName, workingDir, "Error path - fail open");
-    return { approved: true };
+    // Fail closed on errors
+    logFastPathApproval("claude-md-validate", hookName, toolName, workingDir, "Error path - fail closed");
+    return { approved: false, reason: "Error during validation - retry the edit" };
   }
 }

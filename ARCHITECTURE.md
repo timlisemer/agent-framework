@@ -19,7 +19,7 @@ src/                                # TypeScript source
 
   agents/
     mcp/                            # MCP-exposed agents
-      check.ts                      # Runs linter + make check
+      check.ts                      # Runs linter + make/just check
       confirm.ts                    # Code quality gate (SDK mode)
       commit.ts                     # Generates commit message + commits
       push.ts                       # Executes git push
@@ -206,7 +206,7 @@ MCP agents chain together for verification:
 ```
 commit → confirm → check
   │         │         │
-  │         │         └─ Runs linter + make check (sonnet, direct)
+  │         │         └─ Runs linter + make/just check (sonnet, direct)
   │         └─ Analyzes git diff + investigates code (opus, SDK)
   └─ Generates commit message + executes commit (haiku, direct)
 ```
