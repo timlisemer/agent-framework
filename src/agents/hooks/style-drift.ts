@@ -251,8 +251,29 @@ export async function checkStyleDrift(
   const hintSection = formatStyleHints(styleChanges);
   const toolDescription = `Edit ${file_path}`;
 
+  // Truncate old/new strings to prevent excessively large prompts
+  // Style-drift only needs to verify if changes were user-requested
+  // The hintSection already describes what changed; raw content is supplementary
+  const MAX_CONTENT_LENGTH = 2000;
+  const truncatedOld = old_string.length > MAX_CONTENT_LENGTH
+    ? old_string.slice(0, MAX_CONTENT_LENGTH) + "\n... (truncated)"
+    : old_string;
+  const truncatedNew = new_string.length > MAX_CONTENT_LENGTH
+    ? new_string.slice(0, MAX_CONTENT_LENGTH) + "\n... (truncated)"
+    : new_string;
+
   // Mark agent as running in statusline
   logAgentStarted("style-drift", toolName);
+
+  // Timeout helper: ensures each attempt fails fast if LLM hangs
+  function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return Promise.race([
+      promise,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+      ),
+    ]);
+  }
 
   // Retry with exponential backoff, fail closed on final failure
   const maxRetries = 2;
@@ -260,11 +281,15 @@ export async function checkStyleDrift(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-        const result = await runAgent(
-        { ...STYLE_DRIFT_AGENT, workingDir },
-        {
-          prompt: "Verify if these style changes were requested.",
-          context: `${hintSection}
+      // Wrap LLM calls in timeout to prevent indefinite hangs
+      // 15s per attempt ensures worst-case is 3 × 15s = 45s before fail-closed
+      const { result, decision } = await withTimeout(
+        (async () => {
+          const result = await runAgent(
+            { ...STYLE_DRIFT_AGENT, workingDir },
+            {
+              prompt: "Verify if these style changes were requested.",
+              context: `${hintSection}
 STYLE PREFERENCES (from CLAUDE.md):
 ${stylePreferences || "Default: double quotes, follow existing file conventions"}
 
@@ -276,28 +301,40 @@ File: ${file_path}
 
 Old content:
 \`\`\`
-${old_string}
+${truncatedOld}
 \`\`\`
 
 New content:
 \`\`\`
-${new_string}
+${truncatedNew}
 \`\`\``,
-        }
-      );
+            }
+          );
 
-      // Retry if format is invalid (must start with APPROVE or DENY:)
-      const anthropic = getAnthropicClient();
-      const decision = await retryUntilValid(
-        anthropic,
-        getModelId(STYLE_DRIFT_AGENT.tier),
-        result.output,
-        toolDescription,
-        {
-          maxRetries: 2,
-          formatValidator: (text) => startsWithAny(text, ["APPROVE", "DENY:"]),
-          formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
-        }
+          // If runAgent returned an error, skip format validation and retry
+          // Error text (e.g., "[DIRECT ERROR] ...") isn't a malformatted response
+          if (!result.success) {
+            throw new Error(result.output);
+          }
+
+          // Retry if format is invalid (must start with APPROVE or DENY:)
+          const anthropic = getAnthropicClient();
+          const decision = await retryUntilValid(
+            anthropic,
+            getModelId(STYLE_DRIFT_AGENT.tier),
+            result.output,
+            toolDescription,
+            {
+              maxRetries: 2,
+              formatValidator: (text) => startsWithAny(text, ["APPROVE", "DENY:"]),
+              formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
+            }
+          );
+
+          return { result, decision };
+        })(),
+        15_000,
+        "style-drift LLM attempt"
       );
 
       if (decision.startsWith("APPROVE")) {

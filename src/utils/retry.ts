@@ -99,6 +99,10 @@ export async function retryUntilValid(
         // OpenRouter: request usage/cost data in response
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...({ usage: { include: true } } as any),
+      }, {
+        // Disable SDK-level retries — this function IS the retry mechanism
+        // Having the SDK silently retry underneath creates invisible double-timeouts
+        maxRetries: 0,
       });
 
       decision = extractTextFromResponse(retryResponse);
