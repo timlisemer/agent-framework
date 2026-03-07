@@ -208,19 +208,63 @@ export async function checkStyleDrift(
     return { approved: true };
   }
 
-  // LLM confirmation: Other style changes (semicolon, trailing comma) need verification
+  // Separate quote and non-quote changes
+  const quoteChanges = styleChanges.filter((c) => c.type === "quote");
+  const nonQuoteChanges = styleChanges.filter((c) => c.type !== "quote");
+
+  // Fast-path: Only quote changes toward preference → APPROVE (no LLM needed)
+  // This is the most common case: normal code edits that add/remove lines with double-quoted strings
+  if (nonQuoteChanges.length === 0 && quoteChanges.length > 0 && quoteChanges.every((c) => c.matchesPreference)) {
+    logFastPathApproval(
+      "style-drift",
+      hookName,
+      toolName,
+      workingDir,
+      "Quote toward preference"
+    );
+    return { approved: true };
+  }
+
+  // Fast-path: Only quote changes away from preference → DENY (no LLM needed)
+  if (nonQuoteChanges.length === 0 && quoteChanges.some((c) => c.violatesPreference)) {
+    const reason = "quote style changed away from preference - use double quotes";
+    logDeny(
+      {
+        output: reason,
+        latencyMs: 0,
+        success: true,
+        errorCount: 0,
+        modelTier: STYLE_DRIFT_AGENT.tier,
+        modelName: getModelId(STYLE_DRIFT_AGENT.tier),
+      },
+      "style-drift",
+      hookName,
+      toolName,
+      workingDir,
+      EXECUTION_TYPES.TYPESCRIPT,
+      reason
+    );
+    return { approved: false, reason };
+  }
+
+  // LLM confirmation: Semicolon/trailing comma changes, or mixed quote+other changes need verification
   const hintSection = formatStyleHints(styleChanges);
   const toolDescription = `Edit ${file_path}`;
 
   // Mark agent as running in statusline
   logAgentStarted("style-drift", toolName);
 
-  try {
-    const result = await runAgent(
-      { ...STYLE_DRIFT_AGENT, workingDir },
-      {
-        prompt: "Verify if these style changes were requested.",
-        context: `${hintSection}
+  // Retry with exponential backoff, fail closed on final failure
+  const maxRetries = 2;
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+        const result = await runAgent(
+        { ...STYLE_DRIFT_AGENT, workingDir },
+        {
+          prompt: "Verify if these style changes were requested.",
+          context: `${hintSection}
 STYLE PREFERENCES (from CLAUDE.md):
 ${stylePreferences || "Default: double quotes, follow existing file conventions"}
 
@@ -239,58 +283,65 @@ New content:
 \`\`\`
 ${new_string}
 \`\`\``,
-      }
-    );
+        }
+      );
 
-    // Retry if format is invalid (must start with APPROVE or DENY:)
-    const anthropic = getAnthropicClient();
-    const decision = await retryUntilValid(
-      anthropic,
-      getModelId(STYLE_DRIFT_AGENT.tier),
-      result.output,
-      toolDescription,
-      {
-        maxRetries: 2,
-        formatValidator: (text) => startsWithAny(text, ["APPROVE", "DENY:"]),
-        formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
-      }
-    );
+      // Retry if format is invalid (must start with APPROVE or DENY:)
+      const anthropic = getAnthropicClient();
+      const decision = await retryUntilValid(
+        anthropic,
+        getModelId(STYLE_DRIFT_AGENT.tier),
+        result.output,
+        toolDescription,
+        {
+          maxRetries: 2,
+          formatValidator: (text) => startsWithAny(text, ["APPROVE", "DENY:"]),
+          formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
+        }
+      );
 
-    if (decision.startsWith("APPROVE")) {
-      logApprove(
+      if (decision.startsWith("APPROVE")) {
+        logApprove(
+          result,
+          "style-drift",
+          hookName,
+          toolName,
+          workingDir,
+          EXECUTION_TYPES.LLM,
+          decision
+        );
+        return { approved: true };
+      }
+
+      // Extract reason from denial
+      const reason = decision.startsWith("DENY: ")
+        ? decision.replace("DENY: ", "")
+        : `Malformed response: ${decision}`;
+
+      logDeny(
         result,
         "style-drift",
         hookName,
         toolName,
         workingDir,
         EXECUTION_TYPES.LLM,
-        decision
+        reason
       );
-      return { approved: true };
+
+      return {
+        approved: false,
+        reason,
+      };
+    } catch (err) {
+      lastError = err;
+      if (attempt < maxRetries) {
+        // Exponential backoff: 100ms, 200ms
+        await new Promise((resolve) => setTimeout(resolve, 100 * Math.pow(2, attempt)));
+      }
     }
-
-    // Extract reason from denial
-    const reason = decision.startsWith("DENY: ")
-      ? decision.replace("DENY: ", "")
-      : `Malformed response: ${decision}`;
-
-    logDeny(
-      result,
-      "style-drift",
-      hookName,
-      toolName,
-      workingDir,
-      EXECUTION_TYPES.LLM,
-      reason
-    );
-
-    return {
-      approved: false,
-      reason,
-    };
-  } catch {
-    // Fail closed on errors
-    logFastPathApproval("style-drift", hookName, toolName, workingDir, "Error path - fail closed");
-    return { approved: false, reason: "Error during style check - retry the edit" };
   }
+
+  // All retries failed - fail closed (deny edit)
+  logFastPathApproval("style-drift", hookName, toolName, workingDir, `Error after ${maxRetries + 1} attempts - fail closed: ${lastError}`);
+  return { approved: false, reason: "Style check failed after retries - retry the edit" };
 }
