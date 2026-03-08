@@ -810,6 +810,7 @@ VAGUE PLAN DRIFT (→ DRIFT):
 - Plan references files without line numbers or specific locations
 - Plan uses vague verbs: "update", "adjust", "modify", "change" without details
 - Plan says "add field" without showing the actual field definition
+- Plan mentions adding code comments without quoting the exact comment text — all code comments must be prewritten in the plan
 - Plan describes WHAT to do but not HOW to implement it
 
 GOOD PLAN EXAMPLE:

@@ -265,7 +265,12 @@ export async function checkStyleDrift(
   // Mark agent as running in statusline
   logAgentStarted("style-drift", toolName);
 
-  // Timeout helper: ensures each attempt fails fast if LLM hangs
+  // Timeout helper: style-drift is the only agent that needs this because its
+  // prompt includes raw code content (old_string/new_string) which, even truncated,
+  // makes responses slower than other agents' simple approve/deny prompts. Without
+  // a timeout, a stale connection or slow model response falls back to the SDK's
+  // 10-minute default, blocking the hook far too long. Other agents don't need this
+  // because their prompts are small and consistently fast.
   function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
     return Promise.race([
       promise,
@@ -281,8 +286,10 @@ export async function checkStyleDrift(
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      // Wrap LLM calls in timeout to prevent indefinite hangs
-      // 15s per attempt ensures worst-case is 3 × 15s = 45s before fail-closed
+      // Timeout covers both runAgent + retryUntilValid together. 30s budget
+      // accounts for two sequential OpenRouter roundtrips that can each take
+      // 5-15s under normal load. Timeout rejects into the catch block below,
+      // which retries with exponential backoff before failing closed.
       const { result, decision } = await withTimeout(
         (async () => {
           const result = await runAgent(
@@ -333,7 +340,7 @@ ${truncatedNew}
 
           return { result, decision };
         })(),
-        15_000,
+        30_000,
         "style-drift LLM attempt"
       );
 
