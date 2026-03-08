@@ -53,7 +53,7 @@ export {
 export const MODEL_IDS: Record<ModelTierValue, string> = {
   haiku: "x-ai/grok-4.1-fast",
   sonnet: "google/gemini-3-flash-preview",
-  opus: "anthropic/claude-opus-4.5",
+  opus: "anthropic/claude-opus-4-6",
 };
 
 export function getModelId(tier: ModelTier): string {
