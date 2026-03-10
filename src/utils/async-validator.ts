@@ -26,9 +26,10 @@
 import { checkResponseAlignment } from "../agents/hooks/response-align.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
 import { checkErrorAcknowledgment } from "../agents/hooks/error-acknowledge.js";
+import { appealHelper } from "../agents/hooks/tool-appeal.js";
 import { writePendingValidation, clearPendingValidation, setValidationSession } from "./pending-validation-cache.js";
 import { readTranscriptExact, formatTranscriptResult } from "./transcript.js";
-import { ERROR_CHECK_COUNTS } from "./transcript-presets.js";
+import { APPEAL_COUNTS, ERROR_CHECK_COUNTS } from "./transcript-presets.js";
 import { hashString } from "./hash-utils.js";
 import { isSubagent } from "./subagent-detector.js";
 
@@ -109,16 +110,33 @@ async function main(): Promise<void> {
 
     // Validation 1: Response Alignment (preamble + intent check)
     // Runs for all tools now (expanded from action tools only)
+    // Mirrors strict path: response-align → appeal if blocked (pre-tool-use.ts:618-651)
     const intentResult = await checkResponseAlignment(tool, toolInput, transcript, projectDir, "PreToolUse");
     if (!intentResult.approved) {
-      await writePendingValidation({
-        status: "failed",
-        toolName: tool,
-        filePath: file,
-        failureReason: `Response misalignment: ${intentResult.reason}`,
-        userMessageHash,
-      });
-      return;
+      // Appeal with full transcript context (same as strict path)
+      const appealTranscript = await readTranscriptExact(transcript, APPEAL_COUNTS);
+      const appealText = formatTranscriptResult(appealTranscript);
+      const appeal = await appealHelper(
+        tool,
+        `${tool} as first response`,
+        appealText,
+        intentResult.reason || "First response misalignment",
+        projectDir,
+        "PreToolUse",
+        `intent-validate blocked: ${intentResult.reason}`
+      );
+
+      if (!appeal.overturned) {
+        await writePendingValidation({
+          status: "failed",
+          toolName: tool,
+          filePath: file,
+          failureReason: `Response misalignment: ${intentResult.reason}`,
+          userMessageHash,
+        });
+        return;
+      }
+      // Appeal overturned — response-align false positive, continue validation
     }
 
     // Validation 2: Error Acknowledgment
