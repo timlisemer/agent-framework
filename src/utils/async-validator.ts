@@ -30,6 +30,7 @@ import { writePendingValidation, clearPendingValidation, setValidationSession } 
 import { readTranscriptExact, formatTranscriptResult } from "./transcript.js";
 import { ERROR_CHECK_COUNTS } from "./transcript-presets.js";
 import { hashString } from "./hash-utils.js";
+import { isSubagent } from "./subagent-detector.js";
 
 interface ValidatorArgs {
   tool: string;
@@ -80,6 +81,13 @@ async function main(): Promise<void> {
 
   // Set session for cache isolation (prevents subagent results from bleeding into main session)
   setValidationSession(transcript);
+
+  // Skip all validations for subagents - individual validators already return "approved"
+  // for subagents, so running them is wasteful (avoids unnecessary LLM calls)
+  if (isSubagent(transcript)) {
+    await clearPendingValidation();
+    return;
+  }
 
   // Parse tool input if provided
   let toolInput: unknown = { file_path: file };

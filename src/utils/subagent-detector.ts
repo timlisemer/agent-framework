@@ -41,13 +41,13 @@ interface TranscriptMetadata {
  * @param transcriptPath - Path to the transcript JSONL file
  * @returns true if this is a subagent session
  */
-export function isSubagent(transcriptPath: string): boolean {
+export function isSubagent(transcriptPath: string, sessionId?: string): boolean {
   // Primary detection: filename pattern (most reliable)
   // Agent transcripts are always named "agent-*.jsonl"
   const basename = path.basename(transcriptPath);
   if (basename.startsWith("agent-") && basename.endsWith(".jsonl")) {
     if (DEBUG) {
-      console.error(`[subagent-detector] DETECTED via filename: ${basename}`);
+      console.error(`[subagent-detector] DETECTED via filename: ${basename} (session_id=${sessionId ?? "N/A"})`);
     }
     return true;
   }

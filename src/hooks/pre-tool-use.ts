@@ -332,6 +332,7 @@ async function main() {
   // STEP 2: Check pending validation from previous async validator
   // This catches failures from lazy validation on previous tool calls
   // BUT first check if user sent a new message (clears stale validations)
+  // Subagents skip this step to prevent parent session state from bleeding in
   // ============================================================
 
   // Read transcript early to detect new user messages before checking pending validation
@@ -341,24 +342,29 @@ async function main() {
   const earlyLastUserMessage = earlyTranscriptResult.user[earlyTranscriptResult.user.length - 1];
   const earlyLastUserContent = earlyLastUserMessage?.content || "";
 
-  // Check if user sent a new message or answered AskUserQuestion - clears stale pending validations
-  const hasAskUserAnswerEarly = earlyTranscriptResult.toolResult.some(
-    (tr) => tr.content.includes("User answered") || tr.content.includes("answered Claude's questions") || tr.content.includes("→")
-  );
+  // Subagent launchers (Agent/Task) are exempt: they spawn isolated sessions
+  // with their own hooks, so stale pending validation from file tools shouldn't block them
+  const isSubagentLauncher = input.tool_name === "Agent" || input.tool_name === "Task";
+  if (!isSubagent(input.transcript_path) && !isSubagentLauncher) {
+    // Check if user sent a new message or answered AskUserQuestion - clears stale pending validations
+    const hasAskUserAnswerEarly = earlyTranscriptResult.toolResult.some(
+      (tr) => tr.content.includes("User answered") || tr.content.includes("answered Claude's questions") || tr.content.includes("→")
+    );
 
-  // Clear pending validation and confirm state if user provided new input
-  // (invalidates stale async validation failures)
-  if (hasAskUserAnswerEarly) {
-    await clearPendingValidation();
-  }
+    // Clear pending validation and confirm state if user provided new input
+    // (invalidates stale async validation failures)
+    if (hasAskUserAnswerEarly) {
+      await clearPendingValidation();
+    }
 
-  const pendingFailure = await checkPendingValidation();
-  if (pendingFailure?.status === "failed") {
-    await clearPendingValidation(); // Don't block repeatedly
-    await recordStrictError(); // Next tool will use strict mode
-    await recordStrictDenial();
-    outputDeny(`Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`);
-    return;
+    const pendingFailure = await checkPendingValidation();
+    if (pendingFailure?.status === "failed") {
+      await clearPendingValidation(); // Don't block repeatedly
+      await recordStrictError(); // Next tool will use strict mode
+      await recordStrictDenial();
+      outputDeny(`Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`);
+      return;
+    }
   }
 
   // ============================================================
