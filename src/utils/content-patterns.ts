@@ -43,6 +43,45 @@ export const EMOJI_REGEX =
   /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]|[\u{2300}-\u{23FF}]|[\u{2B50}-\u{2B55}]|[\u{203C}\u{2049}]|[\u{25AA}\u{25AB}\u{25B6}\u{25C0}\u{25FB}-\u{25FE}]|[\u{00A9}\u{00AE}]|[\u{2122}\u{2139}]|[\u{3030}\u{303D}]|[\u{3297}\u{3299}]/gu;
 
 /**
+ * Verification heading regex - matches generic verification sections.
+ * Catches: ## Verification, ### Verification Steps, ## Testing, # Test Plan, etc.
+ */
+const VERIFICATION_HEADING_REGEX = /^#{1,3}\s*(verification|testing|test plan)\b/im;
+
+/**
+ * Proper verification subsection regexes.
+ * Plans must use these named subsections instead of generic headings.
+ */
+const ASSISTANT_VERIFICATION_REGEX = /assistant\s+verification/i;
+const MANUAL_VERIFICATION_REGEX = /manual\s+(user\s+)?verification/i;
+
+/**
+ * Detect verification sections that lack proper "Assistant Verification"
+ * or "Manual User Verification" subsections.
+ * Returns highlighted violations for injection into agent prompts.
+ *
+ * Plans with verification content MUST use named subsections:
+ * - "Assistant Verification" for AI-executed checks (mcp__agent-framework__check)
+ * - "Manual User Verification" for user-executed steps (ssh, curl, browser)
+ * Having only one subsection is fine; having neither is a violation.
+ */
+export function getVerificationStructureHighlights(content: string): string[] {
+  const headingMatch = content.match(VERIFICATION_HEADING_REGEX);
+  if (!headingMatch) return [];
+
+  const hasAssistant = ASSISTANT_VERIFICATION_REGEX.test(content);
+  const hasManual = MANUAL_VERIFICATION_REGEX.test(content);
+
+  if (!hasAssistant && !hasManual) {
+    return [
+      `[VIOLATION: generic verification] "${headingMatch[0].trim()}" → Split into "## Assistant Verification" (for mcp__agent-framework__check) and/or "## Manual User Verification" (for user-executed steps like ssh, curl, browser)`,
+    ];
+  }
+
+  return [];
+}
+
+/**
  * Scan content for rule violations.
  * Returns highlighted violations for injection into agent prompts.
  */

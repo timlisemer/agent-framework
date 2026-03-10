@@ -35,7 +35,7 @@ import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../..
 import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { getBlacklistDescription, getContentBlacklistHighlights } from "../../utils/command-patterns.js";
-import { getRuleViolationHighlights } from "../../utils/content-patterns.js";
+import { getRuleViolationHighlights, getVerificationStructureHighlights } from "../../utils/content-patterns.js";
 
 /**
  * Validate that a plan aligns with user intent.
@@ -94,7 +94,8 @@ export async function checkPlanIntent(
     // Check for violations in proposed edit
     const blacklistHighlights = getContentBlacklistHighlights(proposedEdit);
     const ruleViolations = getRuleViolationHighlights(proposedEdit);
-    const allViolations = [...blacklistHighlights, ...ruleViolations];
+    const verificationViolations = getVerificationStructureHighlights(proposedEdit);
+    const allViolations = [...blacklistHighlights, ...ruleViolations, ...verificationViolations];
     const violationSection = allViolations.length > 0
       ? `=== VIOLATIONS DETECTED ===\n${allViolations.join("\n")}\n=== END VIOLATIONS ===\n\n`
       : "";
