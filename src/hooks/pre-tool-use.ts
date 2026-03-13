@@ -15,7 +15,7 @@ import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
 import { checkStyleDrift } from "../agents/hooks/style-drift.js";
 import { checkResponseAlignment } from "../agents/hooks/response-align.js";
 import { checkQuestionValidity } from "../agents/hooks/question-validate.js";
-import { detectWorkaroundPattern, getBlacklistHighlights } from "../utils/command-patterns.js";
+import { detectWorkaroundPattern } from "../utils/command-patterns.js";
 import { markErrorAcknowledged, setSession, checkUserInteraction } from "../utils/ack-cache.js";
 import {
   setRewindSession,
@@ -878,17 +878,11 @@ async function main() {
   );
 
   if (!decision.approved) {
-    // Blacklisted commands cannot be appealed - hard safety constraints
-    const blacklistHits = getBlacklistHighlights(input.tool_name, input.tool_input);
-    if (blacklistHits.length > 0) {
-      const pattern = detectWorkaroundPattern(input.tool_name, input.tool_input);
-      if (pattern) {
-        await recordDenial(pattern);
-      }
-      await recordStrictDenial();
-      outputDeny(`${decision.reason}\nBlacklisted patterns explicitly detected in context.`);
-      return;
-    }
+    // IMPORTANT: Blacklisted commands MUST still go through appealHelper.
+    // The appeal agent checks if the USER explicitly requested the operation
+    // (e.g., "user override git reset hard"). Without this, users cannot
+    // override any blacklisted command, which defeats the appeal system.
+    // DO NOT add an early-return here that skips appealHelper for blacklist hits.
 
     // Get transcript for appeal - WITH slash command context for MCP tools
     const approveTranscriptResult = await readTranscriptExact(input.transcript_path, {
