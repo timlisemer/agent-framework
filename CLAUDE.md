@@ -19,6 +19,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details and design decision
 | `src/agents/hooks/`              | Hook agents (tool-approve, tool-appeal, etc.) |
 | `src/utils/agent-configs.ts`     | Centralized agent configurations            |
 | `src/utils/anthropic-client.ts`  | Singleton Anthropic client factory          |
+| `src/utils/elicitation.ts`       | MCP elicitation helpers (repo selection, preferences, uncertainty) |
 | `claude/settings.json`           | Hook configuration for Claude Code          |
 
 ## Testing MCP Server

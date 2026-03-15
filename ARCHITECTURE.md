@@ -211,6 +211,35 @@ commit → confirm → check
   └─ Generates commit message + executes commit (haiku, direct)
 ```
 
+## MCP Elicitation
+
+The `commit`, `confirm`, and `push` tools use MCP elicitation (`server.elicitInput()`) to ask users structured questions mid-tool-execution, replacing the previous pattern where slash commands instructed Claude Code to call `AskUserQuestion`.
+
+### Flow (commit/confirm)
+
+```
+Tool called → getRepoInfo()
+  → Multiple repos? → elicitInput: repo selection form
+  → For each repo → elicitInput: tier + focus preferences form
+  → Run agent chain per repo
+  → Return combined results
+```
+
+### Confirm Uncertainty Elicitation (last resort)
+
+When the confirm agent DECLINEs with `UNCERTAIN:` markers, the tool callback elicits user clarification and re-runs:
+
+```
+confirm returns DECLINED + UNCERTAIN markers
+  → Parse markers → elicitInput: clarification form
+  → User provides input → re-run confirm with extra_context
+  → Return new result (or original DECLINED if user cancels)
+```
+
+### Skip Elicitation
+
+All three tools accept `skip_elicitation: true` to bypass interactive questions and use defaults. Used by `/quickpush` for zero-interaction commits.
+
 ## SDK Agent Restrictions
 
 The confirm agent (only SDK mode user) is restricted to read-only tools:
@@ -406,6 +435,14 @@ Standard configurations for different use cases:
 
 ### `git-utils.ts`
 - `getUncommittedChanges()` - returns status, diff, and diffStat
+- `getRepoInfo()` - detects main repo + submodules with change status
+
+### `elicitation.ts`
+- `elicitRepoSelection()` - multi-repo selection form via MCP elicitation
+- `elicitPreferences()` - tier + focus preferences form
+- `sortReposSubmodulesFirst()` - enforce submodule-first processing order
+- `parseUncertainties()` - extract UNCERTAIN markers from DECLINED confirm output
+- `elicitUncertaintyClarification()` - ask user to clarify uncertainties
 
 ### `command.ts`
 - `runCommand()` - safe command execution with output capture

@@ -255,6 +255,13 @@ RULES:
 - Any FAIL means DECLINED
 - Small, obvious changes bias toward CONFIRMED
 
+## OPTIONAL: Uncertainty Markers (DECLINED verdicts only)
+If your verdict is DECLINED and the reason involves genuine ambiguity that user input could resolve, you may append UNCERTAIN markers after the verdict. These are ONLY valid on DECLINED verdicts and are entirely optional.
+Format: UNCERTAIN: <category> — <what is ambiguous>
+Example:
+DECLINED: Documentation pattern unclear, cannot determine if new agent needs docs entry
+UNCERTAIN: documentation — Found 3 different doc patterns, unclear which applies to this change
+
 This is a gate, not a review.`,
   formatValidation: {
     validator: /## Verdict\s*\n(CONFIRMED|DECLINED)/i,

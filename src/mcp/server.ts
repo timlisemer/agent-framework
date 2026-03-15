@@ -9,6 +9,13 @@ import { runPushAgent } from "../agents/mcp/push.js";
 import { runValidateIntentAgent } from "../agents/mcp/validate-intent.js";
 import { getRepoInfo } from "../utils/git-utils.js";
 import { initializeTelemetry } from "../telemetry/index.js";
+import {
+  elicitRepoSelection,
+  elicitPreferences,
+  sortReposSubmodulesFirst,
+  parseUncertainties,
+  elicitUncertaintyClarification,
+} from "../utils/elicitation.js";
 
 // Ensure PATH includes standard locations for subprocess spawning
 // Required for Claude Agent SDK to find node when running in Docker via `docker exec`
@@ -52,22 +59,75 @@ server.registerTool(
   "confirm",
   {
     title: "Confirm",
-    description: "Binary code quality gate. Analyzes git diff and returns CONFIRMED or DECLINED. Cannot ask questions or request context.",
+    description: "Binary code quality gate. Detects repos with changes, asks user for preferences via form, then analyzes git diff. Returns CONFIRMED or DECLINED per repo.",
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
       model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Model tier for evaluation (default: opus)"),
       extra_context: z.string().optional().describe("Additional instructions or areas to focus on"),
-      transcript_path: z.string().optional().describe("Session transcript path for statusLine")
+      transcript_path: z.string().optional().describe("Session transcript path for statusLine"),
+      skip_elicitation: z.boolean().optional().describe("Skip interactive questions, use defaults")
     }
   },
   async (args) => {
-    const result = await runConfirmAgent(
-      args.working_dir || process.cwd(),
-      args.model_tier,
-      args.extra_context,
-      args.transcript_path
-    );
-    return { content: [{ type: "text", text: result }] };
+    const workingDir = args.working_dir || process.cwd();
+    const repoInfo = getRepoInfo(workingDir);
+
+    if (repoInfo.reposWithChanges.length === 0) {
+      return { content: [{ type: "text", text: "No repositories with uncommitted changes found." }] };
+    }
+
+    // Select repos (elicit if multiple, unless skipped)
+    let selectedRepos = repoInfo.reposWithChanges;
+    if (!args.skip_elicitation && repoInfo.reposWithChanges.length > 1) {
+      selectedRepos = await elicitRepoSelection(server.server, repoInfo);
+      if (selectedRepos.length === 0) {
+        return { content: [{ type: "text", text: "No repositories selected." }] };
+      }
+    }
+    selectedRepos = sortReposSubmodulesFirst(selectedRepos, repoInfo);
+
+    const results: string[] = [];
+    for (const repo of selectedRepos) {
+      // Get preferences (elicit unless skipped or provided via args)
+      let tier = args.model_tier;
+      let extraContext = args.extra_context;
+      if (!args.skip_elicitation && !args.model_tier) {
+        const prefs = await elicitPreferences(server.server, repo.name);
+        tier = prefs.modelTier;
+        if (prefs.focus) {
+          extraContext = extraContext ? `${extraContext}\nFocus: ${prefs.focus}` : `Focus: ${prefs.focus}`;
+        }
+      }
+
+      // Multi-repo context
+      if (selectedRepos.length > 1) {
+        const repoNames = selectedRepos.map((r) => r.name).join(", ");
+        const multiContext = `Note: This is part of a multi-repository confirm. Repos: ${repoNames}. Currently evaluating: ${repo.name}.`;
+        extraContext = extraContext ? `${multiContext}\n${extraContext}` : multiContext;
+      }
+
+      let result = await runConfirmAgent(repo.path, tier, extraContext, args.transcript_path);
+
+      // Phase 2: If DECLINED with uncertainties, elicit clarification and retry
+      if (!args.skip_elicitation && result.includes("DECLINED")) {
+        const uncertainties = parseUncertainties(result);
+        if (uncertainties.length > 0) {
+          const clarification = await elicitUncertaintyClarification(server.server, uncertainties);
+          if (clarification) {
+            const retryContext = extraContext ? `${extraContext}\n${clarification}` : clarification;
+            result = await runConfirmAgent(repo.path, tier, retryContext, args.transcript_path);
+          }
+        }
+      }
+
+      if (selectedRepos.length > 1) {
+        results.push(`=== ${repo.name} (${repo.path}) ===\n${result}`);
+      } else {
+        results.push(result);
+      }
+    }
+
+    return { content: [{ type: "text", text: results.join("\n\n") }] };
   }
 );
 
@@ -75,22 +135,63 @@ server.registerTool(
   "commit",
   {
     title: "Commit",
-    description: "Generate minimal commit message based on diff and execute git commit (no push).",
+    description: "Detect repos with changes, ask user for preferences via form, then generate commit message and execute git commit (no push).",
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
       model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Passed to confirm agent (default: opus)"),
       extra_context: z.string().optional().describe("Passed to confirm agent"),
-      transcript_path: z.string().optional().describe("Session transcript path for statusLine")
+      transcript_path: z.string().optional().describe("Session transcript path for statusLine"),
+      skip_elicitation: z.boolean().optional().describe("Skip interactive questions, use defaults")
     }
   },
   async (args) => {
-    const result = await runCommitAgent(
-      args.working_dir || process.cwd(),
-      args.model_tier,
-      args.extra_context,
-      args.transcript_path
-    );
-    return { content: [{ type: "text", text: result }] };
+    const workingDir = args.working_dir || process.cwd();
+    const repoInfo = getRepoInfo(workingDir);
+
+    if (repoInfo.reposWithChanges.length === 0) {
+      return { content: [{ type: "text", text: "SKIPPED: No repositories with uncommitted changes found." }] };
+    }
+
+    // Select repos (elicit if multiple, unless skipped)
+    let selectedRepos = repoInfo.reposWithChanges;
+    if (!args.skip_elicitation && repoInfo.reposWithChanges.length > 1) {
+      selectedRepos = await elicitRepoSelection(server.server, repoInfo);
+      if (selectedRepos.length === 0) {
+        return { content: [{ type: "text", text: "No repositories selected." }] };
+      }
+    }
+    selectedRepos = sortReposSubmodulesFirst(selectedRepos, repoInfo);
+
+    const results: string[] = [];
+    for (const repo of selectedRepos) {
+      // Get preferences (elicit unless skipped or provided via args)
+      let tier = args.model_tier;
+      let extraContext = args.extra_context;
+      if (!args.skip_elicitation && !args.model_tier) {
+        const prefs = await elicitPreferences(server.server, repo.name);
+        tier = prefs.modelTier;
+        if (prefs.focus) {
+          extraContext = extraContext ? `${extraContext}\nFocus: ${prefs.focus}` : `Focus: ${prefs.focus}`;
+        }
+      }
+
+      // Multi-repo context
+      if (selectedRepos.length > 1) {
+        const repoNames = selectedRepos.map((r) => r.name).join(", ");
+        const multiContext = `Note: This is part of a multi-repository commit. Repos: ${repoNames}. Currently evaluating: ${repo.name}.`;
+        extraContext = extraContext ? `${multiContext}\n${extraContext}` : multiContext;
+      }
+
+      const result = await runCommitAgent(repo.path, tier, extraContext, args.transcript_path);
+
+      if (selectedRepos.length > 1) {
+        results.push(`=== ${repo.name} (${repo.path}) ===\n${result}`);
+      } else {
+        results.push(result);
+      }
+    }
+
+    return { content: [{ type: "text", text: results.join("\n\n") }] };
   }
 );
 
@@ -98,14 +199,46 @@ server.registerTool(
   "push",
   {
     title: "Push",
-    description: "Push committed changes to remote repository.",
+    description: "Push committed changes to remote repository. Detects repos and asks which to push if multiple exist.",
     inputSchema: {
-      working_dir: z.string().optional().describe("Working directory (defaults to cwd)")
+      working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
+      skip_elicitation: z.boolean().optional().describe("Skip interactive questions, push all repos")
     }
   },
   async (args) => {
-    const result = await runPushAgent(args.working_dir || process.cwd());
-    return { content: [{ type: "text", text: result }] };
+    const workingDir = args.working_dir || process.cwd();
+    const repoInfo = getRepoInfo(workingDir);
+
+    // For push, we push all repos (or let user select)
+    // Use reposWithChanges as a starting point, but push can also push repos without uncommitted changes
+    // that have committed but unpushed changes. For simplicity, push all detected repos.
+    let selectedRepos = repoInfo.reposWithChanges;
+
+    // If no repos have uncommitted changes, just push the working dir
+    if (selectedRepos.length === 0) {
+      const result = await runPushAgent(workingDir);
+      return { content: [{ type: "text", text: result }] };
+    }
+
+    if (!args.skip_elicitation && selectedRepos.length > 1) {
+      selectedRepos = await elicitRepoSelection(server.server, repoInfo);
+      if (selectedRepos.length === 0) {
+        return { content: [{ type: "text", text: "No repositories selected." }] };
+      }
+    }
+    selectedRepos = sortReposSubmodulesFirst(selectedRepos, repoInfo);
+
+    const results: string[] = [];
+    for (const repo of selectedRepos) {
+      const result = await runPushAgent(repo.path);
+      if (selectedRepos.length > 1) {
+        results.push(`=== ${repo.name} (${repo.path}) ===\n${result}`);
+      } else {
+        results.push(result);
+      }
+    }
+
+    return { content: [{ type: "text", text: results.join("\n\n") }] };
   }
 );
 
