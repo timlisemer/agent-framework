@@ -847,7 +847,6 @@ async function main() {
 
   // ============================================================
   // STEP 4: TOOL-APPROVE (final gate)
-  // TS Pre-check: getBlacklistHighlights() for Bash commands
   // Lazy mode: skip LLM if no blacklist matches
   // Otherwise: LLM → if block → appealHelper → decide
   // ============================================================

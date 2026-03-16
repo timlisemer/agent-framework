@@ -10,22 +10,27 @@
  * 1. Early exit if not a modification (insertion or deletion)
  * 2. Fast-path: Emoji additions → DENY
  * 3. Detect style changes with preference flags
- * 4. Fast-path: Quote away from preference → DENY
- * 5. Fast-path: Quote toward preference (only change) → APPROVE
- * 6. Fast-path: No style changes → APPROVE
- * 7. LLM confirmation for semicolon/trailing comma changes
+ * 4. Fast-path: Emdash present → DENY (replace with normal dash)
+ * 5. Fast-path: Backtick-only additions → DENY
+ * 6. Fast-path: Quote away from preference → DENY
+ * 7. Fast-path: Quote toward preference (only change) → APPROVE
+ * 8. Fast-path: No style changes → APPROVE
+ * 9. LLM confirmation for semicolon/trailing comma changes
  *
  * ## FAST-PATH DECISIONS
  *
  * - Quote " → ' when preference is double → FAST DENY
  * - Quote ' → " when preference is double → FAST APPROVE
  * - Emoji additions → FAST DENY
+ * - Emdash present → FAST DENY (replace with normal dash)
+ * - Backtick-only additions → FAST DENY
  * - No style changes detected → FAST APPROVE
  *
  * ## LLM CONFIRMATION
  *
  * - Semicolon changes → LLM verifies if requested
  * - Trailing comma changes → LLM verifies if requested
+ * - Backtick removals → LLM verifies if requested
  * - Mixed quote + other changes → LLM verifies
  *
  * @module style-drift
@@ -83,6 +88,9 @@ function extractStylePreferences(claudeMdContent: string): string {
     "trailing",
     "comma",
     "indent",
+    "backtick",
+    "emdash",
+    "dash",
   ];
 
   for (let i = 0; i < lines.length; i++) {
@@ -195,6 +203,54 @@ export async function checkStyleDrift(
 
   // Detect style changes with preference flags (default: double quotes)
   const styleChanges = detectStyleChanges(old_string, new_string, "double");
+
+  // Fast-path: Emdash present in new content → DENY (always replace with normal dash)
+  const emdashChanges = styleChanges.filter((c) => c.type === "emdash");
+  if (emdashChanges.length > 0) {
+    const reason = "emdash detected - replace with normal dash (-)";
+    logDeny(
+      {
+        output: reason,
+        latencyMs: 0,
+        success: true,
+        errorCount: 0,
+        modelTier: STYLE_DRIFT_AGENT.tier,
+        modelName: getModelId(STYLE_DRIFT_AGENT.tier),
+      },
+      "style-drift",
+      hookName,
+      toolName,
+      workingDir,
+      EXECUTION_TYPES.TYPESCRIPT,
+      reason
+    );
+    return { approved: false, reason };
+  }
+
+  // Fast-path: Backtick-only additions → DENY (cosmetic formatting, not requested)
+  // Removals fall through to LLM (could be functional). Mixed changes also fall through.
+  const backtickChanges = styleChanges.filter((c) => c.type === "backtick");
+  const nonBacktickChanges = styleChanges.filter((c) => c.type !== "backtick");
+  if (nonBacktickChanges.length === 0 && backtickChanges.length > 0 && backtickChanges.every((c) => c.direction === "added")) {
+    const reason = "backticks added (cosmetic formatting) - remove backticks";
+    logDeny(
+      {
+        output: reason,
+        latencyMs: 0,
+        success: true,
+        errorCount: 0,
+        modelTier: STYLE_DRIFT_AGENT.tier,
+        modelName: getModelId(STYLE_DRIFT_AGENT.tier),
+      },
+      "style-drift",
+      hookName,
+      toolName,
+      workingDir,
+      EXECUTION_TYPES.TYPESCRIPT,
+      reason
+    );
+    return { approved: false, reason };
+  }
 
   // Fast-path: No style changes detected → APPROVE
   if (styleChanges.length === 0) {

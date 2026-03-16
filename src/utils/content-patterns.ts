@@ -188,7 +188,7 @@ export function detectUserDirectedQuestions(text: string): string[] {
  * Follows existing pattern: returns specific findings, not boolean.
  */
 export interface StyleChange {
-  type: "quote" | "semicolon" | "trailing_comma";
+  type: "quote" | "semicolon" | "trailing_comma" | "backtick" | "emdash";
   direction: string; // e.g., "' → \"" or "added" or "removed"
   sample: string; // snippet of affected code
   violatesPreference?: boolean; // true if changing AWAY from preference
@@ -258,6 +258,29 @@ export function detectStyleChanges(
     });
   }
 
+  // Backtick changes - no preference, additions fast-denied in caller
+  const oldBackticks = (oldStr.match(/`/g) || []).length;
+  const newBackticks = (newStr.match(/`/g) || []).length;
+  if (oldBackticks !== newBackticks) {
+    changes.push({
+      type: "backtick",
+      direction: newBackticks > oldBackticks ? "added" : "removed",
+      sample: newStr.slice(0, 50),
+    });
+  }
+
+  // Emdash detection - emdashes in new content are always flagged
+  // Covers em dash (U+2014), en dash (U+2013), and horizontal bar (U+2015)
+  const emdashRegex = /[\u2013\u2014\u2015]/g;
+  const newEmdashes = (newStr.match(emdashRegex) || []).length;
+  if (newEmdashes > 0) {
+    changes.push({
+      type: "emdash",
+      direction: "present",
+      sample: newStr.slice(0, 50),
+    });
+  }
+
   return changes;
 }
 
@@ -278,7 +301,13 @@ export function formatStyleHints(changes: StyleChange[]): string {
           ? c.direction === "added"
             ? "trailing commas were added"
             : "trailing commas were removed"
-          : `quote style changed: ${c.direction}`;
+          : c.type === "backtick"
+            ? c.direction === "added"
+              ? "backticks were added"
+              : "backticks were removed"
+            : c.type === "emdash"
+              ? "emdash present - replace with normal dash"
+              : `quote style changed: ${c.direction}`;
     return `[STYLE: ${c.type}] ${message}`;
   });
 
