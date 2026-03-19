@@ -10,7 +10,12 @@
  */
 
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { RepoInfo } from "./git-utils.js";
+
+// MCP SDK always calls setTimeout internally with no way to disable it.
+// Max 32-bit signed int is the largest value setTimeout accepts.
+const NO_TIMEOUT: RequestOptions = { timeout: 2147483647 };
 
 export interface RepoSelection {
   path: string;
@@ -59,7 +64,7 @@ export async function elicitRepoSelection(
       type: "object",
       properties,
     },
-  });
+  }, NO_TIMEOUT);
 
   if (result.action !== "accept" || !result.content) {
     return [];
@@ -98,7 +103,7 @@ export async function elicitPreferences(
         },
       },
     },
-  });
+  }, NO_TIMEOUT);
 
   if (result.action !== "accept" || !result.content) {
     return { modelTier: "opus", focus: undefined };
@@ -177,7 +182,7 @@ export async function elicitUncertaintyClarification(
       type: "object",
       properties,
     },
-  });
+  }, NO_TIMEOUT);
 
   if (result.action !== "accept" || !result.content) {
     return undefined;

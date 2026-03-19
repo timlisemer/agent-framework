@@ -76,6 +76,11 @@ server.registerTool(
       return { content: [{ type: "text", text: "No repositories with uncommitted changes found." }] };
     }
 
+    // Non-interactive mode: validate required params instead of asking
+    if (args.skip_elicitation && !args.model_tier) {
+      return { content: [{ type: "text", text: "ERROR: model_tier is required when skip_elicitation is true." }] };
+    }
+
     // Select repos (elicit if multiple, unless skipped)
     let selectedRepos = repoInfo.reposWithChanges;
     if (!args.skip_elicitation && repoInfo.reposWithChanges.length > 1) {
@@ -150,6 +155,11 @@ server.registerTool(
 
     if (repoInfo.reposWithChanges.length === 0) {
       return { content: [{ type: "text", text: "SKIPPED: No repositories with uncommitted changes found." }] };
+    }
+
+    // Non-interactive mode: validate required params instead of asking
+    if (args.skip_elicitation && !args.model_tier) {
+      return { content: [{ type: "text", text: "ERROR: model_tier is required when skip_elicitation is true." }] };
     }
 
     // Select repos (elicit if multiple, unless skipped)

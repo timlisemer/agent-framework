@@ -1,7 +1,16 @@
 {
-  "model": "opus",
+  "model": "opus[1m]",
   "alwaysThinkingEnabled": true,
   "voiceEnabled": true,
+  "enabledPlugins": {
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "lua-lsp@claude-plugins-official": true,
+    "clangd-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "jdtls-lsp@claude-plugins-official": true,
+    "csharp-lsp@claude-plugins-official": true
+  },
   "statusLine": {
     "type": "command",
     "command": "node $AGENT_FRAMEWORK_ROOT/dist/scripts/statusline.js"
