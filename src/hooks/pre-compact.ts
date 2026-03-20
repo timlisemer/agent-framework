@@ -6,6 +6,7 @@ import { execSync } from "child_process";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
+import { isSubagent } from "../utils/subagent-detector.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +24,12 @@ interface PreCompactHookInput {
 
 async function main() {
   const input = await readStdinJson<PreCompactHookInput>();
+
+  if (isSubagent(input.transcript_path)) {
+    exitAfterFlush(0);
+    return;
+  }
+
   const updaterPath = path.join(__dirname, "../utils/summary-updater.js");
 
   // Run both modes synchronously - compaction is imminent

@@ -5,6 +5,7 @@ build:
 
 check:
 	npx tsc --noEmit
+	npx vitest run --reporter=verbose
 
 clean:
 	rm -rf dist

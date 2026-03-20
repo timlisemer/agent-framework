@@ -218,8 +218,8 @@ async function main() {
   const subagent = isSubagent(input.transcript_path);
   const coldStart = toolCallCount < 3;
 
-  // Use plan-mode pipeline for: plan mode (non-subagent), cold start (first 3 tools)
-  const useSyncPipeline = (planMode && !subagent) || coldStart;
+  // Subagents always use async/lazy pipeline; main agent uses sync for plan mode or cold start
+  const useSyncPipeline = (planMode || coldStart) && !subagent;
 
   /**
    * Sole exit function - replaces all direct outputAllow()/outputDeny() calls.
