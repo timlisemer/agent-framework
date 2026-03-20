@@ -18,7 +18,7 @@ import { fork } from "child_process";
  */
 export function spawnBackground(scriptPath: string, args: string[]): void {
   try {
-    const child = fork(scriptPath, args, { detached: true, stdio: "ignore" });
+    const child = fork(scriptPath, args, { detached: true, stdio: "ignore", env: process.env });
     child.unref();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

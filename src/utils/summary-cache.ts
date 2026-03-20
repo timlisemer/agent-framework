@@ -71,8 +71,17 @@ export interface SessionState {
 
 type SessionStateManager = CacheManager<SessionState>;
 
-const SUMMARIES_DIR = path.join(os.homedir(), ".claude", "summaries");
+const SUMMARIES_BASE = path.join(os.homedir(), ".claude", "summaries");
 const TEMP_BASE = path.join(os.tmpdir(), "agent-framework");
+
+/**
+ * Encode a project root path into a directory-safe name.
+ * Replaces / with - and strips leading -, matching Claude Code's convention.
+ */
+function encodeProjectRoot(): string {
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  return projectDir.replace(/\//g, "-").replace(/^-/, "");
+}
 
 const EMPTY_SUMMARY_TEMPLATE = `## User Intent
 
@@ -102,7 +111,9 @@ const EMPTY_SUMMARY_TEMPLATE = `## User Intent
 export async function getSummaryPath(transcriptPath: string, sessionId?: string): Promise<string> {
   const slug = await extractSlugFromSession(transcriptPath);
   const identifier = slug ?? sessionId ?? hashString(transcriptPath);
-  return path.join(SUMMARIES_DIR, `${identifier}.md`);
+  const projectSubdir = path.join(SUMMARIES_BASE, encodeProjectRoot());
+  fs.mkdirSync(projectSubdir, { recursive: true });
+  return path.join(projectSubdir, `${identifier}.md`);
 }
 
 /**
@@ -110,7 +121,7 @@ export async function getSummaryPath(transcriptPath: string, sessionId?: string)
  * Creates the directory if it does not exist.
  */
 export function getSessionDir(transcriptPath: string): string {
-  const dirPath = path.join(TEMP_BASE, hashString(transcriptPath), "/");
+  const dirPath = path.join(TEMP_BASE, "sessions", encodeProjectRoot(), hashString(transcriptPath));
   fs.mkdirSync(dirPath, { recursive: true });
   return dirPath;
 }
@@ -119,15 +130,20 @@ export function getSessionDir(transcriptPath: string): string {
  * Ensure the ~/.claude/summaries/ directory exists.
  */
 export function ensureSummaryDir(): void {
-  fs.mkdirSync(SUMMARIES_DIR, { recursive: true });
+  const projectSubdir = path.join(SUMMARIES_BASE, encodeProjectRoot());
+  fs.mkdirSync(projectSubdir, { recursive: true });
 }
 
 /**
  * Read a single markdown section from a summary file.
  */
 export async function readSection(summaryPath: string, sectionName: string): Promise<string> {
-  const content = await fs.promises.readFile(summaryPath, "utf-8");
-  return readMarkdownSection(content, sectionName);
+  try {
+    const content = await fs.promises.readFile(summaryPath, "utf-8");
+    return readMarkdownSection(content, sectionName);
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -200,6 +216,9 @@ export async function updateSection(summaryPath: string, sectionName: string, co
   const lockPath = summaryPath + ".lock";
   await acquireSummaryLock(lockPath);
   try {
+    if (!fs.existsSync(summaryPath)) {
+      await createEmptySummary(summaryPath);
+    }
     const fileContent = await fs.promises.readFile(summaryPath, "utf-8");
     const lines = fileContent.split("\n");
     const marker = `## ${sectionName}`;
@@ -354,5 +373,7 @@ export function getSessionState(sessionDir: string): SessionStateManager {
  */
 export async function createEmptySummary(summaryPath: string): Promise<void> {
   ensureSummaryDir();
-  await fs.promises.writeFile(summaryPath, EMPTY_SUMMARY_TEMPLATE);
+  if (!fs.existsSync(summaryPath)) {
+    await fs.promises.writeFile(summaryPath, EMPTY_SUMMARY_TEMPLATE);
+  }
 }

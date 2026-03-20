@@ -21,6 +21,7 @@ import {
   updateSection,
   readToolLogTail,
   getSessionState,
+  createEmptySummary,
 } from "./summary-cache.js";
 import { isSubagent } from "./subagent-detector.js";
 
@@ -59,17 +60,17 @@ async function main(): Promise<void> {
   if (mode === "intent") {
     // Decode user prompt
     const userPrompt = args.prompt ? Buffer.from(args.prompt, "base64").toString("utf-8") : "";
-    if (!userPrompt) return;
+    if (!userPrompt) {
+      console.error("summary-updater: empty prompt, skipping intent update");
+      return;
+    }
+
+    // Ensure summary file exists (handles race with session-start)
+    await createEmptySummary(summaryPath);
 
     // Read current sections
-    let currentIntent = "";
-    let currentApprovals = "";
-    try {
-      currentIntent = await readSection(summaryPath, "User Intent");
-      currentApprovals = await readSection(summaryPath, "User Approvals");
-    } catch {
-      // Summary may not exist yet
-    }
+    const currentIntent = await readSection(summaryPath, "User Intent");
+    const currentApprovals = await readSection(summaryPath, "User Approvals");
 
     const result = await runAgent(
       { ...SUMMARY_INTENT_AGENT },
@@ -96,21 +97,17 @@ async function main(): Promise<void> {
       lastUpdated: Date.now(),
     }));
   } else if (mode === "actions") {
-    // Throttle: skip if < 3s since last update
+    // Throttle: skip if < 3s since last update (but always run on first invocation)
     const state = await stateManager.load();
-    if (Date.now() - state.lastUpdated < 3000) return;
+    if (state.summaryVersion > 0 && Date.now() - state.lastUpdated < 3000) return;
+
+    // Ensure summary file exists (handles race with session-start)
+    await createEmptySummary(summaryPath);
 
     // Read current sections
-    let currentIntent = "";
-    let currentActions = "";
-    let currentMisalignments = "";
-    try {
-      currentIntent = await readSection(summaryPath, "User Intent");
-      currentActions = await readSection(summaryPath, "AI Actions");
-      currentMisalignments = await readSection(summaryPath, "Flagged Misalignments");
-    } catch {
-      return;  // No summary yet, skip
-    }
+    const currentIntent = await readSection(summaryPath, "User Intent");
+    const currentActions = await readSection(summaryPath, "AI Actions");
+    const currentMisalignments = await readSection(summaryPath, "Flagged Misalignments");
 
     const toolLogTail = readToolLogTail(sessionDir, 10);
 
