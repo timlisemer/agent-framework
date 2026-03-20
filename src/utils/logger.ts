@@ -6,7 +6,7 @@
  */
 
 import { trackAgentExecution, extractDecision } from "./telemetry-tracker.js";
-import { getExecutionMode, getTranscriptPath } from "./execution-context.js";
+import { getTranscriptPath } from "./execution-context.js";
 import {
   updateStatusLineState,
   markAgentStarted,
@@ -98,7 +98,7 @@ export function logAgentDecision(log: AgentLog): void {
     agentName: log.agent,
     hookName: log.hookName,
     decision: log.decision,
-    mode: getExecutionMode(),
+    mode: "direct" as import("../types.js").TelemetryMode,
     executionType: log.executionType,
     toolName: log.toolName,
     workingDir: log.workingDir,

@@ -20,7 +20,7 @@ import { EXECUTION_TYPES, parseTierName } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
-import { logAgentStarted, logConfirm } from "../../utils/logger.js";
+import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { runCheckAgent } from "./check.js";
 
@@ -88,15 +88,14 @@ ${diff || "(no diff)"}${extraContext ? `\n\nUSER INSTRUCTIONS:\n${extraContext}`
     }
   );
 
-  logConfirm(
-    result,
-    "confirm",
-    HOOK_NAME,
-    HOOK_NAME,
+  logAgentResult(result, {
+    agent: "confirm",
+    hookName: HOOK_NAME,
+    toolName: HOOK_NAME,
     workingDir,
-    EXECUTION_TYPES.LLM,
-    result.output.slice(0, 500)
-  );
+    executionType: EXECUTION_TYPES.LLM,
+    decisionOverride: "CONFIRM",
+  });
 
   return result.output;
 }

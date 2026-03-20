@@ -1,5 +1,5 @@
 /**
- * Session Utilities - Plan File Resolution
+ * Session Utilities - Plan File Resolution and Summary Access
  *
  * Claude Code stores session metadata in JSONL files at:
  *   ~/.claude/projects/{encoded-path}/agent-{id}.jsonl
@@ -18,6 +18,12 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import {
+  getSummaryPath,
+  readSummary,
+  readSection,
+  type SummaryDocument,
+} from "./summary-cache.js";
 
 interface SessionMetadata {
   slug?: string;
@@ -27,7 +33,7 @@ interface SessionMetadata {
  * Extract the slug from a session JSONL file.
  * Reads the first few lines to find the slug field.
  */
-export async function extractSlugFromSession(transcriptPath: string): Promise<string | null> {
+async function extractSlugFromSession(transcriptPath: string): Promise<string | null> {
   try {
     const content = await fs.promises.readFile(transcriptPath, "utf-8");
     const lines = content.split("\n").filter(Boolean).slice(0, 10);
@@ -78,5 +84,31 @@ export async function readPlanContent(transcriptPath: string): Promise<string | 
     return await fs.promises.readFile(planPath, "utf-8");
   } catch {
     return null;
+  }
+}
+
+/**
+ * Read the full session summary for a given transcript.
+ * Returns null if no summary exists.
+ */
+export async function readSessionSummary(transcriptPath: string): Promise<SummaryDocument | null> {
+  try {
+    const summaryPath = await getSummaryPath(transcriptPath);
+    return await readSummary(summaryPath);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read a single section from the session summary.
+ * Returns empty string if summary or section doesn't exist.
+ */
+export async function readSummarySection(transcriptPath: string, section: string): Promise<string> {
+  try {
+    const summaryPath = await getSummaryPath(transcriptPath);
+    return await readSection(summaryPath, section);
+  } catch {
+    return "";
   }
 }

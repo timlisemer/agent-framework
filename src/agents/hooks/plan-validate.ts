@@ -27,12 +27,11 @@
  * @module plan-validate
  */
 
-import { getModelId, EXECUTION_TYPES } from "../../types.js";
-import { runAgent } from "../../utils/agent-runner.js";
+import { EXECUTION_TYPES } from "../../types.js";
+import { runAgentWithRetryAndTelemetry } from "../../utils/agent-runner.js";
 import { PLAN_VALIDATE_AGENT } from "../../utils/agent-configs.js";
-import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
-import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { logFastPathApproval } from "../../utils/logger.js";
+import { startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { getBlacklistDescription, getContentBlacklistHighlights } from "../../utils/command-patterns.js";
 import { getRuleViolationHighlights, getVerificationStructureHighlights } from "../../utils/content-patterns.js";
@@ -100,46 +99,32 @@ export async function checkPlanIntent(
       ? `=== VIOLATIONS DETECTED ===\n${allViolations.join("\n")}\n=== END VIOLATIONS ===\n\n`
       : "";
 
-    // Mark agent as running in statusline
-    logAgentStarted("plan-validate", toolName);
-
-    // Run plan validation via unified runner
-    const result = await runAgent(
+    // Run plan validation with retry and telemetry
+    const result = await runAgentWithRetryAndTelemetry(
       { ...PLAN_VALIDATE_AGENT },
       {
         prompt: "Check if this plan aligns with the user request.",
         context: `CONVERSATION:\n${conversationContext}\n\nCURRENT PLAN:\n${currentPlan ?? "(new plan)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n${violationSection}=== BLACKLISTED COMMANDS ===\n${getBlacklistDescription()}\n=== END BLACKLIST ===`,
-      }
-    );
-
-    // Retry if format is invalid
-    const anthropic = getAnthropicClient();
-    const decision = await retryUntilValid(
-      anthropic,
-      getModelId(PLAN_VALIDATE_AGENT.tier),
-      result.output,
-      `Plan validation for: ${proposedEdit.substring(0, 100)}...`,
+      },
       {
-        maxRetries: 2,
         formatValidator: (text) => startsWithAny(text, ["OK", "DRIFT:"]),
         formatReminder: "Reply with exactly: OK or DRIFT: <feedback>",
         maxTokens: 150,
-      }
+        context: `Plan validation for: ${proposedEdit.substring(0, 100)}...`,
+      },
+      { agent: "plan-validate", hookName, toolName, workingDir, executionType: EXECUTION_TYPES.LLM }
     );
 
-    if (decision.startsWith("OK")) {
-      logApprove(result, "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Plan aligned");
+    if (result.output.startsWith("OK")) {
       return { approved: true };
     }
 
-    if (decision.startsWith("DRIFT:")) {
-      const feedback = decision.replace("DRIFT:", "").trim();
-      logDeny(result, "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, feedback);
+    if (result.output.startsWith("DRIFT:")) {
+      const feedback = result.output.replace("DRIFT:", "").trim();
       return { approved: false, reason: feedback };
     }
 
     // Fail closed if response is malformed after retries
-    logDeny(result, "plan-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
     return { approved: false, reason: "Malformed response - retry the edit" };
   } catch {
     // Fail closed on errors

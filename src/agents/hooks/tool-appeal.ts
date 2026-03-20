@@ -21,48 +21,14 @@
  * @module tool-appeal
  */
 
-import { getModelId, EXECUTION_TYPES } from "../../types.js";
-import { runAgent } from "../../utils/agent-runner.js";
+import { EXECUTION_TYPES } from "../../types.js";
+import { runAgentWithRetryAndTelemetry } from "../../utils/agent-runner.js";
 import { TOOL_APPEAL_AGENT } from "../../utils/agent-configs.js";
-import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
-import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { logFastPathApproval } from "../../utils/logger.js";
+import { startsWithAny } from "../../utils/retry.js";
+import { extractGateNote } from "../../utils/gate-reasoning-cache.js";
 import type { SlashCommandContext } from "../../utils/transcript.js";
 
-/**
- * Appeal helper - called by other agents after they block a tool.
- * Returns whether user has approved this operation.
- *
- * The CALLING agent decides what to do with the result.
- *
- * @param toolName - Name of the tool being appealed
- * @param toolDescription - Human-readable description of the tool call
- * @param transcript - Recent conversation context
- * @param originalReason - The original denial reason from the calling agent
- * @param workingDir - Working directory for context
- * @param hookName - Hook that triggered this check (for telemetry)
- * @param additionalContext - Extra context from calling agent (e.g., why it blocked)
- * @param slashCommandContext - Slash command context if a slash command was invoked
- * @returns { overturned: boolean } - caller decides what to do
- *
- * @example
- * ```typescript
- * const result = await appealHelper(
- *   'Bash',
- *   'Bash with {"command": "curl ..."}',
- *   transcript,
- *   'Network requests denied by default',
- *   '/path/to/project',
- *   'PreToolUse',
- *   'error-acknowledge blocked because AI ignored build error'
- * );
- * if (result.overturned) {
- *   // User approved - caller continues flow
- * } else {
- *   // User did not approve - caller blocks tool
- * }
- * ```
- */
 export async function appealHelper(
   toolName: string,
   toolDescription: string,
@@ -72,13 +38,11 @@ export async function appealHelper(
   hookName: string,
   additionalContext?: string,
   slashCommandContext?: SlashCommandContext
-): Promise<{ overturned: boolean }> {
-  // Build context section from calling agent
+): Promise<{ overturned: boolean; gateNote?: string }> {
   const contextSection = additionalContext
     ? `\n=== CALLER CONTEXT ===\n${additionalContext}\n=== END CONTEXT ===\n`
     : "";
 
-  // Build slash command context section if a slash command was invoked
   let slashCommandSection = "";
   if (slashCommandContext) {
     const allowedToolsStr = slashCommandContext.allowedTools?.join(", ") || "none specified";
@@ -91,17 +55,12 @@ Allowed tools: ${allowedToolsStr}
 `;
   }
 
-  // Mark agent as running in statusline
-  logAgentStarted("tool-appeal", toolName);
-
-  // Retry with exponential backoff, fail closed on final failure
   const maxRetries = 2;
   let lastError: unknown;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      // Run appeal evaluation via unified runner
-      const result = await runAgent(
+      const result = await runAgentWithRetryAndTelemetry(
         { ...TOOL_APPEAL_AGENT, workingDir },
         {
           prompt: "Review this appeal for a denied tool call.",
@@ -110,45 +69,32 @@ TOOL CALL: ${toolDescription}
 ${slashCommandSection}${contextSection}
 RECENT CONVERSATION:
 ${transcript}`,
-        }
-      );
-
-      // Retry if format is invalid
-      const anthropic = getAnthropicClient();
-      const decision = await retryUntilValid(
-        anthropic,
-        getModelId(TOOL_APPEAL_AGENT.tier),
-        result.output,
-        toolDescription,
+        },
         {
-          maxRetries: 2,
-          formatValidator: (text) =>
-            startsWithAny(text, ["UPHOLD", "OVERTURN: APPROVE"]),
-          formatReminder:
-            "Reply with EXACTLY: UPHOLD or OVERTURN: APPROVE",
+          formatValidator: (text) => startsWithAny(text, ["UPHOLD", "OVERTURN: APPROVE"]),
+          formatReminder: "Reply with EXACTLY: UPHOLD or OVERTURN: APPROVE",
+        },
+        {
+          agent: "tool-appeal",
+          hookName,
+          toolName,
+          workingDir,
+          executionType: EXECUTION_TYPES.LLM,
         }
       );
 
-      // Check for overturn (user approved)
-      const overturned = decision.startsWith("OVERTURN: APPROVE") || decision === "APPROVE";
+      const gateNote = extractGateNote(result.output);
+      const overturned = result.output.startsWith("OVERTURN: APPROVE") || result.output === "APPROVE";
 
-      if (overturned) {
-        logApprove(result, "tool-appeal", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "User approved operation");
-      } else {
-        logDeny(result, "tool-appeal", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "User did not approve");
-      }
-
-      return { overturned };
+      return { overturned, gateNote };
     } catch (err) {
       lastError = err;
       if (attempt < maxRetries) {
-        // Exponential backoff: 100ms, 200ms
         await new Promise((resolve) => setTimeout(resolve, 100 * Math.pow(2, attempt)));
       }
     }
   }
 
-  // All retries failed - fail closed (uphold denial)
   logFastPathApproval("tool-appeal", hookName, toolName, workingDir, `Error after ${maxRetries + 1} attempts - fail closed: ${lastError}`);
   return { overturned: false };
 }

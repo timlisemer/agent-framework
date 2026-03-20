@@ -85,6 +85,7 @@ import {
 } from "../types.js";
 import { extractTextFromResponse } from "./response-parser.js";
 import { logAgentDecision, extractDecision, logAgentStarted } from "./logger.js";
+import type { DecisionType } from "../telemetry/types.js";
 
 /**
  * Read-only tools available to SDK mode agents.
@@ -845,6 +846,8 @@ export interface TelemetryContext {
   executionType: ExecutionType;
   /** Optional custom reason (defaults to output.slice(0, 1000)) */
   decisionReason?: string;
+  /** Force a specific decision type instead of extracting from output */
+  decisionOverride?: DecisionType;  // Force CONFIRM for check/confirm agents
 }
 
 /**
@@ -901,7 +904,50 @@ export async function runAgentWithTelemetry(
   const result = await runAgent(config, input);
 
   // Auto-extract decision from output (APPROVE/DENY/CONFIRM/ERROR)
-  const decision = extractDecision(result.output) ?? "DENY";
+  const decision = telemetry.decisionOverride ?? extractDecision(result.output) ?? "DENY";
+
+  logAgentDecision({
+    agent: telemetry.agent,
+    hookName: telemetry.hookName,
+    decision,
+    executionType: telemetry.executionType,
+    toolName: telemetry.toolName,
+    workingDir: telemetry.workingDir,
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    success: result.success,
+    errorCount: result.errorCount,
+    decisionReason: telemetry.decisionReason ?? result.output.slice(0, 1000),
+  });
+
+  return result;
+}
+
+/**
+ * Run an agent with automatic retry and telemetry logging.
+ *
+ * Combines runAgentWithRetry() and telemetry logging into a single call.
+ * Use this when you need format retry behavior alongside automatic telemetry.
+ *
+ * @param config - Agent configuration (typically from agent-configs.ts)
+ * @param input - Prompt and optional context
+ * @param retryOptions - Format validation and retry settings
+ * @param telemetry - Context for telemetry logging
+ * @returns Execution result with output and metadata
+ */
+export async function runAgentWithRetryAndTelemetry(
+  config: AgentConfig,
+  input: AgentInput,
+  retryOptions: AgentRetryOptions,
+  telemetry: TelemetryContext
+): Promise<AgentExecutionResult> {
+  // Mark agent as running in statusline before execution
+  logAgentStarted(telemetry.agent, telemetry.toolName);
+
+  const result = await runAgentWithRetry(config, input, retryOptions);
+
+  // Auto-extract decision from output
+  const decision = telemetry.decisionOverride ?? extractDecision(result.output) ?? "DENY";
 
   logAgentDecision({
     agent: telemetry.agent,

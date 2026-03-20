@@ -22,7 +22,6 @@
  * PreToolUse Hook (`src/hooks/pre-tool-use.ts`):
  * - tool-approve: Policy enforcement (haiku)
  * - tool-appeal: Reviews denials with user context (haiku)
- * - error-acknowledge: Ensures AI acknowledges issues (haiku)
  * - plan-validate: Checks plan drift against user request (sonnet)
  * - style-drift: Detects unrequested style changes (haiku)
  * - response-align: Checks preamble + tool call alignment with user request (sonnet)
@@ -33,9 +32,8 @@
 
 export { checkToolApproval } from './tool-approve.js';
 export { appealHelper } from './tool-appeal.js';
-export { checkErrorAcknowledgment } from './error-acknowledge.js';
 export { checkPlanIntent } from './plan-validate.js';
-export { checkForOffTopic, extractConversationContext } from './intent-validate.js';
+export { checkForOffTopic } from './intent-validate.js';
 export { checkStyleDrift } from './style-drift.js';
 export {
   checkResponseAlignment,

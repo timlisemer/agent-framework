@@ -29,7 +29,7 @@ src/                                # TypeScript source
     hooks/                          # Hook-triggered agents
       tool-approve.ts               # Policy enforcement
       tool-appeal.ts                # Reviews denials with user context
-      error-acknowledge.ts          # Ensures AI acknowledges issues
+      gate.ts                       # Gate agent (error + intent check)
       plan-validate.ts              # Checks plan drift
       intent-validate.ts            # Detects off-topic AI behavior
       style-drift.ts                # Detects unrequested style changes
@@ -41,7 +41,11 @@ src/                                # TypeScript source
   hooks/                            # Claude Code hook entry points
     pre-tool-use.ts                 # PreToolUse hook (main safety gate)
     post-tool-use.ts                # PostToolUse hook
-    stop-off-topic-check.ts         # Stop hook
+    stop-response-check.ts          # Stop hook
+    session-start.ts                # SessionStart hook (lifecycle)
+    user-prompt-submit.ts           # UserPromptSubmit hook
+    pre-compact.ts                  # PreCompact hook (snapshot before compaction)
+    post-tool-use-failure.ts        # PostToolUseFailure hook
 
   mcp/
     server.ts                       # MCP server exposing tools
@@ -56,7 +60,13 @@ src/                                # TypeScript source
     transcript-presets.ts           # Standard transcript configurations
     transcript.ts                   # Transcript reading utilities
     logger.ts                       # Telemetry logging
-    ack-cache.ts                    # Error acknowledgment cache
+    summary-cache.ts                # Summary document, JSONL tool log, session state
+    summary-updater.ts              # Background LLM for summary updates
+    async-gate-validator.ts         # Non-blocking gate validator
+    gate-reasoning-cache.ts         # Gate reasoning persistent memory
+    hook-bootstrap.ts               # Shared hook stdin/exit infrastructure
+    spawn-background.ts             # Background process spawner
+    markdown-parser.ts              # Markdown section extraction
     git-utils.ts                    # Git operations (status, diff)
     command.ts                      # Safe command execution
     command-patterns.ts             # Blacklist pattern detection
@@ -492,7 +502,7 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 | Mode | Description |
 |------|-------------|
 | `direct` | Direct execution mode |
-| `lazy` | Lazy evaluation mode |
+| `async-gate` | Async gate validator background mode |
 
 ### Agent Telemetry Coverage
 
@@ -502,13 +512,65 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 | `confirm.ts` | 1 | `CONFIRM` | `direct` |
 | `commit.ts` | 3 | `CONFIRM`, `ERROR` | `direct` |
 | `validate-intent.ts` | 1 | `CONFIRM` | `direct` |
-| `error-acknowledge.ts` | 3 | `APPROVE`, `DENY` | `direct` |
-| `tool-approve.ts` | 3 | `APPROVE`, `DENY` | `direct` or `lazy` |
+| `gate.ts` | 1 | `APPROVE`, `DENY` | `direct` or `async-gate` |
+| `tool-approve.ts` | 1 | `APPROVE`, `DENY` | `direct` |
 | `tool-appeal.ts` | 1 | `APPROVE`, `DENY` | `direct` |
 | `response-align.ts` | 5 | `APPROVE`, `DENY` | `direct` |
-| `intent-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |
-| `plan-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |
-| `claude-md-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |
+| `intent-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
+| `plan-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
+| `claude-md-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
 | `style-drift.ts` | 2 | `APPROVE`, `DENY` | `direct` |
-| `question-validate.ts` | 2 | `APPROVE`, `DENY` | `direct` |
-| `push.ts` | 0 | — | — |
+| `question-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
+| `push.ts` | 0 | - | - |
+
+## Session Summary System
+
+### Execution Modes
+
+The framework operates in two modes:
+- **Plan mode**: Active when a plan file exists in `~/.claude/plans/`. Stricter validation, all checks run synchronously.
+- **Non-plan mode**: Normal operation. Trusted file operations use fast-path validation.
+
+### Summary Document Structure
+
+Each session maintains a summary document (JSONL-backed) with 5 sections:
+
+1. **Active Plan** - Current plan context and step tracking
+2. **Flagged Misalignments** - Issues detected by gate/response-align agents (replaces ack-cache)
+3. **Tool Log** - JSONL append-only log of tool calls and results (replaces strict-mode-tracker)
+4. **Session State** - Key-value state surviving compaction (denial counts, mode flags)
+5. **Conversation Digest** - Compressed conversation context for post-compaction recovery
+
+### Hook Lifecycle
+
+Hooks execute in this order during a session:
+
+| Hook | Trigger | Purpose |
+|------|---------|---------|
+| `SessionStart` | Session begins or resumes post-compaction | Initialize summary, recover state |
+| `UserPromptSubmit` | User sends a message | Record user message, update digest |
+| `PreToolUse` | Before each tool call | Safety gate, policy enforcement |
+| `PostToolUse` | After each tool call | Log tool result, update summary |
+| `PostToolUseFailure` | After a tool call fails | Log failure, track error patterns |
+| `PreCompact` | Before context compaction | Persist summary to survive compaction |
+| `Stop` | AI attempts to stop responding | Validate response completeness |
+
+### Compaction Survival
+
+When Claude Code compacts context, the summary document persists on disk. The `SessionStart` hook detects post-compaction resumption and injects the summary back into context, preserving:
+- Active plan state and progress
+- Flagged misalignment history
+- Session state (denial counts, flags)
+- Conversation digest for continuity
+
+### Subagent Isolation
+
+Task-spawned subagents (detected via transcript path patterns) receive lazy validation. They operate in isolated contexts and do not share the parent session's summary document.
+
+### Removed Components
+
+The following components were removed in favor of the summary system:
+- `async-validator.ts` - Replaced by `async-gate-validator.ts`
+- `error-acknowledge.ts` - Absorbed into the gate agent
+- `ack-cache.ts` - Replaced by Flagged Misalignments in summary
+- `strict-mode-tracker.ts` - Replaced by tool log + session state in summary

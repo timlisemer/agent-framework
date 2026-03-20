@@ -14,12 +14,11 @@
  * @module claude-md-validate
  */
 
-import { getModelId, EXECUTION_TYPES } from "../../types.js";
-import { runAgent } from "../../utils/agent-runner.js";
+import { EXECUTION_TYPES } from "../../types.js";
+import { runAgentWithRetryAndTelemetry } from "../../utils/agent-runner.js";
 import { CLAUDE_MD_VALIDATE_AGENT } from "../../utils/agent-configs.js";
-import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
-import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { logFastPathApproval } from "../../utils/logger.js";
+import { startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { getBlacklistDescription, getContentBlacklistHighlights } from "../../utils/command-patterns.js";
 import { getRuleViolationHighlights } from "../../utils/content-patterns.js";
@@ -78,45 +77,33 @@ export async function validateClaudeMd(
       ? `=== VIOLATIONS DETECTED ===\n${allViolations.join("\n")}\n=== END VIOLATIONS ===\n\n`
       : "";
 
-    // Mark agent as running in statusline
-    logAgentStarted("claude-md-validate", toolName);
-
-    const result = await runAgent(
+    // Run CLAUDE.md validation with retry and telemetry
+    const result = await runAgentWithRetryAndTelemetry(
       { ...CLAUDE_MD_VALIDATE_AGENT, workingDir },
       {
         prompt: "Validate this CLAUDE.md content.",
         context: `CURRENT FILE:\n${currentContent ?? "(new file)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n${violationSection}=== BLACKLISTED COMMANDS ===\n${getBlacklistDescription()}\n=== END BLACKLIST ===`,
-      }
-    );
-
-    const anthropic = getAnthropicClient();
-    const decision = await retryUntilValid(
-      anthropic,
-      getModelId(CLAUDE_MD_VALIDATE_AGENT.tier),
-      result.output,
-      "CLAUDE.md validation",
+      },
       {
-        maxRetries: 2,
         formatValidator: (text) => startsWithAny(text, ["OK", "DRIFT:"]),
         formatReminder: "Reply: OK or DRIFT: <feedback>",
         maxTokens: 150,
-      }
+        context: "CLAUDE.md validation",
+      },
+      { agent: "claude-md-validate", hookName, toolName, workingDir, executionType: EXECUTION_TYPES.LLM }
     );
 
-    if (decision.startsWith("OK")) {
-      logApprove(result, "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Valid CLAUDE.md edit");
+    if (result.output.startsWith("OK")) {
       return { approved: true };
     }
 
-    if (decision.startsWith("DRIFT:")) {
-      const feedback = decision.replace("DRIFT:", "").trim();
+    if (result.output.startsWith("DRIFT:")) {
+      const feedback = result.output.replace("DRIFT:", "").trim();
       const fullFeedback = `${feedback}\nRemember: these rules apply to ALL content in the CLAUDE.md, not just the current edit.`;
-      logDeny(result, "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, fullFeedback);
       return { approved: false, reason: fullFeedback };
     }
 
     // Fail closed if response is malformed after retries
-    logDeny(result, "claude-md-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
     return { approved: false, reason: "Malformed response - retry the edit" };
   } catch {
     // Fail closed on errors

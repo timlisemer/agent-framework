@@ -2,30 +2,40 @@ import "../utils/load-env.js";
 import { initializeTelemetry } from "../telemetry/index.js";
 initializeTelemetry();
 
+import * as path from "path";
+import { fileURLToPath } from "url";
 import { type PostToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
-import { clearAckCache } from "../utils/ack-cache.js";
+import { readStdinJson } from "../utils/hook-bootstrap.js";
+import { isSubagent } from "../utils/subagent-detector.js";
+import { spawnBackground } from "../utils/spawn-background.js";
+import { getSessionDir, appendToolLog } from "../utils/summary-cache.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function main() {
-  // Read input but we only use this hook for side effects
-  await new Promise<PostToolUseHookInput>((resolve, reject) => {
-    let data = "";
-    const timeout = setTimeout(() => reject(new Error("stdin timeout")), 30000);
-    const onData = (chunk: Buffer | string) => (data += chunk);
-    const onEnd = () => {
-      clearTimeout(timeout);
-      process.stdin.removeListener("data", onData);
-      try {
-        resolve(JSON.parse(data));
-      } catch (e) {
-        reject(e);
-      }
-    };
-    process.stdin.on("data", onData);
-    process.stdin.once("end", onEnd);
-  });
+  const input = await readStdinJson<PostToolUseHookInput>();
 
-  // Clear error acknowledgment cache on ANY successful tool
-  await clearAckCache();
+  if (!isSubagent(input.transcript_path)) {
+    // Log successful tool execution to JSONL
+    const sessionDir = getSessionDir(input.transcript_path);
+    appendToolLog(sessionDir, {
+      ts: Date.now(),
+      tool: input.tool_name,
+      path: (input.tool_input as Record<string, unknown>)?.file_path as string | undefined,
+      cmd: (input.tool_input as Record<string, unknown>)?.command as string | undefined,
+      status: "allowed",
+      gate: "post-tool-use",
+      ms: 0,
+    });
+
+    // Spawn background summary-updater in actions mode
+    const updaterPath = path.join(__dirname, "../utils/summary-updater.js");
+    spawnBackground(updaterPath, [
+      "--mode", "actions",
+      "--transcript", input.transcript_path,
+    ]);
+  }
 
   process.exit(0);
 }

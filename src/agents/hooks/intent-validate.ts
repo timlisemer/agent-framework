@@ -1,203 +1,102 @@
 /**
- * Intent Validate Agent - Off-Topic Detection
+ * Intent Validate Agent - Off-Topic Detection (Summary-Based)
  *
- * This agent detects when an AI has gone off-track and is about to waste
- * the user's time with irrelevant questions or suggestions.
- *
- * ## FLOW
- *
- * 1. Extract conversation context from transcript
- * 2. Skip if no user messages or no assistant response
- * 3. Run unified agent to check alignment
- * 4. Retry if format is invalid
- * 5. Return OK or INTERVENE with feedback
- *
- * ## DETECTION TARGETS
- *
- * - Redundant questions (already answered)
- * - Off-topic questions (never mentioned)
- * - Irrelevant suggestions
- * - Misunderstood requests
- *
- * ## ALLOWED CASES
- *
- * - On-topic clarifications
- * - Relevant follow-ups
- * - Progress updates
+ * Detects when AI has gone off-track using session summary sections
+ * instead of raw transcript parsing. Reads User Intent and Flagged
+ * Misalignments from the summary document.
  *
  * @module intent-validate
  */
 
-import {
-  getModelId,
-  EXECUTION_TYPES,
-  type OffTopicCheckResult,
-  type ConversationContext,
-  type UserMessage,
-  type AssistantMessage,
-} from "../../types.js";
-import { runAgent } from "../../utils/agent-runner.js";
+import { EXECUTION_TYPES, type OffTopicCheckResult } from "../../types.js";
+import { runAgentWithRetryAndTelemetry } from "../../utils/agent-runner.js";
 import { INTENT_VALIDATE_AGENT } from "../../utils/agent-configs.js";
-import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
-import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { logFastPathApproval } from "../../utils/logger.js";
+import { startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
-import { OFF_TOPIC_COUNTS } from "../../utils/transcript-presets.js";
-
-/**
- * Extract conversation context from a transcript file.
- *
- * @param transcriptPath - Path to the transcript file
- * @returns Structured conversation context
- */
-export async function extractConversationContext(
-  transcriptPath: string
-): Promise<ConversationContext> {
-  try {
-    const result = await readTranscriptExact(transcriptPath, OFF_TOPIC_COUNTS);
-
-    // Convert to UserMessage format (includes tool_result as user context)
-    const userMessages: UserMessage[] = [
-      ...result.user.map((msg) => ({
-        text: msg.content,
-        messageIndex: msg.index,
-      })),
-      ...result.toolResult.map((msg) => ({
-        text: msg.content,
-        messageIndex: msg.index,
-      })),
-    ].sort((a, b) => a.messageIndex - b.messageIndex);
-
-    const assistantMessages: AssistantMessage[] = result.assistant.map((msg) => ({
-      text: msg.content,
-      messageIndex: msg.index,
-    }));
-
-    const lastAssistantMessage = assistantMessages[assistantMessages.length - 1];
-
-    const allMessages = [...userMessages, ...assistantMessages.slice(0, -1)].sort(
-      (a, b) => a.messageIndex - b.messageIndex
-    );
-
-    // Build set of user message indices for role lookup
-    const userIndices = new Set(userMessages.map((u) => u.messageIndex));
-
-    const conversationSummary = allMessages
-      .map((msg) => {
-        const role = userIndices.has(msg.messageIndex) ? "USER" : "ASSISTANT";
-        return `[${role}]: ${msg.text}`;
-      })
-      .join("\n\n---\n\n");
-
-    return {
-      userMessages,
-      assistantMessages,
-      conversationSummary,
-      lastAssistantMessage: lastAssistantMessage?.text || "",
-    };
-  } catch {
-    return {
-      userMessages: [],
-      assistantMessages: [],
-      conversationSummary: "",
-      lastAssistantMessage: "",
-    };
-  }
-}
+import { readSummarySection } from "../../utils/session-utils.js";
+import { getSessionDir, readToolLogTail } from "../../utils/summary-cache.js";
+import { getCondensedHistory } from "../../utils/gate-reasoning-cache.js";
 
 /**
  * Check if AI has gone off-topic in its response.
- *
- * @param transcriptPath - Path to the transcript file
- * @param workingDir - Working directory for context
- * @param hookName - Hook that triggered this check (for telemetry)
- * @returns Check result with optional intervention feedback
- *
- * @example
- * ```typescript
- * const result = await checkForOffTopic(transcriptPath, cwd, "Stop");
- * if (result.decision === 'INTERVENE') {
- *   console.log('Off-topic:', result.feedback);
- * }
- * ```
+ * Uses session summary sections instead of raw transcript parsing.
  */
 export async function checkForOffTopic(
   transcriptPath: string,
   workingDir: string,
   hookName: string
 ): Promise<OffTopicCheckResult> {
-  // Skip off-topic checks for subagents (Task-spawned agents)
+  // Skip for subagents
   if (isSubagent(transcriptPath)) {
-    logFastPathApproval("off-topic-check", hookName, "StopResponse", workingDir, "Subagent skip");
+    logFastPathApproval("intent-validate", hookName, "StopResponse", workingDir, "Subagent skip");
     return { decision: "OK" };
   }
 
-  const context = await extractConversationContext(transcriptPath);
+  // Read summary sections
+  const userIntent = await readSummarySection(transcriptPath, "User Intent");
+  const misalignments = await readSummarySection(transcriptPath, "Flagged Misalignments");
 
-  // No conversation yet - nothing to check
-  if (context.userMessages.length === 0 || !context.lastAssistantMessage) {
-    logFastPathApproval("off-topic-check", hookName, "StopResponse", workingDir, "No conversation yet");
-    return {
-      decision: "OK",
-    };
+  // No summary yet - nothing to check against
+  if (!userIntent || userIntent.includes("(No intent captured yet)")) {
+    logFastPathApproval("intent-validate", hookName, "StopResponse", workingDir, "No summary yet");
+    return { decision: "OK" };
+  }
+
+  // Read last assistant message
+  const transcriptResult = await readTranscriptExact(transcriptPath, {
+    counts: { assistant: 1 },
+  });
+  const lastAssistant = transcriptResult.assistant[transcriptResult.assistant.length - 1];
+  if (!lastAssistant) {
+    logFastPathApproval("intent-validate", hookName, "StopResponse", workingDir, "No assistant message");
+    return { decision: "OK" };
+  }
+
+  // Read tool log tail and gate reasoning condensed history
+  const sessionDir = getSessionDir(transcriptPath);
+  const toolLog = readToolLogTail(sessionDir, 5);
+  let condensed = "";
+  try {
+    condensed = await getCondensedHistory(sessionDir);
+  } catch {
+    // No gate reasoning yet
   }
 
   try {
-    // Mark agent as running in statusline
-    logAgentStarted("intent-validate", "Stop");
-
-    // Run off-topic check via unified runner
-    const result = await runAgent(
+    const result = await runAgentWithRetryAndTelemetry(
       { ...INTENT_VALIDATE_AGENT },
       {
-        prompt:
-          "Check if the assistant has gone off-topic or asked something already answered.",
-        context: `CONVERSATION CONTEXT:
-${context.conversationSummary}
-
----
-
-ASSISTANT'S FINAL RESPONSE (waiting for user input):
-${context.lastAssistantMessage}`,
-      }
-    );
-
-    // Retry if format is invalid
-    const anthropic = getAnthropicClient();
-    const decision = await retryUntilValid(
-      anthropic,
-      getModelId(INTENT_VALIDATE_AGENT.tier),
-      result.output,
-      "Intent validation for assistant response",
+        prompt: "Check if the assistant's response aligns with user intent.",
+        context: `USER INTENT:\n${userIntent}\n\nFLAGGED MISALIGNMENTS:\n${misalignments}\n\nRECENT TOOL LOG:\n${toolLog || "(none)"}${condensed ? `\n\nGATE REASONING HISTORY:\n${condensed}` : ""}\n\nASSISTANT'S FINAL RESPONSE:\n${lastAssistant.content}`,
+      },
       {
-        maxRetries: 2,
         formatValidator: (text) => startsWithAny(text, ["OK", "INTERVENE:"]),
         formatReminder: "Reply with exactly: OK or INTERVENE: <feedback>",
         maxTokens: 150,
+      },
+      {
+        agent: "intent-validate",
+        hookName,
+        toolName: "StopResponse",
+        workingDir,
+        executionType: EXECUTION_TYPES.LLM,
       }
     );
 
-    if (decision.startsWith("OK")) {
-      logApprove(result, "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, "On-topic");
+    if (result.output.startsWith("OK")) {
       return { decision: "OK" };
     }
 
-    if (decision.startsWith("INTERVENE:")) {
-      const feedback = decision.replace("INTERVENE:", "").trim();
-      logDeny(result, "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, feedback);
+    if (result.output.startsWith("INTERVENE:")) {
+      const feedback = result.output.replace("INTERVENE:", "").trim();
       return { decision: "INTERVENE", feedback };
     }
 
-    // Fail closed if response is malformed after retries
-    logDeny(result, "off-topic-check", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
     return { decision: "INTERVENE", feedback: "Malformed response - retry" };
   } catch {
-    // Fail closed on errors
-    logFastPathApproval("off-topic-check", hookName, "StopResponse", workingDir, "Error path - fail closed");
-    return {
-      decision: "INTERVENE",
-      feedback: "Error during validation - retry",
-    };
+    logFastPathApproval("intent-validate", hookName, "StopResponse", workingDir, "Error path - fail closed");
+    return { decision: "INTERVENE", feedback: "Error during validation - retry" };
   }
 }

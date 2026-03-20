@@ -1,16 +1,13 @@
 import "../utils/load-env.js";
-import { initializeTelemetry, flushTelemetry } from "../telemetry/index.js";
+import { initializeTelemetry } from "../telemetry/index.js";
 initializeTelemetry();
 
 import { type StopHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { checkStopResponseAlignment } from "../agents/hooks/response-align.js";
-import {
-  setRewindSession,
-  detectRewind,
-} from "../utils/rewind-cache.js";
+import { setRewindSession, detectRewind } from "../utils/rewind-cache.js";
 import { setTranscriptPath } from "../utils/execution-context.js";
-import { flushStatuslineUpdates } from "../utils/logger.js";
 import { appendSyntheticToolResult } from "../utils/transcript-writer.js";
+import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 
 /**
  * Stop Hook: Response Check
@@ -25,45 +22,8 @@ import { appendSyntheticToolResult } from "../utils/transcript-writer.js";
  * If detected, it injects a system message to course-correct the AI.
  */
 
-/**
- * Exit process after flushing telemetry and statusline updates.
- * Uses Promise.race with a fallback timeout to ensure clean exit.
- *
- * @param code - Exit code (default 0)
- * @param output - Optional output to write before exiting
- */
-async function exitAfterFlush(code = 0, output?: string): Promise<never> {
-  if (output) {
-    process.stdout.write(output + "\n");
-  }
-  flushTelemetry();
-
-  // Wait for statusline flush or timeout (200ms fallback)
-  await Promise.race([
-    flushStatuslineUpdates(),
-    new Promise((r) => setTimeout(r, 200)),
-  ]);
-
-  process.exit(code);
-}
-
 async function main() {
-  const input: StopHookInput = await new Promise((resolve, reject) => {
-    let data = "";
-    const timeout = setTimeout(() => reject(new Error("stdin timeout")), 30000);
-    const onData = (chunk: Buffer | string) => (data += chunk);
-    const onEnd = () => {
-      clearTimeout(timeout);
-      process.stdin.removeListener("data", onData);
-      try {
-        resolve(JSON.parse(data));
-      } catch (e) {
-        reject(e);
-      }
-    };
-    process.stdin.on("data", onData);
-    process.stdin.once("end", onEnd);
-  });
+  const input = await readStdinJson<StopHookInput>();
 
   // Set session and check for rewind
   setRewindSession(input.transcript_path);

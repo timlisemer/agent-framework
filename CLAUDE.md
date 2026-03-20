@@ -11,24 +11,33 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details and design decision
 
 ## Key Files
 
-| File                             | Purpose                                     |
-| -------------------------------- | ------------------------------------------- |
-| `src/types.ts`                   | Model IDs (single source of truth)          |
-| `src/hooks/pre-tool-use.ts`      | Main safety logic (~400 lines)              |
-| `src/agents/mcp/`                | MCP agents (check, confirm, commit, push)   |
-| `src/agents/hooks/`              | Hook agents (tool-approve, tool-appeal, etc.) |
-| `src/utils/agent-configs.ts`     | Centralized agent configurations            |
-| `src/utils/anthropic-client.ts`  | Singleton Anthropic client factory          |
-| `src/utils/elicitation.ts`       | MCP elicitation helpers (repo selection, preferences, uncertainty) |
-| `claude/settings.json`           | Hook configuration for Claude Code          |
+| File                                | Purpose                                                            |
+| ----------------------------------- | ------------------------------------------------------------------ |
+| `src/types.ts`                      | Model IDs (single source of truth)                                 |
+| `src/hooks/pre-tool-use.ts`         | Main safety logic (~400 lines)                                     |
+| `src/agents/mcp/`                   | MCP agents (check, confirm, commit, push)                          |
+| `src/agents/hooks/`                 | Hook agents (tool-approve, tool-appeal, etc.)                      |
+| `src/utils/agent-configs.ts`        | Centralized agent configurations                                   |
+| `src/utils/anthropic-client.ts`     | Singleton Anthropic client factory                                 |
+| `src/utils/elicitation.ts`          | MCP elicitation helpers (repo selection, preferences, uncertainty) |
+| `claude/settings.json`              | Hook configuration for Claude Code                                 |
+| `src/utils/summary-cache.ts`        | Summary document management, JSONL tool log, session state         |
+| `src/utils/summary-updater.ts`      | Background LLM for summary updates                                 |
+| `src/utils/async-gate-validator.ts` | Non-blocking gate validator (replaces async-validator)             |
+| `src/agents/hooks/gate.ts`          | Gate agent (replaces error-ack + response-align)                   |
+| `src/utils/gate-reasoning-cache.ts` | Gate reasoning persistent memory for tool-approve                  |
+| `src/hooks/session-start.ts`        | Session lifecycle, post-compaction recovery                        |
+| `src/utils/hook-bootstrap.ts`       | Shared hook stdin/exit infrastructure                              |
 
 ## Testing MCP Server
 
-Only do this when explicitly mentioned by the user:
+Use `mcp__agent-framework__check` to run the MCP server test.
 
 ```bash
 printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"}}}\n{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"check","arguments":{"working_dir":"."}}}\n' | node dist/mcp/server.js
 ```
+
+Only do this when explicitly mentioned by the user.
 
 ## Code Style
 

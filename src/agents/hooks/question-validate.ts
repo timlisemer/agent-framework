@@ -25,12 +25,11 @@
  * @module question-validate
  */
 
-import { getModelId, EXECUTION_TYPES } from "../../types.js";
-import { runAgent } from "../../utils/agent-runner.js";
+import { EXECUTION_TYPES } from "../../types.js";
+import { runAgentWithRetryAndTelemetry } from "../../utils/agent-runner.js";
 import { QUESTION_VALIDATE_AGENT } from "../../utils/agent-configs.js";
-import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
-import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { logFastPathApproval } from "../../utils/logger.js";
+import { startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 
 /**
@@ -112,46 +111,32 @@ export async function checkQuestionValidity(
     // Format questions for the agent
     const formattedQuestions = formatQuestions(input);
 
-    // Mark agent as running in statusline
-    logAgentStarted("question-validate", "AskUserQuestion");
-
-    // Run question validation via unified runner
-    const result = await runAgent(
+    // Run question validation with retry and telemetry
+    const result = await runAgentWithRetryAndTelemetry(
       { ...QUESTION_VALIDATE_AGENT },
       {
         prompt: "Check if these questions are appropriate to show to the user.",
         context: `QUESTIONS:\n${formattedQuestions}\n\nCONVERSATION AND TOOL HISTORY:\n${conversationContext}`,
-      }
-    );
-
-    // Retry if format is invalid
-    const anthropic = getAnthropicClient();
-    const decision = await retryUntilValid(
-      anthropic,
-      getModelId(QUESTION_VALIDATE_AGENT.tier),
-      result.output,
-      `Question validation for: ${formattedQuestions.substring(0, 100)}...`,
+      },
       {
-        maxRetries: 2,
         formatValidator: (text) => startsWithAny(text, ["ALLOW", "BLOCK:"]),
         formatReminder: "Reply with exactly: ALLOW or BLOCK: <feedback>",
         maxTokens: 200,
-      }
+        context: `Question validation for: ${formattedQuestions.substring(0, 100)}...`,
+      },
+      { agent: "question-validate", hookName, toolName, workingDir, executionType: EXECUTION_TYPES.LLM }
     );
 
-    if (decision.startsWith("ALLOW")) {
-      logApprove(result, "question-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Questions appropriate");
+    if (result.output.startsWith("ALLOW")) {
       return { approved: true };
     }
 
-    if (decision.startsWith("BLOCK:")) {
-      const feedback = decision.replace("BLOCK:", "").trim();
-      logDeny(result, "question-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, feedback);
+    if (result.output.startsWith("BLOCK:")) {
+      const feedback = result.output.replace("BLOCK:", "").trim();
       return { approved: false, reason: feedback };
     }
 
     // Fail closed if response is malformed after retries
-    logDeny(result, "question-validate", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, `Malformed: ${decision}`);
     return { approved: false, reason: "Malformed response - retry the question" };
   } catch {
     // Fail closed on errors

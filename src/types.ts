@@ -19,13 +19,13 @@ export const MODEL_TIERS = {
 declare const TelemetryModeBrand: unique symbol;
 type TelemetryModeBranded = { readonly [TelemetryModeBrand]: never };
 
-type TelemetryModeValue = "direct" | "lazy";
+type TelemetryModeValue = "direct" | "async-gate";
 
 export type TelemetryMode = TelemetryModeValue & TelemetryModeBranded;
 
 export const EXECUTION_MODES = {
   DIRECT: "direct" as TelemetryMode,
-  LAZY: "lazy" as TelemetryMode,
+  ASYNC_GATE: "async-gate" as TelemetryMode,
 } as const;
 
 // Branded type for execution type (LLM vs TypeScript)

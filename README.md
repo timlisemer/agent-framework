@@ -3,7 +3,7 @@
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
 1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent` agents (portable, works with any MCP client)
-2. **PreToolUse Hook** - Multi-layer safety gate with `tool-approve`, `tool-appeal`, `error-acknowledge`, `response-align`, `plan-validate`, `style-drift`, `claude-md-validate`, and `question-validate` agents
+2. **PreToolUse Hook** - Multi-layer safety gate with `gate`, `tool-approve`, `tool-appeal`, `response-align`, `plan-validate`, `style-drift`, `claude-md-validate`, and `question-validate` agents
 3. **Stop Hook** - For `intent-validate` agent (detects when AI goes off-track)
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
@@ -30,7 +30,7 @@ The framework implements 14 specialized agents organized into three categories:
 | ---------------- | ------ | ----------- | ---------------------------------------------- |
 | intent-validate  | haiku  | Stop        | Detect off-topic questions or misunderstood requests |
 | plan-validate    | sonnet | PreToolUse  | Detect plan drift from user intent             |
-| error-acknowledge| haiku  | PreToolUse  | Detect when AI ignores errors or feedback      |
+| gate             | haiku  | PreToolUse  | Validate tool calls against user intent/errors |
 | style-drift      | haiku  | PreToolUse  | Detect unrequested cosmetic/style changes      |
 | claude-md-validate| sonnet | PreToolUse  | Validate CLAUDE.md edits against conventions   |
 | response-align   | sonnet | PreToolUse  | Validate AI response aligns with user request  |
@@ -62,11 +62,10 @@ The `commit` agent enforces the complete verification chain before committing.
 │
 ├─ Auto-approve low-risk tools (Grep, Glob, LSP, MCP tools, etc.)
 │
-├─ error-acknowledge: Check if AI is ignoring errors
-│  └─ BLOCK if errors not acknowledged
+├─ Check pending async gate validation
 │
-├─ response-align: Validate first response aligns with user request
-│  └─ BLOCK if AI asked question then continued, or action misaligned
+├─ gate: Validate tool call against user intent and error context
+│  └─ BLOCK if misaligned with intent or errors unacknowledged
 │
 ├─ Path-based classification for file tools
 │  ├─ Trusted path (project dir or ~/.claude) + not sensitive → ALLOW

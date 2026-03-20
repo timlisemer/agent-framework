@@ -43,9 +43,25 @@ import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact, type TranscriptMessage } from "../../utils/transcript.js";
 import {
-  INTENT_ALIGNMENT_COUNTS,
   FIRST_RESPONSE_STOP_COUNTS,
 } from "../../utils/transcript-presets.js";
+import type { TranscriptReadOptions } from "../../utils/transcript.js";
+
+/**
+ * For intent alignment checks (inlined from removed transcript-presets).
+ *
+ * Gets all user messages to preserve AskUserQuestion responses and plan acceptances.
+ * Includes first user message to capture original request context.
+ * More assistant messages to catch acknowledgments in the current turn.
+ */
+const INTENT_ALIGNMENT_COUNTS: TranscriptReadOptions = {
+  counts: { user: Infinity, assistant: 5, toolResult: 5 },
+  includeFirstUserMessage: true,
+  toolResultOptions: {
+    trim: true,
+    maxLines: 100,
+  },
+};
 import { detectUserDirectedQuestions } from "../../utils/content-patterns.js";
 
 // Re-export CheckResult as ResponseAlignmentResult for backwards compatibility
@@ -55,7 +71,7 @@ export type ResponseAlignmentResult = CheckResult;
 export type IntentAlignmentResult = CheckResult;
 
 // Patterns indicating AI is asking a question/clarification that should wait for user response
-const PREAMBLE_CONCERN_PATTERNS = [
+export const PREAMBLE_CONCERN_PATTERNS = [
   /I need to clarify/i,
   /let me clarify/i,
   /to clarify/i,
@@ -71,7 +87,7 @@ const PREAMBLE_CONCERN_PATTERNS = [
  * Check if the AI acknowledgment contains potential preamble violations.
  * Returns true if the LLM should be alerted to check this.
  */
-function hasPreambleConcern(ackText: string): boolean {
+export function hasPreambleConcern(ackText: string): boolean {
   if (!ackText) return false;
 
   // Check for explicit clarification patterns

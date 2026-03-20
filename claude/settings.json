@@ -49,6 +49,51 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/hooks/session-start.js"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/hooks/user-prompt-submit.js"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/hooks/pre-compact.js",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/hooks/post-tool-use-failure.js"
+          }
+        ]
+      }
     ]
   }
 }
