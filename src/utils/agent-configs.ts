@@ -1570,5 +1570,51 @@ DENY only if clearly misaligned, error is unacknowledged, or preamble violation 
 
 Multiple edits to the same file are NORMAL during refactoring. Do not treat them as misalignment unless the content directly contradicts user intent. A flagged misalignment about "repeated edits" is NOT sufficient reason to deny.
 
-When in doubt, APPROVE. False denials are worse than false approvals.`,
+When in doubt, APPROVE. False denials are worse than false approvals.
+
+You also receive:
+- Edit Intent: whether user wants code edits (true/false/null)
+- Tool Predictions: expected tools based on user intent analysis
+
+If edit intent is false and an edit tool arrives, it was already blocked by TypeScript.
+If expected tools are listed and the current tool is NOT expected, consider why -
+a mismatch is NOT automatic denial, only deny if it clearly contradicts user intent.`,
+};
+
+/**
+ * Edit Intent Agent Configuration
+ *
+ * Classifies if a user message intends file edits or is a non-edit request.
+ * Used as LLM fallback when TypeScript regex returns ambiguous.
+ *
+ * **Tier: haiku** - Fast binary classification
+ * **Mode: direct** - Single API call
+ */
+export const EDIT_INTENT_AGENT: Omit<AgentConfig, "workingDir"> = {
+  name: "edit-intent",
+  tier: MODEL_TIERS.HAIKU,
+  mode: "direct",
+  maxTokens: 50,
+  systemPrompt: `Classify if a user message intends for the AI to edit/create/modify files, or is a non-edit request (reading, explaining, investigating).
+
+Output EXACTLY: EDIT or NON-EDIT
+
+EDIT means the user wants the AI to write, create, modify, delete, or change files or code.
+NON-EDIT means the user wants explanation, reading, investigation, planning, or conversation.
+
+You receive:
+- PREVIOUS_EDIT_INTENT: Whether the prior message was classified as edit intent
+- USER_MESSAGE: The message to classify
+
+Stickiness rule: If PREVIOUS_EDIT_INTENT is true and the message is a short continuation (e.g., "also the tests", "and the config too", "same for the other file"), classify as EDIT. The user is continuing an edit session.
+
+Edge cases:
+- "review and fix" -> EDIT (fix takes priority)
+- "check if it compiles" -> NON-EDIT (verification, not editing)
+- "also handle the edge case" -> EDIT if previous was EDIT (continuation)
+- "what do you think?" -> NON-EDIT (asking for opinion)
+- "try a different approach" -> EDIT if previous was EDIT (retry)
+- "run the tests" -> NON-EDIT (execution, not editing)
+
+Output EXACTLY one word: EDIT or NON-EDIT`,
 };

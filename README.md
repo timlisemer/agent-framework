@@ -3,14 +3,14 @@
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
 1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent` agents (portable, works with any MCP client)
-2. **PreToolUse Hook** - Multi-layer safety gate with `gate`, `tool-approve`, `tool-appeal`, `response-align`, `plan-validate`, `style-drift`, `claude-md-validate`, and `question-validate` agents
+2. **PreToolUse Hook** - Multi-layer safety gate with `gate`, `tool-approve`, `tool-appeal`, `response-align`, `plan-validate`, `style-drift`, `claude-md-validate`, `question-validate`, and `edit-intent` agents
 3. **Stop Hook** - For `intent-validate` agent (detects when AI goes off-track)
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
 
 ## Agents
 
-The framework implements 14 specialized agents organized into three categories:
+The framework implements 15 specialized agents organized into three categories:
 
 ### MCP Tools (User-Facing)
 
@@ -35,6 +35,7 @@ The framework implements 14 specialized agents organized into three categories:
 | claude-md-validate| sonnet | PreToolUse  | Validate CLAUDE.md edits against conventions   |
 | response-align   | sonnet | PreToolUse  | Validate AI response aligns with user request  |
 | question-validate| haiku  | PreToolUse  | Validate AskUserQuestion before showing to user|
+| edit-intent      | haiku  | PreToolUse  | Classify user message as edit or non-edit intent|
 
 ### Approval Agents (PreToolUse Hook)
 

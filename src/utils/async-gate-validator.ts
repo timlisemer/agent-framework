@@ -22,11 +22,13 @@ import {
 import {
   getSummaryPath,
   getSessionDir,
+  getSessionState,
   readSection,
   isStaleSummary,
 } from "./summary-cache.js";
 import { isSubagent } from "./subagent-detector.js";
 import { formatForPrompt } from "./gate-reasoning-cache.js";
+import { getActivePrediction } from "./prediction-cache.js";
 
 interface ValidatorArgs {
   tool: string;
@@ -104,11 +106,26 @@ async function main(): Promise<void> {
       // No gate reasoning yet
     }
 
+    // Read predictions and edit intent for gate context
+    let predictions: string | undefined;
+    let editIntent: boolean | null | undefined;
+    try {
+      const prediction = await getActivePrediction(sessionDir);
+      if (prediction) {
+        predictions = `Expected: ${prediction.expectedTools.join(", ")}`;
+      }
+      const stateManager = getSessionState(sessionDir);
+      const state = await stateManager.load();
+      editIntent = state.currentEditIntent ?? null;
+    } catch {
+      // Non-fatal
+    }
+
     // Run gate agent
     const gateResult = await checkGate(
       tool,
       toolInput,
-      { userIntent, misalignments, gateReasoning },
+      { userIntent, misalignments, gateReasoning, predictions, editIntent },
       projectDir,
       "PreToolUse"
     );

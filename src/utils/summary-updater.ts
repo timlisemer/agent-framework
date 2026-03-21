@@ -13,7 +13,7 @@ import { initializeTelemetry, flushTelemetry } from "../telemetry/index.js";
 initializeTelemetry();
 
 import { runAgent } from "./agent-runner.js";
-import { SUMMARY_INTENT_AGENT, SUMMARY_ACTIONS_AGENT } from "./agent-configs.js";
+import { SUMMARY_INTENT_AGENT, SUMMARY_ACTIONS_AGENT, EDIT_INTENT_AGENT } from "./agent-configs.js";
 import {
   getSummaryPath,
   getSessionDir,
@@ -25,6 +25,9 @@ import {
 } from "./summary-cache.js";
 import { isSubagent } from "./subagent-detector.js";
 import { parseIntentOutput, parseActionsOutput } from "./summary-updater-parsing.js";
+import { parseEditIntentOutput } from "./edit-intent.js";
+import { savePrediction } from "./prediction-cache.js";
+import { isPlanModeActive } from "./plan-mode-detector.js";
 
 interface UpdaterArgs {
   mode: "intent" | "actions";
@@ -97,6 +100,83 @@ async function main(): Promise<void> {
       toolCallsSinceUpdate: 0,
       lastUpdated: Date.now(),
     }));
+
+    // --- LLM fallback for ambiguous edit intent ---
+    const currentState = await stateManager.load();
+    if ((currentState.currentEditIntent ?? null) === null) {
+      const previousEditIntent = currentState.previousEditIntent ?? false;
+      try {
+        const editIntentResult = await runAgent(
+          { ...EDIT_INTENT_AGENT },
+          {
+            prompt: "Classify this user message.",
+            context: `PREVIOUS_EDIT_INTENT: ${previousEditIntent}\n\nUSER_MESSAGE:\n${userPrompt}`,
+          }
+        );
+
+        let classified = parseEditIntentOutput(editIntentResult.output);
+
+        // Validation: if garbage, retry once
+        if (classified === null) {
+          const retryResult = await runAgent(
+            { ...EDIT_INTENT_AGENT },
+            {
+              prompt: "Classify this user message.",
+              context: `PREVIOUS_EDIT_INTENT: ${previousEditIntent}\n\nUSER_MESSAGE:\n${userPrompt}`,
+            }
+          );
+          classified = parseEditIntentOutput(retryResult.output);
+        }
+
+        // Only write if still null (regex didn't already decide)
+        if (classified !== null) {
+          await stateManager.update((s) => {
+            if ((s.currentEditIntent ?? null) === null) {
+              return { ...s, currentEditIntent: classified };
+            }
+            return s;
+          });
+        }
+      } catch {
+        // LLM failure: leave as null (fail-open)
+      }
+    }
+
+    // --- Derive and write predictions ---
+    const updatedState = await stateManager.load();
+    const editIntent = updatedState.currentEditIntent ?? null;
+    const planMode = isPlanModeActive(transcript);
+
+    const expectedTools: string[] = [];
+    const blockedTools: { toolName: string; targetPattern?: string; reason: string }[] = [];
+
+    if (planMode) {
+      expectedTools.push("Read", "Glob", "Grep", "Agent");
+    } else if (editIntent === true) {
+      expectedTools.push("Read", "Edit");
+    } else if (editIntent === false) {
+      expectedTools.push("Read", "Glob", "Grep");
+    }
+
+    // Scan for explicit user directives blocking execution
+    if (/\b(don'?t|do not)\s+(run|execute)\b/i.test(userPrompt)) {
+      blockedTools.push({ toolName: "Bash", reason: "user said no execution" });
+    }
+    if (/\b(don'?t|do not)\s+(push|deploy)\b/i.test(userPrompt)) {
+      blockedTools.push({ toolName: "Bash", targetPattern: "git push*", reason: "user said no pushing" });
+    }
+
+    // Read-before-Edit exception: if Edit expected, always include Read
+    if (expectedTools.includes("Edit") && !expectedTools.includes("Read")) {
+      expectedTools.unshift("Read");
+    }
+
+    await savePrediction(sessionDir, {
+      expectedTools,
+      blockedTools,
+      userMessageSnippet: userPrompt.slice(0, 200),
+      timestamp: Date.now(),
+    });
   } else if (mode === "actions") {
     // Throttle: skip if < 3s since last update (but always run on first invocation)
     const state = await stateManager.load();

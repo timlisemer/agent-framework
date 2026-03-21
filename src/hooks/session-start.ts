@@ -54,6 +54,10 @@ async function main() {
       toolCallCount: 0,
       toolCallsSinceUpdate: 0,
       lastUpdated: Date.now(),
+      currentEditIntent: null,
+      previousEditIntent: null,
+      editIntentTimestamp: 0,
+      editIntentOverturnCount: 0,
     });
     exitAfterFlush(0);
     return;

@@ -92,7 +92,13 @@ function hasPreambleConcern(ackText: string): boolean {
 export async function checkGate(
   toolName: string,
   toolInput: unknown,
-  context: { userIntent: string; misalignments: string; gateReasoning: string },
+  context: {
+    userIntent: string;
+    misalignments: string;
+    gateReasoning: string;
+    predictions?: string;
+    editIntent?: boolean | null;
+  },
   projectDir: string,
   hookName: string
 ): Promise<{ approved: boolean; reason?: string }> {
@@ -109,6 +115,14 @@ export async function checkGate(
   // Check for preamble concern in gate reasoning and surface it
   if (context.gateReasoning && hasPreambleConcern(context.gateReasoning)) {
     contextSection += `\nPREAMBLE CONCERN DETECTED: The recent reasoning contains clarification patterns. Check if the AI should have waited for user response.\n`;
+  }
+
+  if (context.editIntent !== undefined) {
+    contextSection += `\nEDIT INTENT: ${context.editIntent}\n`;
+  }
+
+  if (context.predictions) {
+    contextSection += `\nTOOL PREDICTIONS:\n${context.predictions}\n`;
   }
 
   let result;

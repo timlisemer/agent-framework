@@ -55,6 +55,12 @@ import {
   formatForPrompt,
   clearGateReasoning,
 } from "../utils/gate-reasoning-cache.js";
+import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
+import {
+  getActivePrediction,
+  clearPredictions,
+  matchBlockedTool,
+} from "../utils/prediction-cache.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -245,7 +251,7 @@ async function main() {
     });
 
     // 3. GATE REASONING: Write entry for LLM agent decisions and denials
-    const isLlmAgent = ["tool-approve", "gate", "style-drift", "plan-validate", "claude-md-validate", "question-validate"].includes(exit.agent);
+    const isLlmAgent = ["tool-approve", "gate", "style-drift", "plan-validate", "claude-md-validate", "question-validate", "edit-intent", "prediction-block"].includes(exit.agent);
     if (exit.decision === "deny" || currentGateNote || isLlmAgent) {
       const warnings = await addPatternWarnings(toolName, toolInput, sessionDir);
       await addEntry(sessionDir, {
@@ -329,6 +335,45 @@ async function main() {
   }
 
   // ============================================================
+  // STEP 2.5: Tool prediction blocking (non-edit tools only)
+  // ============================================================
+  if (!subagent) {
+    const prediction = await getActivePrediction(sessionDir);
+    if (prediction) {
+      const blockedMatch = matchBlockedTool(toolName, toolInput, prediction.blockedTools);
+      if (blockedMatch) {
+        const blockReason = `Tool "${toolName}" is not aligned with current user intent. ${blockedMatch.reason}`;
+
+        const predTranscript = formatTranscriptResult(
+          await readTranscriptExact(input.transcript_path, APPEAL_COUNTS)
+        );
+
+        const appeal = await appealHelper(
+          toolName,
+          `${toolName} with ${JSON.stringify(toolInput).slice(0, 200)}`,
+          predTranscript,
+          blockReason,
+          projectDir,
+          "PreToolUse",
+          `prediction-block: ${blockedMatch.reason}`
+        );
+
+        if (!appeal.overturned) {
+          await exitPipeline({
+            decision: "deny",
+            agent: "prediction-block",
+            reason: blockReason,
+          });
+          return;
+        }
+        // Appeal overturned: clear predictions (user wants this tool after all)
+        await clearPredictions(sessionDir);
+        currentGateNote = appeal.gateNote;
+      }
+    }
+  }
+
+  // ============================================================
   // STEP 3: Check pending async gate validation
   // ============================================================
   const isSubagentLauncher = toolName === "Agent" || toolName === "Task";
@@ -407,6 +452,43 @@ async function main() {
             reason: "ExitPlanMode previously approved",
                 });
           return;
+        }
+
+        // If edit intent is explicitly false, block plan edits too
+        // (handles "don't write plan yet" — normally plan files bypass edit-intent)
+        if ((state.currentEditIntent ?? null) === false) {
+          const planEiTranscript = formatTranscriptResult(
+            await readTranscriptExact(input.transcript_path, APPEAL_COUNTS)
+          );
+          const planEiReason = "Edit intent is false - user has not requested file modifications (including plan files).";
+
+          const planEiAppeal = await appealHelper(
+            toolName,
+            `${toolName} to ${filePath}`,
+            planEiTranscript,
+            planEiReason,
+            projectDir,
+            "PreToolUse",
+            `=== EDIT INTENT WARNING ===
+The edit intent classifier has determined the user does NOT want file edits right now.
+This is a STRONG signal. The user's message was analyzed and classified as non-edit intent.
+You should STRONGLY LEAN toward UPHOLD unless you find EXPLICIT, UNAMBIGUOUS user approval
+for editing files (e.g., "make the change", "fix it", "implement it", "go ahead and edit").
+Questions, discussions, or exploration of code do NOT count as edit approval.
+If in doubt, UPHOLD.
+=== END EDIT INTENT WARNING ===`
+          );
+
+          if (!planEiAppeal.overturned) {
+            await exitPipeline({
+              decision: "deny",
+              agent: "edit-intent",
+              reason: planEiReason,
+            });
+            return;
+          }
+          currentGateNote = planEiAppeal.gateNote;
+          // Continue to normal plan-validate
         }
 
         const currentPlan = await readPlanContent(input.transcript_path);
@@ -508,6 +590,59 @@ async function main() {
         return;
       }
 
+      // EDIT INTENT GATE: Block edit tools when editIntent === false
+      // Plan files and CLAUDE.md are handled by their own validators above (already returned)
+      // Exempt paths (memory files, etc.) skip this gate
+      if (
+        !isEditIntentExemptPath(filePath) &&
+        isEditTool(toolName) &&
+        (state.currentEditIntent ?? null) === false
+      ) {
+        const editIntentReason = `Edit intent is false - user has not requested file modifications. Target: ${filePath}`;
+
+        // Appeal with MAJOR HINT (strong signal to uphold)
+        const eiTranscript = formatTranscriptResult(
+          await readTranscriptExact(input.transcript_path, APPEAL_COUNTS)
+        );
+
+        const appeal = await appealHelper(
+          toolName,
+          `${toolName} to ${filePath}`,
+          eiTranscript,
+          editIntentReason,
+          projectDir,
+          "PreToolUse",
+          `=== EDIT INTENT WARNING ===
+The edit intent classifier has determined the user does NOT want file edits right now.
+This is a STRONG signal. The user's message was analyzed and classified as non-edit intent.
+You should STRONGLY LEAN toward UPHOLD unless you find EXPLICIT, UNAMBIGUOUS user approval
+for editing files (e.g., "make the change", "fix it", "implement it", "go ahead and edit").
+Questions, discussions, or exploration of code do NOT count as edit approval.
+If in doubt, UPHOLD.
+=== END EDIT INTENT WARNING ===`
+        );
+
+        if (!appeal.overturned) {
+          await exitPipeline({
+            decision: "deny",
+            agent: "edit-intent",
+            reason: editIntentReason,
+          });
+          return;
+        }
+
+        // BREAKTHROUGH: Track overturned edit-intent appeals (persisted in SessionState)
+        const overturnCount = (state.editIntentOverturnCount ?? 0) + 1;
+        await stateManager.update((s) => ({
+          ...s,
+          editIntentOverturnCount: overturnCount,
+          ...(overturnCount >= 2 ? { currentEditIntent: true as const, editIntentTimestamp: Date.now() } : {}),
+        }));
+
+        currentGateNote = appeal.gateNote;
+        // Fall through to normal pipeline
+      }
+
       if (trusted && !sensitive) {
         if (!useSyncPipeline) {
           // NON-PLAN MODE: Auto-approve + spawn async gate validator
@@ -581,12 +716,24 @@ async function main() {
       // No summary yet - proceed without context
     }
 
+    // Read predictions and edit intent for gate context
+    let predictions: string | undefined;
+    try {
+      const prediction = await getActivePrediction(sessionDir);
+      if (prediction) {
+        predictions = `Expected: ${prediction.expectedTools.join(", ")}`;
+      }
+    } catch {
+      // Non-fatal
+    }
+    const editIntent = state.currentEditIntent ?? null;
+
     let gateResult: { approved: boolean; reason?: string };
     try {
       gateResult = await checkGate(
         toolName,
         toolInput,
-        { userIntent, misalignments, gateReasoning },
+        { userIntent, misalignments, gateReasoning, predictions, editIntent },
         projectDir,
         "PreToolUse"
       );
@@ -753,6 +900,13 @@ async function main() {
   // Clear gate reasoning on plan approval - gives implementation phase a clean slate
   if (toolName === "ExitPlanMode") {
     await clearGateReasoning(sessionDir);
+    await clearPredictions(sessionDir);
+    await stateManager.update((s) => ({
+      ...s,
+      currentEditIntent: true as const,
+      previousEditIntent: s.currentEditIntent ?? null,
+      editIntentTimestamp: Date.now(),
+    }));
   }
 
   logFastPathApproval(lastAgent, "PreToolUse", toolName, projectDir, "All checks passed");

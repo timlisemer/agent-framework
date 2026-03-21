@@ -67,6 +67,10 @@ export interface SessionState {
   toolCallCount: number;
   toolCallsSinceUpdate: number;
   lastUpdated: number;
+  currentEditIntent: boolean | null;
+  previousEditIntent: boolean | null;
+  editIntentTimestamp: number;
+  editIntentOverturnCount: number;
 }
 
 type SessionStateManager = CacheManager<SessionState>;
@@ -382,6 +386,10 @@ export function getSessionState(sessionDir: string): SessionStateManager {
       toolCallCount: 0,
       toolCallsSinceUpdate: 0,
       lastUpdated: Date.now(),
+      currentEditIntent: null,
+      previousEditIntent: null,
+      editIntentTimestamp: 0,
+      editIntentOverturnCount: 0,
     }),
   });
 }
