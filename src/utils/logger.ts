@@ -7,6 +7,7 @@
 
 import { trackAgentExecution, extractDecision } from "./telemetry-tracker.js";
 import { getTranscriptPath } from "./execution-context.js";
+import { isSubagent } from "./subagent-detector.js";
 import {
   updateStatusLineState,
   markAgentStarted,
@@ -94,8 +95,11 @@ export interface AgentLog {
  * ```
  */
 export function logAgentDecision(log: AgentLog): void {
+  const transcriptPath = getTranscriptPath();
+  const agentName = transcriptPath && isSubagent(transcriptPath) ? `sub:${log.agent}` : log.agent;
+
   trackAgentExecution({
-    agentName: log.agent,
+    agentName,
     hookName: log.hookName,
     decision: log.decision,
     mode: "direct" as import("../types.js").TelemetryMode,
@@ -119,10 +123,9 @@ export function logAgentDecision(log: AgentLog): void {
   });
 
   // Update statusline state (fire-and-forget, non-blocking)
-  const transcriptPath = getTranscriptPath();
   if (transcriptPath) {
     const promise = updateStatusLineState(transcriptPath, {
-      agent: log.agent,
+      agent: agentName,
       decision: log.decision,
       toolName: log.toolName,
       executionType: log.executionType,
@@ -514,9 +517,10 @@ export function logFastPathDeny(
  */
 export function logAgentStarted(agent: string, toolName: string): void {
   const transcriptPath = getTranscriptPath();
+  const agentName = transcriptPath && isSubagent(transcriptPath) ? `sub:${agent}` : agent;
   if (transcriptPath) {
     const promise = markAgentStarted(transcriptPath, {
-      agent,
+      agent: agentName,
       toolName,
     }).catch(() => {
       // Ignore errors - statusline is best-effort

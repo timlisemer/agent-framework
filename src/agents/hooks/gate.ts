@@ -25,6 +25,7 @@ import { EXECUTION_TYPES } from "../../types.js";
 import { runAgentWithRetryAndTelemetry } from "../../utils/agent-runner.js";
 import { GATE_AGENT } from "../../utils/agent-configs.js";
 import { startsWithAny } from "../../utils/retry.js";
+import { logFastPathApproval } from "../../utils/logger.js";
 
 // Patterns indicating AI is asking a question/clarification that should wait for user response
 const PREAMBLE_CONCERN_PATTERNS = [
@@ -110,24 +111,31 @@ export async function checkGate(
     contextSection += `\nPREAMBLE CONCERN DETECTED: The recent reasoning contains clarification patterns. Check if the AI should have waited for user response.\n`;
   }
 
-  const result = await runAgentWithRetryAndTelemetry(
-    { ...GATE_AGENT, workingDir: projectDir },
-    {
-      prompt: "Evaluate this tool call against user intent.",
-      context: `${contextSection}\nTOOL TO EVALUATE:\nTool: ${toolName}\nInput: ${JSON.stringify(toolInput)}`,
-    },
-    {
-      formatValidator: (text) => startsWithAny(text, ["APPROVE", "DENY:"]),
-      formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
-    },
-    {
-      agent: "gate",
-      hookName,
-      toolName,
-      workingDir: projectDir,
-      executionType: EXECUTION_TYPES.LLM,
-    }
-  );
+  let result;
+  try {
+    result = await runAgentWithRetryAndTelemetry(
+      { ...GATE_AGENT, workingDir: projectDir },
+      {
+        prompt: "Evaluate this tool call against user intent.",
+        context: `${contextSection}\nTOOL TO EVALUATE:\nTool: ${toolName}\nInput: ${JSON.stringify(toolInput)}`,
+      },
+      {
+        formatValidator: (text) => startsWithAny(text, ["APPROVE", "DENY:"]),
+        formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
+      },
+      {
+        agent: "gate",
+        hookName,
+        toolName,
+        workingDir: projectDir,
+        executionType: EXECUTION_TYPES.LLM,
+      }
+    );
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    logFastPathApproval("gate", hookName, toolName, projectDir, `Gate error (fail open): ${errorMsg}`);
+    return { approved: true };
+  }
 
   if (result.output.startsWith("APPROVE")) {
     return { approved: true };

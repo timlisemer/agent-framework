@@ -34,30 +34,6 @@ const COMPLETED_EXPIRY_MS = 5000;
  * Spawns a non-blocking background task that removes the entry after 5 seconds.
  * Uses .unref() to prevent the timer from keeping the process alive.
  */
-function scheduleEntryCleanup(
-  transcriptPath: string,
-  agent: string,
-  toolName: string
-): void {
-  setTimeout(async () => {
-    try {
-      cacheManager.setSession(getSessionKey(transcriptPath));
-      await cacheManager.update((data) => ({
-        entries: data.entries.filter(
-          (e) =>
-            !(
-              e.agent === agent &&
-              e.toolName === toolName &&
-              e.status === "completed"
-            )
-        ),
-      }));
-    } catch {
-      // Ignore cleanup errors - best effort
-    }
-  }, COMPLETED_EXPIRY_MS).unref();
-}
-
 /**
  * Cached process session ID (SID) to avoid repeated shell calls.
  * The SID is inherited by all child processes, so subagents share
@@ -261,9 +237,6 @@ export async function updateStatusLineState(
       ],
     };
   });
-
-  // Schedule cleanup after fade-out period
-  scheduleEntryCleanup(transcriptPath, entry.agent, entry.toolName);
 }
 
 /**
@@ -278,6 +251,13 @@ export async function readStatusLineEntries(
 ): Promise<StatusLineEntry[]> {
   cacheManager.setSession(getSessionKey(transcriptPath));
   const data = await cacheManager.load();
-  // Filter expired completed entries and return reversed (newest first)
-  return filterExpiredCompleted(data.entries).reverse();
+  const filtered = filterExpiredCompleted(data.entries);
+
+  // Persist cleanup so next poll sees clean state (fixes stale entries
+  // lingering because scheduleEntryCleanup setTimeout never fires in short-lived hook processes)
+  if (filtered.length < data.entries.length) {
+    await cacheManager.update(() => ({ entries: filtered }));
+  }
+
+  return filtered.reverse();
 }

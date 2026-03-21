@@ -1,15 +1,22 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
   recordDenial,
   getDenialCount,
   isWorkaroundEscalation,
   clearDenialCache,
   loadDenials,
+  setDenialSession,
   MAX_SIMILAR_DENIALS,
 } from "../../src/utils/denial-cache.js";
 
 describe("denial-cache", () => {
   beforeEach(async () => {
+    // Isolate each test with a unique session path to avoid shared file state
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "denial-test-"));
+    setDenialSession(path.join(tempDir, "session.jsonl"));
     await clearDenialCache();
   });
 
@@ -26,11 +33,10 @@ describe("denial-cache", () => {
     });
 
     it("tracks separate patterns independently", async () => {
-      // Record both patterns back-to-back, then check immediately
-      const count1 = await recordDenial("type-check");
-      const count2 = await recordDenial("build");
-      expect(count1).toBe(1);
-      expect(count2).toBe(1);
+      await recordDenial("type-check");
+      await recordDenial("build");
+      expect(await getDenialCount("type-check")).toBe(1);
+      expect(await getDenialCount("build")).toBe(1);
     });
 
     it("returns 0 for unknown pattern", async () => {

@@ -53,6 +53,7 @@ import {
   addEntry,
   addPatternWarnings,
   formatForPrompt,
+  clearGateReasoning,
 } from "../utils/gate-reasoning-cache.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -198,7 +199,6 @@ interface PipelineExit {
   decision: "allow" | "deny";
   agent: string;
   reason: string;
-  source: "typescript" | "llm";
 }
 
 async function main() {
@@ -217,6 +217,7 @@ async function main() {
   const toolName = input.tool_name;
   const toolInput = input.tool_input;
   let currentGateNote: string | undefined;
+  let lastAgent = "tool-approve";  // Tracks the last LLM agent that ran
   const startTime = Date.now();
 
   const planMode = isPlanModeActive(input.transcript_path);
@@ -231,16 +232,7 @@ async function main() {
    * Handles telemetry, tool log, gate reasoning, and output.
    */
   async function exitPipeline(exit: PipelineExit): Promise<never> {
-    // 1. TELEMETRY: Only for TypeScript-only decisions
-    if (exit.source === "typescript") {
-      if (exit.decision === "allow") {
-        logFastPathApproval(exit.agent, "PreToolUse", toolName, projectDir, exit.reason);
-      } else {
-        logFastPathDeny(exit.agent, "PreToolUse", toolName, projectDir, exit.reason);
-      }
-    }
-
-    // 2. JSONL TOOL LOG: Always written
+    // 1. JSONL TOOL LOG: Always written
     appendToolLog(sessionDir, {
       ts: Date.now(),
       tool: toolName,
@@ -252,8 +244,9 @@ async function main() {
       ms: Date.now() - startTime,
     });
 
-    // 3. GATE REASONING: Write entry for interesting decisions
-    if (exit.decision === "deny" || currentGateNote) {
+    // 3. GATE REASONING: Write entry for LLM agent decisions and denials
+    const isLlmAgent = ["tool-approve", "gate", "style-drift", "plan-validate", "claude-md-validate", "question-validate"].includes(exit.agent);
+    if (exit.decision === "deny" || currentGateNote || isLlmAgent) {
       const warnings = await addPatternWarnings(toolName, toolInput, sessionDir);
       await addEntry(sessionDir, {
         toolCallIndex: toolCallCount,
@@ -281,11 +274,11 @@ async function main() {
     LOW_RISK_TOOLS.includes(toolName) ||
     (toolName.startsWith("mcp__") && !/(commit|push|confirm)$/.test(toolName))
   ) {
+    logFastPathApproval("low-risk-bypass", "PreToolUse", toolName, projectDir, "Low-risk tool auto-approval");
     await exitPipeline({
       decision: "allow",
       agent: "low-risk-bypass",
       reason: "Low-risk tool auto-approval",
-      source: "typescript",
     });
     return;
   }
@@ -321,8 +314,7 @@ async function main() {
           decision: "deny",
           agent: "question-validate",
           reason: validation.reason || "Question validation failed - show referenced content first",
-          source: "llm",
-        });
+            });
         return;
       }
     }
@@ -332,7 +324,6 @@ async function main() {
       decision: "allow",
       agent: "question-validate",
       reason: "Question validated",
-      source: "llm",
     });
     return;
   }
@@ -345,12 +336,13 @@ async function main() {
     const pendingFailure = await checkPendingValidation();
     if (pendingFailure?.status === "failed") {
       await clearPendingValidation();
+      const asyncReason = `Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`;
+      logFastPathDeny("async-gate", "PreToolUse", toolName, projectDir, asyncReason);
       await exitPipeline({
         decision: "deny",
         agent: "async-gate",
-        reason: `Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`,
-        source: "typescript",
-      });
+        reason: asyncReason,
+        });
       return;
     }
   }
@@ -368,15 +360,13 @@ async function main() {
         decision: "deny",
         agent: "tool-approve",
         reason: decision.reason ?? "Tool denied",
-        source: "llm",
-      });
+        });
       return;
     }
     await exitPipeline({
       decision: "allow",
       agent: "tool-approve",
       reason: "Subagent tool approved",
-      source: "llm",
     });
     return;
   }
@@ -410,12 +400,12 @@ async function main() {
             (r.content.includes("approved") || r.content.includes("allow"))
         );
         if (hasExitPlanModeApproval) {
+          logFastPathApproval("exit-plan-mode", "PreToolUse", toolName, projectDir, "ExitPlanMode previously approved");
           await exitPipeline({
             decision: "allow",
             agent: "exit-plan-mode",
             reason: "ExitPlanMode previously approved",
-            source: "typescript",
-          });
+                });
           return;
         }
 
@@ -449,8 +439,7 @@ async function main() {
               decision: "deny",
               agent: "plan-validate",
               reason: `Plan drift detected: ${validation.reason}`,
-              source: "llm",
-            });
+                    });
             return;
           }
           currentGateNote = appeal.gateNote;
@@ -460,8 +449,7 @@ async function main() {
           decision: "allow",
           agent: "plan-validate",
           reason: "Plan validation passed",
-          source: "llm",
-        });
+            });
         return;
       }
 
@@ -505,8 +493,7 @@ async function main() {
               decision: "deny",
               agent: "claude-md-validate",
               reason: `CLAUDE.md validation failed: ${validation.reason}`,
-              source: "llm",
-            });
+                    });
             return;
           }
           currentGateNote = appeal.gateNote;
@@ -516,8 +503,7 @@ async function main() {
           decision: "allow",
           agent: "claude-md-validate",
           reason: "CLAUDE.md validation passed",
-          source: "llm",
-        });
+            });
         return;
       }
 
@@ -525,12 +511,12 @@ async function main() {
         if (!useSyncPipeline) {
           // NON-PLAN MODE: Auto-approve + spawn async gate validator
           spawnAsyncGateValidator(toolName, filePath, input.transcript_path, toolInput, input.session_id);
+          logFastPathApproval("trusted-path", "PreToolUse", toolName, projectDir, "Trusted file fast-path approval");
           await exitPipeline({
             decision: "allow",
             agent: "trusted-path",
             reason: "Trusted file fast-path approval",
-            source: "typescript",
-          });
+                });
           return;
         }
 
@@ -566,8 +552,7 @@ async function main() {
                 decision: "deny",
                 agent: "style-drift",
                 reason: `Style drift detected: ${styleDriftResult.reason}`,
-                source: "llm",
-              });
+                        });
               return;
             }
             currentGateNote = appeal.gateNote;
@@ -595,13 +580,20 @@ async function main() {
       // No summary yet - proceed without context
     }
 
-    const gateResult = await checkGate(
-      toolName,
-      toolInput,
-      { userIntent, misalignments, gateReasoning },
-      projectDir,
-      "PreToolUse"
-    );
+    let gateResult: { approved: boolean; reason?: string };
+    try {
+      gateResult = await checkGate(
+        toolName,
+        toolInput,
+        { userIntent, misalignments, gateReasoning },
+        projectDir,
+        "PreToolUse"
+      );
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logFastPathDeny("gate", "PreToolUse", toolName, projectDir, `Gate error (fail open): ${errorMsg}`);
+      gateResult = { approved: true };
+    }
 
     if (!gateResult.approved) {
       // Get transcript for appeal
@@ -627,12 +619,12 @@ async function main() {
           decision: "deny",
           agent: "gate",
           reason: gateResult.reason ?? "Gate check failed",
-          source: "llm",
-        });
+            });
         return;
       }
       currentGateNote = appeal.gateNote;
     }
+    lastAgent = "gate";
   }
 
   // ============================================================
@@ -643,12 +635,12 @@ async function main() {
   if (toolName === "ExitPlanMode") {
     const planContent = await readPlanContent(input.transcript_path);
     if (!planContent || planContent.trim() === "") {
+      logFastPathDeny("exit-plan-mode", "PreToolUse", toolName, projectDir, "Cannot exit plan mode without a plan.");
       await exitPipeline({
         decision: "deny",
         agent: "exit-plan-mode",
         reason: "Cannot exit plan mode without a plan.",
-        source: "typescript",
-      });
+        });
       return;
     }
   }
@@ -700,8 +692,7 @@ async function main() {
         decision: "deny",
         agent: "tool-approve",
         reason: finalReason ?? "Tool denied",
-        source: "llm",
-      });
+        });
       return;
     }
     currentGateNote = appeal.gateNote;
@@ -722,11 +713,16 @@ async function main() {
     toolCallsSinceUpdate: s.toolCallsSinceUpdate + 1,
   }));
 
+  // Clear gate reasoning on plan approval - gives implementation phase a clean slate
+  if (toolName === "ExitPlanMode") {
+    await clearGateReasoning(sessionDir);
+  }
+
+  logFastPathApproval(lastAgent, "PreToolUse", toolName, projectDir, "All checks passed");
   await exitPipeline({
     decision: "allow",
-    agent: "pipeline-pass",
+    agent: lastAgent,
     reason: "All checks passed",
-    source: "typescript",
   });
 }
 

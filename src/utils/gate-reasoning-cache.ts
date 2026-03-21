@@ -52,6 +52,15 @@ export function initGateReasoningSession(sessionDir: string): void {
   });
 }
 
+/**
+ * Clear all gate reasoning entries and condensed history.
+ * Called on plan approval (ExitPlanMode) to give the implementation phase a clean slate.
+ */
+export async function clearGateReasoning(sessionDir: string): Promise<void> {
+  const manager = getManager(sessionDir);
+  await manager.clear();
+}
+
 function truncateCondensedHistory(text: string): string {
   if (text.length <= CONDENSED_HISTORY_MAX_CHARS) {
     return text;
@@ -250,19 +259,26 @@ export async function addPatternWarnings(
     }
   }
 
-  // Denial pattern similarity
+  // Denial pattern similarity (with safeguards against feedback loops)
   const manager = getManager(sessionDir);
   const data = await manager.load();
-  const deniedEntries = data.entries.filter((e) => e.decision === "DENIED");
+  const now = Date.now();
+  const DENIAL_TTL_MS = 120_000; // 2 minutes - stale denials are not relevant
+  const deniedEntries = data.entries.filter((e) =>
+    e.decision === "DENIED" &&
+    e.appealOutcome !== "OVERTURNED" &&
+    (now - e.timestamp) < DENIAL_TTL_MS
+  );
   if (deniedEntries.length > 0) {
     const currentTarget = extractTarget(toolName, toolInput);
-    for (const denied of deniedEntries) {
-      if (denied.toolTarget && currentTarget && isSimilarTarget(denied.toolTarget, currentTarget)) {
-        warnings.push(
-          `WARNING: Similar to denied tool-${denied.toolCallIndex}. Likely workaround attempt.`
-        );
-        break;
-      }
+    // Require 2+ recent denials to same target before warning (one denial could be wrong)
+    const similarDenials = deniedEntries.filter(
+      (d) => d.toolTarget && currentTarget && isSimilarTarget(d.toolTarget, currentTarget)
+    );
+    if (similarDenials.length >= 2) {
+      warnings.push(
+        `WARNING: ${similarDenials.length} recent denials similar to this action. Possible workaround attempt.`
+      );
     }
   }
 
