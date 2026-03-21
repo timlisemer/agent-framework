@@ -24,11 +24,13 @@ import {
   createEmptySummary,
 } from "./summary-cache.js";
 import { isSubagent } from "./subagent-detector.js";
+import { parseIntentOutput, parseActionsOutput } from "./summary-updater-parsing.js";
 
 interface UpdaterArgs {
   mode: "intent" | "actions";
   transcript: string;
   prompt?: string;  // base64 encoded user prompt (for intent mode)
+  sessionId?: string;  // stable session identifier from BaseHookInput
 }
 
 function parseArgs(args: string[]): UpdaterArgs {
@@ -39,9 +41,10 @@ function parseArgs(args: string[]): UpdaterArgs {
     if (arg === "--mode" && next) { result.mode = next as "intent" | "actions"; i++; }
     else if (arg === "--transcript" && next) { result.transcript = next; i++; }
     else if (arg === "--prompt" && next) { result.prompt = next; i++; }
+    else if (arg === "--session-id" && next) { result.sessionId = next; i++; }
   }
   if (!result.mode || !result.transcript) {
-    console.error("Usage: summary-updater --mode intent|actions --transcript <path> [--prompt <base64>]");
+    console.error("Usage: summary-updater --mode intent|actions --transcript <path> [--prompt <base64>] [--session-id <id>]");
     process.exit(1);
   }
   return result as UpdaterArgs;
@@ -54,7 +57,7 @@ async function main(): Promise<void> {
   if (isSubagent(transcript)) return;
 
   const sessionDir = getSessionDir(transcript);
-  const summaryPath = await getSummaryPath(transcript);
+  const summaryPath = await getSummaryPath(transcript, args.sessionId);
   const stateManager = getSessionState(sessionDir);
 
   if (mode === "intent") {
@@ -80,15 +83,13 @@ async function main(): Promise<void> {
       }
     );
 
-    // Parse ---INTENT--- and ---APPROVALS--- sections
-    const intentMatch = result.output.match(/---INTENT---\s*([\s\S]*?)(?:---APPROVALS---|$)/);
-    const approvalsMatch = result.output.match(/---APPROVALS---\s*([\s\S]*?)$/);
-
-    if (intentMatch?.[1]?.trim()) {
-      await updateSection(summaryPath, "User Intent", intentMatch[1].trim());
+    // Parse ---INTENT--- and ---APPROVALS--- sections (with fallback)
+    const parsed = parseIntentOutput(result.output);
+    if (parsed.intent) {
+      await updateSection(summaryPath, "User Intent", parsed.intent);
     }
-    if (approvalsMatch?.[1]?.trim()) {
-      await updateSection(summaryPath, "User Approvals", approvalsMatch[1].trim());
+    if (parsed.approvals) {
+      await updateSection(summaryPath, "User Approvals", parsed.approvals);
     }
 
     await stateManager.update((state) => ({
@@ -119,15 +120,13 @@ async function main(): Promise<void> {
       }
     );
 
-    // Parse ---ACTIONS--- and ---MISALIGNMENTS--- sections
-    const actionsMatch = result.output.match(/---ACTIONS---\s*([\s\S]*?)(?:---MISALIGNMENTS---|$)/);
-    const misalignMatch = result.output.match(/---MISALIGNMENTS---\s*([\s\S]*?)$/);
-
-    if (actionsMatch?.[1]?.trim()) {
-      await updateSection(summaryPath, "AI Actions", actionsMatch[1].trim());
+    // Parse ---ACTIONS--- and ---MISALIGNMENTS--- sections (with fallback)
+    const parsed = parseActionsOutput(result.output);
+    if (parsed.actions) {
+      await updateSection(summaryPath, "AI Actions", parsed.actions);
     }
-    if (misalignMatch?.[1]?.trim()) {
-      await updateSection(summaryPath, "Flagged Misalignments", misalignMatch[1].trim());
+    if (parsed.misalignments) {
+      await updateSection(summaryPath, "Flagged Misalignments", parsed.misalignments);
     }
 
     await stateManager.update((state) => ({

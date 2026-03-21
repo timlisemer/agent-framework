@@ -8,7 +8,7 @@ import { type PostToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { readStdinJson } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { spawnBackground } from "../utils/spawn-background.js";
-import { getSessionDir, appendToolLog } from "../utils/summary-cache.js";
+import { getSessionDir, appendToolLog, getActiveSubagentCount } from "../utils/summary-cache.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,12 +29,16 @@ async function main() {
       ms: 0,
     });
 
-    // Spawn background summary-updater in actions mode
-    const updaterPath = path.join(__dirname, "../utils/summary-updater.js");
-    spawnBackground(updaterPath, [
-      "--mode", "actions",
-      "--transcript", input.transcript_path,
-    ]);
+    // Skip summary-updater LLM calls while subagents are active (saves many LLM calls)
+    const activeSubagents = getActiveSubagentCount(sessionDir);
+    if (activeSubagents === 0) {
+      const updaterPath = path.join(__dirname, "../utils/summary-updater.js");
+      spawnBackground(updaterPath, [
+        "--mode", "actions",
+        "--transcript", input.transcript_path,
+        "--session-id", input.session_id,
+      ]);
+    }
   }
 
   process.exit(0);

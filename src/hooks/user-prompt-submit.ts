@@ -21,6 +21,7 @@ const __dirname = path.dirname(__filename);
 interface UserPromptSubmitHookInput {
   prompt: string;
   transcript_path: string;
+  session_id: string;
 }
 
 async function main() {
@@ -40,6 +41,7 @@ async function main() {
     "--mode", "intent",
     "--transcript", input.transcript_path,
     "--prompt", encodedPrompt,
+    "--session-id", input.session_id,
   ]);
 
   exitAfterFlush(0);

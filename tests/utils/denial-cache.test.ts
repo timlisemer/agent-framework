@@ -26,10 +26,11 @@ describe("denial-cache", () => {
     });
 
     it("tracks separate patterns independently", async () => {
-      await recordDenial("type-check");
-      await recordDenial("build");
-      expect(await getDenialCount("type-check")).toBe(1);
-      expect(await getDenialCount("build")).toBe(1);
+      // Record both patterns back-to-back, then check immediately
+      const count1 = await recordDenial("type-check");
+      const count2 = await recordDenial("build");
+      expect(count1).toBe(1);
+      expect(count2).toBe(1);
     });
 
     it("returns 0 for unknown pattern", async () => {

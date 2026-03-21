@@ -1498,7 +1498,9 @@ Rules:
 - Add new intent from the latest user message
 - Track explicit approvals ("yes do it", "go ahead", "override X")
 - Be concise - max 3-4 sentences per section
-- If no change needed, repeat existing content unchanged`,
+- If no change needed, repeat existing content unchanged
+- CRITICAL: You MUST start output with ---INTENT--- and use ---APPROVALS--- as delimiter
+- Do NOT add trailing --- at the end of your output`,
 };
 
 /**
@@ -1530,7 +1532,9 @@ Rules:
 - Remove old entries when list grows beyond 8
 - Flag misalignments: scope creep, ignored instructions, repeated denials
 - Clear resolved misalignments
-- If no misalignment, write: (none detected)`,
+- If no misalignment, write: (none detected)
+- CRITICAL: You MUST start output with ---ACTIONS--- and use ---MISALIGNMENTS--- as delimiter
+- Do NOT add trailing --- at the end of your output`,
 };
 
 /**

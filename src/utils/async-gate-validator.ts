@@ -34,6 +34,7 @@ interface ValidatorArgs {
   transcript: string;
   input?: string;
   userHash?: string;
+  sessionId?: string;
 }
 
 function parseArgs(args: string[]): ValidatorArgs {
@@ -46,9 +47,10 @@ function parseArgs(args: string[]): ValidatorArgs {
     else if (arg === "--transcript" && next) { result.transcript = next; i++; }
     else if (arg === "--input" && next) { result.input = next; i++; }
     else if (arg === "--user-hash" && next) { result.userHash = next; i++; }
+    else if (arg === "--session-id" && next) { result.sessionId = next; i++; }
   }
   if (!result.tool || !result.file || !result.transcript) {
-    console.error("Usage: async-gate-validator --tool <name> --file <path> --transcript <path> [--input <json>] [--user-hash <hash>]");
+    console.error("Usage: async-gate-validator --tool <name> --file <path> --transcript <path> [--input <json>] [--user-hash <hash>] [--session-id <id>]");
     process.exit(1);
   }
   return result as ValidatorArgs;
@@ -82,7 +84,7 @@ async function main(): Promise<void> {
     // Read summary sections
     let userIntent = "";
     let misalignments = "";
-    const summaryPath = await getSummaryPath(transcript);
+    const summaryPath = await getSummaryPath(transcript, args.sessionId);
 
     const stale = await isStaleSummary(sessionDir);
     if (!stale) {

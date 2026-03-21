@@ -109,11 +109,29 @@ const EMPTY_SUMMARY_TEMPLATE = `## User Intent
  * Tries slug via extractSlugFromSession(), falls back to sessionId or hash.
  */
 export async function getSummaryPath(transcriptPath: string, sessionId?: string): Promise<string> {
-  const slug = await extractSlugFromSession(transcriptPath);
-  const identifier = slug ?? sessionId ?? hashString(transcriptPath);
   const projectSubdir = path.join(SUMMARIES_BASE, encodeProjectRoot());
   fs.mkdirSync(projectSubdir, { recursive: true });
-  return path.join(projectSubdir, `${identifier}.md`);
+
+  const slug = await extractSlugFromSession(transcriptPath);
+  const stableId = sessionId ?? hashString(transcriptPath);
+
+  // If slug is available, use it (human-readable)
+  if (slug) {
+    const slugPath = path.join(projectSubdir, `${slug}.md`);
+    // Rename from stableId to slug if the old file exists but slug file doesn't
+    const stableIdPath = path.join(projectSubdir, `${stableId}.md`);
+    if (!fs.existsSync(slugPath) && fs.existsSync(stableIdPath)) {
+      try {
+        fs.renameSync(stableIdPath, slugPath);
+      } catch {
+        // Race condition - another process may have renamed it
+      }
+    }
+    return slugPath;
+  }
+
+  // Slug not yet available - use stableId (sessionId or hash)
+  return path.join(projectSubdir, `${stableId}.md`);
 }
 
 /**
@@ -376,4 +394,42 @@ export async function createEmptySummary(summaryPath: string): Promise<void> {
   if (!fs.existsSync(summaryPath)) {
     await fs.promises.writeFile(summaryPath, EMPTY_SUMMARY_TEMPLATE);
   }
+}
+
+/**
+ * Active subagent tracking.
+ *
+ * SubagentStart/SubagentStop hooks maintain a counter so PostToolUse
+ * can skip expensive summary-updater LLM calls during subagent execution.
+ * Staleness protection: if the counter file is older than 10 minutes,
+ * return 0 (assumes subagent crashed without firing SubagentStop).
+ */
+
+const SUBAGENT_COUNTER_FILE = "active-subagents.json";
+const SUBAGENT_STALE_MS = 10 * 60 * 1000;
+
+export function getActiveSubagentCount(sessionDir: string): number {
+  const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
+  try {
+    const stat = fs.statSync(filePath);
+    if (Date.now() - stat.mtimeMs > SUBAGENT_STALE_MS) {
+      return 0;
+    }
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    return typeof data.count === "number" ? data.count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function incrementActiveSubagents(sessionDir: string): void {
+  const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
+  const current = getActiveSubagentCount(sessionDir);
+  fs.writeFileSync(filePath, JSON.stringify({ count: current + 1 }));
+}
+
+export function decrementActiveSubagents(sessionDir: string): void {
+  const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
+  const current = getActiveSubagentCount(sessionDir);
+  fs.writeFileSync(filePath, JSON.stringify({ count: Math.max(0, current - 1) }));
 }

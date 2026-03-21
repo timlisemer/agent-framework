@@ -3,6 +3,7 @@ import { initializeTelemetry } from "../telemetry/index.js";
 initializeTelemetry();
 
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
+import { isSubagent } from "../utils/subagent-detector.js";
 import {
   getSummaryPath,
   getSessionDir,
@@ -33,6 +34,12 @@ const MAX_SUMMARY_SIZE = 4096;
 async function main() {
   const input = await readStdinJson<SessionStartHookInput>();
   const { source, session_id, transcript_path } = input;
+
+  // No summary system for subagents
+  if (isSubagent(transcript_path)) {
+    exitAfterFlush(0);
+    return;
+  }
 
   const summaryPath = await getSummaryPath(transcript_path, session_id);
   const sessionDir = getSessionDir(transcript_path);

@@ -134,17 +134,22 @@ function spawnAsyncGateValidator(
   toolName: string,
   filePath: string,
   transcriptPath: string,
-  toolInput: unknown
+  toolInput: unknown,
+  sessionId?: string
 ): void {
   const validatorPath = path.join(__dirname, "../utils/async-gate-validator.js");
 
   try {
-    spawnBackground(validatorPath, [
+    const args = [
       "--tool", toolName,
       "--file", filePath,
       "--transcript", transcriptPath,
       "--input", JSON.stringify(toolInput),
-    ]);
+    ];
+    if (sessionId) {
+      args.push("--session-id", sessionId);
+    }
+    spawnBackground(validatorPath, args);
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     writePendingValidation({
@@ -519,7 +524,7 @@ async function main() {
       if (trusted && !sensitive) {
         if (!useSyncPipeline) {
           // NON-PLAN MODE: Auto-approve + spawn async gate validator
-          spawnAsyncGateValidator(toolName, filePath, input.transcript_path, toolInput);
+          spawnAsyncGateValidator(toolName, filePath, input.transcript_path, toolInput, input.session_id);
           await exitPipeline({
             decision: "allow",
             agent: "trusted-path",
@@ -582,7 +587,7 @@ async function main() {
     let misalignments = "";
     let gateReasoning = "";
     try {
-      const summaryPath = await getSummaryPath(input.transcript_path);
+      const summaryPath = await getSummaryPath(input.transcript_path, input.session_id);
       userIntent = await readSection(summaryPath, "User Intent");
       misalignments = await readSection(summaryPath, "Flagged Misalignments");
       gateReasoning = await formatForPrompt(sessionDir);
@@ -706,7 +711,7 @@ async function main() {
     // Non-plan mode: spawn async gate validator in background
     if (!useSyncPipeline) {
       const filePath = (toolInput as Record<string, unknown>)?.file_path as string ?? "";
-      spawnAsyncGateValidator(toolName, filePath, input.transcript_path, toolInput);
+      spawnAsyncGateValidator(toolName, filePath, input.transcript_path, toolInput, input.session_id);
     }
   }
 

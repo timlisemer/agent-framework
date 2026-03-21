@@ -1,5 +1,16 @@
-import { describe, it, expect } from "vitest";
-import { formatToolDetail } from "../../src/utils/summary-cache.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import {
+  formatToolDetail,
+  readSection,
+  updateSection,
+  createEmptySummary,
+  getActiveSubagentCount,
+  incrementActiveSubagents,
+  decrementActiveSubagents,
+} from "../../src/utils/summary-cache.js";
 
 describe("formatToolDetail", () => {
   it("returns 'Edit <path>' for Edit tool", () => {
@@ -40,5 +51,164 @@ describe("formatToolDetail", () => {
   it("handles missing input fields with 'unknown'", () => {
     expect(formatToolDetail("Edit", {})).toBe("Edit unknown");
     expect(formatToolDetail("Bash", {})).toBe("");
+  });
+});
+
+describe("readSection (I/O)", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "summary-cache-test-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns empty string when file does not exist", async () => {
+    const result = await readSection(path.join(tempDir, "missing.md"), "User Intent");
+    expect(result).toBe("");
+  });
+
+  it("reads existing section content", async () => {
+    const filePath = path.join(tempDir, "summary.md");
+    fs.writeFileSync(filePath, "## User Intent\n\nFix the auth bug\n\n## AI Actions\n\n(none)");
+    const result = await readSection(filePath, "User Intent");
+    expect(result).toBe("Fix the auth bug");
+  });
+
+  it("returns empty string when section heading not found", async () => {
+    const filePath = path.join(tempDir, "summary.md");
+    fs.writeFileSync(filePath, "## User Intent\n\nSome content");
+    const result = await readSection(filePath, "Missing Section");
+    expect(result).toBe("");
+  });
+
+  it("handles file with --- artifacts between sections", async () => {
+    const filePath = path.join(tempDir, "summary.md");
+    fs.writeFileSync(filePath, "## User Intent\n\nContent\n---\n## AI Actions\n\n(none)");
+    const result = await readSection(filePath, "User Intent");
+    expect(result).toBe("Content\n---");
+  });
+});
+
+describe("updateSection (I/O)", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "summary-cache-test-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("creates file from template if missing, then updates section", async () => {
+    const filePath = path.join(tempDir, "summary.md");
+    await updateSection(filePath, "User Intent", "Fix auth bug");
+    const content = fs.readFileSync(filePath, "utf-8");
+    expect(content).toContain("## User Intent");
+    expect(content).toContain("Fix auth bug");
+    expect(content).toContain("## AI Actions");
+  });
+
+  it("preserves other sections when updating one", async () => {
+    const filePath = path.join(tempDir, "summary.md");
+    fs.writeFileSync(filePath, "## User Intent\n\nOriginal intent\n\n## AI Actions\n\nOriginal actions\n\n## Flagged Misalignments\n\n(none)");
+    await updateSection(filePath, "AI Actions", "Updated actions");
+    const content = fs.readFileSync(filePath, "utf-8");
+    expect(content).toContain("Original intent");
+    expect(content).toContain("Updated actions");
+    expect(content).toContain("(none)");
+  });
+
+  it("replaces section content between ## markers", async () => {
+    const filePath = path.join(tempDir, "summary.md");
+    fs.writeFileSync(filePath, "## User Intent\n\nOld\n\n## AI Actions\n\nOld actions");
+    await updateSection(filePath, "User Intent", "New intent");
+    const content = fs.readFileSync(filePath, "utf-8");
+    expect(content).toContain("New intent");
+    expect(content).not.toContain("Old\n");
+  });
+});
+
+describe("createEmptySummary (I/O)", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "summary-cache-test-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("creates file with all section headers", async () => {
+    const filePath = path.join(tempDir, "summary.md");
+    await createEmptySummary(filePath);
+    const content = fs.readFileSync(filePath, "utf-8");
+    expect(content).toContain("## User Intent");
+    expect(content).toContain("## User Approvals");
+    expect(content).toContain("## AI Actions");
+    expect(content).toContain("## Flagged Misalignments");
+    expect(content).toContain("## Gate Reasoning");
+  });
+
+  it("does not overwrite existing file (idempotent)", async () => {
+    const filePath = path.join(tempDir, "summary.md");
+    fs.writeFileSync(filePath, "## User Intent\n\nCustom content");
+    await createEmptySummary(filePath);
+    const content = fs.readFileSync(filePath, "utf-8");
+    expect(content).toContain("Custom content");
+    expect(content).not.toContain("No intent captured yet");
+  });
+});
+
+describe("active subagent counter", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "summary-cache-test-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("returns 0 when no file exists", () => {
+    expect(getActiveSubagentCount(tempDir)).toBe(0);
+  });
+
+  it("returns correct count after increment", () => {
+    incrementActiveSubagents(tempDir);
+    expect(getActiveSubagentCount(tempDir)).toBe(1);
+  });
+
+  it("increments multiple times", () => {
+    incrementActiveSubagents(tempDir);
+    incrementActiveSubagents(tempDir);
+    incrementActiveSubagents(tempDir);
+    expect(getActiveSubagentCount(tempDir)).toBe(3);
+  });
+
+  it("decrements correctly", () => {
+    incrementActiveSubagents(tempDir);
+    incrementActiveSubagents(tempDir);
+    decrementActiveSubagents(tempDir);
+    expect(getActiveSubagentCount(tempDir)).toBe(1);
+  });
+
+  it("does not go below 0 on decrement", () => {
+    decrementActiveSubagents(tempDir);
+    expect(getActiveSubagentCount(tempDir)).toBe(0);
+  });
+
+  it("returns 0 when file is older than 10 minutes (staleness)", () => {
+    incrementActiveSubagents(tempDir);
+    // Manually backdate the file's mtime
+    const filePath = path.join(tempDir, "active-subagents.json");
+    const oldTime = new Date(Date.now() - 11 * 60 * 1000);
+    fs.utimesSync(filePath, oldTime, oldTime);
+    expect(getActiveSubagentCount(tempDir)).toBe(0);
   });
 });
