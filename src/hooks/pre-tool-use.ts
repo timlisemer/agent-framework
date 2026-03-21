@@ -420,7 +420,8 @@ async function main() {
           conversationContext,
           input.transcript_path,
           projectDir,
-          "PreToolUse"
+          "PreToolUse",
+          "edit"
         );
 
         if (!validation.approved) {
@@ -631,7 +632,7 @@ async function main() {
   // TOOL-APPROVE (final gate)
   // ============================================================
 
-  // Block ExitPlanMode if plan file is empty
+  // ExitPlanMode: validate plan content before allowing exit
   if (toolName === "ExitPlanMode") {
     const planContent = await readPlanContent(input.transcript_path);
     if (!planContent || planContent.trim() === "") {
@@ -642,6 +643,42 @@ async function main() {
         reason: "Cannot exit plan mode without a plan.",
         });
       return;
+    }
+
+    // Full plan validation with LLM (exit mode = always runs LLM)
+    const exitPlanResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
+    const exitPlanContext = formatTranscriptResult(exitPlanResult);
+    const exitValidation = await checkPlanIntent(
+      planContent,
+      "Write",
+      { content: planContent },
+      exitPlanContext,
+      input.transcript_path,
+      projectDir,
+      "PreToolUse",
+      "exit"
+    );
+
+    if (!exitValidation.approved) {
+      const appeal = await appealHelper(
+        toolName,
+        "ExitPlanMode - full plan validation",
+        exitPlanContext,
+        exitValidation.reason || "Plan validation failed",
+        projectDir,
+        "PreToolUse",
+        `plan-validate blocked ExitPlanMode: ${exitValidation.reason}`
+      );
+
+      if (!appeal.overturned) {
+        await exitPipeline({
+          decision: "deny",
+          agent: "plan-validate",
+          reason: `Plan validation failed: ${exitValidation.reason}`,
+        });
+        return;
+      }
+      currentGateNote = appeal.gateNote;
     }
   }
 

@@ -63,7 +63,8 @@ export async function checkPlanIntent(
   conversationContext: string,
   transcriptPath: string,
   workingDir: string,
-  hookName: string
+  hookName: string,
+  mode: "edit" | "exit" = "edit"
 ): Promise<{ approved: boolean; reason?: string }> {
   // Skip plan validation for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
@@ -89,22 +90,35 @@ export async function checkPlanIntent(
     return { approved: true };
   }
 
+  // Compute the full resulting plan for regex checks (not just the diff)
+  const resultingPlan = toolName === "Write"
+    ? toolInput.content ?? ""
+    : currentPlan
+      ? currentPlan.replace(toolInput.old_string ?? "", toolInput.new_string ?? "")
+      : toolInput.new_string ?? "";
+
   try {
-    // Check for violations in proposed edit
-    const blacklistHighlights = getContentBlacklistHighlights(proposedEdit);
-    const ruleViolations = getRuleViolationHighlights(proposedEdit);
-    const verificationViolations = getVerificationStructureHighlights(proposedEdit);
+    // Check for violations in the full resulting plan
+    const blacklistHighlights = getContentBlacklistHighlights(resultingPlan);
+    const ruleViolations = getRuleViolationHighlights(resultingPlan);
+    const verificationViolations = getVerificationStructureHighlights(resultingPlan);
     const allViolations = [...blacklistHighlights, ...ruleViolations, ...verificationViolations];
     const violationSection = allViolations.length > 0
       ? `=== VIOLATIONS DETECTED ===\n${allViolations.join("\n")}\n=== END VIOLATIONS ===\n\n`
       : "";
 
-    // Run plan validation with retry and telemetry
+    // Edit mode: fast-path approve if no violations in full plan
+    if (mode === "edit" && allViolations.length === 0) {
+      logFastPathApproval("plan-validate", hookName, toolName, workingDir, "No violations in full plan");
+      return { approved: true };
+    }
+
+    // Exit mode: always call LLM. Edit mode with violations: call LLM for context-aware check.
     const result = await runAgentWithRetryAndTelemetry(
       { ...PLAN_VALIDATE_AGENT },
       {
         prompt: "Check if this plan aligns with the user request.",
-        context: `CONVERSATION:\n${conversationContext}\n\nCURRENT PLAN:\n${currentPlan ?? "(new plan)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n${violationSection}=== BLACKLISTED COMMANDS ===\n${getBlacklistDescription()}\n=== END BLACKLIST ===`,
+        context: `${violationSection}CONVERSATION:\n${conversationContext}\n\nCURRENT PLAN:\n${resultingPlan}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n=== BLACKLISTED COMMANDS ===\n${getBlacklistDescription()}\n=== END BLACKLIST ===`,
       },
       {
         formatValidator: (text) => startsWithAny(text, ["OK", "DRIFT:"]),
