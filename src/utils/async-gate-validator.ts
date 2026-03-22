@@ -29,6 +29,7 @@ import {
 import { isSubagent } from "./subagent-detector.js";
 import { formatForPrompt } from "./gate-reasoning-cache.js";
 import { getActivePrediction, formatPredictionContext } from "./prediction-cache.js";
+import { cleanupPidFile } from "./spawn-background.js";
 
 interface ValidatorArgs {
   tool: string;
@@ -58,11 +59,23 @@ function parseArgs(args: string[]): ValidatorArgs {
   return result as ValidatorArgs;
 }
 
+const DEDUP_KEY = "async-gate-validator";
+
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const { tool, file, transcript } = args;
 
   const sessionDir = getSessionDir(transcript);
+
+  // Hard timeout: self-terminate to prevent zombie processes
+  const hardTimeout = setTimeout(() => {
+    console.error("[async-gate-validator] Hard timeout reached, exiting");
+    cleanupPidFile(sessionDir, DEDUP_KEY);
+    flushTelemetry();
+    process.exit(0);
+  }, 60_000);
+  hardTimeout.unref();
+
   initValidationSession(sessionDir);
 
   // Skip for subagents
@@ -151,6 +164,7 @@ async function main(): Promise<void> {
     await clearPendingValidation();
   }
 
+  cleanupPidFile(sessionDir, DEDUP_KEY);
   flushTelemetry();
 }
 

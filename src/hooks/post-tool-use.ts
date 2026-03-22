@@ -37,7 +37,7 @@ async function main() {
         "--mode", "actions",
         "--transcript", input.transcript_path,
         "--session-id", input.session_id,
-      ]);
+      ], { dedupKey: "summary-updater-actions", sessionDir });
     }
   }
 

@@ -158,7 +158,8 @@ function spawnAsyncGateValidator(
     if (sessionId) {
       args.push("--session-id", sessionId);
     }
-    spawnBackground(validatorPath, args);
+    const sessionDir = getSessionDir(transcriptPath);
+    spawnBackground(validatorPath, args, { dedupKey: "async-gate-validator", sessionDir });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     writePendingValidation({

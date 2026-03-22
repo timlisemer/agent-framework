@@ -1,12 +1,6 @@
 import "../utils/load-env.js";
-import { fork } from "child_process";
-import * as path from "path";
-import { fileURLToPath } from "url";
 import type { TelemetryConfig, TelemetryEvent } from "./types.js";
 import { TelemetryQueue } from "./queue.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 /**
  * Master switch to disable all telemetry.
@@ -114,40 +108,26 @@ export class TelemetryClient {
 
   /**
    * Fire-and-forget flush for process exit.
-   * Spawns a detached child process to send telemetry, ensuring the request
-   * completes even after the parent process exits.
+   * Uses keepalive fetch to ensure the request completes even after the
+   * parent process exits, without spawning a separate child process.
    */
   flushSync(): void {
     if (this.queue.isEmpty()) return;
 
-    // Drain ALL events (not just batch size)
     const events = this.queue.drain(this.config.maxQueueSize);
     if (events.length === 0) return;
 
-    // Spawn detached child process to send telemetry
-    const senderPath = path.join(__dirname, "../utils/telemetry-sender.js");
-
-    try {
-      const child = fork(
-        senderPath,
-        [JSON.stringify(events), this.config.endpoint, this.config.apiKey],
-        { detached: true, stdio: "ignore" }
-      );
-      child.unref(); // Allow parent to exit immediately
-    } catch (error) {
-      // Fallback to fire-and-forget fetch (best effort)
-      fetch(`${this.config.endpoint}/api/v1/telemetry/batch`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-API-Key": this.config.apiKey,
-        },
-        body: JSON.stringify({ events }),
-        keepalive: true,
-      }).catch((e) => {
-        console.error("[Telemetry] Flush error:", e instanceof Error ? e.message : e);
-      });
-    }
+    fetch(`${this.config.endpoint}/api/v1/telemetry/batch`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": this.config.apiKey,
+      },
+      body: JSON.stringify({ events }),
+      keepalive: true,
+    }).catch((e) => {
+      console.error("[Telemetry] Flush error:", e instanceof Error ? e.message : e);
+    });
   }
 
   getConfig(): Required<TelemetryConfig> {

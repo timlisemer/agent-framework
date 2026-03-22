@@ -406,9 +406,38 @@ export async function createEmptySummary(summaryPath: string): Promise<void> {
 
 const SUBAGENT_COUNTER_FILE = "active-subagents.json";
 const SUBAGENT_STALE_MS = 10 * 60 * 1000;
+const SUBAGENT_LOCK_STALE_MS = 1000;
 
-export function getActiveSubagentCount(sessionDir: string): number {
-  const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
+function acquireSubagentLock(lockPath: string): void {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      fs.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
+      return;
+    } catch (err) {
+      const error = err as NodeJS.ErrnoException;
+      if (error.code === "EEXIST") {
+        try {
+          const stat = fs.statSync(lockPath);
+          if (Date.now() - stat.mtimeMs > SUBAGENT_LOCK_STALE_MS) {
+            try { fs.unlinkSync(lockPath); } catch {}
+            continue;
+          }
+        } catch { continue; }
+        // Brief busy-wait before retry
+        const start = Date.now();
+        while (Date.now() - start < 10) { /* spin */ }
+        continue;
+      }
+      return;
+    }
+  }
+}
+
+function releaseSubagentLock(lockPath: string): void {
+  try { fs.unlinkSync(lockPath); } catch {}
+}
+
+function readSubagentCount(filePath: string): number {
   try {
     const stat = fs.statSync(filePath);
     if (Date.now() - stat.mtimeMs > SUBAGENT_STALE_MS) {
@@ -421,14 +450,31 @@ export function getActiveSubagentCount(sessionDir: string): number {
   }
 }
 
+export function getActiveSubagentCount(sessionDir: string): number {
+  const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
+  return readSubagentCount(filePath);
+}
+
 export function incrementActiveSubagents(sessionDir: string): void {
   const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
-  const current = getActiveSubagentCount(sessionDir);
-  fs.writeFileSync(filePath, JSON.stringify({ count: current + 1 }));
+  const lockPath = filePath + ".lock";
+  acquireSubagentLock(lockPath);
+  try {
+    const current = readSubagentCount(filePath);
+    fs.writeFileSync(filePath, JSON.stringify({ count: current + 1 }));
+  } finally {
+    releaseSubagentLock(lockPath);
+  }
 }
 
 export function decrementActiveSubagents(sessionDir: string): void {
   const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
-  const current = getActiveSubagentCount(sessionDir);
-  fs.writeFileSync(filePath, JSON.stringify({ count: Math.max(0, current - 1) }));
+  const lockPath = filePath + ".lock";
+  acquireSubagentLock(lockPath);
+  try {
+    const current = readSubagentCount(filePath);
+    fs.writeFileSync(filePath, JSON.stringify({ count: Math.max(0, current - 1) }));
+  } finally {
+    releaseSubagentLock(lockPath);
+  }
 }

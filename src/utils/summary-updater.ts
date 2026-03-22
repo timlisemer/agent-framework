@@ -28,6 +28,7 @@ import { parseIntentOutput, parseActionsOutput } from "./summary-updater-parsing
 import { parseEditIntentOutput } from "./edit-intent.js";
 import { savePrediction } from "./prediction-cache.js";
 import { isPlanModeActive } from "./plan-mode-detector.js";
+import { cleanupPidFile } from "./spawn-background.js";
 
 interface UpdaterArgs {
   mode: "intent" | "actions";
@@ -60,6 +61,16 @@ async function main(): Promise<void> {
   if (isSubagent(transcript)) return;
 
   const sessionDir = getSessionDir(transcript);
+  const dedupKey = `summary-updater-${mode}`;
+
+  // Hard timeout: self-terminate to prevent zombie processes
+  const hardTimeout = setTimeout(() => {
+    console.error(`[summary-updater] Hard timeout reached (mode=${mode}), exiting`);
+    cleanupPidFile(sessionDir, dedupKey);
+    flushTelemetry();
+    process.exit(0);
+  }, 60_000);
+  hardTimeout.unref();
   const summaryPath = await getSummaryPath(transcript, args.sessionId);
   const stateManager = getSessionState(sessionDir);
 
@@ -239,6 +250,7 @@ async function main(): Promise<void> {
     }));
   }
 
+  cleanupPidFile(sessionDir, dedupKey);
   flushTelemetry();
 }
 

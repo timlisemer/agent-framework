@@ -71,7 +71,7 @@ async function main() {
     "--transcript", input.transcript_path,
     "--prompt", encodedPrompt,
     "--session-id", input.session_id,
-  ]);
+  ], { dedupKey: "summary-updater-intent", sessionDir });
 
   exitAfterFlush(0);
 }
