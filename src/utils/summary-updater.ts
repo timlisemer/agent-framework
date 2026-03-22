@@ -147,32 +147,46 @@ async function main(): Promise<void> {
     const editIntent = updatedState.currentEditIntent ?? null;
     const planMode = isPlanModeActive(transcript);
 
-    const expectedTools: string[] = [];
-    const blockedTools: { toolName: string; targetPattern?: string; reason: string }[] = [];
+    let expectedIntent = "";
+    let blockedIntent = "";
+    const blockedTools: { toolName: string; targetPattern?: string; reason: string; exceptions?: string[] }[] = [];
 
     if (planMode) {
-      expectedTools.push("Read", "Glob", "Grep", "Agent");
+      expectedIntent = "planning and exploration tools";
+      blockedIntent = "no file modification or execution tools";
     } else if (editIntent === true) {
-      expectedTools.push("Read", "Edit");
+      expectedIntent = "file editing tools for implementation";
     } else if (editIntent === false) {
-      expectedTools.push("Read", "Glob", "Grep");
+      expectedIntent = "read-only exploration tools";
+      blockedIntent = "no write/edit tools";
     }
 
     // Scan for explicit user directives blocking execution
     if (/\b(don'?t|do not)\s+(run|execute)\b/i.test(userPrompt)) {
       blockedTools.push({ toolName: "Bash", reason: "user said no execution" });
+      blockedIntent += (blockedIntent ? "; " : "") + "no execution";
     }
     if (/\b(don'?t|do not)\s+(push|deploy)\b/i.test(userPrompt)) {
       blockedTools.push({ toolName: "Bash", targetPattern: "git push*", reason: "user said no pushing" });
+      blockedIntent += (blockedIntent ? "; " : "") + "no pushing/deploying";
     }
 
-    // Read-before-Edit exception: if Edit expected, always include Read
-    if (expectedTools.includes("Edit") && !expectedTools.includes("Read")) {
-      expectedTools.unshift("Read");
+    // Detect "use X agents only" pattern
+    const agentOnlyMatch = userPrompt.match(/\buse\s+(\w+)\s+agents?\b/i);
+    if (agentOnlyMatch) {
+      const agentType = agentOnlyMatch[1];
+      expectedIntent = `${agentType} agent delegation only`;
+      blockedIntent = `everything except Agent tool with ${agentType} subagent`;
+      blockedTools.push({
+        toolName: ".*",
+        reason: `user requested ${agentType} agents only`,
+        exceptions: ["Agent"],
+      });
     }
 
     await savePrediction(sessionDir, {
-      expectedTools,
+      expectedIntent,
+      blockedIntent,
       blockedTools,
       userMessageSnippet: userPrompt.slice(0, 200),
       timestamp: Date.now(),

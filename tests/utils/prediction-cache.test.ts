@@ -4,9 +4,11 @@ import * as os from "os";
 import * as path from "path";
 import {
   getActivePrediction,
+  getAllPredictions,
   savePrediction,
   clearPredictions,
   matchBlockedTool,
+  formatPredictionContext,
   initPredictionSession,
   type BlockedTool,
   type ToolPrediction,
@@ -41,12 +43,104 @@ describe("matchBlockedTool", () => {
     const result = matchBlockedTool("Bash", { command: "echo hello" }, []);
     expect(result).toBeNull();
   });
+
+  describe("regex patterns", () => {
+    it("matches all tools with .* pattern", () => {
+      const blocked: BlockedTool = { toolName: ".*", reason: "block all" };
+      expect(matchBlockedTool("Bash", {}, [blocked])).toBe(blocked);
+      expect(matchBlockedTool("Read", {}, [blocked])).toBe(blocked);
+      expect(matchBlockedTool("Edit", {}, [blocked])).toBe(blocked);
+      expect(matchBlockedTool("Agent", {}, [blocked])).toBe(blocked);
+    });
+
+    it("respects exceptions on wildcard pattern", () => {
+      const blocked: BlockedTool = {
+        toolName: ".*",
+        reason: "block all except Agent",
+        exceptions: ["Agent"],
+      };
+      expect(matchBlockedTool("Bash", {}, [blocked])).toBe(blocked);
+      expect(matchBlockedTool("Read", {}, [blocked])).toBe(blocked);
+      expect(matchBlockedTool("Edit", {}, [blocked])).toBe(blocked);
+      expect(matchBlockedTool("Agent", {}, [blocked])).toBeNull();
+    });
+
+    it("supports alternation pattern", () => {
+      const blocked: BlockedTool = { toolName: "Edit|Write", reason: "no writes" };
+      expect(matchBlockedTool("Edit", {}, [blocked])).toBe(blocked);
+      expect(matchBlockedTool("Write", {}, [blocked])).toBe(blocked);
+      expect(matchBlockedTool("Read", {}, [blocked])).toBeNull();
+    });
+
+    it("falls back to exact match on invalid regex", () => {
+      const blocked: BlockedTool = { toolName: "[invalid", reason: "bad regex" };
+      expect(matchBlockedTool("[invalid", {}, [blocked])).toBe(blocked);
+      expect(matchBlockedTool("Bash", {}, [blocked])).toBeNull();
+    });
+
+    it("supports multiple exceptions", () => {
+      const blocked: BlockedTool = {
+        toolName: ".*",
+        reason: "block all",
+        exceptions: ["Agent", "Read"],
+      };
+      expect(matchBlockedTool("Agent", {}, [blocked])).toBeNull();
+      expect(matchBlockedTool("Read", {}, [blocked])).toBeNull();
+      expect(matchBlockedTool("Edit", {}, [blocked])).toBe(blocked);
+      expect(matchBlockedTool("Bash", {}, [blocked])).toBe(blocked);
+    });
+
+    it("combines regex pattern with targetPattern", () => {
+      const blocked: BlockedTool = {
+        toolName: "Bash",
+        targetPattern: "git push*",
+        reason: "no pushing",
+      };
+      expect(matchBlockedTool("Bash", { command: "git push origin main" }, [blocked])).toBe(blocked);
+      expect(matchBlockedTool("Bash", { command: "git status" }, [blocked])).toBeNull();
+    });
+  });
 });
 
-// The prediction-cache module uses a module-level `cacheManager` variable that is
-// lazily initialized on first access. Once set, it retains its file path for the
-// process lifetime. Tests below use a single shared tmpDir to avoid issues with
-// the singleton cacheManager pointing to a stale directory.
+describe("formatPredictionContext", () => {
+  it("formats expectedIntent and blockedIntent", () => {
+    const prediction: ToolPrediction = {
+      expectedIntent: "read-only exploration tools",
+      blockedIntent: "no write/edit tools",
+      blockedTools: [],
+      userMessageSnippet: "test",
+      timestamp: Date.now(),
+    };
+    const result = formatPredictionContext(prediction);
+    expect(result).toContain("Expected intent: read-only exploration tools");
+    expect(result).toContain("Blocked intent: no write/edit tools");
+  });
+
+  it("includes mechanically blocked tools with exceptions", () => {
+    const prediction: ToolPrediction = {
+      expectedIntent: "explore agent delegation only",
+      blockedIntent: "everything except Agent",
+      blockedTools: [{ toolName: ".*", reason: "block all", exceptions: ["Agent"] }],
+      userMessageSnippet: "test",
+      timestamp: Date.now(),
+    };
+    const result = formatPredictionContext(prediction);
+    expect(result).toContain("Mechanically blocked: .* (except Agent)");
+  });
+
+  it("omits empty fields", () => {
+    const prediction: ToolPrediction = {
+      expectedIntent: "",
+      blockedIntent: "",
+      blockedTools: [],
+      userMessageSnippet: "test",
+      timestamp: Date.now(),
+    };
+    const result = formatPredictionContext(prediction);
+    expect(result).toBe("");
+  });
+});
+
 describe("prediction-cache I/O", () => {
   let tmpDir: string;
 
@@ -61,7 +155,8 @@ describe("prediction-cache I/O", () => {
 
   function makePrediction(overrides: Partial<ToolPrediction> = {}): ToolPrediction {
     return {
-      expectedTools: ["Bash"],
+      expectedIntent: "read-only exploration tools",
+      blockedIntent: "",
       blockedTools: [],
       userMessageSnippet: "test message",
       timestamp: Date.now(),
@@ -80,17 +175,23 @@ describe("prediction-cache I/O", () => {
     const result = await getActivePrediction(tmpDir);
     expect(result).not.toBeNull();
     expect(result!.userMessageSnippet).toBe("run tests");
-    expect(result!.expectedTools).toEqual(["Bash"]);
+    expect(result!.expectedIntent).toBe("read-only exploration tools");
   });
 
-  it("overwrites the first prediction when saving a second", async () => {
+  it("appends entries instead of replacing", async () => {
     const first = makePrediction({ userMessageSnippet: "first" });
     const second = makePrediction({ userMessageSnippet: "second" });
     await savePrediction(tmpDir, first);
     await savePrediction(tmpDir, second);
-    const result = await getActivePrediction(tmpDir);
-    expect(result).not.toBeNull();
-    expect(result!.userMessageSnippet).toBe("second");
+
+    const active = await getActivePrediction(tmpDir);
+    expect(active).not.toBeNull();
+    expect(active!.userMessageSnippet).toBe("second");
+
+    const all = await getAllPredictions(tmpDir);
+    expect(all).toHaveLength(2);
+    expect(all[0].userMessageSnippet).toBe("first");
+    expect(all[1].userMessageSnippet).toBe("second");
   });
 
   it("returns null after clearing predictions", async () => {
@@ -124,6 +225,23 @@ describe("prediction-cache I/O", () => {
     initPredictionSession(tmpDir);
     const result = await getActivePrediction(tmpDir);
     expect(result).not.toBeNull();
+  });
+
+  it("getAllPredictions returns empty array when none saved", async () => {
+    const all = await getAllPredictions(tmpDir);
+    expect(all).toEqual([]);
+  });
+
+  it("getActivePrediction returns the most recent entry", async () => {
+    await savePrediction(tmpDir, makePrediction({ userMessageSnippet: "first" }));
+    await savePrediction(tmpDir, makePrediction({ userMessageSnippet: "second" }));
+    await savePrediction(tmpDir, makePrediction({ userMessageSnippet: "third" }));
+
+    const active = await getActivePrediction(tmpDir);
+    expect(active!.userMessageSnippet).toBe("third");
+
+    const all = await getAllPredictions(tmpDir);
+    expect(all).toHaveLength(3);
   });
 
   it("matchBlockedTool with no targetPattern matches all invocations", async () => {

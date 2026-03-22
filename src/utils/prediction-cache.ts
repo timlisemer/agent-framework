@@ -1,8 +1,9 @@
 /**
- * Tool Prediction Cache - Expected and blocked tool lists derived from user intent.
+ * Tool Prediction Cache - Intent-based predictions with regex-powered blocking.
  *
- * Predictions handle non-file-edit tools only (Bash commands, MCP tools, etc.).
- * File-modification blocking is handled exclusively by edit intent flags.
+ * Stores natural language intent descriptions (expectedIntent, blockedIntent) for
+ * LLM agent context, plus a mechanical blocklist (blockedTools) with regex pattern
+ * matching and exception support.
  *
  * Uses lazy CacheManager initialization (same pattern as gate-reasoning-cache.ts).
  *
@@ -13,13 +14,21 @@ import * as path from "path";
 import { CacheManager } from "./cache-manager.js";
 
 export interface BlockedTool {
+  /** Regex pattern matched against tool name (e.g. ".*", "Bash", "Edit|Write") */
   toolName: string;
+  /** Optional glob pattern for command/file_path matching */
   targetPattern?: string;
   reason: string;
+  /** Tool names exempt from this rule (exact match) */
+  exceptions?: string[];
 }
 
 export interface ToolPrediction {
-  expectedTools: string[];
+  /** Natural language description of what tools/actions are expected */
+  expectedIntent: string;
+  /** Natural language description of what tools/actions are NOT wanted */
+  blockedIntent: string;
+  /** Concrete tool entries that are mechanically blocked (regex + exceptions) */
   blockedTools: BlockedTool[];
   userMessageSnippet: string;
   timestamp: number;
@@ -40,7 +49,7 @@ export function initPredictionSession(sessionDir: string): void {
     filePath: path.join(sessionDir, "prediction-cache.json"),
     defaultData: () => ({ entries: [] }),
     expiryMs: 10 * 60 * 1000,
-    maxEntries: 1,
+    maxEntries: 20,
     getTimestamp: (e) => (e as ToolPrediction).timestamp,
     getEntries: (d) => d.entries,
     setEntries: (d, e) => ({ ...d, entries: e as ToolPrediction[] }),
@@ -55,20 +64,32 @@ function getManager(sessionDir: string): CacheManager<PredictionData> {
 }
 
 /**
- * Get the active (non-expired) prediction, or null if none exists.
+ * Get the most recent active (non-expired) prediction, or null if none exists.
  */
 export async function getActivePrediction(sessionDir: string): Promise<ToolPrediction | null> {
   const manager = getManager(sessionDir);
   const data = await manager.load();
-  return data.entries.length > 0 ? data.entries[0] : null;
+  return data.entries.length > 0 ? data.entries[data.entries.length - 1] : null;
 }
 
 /**
- * Save a new prediction (replaces any existing one).
+ * Get all active (non-expired) predictions.
+ */
+export async function getAllPredictions(sessionDir: string): Promise<ToolPrediction[]> {
+  const manager = getManager(sessionDir);
+  const data = await manager.load();
+  return data.entries;
+}
+
+/**
+ * Save a new prediction (appends to existing entries).
  */
 export async function savePrediction(sessionDir: string, prediction: ToolPrediction): Promise<void> {
   const manager = getManager(sessionDir);
-  await manager.save({ entries: [prediction] });
+  await manager.update((data) => ({
+    ...data,
+    entries: [...data.entries, prediction],
+  }));
 }
 
 /**
@@ -80,7 +101,30 @@ export async function clearPredictions(sessionDir: string): Promise<void> {
 }
 
 /**
+ * Format prediction context for LLM agent consumption.
+ */
+export function formatPredictionContext(prediction: ToolPrediction): string {
+  const parts: string[] = [];
+  if (prediction.expectedIntent) {
+    parts.push(`Expected intent: ${prediction.expectedIntent}`);
+  }
+  if (prediction.blockedIntent) {
+    parts.push(`Blocked intent: ${prediction.blockedIntent}`);
+  }
+  if (prediction.blockedTools.length > 0) {
+    const blocked = prediction.blockedTools.map((b) => {
+      let desc = b.toolName;
+      if (b.exceptions?.length) desc += ` (except ${b.exceptions.join(", ")})`;
+      return desc;
+    });
+    parts.push(`Mechanically blocked: ${blocked.join("; ")}`);
+  }
+  return parts.join("\n");
+}
+
+/**
  * Check if a tool call matches any blocked tool entry.
+ * Supports regex patterns in toolName and exception lists.
  * Returns the matching BlockedTool, or null if no match.
  */
 export function matchBlockedTool(
@@ -89,7 +133,11 @@ export function matchBlockedTool(
   blockedTools: BlockedTool[]
 ): BlockedTool | null {
   for (const blocked of blockedTools) {
-    if (blocked.toolName !== toolName) continue;
+    // Check exceptions first — if tool is exempt, skip this rule
+    if (blocked.exceptions?.includes(toolName)) continue;
+
+    // Match toolName as regex pattern
+    if (!toolNameMatches(toolName, blocked.toolName)) continue;
 
     // If no targetPattern, matches all invocations of this tool
     if (!blocked.targetPattern) return blocked;
@@ -105,6 +153,22 @@ export function matchBlockedTool(
     }
   }
   return null;
+}
+
+/**
+ * Match a tool name against a pattern.
+ * If pattern contains regex metacharacters, treat as regex. Otherwise exact match.
+ */
+function toolNameMatches(toolName: string, pattern: string): boolean {
+  if (/[.*|[\]()^$+?\\]/.test(pattern)) {
+    try {
+      const regex = new RegExp(`^(?:${pattern})$`);
+      return regex.test(toolName);
+    } catch {
+      return toolName === pattern;
+    }
+  }
+  return toolName === pattern;
 }
 
 /**

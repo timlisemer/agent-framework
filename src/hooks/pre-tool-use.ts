@@ -60,6 +60,7 @@ import {
   getActivePrediction,
   clearPredictions,
   matchBlockedTool,
+  formatPredictionContext,
 } from "../utils/prediction-cache.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -252,7 +253,7 @@ async function main() {
 
     // 3. GATE REASONING: Write entry for LLM agent decisions and denials
     const isLlmAgent = ["tool-approve", "gate", "style-drift", "plan-validate", "claude-md-validate", "question-validate", "edit-intent", "prediction-block"].includes(exit.agent);
-    if (exit.decision === "deny" || currentGateNote || isLlmAgent) {
+    if (!subagent && (exit.decision === "deny" || currentGateNote || isLlmAgent)) {
       const warnings = await addPatternWarnings(toolName, toolInput, sessionDir);
       await addEntry(sessionDir, {
         toolCallIndex: toolCallCount,
@@ -721,7 +722,7 @@ If in doubt, UPHOLD.
     try {
       const prediction = await getActivePrediction(sessionDir);
       if (prediction) {
-        predictions = `Expected: ${prediction.expectedTools.join(", ")}`;
+        predictions = formatPredictionContext(prediction);
       }
     } catch {
       // Non-fatal

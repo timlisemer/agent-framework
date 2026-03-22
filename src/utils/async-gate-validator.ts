@@ -28,7 +28,7 @@ import {
 } from "./summary-cache.js";
 import { isSubagent } from "./subagent-detector.js";
 import { formatForPrompt } from "./gate-reasoning-cache.js";
-import { getActivePrediction } from "./prediction-cache.js";
+import { getActivePrediction, formatPredictionContext } from "./prediction-cache.js";
 
 interface ValidatorArgs {
   tool: string;
@@ -112,7 +112,7 @@ async function main(): Promise<void> {
     try {
       const prediction = await getActivePrediction(sessionDir);
       if (prediction) {
-        predictions = `Expected: ${prediction.expectedTools.join(", ")}`;
+        predictions = formatPredictionContext(prediction);
       }
       const stateManager = getSessionState(sessionDir);
       const state = await stateManager.load();
