@@ -1,9 +1,9 @@
 import * as fs from "fs";
-import { CacheManager, getTempFilePath } from "./cache-manager.js";
+import * as path from "path";
+import { CacheManager } from "./cache-manager.js";
 import { hashString } from "./hash-utils.js";
 import { clearDenialCache } from "./denial-cache.js";
 
-const REWIND_CACHE_FILE = getTempFilePath("rewind-cache.json");
 const REWIND_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
 const MAX_CACHED_MESSAGES = 20;
 
@@ -18,18 +18,29 @@ interface RewindData {
   userMessages: CachedUserMessage[];
 }
 
-const cacheManager = new CacheManager<RewindData>({
-  filePath: REWIND_CACHE_FILE,
-  defaultData: () => ({ userMessages: [] }),
-  expiryMs: REWIND_EXPIRY_MS,
-  maxEntries: MAX_CACHED_MESSAGES,
-  getTimestamp: (e) => (e as CachedUserMessage).timestamp,
-  getEntries: (d) => d.userMessages,
-  setEntries: (d, e) => ({ ...d, userMessages: e as CachedUserMessage[] }),
-});
+let cacheManager: CacheManager<RewindData> | null = null;
 
-export function setRewindSession(transcriptPath: string): void {
-  cacheManager.setSession(transcriptPath);
+/**
+ * Initialize the rewind cache for a session directory.
+ * Call once per hook invocation after computing sessionDir.
+ */
+export function initRewindSession(sessionDir: string): void {
+  cacheManager = new CacheManager<RewindData>({
+    filePath: path.join(sessionDir, "rewind-cache.json"),
+    defaultData: () => ({ userMessages: [] }),
+    expiryMs: REWIND_EXPIRY_MS,
+    maxEntries: MAX_CACHED_MESSAGES,
+    getTimestamp: (e) => (e as CachedUserMessage).timestamp,
+    getEntries: (d) => d.userMessages,
+    setEntries: (d, e) => ({ ...d, userMessages: e as CachedUserMessage[] }),
+  });
+}
+
+function getManager(): CacheManager<RewindData> {
+  if (!cacheManager) {
+    throw new Error("rewind-cache: initRewindSession() must be called before use");
+  }
+  return cacheManager;
 }
 
 /**
@@ -38,7 +49,7 @@ export function setRewindSession(transcriptPath: string): void {
  */
 export async function invalidateAllCaches(): Promise<void> {
   await clearDenialCache();
-  await cacheManager.clear();
+  await getManager().clear();
 }
 
 /**
@@ -51,7 +62,7 @@ export async function invalidateAllCaches(): Promise<void> {
 export async function recordUserMessage(msg: string, index: number): Promise<void> {
   if (!msg) return;
 
-  const data = await cacheManager.load();
+  const data = await getManager().load();
   const hash = hashString(msg);
   const snippet = msg.slice(0, 100);
 
@@ -62,7 +73,7 @@ export async function recordUserMessage(msg: string, index: number): Promise<voi
   // Add new message with timestamp
   data.userMessages.push({ hash, snippet, index, timestamp: Date.now() });
 
-  await cacheManager.save(data);
+  await getManager().save(data);
 }
 
 /**
@@ -73,7 +84,7 @@ export async function recordUserMessage(msg: string, index: number): Promise<voi
  * @returns true if rewind detected (caches cleared), false otherwise
  */
 export async function detectRewind(transcriptPath: string): Promise<boolean> {
-  const data = await cacheManager.load();
+  const data = await getManager().load();
 
   // No cached messages - nothing to detect
   if (data.userMessages.length === 0) {

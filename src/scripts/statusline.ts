@@ -25,8 +25,10 @@ import { execSync } from "child_process";
 import * as path from "path";
 import {
   readStatusLineEntries,
+  initStatuslineSession,
   type StatusLineEntry,
 } from "../utils/statusline-state.js";
+import { getSessionDir } from "../utils/cache-manager.js";
 
 /**
  * JSON input structure from Claude Code statusLine.
@@ -239,7 +241,8 @@ async function main(): Promise<void> {
     // Build right side: agent activity
     let rightSide = "";
     if (input.transcript_path) {
-      const entries = await readStatusLineEntries(input.transcript_path);
+      initStatuslineSession(getSessionDir(input.transcript_path));
+      const entries = await readStatusLineEntries();
 
       if (entries.length > 0) {
         const filtered = filterEntries(entries);

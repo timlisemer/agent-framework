@@ -6,8 +6,9 @@ import {
   recordUserMessage,
   detectRewind,
   invalidateAllCaches,
-  setRewindSession,
+  initRewindSession,
 } from "../../src/utils/rewind-cache.js";
+import { initDenialSession } from "../../src/utils/denial-cache.js";
 
 describe("rewind-cache", () => {
   let tempDir: string;
@@ -16,8 +17,9 @@ describe("rewind-cache", () => {
   beforeEach(async () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "rewind-test-"));
     transcriptPath = path.join(tempDir, "transcript.jsonl");
+    initDenialSession(tempDir);
+    initRewindSession(tempDir);
     await invalidateAllCaches();
-    setRewindSession(transcriptPath);
   });
 
   afterEach(() => {

@@ -124,7 +124,7 @@ export function logAgentDecision(log: AgentLog): void {
 
   // Update statusline state (fire-and-forget, non-blocking)
   if (transcriptPath) {
-    const promise = updateStatusLineState(transcriptPath, {
+    const promise = updateStatusLineState({
       agent: agentName,
       decision: log.decision,
       toolName: log.toolName,
@@ -519,7 +519,7 @@ export function logAgentStarted(agent: string, toolName: string): void {
   const transcriptPath = getTranscriptPath();
   const agentName = transcriptPath && isSubagent(transcriptPath) ? `sub:${agent}` : agent;
   if (transcriptPath) {
-    const promise = markAgentStarted(transcriptPath, {
+    const promise = markAgentStarted({
       agent: agentName,
       toolName,
     }).catch(() => {

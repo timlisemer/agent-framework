@@ -4,25 +4,77 @@ import * as path from "path";
 import { hashString } from "./hash-utils.js";
 
 /**
- * Base temp directory for all agent-framework cache files.
- * Using a dedicated subdirectory keeps the system temp dir clean.
- * Resolves to /tmp/agent-framework on Linux, %TEMP%\agent-framework on Windows.
+ * Base directory for all agent-framework files.
+ * All session state, caches, and summaries live under this directory.
  */
-const TEMP_BASE_DIR = path.join(os.tmpdir(), "agent-framework");
+const BASE_DIR = path.join(os.homedir(), ".agent-framework");
 
 /**
- * Get the path for a cache file within the agent-framework temp directory.
- * Creates the directory if it doesn't exist.
- *
- * @param filename - The cache filename (e.g., "confirm-state.json")
- * @returns Full path to the cache file
+ * In-memory cache of resolved session directories.
+ * Avoids repeated readdirSync calls within the same process lifetime.
+ * Keyed by transcript hash.
  */
-export function getTempFilePath(filename: string): string {
-  // Ensure directory exists (sync for simplicity at module load)
-  if (!fs.existsSync(TEMP_BASE_DIR)) {
-    fs.mkdirSync(TEMP_BASE_DIR, { recursive: true });
+const sessionDirCache = new Map<string, string>();
+
+/**
+ * Format a creation timestamp for session folder names.
+ * @returns Timestamp string in "yyyy-mm-dd-HHmm" format
+ */
+export function formatTimestamp(date: Date = new Date()): string {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const HH = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}-${HH}${min}`;
+}
+
+/**
+ * Encode a project root path into a directory-safe name.
+ * Replaces / with - and strips leading -, matching Claude Code's convention.
+ */
+export function encodeProjectRoot(): string {
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  return projectDir.replace(/\//g, "-").replace(/^-/, "");
+}
+
+/**
+ * Get the session-scoped directory for a transcript.
+ * All session files (state, caches, logs, summaries) live here.
+ *
+ * The folder name is `{yyyy-mm-dd-HHmm}_{hash}` where the timestamp is set
+ * once at creation time. Discovery scans the parent dir for an existing folder
+ * ending with `_{hash}` to preserve the original creation timestamp.
+ *
+ * @param transcriptPath - Path to the Claude Code transcript JSONL
+ * @returns Full path to the session directory
+ */
+export function getSessionDir(transcriptPath: string): string {
+  const hash = hashString(transcriptPath);
+
+  const cached = sessionDirCache.get(hash);
+  if (cached) return cached;
+
+  const parentDir = path.join(BASE_DIR, "sessions", encodeProjectRoot());
+  fs.mkdirSync(parentDir, { recursive: true });
+
+  const suffix = `_${hash}`;
+  try {
+    const entries = fs.readdirSync(parentDir);
+    const existing = entries.find((e) => e.endsWith(suffix));
+    if (existing) {
+      const dirPath = path.join(parentDir, existing);
+      sessionDirCache.set(hash, dirPath);
+      return dirPath;
+    }
+  } catch {
+    // Parent dir just created, no entries yet
   }
-  return path.join(TEMP_BASE_DIR, filename);
+
+  const dirPath = path.join(parentDir, `${formatTimestamp()}_${hash}`);
+  fs.mkdirSync(dirPath, { recursive: true });
+  sessionDirCache.set(hash, dirPath);
+  return dirPath;
 }
 
 /**

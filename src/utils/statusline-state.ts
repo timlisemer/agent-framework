@@ -4,15 +4,15 @@
  * Maintains a circular buffer of recent agent decisions that can be
  * displayed in Claude Code's statusLine feature.
  *
- * Uses CacheManager for session isolation - each Claude Code session
- * sees only its own decisions.
+ * Session isolation is structural: each session has its own file in
+ * the session directory. Subagents share the parent's session directory
+ * (they receive the parent's transcript_path).
  *
  * @module statusline-state
  */
 
 import * as path from "path";
-import { execSync } from "child_process";
-import { CacheManager, getTempFilePath } from "./cache-manager.js";
+import { CacheManager } from "./cache-manager.js";
 import type { DecisionType } from "../telemetry/types.js";
 import type { ExecutionType } from "../types.js";
 
@@ -28,50 +28,6 @@ export const STATUSLINE_CONFIG = {
 
 /** How long completed entries stay before being deleted (5 seconds) */
 const COMPLETED_EXPIRY_MS = 5000;
-
-/**
- * Schedule cleanup of a completed entry after the fade-out period.
- * Spawns a non-blocking background task that removes the entry after 5 seconds.
- * Uses .unref() to prevent the timer from keeping the process alive.
- */
-/**
- * Cached process session ID (SID) to avoid repeated shell calls.
- * The SID is inherited by all child processes, so subagents share
- * the same SID as their parent Claude Code session.
- */
-let cachedSid: string | undefined;
-
-/**
- * Get the Unix process session ID (SID) for the current process.
- * The SID is inherited by all child processes, making it ideal for
- * grouping parent sessions with their subagents while isolating
- * parallel Claude Code instances.
- */
-function getProcessSessionId(): string {
-  if (cachedSid) return cachedSid;
-  try {
-    cachedSid = execSync(`ps -o sid= -p ${process.pid}`, {
-      encoding: "utf8",
-    }).trim();
-    return cachedSid;
-  } catch {
-    // Fallback to PID if ps fails (shouldn't happen on Unix)
-    return String(process.pid);
-  }
-}
-
-/**
- * Get session key from transcript path and process session ID.
- * Combines the project directory with the Unix SID to:
- * 1. Isolate parallel Claude Code sessions (different SIDs)
- * 2. Share statusLine between parent and subagents (same SID)
- * 3. Automatically invalidate when Claude Code exits (SID no longer exists)
- */
-function getSessionKey(transcriptPath: string): string {
-  const projectDir = path.dirname(transcriptPath);
-  const sid = getProcessSessionId();
-  return `${projectDir}:${sid}`;
-}
 
 /**
  * Filter out completed entries older than COMPLETED_EXPIRY_MS.
@@ -114,15 +70,30 @@ interface StatusLineData {
   entries: StatusLineEntry[];
 }
 
-const cacheManager = new CacheManager<StatusLineData>({
-  filePath: getTempFilePath("statusline.json"),
-  defaultData: () => ({ entries: [] }),
-  expiryMs: STATUSLINE_CONFIG.expiryMs,
-  maxEntries: STATUSLINE_CONFIG.maxEntries,
-  getTimestamp: (e) => (e as StatusLineEntry).timestamp,
-  getEntries: (d) => d.entries,
-  setEntries: (d, e) => ({ ...d, entries: e as StatusLineEntry[] }),
-});
+let cacheManager: CacheManager<StatusLineData> | null = null;
+
+/**
+ * Initialize the statusline cache for a session directory.
+ * Call once per hook invocation after computing sessionDir.
+ */
+export function initStatuslineSession(sessionDir: string): void {
+  cacheManager = new CacheManager<StatusLineData>({
+    filePath: path.join(sessionDir, "statusline.json"),
+    defaultData: () => ({ entries: [] }),
+    expiryMs: STATUSLINE_CONFIG.expiryMs,
+    maxEntries: STATUSLINE_CONFIG.maxEntries,
+    getTimestamp: (e) => (e as StatusLineEntry).timestamp,
+    getEntries: (d) => d.entries,
+    setEntries: (d, e) => ({ ...d, entries: e as StatusLineEntry[] }),
+  });
+}
+
+function getManager(): CacheManager<StatusLineData> {
+  if (!cacheManager) {
+    throw new Error("statusline-state: initStatuslineSession() must be called before use");
+  }
+  return cacheManager;
+}
 
 /**
  * Set of pending statusline update promises.
@@ -159,16 +130,13 @@ export async function flushStatuslineUpdates(): Promise<void> {
  * Mark an agent as started (running).
  * Called before agent execution begins.
  *
- * @param transcriptPath - Session identifier (transcript path)
  * @param entry - Agent info (agent name and tool name)
  */
 export async function markAgentStarted(
-  transcriptPath: string,
   entry: { agent: string; toolName: string }
 ): Promise<void> {
-  cacheManager.setSession(getSessionKey(transcriptPath));
   const now = Date.now();
-  await cacheManager.update((data) => ({
+  await getManager().update((data) => ({
     entries: [
       ...filterExpiredCompleted(data.entries),
       {
@@ -188,16 +156,13 @@ export async function markAgentStarted(
  * This will find and update any running entry for the same agent/tool,
  * or add a new completed entry if none found.
  *
- * @param transcriptPath - Session identifier (transcript path)
  * @param entry - Decision entry (without timestamp and startTime)
  */
 export async function updateStatusLineState(
-  transcriptPath: string,
   entry: Omit<StatusLineEntry, "timestamp" | "startTime" | "status">
 ): Promise<void> {
-  cacheManager.setSession(getSessionKey(transcriptPath));
   const now = Date.now();
-  await cacheManager.update((data) => {
+  await getManager().update((data) => {
     // Filter out expired completed entries first
     const entries = filterExpiredCompleted(data.entries);
 
@@ -243,20 +208,16 @@ export async function updateStatusLineState(
  * Read all decisions for statusline display.
  * Called by the statusline script.
  *
- * @param transcriptPath - Session identifier (transcript path)
  * @returns Array of decision entries, newest first
  */
-export async function readStatusLineEntries(
-  transcriptPath: string
-): Promise<StatusLineEntry[]> {
-  cacheManager.setSession(getSessionKey(transcriptPath));
-  const data = await cacheManager.load();
+export async function readStatusLineEntries(): Promise<StatusLineEntry[]> {
+  const data = await getManager().load();
   const filtered = filterExpiredCompleted(data.entries);
 
   // Persist cleanup so next poll sees clean state (fixes stale entries
   // lingering because scheduleEntryCleanup setTimeout never fires in short-lived hook processes)
   if (filtered.length < data.entries.length) {
-    await cacheManager.update(() => ({ entries: filtered }));
+    await getManager().update(() => ({ entries: filtered }));
   }
 
   return filtered.reverse();

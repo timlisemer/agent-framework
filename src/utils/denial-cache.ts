@@ -1,6 +1,6 @@
-import { CacheManager, getTempFilePath } from "./cache-manager.js";
+import * as path from "path";
+import { CacheManager } from "./cache-manager.js";
 
-const DENIAL_CACHE_FILE = getTempFilePath("hook-denials.json");
 const DENIAL_EXPIRY_MS = 60 * 1000; // 1 minute
 const DENIAL_MAX_ENTRIES = 20;
 const MAX_SIMILAR_DENIALS = 3;
@@ -15,18 +15,29 @@ interface DenialData {
   entries: DenialEntry[];
 }
 
-const cacheManager = new CacheManager<DenialData>({
-  filePath: DENIAL_CACHE_FILE,
-  defaultData: () => ({ entries: [] }),
-  expiryMs: DENIAL_EXPIRY_MS,
-  maxEntries: DENIAL_MAX_ENTRIES,
-  getTimestamp: (e) => (e as DenialEntry).timestamp,
-  getEntries: (d) => d.entries,
-  setEntries: (d, e) => ({ ...d, entries: e as DenialEntry[] }),
-});
+let cacheManager: CacheManager<DenialData> | null = null;
 
-export function setDenialSession(transcriptPath: string): void {
-  cacheManager.setSession(transcriptPath);
+/**
+ * Initialize the denial cache for a session directory.
+ * Call once per hook invocation after computing sessionDir.
+ */
+export function initDenialSession(sessionDir: string): void {
+  cacheManager = new CacheManager<DenialData>({
+    filePath: path.join(sessionDir, "hook-denials.json"),
+    defaultData: () => ({ entries: [] }),
+    expiryMs: DENIAL_EXPIRY_MS,
+    maxEntries: DENIAL_MAX_ENTRIES,
+    getTimestamp: (e) => (e as DenialEntry).timestamp,
+    getEntries: (d) => d.entries,
+    setEntries: (d, e) => ({ ...d, entries: e as DenialEntry[] }),
+  });
+}
+
+function getManager(): CacheManager<DenialData> {
+  if (!cacheManager) {
+    throw new Error("denial-cache: initDenialSession() must be called before use");
+  }
+  return cacheManager;
 }
 
 /**
@@ -36,14 +47,14 @@ export function setDenialSession(transcriptPath: string): void {
  * Call this at the start of pre-tool-use hook.
  */
 export async function checkDenialUserInteraction(lastUserMessage: string | undefined): Promise<void> {
-  await cacheManager.checkUserMessage(lastUserMessage);
+  await getManager().checkUserMessage(lastUserMessage);
 }
 
 /**
  * Load denial entries, cleaning expired ones.
  */
 export async function loadDenials(): Promise<Map<string, { count: number; timestamp: number }>> {
-  const data = await cacheManager.load();
+  const data = await getManager().load();
   const map = new Map<string, { count: number; timestamp: number }>();
   for (const entry of data.entries) {
     map.set(entry.pattern, { count: entry.count, timestamp: entry.timestamp });
@@ -55,7 +66,7 @@ export async function loadDenials(): Promise<Map<string, { count: number; timest
  * Record a denial for a pattern. Returns the updated count.
  */
 export async function recordDenial(pattern: string): Promise<number> {
-  const data = await cacheManager.load();
+  const data = await getManager().load();
   const existing = data.entries.find((e) => e.pattern === pattern);
 
   if (existing) {
@@ -69,7 +80,7 @@ export async function recordDenial(pattern: string): Promise<number> {
     });
   }
 
-  await cacheManager.save(data);
+  await getManager().save(data);
   return existing ? existing.count : 1;
 }
 
@@ -77,7 +88,7 @@ export async function recordDenial(pattern: string): Promise<number> {
  * Get denial count for a pattern.
  */
 export async function getDenialCount(pattern: string): Promise<number> {
-  const data = await cacheManager.load();
+  const data = await getManager().load();
   const entry = data.entries.find((e) => e.pattern === pattern);
   return entry?.count ?? 0;
 }
@@ -93,7 +104,7 @@ export async function isWorkaroundEscalation(pattern: string): Promise<boolean> 
  * Clear all denial entries.
  */
 export async function clearDenialCache(): Promise<void> {
-  await cacheManager.clear();
+  await getManager().clear();
 }
 
 export { MAX_SIMILAR_DENIALS };

@@ -1,14 +1,26 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
   checkPendingValidation,
   writePendingValidation,
   clearPendingValidation,
   getPendingValidationStatus,
+  initValidationSession,
 } from "../../src/utils/pending-validation-cache.js";
 
 describe("pending-validation-cache", () => {
+  let tempDir: string;
+
   beforeEach(async () => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pending-validation-test-"));
+    initValidationSession(tempDir);
     await clearPendingValidation();
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   describe("checkPendingValidation", () => {

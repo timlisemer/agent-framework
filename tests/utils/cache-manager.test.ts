@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { CacheManager, getTempFilePath } from "../../src/utils/cache-manager.js";
+import { CacheManager, getSessionDir, formatTimestamp } from "../../src/utils/cache-manager.js";
 
 interface TestEntry {
   id: string;
@@ -193,10 +193,30 @@ describe("CacheManager", () => {
   });
 });
 
-describe("getTempFilePath", () => {
-  it("returns path within agent-framework temp directory", () => {
-    const result = getTempFilePath("test-file.json");
-    expect(result).toContain("agent-framework");
-    expect(result).toContain("test-file.json");
+
+describe("formatTimestamp", () => {
+  it("formats date as yyyy-mm-dd-HHmm", () => {
+    const date = new Date(2026, 2, 22, 14, 30);
+    expect(formatTimestamp(date)).toBe("2026-03-22-1430");
+  });
+});
+
+describe("getSessionDir", () => {
+  it("creates a directory under ~/.agent-framework/sessions/ with timestamp prefix", () => {
+    const dir = getSessionDir("/tmp/test-transcript-for-unit-test.jsonl");
+    expect(dir).toContain(".agent-framework");
+    expect(dir).toContain("sessions");
+    // Folder name should be {timestamp}_{hash}
+    const folderName = path.basename(dir);
+    expect(folderName).toMatch(/^\d{4}-\d{2}-\d{2}-\d{4}_/);
+    expect(fs.existsSync(dir)).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("discovers existing session folder on subsequent calls", () => {
+    const first = getSessionDir("/tmp/test-transcript-discovery.jsonl");
+    const second = getSessionDir("/tmp/test-transcript-discovery.jsonl");
+    expect(second).toBe(first);
+    fs.rmSync(first, { recursive: true, force: true });
   });
 });

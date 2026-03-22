@@ -154,11 +154,19 @@ async function main(): Promise<void> {
     if (planMode) {
       expectedIntent = "planning and exploration tools";
       blockedIntent = "no file modification or execution tools";
+      blockedTools.push({
+        toolName: "Edit|Write|NotebookEdit",
+        reason: "plan mode active - no file modifications",
+      });
     } else if (editIntent === true) {
       expectedIntent = "file editing tools for implementation";
     } else if (editIntent === false) {
       expectedIntent = "read-only exploration tools";
       blockedIntent = "no write/edit tools";
+      blockedTools.push({
+        toolName: "Edit|Write|NotebookEdit",
+        reason: "edit intent is false - read-only exploration",
+      });
     }
 
     // Scan for explicit user directives blocking execution

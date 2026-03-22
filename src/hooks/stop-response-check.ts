@@ -6,7 +6,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { type StopHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { checkStopResponseAlignment } from "../agents/hooks/response-align.js";
-import { setRewindSession, detectRewind } from "../utils/rewind-cache.js";
+import { initRewindSession, detectRewind } from "../utils/rewind-cache.js";
 import { setTranscriptPath } from "../utils/execution-context.js";
 import { appendSyntheticToolResult } from "../utils/transcript-writer.js";
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
@@ -34,8 +34,9 @@ async function main() {
   const input = await readStdinJson<StopHookInput>();
 
   // Set session and check for rewind
-  setRewindSession(input.transcript_path);
   setTranscriptPath(input.transcript_path);
+  const sessionDir = getSessionDir(input.transcript_path);
+  initRewindSession(sessionDir);
   const rewound = await detectRewind(input.transcript_path);
 
   if (rewound) {

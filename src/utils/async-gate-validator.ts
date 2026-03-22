@@ -17,7 +17,7 @@ import { checkGate } from "../agents/hooks/gate.js";
 import {
   writePendingValidation,
   clearPendingValidation,
-  setValidationSession,
+  initValidationSession,
 } from "./pending-validation-cache.js";
 import {
   getSummaryPath,
@@ -62,7 +62,8 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   const { tool, file, transcript } = args;
 
-  setValidationSession(transcript);
+  const sessionDir = getSessionDir(transcript);
+  initValidationSession(sessionDir);
 
   // Skip for subagents
   if (isSubagent(transcript)) {
@@ -80,7 +81,6 @@ async function main(): Promise<void> {
   }
 
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-  const sessionDir = getSessionDir(transcript);
 
   try {
     // Read summary sections

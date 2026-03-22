@@ -1,8 +1,9 @@
 /**
  * Summary document management, JSONL tool log, and session state.
  *
- * Manages per-session summary markdown files in ~/.claude/summaries/,
- * structured tool logs in JSONL format, and session state via CacheManager.
+ * Manages per-session summary markdown files, structured tool logs in
+ * JSONL format, and session state via CacheManager. All files live in
+ * the unified session directory under ~/.agent-framework/.
  *
  * @module summary-cache
  */
@@ -10,7 +11,11 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { CacheManager } from "./cache-manager.js";
+import {
+  CacheManager,
+  getSessionDir as getSessionDirFromCacheManager,
+  encodeProjectRoot,
+} from "./cache-manager.js";
 import { readMarkdownSection } from "./markdown-parser.js";
 import { hashString } from "./hash-utils.js";
 
@@ -75,17 +80,7 @@ export interface SessionState {
 
 type SessionStateManager = CacheManager<SessionState>;
 
-const SUMMARIES_BASE = path.join(os.homedir(), ".claude", "summaries");
-const TEMP_BASE = path.join(os.tmpdir(), "agent-framework");
-
-/**
- * Encode a project root path into a directory-safe name.
- * Replaces / with - and strips leading -, matching Claude Code's convention.
- */
-function encodeProjectRoot(): string {
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-  return projectDir.replace(/\//g, "-").replace(/^-/, "");
-}
+const OLD_SUMMARIES_BASE = path.join(os.homedir(), ".claude", "summaries");
 
 const EMPTY_SUMMARY_TEMPLATE = `## User Intent
 
@@ -110,50 +105,55 @@ const EMPTY_SUMMARY_TEMPLATE = `## User Intent
 
 /**
  * Resolve the summary file path for a given transcript.
+ * Summary now lives inside the session directory alongside all other session files.
  * Tries slug via extractSlugFromSession(), falls back to sessionId or hash.
  */
 export async function getSummaryPath(transcriptPath: string, sessionId?: string): Promise<string> {
-  const projectSubdir = path.join(SUMMARIES_BASE, encodeProjectRoot());
-  fs.mkdirSync(projectSubdir, { recursive: true });
-
+  const sessionDir = getSessionDir(transcriptPath);
   const slug = await extractSlugFromSession(transcriptPath);
   const stableId = sessionId ?? hashString(transcriptPath);
+  const basename = slug ? `${slug}.md` : `${stableId}.md`;
 
-  // If slug is available, use it (human-readable)
+  const summaryPath = path.join(sessionDir, basename);
+
+  // If slug is available, check if old stableId-based file exists and rename
   if (slug) {
-    const slugPath = path.join(projectSubdir, `${slug}.md`);
-    // Rename from stableId to slug if the old file exists but slug file doesn't
-    const stableIdPath = path.join(projectSubdir, `${stableId}.md`);
-    if (!fs.existsSync(slugPath) && fs.existsSync(stableIdPath)) {
+    const stableBasename = `${stableId}.md`;
+    const stablePath = path.join(sessionDir, stableBasename);
+    if (!fs.existsSync(summaryPath) && fs.existsSync(stablePath)) {
       try {
-        fs.renameSync(stableIdPath, slugPath);
+        fs.renameSync(stablePath, summaryPath);
       } catch {
         // Race condition - another process may have renamed it
       }
     }
-    return slugPath;
   }
 
-  // Slug not yet available - use stableId (sessionId or hash)
-  return path.join(projectSubdir, `${stableId}.md`);
+  // Migration: check old ~/.claude/summaries/ location
+  if (!fs.existsSync(summaryPath)) {
+    const oldProjectSubdir = path.join(OLD_SUMMARIES_BASE, encodeProjectRoot());
+    const oldSlugPath = slug ? path.join(oldProjectSubdir, `${slug}.md`) : null;
+    const oldStablePath = path.join(oldProjectSubdir, `${stableId}.md`);
+    const oldPath = oldSlugPath && fs.existsSync(oldSlugPath) ? oldSlugPath :
+                    fs.existsSync(oldStablePath) ? oldStablePath : null;
+    if (oldPath) {
+      try {
+        fs.copyFileSync(oldPath, summaryPath);
+      } catch {
+        // Migration is best-effort
+      }
+    }
+  }
+
+  return summaryPath;
 }
 
 /**
- * Get the session-scoped temp directory for a transcript.
- * Creates the directory if it does not exist.
+ * Re-export getSessionDir from cache-manager.
+ * All session files live under ~/.agent-framework/sessions/{project}/{hash}/.
  */
 export function getSessionDir(transcriptPath: string): string {
-  const dirPath = path.join(TEMP_BASE, "sessions", encodeProjectRoot(), hashString(transcriptPath));
-  fs.mkdirSync(dirPath, { recursive: true });
-  return dirPath;
-}
-
-/**
- * Ensure the ~/.claude/summaries/ directory exists.
- */
-export function ensureSummaryDir(): void {
-  const projectSubdir = path.join(SUMMARIES_BASE, encodeProjectRoot());
-  fs.mkdirSync(projectSubdir, { recursive: true });
+  return getSessionDirFromCacheManager(transcriptPath);
 }
 
 /**
@@ -339,15 +339,9 @@ export function formatToolDetail(toolName: string, toolInput: unknown): string {
 
 /**
  * Delete a summary file and clean up its session directory.
+ * Since the summary now lives in the session dir, removing the dir handles both.
  */
 export async function deleteSummary(transcriptPath: string): Promise<void> {
-  const summaryPath = await getSummaryPath(transcriptPath);
-  try {
-    await fs.promises.unlink(summaryPath);
-  } catch {
-    // File may not exist
-  }
-
   const sessionDir = getSessionDir(transcriptPath);
   try {
     await fs.promises.rm(sessionDir, { recursive: true, force: true });
@@ -398,7 +392,8 @@ export function getSessionState(sessionDir: string): SessionStateManager {
  * Create a summary file with empty section headers.
  */
 export async function createEmptySummary(summaryPath: string): Promise<void> {
-  ensureSummaryDir();
+  const dir = path.dirname(summaryPath);
+  fs.mkdirSync(dir, { recursive: true });
   if (!fs.existsSync(summaryPath)) {
     await fs.promises.writeFile(summaryPath, EMPTY_SUMMARY_TEMPLATE);
   }

@@ -12,9 +12,11 @@
 import { flushTelemetry } from "../telemetry/index.js";
 import { flushStatuslineUpdates } from "./logger.js";
 import { setTranscriptPath } from "./execution-context.js";
-import { setDenialSession } from "./denial-cache.js";
-import { setRewindSession } from "./rewind-cache.js";
-import { setValidationSession } from "./pending-validation-cache.js";
+import { getSessionDir } from "./cache-manager.js";
+import { initDenialSession } from "./denial-cache.js";
+import { initRewindSession } from "./rewind-cache.js";
+import { initValidationSession } from "./pending-validation-cache.js";
+import { initStatuslineSession } from "./statusline-state.js";
 
 /**
  * Read and parse JSON from stdin with an optional timeout.
@@ -69,14 +71,16 @@ export async function exitAfterFlush(code = 0, output?: string): Promise<never> 
  * Initialize all session-scoped caches for a hook process.
  *
  * Call this once at the top of each hook's main function after reading
- * the transcript path from hook input. Prevents accidentally omitting
- * a session setter when adding new hooks.
+ * the transcript path from hook input. Computes the session directory
+ * and initializes all caches to use files within it.
  *
  * @param transcriptPath - The transcript_path from hook input
  */
 export function initHookProcess(transcriptPath: string): void {
   setTranscriptPath(transcriptPath);
-  setDenialSession(transcriptPath);
-  setRewindSession(transcriptPath);
-  setValidationSession(transcriptPath);
+  const sessionDir = getSessionDir(transcriptPath);
+  initDenialSession(sessionDir);
+  initRewindSession(sessionDir);
+  initValidationSession(sessionDir);
+  initStatuslineSession(sessionDir);
 }

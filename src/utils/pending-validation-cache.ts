@@ -1,4 +1,5 @@
-import { CacheManager, getTempFilePath } from "./cache-manager.js";
+import * as path from "path";
+import { CacheManager } from "./cache-manager.js";
 
 const PENDING_VALIDATION_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -19,25 +20,29 @@ interface PendingValidationData {
   entries: PendingValidation[];
 }
 
-const cacheManager = new CacheManager<PendingValidationData>({
-  filePath: getTempFilePath("pending-validation.json"),
-  defaultData: () => ({ entries: [] }),
-  expiryMs: PENDING_VALIDATION_EXPIRY_MS,
-  maxEntries: 1,
-  getTimestamp: (e) => (e as PendingValidation).timestamp,
-  getEntries: (d) => d.entries,
-  setEntries: (d, e) => ({ ...d, entries: e as PendingValidation[] }),
-});
+let cacheManager: CacheManager<PendingValidationData> | null = null;
 
 /**
- * Set the session for validation cache isolation.
- * Call this at the start of each hook invocation to ensure
- * subagent validations don't bleed into the main session.
- *
- * @param transcriptPath - Path to the transcript file (used as session ID)
+ * Initialize the pending validation cache for a session directory.
+ * Call once per hook invocation after computing sessionDir.
  */
-export function setValidationSession(transcriptPath: string): void {
-  cacheManager.setSession(transcriptPath);
+export function initValidationSession(sessionDir: string): void {
+  cacheManager = new CacheManager<PendingValidationData>({
+    filePath: path.join(sessionDir, "pending-validation.json"),
+    defaultData: () => ({ entries: [] }),
+    expiryMs: PENDING_VALIDATION_EXPIRY_MS,
+    maxEntries: 1,
+    getTimestamp: (e) => (e as PendingValidation).timestamp,
+    getEntries: (d) => d.entries,
+    setEntries: (d, e) => ({ ...d, entries: e as PendingValidation[] }),
+  });
+}
+
+function getManager(): CacheManager<PendingValidationData> {
+  if (!cacheManager) {
+    throw new Error("pending-validation-cache: initValidationSession() must be called before use");
+  }
+  return cacheManager;
 }
 
 /**
@@ -52,7 +57,7 @@ export function setValidationSession(transcriptPath: string): void {
 export async function checkPendingValidation(
   currentUserMessageHash?: string
 ): Promise<PendingValidation | null> {
-  const data = await cacheManager.load();
+  const data = await getManager().load();
   const validation = data.entries[0];
   if (!validation) return null;
 
@@ -88,7 +93,7 @@ export async function writePendingValidation(
     timestamp: Date.now(),
   };
 
-  await cacheManager.update(() => ({ entries: [fullValidation] }));
+  await getManager().update(() => ({ entries: [fullValidation] }));
 }
 
 /**
@@ -96,7 +101,7 @@ export async function writePendingValidation(
  * Called after reporting a failure to the user or when user sends new message.
  */
 export async function clearPendingValidation(): Promise<void> {
-  await cacheManager.update(() => ({ entries: [] }));
+  await getManager().update(() => ({ entries: [] }));
 }
 
 /**
@@ -107,6 +112,6 @@ export async function clearPendingValidation(): Promise<void> {
  * @returns The validation or null if none exists
  */
 export async function getPendingValidationStatus(): Promise<PendingValidation | null> {
-  const data = await cacheManager.load();
+  const data = await getManager().load();
   return data.entries[0] ?? null;
 }

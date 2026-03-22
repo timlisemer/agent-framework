@@ -8,15 +8,15 @@ import {
   isWorkaroundEscalation,
   clearDenialCache,
   loadDenials,
-  setDenialSession,
+  initDenialSession,
   MAX_SIMILAR_DENIALS,
 } from "../../src/utils/denial-cache.js";
 
 describe("denial-cache", () => {
   beforeEach(async () => {
-    // Isolate each test with a unique session path to avoid shared file state
+    // Isolate each test with a unique session directory
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "denial-test-"));
-    setDenialSession(path.join(tempDir, "session.jsonl"));
+    initDenialSession(tempDir);
     await clearDenialCache();
   });
 
