@@ -499,25 +499,12 @@ async function main() {
         );
 
         if (!validation.approved) {
-          const appeal = await appealHelper(
-            toolName,
-            `Plan ${toolName.toLowerCase()} to ${filePath}`,
-            conversationContext,
-            validation.reason || "Plan drift detected",
-            projectDir,
-            "PreToolUse",
-            `plan-validate blocked: ${validation.reason}`
-          );
-
-          if (!appeal.overturned) {
-            await exitPipeline({
-              decision: "deny",
-              agent: "plan-validate",
-              reason: `Plan drift detected: ${validation.reason}`,
-                    });
-            return;
-          }
-          currentGateNote = appeal.gateNote;
+          await exitPipeline({
+            decision: "deny",
+            agent: "plan-validate",
+            reason: `Plan drift detected: ${validation.reason}`,
+          });
+          return;
         }
 
         await exitPipeline({
@@ -700,7 +687,7 @@ If in doubt, UPHOLD.
     let misalignments = "";
     let gateReasoning = "";
     try {
-      const summaryPath = await getSummaryPath(input.transcript_path, input.session_id);
+      const summaryPath = getSummaryPath(input.transcript_path);
       userIntent = await readSection(summaryPath, "User Intent");
       misalignments = await readSection(summaryPath, "Flagged Misalignments");
       gateReasoning = await formatForPrompt(sessionDir);

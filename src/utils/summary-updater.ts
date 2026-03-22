@@ -71,7 +71,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }, 60_000);
   hardTimeout.unref();
-  const summaryPath = await getSummaryPath(transcript, args.sessionId);
+  const summaryPath = getSummaryPath(transcript);
   const stateManager = getSessionState(sessionDir);
 
   if (mode === "intent") {

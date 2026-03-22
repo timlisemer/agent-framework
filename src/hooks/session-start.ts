@@ -33,7 +33,7 @@ const MAX_SUMMARY_SIZE = 4096;
 
 async function main() {
   const input = await readStdinJson<SessionStartHookInput>();
-  const { source, session_id, transcript_path } = input;
+  const { source, transcript_path } = input;
 
   // No summary system for subagents
   if (isSubagent(transcript_path)) {
@@ -41,7 +41,7 @@ async function main() {
     return;
   }
 
-  const summaryPath = await getSummaryPath(transcript_path, session_id);
+  const summaryPath = getSummaryPath(transcript_path);
   const sessionDir = getSessionDir(transcript_path);
 
   if (source === "startup") {

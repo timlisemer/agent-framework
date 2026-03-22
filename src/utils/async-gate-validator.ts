@@ -99,7 +99,7 @@ async function main(): Promise<void> {
     // Read summary sections
     let userIntent = "";
     let misalignments = "";
-    const summaryPath = await getSummaryPath(transcript, args.sessionId);
+    const summaryPath = getSummaryPath(transcript);
 
     const stale = await isStaleSummary(sessionDir);
     if (!stale) {

@@ -93,7 +93,7 @@ export async function readPlanContent(transcriptPath: string): Promise<string | 
  */
 export async function readSessionSummary(transcriptPath: string): Promise<SummaryDocument | null> {
   try {
-    const summaryPath = await getSummaryPath(transcriptPath);
+    const summaryPath = getSummaryPath(transcriptPath);
     return await readSummary(summaryPath);
   } catch {
     return null;
@@ -106,7 +106,7 @@ export async function readSessionSummary(transcriptPath: string): Promise<Summar
  */
 export async function readSummarySection(transcriptPath: string, section: string): Promise<string> {
   try {
-    const summaryPath = await getSummaryPath(transcriptPath);
+    const summaryPath = getSummaryPath(transcriptPath);
     return await readSection(summaryPath, section);
   } catch {
     return "";

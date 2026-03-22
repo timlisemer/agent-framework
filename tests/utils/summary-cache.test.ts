@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -7,7 +7,17 @@ import {
   readSection,
   updateSection,
   createEmptySummary,
+  getSummaryPath,
 } from "../../src/utils/summary-cache.js";
+
+vi.mock("../../src/utils/cache-manager.js", () => ({
+  getSessionDir: vi.fn(),
+  CacheManager: vi.fn(),
+  encodeProjectRoot: vi.fn(() => "test-project"),
+}));
+
+import { getSessionDir } from "../../src/utils/cache-manager.js";
+const mockGetSessionDir = vi.mocked(getSessionDir);
 
 describe("formatToolDetail", () => {
   it("returns 'Edit <path>' for Edit tool", () => {
@@ -157,6 +167,48 @@ describe("createEmptySummary (I/O)", () => {
     const content = fs.readFileSync(filePath, "utf-8");
     expect(content).toContain("Custom content");
     expect(content).not.toContain("No intent captured yet");
+  });
+});
+
+describe("getSummaryPath", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "summary-path-test-"));
+    mockGetSessionDir.mockReturnValue(tempDir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it("returns summary.md in session dir", () => {
+    const result = getSummaryPath("/fake/transcript.jsonl");
+    expect(result).toBe(path.join(tempDir, "summary.md"));
+  });
+
+  it("migrates old slug-named .md file to summary.md", () => {
+    fs.writeFileSync(path.join(tempDir, "woolly-swinging-neumann.md"), "## User Intent\n\nOld content");
+    const result = getSummaryPath("/fake/transcript.jsonl");
+    expect(result).toBe(path.join(tempDir, "summary.md"));
+    expect(fs.existsSync(path.join(tempDir, "summary.md"))).toBe(true);
+    expect(fs.readFileSync(path.join(tempDir, "summary.md"), "utf-8")).toContain("Old content");
+  });
+
+  it("migrates old hash-named .md file to summary.md", () => {
+    fs.writeFileSync(path.join(tempDir, "abc123def.md"), "## User Intent\n\nHash content");
+    const result = getSummaryPath("/fake/transcript.jsonl");
+    expect(result).toBe(path.join(tempDir, "summary.md"));
+    expect(fs.readFileSync(path.join(tempDir, "summary.md"), "utf-8")).toContain("Hash content");
+  });
+
+  it("does not migrate when summary.md already exists", () => {
+    fs.writeFileSync(path.join(tempDir, "summary.md"), "## User Intent\n\nCurrent");
+    fs.writeFileSync(path.join(tempDir, "old-slug.md"), "## User Intent\n\nOld");
+    getSummaryPath("/fake/transcript.jsonl");
+    expect(fs.readFileSync(path.join(tempDir, "summary.md"), "utf-8")).toContain("Current");
+    expect(fs.existsSync(path.join(tempDir, "old-slug.md"))).toBe(true);
   });
 });
 

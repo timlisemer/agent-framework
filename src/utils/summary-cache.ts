@@ -10,43 +10,11 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import {
   CacheManager,
   getSessionDir as getSessionDirFromCacheManager,
-  encodeProjectRoot,
 } from "./cache-manager.js";
 import { readMarkdownSection } from "./markdown-parser.js";
-import { hashString } from "./hash-utils.js";
-
-interface SessionMetadata {
-  slug?: string;
-}
-
-/**
- * Extract the slug from a session JSONL file.
- * Reads the first few lines to find the slug field.
- */
-async function extractSlugFromSession(transcriptPath: string): Promise<string | null> {
-  try {
-    const content = await fs.promises.readFile(transcriptPath, "utf-8");
-    const lines = content.split("\n").filter(Boolean).slice(0, 10);
-
-    for (const line of lines) {
-      try {
-        const entry: SessionMetadata = JSON.parse(line);
-        if (entry.slug) {
-          return entry.slug;
-        }
-      } catch {
-        continue;
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
 
 export interface SummaryDocument {
   userIntent: string;
@@ -80,8 +48,6 @@ export interface SessionState {
 
 type SessionStateManager = CacheManager<SessionState>;
 
-const OLD_SUMMARIES_BASE = path.join(os.homedir(), ".claude", "summaries");
-
 const EMPTY_SUMMARY_TEMPLATE = `## User Intent
 
 (No intent captured yet)
@@ -101,43 +67,23 @@ const EMPTY_SUMMARY_TEMPLATE = `## User Intent
 
 /**
  * Resolve the summary file path for a given transcript.
- * Summary now lives inside the session directory alongside all other session files.
- * Tries slug via extractSlugFromSession(), falls back to sessionId or hash.
+ * Uses a hardcoded "summary.md" name, consistent with all other session files.
+ * Includes one-time migration for old slug/hash-named .md files.
  */
-export async function getSummaryPath(transcriptPath: string, sessionId?: string): Promise<string> {
+export function getSummaryPath(transcriptPath: string): string {
   const sessionDir = getSessionDir(transcriptPath);
-  const slug = await extractSlugFromSession(transcriptPath);
-  const stableId = sessionId ?? hashString(transcriptPath);
-  const basename = slug ? `${slug}.md` : `${stableId}.md`;
+  const summaryPath = path.join(sessionDir, "summary.md");
 
-  const summaryPath = path.join(sessionDir, basename);
-
-  // If slug is available, check if old stableId-based file exists and rename
-  if (slug) {
-    const stableBasename = `${stableId}.md`;
-    const stablePath = path.join(sessionDir, stableBasename);
-    if (!fs.existsSync(summaryPath) && fs.existsSync(stablePath)) {
-      try {
-        fs.renameSync(stablePath, summaryPath);
-      } catch {
-        // Race condition - another process may have renamed it
-      }
-    }
-  }
-
-  // Migration: check old ~/.claude/summaries/ location
   if (!fs.existsSync(summaryPath)) {
-    const oldProjectSubdir = path.join(OLD_SUMMARIES_BASE, encodeProjectRoot());
-    const oldSlugPath = slug ? path.join(oldProjectSubdir, `${slug}.md`) : null;
-    const oldStablePath = path.join(oldProjectSubdir, `${stableId}.md`);
-    const oldPath = oldSlugPath && fs.existsSync(oldSlugPath) ? oldSlugPath :
-                    fs.existsSync(oldStablePath) ? oldStablePath : null;
-    if (oldPath) {
-      try {
-        fs.copyFileSync(oldPath, summaryPath);
-      } catch {
-        // Migration is best-effort
+    // Migrate: rename any existing .md file from old slug/hash naming
+    try {
+      const entries = fs.readdirSync(sessionDir);
+      const oldMd = entries.filter((e) => e.endsWith(".md") && e !== "summary.md")[0];
+      if (oldMd) {
+        fs.renameSync(path.join(sessionDir, oldMd), summaryPath);
       }
+    } catch {
+      // Migration is best-effort
     }
   }
 
