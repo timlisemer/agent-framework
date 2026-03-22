@@ -63,6 +63,7 @@ import {
   matchBlockedTool,
   formatPredictionContext,
 } from "../utils/prediction-cache.js";
+import { appendSyntheticToolResult } from "../utils/transcript-writer.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -97,7 +98,6 @@ const LOW_RISK_TOOLS = [
   // Internal/meta tools (low impact)
   "TodoWrite",
   "TaskOutput",
-  "ExitPlanMode",
   "EnterPlanMode",
   "Skill",
 ];
@@ -284,6 +284,17 @@ async function main() {
   // ============================================================
   // STEP 1: Low-risk auto-approve
   // ============================================================
+
+  // Synthetic message for entering plan mode (before exitPipeline exits the process)
+  if (toolName === "EnterPlanMode" && !subagent) {
+    await appendSyntheticToolResult(
+      input.transcript_path,
+      "PlanMode",
+      "Entering plan mode. All subsequent tool calls are read-only until ExitPlanMode.",
+      input.session_id
+    );
+  }
+
   if (
     LOW_RISK_TOOLS.includes(toolName) ||
     (toolName.startsWith("mcp__") && !/(commit|push|confirm)$/.test(toolName))
@@ -447,10 +458,11 @@ async function main() {
           input.transcript_path,
           APPEAL_COUNTS
         );
+        // Check for actual ExitPlanMode tool result via its [ExitPlanMode] prefix
+        // (set by transcript.ts:799). Do NOT use naive content.includes() here —
+        // that false-positives on Read/Grep results containing ExitPlanMode source code.
         const hasExitPlanModeApproval = recentContext.toolResult.some(
-          (r) =>
-            r.content.includes("ExitPlanMode") &&
-            (r.content.includes("approved") || r.content.includes("allow"))
+          (r) => r.content.startsWith("[ExitPlanMode]")
         );
         if (hasExitPlanModeApproval) {
           logFastPathApproval("exit-plan-mode", "PreToolUse", toolName, projectDir, "ExitPlanMode previously approved");
@@ -915,6 +927,16 @@ If in doubt, UPHOLD.
       previousEditIntent: s.currentEditIntent ?? null,
       editIntentTimestamp: Date.now(),
     }));
+
+    // Synthetic message for exiting plan mode
+    if (!subagent) {
+      await appendSyntheticToolResult(
+        input.transcript_path,
+        "PlanMode",
+        "Exiting plan mode. Transitioning to implementation phase.",
+        input.session_id
+      );
+    }
   }
 
   logFastPathApproval(lastAgent, "PreToolUse", toolName, projectDir, "All checks passed");

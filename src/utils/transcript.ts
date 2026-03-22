@@ -697,12 +697,11 @@ export async function readTranscriptExact(
     }
   }
 
-  // Always synthesize plan approval as user message
-  // This makes plan approval visible to all agents as part of the transcript
+  // Synthesize plan approval as user message so all agents see it.
+  // Match on [ExitPlanMode] prefix (set at line 799) — NOT naive content.includes(),
+  // which false-positives on Read/Grep results containing ExitPlanMode source code.
   const hasPlanApproval = collected.toolResult.some(
-    (r) =>
-      r.content.includes("ExitPlanMode") &&
-      (r.content.includes("approved") || r.content.includes("allow"))
+    (r) => r.content.startsWith("[ExitPlanMode]")
   );
   if (hasPlanApproval) {
     collected.user.push({

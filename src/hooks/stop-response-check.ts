@@ -2,20 +2,13 @@ import "../utils/load-env.js";
 import { initializeTelemetry } from "../telemetry/index.js";
 initializeTelemetry();
 
-import * as path from "path";
-import { fileURLToPath } from "url";
 import { type StopHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { checkStopResponseAlignment } from "../agents/hooks/response-align.js";
 import { initRewindSession, detectRewind } from "../utils/rewind-cache.js";
 import { setTranscriptPath } from "../utils/execution-context.js";
 import { appendSyntheticToolResult } from "../utils/transcript-writer.js";
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { getSessionDir, appendToolLog, getActiveSubagentCount } from "../utils/summary-cache.js";
-import { spawnBackground } from "../utils/spawn-background.js";
-import { isSubagent } from "../utils/subagent-detector.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { getSessionDir } from "../utils/summary-cache.js";
 
 /**
  * Stop Hook: Response Check
@@ -52,30 +45,10 @@ async function main() {
   );
 
   if (!result.approved && result.systemMessage) {
-    // Append synthetic entry to transcript so agents can see this feedback
-    await appendSyntheticToolResult(input.transcript_path, "Stop", result.systemMessage);
-
-    // Log synthetic message to tool log and trigger summary update
-    if (!isSubagent(input.transcript_path)) {
-      const sessionDir = getSessionDir(input.transcript_path);
-      appendToolLog(sessionDir, {
-        ts: Date.now(),
-        tool: "SyntheticMessage",
-        status: "allowed",
-        gate: "stop-hook",
-        reason: result.reason,
-        ms: 0,
-      });
-      const activeSubagents = getActiveSubagentCount(sessionDir);
-      if (activeSubagents === 0) {
-        const updaterPath = path.join(__dirname, "../utils/summary-updater.js");
-        spawnBackground(updaterPath, [
-          "--mode", "actions",
-          "--transcript", input.transcript_path,
-          "--session-id", input.session_id,
-        ], { dedupKey: "summary-updater-actions", sessionDir });
-      }
-    }
+    // Append synthetic entry to transcript and trigger summary update.
+    // Tool log + summary-updater spawning is handled inside appendSyntheticToolResult.
+    // Do NOT log SyntheticMessage or spawn summary-updater here — that would duplicate.
+    await appendSyntheticToolResult(input.transcript_path, "Stop", result.systemMessage, input.session_id);
 
     const output = JSON.stringify({
       decision: "block",

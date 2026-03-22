@@ -29,7 +29,11 @@ async function main() {
       ms: 0,
     });
 
-    // Skip summary-updater LLM calls while subagents are active (saves many LLM calls)
+    // Summary-updater is spawned here for regular tool executions only.
+    // Synthetic messages (from plan mode transitions, stop hook, etc.) trigger
+    // summary-updater via appendSyntheticToolResult in transcript-writer.ts.
+    // Do NOT add summary-updater spawning for synthetic messages here — that
+    // would cause duplicate summary runs.
     const activeSubagents = getActiveSubagentCount(sessionDir);
     if (activeSubagents === 0) {
       const updaterPath = path.join(__dirname, "../utils/summary-updater.js");

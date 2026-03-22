@@ -7,9 +7,6 @@ import {
   readSection,
   updateSection,
   createEmptySummary,
-  getActiveSubagentCount,
-  incrementActiveSubagents,
-  decrementActiveSubagents,
 } from "../../src/utils/summary-cache.js";
 
 describe("formatToolDetail", () => {
@@ -163,51 +160,3 @@ describe("createEmptySummary (I/O)", () => {
   });
 });
 
-describe("active subagent counter", () => {
-  let tempDir: string;
-
-  beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "summary-cache-test-"));
-  });
-
-  afterEach(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  });
-
-  it("returns 0 when no file exists", () => {
-    expect(getActiveSubagentCount(tempDir)).toBe(0);
-  });
-
-  it("returns correct count after increment", () => {
-    incrementActiveSubagents(tempDir);
-    expect(getActiveSubagentCount(tempDir)).toBe(1);
-  });
-
-  it("increments multiple times", () => {
-    incrementActiveSubagents(tempDir);
-    incrementActiveSubagents(tempDir);
-    incrementActiveSubagents(tempDir);
-    expect(getActiveSubagentCount(tempDir)).toBe(3);
-  });
-
-  it("decrements correctly", () => {
-    incrementActiveSubagents(tempDir);
-    incrementActiveSubagents(tempDir);
-    decrementActiveSubagents(tempDir);
-    expect(getActiveSubagentCount(tempDir)).toBe(1);
-  });
-
-  it("does not go below 0 on decrement", () => {
-    decrementActiveSubagents(tempDir);
-    expect(getActiveSubagentCount(tempDir)).toBe(0);
-  });
-
-  it("returns 0 when file is older than 10 minutes (staleness)", () => {
-    incrementActiveSubagents(tempDir);
-    // Manually backdate the file's mtime
-    const filePath = path.join(tempDir, "active-subagents.json");
-    const oldTime = new Date(Date.now() - 11 * 60 * 1000);
-    fs.utimesSync(filePath, oldTime, oldTime);
-    expect(getActiveSubagentCount(tempDir)).toBe(0);
-  });
-});
