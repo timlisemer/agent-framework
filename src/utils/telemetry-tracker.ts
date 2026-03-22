@@ -191,7 +191,7 @@ export function trackAgentExecution(params: TrackAgentParams): void {
  * Agent outputs use various keywords (APPROVE, DENY, OK, BLOCK, etc.)
  * that need to be mapped to the telemetry API's decision types.
  */
-export function normalizeDecision(raw: string): DecisionType | null {
+function normalizeDecision(raw: string): DecisionType | null {
   const trimmed = raw.trim().toUpperCase();
 
   // Map to APPROVE

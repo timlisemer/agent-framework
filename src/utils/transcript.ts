@@ -162,11 +162,6 @@ export interface TranscriptReadResult {
   slashCommandContext?: SlashCommandContext;
 }
 
-export interface ErrorCheckResult {
-  needsCheck: boolean;
-  indicators: string[];
-}
-
 interface ContentBlock {
   type: string;
   text?: string;
@@ -222,70 +217,6 @@ export function trimToolOutput(output: string, maxLines = 20): string {
   return output;
 }
 
-export interface ErrorCheckOptions {
-  toolResultsOnly?: boolean; // Only check TOOL_RESULT lines for error patterns
-}
-
-/**
- * Quick pattern check to determine if error acknowledgment should be checked.
- * Returns true only if error patterns or user frustration indicators are found.
- */
-export function hasErrorPatterns(
-  transcript: string,
-  options?: ErrorCheckOptions
-): ErrorCheckResult {
-  const indicators: string[] = [];
-
-  // If toolResultsOnly is true, only check TOOL_RESULT lines for errors
-  // This prevents false positives from Read tool content (source code)
-  const textToCheck = options?.toolResultsOnly
-    ? transcript
-        .split('\n')
-        .filter((l) => l.startsWith('TOOL_RESULT:'))
-        .join('\n')
-    : transcript;
-
-  const errorPatterns = [
-    /error TS\d+/i,
-    /Error:/i,
-    /failed|FAILED/,
-    /denied|DENIED/,
-    /make: \*\*\*/,
-  ];
-
-  const userPatterns = [
-    /\bignore\b/i, // "ignore this"
-    /[A-Z]{5,}/, // All caps words (5+ chars) - triggers Haiku to evaluate
-    /\bstop\s+(doing|trying|that)\b/i, // "stop doing that"
-    /\bI\s+(said|told|asked)\b/i, // "I said to..."
-    /\bwrong\b.*\byou\b/i, // "wrong, you should..."
-  ];
-
-  // Check error patterns against tool results (or full transcript)
-  for (const pattern of errorPatterns) {
-    if (pattern.test(textToCheck)) {
-      indicators.push(`error:${pattern.source}`);
-    }
-  }
-
-  // Only check USER: lines for user frustration patterns
-  // (avoids false positives from ASSISTANT/TOOL_RESULT prefixes matching [A-Z]{5,})
-  const userLines = transcript
-    .split('\n')
-    .filter((l) => l.startsWith('USER:'))
-    .join('\n');
-
-  for (const pattern of userPatterns) {
-    if (pattern.test(userLines)) {
-      indicators.push(`user:${pattern.source}`);
-    }
-  }
-
-  return {
-    needsCheck: indicators.length > 0,
-    indicators,
-  };
-}
 
 /**
  * Detect if content is a slash command system prompt.

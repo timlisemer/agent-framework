@@ -87,4 +87,12 @@ describe("isSubagent", () => {
     ]);
     expect(isSubagent(filePath)).toBe(false);
   });
+
+  it("returns true when path contains /subagents/ directory", () => {
+    const subagentsDir = path.join(tempDir, "subagents");
+    fs.mkdirSync(subagentsDir);
+    const filePath = path.join(subagentsDir, "some-uuid.jsonl");
+    fs.writeFileSync(filePath, "{}");
+    expect(isSubagent(filePath)).toBe(true);
+  });
 });

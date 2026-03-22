@@ -430,7 +430,6 @@ Singleton factory for Anthropic client. Used by direct mode agents.
 
 ### `response-parser.ts`
 - `extractTextFromResponse()` - finds text block in API response
-- `parseDecision()` - parses APPROVE/DENY, OK/BLOCK decisions
 
 ### `retry.ts`
 - `retryUntilValid()` - retries LLM call until format validation passes

@@ -52,6 +52,14 @@ export function isSubagent(transcriptPath: string, sessionId?: string): boolean 
     return true;
   }
 
+  // Secondary detection: path contains /subagents/ directory
+  if (transcriptPath.includes("/subagents/") || transcriptPath.includes("\\subagents\\")) {
+    if (DEBUG) {
+      console.error(`[subagent-detector] DETECTED via path segment: /subagents/ in ${basename}`);
+    }
+    return true;
+  }
+
   // Fallback: read transcript metadata
   let fd: number | undefined;
   try {

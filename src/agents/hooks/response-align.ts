@@ -64,14 +64,8 @@ const INTENT_ALIGNMENT_COUNTS: TranscriptReadOptions = {
 };
 import { detectUserDirectedQuestions } from "../../utils/content-patterns.js";
 
-// Re-export CheckResult as ResponseAlignmentResult for backwards compatibility
-export type ResponseAlignmentResult = CheckResult;
-
-// Legacy alias for backwards compatibility
-export type IntentAlignmentResult = CheckResult;
-
 // Patterns indicating AI is asking a question/clarification that should wait for user response
-export const PREAMBLE_CONCERN_PATTERNS = [
+const PREAMBLE_CONCERN_PATTERNS = [
   /I need to clarify/i,
   /let me clarify/i,
   /to clarify/i,
@@ -87,7 +81,7 @@ export const PREAMBLE_CONCERN_PATTERNS = [
  * Check if the AI acknowledgment contains potential preamble violations.
  * Returns true if the LLM should be alerted to check this.
  */
-export function hasPreambleConcern(ackText: string): boolean {
+function hasPreambleConcern(ackText: string): boolean {
   if (!ackText) return false;
 
   // Check for explicit clarification patterns
@@ -158,7 +152,7 @@ export async function checkResponseAlignment(
   transcriptPath: string,
   workingDir: string,
   hookName: string
-): Promise<ResponseAlignmentResult> {
+): Promise<CheckResult> {
   // Skip response alignment checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
     logFastPathApproval("response-align", hookName, toolName, workingDir, "Subagent skip");
@@ -278,14 +272,6 @@ ${toolResultsText}`;
   }
 }
 
-// Legacy alias for backwards compatibility
-export const checkIntentAlignment = checkResponseAlignment;
-
-// Re-export StopCheckResult as StopResponseResult for backwards compatibility
-export type StopResponseResult = StopCheckResult;
-
-// Legacy alias
-export type StopIntentResult = StopCheckResult;
 
 /**
  * Use AI to classify a stop response as either an intermediate question,
@@ -601,7 +587,7 @@ export async function checkStopResponseAlignment(
   transcriptPath: string,
   workingDir: string,
   hookName: string
-): Promise<StopResponseResult> {
+): Promise<StopCheckResult> {
   // Skip stop response checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
     logFastPathApproval("response-align-stop", hookName, "StopResponse", workingDir, "Subagent skip");
@@ -750,5 +736,3 @@ export async function checkStopResponseAlignment(
   return { approved: true };
 }
 
-// Legacy alias for backwards compatibility
-export const checkStopIntentAlignment = checkStopResponseAlignment;

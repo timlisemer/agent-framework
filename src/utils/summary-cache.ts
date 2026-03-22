@@ -97,10 +97,6 @@ const EMPTY_SUMMARY_TEMPLATE = `## User Intent
 ## Flagged Misalignments
 
 (No misalignments detected)
-
-## Gate Reasoning
-
-(No gate reasoning yet)
 `;
 
 /**

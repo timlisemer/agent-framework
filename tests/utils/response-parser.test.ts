@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractTextFromResponse, parseDecision } from "../../src/utils/response-parser.js";
+import { extractTextFromResponse } from "../../src/utils/response-parser.js";
 import type Anthropic from "@anthropic-ai/sdk";
 
 function makeTextBlock(text: string): Anthropic.Messages.ContentBlock {
@@ -43,55 +43,5 @@ describe("extractTextFromResponse", () => {
   it("returns first text block when multiple exist", () => {
     const response = makeResponse([makeTextBlock("FIRST"), makeTextBlock("SECOND")]);
     expect(extractTextFromResponse(response)).toBe("FIRST");
-  });
-});
-
-describe("parseDecision", () => {
-  it("returns approved=true for exact positive token match", () => {
-    const result = parseDecision("APPROVE", ["APPROVE"]);
-    expect(result).toEqual({ decision: "APPROVE", approved: true });
-  });
-
-  it("returns approved=true for first matching positive token", () => {
-    const result = parseDecision("OK", ["APPROVE", "OK"]);
-    expect(result).toEqual({ decision: "OK", approved: true });
-  });
-
-  it("matches positive token as prefix (startsWith)", () => {
-    const result = parseDecision("APPROVE with some extra text", ["APPROVE"]);
-    expect(result.approved).toBe(true);
-    expect(result.decision).toBe("APPROVE");
-  });
-
-  it("returns approved=false with reason for 'DENY: reason'", () => {
-    const result = parseDecision("DENY: not allowed", ["APPROVE"]);
-    expect(result).toEqual({ decision: "DENY", approved: false, reason: "not allowed" });
-  });
-
-  it("returns approved=false with undefined reason for empty reason after colon", () => {
-    const result = parseDecision("DENY: ", ["APPROVE"]);
-    expect(result.approved).toBe(false);
-    expect(result.decision).toBe("DENY");
-    expect(result.reason).toBeUndefined();
-  });
-
-  it("returns raw text as decision when no colon present", () => {
-    const result = parseDecision("UNKNOWN", ["APPROVE"]);
-    expect(result).toEqual({ decision: "UNKNOWN", approved: false });
-  });
-
-  it("trims input text", () => {
-    const result = parseDecision("  APPROVE  ", ["APPROVE"]);
-    expect(result.approved).toBe(true);
-  });
-
-  it("is case-sensitive for positive tokens", () => {
-    const result = parseDecision("approve", ["APPROVE"]);
-    expect(result.approved).toBe(false);
-  });
-
-  it("handles DRIFT format", () => {
-    const result = parseDecision("DRIFT: plan deviated from spec", ["OK"]);
-    expect(result).toEqual({ decision: "DRIFT", approved: false, reason: "plan deviated from spec" });
   });
 });

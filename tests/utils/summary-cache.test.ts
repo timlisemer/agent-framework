@@ -151,7 +151,6 @@ describe("createEmptySummary (I/O)", () => {
     expect(content).toContain("## User Approvals");
     expect(content).toContain("## AI Actions");
     expect(content).toContain("## Flagged Misalignments");
-    expect(content).toContain("## Gate Reasoning");
   });
 
   it("does not overwrite existing file (idempotent)", async () => {

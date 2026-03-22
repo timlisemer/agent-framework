@@ -198,6 +198,7 @@ async function main(): Promise<void> {
       blockedTools,
       userMessageSnippet: userPrompt.slice(0, 200),
       timestamp: Date.now(),
+      active: true,
     });
   } else if (mode === "actions") {
     // Throttle: skip if < 3s since last update (but always run on first invocation)

@@ -6,7 +6,8 @@ import {
   getActivePrediction,
   getAllPredictions,
   savePrediction,
-  clearPredictions,
+  deactivatePrediction,
+  deactivateAllPredictions,
   matchBlockedTool,
   formatPredictionContext,
   initPredictionSession,
@@ -110,6 +111,7 @@ describe("formatPredictionContext", () => {
       blockedTools: [],
       userMessageSnippet: "test",
       timestamp: Date.now(),
+      active: true,
     };
     const result = formatPredictionContext(prediction);
     expect(result).toContain("Expected intent: read-only exploration tools");
@@ -123,6 +125,7 @@ describe("formatPredictionContext", () => {
       blockedTools: [{ toolName: ".*", reason: "block all", exceptions: ["Agent"] }],
       userMessageSnippet: "test",
       timestamp: Date.now(),
+      active: true,
     };
     const result = formatPredictionContext(prediction);
     expect(result).toContain("Mechanically blocked: .* (except Agent)");
@@ -135,6 +138,7 @@ describe("formatPredictionContext", () => {
       blockedTools: [],
       userMessageSnippet: "test",
       timestamp: Date.now(),
+      active: true,
     };
     const result = formatPredictionContext(prediction);
     expect(result).toBe("");
@@ -160,6 +164,7 @@ describe("prediction-cache I/O", () => {
       blockedTools: [],
       userMessageSnippet: "test message",
       timestamp: Date.now(),
+      active: true,
       ...overrides,
     };
   }
@@ -194,16 +199,41 @@ describe("prediction-cache I/O", () => {
     expect(all[1].userMessageSnippet).toBe("second");
   });
 
-  it("returns null after clearing predictions", async () => {
-    const prediction = makePrediction();
-    await savePrediction(tmpDir, prediction);
-    await clearPredictions(tmpDir);
+  it("returns null after deactivating all predictions", async () => {
+    await savePrediction(tmpDir, makePrediction());
+    await savePrediction(tmpDir, makePrediction({ userMessageSnippet: "second" }));
+    await deactivateAllPredictions(tmpDir);
     const result = await getActivePrediction(tmpDir);
     expect(result).toBeNull();
+    const all = await getAllPredictions(tmpDir);
+    expect(all).toHaveLength(0);
   });
 
-  it("does not throw when clearing predictions on an empty directory", async () => {
-    await expect(clearPredictions(tmpDir)).resolves.not.toThrow();
+  it("deactivatePrediction only deactivates the entry whose blockedTools match", async () => {
+    const pred1 = makePrediction({
+      userMessageSnippet: "first",
+      blockedTools: [{ toolName: "Bash", reason: "no bash" }],
+    });
+    const pred2 = makePrediction({
+      userMessageSnippet: "second",
+      blockedTools: [{ toolName: "Edit", reason: "no edits" }],
+    });
+    await savePrediction(tmpDir, pred1);
+    await savePrediction(tmpDir, pred2);
+
+    await deactivatePrediction(tmpDir, "Bash", { command: "ls" });
+
+    const all = await getAllPredictions(tmpDir);
+    expect(all).toHaveLength(1);
+    expect(all[0].userMessageSnippet).toBe("second");
+
+    const active = await getActivePrediction(tmpDir);
+    expect(active).not.toBeNull();
+    expect(active!.userMessageSnippet).toBe("second");
+  });
+
+  it("does not throw when deactivating predictions on an empty directory", async () => {
+    await expect(deactivateAllPredictions(tmpDir)).resolves.not.toThrow();
   });
 
   it("returns null for expired predictions (timestamp older than 10 minutes)", async () => {

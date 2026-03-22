@@ -32,6 +32,8 @@ export interface ToolPrediction {
   blockedTools: BlockedTool[];
   userMessageSnippet: string;
   timestamp: number;
+  /** Whether this prediction is still active */
+  active: boolean;
 }
 
 interface PredictionData {
@@ -69,7 +71,8 @@ function getManager(sessionDir: string): CacheManager<PredictionData> {
 export async function getActivePrediction(sessionDir: string): Promise<ToolPrediction | null> {
   const manager = getManager(sessionDir);
   const data = await manager.load();
-  return data.entries.length > 0 ? data.entries[data.entries.length - 1] : null;
+  const activeEntries = data.entries.filter((e) => e.active === true);
+  return activeEntries.length > 0 ? activeEntries[activeEntries.length - 1] : null;
 }
 
 /**
@@ -78,7 +81,7 @@ export async function getActivePrediction(sessionDir: string): Promise<ToolPredi
 export async function getAllPredictions(sessionDir: string): Promise<ToolPrediction[]> {
   const manager = getManager(sessionDir);
   const data = await manager.load();
-  return data.entries;
+  return data.entries.filter((e) => e.active === true);
 }
 
 /**
@@ -88,16 +91,42 @@ export async function savePrediction(sessionDir: string, prediction: ToolPredict
   const manager = getManager(sessionDir);
   await manager.update((data) => ({
     ...data,
-    entries: [...data.entries, prediction],
+    entries: [...data.entries, { ...prediction, active: true }],
   }));
 }
 
 /**
- * Clear all predictions.
+ * Deactivate the prediction entry whose blockedTools matched the given tool.
+ * Used when an appeal overturns a prediction block — only that specific entry is deactivated.
  */
-export async function clearPredictions(sessionDir: string): Promise<void> {
+export async function deactivatePrediction(
+  sessionDir: string,
+  toolName: string,
+  toolInput: unknown
+): Promise<void> {
   const manager = getManager(sessionDir);
-  await manager.clear();
+  await manager.update((data) => ({
+    ...data,
+    entries: data.entries.map((entry) => {
+      if (!entry.active) return entry;
+      const match = matchBlockedTool(toolName, toolInput, entry.blockedTools);
+      return match ? { ...entry, active: false } : entry;
+    }),
+  }));
+}
+
+/**
+ * Deactivate all active predictions.
+ * Used on plan-to-implementation transitions (ExitPlanMode).
+ */
+export async function deactivateAllPredictions(sessionDir: string): Promise<void> {
+  const manager = getManager(sessionDir);
+  await manager.update((data) => ({
+    ...data,
+    entries: data.entries.map((entry) =>
+      entry.active ? { ...entry, active: false } : entry
+    ),
+  }));
 }
 
 /**

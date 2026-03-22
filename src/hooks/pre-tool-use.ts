@@ -58,7 +58,8 @@ import {
 import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
 import {
   getActivePrediction,
-  clearPredictions,
+  deactivatePrediction,
+  deactivateAllPredictions,
   matchBlockedTool,
   formatPredictionContext,
 } from "../utils/prediction-cache.js";
@@ -227,9 +228,14 @@ async function main() {
   let lastAgent = "tool-approve";  // Tracks the last LLM agent that ran
   const startTime = Date.now();
 
+  const DEBUG = process.env.AGENT_FRAMEWORK_DEBUG === "1";
   const planMode = isPlanModeActive(input.transcript_path);
   const subagent = isSubagent(input.transcript_path);
   const coldStart = toolCallCount < 3;
+
+  if (DEBUG && !subagent) {
+    console.error(`[pre-tool-use] subagent=false transcript=${path.basename(input.transcript_path)}`);
+  }
 
   // Subagents always use async/lazy pipeline; main agent uses sync for plan mode or cold start
   const useSyncPipeline = (planMode || coldStart) && !subagent;
@@ -286,6 +292,27 @@ async function main() {
       decision: "allow",
       agent: "low-risk-bypass",
       reason: "Low-risk tool auto-approval",
+    });
+    return;
+  }
+
+  // ============================================================
+  // SUBAGENT PATH: low-risk already handled, tool-approve only
+  // ============================================================
+  if (subagent) {
+    const decision = await checkToolApproval(toolName, toolInput, projectDir, "PreToolUse", { lazyMode: true });
+    if (!decision.approved) {
+      await exitPipeline({
+        decision: "deny",
+        agent: "tool-approve",
+        reason: decision.reason ?? "Tool denied",
+        });
+      return;
+    }
+    await exitPipeline({
+      decision: "allow",
+      agent: "tool-approve",
+      reason: "Subagent tool approved",
     });
     return;
   }
@@ -368,7 +395,7 @@ async function main() {
           return;
         }
         // Appeal overturned: clear predictions (user wants this tool after all)
-        await clearPredictions(sessionDir);
+        await deactivatePrediction(sessionDir, toolName, toolInput);
         currentGateNote = appeal.gateNote;
       }
     }
@@ -395,27 +422,6 @@ async function main() {
 
   // Detect rewind - if user rewound, clear all caches
   await detectRewind(input.transcript_path);
-
-  // ============================================================
-  // SUBAGENT PATH: low-risk already handled, tool-approve only
-  // ============================================================
-  if (subagent) {
-    const decision = await checkToolApproval(toolName, toolInput, projectDir, "PreToolUse", { lazyMode: true });
-    if (!decision.approved) {
-      await exitPipeline({
-        decision: "deny",
-        agent: "tool-approve",
-        reason: decision.reason ?? "Tool denied",
-        });
-      return;
-    }
-    await exitPipeline({
-      decision: "allow",
-      agent: "tool-approve",
-      reason: "Subagent tool approved",
-    });
-    return;
-  }
 
   // ============================================================
   // FILE TOOLS PATH
@@ -901,7 +907,7 @@ If in doubt, UPHOLD.
   // Clear gate reasoning on plan approval - gives implementation phase a clean slate
   if (toolName === "ExitPlanMode") {
     await clearGateReasoning(sessionDir);
-    await clearPredictions(sessionDir);
+    await deactivateAllPredictions(sessionDir);
     await stateManager.update((s) => ({
       ...s,
       currentEditIntent: true as const,

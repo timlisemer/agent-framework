@@ -38,7 +38,4 @@ export { checkStyleDrift } from './style-drift.js';
 export {
   checkResponseAlignment,
   checkStopResponseAlignment,
-  // Legacy aliases for backwards compatibility
-  checkIntentAlignment,
-  checkStopIntentAlignment,
 } from './response-align.js';
