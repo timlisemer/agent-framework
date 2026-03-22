@@ -46,7 +46,7 @@ export async function checkToolApproval(
   hookName: string,
   options?: ToolApprovalOptions
 ): Promise<{ approved: boolean; reason?: string; gateNote?: string }> {
-  const highlights = getBlacklistHighlights(toolName, toolInput);
+  const highlights = getBlacklistHighlights(toolName, toolInput, workingDir);
 
   // Lazy mode: skip LLM if no blacklist violations
   if (options?.lazyMode && highlights.length === 0) {

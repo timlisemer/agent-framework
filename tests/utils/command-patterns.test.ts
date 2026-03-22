@@ -92,6 +92,24 @@ describe("getBlacklistHighlights", () => {
   it("returns empty array for safe Bash command", () => {
     expect(getBlacklistHighlights("Bash", { command: "ls -la" })).toEqual([]);
   });
+
+  it("detects 'vitest' in Bash command", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "npx vitest run" });
+    expect(highlights.length).toBeGreaterThan(0);
+    expect(highlights[0]).toContain("test command");
+  });
+
+  it("detects 'jest' in Bash command", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "npx jest --coverage" });
+    expect(highlights.length).toBeGreaterThan(0);
+    expect(highlights[0]).toContain("test command");
+  });
+
+  it("detects 'pytest' in Bash command", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "pytest tests/" });
+    expect(highlights.length).toBeGreaterThan(0);
+    expect(highlights[0]).toContain("test command");
+  });
 });
 
 describe("detectWorkaroundPattern", () => {
@@ -129,5 +147,13 @@ describe("detectWorkaroundPattern", () => {
 
   it("returns null for Bash with empty command", () => {
     expect(detectWorkaroundPattern("Bash", { command: "" })).toBeNull();
+  });
+
+  it("returns 'test' for 'vitest' command", () => {
+    expect(detectWorkaroundPattern("Bash", { command: "vitest run" })).toBe("test");
+  });
+
+  it("returns 'test' for 'jest' command", () => {
+    expect(detectWorkaroundPattern("Bash", { command: "jest --coverage" })).toBe("test");
   });
 });

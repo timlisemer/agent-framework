@@ -58,6 +58,7 @@ import {
 import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
 import {
   getActivePrediction,
+  savePrediction,
   deactivatePrediction,
   deactivateAllPredictions,
   matchBlockedTool,
@@ -299,6 +300,10 @@ async function main() {
     LOW_RISK_TOOLS.includes(toolName) ||
     (toolName.startsWith("mcp__") && !/(commit|push|confirm)$/.test(toolName))
   ) {
+    // Clear force-check predictions when check MCP is called
+    if (toolName === "mcp__agent-framework__check") {
+      await deactivateAllPredictions(sessionDir);
+    }
     logFastPathApproval("low-risk-bypass", "PreToolUse", toolName, projectDir, "Low-risk tool auto-approval");
     await exitPipeline({
       decision: "allow",
@@ -474,42 +479,9 @@ async function main() {
           return;
         }
 
-        // If edit intent is explicitly false, block plan edits too
-        // (handles "don't write plan yet" — normally plan files bypass edit-intent)
-        if ((state.currentEditIntent ?? null) === false) {
-          const planEiTranscript = formatTranscriptResult(
-            await readTranscriptExact(input.transcript_path, APPEAL_COUNTS)
-          );
-          const planEiReason = "Edit intent is false - user has not requested file modifications (including plan files).";
-
-          const planEiAppeal = await appealHelper(
-            toolName,
-            `${toolName} to ${filePath}`,
-            planEiTranscript,
-            planEiReason,
-            projectDir,
-            "PreToolUse",
-            `=== EDIT INTENT WARNING ===
-The edit intent classifier has determined the user does NOT want file edits right now.
-This is a STRONG signal. The user's message was analyzed and classified as non-edit intent.
-You should STRONGLY LEAN toward UPHOLD unless you find EXPLICIT, UNAMBIGUOUS user approval
-for editing files (e.g., "make the change", "fix it", "implement it", "go ahead and edit").
-Questions, discussions, or exploration of code do NOT count as edit approval.
-If in doubt, UPHOLD.
-=== END EDIT INTENT WARNING ===`
-          );
-
-          if (!planEiAppeal.overturned) {
-            await exitPipeline({
-              decision: "deny",
-              agent: "edit-intent",
-              reason: planEiReason,
-            });
-            return;
-          }
-          currentGateNote = planEiAppeal.gateNote;
-          // Continue to normal plan-validate
-        }
+        // Plan files at ~/.claude/plans/ are exempt from edit-intent blocking.
+        // classifyEditIntent always returns false in plan mode, making this check
+        // fire unconditionally. The plan-validate LLM check below handles validation.
 
         const currentPlan = await readPlanContent(input.transcript_path);
         const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
@@ -884,12 +856,26 @@ If in doubt, UPHOLD.
     if (!appeal.overturned) {
       // Track workaround patterns for escalation
       let finalReason = decision.reason;
-      const pattern = detectWorkaroundPattern(toolName, toolInput);
-      if (pattern) {
-        const count = await recordDenial(pattern);
+      const workaroundCategory = detectWorkaroundPattern(toolName, toolInput);
+      if (workaroundCategory) {
+        const count = await recordDenial(workaroundCategory);
         if (count >= MAX_SIMILAR_DENIALS) {
-          finalReason += ` CRITICAL: You have attempted ${count} similar workarounds for '${pattern}'. STOP trying alternatives. Either use the approved MCP tool, ask the user for guidance, or acknowledge that this action cannot be performed.`;
+          finalReason += ` CRITICAL: You have attempted ${count} similar workarounds for '${workaroundCategory}'. STOP trying alternatives. Either use the approved MCP tool, ask the user for guidance, or acknowledge that this action cannot be performed.`;
         }
+
+        // Force check: block all non-low-risk tools until check MCP is called
+        await savePrediction(sessionDir, {
+          expectedIntent: "run mcp__agent-framework__check to verify project state",
+          blockedIntent: "all non-read tools until check has been run",
+          blockedTools: [{
+            toolName: ".*",
+            reason: `Bash command denied (${workaroundCategory}). You must run mcp__agent-framework__check first.`,
+            exceptions: ["mcp__agent-framework__check"],
+          }],
+          userMessageSnippet: `denied: ${(finalReason ?? "").slice(0, 100)}`,
+          timestamp: Date.now(),
+          active: true,
+        });
       }
 
       await exitPipeline({

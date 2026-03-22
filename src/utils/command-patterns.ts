@@ -3,7 +3,10 @@
  *
  * BLACKLIST_PATTERNS: Used by tool-approve to highlight bad bash commands to the LLM
  * WORKAROUND_PATTERNS: Used by pre-tool-use to detect repeated denial attempts
+ * CHECK_EQUIVALENTS: Maps pattern names to equivalent commands found in check targets
  */
+
+import { resolveCheckMessage } from "./check-target-context.js";
 
 export interface BlacklistPattern {
   pattern: RegExp;
@@ -37,17 +40,17 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bgit\s+(commit|push|add|merge|rebase|reset)\b/, name: 'git write op', alternative: 'Use MCP tools' },
 
   // Build/check commands - LLMs should NOT build, only verify with check tool
-  { pattern: /\bmake\s+check\b/, name: "make check", alternative: "Use mcp__agent-framework__check" },
-  { pattern: /\bjust\s+check\b/, name: "just check", alternative: "Use mcp__agent-framework__check" },
-  { pattern: /\bmake\s+build\b/, name: "make build", alternative: "LLMs are not supposed to build projects. Use mcp__agent-framework__check to verify code compiles" },
-  { pattern: /\bjust\s+build\b/, name: "just build", alternative: "LLMs are not supposed to build projects. Use mcp__agent-framework__check to verify code compiles" },
-  { pattern: /\bnpm\s+run\s+build\b/, name: "npm build", alternative: "LLMs are not supposed to build projects. Use mcp__agent-framework__check to verify code compiles" },
-  { pattern: /\bnpm\s+run\s+(check|typecheck)\b/, name: "npm check/typecheck", alternative: "Use mcp__agent-framework__check" },
-  { pattern: /\bbun\s+run\s+build\b/, name: "bun build", alternative: "LLMs are not supposed to build projects. Use mcp__agent-framework__check to verify code compiles" },
-  { pattern: /\bbun\s+run\s+(check|typecheck)\b/, name: "bun check/typecheck", alternative: "Use mcp__agent-framework__check" },
-  { pattern: /\bcargo\s+build\b/, name: "cargo build", alternative: "LLMs are not supposed to build projects. Use mcp__agent-framework__check to verify code compiles" },
-  { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: "Use mcp__agent-framework__check" },
-  { pattern: /\b(tsc|npx\s+tsc)\b/, name: "tsc", alternative: "LLMs are not supposed to build projects. Use mcp__agent-framework__check to verify code compiles" },
+  { pattern: /\bmake\s+check\b/, name: "make check", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bjust\s+check\b/, name: "just check", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bmake\s+build\b/, name: "make build", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bjust\s+build\b/, name: "just build", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bnpm\s+run\s+build\b/, name: "npm build", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bnpm\s+run\s+(check|typecheck)\b/, name: "npm check/typecheck", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bbun\s+run\s+build\b/, name: "bun build", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bbun\s+run\s+(check|typecheck)\b/, name: "bun check/typecheck", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bcargo\s+build\b/, name: "cargo build", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\b(tsc|npx\s+tsc)\b/, name: "tsc", alternative: "You must run mcp__agent-framework__check" },
 
   // Package install commands - dependency-modifying, should not be run by AI
   { pattern: /\bnpm\s+install\b/, name: "npm install", alternative: "LLMs should not modify project dependencies" },
@@ -55,18 +58,18 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bpnpm\s+install\b/, name: "pnpm install", alternative: "LLMs should not modify project dependencies" },
 
   // Lint commands - should use check tool
-  { pattern: /\bnpm\s+run\s+lint\b/, name: "npm lint", alternative: "Use mcp__agent-framework__check" },
-  { pattern: /\bbun\s+run\s+lint\b/, name: "bun lint", alternative: "Use mcp__agent-framework__check" },
-  { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: "Use mcp__agent-framework__check" },
+  { pattern: /\bnpm\s+run\s+lint\b/, name: "npm lint", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bbun\s+run\s+lint\b/, name: "bun lint", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: "You must run mcp__agent-framework__check" },
 
   // Test commands - tests may not exist, use check for build verification
-  { pattern: /\btest\b/, name: 'test command', alternative: 'Use mcp__agent-framework__check for build verification' },
+  { pattern: /\b(test|vitest|jest|mocha|pytest|ava)\b/, name: "test command", alternative: "You must run mcp__agent-framework__check" },
 
   // Command chaining with cd - always deny
   { pattern: /\bcd\s+[^&]+&&/, name: 'cd && chain', alternative: 'Use --cwd flag or run from correct directory' },
 
   // Nix formatting - should use check tool
-  { pattern: /\balejandra\b/, name: 'alejandra', alternative: 'Use mcp__agent-framework__check' },
+  { pattern: /\balejandra\b/, name: "alejandra", alternative: "You must run mcp__agent-framework__check" },
 
   // SSH remote execution
   { pattern: /\bssh\s+/, name: 'ssh', alternative: 'Remote execution denied' },
@@ -80,11 +83,11 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bgo\s+run\b/, name: "go run", alternative: "Run commands not allowed" },
 
   // Code execution commands - should be added to Justfile/Makefile check target
-  { pattern: /\bpython\s+(-c\s+)?/, name: "python", alternative: "Add to Justfile/Makefile check target, then use mcp__agent-framework__check" },
-  { pattern: /\bpython3\s+(-c\s+)?/, name: "python3", alternative: "Add to Justfile/Makefile check target, then use mcp__agent-framework__check" },
-  { pattern: /\bnode\s+(-e\s+)?/, name: "node", alternative: "Add to Justfile/Makefile check target, then use mcp__agent-framework__check" },
-  { pattern: /\bruby\s+(-e\s+)?/, name: "ruby", alternative: "Add to Justfile/Makefile check target, then use mcp__agent-framework__check" },
-  { pattern: /\bperl\s+(-e\s+)?/, name: "perl", alternative: "Add to Justfile/Makefile check target, then use mcp__agent-framework__check" },
+  { pattern: /\bpython\s+(-c\s+)?/, name: "python", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bpython3\s+(-c\s+)?/, name: "python3", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bnode\s+(-e\s+)?/, name: "node", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bruby\s+(-e\s+)?/, name: "ruby", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bperl\s+(-e\s+)?/, name: "perl", alternative: "You must run mcp__agent-framework__check" },
 ];
 
 /**
@@ -105,9 +108,38 @@ export const WORKAROUND_PATTERNS: Record<string, string[]> = {
   ],
   build: ["make build", "just build", "npm run build", "bun run build", "cargo build"],
   lint: ["eslint", "prettier", "npm run lint", "bun run lint", "alejandra"],
-  test: ["test"],
+  test: ["test", "vitest", "jest", "mocha", "pytest", "ava"],
   "code-exec": ["python ", "python3 ", "node ", "ruby ", "perl "],
   install: ["npm install", "bun install", "pnpm install"],
+};
+
+/**
+ * Maps blacklist pattern names to equivalent commands to search for in check targets.
+ * Only patterns that redirect to mcp__agent-framework__check need entries here.
+ * Used by getBlacklistHighlights to produce context-aware error messages.
+ */
+export const CHECK_EQUIVALENTS: Record<string, string[]> = {
+  "make check": ["check"],
+  "just check": ["check"],
+  "make build": ["make build", "cargo check", "tsc"],
+  "just build": ["just build", "cargo check", "tsc"],
+  "npm build": ["tsc", "npx tsc", "npm run build"],
+  "npm check/typecheck": ["tsc", "npx tsc", "typecheck"],
+  "bun build": ["tsc", "bun run build"],
+  "bun check/typecheck": ["tsc", "typecheck"],
+  "cargo build": ["cargo check", "cargo clippy"],
+  "cargo check": ["cargo check", "cargo clippy"],
+  "tsc": ["tsc", "npx tsc"],
+  "npm lint": ["eslint", "lint", "prettier"],
+  "bun lint": ["eslint", "lint", "prettier"],
+  "pnpm lint": ["eslint", "lint", "prettier"],
+  "test command": ["vitest", "jest", "pytest", "cargo test", "test", "mocha", "ava"],
+  "alejandra": ["alejandra"],
+  "python": ["python", "python3"],
+  "python3": ["python", "python3"],
+  "node": ["node"],
+  "ruby": ["ruby"],
+  "perl": ["perl"],
 };
 
 /**
@@ -142,15 +174,25 @@ export function getContentBlacklistHighlights(content: string): string[] {
 /**
  * Get blacklist highlights for a Bash command.
  * Returns array of violation messages for the LLM.
+ *
+ * When workingDir is provided, produces context-aware messages by checking
+ * the project's Justfile/Makefile for command coverage. Falls back to static
+ * alternative strings when workingDir is omitted or pattern has no equivalents.
  */
-export function getBlacklistHighlights(toolName: string, toolInput: unknown): string[] {
-  if (toolName !== 'Bash') return [];
+export function getBlacklistHighlights(toolName: string, toolInput: unknown, workingDir?: string): string[] {
+  if (toolName !== "Bash") return [];
   const command = (toolInput as { command?: string }).command;
   if (!command) return [];
 
-  return BLACKLIST_PATTERNS.filter(({ pattern }) => pattern.test(command)).map(
-    ({ name, alternative }) => `[BLACKLIST: ${name}] ${alternative}`
-  );
+  return BLACKLIST_PATTERNS
+    .filter(({ pattern }) => pattern.test(command))
+    .map(({ name, alternative }) => {
+      const equivalents = CHECK_EQUIVALENTS[name];
+      const msg = equivalents && workingDir
+        ? resolveCheckMessage(name, equivalents, workingDir)
+        : alternative;
+      return `[BLACKLIST: ${name}] ${msg}`;
+    });
 }
 
 /**
