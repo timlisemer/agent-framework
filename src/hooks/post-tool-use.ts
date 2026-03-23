@@ -9,6 +9,7 @@ import { readStdinJson } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { spawnBackground } from "../utils/spawn-background.js";
 import { getSessionDir, appendToolLog, getActiveSubagentCount } from "../utils/summary-cache.js";
+import { writeUser, writeTool, formatTodoState, extractAskUserAnswer, type TodoItem } from "../utils/synthetic.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,11 +30,30 @@ async function main() {
       ms: 0,
     });
 
-    // Summary-updater is spawned here for regular tool executions only.
-    // Synthetic messages (from plan mode transitions, stop hook, etc.) trigger
-    // summary-updater via appendSyntheticToolResult in transcript-writer.ts.
-    // Do NOT add summary-updater spawning for synthetic messages here — that
-    // would cause duplicate summary runs.
+    // AskUserQuestion: write user's answer as a synthetic user message
+    if (input.tool_name === "AskUserQuestion") {
+      const answer = extractAskUserAnswer((input as Record<string, unknown>).tool_response);
+      if (answer) {
+        await writeUser(input.transcript_path, input.session_id, "AskUserQuestion", answer);
+      }
+      process.exit(0);
+      return;
+    }
+
+    // TodoWrite: write task state as a synthetic tool message
+    if (input.tool_name === "TodoWrite") {
+      const toolInput = input.tool_input as { todos?: Array<{ content: string; status: string; activeForm: string }> };
+      if (toolInput?.todos && Array.isArray(toolInput.todos)) {
+        const todoText = formatTodoState(toolInput.todos as TodoItem[]);
+        if (todoText) {
+          await writeTool(input.transcript_path, input.session_id, "TodoWrite", `Current tasks:\n${todoText}`);
+        }
+      }
+      process.exit(0);
+      return;
+    }
+
+    // Regular tools: spawn summary-updater
     const activeSubagents = getActiveSubagentCount(sessionDir);
     if (activeSubagents === 0) {
       const updaterPath = path.join(__dirname, "../utils/summary-updater.js");

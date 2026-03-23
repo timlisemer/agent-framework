@@ -25,7 +25,7 @@ const ALL = Infinity;
  * Plan approval and todo state are always synthesized into transcript.
  */
 export const APPEAL_COUNTS: TranscriptReadOptions = {
-  counts: { user: ALL, assistant: 10, toolResult: 3 },
+  counts: { user: ALL, assistant: 10, tool: 3 },
   includeFirstUserMessage: true,
 };
 
@@ -37,9 +37,9 @@ export const APPEAL_COUNTS: TranscriptReadOptions = {
  * Always includes first user message to capture initial request.
  */
 export const PLAN_VALIDATE_COUNTS: TranscriptReadOptions = {
-  counts: { user: ALL, assistant: 10, toolResult: 10 },
+  counts: { user: ALL, assistant: 10, tool: 10 },
   includeFirstUserMessage: true,
-  toolResultOptions: {
+  toolOptions: {
     trim: false,
   },
 };
@@ -73,14 +73,14 @@ export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
  *
  * User message has maxStale to prevent false positives on old questions
  * that were already addressed through planning/implementation cycles.
- * toolResult is included so the hook can see if work was done between
+ * tool is included so the hook can see if work was done between
  * the user message and now.
  */
 export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
   counts: {
     user: { count: 3, maxStale: 5 },
     assistant: 3,
-    toolResult: 2,
+    tool: 2,
   },
 };
 
@@ -92,9 +92,9 @@ export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
  * Recent tool results - to see what Claude has done (Write to plan, etc.).
  */
 export const QUESTION_VALIDATE_COUNTS: TranscriptReadOptions = {
-  counts: { user: ALL, assistant: 5, toolResult: 10 },
+  counts: { user: ALL, assistant: 5, tool: 10 },
   includeFirstUserMessage: true,
-  toolResultOptions: {
+  toolOptions: {
     trim: true,
     maxLines: 30,
     excludeToolNames: ["Task", "Agent", "TaskOutput"],

@@ -55,9 +55,9 @@ import type { TranscriptReadOptions } from "../../utils/transcript.js";
  * More assistant messages to catch acknowledgments in the current turn.
  */
 const INTENT_ALIGNMENT_COUNTS: TranscriptReadOptions = {
-  counts: { user: Infinity, assistant: 5, toolResult: 5 },
+  counts: { user: Infinity, assistant: 5, tool: 5 },
   includeFirstUserMessage: true,
-  toolResultOptions: {
+  toolOptions: {
     trim: true,
     maxLines: 100,
   },
@@ -173,7 +173,7 @@ export async function checkResponseAlignment(
 
   // Check if user answered via AskUserQuestion tool (tool result with answer indicator)
   // This means user provided fresh input that supersedes any prior stop hook feedback
-  const hasUserToolAnswer = transcriptResult.toolResult.some(
+  const hasUserToolAnswer = transcriptResult.tool.some(
     (tr) => tr.content.includes("User answered") || tr.content.includes("answered Claude's questions") || tr.content.includes("→")
   );
   if (hasUserToolAnswer) {
@@ -197,9 +197,9 @@ export async function checkResponseAlignment(
   const toolDescription = `${toolName} with ${JSON.stringify(toolInput).slice(0, 300)}`;
 
   // Format recent tool results for context
-  const toolResultsText =
-    transcriptResult.toolResult.length > 0
-      ? `\nRECENT TOOL RESULTS:\n${transcriptResult.toolResult
+  const toolsText =
+    transcriptResult.tool.length > 0
+      ? `\nRECENT TOOL RESULTS:\n${transcriptResult.tool
           .map(
             (r) =>
               `- ${r.content.slice(0, 300)}${r.content.length > 300 ? "..." : ""}`
@@ -220,7 +220,7 @@ ${userRequest}
 ${ackText ? `AI ACKNOWLEDGMENT (text before this tool call):\n${ackText}\n` : ""}${preambleSection}TOOL CALL:
 Tool: ${toolName}
 Input: ${JSON.stringify(toolInput, null, 2).slice(0, 500)}
-${toolResultsText}`;
+${toolsText}`;
 
   // Mark agent as running in statusline
   logAgentStarted("response-align", toolName);

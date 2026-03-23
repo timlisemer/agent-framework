@@ -6,7 +6,7 @@ import { type StopHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { checkStopResponseAlignment } from "../agents/hooks/response-align.js";
 import { initRewindSession, detectRewind } from "../utils/rewind-cache.js";
 import { setTranscriptPath } from "../utils/execution-context.js";
-import { appendSyntheticToolResult } from "../utils/transcript-writer.js";
+import { writeTool } from "../utils/synthetic.js";
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { getSessionDir } from "../utils/summary-cache.js";
 
@@ -45,10 +45,7 @@ async function main() {
   );
 
   if (!result.approved && result.systemMessage) {
-    // Append synthetic entry to transcript and trigger summary update.
-    // Tool log + summary-updater spawning is handled inside appendSyntheticToolResult.
-    // Do NOT log SyntheticMessage or spawn summary-updater here — that would duplicate.
-    await appendSyntheticToolResult(input.transcript_path, "Stop", result.systemMessage, input.session_id);
+    await writeTool(input.transcript_path, input.session_id, "stop-hook", result.systemMessage);
 
     const output = JSON.stringify({
       decision: "block",

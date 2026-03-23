@@ -64,7 +64,7 @@ import {
   matchBlockedTool,
   formatPredictionContext,
 } from "../utils/prediction-cache.js";
-import { appendSyntheticToolResult } from "../utils/transcript-writer.js";
+import { writeTool, writeUser } from "../utils/synthetic.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -312,11 +312,11 @@ async function main() {
 
   // Synthetic message for entering plan mode (before exitPipeline exits the process)
   if (toolName === "EnterPlanMode" && !subagent) {
-    await appendSyntheticToolResult(
+    await writeTool(
       input.transcript_path,
-      "PlanMode",
-      "Entering plan mode. All subsequent tool calls are read-only until ExitPlanMode.",
-      input.session_id
+      input.session_id,
+      "EnterPlanMode",
+      "Entering plan mode. All subsequent tool calls are read-only until ExitPlanMode."
     );
   }
 
@@ -324,10 +324,6 @@ async function main() {
     LOW_RISK_TOOLS.includes(toolName) ||
     (toolName.startsWith("mcp__") && !/(commit|push|confirm)$/.test(toolName))
   ) {
-    // Clear force-check predictions when check MCP is called
-    if (toolName === "mcp__agent-framework__check") {
-      await deactivateAllPredictions(sessionDir);
-    }
     logFastPathApproval("low-risk-bypass", "PreToolUse", toolName, projectDir, "Low-risk tool auto-approval");
     await exitPipeline({
       decision: "allow",
@@ -407,6 +403,10 @@ async function main() {
   // STEP 2.5: Tool prediction blocking (non-edit tools only)
   // ============================================================
   if (!subagent) {
+    if (toolName.startsWith("mcp__") && /(commit|push|confirm|check)$/.test(toolName)) {
+      await deactivateAllPredictions(sessionDir);
+    }
+
     const prediction = await getActivePrediction(sessionDir);
     if (prediction) {
       const predFilePath = (toolInput as { file_path?: string }).file_path || (toolInput as { path?: string }).path || "";
@@ -493,7 +493,7 @@ async function main() {
         // Check for actual ExitPlanMode tool result via its [ExitPlanMode] prefix
         // (set by transcript.ts:799). Do NOT use naive content.includes() here —
         // that false-positives on Read/Grep results containing ExitPlanMode source code.
-        const hasExitPlanModeApproval = recentContext.toolResult.some(
+        const hasExitPlanModeApproval = recentContext.tool.some(
           (r) => r.content.startsWith("[ExitPlanMode]")
         );
         if (hasExitPlanModeApproval) {
@@ -890,13 +890,18 @@ If in doubt, UPHOLD.
       editIntentTimestamp: Date.now(),
     }));
 
-    // Synthetic message for exiting plan mode
     if (!subagent) {
-      await appendSyntheticToolResult(
+      await writeTool(
         input.transcript_path,
-        "PlanMode",
-        "Exiting plan mode. Transitioning to implementation phase.",
-        input.session_id
+        input.session_id,
+        "ExitPlanMode",
+        "Exiting plan mode."
+      );
+      await writeUser(
+        input.transcript_path,
+        input.session_id,
+        "ExitPlanMode",
+        "Plan approved. Proceed with implementation."
       );
     }
   }

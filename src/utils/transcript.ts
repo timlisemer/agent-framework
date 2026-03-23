@@ -53,7 +53,7 @@ function isClaudeCodeInterruption(content: string): boolean {
 }
 
 export interface TranscriptMessage {
-  role: 'user' | 'assistant' | 'tool_result';
+  role: 'user' | 'assistant' | 'tool';
   content: string;
   index: number;
 }
@@ -85,7 +85,7 @@ export interface CountSpec {
 export interface MessageCounts {
   user?: number | CountSpec;
   assistant?: number | CountSpec;
-  toolResult?: number | CountSpec;
+  tool?: number | CountSpec;
 }
 
 /**
@@ -102,7 +102,7 @@ export interface TranscriptReadOptions {
   /**
    * Options for tool result processing.
    */
-  toolResultOptions?: {
+  toolOptions?: {
     /** Trim tool output to error-relevant lines */
     trim?: boolean;
     /** Max lines to include per tool result (default: 20) */
@@ -154,8 +154,8 @@ export interface TranscriptReadResult {
   user: TranscriptMessage[];
   /** Assistant messages */
   assistant: TranscriptMessage[];
-  /** Tool result messages */
-  toolResult: TranscriptMessage[];
+  /** Tool messages */
+  tool: TranscriptMessage[];
   /** Total messages collected across all types */
   totalCount: number;
   /** Slash command context if includeSlashCommandContext was true and a slash command was found */
@@ -171,23 +171,10 @@ interface ContentBlock {
   id?: string; // Tool use ID for tool_use blocks
 }
 
-/**
- * Todo item structure from TodoWrite tool results.
- */
-export interface TodoItem {
-  content: string;
-  status: "pending" | "in_progress" | "completed";
-  activeForm: string;
-}
-
 interface TranscriptEntry {
   message?: {
     role: string;
     content: string | ContentBlock[];
-  };
-  toolUseResult?: {
-    oldTodos?: TodoItem[];
-    newTodos?: TodoItem[];
   };
 }
 
@@ -356,33 +343,6 @@ function extractToolResultContent(block: ContentBlock): string {
 }
 
 /**
- * Format todo items for synthetic transcript entry.
- * Groups by status and formats as readable list.
- */
-function formatTodoState(todos: TodoItem[]): string {
-  const inProgress = todos.filter((t) => t.status === "in_progress");
-  const pending = todos.filter((t) => t.status === "pending");
-  const completed = todos.filter((t) => t.status === "completed");
-
-  const lines: string[] = [];
-
-  if (inProgress.length > 0) {
-    lines.push("In Progress:");
-    inProgress.forEach((t) => lines.push(`  - ${t.content}`));
-  }
-  if (pending.length > 0) {
-    lines.push("Pending:");
-    pending.forEach((t) => lines.push(`  - ${t.content}`));
-  }
-  if (completed.length > 0) {
-    lines.push("Completed:");
-    completed.forEach((t) => lines.push(`  - ${t.content}`));
-  }
-
-  return lines.join("\n");
-}
-
-/**
  * Normalize a count specification to a consistent format.
  *
  * Handles both simple numbers (backward compatible) and CountSpec objects.
@@ -410,7 +370,7 @@ function normalizeCount(
  * context from other message types to determine if they were addressed.
  *
  * Example:
- * - `user: { count: 3, maxStale: 5 }` requires `assistant.count + toolResult.count >= 5`
+ * - `user: { count: 3, maxStale: 5 }` requires `assistant.count + tool.count >= 5`
  * - If user messages beyond 5 lines are excluded, we need 5 lines of context
  *
  * @param config - The transcript read options to validate
@@ -423,41 +383,41 @@ export function validateTranscriptConfig(
 ): void {
   const userSpec = normalizeCount(config.counts.user);
   const assistantSpec = normalizeCount(config.counts.assistant);
-  const toolResultSpec = normalizeCount(config.counts.toolResult);
+  const toolSpec = normalizeCount(config.counts.tool);
 
-  // Validate user maxStale: need enough assistant + toolResult context
+  // Validate user maxStale: need enough assistant + tool context
   if (userSpec.maxStale !== undefined) {
-    const contextCount = assistantSpec.count + toolResultSpec.count;
+    const contextCount = assistantSpec.count + toolSpec.count;
     if (contextCount < userSpec.maxStale) {
       throw new Error(
         `TranscriptConfig "${configName}" invalid:\n` +
-        `  user.maxStale (${userSpec.maxStale}) > assistant.count + toolResult.count (${contextCount})\n` +
+        `  user.maxStale (${userSpec.maxStale}) > assistant.count + tool.count (${contextCount})\n` +
         `  Stale user messages will be excluded but there's not enough context\n` +
-        `  to determine if they were addressed. Increase assistant or toolResult counts.`
+        `  to determine if they were addressed. Increase assistant or tool counts.`
       );
     }
   }
 
-  // Validate assistant maxStale: need enough user + toolResult context
+  // Validate assistant maxStale: need enough user + tool context
   if (assistantSpec.maxStale !== undefined) {
-    const contextCount = userSpec.count + toolResultSpec.count;
+    const contextCount = userSpec.count + toolSpec.count;
     if (typeof userSpec.count === "number" && contextCount < assistantSpec.maxStale) {
       throw new Error(
         `TranscriptConfig "${configName}" invalid:\n` +
-        `  assistant.maxStale (${assistantSpec.maxStale}) > user.count + toolResult.count (${contextCount})\n` +
+        `  assistant.maxStale (${assistantSpec.maxStale}) > user.count + tool.count (${contextCount})\n` +
         `  Stale assistant messages will be excluded but there's not enough context.`
       );
     }
   }
 
-  // Validate toolResult maxStale: need enough user + assistant context
-  if (toolResultSpec.maxStale !== undefined) {
+  // Validate tool maxStale: need enough user + assistant context
+  if (toolSpec.maxStale !== undefined) {
     const userCount = typeof userSpec.count === "number" ? userSpec.count : 0;
     const contextCount = userCount + assistantSpec.count;
-    if (contextCount < toolResultSpec.maxStale) {
+    if (contextCount < toolSpec.maxStale) {
       throw new Error(
         `TranscriptConfig "${configName}" invalid:\n` +
-        `  toolResult.maxStale (${toolResultSpec.maxStale}) > user.count + assistant.count (${contextCount})\n` +
+        `  tool.maxStale (${toolSpec.maxStale}) > user.count + assistant.count (${contextCount})\n` +
         `  Stale tool results will be excluded but there's not enough context.`
       );
     }
@@ -480,8 +440,8 @@ export function validateTranscriptConfig(
  * @example
  * // Get 5 of each type for context
  * const result = await readTranscriptExact(transcriptPath, {
- *   counts: { user: 5, assistant: 5, toolResult: 3 },
- *   toolResultOptions: { trim: true, maxLines: 20 }
+ *   counts: { user: 5, assistant: 5, tool: 3 },
+ *   toolOptions: { trim: true, maxLines: 20 }
  * });
  */
 export async function readTranscriptExact(
@@ -490,7 +450,7 @@ export async function readTranscriptExact(
 ): Promise<TranscriptReadResult> {
   const {
     counts,
-    toolResultOptions = {},
+    toolOptions = {},
     excludeSystemReminders = true,
     excludeSlashCommandPrompts = true,
     includeFirstUserMessage = false,
@@ -501,11 +461,11 @@ export async function readTranscriptExact(
   // This enables backward compatibility: `user: 3` works alongside `user: { count: 1, maxStale: 1 }`.
   const userSpec = normalizeCount(counts.user);
   const assistantSpec = normalizeCount(counts.assistant);
-  const toolResultSpec = normalizeCount(counts.toolResult);
+  const toolSpec = normalizeCount(counts.tool);
 
   const targetUser = userSpec.count;
   const targetAssistant = assistantSpec.count;
-  const targetToolResult = toolResultSpec.count;
+  const targetTool = toolSpec.count;
 
   const content = await fs.promises.readFile(transcriptPath, "utf-8");
   const allLines = content.trim().split("\n");
@@ -513,7 +473,7 @@ export async function readTranscriptExact(
   const collected: TranscriptReadResult = {
     user: [],
     assistant: [],
-    toolResult: [],
+    tool: [],
     totalCount: 0,
   };
 
@@ -597,24 +557,13 @@ export async function readTranscriptExact(
     if (
       collected.user.length >= targetUser &&
       collected.assistant.length >= targetAssistant &&
-      collected.toolResult.length >= targetToolResult
+      collected.tool.length >= targetTool
     ) {
       break;
     }
 
     const entry = parsedEntries[i];
     if (!entry) continue;
-
-    // Synthesize tool_result for todo changes
-    // This makes todo state visible to all agents as part of the transcript
-    if (entry.toolUseResult?.newTodos) {
-      const todoSummary = formatTodoState(entry.toolUseResult.newTodos);
-      collected.toolResult.push({
-        role: "tool_result",
-        content: `[TodoWrite] Current tasks:\n${todoSummary}`,
-        index: i,
-      });
-    }
 
     if (!entry.message) continue;
 
@@ -625,20 +574,20 @@ export async function readTranscriptExact(
       // This prevents old user directives from being re-checked after they've
       // already been processed by previous hook invocations.
       const userStale = userSpec.maxStale !== undefined && scanDistance > userSpec.maxStale;
-      const toolResultStale = toolResultSpec.maxStale !== undefined && scanDistance > toolResultSpec.maxStale;
+      const toolStale = toolSpec.maxStale !== undefined && scanDistance > toolSpec.maxStale;
 
       // Only process if at least one type is still collectible and not stale
       if (
         (!userStale && collected.user.length < targetUser) ||
-        (!toolResultStale && collected.toolResult.length < targetToolResult)
+        (!toolStale && collected.tool.length < targetTool)
       ) {
         processUserEntry(msgContent, i, collected, {
           // Pass 0 as target if stale to prevent collection
           targetUser: userStale ? 0 : targetUser,
-          targetToolResult: toolResultStale ? 0 : targetToolResult,
+          targetTool: toolStale ? 0 : targetTool,
           excludeSystemReminders,
           excludeSlashCommandPrompts,
-          toolResultOptions,
+          toolOptions,
           toolUseIdToName,
         });
       }
@@ -697,36 +646,8 @@ export async function readTranscriptExact(
     }
   }
 
-  // Synthesize plan approval as user message so all agents see it.
-  // Match on [ExitPlanMode] prefix (set at line 799) — NOT naive content.includes(),
-  // which false-positives on Read/Grep results containing ExitPlanMode source code.
-  const hasPlanApproval = collected.toolResult.some(
-    (r) => r.content.startsWith("[ExitPlanMode]")
-  );
-  if (hasPlanApproval) {
-    collected.user.push({
-      role: "user",
-      content: "I approved the plan. Proceed with implementation.",
-      index: Infinity, // Sort to end
-    });
-  }
-
-  // Synthesize AskUserQuestion answers as user messages
-  // This ensures presets that only collect user messages (e.g., STYLE_DRIFT_COUNTS)
-  // can still see AskUserQuestion answers as user intent
-  for (const tr of collected.toolResult) {
-    if (tr.content.includes("User answered") || tr.content.includes("answered Claude's questions")) {
-      collected.user.push({
-        role: "user",
-        content: tr.content,
-        index: tr.index,
-      });
-      break; // Most recent answer only
-    }
-  }
-
   collected.totalCount =
-    collected.user.length + collected.assistant.length + collected.toolResult.length;
+    collected.user.length + collected.assistant.length + collected.tool.length;
 
   return collected;
 }
@@ -740,22 +661,22 @@ function processUserEntry(
   collected: TranscriptReadResult,
   config: {
     targetUser: number;
-    targetToolResult: number;
+    targetTool: number;
     excludeSystemReminders: boolean;
     excludeSlashCommandPrompts: boolean;
-    toolResultOptions: TranscriptReadOptions['toolResultOptions'];
+    toolOptions: TranscriptReadOptions['toolOptions'];
     toolUseIdToName: Map<string, string>;
   }
 ): void {
   const {
     targetUser,
-    targetToolResult,
+    targetTool,
     excludeSystemReminders,
     excludeSlashCommandPrompts,
-    toolResultOptions,
+    toolOptions,
     toolUseIdToName,
   } = config;
-  const { trim = false, maxLines = 20, excludeToolNames = [] } = toolResultOptions ?? {};
+  const { trim = false, maxLines = 20, excludeToolNames = [] } = toolOptions ?? {};
 
   if (typeof msgContent === 'string') {
     if (excludeSystemReminders && msgContent.startsWith('<system-reminder>')) {
@@ -769,7 +690,7 @@ function processUserEntry(
     }
   } else if (Array.isArray(msgContent)) {
     for (const block of msgContent) {
-      if (block.type === 'tool_result' && collected.toolResult.length < targetToolResult) {
+      if (block.type === 'tool_result' && collected.tool.length < targetTool) {
         // Check if this tool should be excluded
         if (block.tool_use_id && excludeToolNames.length > 0) {
           const toolName = toolUseIdToName.get(block.tool_use_id);
@@ -796,7 +717,7 @@ function processUserEntry(
         if (toolContent) {
           const toolName = block.tool_use_id ? toolUseIdToName.get(block.tool_use_id) : undefined;
           const prefix = toolName ? `[${toolName}] ` : "";
-          collected.toolResult.push({ role: 'tool_result', content: `${prefix}${toolContent}`, index: lineIndex });
+          collected.tool.push({ role: 'tool', content: `${prefix}${toolContent}`, index: lineIndex });
         }
       } else if (block.type === 'text' && block.text) {
         if (excludeSystemReminders && block.text.startsWith('<system-reminder>')) {
@@ -821,7 +742,7 @@ export function formatTranscriptResult(result: TranscriptReadResult): string {
   const allMessages = [
     ...result.user.map((m) => ({ ...m, prefix: 'USER' })),
     ...result.assistant.map((m) => ({ ...m, prefix: 'ASSISTANT' })),
-    ...result.toolResult.map((m) => ({ ...m, prefix: 'TOOL_RESULT' })),
+    ...result.tool.map((m) => ({ ...m, prefix: 'TOOL' })),
   ].sort((a, b) => a.index - b.index);
 
   return allMessages.map((m) => `${m.prefix}: ${m.content}`).join('\n\n');
@@ -835,13 +756,13 @@ export interface MinimumTranscriptRequirements {
   user?: number;
   /** Minimum assistant messages required (default: 0) */
   assistant?: number;
-  /** Minimum tool result messages required (default: 0) */
-  toolResult?: number;
+  /** Minimum tool messages required (default: 0) */
+  tool?: number;
   /**
-   * If true, require at least one of assistant OR toolResult.
+   * If true, require at least one of assistant OR tool.
    * Useful for error-acknowledge which needs context but either type is sufficient.
    */
-  assistantOrToolResult?: number;
+  assistantOrTool?: number;
 }
 
 /**
@@ -857,7 +778,7 @@ export interface MinimumTranscriptRequirements {
  *
  * @example
  * // Error-acknowledge needs user message AND some context (assistant or tool result)
- * if (!hasMinimumTranscript(result, { user: 1, assistantOrToolResult: 1 })) {
+ * if (!hasMinimumTranscript(result, { user: 1, assistantOrTool: 1 })) {
  *   return "OK"; // Skip LLM, nothing to check
  * }
  *
@@ -871,17 +792,17 @@ export function hasMinimumTranscript(
   result: TranscriptReadResult,
   requirements: MinimumTranscriptRequirements
 ): boolean {
-  const { user = 0, assistant = 0, toolResult = 0, assistantOrToolResult } = requirements;
+  const { user = 0, assistant = 0, tool = 0, assistantOrTool } = requirements;
 
   // Check individual requirements
   if (result.user.length < user) return false;
   if (result.assistant.length < assistant) return false;
-  if (result.toolResult.length < toolResult) return false;
+  if (result.tool.length < tool) return false;
 
-  // Check combined assistant OR toolResult requirement
-  if (assistantOrToolResult !== undefined) {
-    const combined = result.assistant.length + result.toolResult.length;
-    if (combined < assistantOrToolResult) return false;
+  // Check combined assistant OR tool requirement
+  if (assistantOrTool !== undefined) {
+    const combined = result.assistant.length + result.tool.length;
+    if (combined < assistantOrTool) return false;
   }
 
   return true;
