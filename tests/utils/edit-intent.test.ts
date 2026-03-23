@@ -6,6 +6,8 @@ import {
   isEditIntentExemptPath,
   shouldBlockEdit,
   classifyEditIntent,
+  planModeEditBlock,
+  planModeBashBlock,
   STICKINESS_TIMEOUT_MS,
 } from "../../src/utils/edit-intent.js";
 
@@ -324,5 +326,89 @@ describe("classifyEditIntent", () => {
 describe("STICKINESS_TIMEOUT_MS", () => {
   it("equals 600000", () => {
     expect(STICKINESS_TIMEOUT_MS).toBe(600000);
+  });
+});
+
+describe("planModeEditBlock", () => {
+  it("blocks Edit to non-exempt path when plan mode active", () => {
+    const result = planModeEditBlock(true, "Edit", "/project/src/foo.ts");
+    expect(result).toContain("Plan mode is active");
+  });
+
+  it("blocks Write to non-exempt path when plan mode active", () => {
+    const result = planModeEditBlock(true, "Write", "/project/src/foo.ts");
+    expect(result).toContain("Plan mode is active");
+  });
+
+  it("blocks NotebookEdit to non-exempt path when plan mode active", () => {
+    const result = planModeEditBlock(true, "NotebookEdit", "/project/notebook.ipynb");
+    expect(result).toContain("Plan mode is active");
+  });
+
+  it("allows Edit to plan file when plan mode active", () => {
+    expect(planModeEditBlock(true, "Edit", "/home/user/.claude/plans/my-plan.md")).toBeNull();
+  });
+
+  it("allows Edit to memory file when plan mode active", () => {
+    expect(planModeEditBlock(true, "Edit", "/home/user/.claude/projects/-foo/memory/bar.md")).toBeNull();
+  });
+
+  it("allows Edit to CLAUDE.md when plan mode active", () => {
+    expect(planModeEditBlock(true, "Edit", "/project/CLAUDE.md")).toBeNull();
+  });
+
+  it("allows Read in plan mode", () => {
+    expect(planModeEditBlock(true, "Read", "/project/src/foo.ts")).toBeNull();
+  });
+
+  it("returns null when plan mode inactive", () => {
+    expect(planModeEditBlock(false, "Edit", "/project/src/foo.ts")).toBeNull();
+  });
+});
+
+describe("planModeBashBlock", () => {
+  it("blocks echo redirect in plan mode", () => {
+    const result = planModeBashBlock(true, "Bash", 'echo "test" > file.txt');
+    expect(result).toContain("Plan mode is active");
+  });
+
+  it("blocks git commit in plan mode", () => {
+    const result = planModeBashBlock(true, "Bash", "git commit -m 'msg'");
+    expect(result).toContain("Plan mode is active");
+  });
+
+  it("blocks git push in plan mode", () => {
+    const result = planModeBashBlock(true, "Bash", "git push origin main");
+    expect(result).toContain("Plan mode is active");
+  });
+
+  it("blocks rm in plan mode", () => {
+    const result = planModeBashBlock(true, "Bash", "rm -rf dist/");
+    expect(result).toContain("Plan mode is active");
+  });
+
+  it("blocks sed -i in plan mode", () => {
+    const result = planModeBashBlock(true, "Bash", "sed -i 's/foo/bar/' file.txt");
+    expect(result).toContain("Plan mode is active");
+  });
+
+  it("allows git status in plan mode", () => {
+    expect(planModeBashBlock(true, "Bash", "git status")).toBeNull();
+  });
+
+  it("allows git log in plan mode", () => {
+    expect(planModeBashBlock(true, "Bash", "git log --oneline -10")).toBeNull();
+  });
+
+  it("allows ls in plan mode", () => {
+    expect(planModeBashBlock(true, "Bash", "ls -la src/")).toBeNull();
+  });
+
+  it("returns null when plan mode inactive", () => {
+    expect(planModeBashBlock(false, "Bash", "rm -rf dist/")).toBeNull();
+  });
+
+  it("returns null for non-Bash tools", () => {
+    expect(planModeBashBlock(true, "Edit", "anything")).toBeNull();
   });
 });

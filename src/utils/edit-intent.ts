@@ -210,3 +210,50 @@ export function classifyEditIntent(
 
 /** Stickiness timeout: 10 minutes */
 export const STICKINESS_TIMEOUT_MS = 10 * 60 * 1000;
+
+// --- Bash commands that perform writes/mutations ---
+const BASH_WRITE_PATTERNS: RegExp[] = [
+  /\b(echo|printf)\s+.*>/,
+  /\btee\s+/,
+  /\bsed\s+-i/,
+  /\b(mkdir|touch|rm|mv|cp)\s+/,
+  /\bgit\s+(commit|push|add|merge|rebase|reset)\b/,
+  /\bnpm\s+(install|run\s+build)\b/,
+];
+
+/**
+ * Hard block for edit tools during plan mode.
+ * Returns a denial reason if the tool should be blocked, or null if allowed.
+ *
+ * During plan mode, ONLY plan files and exempt paths may be edited.
+ * This is a hard block — no LLM appeal can overturn it.
+ */
+export function planModeEditBlock(
+  planMode: boolean,
+  toolName: string,
+  filePath: string
+): string | null {
+  if (!planMode) return null;
+  if (!isEditTool(toolName)) return null;
+  if (isEditIntentExemptPath(filePath)) return null;
+  return `Plan mode is active - file edits are blocked. Only plan files may be modified. Target: ${filePath}`;
+}
+
+/**
+ * Hard block for write-like Bash commands during plan mode.
+ * Returns a denial reason if the command should be blocked, or null if allowed.
+ */
+export function planModeBashBlock(
+  planMode: boolean,
+  toolName: string,
+  command: string
+): string | null {
+  if (!planMode) return null;
+  if (toolName !== "Bash") return null;
+  for (const pattern of BASH_WRITE_PATTERNS) {
+    if (pattern.test(command)) {
+      return `Plan mode is active - write commands are blocked. Command: ${command.slice(0, 100)}`;
+    }
+  }
+  return null;
+}

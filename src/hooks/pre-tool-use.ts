@@ -55,7 +55,7 @@ import {
   formatForPrompt,
   clearGateReasoning,
 } from "../utils/gate-reasoning-cache.js";
-import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
+import { isEditTool, isEditIntentExemptPath, planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
 import {
   getActivePrediction,
   savePrediction,
@@ -331,6 +331,41 @@ async function main() {
       reason: "Low-risk tool auto-approval",
     });
     return;
+  }
+
+  // ============================================================
+  // STEP 1.5: Plan mode hard block (TypeScript only, no appeal)
+  // ============================================================
+  if (planMode) {
+    if (FILE_TOOLS.includes(toolName)) {
+      const filePath =
+        (toolInput as { file_path?: string }).file_path ||
+        (toolInput as { path?: string }).path || "";
+      const editBlock = planModeEditBlock(planMode, toolName, filePath);
+      if (editBlock) {
+        logFastPathDeny("plan-mode-block", "PreToolUse", toolName, projectDir, editBlock);
+        await exitPipeline({
+          decision: "deny",
+          agent: "plan-mode-block",
+          reason: editBlock,
+        });
+        return;
+      }
+    }
+
+    if (toolName === "Bash") {
+      const command = (toolInput as { command?: string }).command || "";
+      const bashBlock = planModeBashBlock(planMode, toolName, command);
+      if (bashBlock) {
+        logFastPathDeny("plan-mode-block", "PreToolUse", toolName, projectDir, bashBlock);
+        await exitPipeline({
+          decision: "deny",
+          agent: "plan-mode-block",
+          reason: bashBlock,
+        });
+        return;
+      }
+    }
   }
 
   // ============================================================
