@@ -298,7 +298,6 @@ export class CacheManager<T> {
 
   /**
    * Save cache data to file with current session ID and user message hash.
-   * Uses atomic write (temp file + rename) for safe concurrent access.
    */
   async save(data: T): Promise<void> {
     try {
@@ -309,10 +308,7 @@ export class CacheManager<T> {
       };
       const content = JSON.stringify(state);
 
-      // Atomic write: write to temp file, then rename
-      const tempPath = `${this.config.filePath}.${process.pid}.tmp`;
-      await fs.promises.writeFile(tempPath, content);
-      await fs.promises.rename(tempPath, this.config.filePath);
+      await fs.promises.writeFile(this.config.filePath, content);
     } catch {
       // Ignore write errors - cache is best-effort
     }

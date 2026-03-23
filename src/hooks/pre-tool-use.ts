@@ -20,7 +20,7 @@ import {
   recordDenial,
   MAX_SIMILAR_DENIALS,
 } from "../utils/denial-cache.js";
-import { readPlanContent } from "../utils/session-utils.js";
+import { readPlanContent, resolvePlanPath } from "../utils/session-utils.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
 import {
   readTranscriptExact,
@@ -282,6 +282,30 @@ async function main() {
     return outputDeny(exit.reason);
   }
 
+  /**
+   * Shared plan-validate helper: reads plan content + transcript, calls checkPlanIntent,
+   * and returns the validation result. Does NOT call exitPipeline — caller decides.
+   */
+  async function runPlanValidation(
+    mode: "edit" | "exit",
+    overrideToolName?: string,
+    overrideToolInput?: unknown
+  ): Promise<{ approved: boolean; reason?: string }> {
+    const planContent = await readPlanContent(input.transcript_path);
+    const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
+    const conversationContext = formatTranscriptResult(planResult);
+    return checkPlanIntent(
+      planContent,
+      (overrideToolName ?? toolName) as "Write" | "Edit",
+      (overrideToolInput ?? toolInput) as { content?: string; old_string?: string; new_string?: string },
+      conversationContext,
+      input.transcript_path,
+      projectDir,
+      "PreToolUse",
+      mode
+    );
+  }
+
   // ============================================================
   // STEP 1: Low-risk auto-approve
   // ============================================================
@@ -385,8 +409,11 @@ async function main() {
   if (!subagent) {
     const prediction = await getActivePrediction(sessionDir);
     if (prediction) {
-      const blockedMatch = matchBlockedTool(toolName, toolInput, prediction.blockedTools);
-      if (blockedMatch) {
+      const predFilePath = (toolInput as { file_path?: string }).file_path || (toolInput as { path?: string }).path || "";
+      if (isEditTool(toolName) && isEditIntentExemptPath(predFilePath)) {
+        // Exempt paths skip prediction blocking — they have their own validators
+      } else if (matchBlockedTool(toolName, toolInput, prediction.blockedTools)) {
+        const blockedMatch = matchBlockedTool(toolName, toolInput, prediction.blockedTools)!;
         const blockReason = `Tool "${toolName}" is not aligned with current user intent. ${blockedMatch.reason}`;
 
         const predTranscript = formatTranscriptResult(
@@ -483,20 +510,7 @@ async function main() {
         // classifyEditIntent always returns false in plan mode, making this check
         // fire unconditionally. The plan-validate LLM check below handles validation.
 
-        const currentPlan = await readPlanContent(input.transcript_path);
-        const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
-        const conversationContext = formatTranscriptResult(planResult);
-
-        const validation = await checkPlanIntent(
-          currentPlan,
-          toolName as "Write" | "Edit",
-          toolInput as { content?: string; old_string?: string; new_string?: string },
-          conversationContext,
-          input.transcript_path,
-          projectDir,
-          "PreToolUse",
-          "edit"
-        );
+        const validation = await runPlanValidation("edit");
 
         if (!validation.approved) {
           await exitPipeline({
@@ -511,7 +525,7 @@ async function main() {
           decision: "allow",
           agent: "plan-validate",
           reason: "Plan validation passed",
-            });
+        });
         return;
       }
 
@@ -758,53 +772,28 @@ If in doubt, UPHOLD.
   // TOOL-APPROVE (final gate)
   // ============================================================
 
-  // ExitPlanMode: validate plan content before allowing exit
+  // ExitPlanMode: block if plan file doesn't exist or is empty
   if (toolName === "ExitPlanMode") {
-    const planContent = await readPlanContent(input.transcript_path);
-    if (!planContent || planContent.trim() === "") {
+    const planPath = await resolvePlanPath(input.transcript_path);
+    if (!planPath || !(await fs.promises.stat(planPath)).size) {
       logFastPathDeny("exit-plan-mode", "PreToolUse", toolName, projectDir, "Cannot exit plan mode without a plan.");
       await exitPipeline({
         decision: "deny",
         agent: "exit-plan-mode",
         reason: "Cannot exit plan mode without a plan.",
-        });
+      });
       return;
     }
 
-    // Full plan validation with LLM (exit mode = always runs LLM)
-    const exitPlanResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
-    const exitPlanContext = formatTranscriptResult(exitPlanResult);
-    const exitValidation = await checkPlanIntent(
-      planContent,
-      "Write",
-      { content: planContent },
-      exitPlanContext,
-      input.transcript_path,
-      projectDir,
-      "PreToolUse",
-      "exit"
-    );
-
+    // Plan exists and is non-empty — validate content before allowing exit
+    const exitValidation = await runPlanValidation("exit");
     if (!exitValidation.approved) {
-      const appeal = await appealHelper(
-        toolName,
-        "ExitPlanMode - full plan validation",
-        exitPlanContext,
-        exitValidation.reason || "Plan validation failed",
-        projectDir,
-        "PreToolUse",
-        `plan-validate blocked ExitPlanMode: ${exitValidation.reason}`
-      );
-
-      if (!appeal.overturned) {
-        await exitPipeline({
-          decision: "deny",
-          agent: "plan-validate",
-          reason: `Plan validation failed: ${exitValidation.reason}`,
-        });
-        return;
-      }
-      currentGateNote = appeal.gateNote;
+      await exitPipeline({
+        decision: "deny",
+        agent: "plan-validate",
+        reason: `Plan validation failed: ${exitValidation.reason}`,
+      });
+      return;
     }
   }
 

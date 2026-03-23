@@ -36,7 +36,7 @@ interface SessionMetadata {
 async function extractSlugFromSession(transcriptPath: string): Promise<string | null> {
   try {
     const content = await fs.promises.readFile(transcriptPath, "utf-8");
-    const lines = content.split("\n").filter(Boolean).slice(0, 10);
+    const lines = content.split("\n").filter(Boolean);
 
     for (const line of lines) {
       try {

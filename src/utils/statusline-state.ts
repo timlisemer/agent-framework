@@ -217,7 +217,9 @@ export async function readStatusLineEntries(): Promise<StatusLineEntry[]> {
   // Persist cleanup so next poll sees clean state (fixes stale entries
   // lingering because scheduleEntryCleanup setTimeout never fires in short-lived hook processes)
   if (filtered.length < data.entries.length) {
-    await getManager().update(() => ({ entries: filtered }));
+    await getManager().update((currentData) => ({
+      entries: filterExpiredCompleted(currentData.entries),
+    }));
   }
 
   return filtered.reverse();
