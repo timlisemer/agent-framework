@@ -37,7 +37,8 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bcd\s+/, name: 'cd', alternative: 'Use absolute paths' },
 
   // Git write operations
-  { pattern: /\bgit\s+(commit|push|add|merge|rebase|reset)\b/, name: 'git write op', alternative: 'Use MCP tools' },
+  { pattern: /\bgit\s+(commit|push|add)\b/, name: 'git write op (MCP)', alternative: 'Use MCP tools: /commit, /push, or /quickpush' },
+  { pattern: /\bgit\s+(?!commit|push|add)\w+/, name: 'git write op', alternative: 'Git write operation denied' },
 
   // Build/check commands - LLMs should NOT build, only verify with check tool
   { pattern: /\bmake\s+check\b/, name: "make check", alternative: "You must run mcp__agent-framework__check" },
