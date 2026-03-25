@@ -28,6 +28,7 @@ import { parseIntentOutput, parseActionsOutput } from "./summary-updater-parsing
 import { parseEditIntentOutput } from "./edit-intent.js";
 import { savePrediction } from "./prediction-cache.js";
 import { isPlanModeActive } from "./plan-mode-detector.js";
+import { clearGateReasoning } from "./gate-reasoning-cache.js";
 import { cleanupPidFile } from "./spawn-background.js";
 
 interface UpdaterArgs {
@@ -52,6 +53,21 @@ function parseArgs(args: string[]): UpdaterArgs {
     process.exit(1);
   }
   return result as UpdaterArgs;
+}
+
+/**
+ * Detect whether the new intent is a significant departure from the old one.
+ * Uses word overlap ratio — if less than 40% of old words appear in new text,
+ * the intent has pivoted substantially.
+ */
+function isSignificantIntentChange(oldIntent: string, newIntent: string): boolean {
+  const normalize = (text: string) =>
+    text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  const oldWords = normalize(oldIntent);
+  const newWords = new Set(normalize(newIntent));
+  if (oldWords.length === 0) return false;
+  const overlap = oldWords.filter((w) => newWords.has(w)).length;
+  return (overlap / oldWords.length) < 0.4;
 }
 
 async function main(): Promise<void> {
@@ -99,6 +115,12 @@ async function main(): Promise<void> {
 
     // Parse ---INTENT--- and ---APPROVALS--- sections (with fallback)
     const parsed = parseIntentOutput(result.output);
+
+    // Clear stale gate reasoning when intent changes significantly
+    if (parsed.intent && currentIntent && isSignificantIntentChange(currentIntent, parsed.intent)) {
+      await clearGateReasoning(sessionDir);
+    }
+
     if (parsed.intent) {
       await updateSection(summaryPath, "User Intent", parsed.intent);
     }
