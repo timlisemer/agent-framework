@@ -17,6 +17,11 @@ import {
   elicitUncertaintyClarification,
 } from "../utils/elicitation.js";
 
+const coercibleBoolean = z.preprocess(
+  (val) => (typeof val === "string" ? val === "true" : val),
+  z.boolean().optional()
+);
+
 // Ensure PATH includes standard locations for subprocess spawning
 // Required for Claude Agent SDK to find node when running in Docker via `docker exec`
 // Only applies to Unix-like systems (Linux/macOS) - Windows has its own PATH defaults
@@ -65,7 +70,7 @@ server.registerTool(
       model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Model tier for evaluation (default: opus)"),
       extra_context: z.string().optional().describe("Additional instructions or areas to focus on"),
       transcript_path: z.string().optional().describe("Session transcript path for statusLine"),
-      skip_elicitation: z.boolean().optional().describe("Skip interactive questions, use defaults")
+      skip_elicitation: coercibleBoolean.describe("Skip interactive questions, use defaults")
     }
   },
   async (args) => {
@@ -91,18 +96,24 @@ server.registerTool(
     }
     selectedRepos = sortReposSubmodulesFirst(selectedRepos, repoInfo);
 
-    const results: string[] = [];
+    // Phase 1: Collect all preferences upfront
+    const repoPrefs = new Map<string, { tier: string | undefined; extraContext: string | undefined }>();
     for (const repo of selectedRepos) {
-      // Get preferences (elicit unless skipped or provided via args)
-      let tier = args.model_tier;
-      let extraContext = args.extra_context;
       if (!args.skip_elicitation && !args.model_tier) {
         const prefs = await elicitPreferences(server.server, repo.name);
-        tier = prefs.modelTier;
-        if (prefs.focus) {
-          extraContext = extraContext ? `${extraContext}\nFocus: ${prefs.focus}` : `Focus: ${prefs.focus}`;
-        }
+        const focus = prefs.focus ? `Focus: ${prefs.focus}` : undefined;
+        const extra = args.extra_context && focus ? `${args.extra_context}\n${focus}` : focus || args.extra_context;
+        repoPrefs.set(repo.path, { tier: prefs.modelTier, extraContext: extra });
+      } else {
+        repoPrefs.set(repo.path, { tier: args.model_tier, extraContext: args.extra_context });
       }
+    }
+
+    // Phase 2: Process all repos
+    const results: string[] = [];
+    for (const repo of selectedRepos) {
+      const prefs = repoPrefs.get(repo.path)!;
+      let extraContext = prefs.extraContext;
 
       // Multi-repo context
       if (selectedRepos.length > 1) {
@@ -111,16 +122,16 @@ server.registerTool(
         extraContext = extraContext ? `${multiContext}\n${extraContext}` : multiContext;
       }
 
-      let result = await runConfirmAgent(repo.path, tier, extraContext, args.transcript_path);
+      let result = await runConfirmAgent(repo.path, prefs.tier, extraContext, args.transcript_path);
 
-      // Phase 2: If DECLINED with uncertainties, elicit clarification and retry
+      // Post-processing: If DECLINED with uncertainties, elicit clarification and retry
       if (!args.skip_elicitation && result.includes("DECLINED")) {
         const uncertainties = parseUncertainties(result);
         if (uncertainties.length > 0) {
           const clarification = await elicitUncertaintyClarification(server.server, uncertainties);
           if (clarification) {
             const retryContext = extraContext ? `${extraContext}\n${clarification}` : clarification;
-            result = await runConfirmAgent(repo.path, tier, retryContext, args.transcript_path);
+            result = await runConfirmAgent(repo.path, prefs.tier, retryContext, args.transcript_path);
           }
         }
       }
@@ -140,13 +151,14 @@ server.registerTool(
   "commit",
   {
     title: "Commit",
-    description: "Detect repos with changes, ask user for preferences via form, then generate commit message and execute git commit (no push).",
+    description: "Detect repos with changes, ask user for preferences via form, then generate commit message and execute git commit. Optionally auto-push after successful commits.",
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
       model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Passed to confirm agent (default: opus)"),
       extra_context: z.string().optional().describe("Passed to confirm agent"),
       transcript_path: z.string().optional().describe("Session transcript path for statusLine"),
-      skip_elicitation: z.boolean().optional().describe("Skip interactive questions, use defaults")
+      skip_elicitation: coercibleBoolean.describe("Skip interactive questions, use defaults"),
+      auto_push: coercibleBoolean.describe("Automatically push all committed repos after successful commit")
     }
   },
   async (args) => {
@@ -172,18 +184,25 @@ server.registerTool(
     }
     selectedRepos = sortReposSubmodulesFirst(selectedRepos, repoInfo);
 
-    const results: string[] = [];
+    // Phase 1: Collect all preferences upfront
+    const repoPrefs = new Map<string, { tier: string | undefined; extraContext: string | undefined }>();
     for (const repo of selectedRepos) {
-      // Get preferences (elicit unless skipped or provided via args)
-      let tier = args.model_tier;
-      let extraContext = args.extra_context;
       if (!args.skip_elicitation && !args.model_tier) {
         const prefs = await elicitPreferences(server.server, repo.name);
-        tier = prefs.modelTier;
-        if (prefs.focus) {
-          extraContext = extraContext ? `${extraContext}\nFocus: ${prefs.focus}` : `Focus: ${prefs.focus}`;
-        }
+        const focus = prefs.focus ? `Focus: ${prefs.focus}` : undefined;
+        const extra = args.extra_context && focus ? `${args.extra_context}\n${focus}` : focus || args.extra_context;
+        repoPrefs.set(repo.path, { tier: prefs.modelTier, extraContext: extra });
+      } else {
+        repoPrefs.set(repo.path, { tier: args.model_tier, extraContext: args.extra_context });
       }
+    }
+
+    // Phase 2: Process all repos
+    const results: string[] = [];
+    const committedRepos: typeof selectedRepos = [];
+    for (const repo of selectedRepos) {
+      const prefs = repoPrefs.get(repo.path)!;
+      let extraContext = prefs.extraContext;
 
       // Multi-repo context
       if (selectedRepos.length > 1) {
@@ -192,12 +211,45 @@ server.registerTool(
         extraContext = extraContext ? `${multiContext}\n${extraContext}` : multiContext;
       }
 
-      const result = await runCommitAgent(repo.path, tier, extraContext, args.transcript_path);
+      const result = await runCommitAgent(repo.path, prefs.tier, extraContext, args.transcript_path);
+
+      const commitFailed = result.includes("DECLINED") || result.includes("ERROR") || result.includes("FAILED");
+      if (!commitFailed) {
+        committedRepos.push(repo);
+      }
 
       if (selectedRepos.length > 1) {
         results.push(`=== ${repo.name} (${repo.path}) ===\n${result}`);
       } else {
         results.push(result);
+      }
+    }
+
+    // Phase 3: Auto-push if requested
+    if (args.auto_push && committedRepos.length > 0) {
+      let reposToPush = committedRepos;
+
+      // If elicitation is enabled and multiple repos, ask which to push
+      if (!args.skip_elicitation && committedRepos.length > 1) {
+        reposToPush = await elicitRepoSelection(server.server, {
+          ...repoInfo,
+          reposWithChanges: committedRepos,
+        });
+        if (reposToPush.length === 0) {
+          results.push("\nPush skipped: no repositories selected for push.");
+          return { content: [{ type: "text", text: results.join("\n\n") }] };
+        }
+        reposToPush = sortReposSubmodulesFirst(reposToPush, repoInfo);
+      }
+
+      results.push("\n--- Push Results ---");
+      for (const repo of reposToPush) {
+        const pushResult = await runPushAgent(repo.path);
+        if (reposToPush.length > 1) {
+          results.push(`=== ${repo.name} (${repo.path}) ===\n${pushResult}`);
+        } else {
+          results.push(pushResult);
+        }
       }
     }
 
@@ -212,7 +264,7 @@ server.registerTool(
     description: "Push committed changes to remote repository. Detects repos and asks which to push if multiple exist.",
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
-      skip_elicitation: z.boolean().optional().describe("Skip interactive questions, push all repos")
+      skip_elicitation: coercibleBoolean.describe("Skip interactive questions, push all repos")
     }
   },
   async (args) => {
