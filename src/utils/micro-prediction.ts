@@ -66,7 +66,7 @@ export function generateMicroPredictions(
     blockedTools.push({
       toolName: ".*",
       reason: `user requested ${agentType} agents only`,
-      exceptions: ["Agent"],
+      exceptions: ["Agent", "ToolSearch"],
     });
   }
 

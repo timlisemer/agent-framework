@@ -86,6 +86,7 @@ const LOW_RISK_TOOLS = [
   "Glob",
   "WebSearch",
   "WebFetch",
+  "ToolSearch",
 
   // MCP resource reading (read-only)
   "ListMcpResources",
@@ -889,7 +890,7 @@ If in doubt, UPHOLD.
           blockedTools: [{
             toolName: ".*",
             reason: `Bash command denied (${workaroundCategory}). You must run mcp__agent-framework__check first.`,
-            exceptions: ["mcp__agent-framework__check"],
+            exceptions: ["mcp__agent-framework__check", "ToolSearch"],
           }],
           userMessageSnippet: `denied: ${(finalReason ?? "").slice(0, 100)}`,
           timestamp: Date.now(),
