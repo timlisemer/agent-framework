@@ -6,7 +6,6 @@ import { type PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
-import { fileURLToPath } from "url";
 import { readStdinJson, initHookProcess, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { checkToolApproval } from "../agents/hooks/tool-approve.js";
 import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
@@ -34,13 +33,8 @@ import {
 } from "../utils/transcript-presets.js";
 import { isPlanModeActive } from "../utils/plan-mode-detector.js";
 import { isSubagent } from "../utils/subagent-detector.js";
-import {
-  checkPendingValidation,
-  clearPendingValidation,
-  writePendingValidation,
-} from "../utils/pending-validation-cache.js";
+import { getUnconsumedCorrections, consumeCorrections } from "../utils/correction-cache.js";
 import { logFastPathApproval, logFastPathDeny } from "../utils/logger.js";
-import { spawnBackground } from "../utils/spawn-background.js";
 import {
   getSessionDir,
   getSessionState,
@@ -48,6 +42,7 @@ import {
   readSection,
   appendToolLog,
   formatToolDetail,
+  readToolLogEntries,
 } from "../utils/summary-cache.js";
 import {
   addEntry,
@@ -58,16 +53,16 @@ import {
 import { isEditTool, isEditIntentExemptPath, planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
 import {
   getActivePrediction,
+  getAllPredictions,
   savePrediction,
   deactivatePrediction,
   deactivateAllPredictions,
-  matchBlockedTool,
+  matchBlockedToolFromAll,
   formatPredictionContext,
 } from "../utils/prediction-cache.js";
+import { detectDrift } from "../utils/drift-detector.js";
 import { writeTool, writeUser } from "../utils/synthetic.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // File tools that benefit from path-based risk classification
 const FILE_TOOLS = ["Read", "Write", "Edit", "NotebookEdit"];
@@ -135,44 +130,6 @@ function extractPathOrCmd(toolInput: unknown): { path?: string; cmd?: string } {
   };
 }
 
-/**
- * Spawn the async gate validator as a background process.
- * Uses spawnBackground to fork the async-gate-validator module.
- * If spawn fails, writes a pending validation failure to cache.
- */
-function spawnAsyncGateValidator(
-  toolName: string,
-  filePath: string,
-  transcriptPath: string,
-  toolInput: unknown,
-  sessionId?: string
-): void {
-  const validatorPath = path.join(__dirname, "../utils/async-gate-validator.js");
-
-  try {
-    const args = [
-      "--tool", toolName,
-      "--file", filePath,
-      "--transcript", transcriptPath,
-      "--input", JSON.stringify(toolInput),
-    ];
-    if (sessionId) {
-      args.push("--session-id", sessionId);
-    }
-    const sessionDir = getSessionDir(transcriptPath);
-    spawnBackground(validatorPath, args, { dedupKey: "async-gate-validator", sessionDir });
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    writePendingValidation({
-      toolName,
-      filePath,
-      status: "failed",
-      failureReason: `Async gate validator spawn failed: ${errorMessage}`,
-    }).catch(() => {
-      // Ignore cache write errors - fail open for performance
-    });
-  }
-}
 
 /**
  * Output structured JSON to allow the tool call and exit.
@@ -435,66 +392,110 @@ async function main() {
   }
 
   // ============================================================
-  // STEP 2.5: Tool prediction blocking (non-edit tools only)
+  // STEP 2.5: Tool prediction blocking (checks ALL predictions)
   // ============================================================
   if (!subagent) {
     if (toolName.startsWith("mcp__") && /(commit|push|confirm|check)$/.test(toolName)) {
       await deactivateAllPredictions(sessionDir);
     }
 
-    const prediction = await getActivePrediction(sessionDir);
-    if (prediction) {
+    const allPredictions = await getAllPredictions(sessionDir);
+    if (allPredictions.length > 0) {
       const predFilePath = (toolInput as { file_path?: string }).file_path || (toolInput as { path?: string }).path || "";
       if (isEditTool(toolName) && isEditIntentExemptPath(predFilePath)) {
         // Exempt paths skip prediction blocking — they have their own validators
-      } else if (matchBlockedTool(toolName, toolInput, prediction.blockedTools)) {
-        const blockedMatch = matchBlockedTool(toolName, toolInput, prediction.blockedTools)!;
-        const blockReason = `Tool "${toolName}" is not aligned with current user intent. ${blockedMatch.reason}`;
+      } else {
+        const blockedResult = matchBlockedToolFromAll(toolName, toolInput, allPredictions);
+        if (blockedResult) {
+          const blockReason = `Tool "${toolName}" is not aligned with current user intent. ${blockedResult.blocked.reason}`;
 
-        const predTranscript = formatTranscriptResult(
-          await readTranscriptExact(input.transcript_path, APPEAL_COUNTS)
-        );
+          const predTranscript = formatTranscriptResult(
+            await readTranscriptExact(input.transcript_path, APPEAL_COUNTS)
+          );
 
-        const appeal = await appealHelper(
-          toolName,
-          `${toolName} with ${JSON.stringify(toolInput).slice(0, 200)}`,
-          predTranscript,
-          blockReason,
-          projectDir,
-          "PreToolUse",
-          `prediction-block: ${blockedMatch.reason}`
-        );
+          const appeal = await appealHelper(
+            toolName,
+            `${toolName} with ${JSON.stringify(toolInput).slice(0, 200)}`,
+            predTranscript,
+            blockReason,
+            projectDir,
+            "PreToolUse",
+            `prediction-block: ${blockedResult.blocked.reason}`
+          );
 
-        if (!appeal.overturned) {
-          await exitPipeline({
-            decision: "deny",
-            agent: "prediction-block",
-            reason: blockReason,
-          });
-          return;
+          if (!appeal.overturned) {
+            await exitPipeline({
+              decision: "deny",
+              agent: "prediction-block",
+              reason: blockReason,
+            });
+            return;
+          }
+          // Appeal overturned: clear the matching prediction
+          await deactivatePrediction(sessionDir, toolName, toolInput);
+          currentGateNote = appeal.gateNote;
         }
-        // Appeal overturned: clear predictions (user wants this tool after all)
-        await deactivatePrediction(sessionDir, toolName, toolInput);
-        currentGateNote = appeal.gateNote;
       }
     }
   }
 
   // ============================================================
-  // STEP 3: Check pending async gate validation
+  // STEP 2.7: Drift detection (lazy mode only)
+  // ============================================================
+  if (!useSyncPipeline && !subagent) {
+    let userIntent = "";
+    let misalignments = "";
+    try {
+      const summaryPath = getSummaryPath(input.transcript_path);
+      userIntent = await readSection(summaryPath, "User Intent");
+      misalignments = await readSection(summaryPath, "Flagged Misalignments");
+    } catch {
+      // No summary yet
+    }
+
+    const recentLog = readToolLogEntries(sessionDir, 10);
+    const drift = detectDrift(toolName, toolInput, userIntent, misalignments, recentLog);
+    if (drift.detected && drift.severity === "block") {
+      const driftTranscript = formatTranscriptResult(
+        await readTranscriptExact(input.transcript_path, APPEAL_COUNTS)
+      );
+
+      const appeal = await appealHelper(
+        toolName,
+        `${toolName} with ${JSON.stringify(toolInput).slice(0, 200)}`,
+        driftTranscript,
+        drift.reason,
+        projectDir,
+        "PreToolUse",
+        `drift-block: ${drift.reason}`
+      );
+
+      if (!appeal.overturned) {
+        await exitPipeline({
+          decision: "deny",
+          agent: "drift-block",
+          reason: drift.reason,
+        });
+        return;
+      }
+      currentGateNote = appeal.gateNote;
+    }
+  }
+
+  // ============================================================
+  // STEP 3: Check corrections from PostToolUse
   // ============================================================
   const isSubagentLauncher = toolName === "Agent" || toolName === "Task";
   if (!subagent && !isSubagentLauncher) {
-    const pendingFailure = await checkPendingValidation();
-    if (pendingFailure?.status === "failed") {
-      await clearPendingValidation();
-      const asyncReason = `Previous ${pendingFailure.toolName} had issues: ${pendingFailure.failureReason}`;
-      logFastPathDeny("async-gate", "PreToolUse", toolName, projectDir, asyncReason);
+    const corrections = await getUnconsumedCorrections(sessionDir);
+    const relevantCorrection = corrections.find((c) => c.toolName === toolName);
+    if (relevantCorrection) {
+      await consumeCorrections(sessionDir);
       await exitPipeline({
         decision: "deny",
-        agent: "async-gate",
-        reason: asyncReason,
-        });
+        agent: "correction",
+        reason: relevantCorrection.reason,
+      });
       return;
     }
   }
@@ -673,14 +674,12 @@ If in doubt, UPHOLD.
 
       if (trusted && !sensitive) {
         if (!useSyncPipeline) {
-          // NON-PLAN MODE: Auto-approve + spawn async gate validator
-          spawnAsyncGateValidator(toolName, filePath, input.transcript_path, toolInput, input.session_id);
-          logFastPathApproval("trusted-path", "PreToolUse", toolName, projectDir, "Trusted file fast-path approval");
+          logFastPathApproval("trusted-path", "PreToolUse", toolName, projectDir, "Trusted file fast-path");
           await exitPipeline({
             decision: "allow",
             agent: "trusted-path",
-            reason: "Trusted file fast-path approval",
-                });
+            reason: "Trusted file fast-path",
+          });
           return;
         }
 
@@ -900,11 +899,6 @@ If in doubt, UPHOLD.
     if (appeal.gateNote) currentGateNote = appeal.gateNote;
   } else {
     currentGateNote = decision.gateNote;
-    // Non-plan mode: spawn async gate validator in background
-    if (!useSyncPipeline) {
-      const filePath = (toolInput as Record<string, unknown>)?.file_path as string ?? "";
-      spawnAsyncGateValidator(toolName, filePath, input.transcript_path, toolInput, input.session_id);
-    }
   }
 
   // Increment tool count

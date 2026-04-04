@@ -3,126 +3,124 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
-  checkPendingValidation,
-  writePendingValidation,
-  clearPendingValidation,
-  getPendingValidationStatus,
-  initValidationSession,
-} from "../../src/utils/pending-validation-cache.js";
+  initCorrectionSession,
+  writeCorrection,
+  getUnconsumedCorrections,
+  consumeCorrections,
+  clearCorrections,
+} from "../../src/utils/correction-cache.js";
 
-describe("pending-validation-cache", () => {
+describe("correction-cache", () => {
   let tempDir: string;
 
   beforeEach(async () => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pending-validation-test-"));
-    initValidationSession(tempDir);
-    await clearPendingValidation();
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "correction-cache-test-"));
+    initCorrectionSession(tempDir);
+    await clearCorrections(tempDir);
   });
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  describe("checkPendingValidation", () => {
-    it("returns null when no validation stored", async () => {
-      expect(await checkPendingValidation()).toBeNull();
+  describe("getUnconsumedCorrections", () => {
+    it("returns empty array when no corrections exist", async () => {
+      expect(await getUnconsumedCorrections(tempDir)).toEqual([]);
     });
 
-    it("returns null for passed validation", async () => {
-      await writePendingValidation({
+    it("returns unconsumed corrections", async () => {
+      await writeCorrection(tempDir, {
         toolName: "Edit",
-        filePath: "/src/main.ts",
-        status: "passed",
+        toolTarget: "/src/main.ts",
+        reason: "Violated prediction",
+        source: "post-tool",
+        timestamp: Date.now(),
+        consumed: false,
       });
-      expect(await checkPendingValidation()).toBeNull();
+      const result = await getUnconsumedCorrections(tempDir);
+      expect(result).toHaveLength(1);
+      expect(result[0].toolName).toBe("Edit");
+      expect(result[0].reason).toBe("Violated prediction");
     });
 
-    it("returns failed validation", async () => {
-      await writePendingValidation({
+    it("does not return consumed corrections", async () => {
+      await writeCorrection(tempDir, {
         toolName: "Edit",
-        filePath: "/src/main.ts",
-        status: "failed",
-        failureReason: "Style drift detected",
+        toolTarget: "/src/main.ts",
+        reason: "Violated prediction",
+        source: "post-tool",
+        timestamp: Date.now(),
+        consumed: false,
       });
-      const result = await checkPendingValidation();
-      expect(result).not.toBeNull();
-      expect(result!.status).toBe("failed");
-      expect(result!.failureReason).toBe("Style drift detected");
-    });
-
-    it("returns null when user message hash changed (stale)", async () => {
-      await writePendingValidation({
-        toolName: "Edit",
-        filePath: "/src/main.ts",
-        status: "failed",
-        failureReason: "Drift",
-        userMessageHash: "hash-1",
-      });
-      expect(await checkPendingValidation("hash-2")).toBeNull();
-    });
-
-    it("returns validation when user message hash matches", async () => {
-      await writePendingValidation({
-        toolName: "Edit",
-        filePath: "/src/main.ts",
-        status: "failed",
-        failureReason: "Drift",
-        userMessageHash: "hash-1",
-      });
-      const result = await checkPendingValidation("hash-1");
-      expect(result).not.toBeNull();
+      await consumeCorrections(tempDir);
+      expect(await getUnconsumedCorrections(tempDir)).toEqual([]);
     });
   });
 
-  describe("writePendingValidation", () => {
-    it("stores validation that can be retrieved", async () => {
-      await writePendingValidation({
+  describe("writeCorrection", () => {
+    it("stores correction that can be retrieved", async () => {
+      await writeCorrection(tempDir, {
         toolName: "Bash",
-        filePath: "",
-        status: "failed",
-        failureReason: "Blocked command",
+        toolTarget: "git push",
+        reason: "Blocked command",
+        source: "post-tool",
+        timestamp: Date.now(),
+        consumed: false,
       });
-      const result = await getPendingValidationStatus();
-      expect(result).not.toBeNull();
-      expect(result!.toolName).toBe("Bash");
+      const result = await getUnconsumedCorrections(tempDir);
+      expect(result).toHaveLength(1);
+      expect(result[0].toolName).toBe("Bash");
     });
 
-    it("adds timestamp automatically", async () => {
-      const before = Date.now();
-      await writePendingValidation({
+    it("supports multiple corrections", async () => {
+      await writeCorrection(tempDir, {
         toolName: "Edit",
-        filePath: "/src/file.ts",
-        status: "pending",
+        toolTarget: "/src/a.ts",
+        reason: "Reason 1",
+        source: "post-tool",
+        timestamp: Date.now(),
+        consumed: false,
       });
-      const result = await getPendingValidationStatus();
-      expect(result!.timestamp).toBeGreaterThanOrEqual(before);
-      expect(result!.timestamp).toBeLessThanOrEqual(Date.now());
-    });
-  });
-
-  describe("clearPendingValidation", () => {
-    it("clears stored validation", async () => {
-      await writePendingValidation({
-        toolName: "Edit",
-        filePath: "/src/file.ts",
-        status: "failed",
-        failureReason: "Test",
+      await writeCorrection(tempDir, {
+        toolName: "Write",
+        toolTarget: "/src/b.ts",
+        reason: "Reason 2",
+        source: "summary-actions",
+        timestamp: Date.now(),
+        consumed: false,
       });
-      await clearPendingValidation();
-      expect(await getPendingValidationStatus()).toBeNull();
+      const result = await getUnconsumedCorrections(tempDir);
+      expect(result).toHaveLength(2);
     });
   });
 
-  describe("getPendingValidationStatus", () => {
-    it("returns validation regardless of status", async () => {
-      await writePendingValidation({
+  describe("clearCorrections", () => {
+    it("clears all corrections", async () => {
+      await writeCorrection(tempDir, {
         toolName: "Edit",
-        filePath: "/src/file.ts",
-        status: "pending",
+        toolTarget: "/src/file.ts",
+        reason: "Test",
+        source: "post-tool",
+        timestamp: Date.now(),
+        consumed: false,
       });
-      const result = await getPendingValidationStatus();
-      expect(result).not.toBeNull();
-      expect(result!.status).toBe("pending");
+      await clearCorrections(tempDir);
+      expect(await getUnconsumedCorrections(tempDir)).toEqual([]);
+    });
+  });
+
+  describe("consumeCorrections", () => {
+    it("marks all corrections as consumed", async () => {
+      await writeCorrection(tempDir, {
+        toolName: "Edit",
+        toolTarget: "/src/file.ts",
+        reason: "Test",
+        source: "post-tool",
+        timestamp: Date.now(),
+        consumed: false,
+      });
+      await consumeCorrections(tempDir);
+      expect(await getUnconsumedCorrections(tempDir)).toEqual([]);
     });
   });
 });

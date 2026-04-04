@@ -23,7 +23,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details and design decision
 | `claude/settings.json`              | Hook configuration for Claude Code                                 |
 | `src/utils/summary-cache.ts`        | Summary document management, JSONL tool log, session state         |
 | `src/utils/summary-updater.ts`      | Background LLM for summary updates                                 |
-| `src/utils/async-gate-validator.ts` | Non-blocking gate validator (replaces async-validator)             |
+| `src/utils/correction-cache.ts`     | Post-tool correction cache for prediction violations               |
+| `src/utils/micro-prediction.ts`    | Sync regex predictions from user messages                          |
+| `src/utils/drift-detector.ts`      | Pure TypeScript drift/anomaly detection heuristics                 |
 | `src/agents/hooks/gate.ts`          | Gate agent (replaces error-ack + response-align)                   |
 | `src/utils/gate-reasoning-cache.ts` | Gate reasoning persistent memory for tool-approve                  |
 | `src/hooks/session-start.ts`        | Session lifecycle, post-compaction recovery                        |

@@ -10,6 +10,8 @@ import { isSubagent } from "../utils/subagent-detector.js";
 import { spawnBackground } from "../utils/spawn-background.js";
 import { getSessionDir, appendToolLog, getActiveSubagentCount } from "../utils/summary-cache.js";
 import { writeUser, writeTool, formatTodoState, extractAskUserAnswer, type TodoItem } from "../utils/synthetic.js";
+import { getAllPredictions, matchBlockedTool } from "../utils/prediction-cache.js";
+import { writeCorrection } from "../utils/correction-cache.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -29,6 +31,24 @@ async function main() {
       gate: "post-tool-use",
       ms: 0,
     });
+
+    // Post-tool prediction validation: catch violations from predictions that arrived late
+    const predictions = await getAllPredictions(sessionDir);
+    for (const pred of predictions) {
+      const match = matchBlockedTool(input.tool_name, input.tool_input, pred.blockedTools);
+      if (match) {
+        await writeCorrection(sessionDir, {
+          toolName: input.tool_name,
+          toolTarget: (input.tool_input as Record<string, unknown>)?.file_path as string
+            || (input.tool_input as Record<string, unknown>)?.command as string || "",
+          reason: `Tool ${input.tool_name} violated prediction: ${match.reason}`,
+          source: "post-tool",
+          timestamp: Date.now(),
+          consumed: false,
+        });
+        break;
+      }
+    }
 
     // AskUserQuestion: write user's answer as a synthetic user message
     if (input.tool_name === "AskUserQuestion") {

@@ -9,6 +9,7 @@ import { setTranscriptPath } from "../utils/execution-context.js";
 import { writeTool } from "../utils/synthetic.js";
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { getSessionDir } from "../utils/summary-cache.js";
+import { getUnconsumedCorrections, consumeCorrections } from "../utils/correction-cache.js";
 
 /**
  * Stop Hook: Response Check
@@ -52,6 +53,19 @@ async function main() {
       reason: result.systemMessage,
     });
     exitAfterFlush(0, output);
+    return;
+  }
+
+  // Check for unconsumed corrections from PostToolUse
+  const corrections = await getUnconsumedCorrections(sessionDir);
+  if (corrections.length > 0) {
+    const messages = corrections
+      .map((c) => `CORRECTION: ${c.toolName} (${c.toolTarget}) - ${c.reason}`)
+      .join("\n");
+    await consumeCorrections(sessionDir);
+    await writeTool(input.transcript_path, input.session_id, "correction-check",
+      `Actions need review:\n${messages}\nPlease address these issues.`);
+    exitAfterFlush(0, JSON.stringify({ decision: "block", reason: messages }));
     return;
   }
 

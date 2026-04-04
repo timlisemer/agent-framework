@@ -229,6 +229,29 @@ export function appendToolLog(sessionDir: string, entry: ToolLogEntry): void {
 }
 
 /**
+ * Read the last N entries from the tool log as parsed ToolLogEntry objects.
+ */
+export function readToolLogEntries(sessionDir: string, count: number): ToolLogEntry[] {
+  const logPath = path.join(sessionDir, "tool-log.jsonl");
+  try {
+    const content = fs.readFileSync(logPath, "utf-8");
+    const lines = content.split("\n").filter(Boolean);
+    const tail = lines.slice(-count);
+    const entries: ToolLogEntry[] = [];
+    for (const line of tail) {
+      try {
+        entries.push(JSON.parse(line) as ToolLogEntry);
+      } catch {
+        // Skip malformed lines
+      }
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Read the last N entries from the tool log as readable text.
  */
 export function readToolLogTail(sessionDir: string, count: number): string {

@@ -10,6 +10,9 @@ import { spawnBackground } from "../utils/spawn-background.js";
 import { getSessionDir, getSessionState } from "../utils/summary-cache.js";
 import { isPlanModeActive } from "../utils/plan-mode-detector.js";
 import { classifyEditIntent } from "../utils/edit-intent.js";
+import { generateMicroPredictions } from "../utils/micro-prediction.js";
+import { savePrediction } from "../utils/prediction-cache.js";
+import { clearCorrections } from "../utils/correction-cache.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -61,6 +64,15 @@ async function main() {
     editIntentTimestamp: now,
     editIntentOverturnCount: 0,
   }));
+
+  // Clear stale corrections from previous turn
+  await clearCorrections(sessionDir);
+
+  // Generate synchronous micro-predictions
+  const microPrediction = generateMicroPredictions(input.prompt, result, planMode);
+  if (microPrediction.blockedTools.length > 0 || (microPrediction.allowedTools?.length ?? 0) > 0) {
+    await savePrediction(sessionDir, microPrediction);
+  }
 
   // Spawn background summary-updater in intent mode
   const updaterPath = path.join(__dirname, "../utils/summary-updater.js");

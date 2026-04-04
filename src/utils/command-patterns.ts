@@ -159,8 +159,15 @@ export function getBlacklistDescription(): string {
 export function getContentBlacklistHighlights(content: string): string[] {
   const highlights: string[] = [];
   const lines = content.split("\n");
+  let inCodeBlock = false;
 
   for (const line of lines) {
+    if (line.trimStart().startsWith("```")) {
+      inCodeBlock = !inCodeBlock;
+      continue;
+    }
+    if (inCodeBlock) continue;
+
     for (const { pattern, name, alternative } of BLACKLIST_PATTERNS) {
       if (pattern.test(line)) {
         highlights.push(`[VIOLATION: ${name}] "${line.trim()}" → ${alternative}`);

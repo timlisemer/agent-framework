@@ -23,6 +23,12 @@ export interface BlockedTool {
   exceptions?: string[];
 }
 
+export interface AllowedTool {
+  toolName: string;
+  targetPattern?: string;
+  reason: string;
+}
+
 export interface ToolPrediction {
   /** Natural language description of what tools/actions are expected */
   expectedIntent: string;
@@ -30,6 +36,12 @@ export interface ToolPrediction {
   blockedIntent: string;
   /** Concrete tool entries that are mechanically blocked (regex + exceptions) */
   blockedTools: BlockedTool[];
+  /** Tools explicitly allowed by prediction (micro or LLM) */
+  allowedTools?: AllowedTool[];
+  /** Origin of this prediction */
+  source?: "micro" | "llm" | "gate";
+  /** Hash of the user message that generated this prediction */
+  userMessageHash?: string;
   userMessageSnippet: string;
   timestamp: number;
   /** Whether this prediction is still active */
@@ -202,11 +214,69 @@ function toolNameMatches(toolName: string, pattern: string): boolean {
 
 /**
  * Simple glob matching for target patterns.
- * Supports * as wildcard at the end (e.g., "git *" matches "git push").
+ * Supports * as wildcard at the end (e.g., "git *" matches "git push")
+ * and * at the start (e.g., "*file.ts" matches "/path/to/file.ts").
  */
 function globMatch(value: string, pattern: string): boolean {
+  if (pattern.startsWith("*") && pattern.endsWith("*")) {
+    return value.includes(pattern.slice(1, -1));
+  }
   if (pattern.endsWith("*")) {
     return value.startsWith(pattern.slice(0, -1));
   }
+  if (pattern.startsWith("*")) {
+    return value.endsWith(pattern.slice(1));
+  }
   return value === pattern;
+}
+
+/**
+ * Check if a tool call matches any allowed tool entry.
+ * Returns the matching AllowedTool, or null if no match.
+ */
+export function matchAllowedTool(
+  toolName: string,
+  toolInput: unknown,
+  allowedTools: AllowedTool[]
+): AllowedTool | null {
+  for (const allowed of allowedTools) {
+    if (!toolNameMatches(toolName, allowed.toolName)) continue;
+
+    if (!allowed.targetPattern) return allowed;
+
+    const input = toolInput as Record<string, unknown>;
+    const command = (input?.command as string) ?? "";
+    const filePath = (input?.file_path as string) ?? (input?.path as string) ?? "";
+    const target = command || filePath;
+
+    if (target && globMatch(target, allowed.targetPattern)) {
+      return allowed;
+    }
+  }
+  return null;
+}
+
+/**
+ * Check ALL active predictions for a blocked tool match.
+ * Prioritizes source "llm" over "micro". Returns the first match.
+ */
+export function matchBlockedToolFromAll(
+  toolName: string,
+  toolInput: unknown,
+  predictions: ToolPrediction[]
+): { prediction: ToolPrediction; blocked: BlockedTool } | null {
+  // Sort: LLM predictions first, then micro
+  const sorted = [...predictions].sort((a, b) => {
+    const aScore = a.source === "llm" ? 0 : a.source === "gate" ? 1 : 2;
+    const bScore = b.source === "llm" ? 0 : b.source === "gate" ? 1 : 2;
+    return aScore - bScore;
+  });
+
+  for (const prediction of sorted) {
+    const blocked = matchBlockedTool(toolName, toolInput, prediction.blockedTools);
+    if (blocked) {
+      return { prediction, blocked };
+    }
+  }
+  return null;
 }

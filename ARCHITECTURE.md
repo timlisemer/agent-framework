@@ -62,7 +62,9 @@ src/                                # TypeScript source
     logger.ts                       # Telemetry logging
     summary-cache.ts                # Summary document, JSONL tool log, session state
     summary-updater.ts              # Background LLM for summary updates
-    async-gate-validator.ts         # Non-blocking gate validator
+    correction-cache.ts             # Post-tool correction cache
+    micro-prediction.ts             # Sync regex predictions from user messages
+    drift-detector.ts               # Pure TypeScript drift/anomaly heuristics
     gate-reasoning-cache.ts         # Gate reasoning persistent memory
     hook-bootstrap.ts               # Shared hook stdin/exit infrastructure
     spawn-background.ts             # Background process spawner
@@ -381,15 +383,16 @@ Tool N+1 (any)
 
 | File | Purpose |
 |------|---------|
-| `src/utils/pending-validation-cache.ts` | Stores async validation results between tool calls |
-| `src/utils/async-validator.ts` | Background process for async LLM validation |
+| `src/utils/correction-cache.ts` | Stores post-tool corrections for prediction violations |
+| `src/utils/micro-prediction.ts` | Sync regex predictions from user messages |
+| `src/utils/drift-detector.ts` | Pure TypeScript drift/anomaly detection heuristics |
 | `src/utils/plan-mode-detector.ts` | Detects if plan mode is active |
 
 ### Temporary Files
 
 | File | Purpose | Expiry |
 |------|---------|--------|
-| `/tmp/claude-pending-validation.json` | Async validation results | 5 minutes |
+| `correction-cache.json` | Post-tool correction entries | 5 minutes |
 | `/tmp/claude-strict-mode.json` | Strict mode state (tool count, denial/error flags) | Session-scoped |
 
 ## Shared Utilities
@@ -569,7 +572,9 @@ Task-spawned subagents (detected via transcript path patterns) receive lazy vali
 ### Removed Components
 
 The following components were removed in favor of the summary system:
-- `async-validator.ts` - Replaced by `async-gate-validator.ts`
+- `async-validator.ts` - Replaced by prediction-driven checks + correction-cache
+- `async-gate-validator.ts` - Replaced by micro-prediction + drift-detector + correction-cache
+- `pending-validation-cache.ts` - Replaced by correction-cache
 - `error-acknowledge.ts` - Absorbed into the gate agent
 - `ack-cache.ts` - Replaced by Flagged Misalignments in summary
 - `strict-mode-tracker.ts` - Replaced by tool log + session state in summary

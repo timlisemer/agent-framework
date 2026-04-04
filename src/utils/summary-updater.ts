@@ -26,7 +26,7 @@ import {
 import { isSubagent } from "./subagent-detector.js";
 import { parseIntentOutput, parseActionsOutput } from "./summary-updater-parsing.js";
 import { parseEditIntentOutput } from "./edit-intent.js";
-import { savePrediction } from "./prediction-cache.js";
+import { savePrediction, type BlockedTool } from "./prediction-cache.js";
 import { isPlanModeActive } from "./plan-mode-detector.js";
 import { clearGateReasoning } from "./gate-reasoning-cache.js";
 import { cleanupPidFile } from "./spawn-background.js";
@@ -68,6 +68,43 @@ function isSignificantIntentChange(oldIntent: string, newIntent: string): boolea
   if (oldWords.length === 0) return false;
   const overlap = oldWords.filter((w) => newWords.has(w)).length;
   return (overlap / oldWords.length) < 0.4;
+}
+
+/**
+ * Extract tool/file patterns from misalignment text to produce blocking predictions.
+ */
+function derivePredictionsFromMisalignments(misalignments: string): BlockedTool[] {
+  const blockedTools: BlockedTool[] = [];
+
+  // Detect file-specific misalignment mentions
+  const fileMatches = misalignments.match(/[\w./\\-]+\.\w{1,6}/g);
+  if (fileMatches) {
+    for (const file of fileMatches) {
+      blockedTools.push({
+        toolName: "Edit|Write",
+        targetPattern: `*${file}`,
+        reason: `misalignment flagged for ${file}`,
+      });
+    }
+  }
+
+  // Detect execution-related misalignment
+  if (/\b(unauthorized|unexpected)\s+(execution|command|bash)\b/i.test(misalignments)) {
+    blockedTools.push({
+      toolName: "Bash",
+      reason: "misalignment flagged unauthorized execution",
+    });
+  }
+
+  // Detect scope creep mentions
+  if (/\b(scope\s+creep|out\s+of\s+scope|unrelated)\b/i.test(misalignments)) {
+    blockedTools.push({
+      toolName: "Edit|Write|NotebookEdit",
+      reason: "misalignment flagged scope creep",
+    });
+  }
+
+  return blockedTools;
 }
 
 async function main(): Promise<void> {
@@ -175,64 +212,47 @@ async function main(): Promise<void> {
       }
     }
 
-    // --- Derive and write predictions ---
+    // --- Derive LLM-enhanced predictions (override micro-predictions) ---
+    // Micro-predictions are generated synchronously in UserPromptSubmit.
+    // Here we produce LLM-enhanced predictions with source "llm" that take priority.
     const updatedState = await stateManager.load();
     const editIntent = updatedState.currentEditIntent ?? null;
     const planMode = isPlanModeActive(transcript);
 
-    let expectedIntent = "";
-    let blockedIntent = "";
-    const blockedTools: { toolName: string; targetPattern?: string; reason: string; exceptions?: string[] }[] = [];
+    const llmBlockedTools: BlockedTool[] = [];
+    let llmExpectedIntent = "";
+    let llmBlockedIntent = "";
 
-    if (planMode) {
-      expectedIntent = "planning and exploration tools";
-      blockedIntent = "no file modification or execution tools";
-      blockedTools.push({
+    // LLM-derived: use parsed intent to produce nuanced scope-aware predictions
+    if (parsed.intent) {
+      // Detect scope limitations from LLM-parsed intent
+      const scopeFiles = parsed.intent.match(/[\w./\\-]+\.\w{1,6}/g);
+      if (scopeFiles && scopeFiles.length > 0 && editIntent === true) {
+        llmExpectedIntent = `editing scoped to: ${scopeFiles.join(", ")}`;
+      }
+    }
+
+    // Edit intent blocking from LLM classification (higher confidence than micro)
+    if (editIntent === false && !planMode) {
+      llmExpectedIntent = "read-only exploration tools";
+      llmBlockedIntent = "no write/edit tools (LLM-confirmed)";
+      llmBlockedTools.push({
         toolName: "Edit|Write|NotebookEdit",
-        reason: "plan mode active - no file modifications",
-      });
-    } else if (editIntent === true) {
-      expectedIntent = "file editing tools for implementation";
-    } else if (editIntent === false) {
-      expectedIntent = "read-only exploration tools";
-      blockedIntent = "no write/edit tools";
-      blockedTools.push({
-        toolName: "Edit|Write|NotebookEdit",
-        reason: "edit intent is false - read-only exploration",
+        reason: "edit intent is false (LLM-confirmed) - read-only exploration",
       });
     }
 
-    // Scan for explicit user directives blocking execution
-    if (/\b(don'?t|do not)\s+(run|execute)\b/i.test(userPrompt)) {
-      blockedTools.push({ toolName: "Bash", reason: "user said no execution" });
-      blockedIntent += (blockedIntent ? "; " : "") + "no execution";
-    }
-    if (/\b(don'?t|do not)\s+(push|deploy)\b/i.test(userPrompt)) {
-      blockedTools.push({ toolName: "Bash", targetPattern: "git push*", reason: "user said no pushing" });
-      blockedIntent += (blockedIntent ? "; " : "") + "no pushing/deploying";
-    }
-
-    // Detect "use X agents only" pattern
-    const agentOnlyMatch = userPrompt.match(/\buse\s+(\w+)\s+agents?\b/i);
-    if (agentOnlyMatch) {
-      const agentType = agentOnlyMatch[1];
-      expectedIntent = `${agentType} agent delegation only`;
-      blockedIntent = `everything except Agent tool with ${agentType} subagent`;
-      blockedTools.push({
-        toolName: ".*",
-        reason: `user requested ${agentType} agents only`,
-        exceptions: ["Agent"],
+    if (llmBlockedTools.length > 0 || llmExpectedIntent) {
+      await savePrediction(sessionDir, {
+        expectedIntent: llmExpectedIntent,
+        blockedIntent: llmBlockedIntent,
+        blockedTools: llmBlockedTools,
+        source: "llm",
+        userMessageSnippet: userPrompt.slice(0, 200),
+        timestamp: Date.now(),
+        active: true,
       });
     }
-
-    await savePrediction(sessionDir, {
-      expectedIntent,
-      blockedIntent,
-      blockedTools,
-      userMessageSnippet: userPrompt.slice(0, 200),
-      timestamp: Date.now(),
-      active: true,
-    });
   } else if (mode === "actions") {
     // Throttle: skip if < 3s since last update (but always run on first invocation)
     const state = await stateManager.load();
@@ -257,12 +277,28 @@ async function main(): Promise<void> {
     );
 
     // Parse ---ACTIONS--- and ---MISALIGNMENTS--- sections (with fallback)
-    const parsed = parseActionsOutput(result.output);
-    if (parsed.actions) {
-      await updateSection(summaryPath, "AI Actions", parsed.actions);
+    const parsedActions = parseActionsOutput(result.output);
+    if (parsedActions.actions) {
+      await updateSection(summaryPath, "AI Actions", parsedActions.actions);
     }
-    if (parsed.misalignments) {
-      await updateSection(summaryPath, "Flagged Misalignments", parsed.misalignments);
+    if (parsedActions.misalignments) {
+      await updateSection(summaryPath, "Flagged Misalignments", parsedActions.misalignments);
+    }
+
+    // Misalignment-to-correction bridge: derive predictions from new misalignments
+    if (parsedActions.misalignments && parsedActions.misalignments !== currentMisalignments) {
+      const newBlockedTools = derivePredictionsFromMisalignments(parsedActions.misalignments);
+      if (newBlockedTools.length > 0) {
+        await savePrediction(sessionDir, {
+          expectedIntent: currentIntent.slice(0, 100),
+          blockedIntent: "misalignment-derived blocks",
+          blockedTools: newBlockedTools,
+          userMessageSnippet: "",
+          timestamp: Date.now(),
+          active: true,
+          source: "llm",
+        });
+      }
     }
 
     await stateManager.update((state) => ({
