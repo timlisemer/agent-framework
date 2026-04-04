@@ -46,6 +46,15 @@ export interface ToolPrediction {
   timestamp: number;
   /** Whether this prediction is still active */
   active: boolean;
+  /** Whether this prediction explicitly blocks the AI from stopping (default: false/undefined = stopping OK) */
+  blockStop?: boolean;
+}
+
+/**
+ * Check if any active prediction explicitly blocks stopping.
+ */
+export function isStopBlocked(predictions: ToolPrediction[]): boolean {
+  return predictions.some((p) => p.blockStop === true);
 }
 
 interface PredictionData {

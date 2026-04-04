@@ -8,6 +8,8 @@
  * @module edit-intent
  */
 
+import { stripQuotedAndPastedContent } from "./quote-detection.js";
+
 // Tools that modify files
 const EDIT_TOOLS = ["Write", "Edit", "NotebookEdit"];
 
@@ -107,20 +109,21 @@ const COMPOUND_OVERRIDE_PATTERN = /\b(and|then)\s+(fix|update|change|modify|edit
 export function detectEditSignal(userMessage: string, previousEditIntent: boolean): EditSignalResult {
   const trimmed = userMessage.trim();
   if (!trimmed) return "ambiguous";
+  const stripped = stripQuotedAndPastedContent(trimmed);
 
   // Check non-edit patterns first
-  const isNonEdit = NON_EDIT_SIGNAL_PATTERNS.some((p) => p.test(trimmed));
+  const isNonEdit = NON_EDIT_SIGNAL_PATTERNS.some((p) => p.test(stripped));
 
   if (isNonEdit) {
     // Compound override: "review and fix" -> edit
-    if (COMPOUND_OVERRIDE_PATTERN.test(trimmed)) {
+    if (COMPOUND_OVERRIDE_PATTERN.test(stripped)) {
       return "edit";
     }
     return "non-edit";
   }
 
   // Check edit patterns
-  const isEdit = EDIT_SIGNAL_PATTERNS.some((p) => p.test(trimmed));
+  const isEdit = EDIT_SIGNAL_PATTERNS.some((p) => p.test(stripped));
   if (isEdit) return "edit";
 
   // Short affirmatives: edit ONLY when previousEditIntent=true

@@ -329,6 +329,15 @@ async function main() {
   // SUBAGENT PATH: low-risk already handled, tool-approve only
   // ============================================================
   if (subagent) {
+    if (toolName === "Bash") {
+      logFastPathDeny("subagent-bash-block", "PreToolUse", toolName, projectDir, "Bash denied in subagents");
+      await exitPipeline({
+        decision: "deny",
+        agent: "subagent-bash-block",
+        reason: "Bash tool is not available in subagents",
+      });
+      return;
+    }
     const decision = await checkToolApproval(toolName, toolInput, projectDir, "PreToolUse", { lazyMode: true });
     if (!decision.approved) {
       await exitPipeline({

@@ -29,6 +29,7 @@ import { parseEditIntentOutput } from "./edit-intent.js";
 import { savePrediction, type BlockedTool } from "./prediction-cache.js";
 import { isPlanModeActive } from "./plan-mode-detector.js";
 import { clearGateReasoning } from "./gate-reasoning-cache.js";
+import { stripQuotedAndPastedContent } from "./quote-detection.js";
 import { cleanupPidFile } from "./spawn-background.js";
 
 interface UpdaterArgs {
@@ -130,6 +131,7 @@ async function main(): Promise<void> {
   if (mode === "intent") {
     // Decode user prompt
     const userPrompt = args.prompt ? Buffer.from(args.prompt, "base64").toString("utf-8") : "";
+    const strippedPrompt = stripQuotedAndPastedContent(userPrompt);
     if (!userPrompt) {
       console.error("summary-updater: empty prompt, skipping intent update");
       return;
@@ -180,7 +182,7 @@ async function main(): Promise<void> {
           { ...EDIT_INTENT_AGENT },
           {
             prompt: "Classify this user message.",
-            context: `PREVIOUS_EDIT_INTENT: ${previousEditIntent}\n\nUSER_MESSAGE:\n${userPrompt}`,
+            context: `PREVIOUS_EDIT_INTENT: ${previousEditIntent}\n\nUSER_MESSAGE:\n${strippedPrompt}`,
           }
         );
 
@@ -192,7 +194,7 @@ async function main(): Promise<void> {
             { ...EDIT_INTENT_AGENT },
             {
               prompt: "Classify this user message.",
-              context: `PREVIOUS_EDIT_INTENT: ${previousEditIntent}\n\nUSER_MESSAGE:\n${userPrompt}`,
+              context: `PREVIOUS_EDIT_INTENT: ${previousEditIntent}\n\nUSER_MESSAGE:\n${strippedPrompt}`,
             }
           );
           classified = parseEditIntentOutput(retryResult.output);

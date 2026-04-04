@@ -8,6 +8,7 @@
  */
 
 import type { ToolPrediction, BlockedTool, AllowedTool } from "./prediction-cache.js";
+import { stripQuotedAndPastedContent } from "./quote-detection.js";
 
 /**
  * Generate synchronous micro-predictions from a user message using regex heuristics.
@@ -22,6 +23,7 @@ export function generateMicroPredictions(
   const allowedTools: AllowedTool[] = [];
   let expectedIntent = "";
   let blockedIntent = "";
+  const strippedMessage = stripQuotedAndPastedContent(userMessage);
 
   // Plan mode -> block Edit/Write/NotebookEdit
   if (planMode) {
@@ -44,19 +46,19 @@ export function generateMicroPredictions(
   }
 
   // "don't run/execute" -> block Bash
-  if (/\b(don'?t|do not)\s+(run|execute)\b/i.test(userMessage)) {
+  if (/\b(don'?t|do not)\s+(run|execute)\b/i.test(strippedMessage)) {
     blockedTools.push({ toolName: "Bash", reason: "user said no execution" });
     blockedIntent += (blockedIntent ? "; " : "") + "no execution";
   }
 
   // "don't push/deploy" -> block git push
-  if (/\b(don'?t|do not)\s+(push|deploy)\b/i.test(userMessage)) {
+  if (/\b(don'?t|do not)\s+(push|deploy)\b/i.test(strippedMessage)) {
     blockedTools.push({ toolName: "Bash", targetPattern: "git push*", reason: "user said no pushing" });
     blockedIntent += (blockedIntent ? "; " : "") + "no pushing/deploying";
   }
 
   // "use X agents only" pattern
-  const agentOnlyMatch = userMessage.match(/\buse\s+(\w+)\s+agents?\b/i);
+  const agentOnlyMatch = strippedMessage.match(/\buse\s+(\w+)\s+agents?\b/i);
   if (agentOnlyMatch) {
     const agentType = agentOnlyMatch[1];
     expectedIntent = `${agentType} agent delegation only`;
@@ -69,7 +71,7 @@ export function generateMicroPredictions(
   }
 
   // "explain/review/understand/explore" -> block Edit/Write (read-only intent)
-  if (/\b(explain|review|understand|explore)\b/i.test(userMessage) && editIntent !== true) {
+  if (/\b(explain|review|understand|explore)\b/i.test(strippedMessage) && editIntent !== true) {
     const alreadyBlocksEdits = blockedTools.some((b) => /Edit|Write/.test(b.toolName));
     if (!alreadyBlocksEdits) {
       blockedTools.push({
@@ -81,7 +83,7 @@ export function generateMicroPredictions(
   }
 
   // "fix/implement/add" + file path -> allowedTools for that file scope
-  const actionFileMatch = userMessage.match(/\b(fix|implement|add)\b.*?([\w./\\-]+\.\w{1,6})/i);
+  const actionFileMatch = strippedMessage.match(/\b(fix|implement|add)\b.*?([\w./\\-]+\.\w{1,6})/i);
   if (actionFileMatch) {
     const filePath = actionFileMatch[2];
     allowedTools.push({

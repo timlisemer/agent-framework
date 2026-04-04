@@ -63,6 +63,7 @@ const INTENT_ALIGNMENT_COUNTS: TranscriptReadOptions = {
   },
 };
 import { detectUserDirectedQuestions } from "../../utils/content-patterns.js";
+import { stripQuotedContent } from "../../utils/quote-detection.js";
 
 // Patterns indicating AI is asking a question/clarification that should wait for user response
 const PREAMBLE_CONCERN_PATTERNS = [
@@ -443,16 +444,6 @@ const PLAN_APPROVAL_PATTERNS = [
   /approve this (?:plan|approach)/i,
   /continue with (?:this|the) (?:plan|approach|implementation)/i,
 ];
-
-/**
- * Strip quoted content from text to avoid false positives on quoted questions.
- */
-function stripQuotedContent(text: string): string {
-  return text
-    .replace(/"[^"]*"/g, "")
-    .replace(/'[^']*'/g, "")
-    .replace(/`[^`]*`/g, "");
-}
 
 /**
  * Extract the main question from user text (for error messages).

@@ -10,6 +10,7 @@ import { writeTool } from "../utils/synthetic.js";
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { getSessionDir } from "../utils/summary-cache.js";
 import { getUnconsumedCorrections, consumeCorrections } from "../utils/correction-cache.js";
+import { getAllPredictions, isStopBlocked } from "../utils/prediction-cache.js";
 
 /**
  * Stop Hook: Response Check
@@ -56,17 +57,22 @@ async function main() {
     return;
   }
 
-  // Check for unconsumed corrections from PostToolUse
+  // Check for unconsumed corrections from PostToolUse — only block if a prediction says stopping is wrong
   const corrections = await getUnconsumedCorrections(sessionDir);
   if (corrections.length > 0) {
-    const messages = corrections
-      .map((c) => `CORRECTION: ${c.toolName} (${c.toolTarget}) - ${c.reason}`)
-      .join("\n");
+    const predictions = await getAllPredictions(sessionDir);
+    if (isStopBlocked(predictions)) {
+      const messages = corrections
+        .map((c) => `CORRECTION: ${c.toolName} (${c.toolTarget}) - ${c.reason}`)
+        .join("\n");
+      await consumeCorrections(sessionDir);
+      await writeTool(input.transcript_path, input.session_id, "correction-check",
+        `Actions need review:\n${messages}\nPlease address these issues.`);
+      exitAfterFlush(0, JSON.stringify({ decision: "block", reason: messages }));
+      return;
+    }
+    // No prediction blocks stopping — consume corrections silently
     await consumeCorrections(sessionDir);
-    await writeTool(input.transcript_path, input.session_id, "correction-check",
-      `Actions need review:\n${messages}\nPlease address these issues.`);
-    exitAfterFlush(0, JSON.stringify({ decision: "block", reason: messages }));
-    return;
   }
 
   exitAfterFlush(0);
