@@ -14,6 +14,7 @@ import { INTENT_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
+import { formatPlanModeContext } from "../../utils/plan-mode-detector.js";
 import { readTranscriptExact } from "../../utils/transcript.js";
 import { readSummarySection } from "../../utils/session-utils.js";
 import { getSessionDir, readToolLogTail } from "../../utils/summary-cache.js";
@@ -37,6 +38,7 @@ export async function checkForOffTopic(
   // Read summary sections
   const userIntent = await readSummarySection(transcriptPath, "User Intent");
   const misalignments = await readSummarySection(transcriptPath, "Flagged Misalignments");
+  const planModeContext = formatPlanModeContext(transcriptPath);
 
   // No summary yet - nothing to check against
   if (!userIntent || userIntent.includes("(No intent captured yet)")) {
@@ -69,7 +71,7 @@ export async function checkForOffTopic(
       { ...INTENT_VALIDATE_AGENT },
       {
         prompt: "Check if the assistant's response aligns with user intent.",
-        context: `USER INTENT:\n${userIntent}\n\nFLAGGED MISALIGNMENTS:\n${misalignments}\n\nRECENT TOOL LOG:\n${toolLog || "(none)"}${condensed ? `\n\nGATE REASONING HISTORY:\n${condensed}` : ""}\n\nASSISTANT'S FINAL RESPONSE:\n${lastAssistant.content}`,
+        context: `${planModeContext}USER INTENT:\n${userIntent}\n\nFLAGGED MISALIGNMENTS:\n${misalignments}\n\nRECENT TOOL LOG:\n${toolLog || "(none)"}${condensed ? `\n\nGATE REASONING HISTORY:\n${condensed}` : ""}\n\nASSISTANT'S FINAL RESPONSE:\n${lastAssistant.content}`,
       },
       {
         formatValidator: (text) => startsWithAny(text, ["OK", "INTERVENE:"]),

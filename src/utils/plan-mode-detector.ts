@@ -1,5 +1,23 @@
 import * as fs from "fs";
 
+export interface PlanModeContext {
+  active: boolean;
+  contextString: string;  // empty string when inactive (safe to concatenate)
+}
+
+export function getPlanModeContext(transcriptPath: string): PlanModeContext {
+  const active = isPlanModeActive(transcriptPath);
+  if (!active) return { active: false, contextString: "" };
+  return {
+    active: true,
+    contextString: `\n=== PLAN MODE ACTIVE ===\nThe session is in PLAN MODE (read-only exploration and planning). File modifications (Edit, Write, NotebookEdit) and write Bash commands are blocked by TypeScript. The user's intent is planning and exploration, NOT implementation. ExitPlanMode is the expected way to finish planning.\n=== END PLAN MODE ===\n`,
+  };
+}
+
+export function formatPlanModeContext(transcriptPath: string): string {
+  return getPlanModeContext(transcriptPath).contextString;
+}
+
 /**
  * Detect if plan mode is currently active by scanning transcript.
  * Plan mode is active if EnterPlanMode was called more recently than ExitPlanMode.

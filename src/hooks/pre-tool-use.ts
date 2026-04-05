@@ -31,7 +31,7 @@ import {
   STYLE_DRIFT_COUNTS,
   QUESTION_VALIDATE_COUNTS,
 } from "../utils/transcript-presets.js";
-import { isPlanModeActive } from "../utils/plan-mode-detector.js";
+import { getPlanModeContext } from "../utils/plan-mode-detector.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { getUnconsumedCorrections, consumeCorrections } from "../utils/correction-cache.js";
 import { logFastPathApproval, logFastPathDeny } from "../utils/logger.js";
@@ -189,7 +189,8 @@ async function main() {
   const startTime = Date.now();
 
   const DEBUG = process.env.AGENT_FRAMEWORK_DEBUG === "1";
-  const planMode = isPlanModeActive(input.transcript_path);
+  const planModeCtx = getPlanModeContext(input.transcript_path);
+  const planMode = planModeCtx.active;
   const subagent = isSubagent(input.transcript_path);
   const coldStart = toolCallCount < 3;
 
@@ -276,6 +277,7 @@ async function main() {
       "EnterPlanMode",
       "Entering plan mode. All subsequent tool calls are read-only until ExitPlanMode."
     );
+    await deactivateAllPredictions(sessionDir);
   }
 
   if (
@@ -339,7 +341,7 @@ async function main() {
       });
       return;
     }
-    const decision = await checkToolApproval(toolName, toolInput, projectDir, "PreToolUse", { lazyMode: true });
+    const decision = await checkToolApproval(toolName, toolInput, projectDir, "PreToolUse", { lazyMode: true, planModeContext: planModeCtx.contextString });
     if (!decision.approved) {
       await exitPipeline({
         decision: "deny",
@@ -770,7 +772,7 @@ If in doubt, UPHOLD.
       gateResult = await checkGate(
         toolName,
         toolInput,
-        { userIntent, misalignments, gateReasoning, predictions, editIntent },
+        { userIntent, misalignments, gateReasoning, predictions, editIntent, planModeContext: planModeCtx.contextString },
         projectDir,
         "PreToolUse"
       );
@@ -795,7 +797,7 @@ If in doubt, UPHOLD.
         gateResult.reason || "Gate check failed",
         projectDir,
         "PreToolUse",
-        `gate blocked: ${gateResult.reason}`,
+        `${planModeCtx.contextString}gate blocked: ${gateResult.reason}`,
         gateTranscriptResult.slashCommandContext
       );
 
@@ -849,6 +851,7 @@ If in doubt, UPHOLD.
     {
       lazyMode: !useSyncPipeline,
       sessionDir,
+      planModeContext: planModeCtx.contextString,
     }
   );
 
@@ -869,7 +872,7 @@ If in doubt, UPHOLD.
       decision.reason || "Tool denied",
       projectDir,
       "PreToolUse",
-      `tool-approve blocked: ${decision.reason}`,
+      `${planModeCtx.contextString}tool-approve blocked: ${decision.reason}`,
       approveTranscriptResult.slashCommandContext
     );
 

@@ -27,7 +27,7 @@ import { isSubagent } from "./subagent-detector.js";
 import { parseIntentOutput, parseActionsOutput } from "./summary-updater-parsing.js";
 import { parseEditIntentOutput } from "./edit-intent.js";
 import { savePrediction, type BlockedTool } from "./prediction-cache.js";
-import { isPlanModeActive } from "./plan-mode-detector.js";
+import { getPlanModeContext } from "./plan-mode-detector.js";
 import { clearGateReasoning } from "./gate-reasoning-cache.js";
 import { stripQuotedAndPastedContent } from "./quote-detection.js";
 import { cleanupPidFile } from "./spawn-background.js";
@@ -114,6 +114,8 @@ async function main(): Promise<void> {
 
   if (isSubagent(transcript)) return;
 
+  const planModeCtx = getPlanModeContext(transcript);
+
   const sessionDir = getSessionDir(transcript);
   const dedupKey = `summary-updater-${mode}`;
 
@@ -148,7 +150,7 @@ async function main(): Promise<void> {
       { ...SUMMARY_INTENT_AGENT },
       {
         prompt: "Update summary sections based on this user message.",
-        context: `CURRENT USER INTENT:\n${currentIntent}\n\nCURRENT USER APPROVALS:\n${currentApprovals}\n\nNEW USER MESSAGE:\n${userPrompt}`,
+        context: `${planModeCtx.contextString}CURRENT USER INTENT:\n${currentIntent}\n\nCURRENT USER APPROVALS:\n${currentApprovals}\n\nNEW USER MESSAGE:\n${userPrompt}`,
       }
     );
 
@@ -219,7 +221,7 @@ async function main(): Promise<void> {
     // Here we produce LLM-enhanced predictions with source "llm" that take priority.
     const updatedState = await stateManager.load();
     const editIntent = updatedState.currentEditIntent ?? null;
-    const planMode = isPlanModeActive(transcript);
+    const planMode = planModeCtx.active;
 
     const llmBlockedTools: BlockedTool[] = [];
     let llmExpectedIntent = "";
@@ -274,7 +276,7 @@ async function main(): Promise<void> {
       { ...SUMMARY_ACTIONS_AGENT },
       {
         prompt: "Update summary sections based on recent AI actions.",
-        context: `USER INTENT:\n${currentIntent}\n\nCURRENT AI ACTIONS:\n${currentActions}\n\nCURRENT MISALIGNMENTS:\n${currentMisalignments}\n\nRECENT TOOL LOG:\n${toolLogTail}`,
+        context: `${planModeCtx.contextString}USER INTENT:\n${currentIntent}\n\nCURRENT AI ACTIONS:\n${currentActions}\n\nCURRENT MISALIGNMENTS:\n${currentMisalignments}\n\nRECENT TOOL LOG:\n${toolLogTail}`,
       }
     );
 

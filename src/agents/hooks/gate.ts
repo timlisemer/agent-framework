@@ -98,6 +98,7 @@ export async function checkGate(
     gateReasoning: string;
     predictions?: string;
     editIntent?: boolean | null;
+    planModeContext?: string;
   },
   projectDir: string,
   hookName: string
@@ -115,6 +116,10 @@ export async function checkGate(
   // Check for preamble concern in gate reasoning and surface it
   if (context.gateReasoning && hasPreambleConcern(context.gateReasoning)) {
     contextSection += `\nPREAMBLE CONCERN DETECTED: The recent reasoning contains clarification patterns. Check if the AI should have waited for user response.\n`;
+  }
+
+  if (context.planModeContext) {
+    contextSection += context.planModeContext;
   }
 
   if (context.editIntent !== undefined) {

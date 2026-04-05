@@ -33,10 +33,12 @@ import { getBlacklistHighlights } from "../../utils/command-patterns.js";
 import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
 import { extractGateNote, formatForPrompt } from "../../utils/gate-reasoning-cache.js";
+import { planModeEditBlock, planModeBashBlock } from "../../utils/edit-intent.js";
 
 export interface ToolApprovalOptions {
   lazyMode?: boolean;
   sessionDir?: string;
+  planModeContext?: string;
 }
 
 export async function checkToolApproval(
@@ -46,6 +48,19 @@ export async function checkToolApproval(
   hookName: string,
   options?: ToolApprovalOptions
 ): Promise<{ approved: boolean; reason?: string; gateNote?: string }> {
+  if (options?.planModeContext) {
+    const input = toolInput as Record<string, unknown>;
+    const filePath = (input?.file_path as string) ?? (input?.path as string) ?? "";
+    const editBlock = planModeEditBlock(true, toolName, filePath);
+    if (editBlock) {
+      return { approved: false, reason: editBlock };
+    }
+    const bashBlock = planModeBashBlock(true, toolName, (input?.command as string) ?? "");
+    if (bashBlock) {
+      return { approved: false, reason: bashBlock };
+    }
+  }
+
   const highlights = getBlacklistHighlights(toolName, toolInput, workingDir);
 
   // Lazy mode: skip LLM if no blacklist violations
@@ -95,7 +110,7 @@ export async function checkToolApproval(
 
 PROJECT RULES (from CLAUDE.md):
 ${rules || "No project-specific rules."}
-${highlightSection}${gateReasoningSection}
+${highlightSection}${gateReasoningSection}${options?.planModeContext ?? ""}
 TOOL TO EVALUATE:
 Tool: ${toolName}
 Input: ${JSON.stringify(toolInput)}`,
