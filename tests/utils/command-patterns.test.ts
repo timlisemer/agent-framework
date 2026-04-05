@@ -112,6 +112,23 @@ describe("getBlacklistHighlights", () => {
   });
 });
 
+describe("getBlacklistHighlights - Agent background blocking", () => {
+  it("blocks Agent with run_in_background: true", () => {
+    const highlights = getBlacklistHighlights("Agent", { prompt: "do stuff", run_in_background: true });
+    expect(highlights).toHaveLength(1);
+    expect(highlights[0]).toContain("BLACKLIST");
+    expect(highlights[0]).toContain("background agent");
+  });
+
+  it("allows Agent with run_in_background: false", () => {
+    expect(getBlacklistHighlights("Agent", { prompt: "do stuff", run_in_background: false })).toEqual([]);
+  });
+
+  it("allows Agent with run_in_background omitted", () => {
+    expect(getBlacklistHighlights("Agent", { prompt: "do stuff" })).toEqual([]);
+  });
+});
+
 describe("detectWorkaroundPattern", () => {
   it("returns null for non-Bash tool", () => {
     expect(detectWorkaroundPattern("Read", { file_path: "/tmp" })).toBeNull();

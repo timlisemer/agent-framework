@@ -188,6 +188,15 @@ export function getContentBlacklistHighlights(content: string): string[] {
  * alternative strings when workingDir is omitted or pattern has no equivalents.
  */
 export function getBlacklistHighlights(toolName: string, toolInput: unknown, workingDir?: string): string[] {
+  // Block background agents
+  if (toolName === "Agent") {
+    const input = toolInput as { run_in_background?: boolean };
+    if (input.run_in_background === true) {
+      return ["[BLACKLIST: background agent] Background agents are not allowed. Use foreground agents only (remove run_in_background or set it to false)."];
+    }
+    return [];
+  }
+
   if (toolName !== "Bash") return [];
   const command = (toolInput as { command?: string }).command;
   if (!command) return [];
