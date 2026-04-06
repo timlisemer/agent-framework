@@ -64,11 +64,13 @@ function getCachedSubagentCount(sessionDir: string): number {
 
 const SUBAGENT_LOCK_STALE_MS = 1000;
 
-function acquireSubagentLock(lockPath: string): void {
-  for (let attempt = 0; attempt < 10; attempt++) {
+function acquireSubagentLock(lockPath: string): boolean {
+  const maxAttempts = 50;
+  const spinMs = 20;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       fs.writeFileSync(lockPath, String(process.pid), { flag: "wx" });
-      return;
+      return true;
     } catch (err) {
       const error = err as NodeJS.ErrnoException;
       if (error.code === "EEXIST") {
@@ -80,12 +82,15 @@ function acquireSubagentLock(lockPath: string): void {
           }
         } catch { continue; }
         const start = Date.now();
-        while (Date.now() - start < 10) { /* spin */ }
+        while (Date.now() - start < spinMs) { /* spin */ }
         continue;
       }
-      return;
+      if (process.env.DEBUG) console.error("[acquireSubagentLock]", err);
+      return false;
     }
   }
+  if (process.env.DEBUG) console.error("[acquireSubagentLock] failed after", maxAttempts, "attempts");
+  return false;
 }
 
 function releaseSubagentLock(lockPath: string): void {
@@ -113,24 +118,26 @@ export function getActiveSubagentCount(sessionDir: string): number {
 export function incrementActiveSubagents(sessionDir: string): void {
   const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
   const lockPath = filePath + ".lock";
-  acquireSubagentLock(lockPath);
+  const locked = acquireSubagentLock(lockPath);
   try {
+    if (!locked) return;
     const current = readSubagentCount(filePath);
     fs.writeFileSync(filePath, JSON.stringify({ count: current + 1 }));
   } finally {
-    releaseSubagentLock(lockPath);
+    if (locked) releaseSubagentLock(lockPath);
   }
 }
 
 export function decrementActiveSubagents(sessionDir: string): void {
   const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
   const lockPath = filePath + ".lock";
-  acquireSubagentLock(lockPath);
+  const locked = acquireSubagentLock(lockPath);
   try {
+    if (!locked) return;
     const current = readSubagentCount(filePath);
     fs.writeFileSync(filePath, JSON.stringify({ count: Math.max(0, current - 1) }));
   } finally {
-    releaseSubagentLock(lockPath);
+    if (locked) releaseSubagentLock(lockPath);
   }
 }
 

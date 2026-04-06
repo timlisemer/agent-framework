@@ -24,6 +24,7 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(() => {
+main().catch((err) => {
+  console.error("[subagent-start]", err);
   process.exit(0);
 });
