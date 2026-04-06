@@ -64,8 +64,11 @@ import { detectDrift } from "../utils/drift-detector.js";
 import { writeTool, writeUser } from "../utils/synthetic.js";
 
 
-// File tools that benefit from path-based risk classification
-const FILE_TOOLS = ["Read", "Write", "Edit", "NotebookEdit"];
+// File tools that go through path-based risk classification (trusted/sensitive)
+// and write-specific gates (edit-intent, CLAUDE.md validation, plan-file validation,
+// style-drift). Read is NOT here — it's read-only with no side effects, so it
+// belongs in LOW_RISK_TOOLS alongside Grep/Glob for immediate auto-approval.
+const FILE_TOOLS = ["Write", "Edit", "NotebookEdit"];
 
 // Sensitive file patterns - always require LLM approval
 const SENSITIVE_PATTERNS = [
@@ -79,8 +82,13 @@ const SENSITIVE_PATTERNS = [
   "password",
 ];
 
+// Low-risk tools get immediate auto-approval with no further checks.
+// These are all read-only or side-effect-free — they can't modify files,
+// execute commands, or affect shared state. Contrast with FILE_TOOLS above,
+// which go through write-specific gates (edit-intent, style-drift, etc.).
 const LOW_RISK_TOOLS = [
-  // Read-only search/navigation
+  // Read-only file/search/navigation
+  "Read",
   "LSP",
   "Grep",
   "Glob",

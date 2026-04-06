@@ -181,7 +181,7 @@ export function buildSession(
   fs.writeFileSync(path.join(sessionDir, "summary.md"), summaryContent);
 
   // 4. gate-reasoning.json
-  writeWrapped(sessionDir, "gate-reasoning.json", sessionId, []);
+  writeWrapped(sessionDir, "gate-reasoning.json", sessionId, { entries: [], condensedHistory: "" });
 
   // 5. prediction-cache.json
   writeWrapped(sessionDir, "prediction-cache.json", sessionId, {});

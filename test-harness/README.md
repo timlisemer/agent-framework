@@ -6,24 +6,23 @@ Replay testing system for agent-framework hooks. Executes real `pre-tool-use` an
 
 ## Quick Start
 
+Ensure `dist/` is up to date and `ANTHROPIC_API_KEY` is set, then:
+
 ```bash
-# 1. Build the project (hooks run from dist/)
-npm run build
+# 1. Copy a recent transcript into fixtures
+cp ~/.claude/projects/-home-tim-Coding-public-repos-agent-framework/<session-id>.jsonl \
+  test-harness/fixtures/transcripts/my-session.jsonl
 
-# 2. Ensure your API key is set
-export ANTHROPIC_API_KEY=sk-ant-...
+# 2. List testable tool calls
+npx tsx test-harness/run.ts --list test-harness/fixtures/transcripts/my-session.jsonl
 
-# 3. List testable tool calls in the example fixture
-npx tsx test-harness/run.ts --list test-harness/fixtures/transcripts/git-blame-investigation.jsonl
-
-# 4. Run a test — Grep at line 6 should be allowed (low-risk tool)
+# 3. Run a test (use a line number from the --list output)
 npx tsx test-harness/run.ts \
   --hook pre-tool-use \
-  --transcript test-harness/fixtures/transcripts/git-blame-investigation.jsonl \
-  --line 6 \
+  --transcript test-harness/fixtures/transcripts/my-session.jsonl \
+  --line <N> \
   --expect allow \
-  --expect-agent low-risk-bypass \
-  --label "Allow Grep - low risk tool"
+  --label "Description of what this tests"
 ```
 
 ## Concepts
@@ -71,7 +70,7 @@ The `--edit-intent` and `--tool-call-count` flags let you override the derived v
 ## Prerequisites
 
 - **Node.js** (v20+) and `npx` available
-- **Built dist/ directory** — run `npm run build` in the repo root first; hooks are spawned from `dist/hooks/`
+- **Built dist/ directory** — hooks are spawned from `dist/hooks/`, so `dist/` must be up to date. Build before running tests
 - **`ANTHROPIC_API_KEY`** environment variable — hooks make real LLM calls to gate agents
 
 ## Usage
@@ -81,16 +80,15 @@ The `--edit-intent` and `--tool-call-count` flags let you override the derived v
 Scan a transcript for all `tool_use` entries:
 
 ```bash
-npx tsx test-harness/run.ts --list test-harness/fixtures/transcripts/git-blame-investigation.jsonl
+npx tsx test-harness/run.ts --list test-harness/fixtures/transcripts/<your-file>.jsonl
 ```
 
 Example output:
 
 ```
-line:6 tool:Grep plan-mode:no input:{"pattern":"Edit intent is false","output_mode":"content"} context:(none)
-line:8 tool:Read plan-mode:no input:{"file_path":"/home/tim/Coding/public_repos/agent-framework/src/hooks/pre-tool-use.ts","offse... context:(none)
-line:11 tool:Bash plan-mode:no input:{"command":"git blame -L 634,670 src/hooks/pre-tool-use.ts","description":"Git blame on edit ... context:(none)
-line:14 tool:Bash plan-mode:no input:{"command":"git log --format=\"%H %s\" 0aeaa49b -1","description":"Show commit message for 0a... context:(none)
+line:6 tool:Grep plan-mode:no input:{"pattern":"some search term","output_mode":"content"} context:(none)
+line:8 tool:Read plan-mode:no input:{"file_path":"/home/user/project/src/main.ts","offset":100,"limit":40} context:(none)
+line:11 tool:Bash plan-mode:no input:{"command":"git blame -L 10,30 src/main.ts","description":"Git blame on main.ts"} context:(none)
 ```
 
 Output format — one line per tool call:
@@ -120,11 +118,11 @@ There is no built-in batch runner. Script multiple tests with a bash loop:
 ```bash
 #!/usr/bin/env bash
 set -e
-T=test-harness/fixtures/transcripts/git-blame-investigation.jsonl
+T=test-harness/fixtures/transcripts/my-session.jsonl
 
 npx tsx test-harness/run.ts --hook pre-tool-use --transcript "$T" --line 6 --expect allow --label "Allow Grep"
 npx tsx test-harness/run.ts --hook pre-tool-use --transcript "$T" --line 8 --expect allow --label "Allow Read"
-npx tsx test-harness/run.ts --hook pre-tool-use --transcript "$T" --line 11 --expect allow --label "Allow Bash git blame"
+npx tsx test-harness/run.ts --hook pre-tool-use --transcript "$T" --line 11 --expect allow --label "Allow Bash"
 
 echo "All tests passed"
 ```
@@ -190,8 +188,8 @@ Deterministic agents always produce the same result for the same input. LLM-base
 
 When `--line` points to a line that isn't a `tool_use` block:
 
-```
-Error: No tool_use found at line 3
+```json
+{"pass":false,"hook":"pre-tool-use","decision":"error","expected":"allow","ms":0,"error":"No tool_use block found at line 3. Found type: attachment"}
 ```
 
 When the hook crashes or times out:
@@ -208,37 +206,32 @@ Error: --hook is required
 
 ## Examples
 
-Using the included fixture (`test-harness/fixtures/transcripts/git-blame-investigation.jsonl`):
+After copying a transcript to `test-harness/fixtures/transcripts/my-session.jsonl` and running `--list`:
 
 ```bash
-# List all tool calls in the fixture
-npx tsx test-harness/run.ts --list test-harness/fixtures/transcripts/git-blame-investigation.jsonl
-
-# Test that Grep is allowed (deterministic low-risk bypass)
+# Test that a Grep call is allowed (deterministic low-risk bypass)
 npx tsx test-harness/run.ts \
   --hook pre-tool-use \
-  --transcript test-harness/fixtures/transcripts/git-blame-investigation.jsonl \
+  --transcript test-harness/fixtures/transcripts/my-session.jsonl \
   --line 6 \
   --expect allow \
   --expect-agent low-risk-bypass \
   --label "Allow Grep - low risk tool"
 
-# Test that Read is allowed (deterministic low-risk bypass)
+# Test that a Bash command is allowed (goes through LLM gate)
 npx tsx test-harness/run.ts \
   --hook pre-tool-use \
-  --transcript test-harness/fixtures/transcripts/git-blame-investigation.jsonl \
-  --line 8 \
-  --expect allow \
-  --expect-agent low-risk-bypass \
-  --label "Allow Read - low risk tool"
-
-# Test that Bash git-blame is allowed (goes through LLM gate)
-npx tsx test-harness/run.ts \
-  --hook pre-tool-use \
-  --transcript test-harness/fixtures/transcripts/git-blame-investigation.jsonl \
+  --transcript test-harness/fixtures/transcripts/my-session.jsonl \
   --line 11 \
   --expect allow \
   --label "Allow Bash git blame"
+
+# Test that a stop-response-check passes
+npx tsx test-harness/run.ts \
+  --hook stop-response-check \
+  --transcript test-harness/fixtures/transcripts/my-session.jsonl \
+  --line 8 \
+  --expect pass
 ```
 
 ## Results
