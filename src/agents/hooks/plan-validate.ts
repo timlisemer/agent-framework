@@ -123,7 +123,7 @@ export async function checkPlanIntent(
       {
         formatValidator: (text) => startsWithAny(text, ["OK", "DRIFT:"]),
         formatReminder: "Reply with exactly: OK or DRIFT: <feedback>",
-        maxTokens: 150,
+        maxTokens: 512,
         context: `Plan validation for: ${proposedEdit.substring(0, 100)}...`,
       },
       { agent: "plan-validate", hookName, toolName, workingDir, executionType: EXECUTION_TYPES.LLM }

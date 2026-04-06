@@ -554,7 +554,7 @@ export const TOOL_APPEAL_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'tool-appeal',
   tier: MODEL_TIERS.HAIKU,
   mode: 'direct',
-  maxTokens: 500,
+  maxTokens: 1000,
   systemPrompt: `You are an appeal HELPER. Another agent blocked a tool call and is asking for your perspective.
 
 The original block followed strict rules. Your job is to check if the block should be overturned.
@@ -776,7 +776,7 @@ export const PLAN_VALIDATE_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'plan-validate',
   tier: MODEL_TIERS.SONNET,
   mode: 'direct',
-  maxTokens: 500,
+  maxTokens: 2000,
   systemPrompt: `You are a plan-intent alignment checker. Your job is to detect when an AI's plan has DRIFTED from what the user actually requested.
 
 You will receive:
@@ -933,7 +933,7 @@ export const CLAUDE_MD_VALIDATE_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'claude-md-validate',
   tier: MODEL_TIERS.SONNET,
   mode: 'direct',
-  maxTokens: 500,
+  maxTokens: 1000,
   systemPrompt: `You validate CLAUDE.md files against agent-framework rules.
 
 You will receive:
@@ -1558,7 +1558,7 @@ export const GATE_AGENT: Omit<AgentConfig, "workingDir"> = {
   name: "gate",
   tier: MODEL_TIERS.HAIKU,
   mode: "direct",
-  maxTokens: 300,
+  maxTokens: 512,
   systemPrompt: `You are a gate validator checking if a tool call aligns with user intent and acknowledged errors.
 
 Output EXACTLY: APPROVE or DENY: <reason>

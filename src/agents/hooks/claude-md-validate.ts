@@ -87,7 +87,7 @@ export async function validateClaudeMd(
       {
         formatValidator: (text) => startsWithAny(text, ["OK", "DRIFT:"]),
         formatReminder: "Reply: OK or DRIFT: <feedback>",
-        maxTokens: 150,
+        maxTokens: 512,
         context: "CLAUDE.md validation",
       },
       { agent: "claude-md-validate", hookName, toolName, workingDir, executionType: EXECUTION_TYPES.LLM }
