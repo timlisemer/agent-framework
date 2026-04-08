@@ -2,8 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { isSubagent } from "./subagent-detector.js";
-import { getSessionDir, appendToolLog, getActiveSubagentCount } from "./summary-cache.js";
+import { getSessionDir, appendToolLog, getActiveSubagentCount, getSessionState } from "./summary-cache.js";
 import { spawnBackground } from "./spawn-background.js";
+import { classifyEditIntent } from "./edit-intent.js";
+import { isPlanModeActive } from "./plan-mode-detector.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -75,7 +77,34 @@ async function writeSynthetic(
   const entry = buildEntry(kind, source, content);
   await fs.promises.appendFile(transcriptPath, JSON.stringify(entry) + "\n");
 
-  // 2. Update summary (main agent only)
+  // 2. Sync edit-intent reclassification for synthetic user messages (pure regex, no LLM)
+  if (kind === "user" && !isSubagent(transcriptPath)) {
+    try {
+      const syncSessionDir = getSessionDir(transcriptPath);
+      const stateManager = getSessionState(syncSessionDir);
+      const currentState = await stateManager.load();
+      const planMode = isPlanModeActive(transcriptPath);
+      const classified = classifyEditIntent(
+        content,
+        currentState.currentEditIntent ?? null,
+        currentState.editIntentTimestamp ?? 0,
+        planMode
+      );
+      if (classified !== null) {
+        await stateManager.update((s) => ({
+          ...s,
+          previousEditIntent: s.currentEditIntent ?? null,
+          currentEditIntent: classified,
+          editIntentTimestamp: Date.now(),
+          editIntentOverturnCount: 0,
+        }));
+      }
+    } catch {
+      // Fail-open: don't block the pipeline
+    }
+  }
+
+  // 3. Update summary (main agent only)
   if (isSubagent(transcriptPath)) return;
 
   const sessionDir = getSessionDir(transcriptPath);

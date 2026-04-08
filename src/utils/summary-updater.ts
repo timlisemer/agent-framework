@@ -177,7 +177,7 @@ async function main(): Promise<void> {
 
     // --- LLM fallback for ambiguous edit intent ---
     const currentState = await stateManager.load();
-    if ((currentState.currentEditIntent ?? null) === null) {
+    if ((currentState.currentEditIntent ?? null) !== true) {
       const previousEditIntent = currentState.previousEditIntent ?? false;
       try {
         const editIntentResult = await runAgent(
@@ -205,7 +205,7 @@ async function main(): Promise<void> {
         // Only write if still null (regex didn't already decide)
         if (classified !== null) {
           await stateManager.update((s) => {
-            if ((s.currentEditIntent ?? null) === null) {
+            if (s.currentEditIntent !== true) {
               return { ...s, currentEditIntent: classified };
             }
             return s;

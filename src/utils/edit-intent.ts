@@ -64,6 +64,9 @@ const EDIT_SIGNAL_PATTERNS: RegExp[] = [
 // Short affirmative patterns (only edit when previousEditIntent=true)
 const SHORT_AFFIRMATIVE_PATTERN = /^(yes|yeah|yep|sure|ok|okay|go ahead|proceed|continue|do it|go for it|sounds good|looks good|lgtm|ship it|approved)\s*[.!]?\s*$/i;
 
+// Affirmative + edit verb combos: "Yes, implement it", "Sure, fix the bug", "Yeah, make the change"
+const AFFIRMATIVE_PLUS_EDIT_PATTERN = /^(yes|yeah|yep|sure|ok|okay|go ahead|go for it|sounds good|approved|absolutely|definitely|please do)\b[,.\s!]*(please\s+)?(fix|update|change|modify|edit|refactor|rename|replace|rewrite|add|create|implement|write|remove|delete|build|set up|setup|configure|make)\b/i;
+
 // --- NON-EDIT SIGNAL PATTERNS (negative -- user does NOT want edits) ---
 const NON_EDIT_SIGNAL_PATTERNS: RegExp[] = [
   // Pure reading/investigation
@@ -125,6 +128,9 @@ export function detectEditSignal(userMessage: string, previousEditIntent: boolea
   // Check edit patterns
   const isEdit = EDIT_SIGNAL_PATTERNS.some((p) => p.test(stripped));
   if (isEdit) return "edit";
+
+  // Affirmative + edit verb: "Yes, implement it", "Sure, fix the bug"
+  if (AFFIRMATIVE_PLUS_EDIT_PATTERN.test(trimmed)) return "edit";
 
   // Short affirmatives: edit ONLY when previousEditIntent=true
   if (SHORT_AFFIRMATIVE_PATTERN.test(trimmed)) {
