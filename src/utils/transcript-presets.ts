@@ -92,12 +92,12 @@ export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
  * Recent tool results - to see what Claude has done (Write to plan, etc.).
  */
 export const QUESTION_VALIDATE_COUNTS: TranscriptReadOptions = {
-  counts: { user: ALL, assistant: 5, tool: 10 },
+  counts: { user: ALL, assistant: 20, tool: 15 },
   includeFirstUserMessage: true,
   toolOptions: {
     trim: true,
-    maxLines: 30,
-    excludeToolNames: ["Task", "Agent", "TaskOutput"],
+    maxLines: 80,
+    excludeToolNames: ["Task"],
   },
 };
 

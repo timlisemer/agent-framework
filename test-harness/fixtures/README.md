@@ -17,7 +17,12 @@ Each `.jsonl` file has one JSON object per line. The `type` field determines the
 
 **User prompts vs tool results**: User messages (`type:"user"`) with string `message.content` are real prompts. User messages with array content containing `{type:"tool_result"}` blocks are tool returns.
 
-**System-injected messages**: User messages with `isMeta:true` are system-injected, not real user input. These are skipped during replay.
+**System-injected messages (`isMeta`)**: User messages with `isMeta:true` at the top level are system-injected by Claude Code, not real user input. These appear when:
+- Stop-hook feedback is fed back into the conversation
+- Slash command instructions are injected (e.g., `/commit` adds tool usage instructions)
+- Other system-level messages are injected into the user turn
+
+These are skipped during replay hook classification and filtered by the transcript reader (`src/utils/transcript.ts`) to avoid wasting context slots in hook agents.
 
 **tool_use blocks**: Found in `type:"assistant"` lines. Look in `message.content` array for `{type:"tool_use", id:"toolu_...", name:"...", input:{...}}`. The `id` field is the tool_use_id used in expectations.
 

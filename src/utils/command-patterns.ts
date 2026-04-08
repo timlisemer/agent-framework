@@ -12,6 +12,7 @@ export interface BlacklistPattern {
   pattern: RegExp;
   name: string;
   alternative: string;
+  bashOnly?: boolean;
 }
 
 /**
@@ -64,7 +65,8 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: "You must run mcp__agent-framework__check" },
 
   // Test commands - tests may not exist, use check for build verification
-  { pattern: /\b(test|vitest|jest|mocha|pytest|ava)\b/, name: "test command", alternative: "You must run mcp__agent-framework__check" },
+  // bashOnly: the bare word "test" matches prose like "test suite" — only check in Bash commands
+  { pattern: /\b(test|vitest|jest|mocha|pytest|ava)\b/, name: "test command", alternative: "You must run mcp__agent-framework__check", bashOnly: true },
 
   // Command chaining with cd - always deny
   { pattern: /\bcd\s+[^&]+&&/, name: 'cd && chain', alternative: 'Use --cwd flag or run from correct directory' },
@@ -168,7 +170,8 @@ export function getContentBlacklistHighlights(content: string): string[] {
     }
     if (inCodeBlock) continue;
 
-    for (const { pattern, name, alternative } of BLACKLIST_PATTERNS) {
+    for (const { pattern, name, alternative, bashOnly } of BLACKLIST_PATTERNS) {
+      if (bashOnly) continue; // Skip patterns too broad for plan prose (e.g., bare "test")
       if (pattern.test(line)) {
         highlights.push(`[VIOLATION: ${name}] "${line.trim()}" → ${alternative}`);
         break; // One highlight per line
@@ -201,8 +204,16 @@ export function getBlacklistHighlights(toolName: string, toolInput: unknown, wor
   const command = (toolInput as { command?: string }).command;
   if (!command) return [];
 
+  // File-reading patterns should only match the primary command (before any pipe).
+  // e.g. "ls | head -5" is output truncation, not file reading.
+  const FILE_READING_PATTERN_NAMES = new Set(["cat", "head", "tail"]);
+  const primaryCommand = command.split(/\s*\|\s*/)[0];
+
   return BLACKLIST_PATTERNS
-    .filter(({ pattern }) => pattern.test(command))
+    .filter(({ pattern, name }) => {
+      const target = FILE_READING_PATTERN_NAMES.has(name) ? primaryCommand : command;
+      return pattern.test(target);
+    })
     .map(({ name, alternative }) => {
       const equivalents = CHECK_EQUIVALENTS[name];
       const msg = equivalents && workingDir

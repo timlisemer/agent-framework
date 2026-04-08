@@ -364,6 +364,8 @@ Examples:
 - "Here are two ways: 1. Simple approach 2. Complex approach. Which sounds better?" → QUESTION
 
 NOT QUESTION (use OK instead):
+- EMOTIONAL CONTEXT: When the user is angry/frustrated (profanity, ALL CAPS, accusations) and the AI acknowledges mistakes then asks what the user wants as conflict resolution — these are conversational, not blocking. Using AskUserQuestion during heated exchanges would be robotic and dismissive.
+- SUBSTANTIVE RESPONSE + TRAILING QUESTION: When the AI first provides a thorough response (>150 words) addressing the user's complaint and THEN asks a follow-up, the response as a whole is OK. The question is natural follow-up, not a standalone blocker.
 - Open-ended "what's next": "Done! Do you have another topic?" "Anything else?" "What would you like to work on next?"
 - Rhetorical: "Why would this fail?" (thinking aloud)
 - Confirmation of completion: "Task complete. Need anything else?"
@@ -373,10 +375,14 @@ NOT QUESTION (use OK instead):
 - Polite elaboration offers: "Would you like me to explain further?", "Should I go into more detail?", "Can I help with anything else?"
 - Soft check-ins: "Does that make sense?", "You know?", "Right?"
 - Conversational responses to casual/social user messages
+- Asking a question WHILE also providing a complete answer/deliverable is OK
+- "Would you like me to explain further?" after completing a task → OK (polite offer, not blocking)
+- Context matters: questions AFTER completing a task differ from questions INSTEAD of doing a task
 
 KEY TEST: Does the user need to make a SPECIFIC decision to proceed?
 - If AI presents options/choices → QUESTION (even if phrased softly)
 - If AI asks "what's next" after completing work → OK
+- OPTION PRESENTATION IN STATEMENT FORM: When AI says "X or Y. Those are the only options." without a question mark, this is still QUESTION because the user must choose.
 When regex detected a pattern AND the response contains option presentation, default to QUESTION.
 
 OK - Use when:
@@ -434,6 +440,24 @@ const PLAIN_TEXT_QUESTION_PATTERNS = [
   /shall I\b/i,
   /let me know if\b/i,
   /what would you prefer/i,
+  /how would you like/i,
+  /which (?:option|approach)/i,
+  /what do you think/i,
+  /any preference/i,
+  /\bor\s+you\s+can\b/i,
+  /\bonly\s+(?:two|three|\d+)\s+(?:options|choices|ways)\b/i,
+];
+
+// Conversational patterns that weaken question detection hints.
+// When a match also matches one of these, the hint is softened to reduce LLM bias toward QUESTION.
+const CONVERSATIONAL_EXEMPTIONS = [
+  /would you like me to explain/i,
+  /would you like more detail/i,
+  /should I go into more detail/i,
+  /let me know if you.*(need|want|have)/i,
+  /can I help with anything else/i,
+  /what (?:do you want|should|would you like).*(?:explore|investigate|look at)/i,
+  /what should the.*agent/i,
 ];
 
 // Patterns indicating AI is asking for plan approval in plain text (should use ExitPlanMode)
@@ -471,10 +495,12 @@ function extractUserQuestion(text: string): string | null {
 
 /**
  * Check if assistant response ends with a question or contains question patterns.
+ * When a conversational exemption matches, the detection is weakened (returned as
+ * "conversational" type) so the LLM classifier is not biased toward QUESTION.
  */
 function hasPlainTextQuestion(assistantText: string): {
   detected: boolean;
-  type?: "question" | "plan_approval";
+  type?: "question" | "plan_approval" | "conversational";
 } {
   const trimmed = assistantText.trim();
 
@@ -485,9 +511,15 @@ function hasPlainTextQuestion(assistantText: string): {
     }
   }
 
+  // Check for conversational exemptions — if matched, weaken the hint
+  const isConversational = CONVERSATIONAL_EXEMPTIONS.some((p) => p.test(trimmed));
+
   // Check for general question patterns
   for (const pattern of PLAIN_TEXT_QUESTION_PATTERNS) {
     if (pattern.test(trimmed)) {
+      if (isConversational) {
+        return { detected: true, type: "conversational" };
+      }
       return { detected: true, type: "question" };
     }
   }
@@ -500,6 +532,9 @@ function hasPlainTextQuestion(assistantText: string): {
       !lastSentence.match(/^(?:why|how) (?:does|is|would) (?:this|that)/i) &&
       !lastSentence.match(/^(?:I wonder|wondering)/i)
     ) {
+      if (isConversational) {
+        return { detected: true, type: "conversational" };
+      }
       return { detected: true, type: "question" };
     }
   }
@@ -577,7 +612,8 @@ Is the extracted text an actual question the user wants answered?`;
 export async function checkStopResponseAlignment(
   transcriptPath: string,
   workingDir: string,
-  hookName: string
+  hookName: string,
+  planMode = false
 ): Promise<StopCheckResult> {
   // Skip stop response checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
@@ -634,16 +670,19 @@ export async function checkStopResponseAlignment(
   // Check for responses ending with ? (likely asking user a question)
   const endsWithQuestion = trimmedAssistant.endsWith("?");
 
-  const needsLLMCheck = questionCheck.detected || stopHookError || regexQuestionHints.length > 0 || isShortResponse || endsWithQuestion;
+  const needsLLMCheck = questionCheck.detected || stopHookError || regexQuestionHints.length > 0 || isShortResponse || endsWithQuestion || planMode;
 
   if (needsLLMCheck) {
+    // When conversational exemption matched, suppress regex hints to avoid biasing LLM toward QUESTION
+    const effectiveHints = questionCheck.type === "conversational" ? [] : regexQuestionHints;
+
     // Use AI to determine classification (pass stop hook error and question hints)
     const classifyResult = await classifyStopResponse(
       userText,
       assistantText,
       workingDir,
       stopHookError?.content,
-      regexQuestionHints
+      effectiveHints
     );
 
     // Build AgentExecutionResult for logging

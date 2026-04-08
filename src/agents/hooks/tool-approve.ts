@@ -63,6 +63,12 @@ export async function checkToolApproval(
 
   const highlights = getBlacklistHighlights(toolName, toolInput, workingDir);
 
+  // Deterministic deny for blacklisted patterns — bypasses LLM (appeal system still provides override)
+  if (highlights.length > 0) {
+    const reason = highlights.map(h => h.replace(/^\[BLACKLIST: [^\]]+\]\s*/, "")).join(". ");
+    return { approved: false, reason };
+  }
+
   // Lazy mode: skip LLM if no blacklist violations
   if (options?.lazyMode && highlights.length === 0) {
     logFastPathApproval("tool-approve", hookName, toolName, workingDir, "No blacklist violations");

@@ -117,6 +117,9 @@ export interface TranscriptReadOptions {
   /** Exclude slash command system prompts (default: true) */
   excludeSlashCommandPrompts?: boolean;
 
+  /** Exclude system-injected meta messages like stop-hook feedback (default: true) */
+  excludeMetaMessages?: boolean;
+
   /**
    * Always include the first user message (initial request).
    * Useful for plan validation where the original task context matters.
@@ -172,6 +175,7 @@ interface ContentBlock {
 }
 
 interface TranscriptEntry {
+  isMeta?: boolean;
   message?: {
     role: string;
     content: string | ContentBlock[];
@@ -453,6 +457,7 @@ export async function readTranscriptExact(
     toolOptions = {},
     excludeSystemReminders = true,
     excludeSlashCommandPrompts = true,
+    excludeMetaMessages = true,
     includeFirstUserMessage = false,
     includeSlashCommandContext = false,
   } = options;
@@ -570,6 +575,12 @@ export async function readTranscriptExact(
     const { role, content: msgContent } = entry.message;
 
     if (role === 'user') {
+      // Skip system-injected meta messages (stop-hook feedback, slash command
+      // instructions). These are not real user input and waste context slots.
+      if (excludeMetaMessages && entry.isMeta === true) {
+        continue;
+      }
+
       // Check staleness: skip user messages beyond maxStale distance.
       // This prevents old user directives from being re-checked after they've
       // already been processed by previous hook invocations.
@@ -615,6 +626,7 @@ export async function readTranscriptExact(
 
         const entry = parsedEntries[i];
         if (!entry || !entry.message || entry.message.role !== "user") continue;
+        if (excludeMetaMessages && entry.isMeta === true) continue;
 
         const msgContent = entry.message.content;
         let text: string | undefined;

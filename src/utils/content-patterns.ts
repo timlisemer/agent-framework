@@ -56,6 +56,21 @@ const ASSISTANT_VERIFICATION_REGEX = /assistant\s+verification/i;
 const MANUAL_VERIFICATION_REGEX = /manual\s+(user\s+)?verification/i;
 
 /**
+ * Detect plan clearing: Write that replaces the plan with placeholder/stub content.
+ * A plan Write must contain substantive content (5+ non-empty lines).
+ * Plans shorter than 5 lines or containing only a title with no body are violations.
+ */
+export function getPlanClearingHighlights(content: string): string[] {
+  const nonEmptyLines = content.split("\n").filter((l) => l.trim().length > 0);
+  if (nonEmptyLines.length < 5) {
+    return [
+      `[VIOLATION: plan clearing] Plan content has only ${nonEmptyLines.length} non-empty line(s) — this is placeholder/stub content. Use Bash rm to delete the plan file instead of writing placeholder content.`,
+    ];
+  }
+  return [];
+}
+
+/**
  * Detect verification sections that lack proper "Assistant Verification"
  * or "Manual User Verification" subsections.
  * Returns highlighted violations for injection into agent prompts.
@@ -148,7 +163,10 @@ const SELF_DIRECTED_PATTERNS = [
  * Detect AI questions directed at user that should use AskUserQuestion tool.
  * Returns array of detected question highlights for feedback.
  *
- * Only detects questions that:
+ * Splits text into sentences and checks each independently so questions
+ * embedded mid-response are caught (not just when the entire text ends with ?).
+ *
+ * Only detects sentences that:
  * 1. End with ? (question mark)
  * 2. Match user-directed patterns (should I, do you want, which approach, etc.)
  * 3. Do NOT match self-directed/rhetorical patterns
@@ -156,23 +174,31 @@ const SELF_DIRECTED_PATTERNS = [
 export function detectUserDirectedQuestions(text: string): string[] {
   const highlights: string[] = [];
 
-  // Must end with ? to be considered a question
-  if (!text.trim().endsWith("?")) {
-    return highlights;
-  }
+  // Split into sentences on . ! or newline boundaries, keep ? attached
+  const sentences = text.split(/(?<=[.!])\s+|\n+/).filter((s) => s.trim().length > 0);
 
-  // Check if it's self-directed (skip these)
-  for (const pattern of SELF_DIRECTED_PATTERNS) {
-    if (pattern.test(text.trim())) {
-      return highlights;
+  for (const sentence of sentences) {
+    const trimmed = sentence.trim();
+
+    // Sentence must end with ? to be considered a question
+    if (!trimmed.endsWith("?")) continue;
+
+    // Check if it's self-directed (skip these)
+    let selfDirected = false;
+    for (const pattern of SELF_DIRECTED_PATTERNS) {
+      if (pattern.test(trimmed)) {
+        selfDirected = true;
+        break;
+      }
     }
-  }
+    if (selfDirected) continue;
 
-  // Check for user-directed question patterns
-  for (const { pattern, name, message } of USER_DIRECTED_QUESTION_PATTERNS) {
-    if (pattern.test(text)) {
-      highlights.push(`[QUESTION: ${name}] "${text.trim().slice(0, 100)}..." → ${message}`);
-      break; // Only report first match
+    // Check for user-directed question patterns
+    for (const { pattern, name, message } of USER_DIRECTED_QUESTION_PATTERNS) {
+      if (pattern.test(trimmed)) {
+        highlights.push(`[QUESTION: ${name}] "${trimmed.slice(0, 100)}..." → ${message}`);
+        break; // Only report first match per sentence
+      }
     }
   }
 

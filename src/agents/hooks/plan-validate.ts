@@ -34,7 +34,7 @@ import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { getBlacklistDescription, getContentBlacklistHighlights } from "../../utils/command-patterns.js";
-import { getRuleViolationHighlights, getVerificationStructureHighlights } from "../../utils/content-patterns.js";
+import { getPlanClearingHighlights, getRuleViolationHighlights, getVerificationStructureHighlights } from "../../utils/content-patterns.js";
 
 /**
  * Validate that a plan aligns with user intent.
@@ -99,16 +99,36 @@ export async function checkPlanIntent(
 
   try {
     // Check for violations in the full resulting plan
+    const planClearingViolations = getPlanClearingHighlights(resultingPlan);
     const blacklistHighlights = getContentBlacklistHighlights(resultingPlan);
     const ruleViolations = getRuleViolationHighlights(resultingPlan);
     const verificationViolations = getVerificationStructureHighlights(resultingPlan);
-    const allViolations = [...blacklistHighlights, ...ruleViolations, ...verificationViolations];
+    const allViolations = [...planClearingViolations, ...blacklistHighlights, ...ruleViolations, ...verificationViolations];
+
+    // Deterministic deny for exit mode when regex violations exist — LLM unreliably ignores them
+    if (mode === "exit" && allViolations.length > 0) {
+      const feedback = allViolations.map(v =>
+        v.replace(/^\[VIOLATION: [^\]]+\]\s*"[^"]*"\s*→\s*/, "")
+      ).join(". ");
+      return { approved: false, reason: feedback };
+    }
+
+    // Deterministic deny for Write in edit mode when violations exist — Write replaces the
+    // entire file so violations in the result are definitive, not diff artifacts
+    if (mode === "edit" && allViolations.length > 0 && toolName === "Write") {
+      const feedback = allViolations.map(v =>
+        v.replace(/^\[VIOLATION: [^\]]+\]\s*"[^"]*"\s*→\s*/, "")
+      ).join(". ");
+      return { approved: false, reason: feedback };
+    }
+
     const violationSection = allViolations.length > 0
       ? `=== VIOLATIONS DETECTED ===\n${allViolations.join("\n")}\n=== END VIOLATIONS ===\n\n`
       : "";
 
-    // Edit mode: fast-path approve if no violations in full plan
-    if (mode === "edit" && allViolations.length === 0) {
+    // Edit mode: fast-path approve if no violations in full plan (Edit only).
+    // Write replaces the entire file, so structural issues need LLM review even without regex violations.
+    if (mode === "edit" && allViolations.length === 0 && toolName === "Edit") {
       logFastPathApproval("plan-validate", hookName, toolName, workingDir, "No violations in full plan");
       return { approved: true };
     }

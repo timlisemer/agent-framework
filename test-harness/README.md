@@ -197,6 +197,18 @@ Do **not** read from `test-harness/fixtures/` -- use real transcripts from `~/.c
 
 **Do not read the replay script or harness source code.** This README is the complete interface -- follow the labeling workflow above, nothing else.
 
+## Transcript Anatomy
+
+Key fields on each JSONL line:
+
+| Field | Description |
+|-------|-------------|
+| `type` | Line type: `user`, `assistant`, `system`, `permission-mode`, `file-history-snapshot` |
+| `isMeta` | If `true`, this user message is system-injected (stop-hook feedback, slash command instructions), not real user input. Skipped during replay and filtered from hook agent context. |
+| `isSidechain` | If `true`, belongs to a subagent transcript. Only use main session transcripts. |
+| `message` | The API message object with `role` and `content`. |
+| `stop_reason` | On assistant messages: `"end_turn"`, `"tool_use"`, or `null` (streaming chunk). |
+
 ## Known Limitations
 
 - Replaying transcripts that contain baked-in synthetic entries (EnterPlanMode/ExitPlanMode) may duplicate them
