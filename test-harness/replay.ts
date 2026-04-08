@@ -18,7 +18,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import * as os from "os";
-import { ReplayEvent, ReplaySummary, ReplayExpectations, ReplayArgs } from "./lib/types.js";
+import { ReplayEvent, ReplayExpectations, ReplayArgs } from "./lib/types.js";
 import { classifyLine, extractCwd } from "./lib/classifier.js";
 import { runHook, cleanupBackgroundProcesses } from "./lib/harness.js";
 
@@ -45,6 +45,8 @@ function parseArgs(): ReplayArgs {
   }
 
   const list = args.includes("--list");
+  const scaffold = args.includes("--scaffold");
+  const validate = args.includes("--validate");
   const expand = getArg("expand");
   const depthRaw = getArg("depth");
   const depth = depthRaw ? parseInt(depthRaw, 10) : 1;
@@ -56,22 +58,29 @@ function parseArgs(): ReplayArgs {
   let expect: ReplayExpectations | undefined;
   const expectRaw = getArg("expect");
   if (expectRaw) {
+    if (!expectRaw.endsWith(".json")) {
+      console.error(
+        "ERROR: --expect requires a path to a .json file. Inline JSON is not supported.\n\n" +
+        "  Store labels at: /tmp/test-harness-labels/<transcript-name>.json\n" +
+        "  Use --scaffold to generate a starter file with all keys pre-filled.\n"
+      );
+      process.exit(2);
+    }
     try {
-      // Try as inline JSON first
-      expect = JSON.parse(expectRaw);
-    } catch {
-      // Try as file path
-      try {
-        const fileContent = fs.readFileSync(expectRaw, "utf-8");
-        expect = JSON.parse(fileContent);
-      } catch {
-        console.error("Error: --expect must be valid JSON string or path to a .json file");
-        process.exit(2);
-      }
+      const fileContent = fs.readFileSync(expectRaw, "utf-8");
+      const parsed = JSON.parse(fileContent);
+      expect = parsed.labels ?? parsed;
+    } catch (err) {
+      console.error(
+        `ERROR: Cannot read label file: ${expectRaw}\n` +
+        `  ${err instanceof Error ? err.message : String(err)}\n\n` +
+        "  Use --scaffold to generate a starter label file.\n"
+      );
+      process.exit(2);
     }
   }
 
-  return { transcript, expect, cwd, timeout, list, expand, depth };
+  return { transcript, expect, expectPath: expectRaw, cwd, timeout, list, expand, depth, scaffold, validate };
 }
 
 // ─── Expectation Matching ───────────────────────────────────────────────────
@@ -93,6 +102,119 @@ function matchExpectation(
   }
 
   return undefined;
+}
+
+// ─── Scorable Key Collection ───────────────────────────────────────────────
+
+function collectScorableKeys(
+  lines: Record<string, unknown>[]
+): Array<{ key: string; line: number; type: "tool_use" | "stop"; tool?: string }> {
+  const keys: Array<{ key: string; line: number; type: "tool_use" | "stop"; tool?: string }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const classification = classifyLine(lines[i], lines, i);
+    if (classification.kind === "pre-tool-use") {
+      for (const block of classification.blocks) {
+        keys.push({ key: block.id, line: i, type: "tool_use", tool: block.name });
+      }
+    }
+    if (classification.kind === "stop-response-check") {
+      keys.push({ key: `stop:${i}`, line: i, type: "stop" });
+    }
+  }
+  return keys;
+}
+
+// ─── Expectation Validation ────────────────────────────────────────────────
+
+function validateExpectationCompleteness(
+  expectations: ReplayExpectations,
+  scorableKeys: Array<{ key: string; line: number; type: "tool_use" | "stop"; tool?: string }>,
+): void {
+  const unlabeled = scorableKeys.filter(
+    (sk) => matchExpectation(expectations, sk.key) === undefined
+  );
+  const expectKeys = Object.keys(expectations).filter((k) => !k.startsWith("_"));
+  const orphaned = expectKeys.filter((ek) => {
+    return !scorableKeys.some((sk) =>
+      sk.key === ek || (ek.length >= MIN_PREFIX_LENGTH && sk.key.startsWith(ek))
+    );
+  });
+
+  // Check for unresolved INVESTIGATE values
+  const unresolved = Object.entries(expectations).filter(
+    ([k, v]) => !k.startsWith("_") && v === "INVESTIGATE"
+  );
+
+  // Check for invalid label values
+  const invalidValues = Object.entries(expectations).filter(([k, v]) => {
+    if (k.startsWith("_")) return false;
+    if (k.startsWith("stop:")) return !["pass", "block"].includes(v);
+    return !["allow", "deny"].includes(v);
+  });
+
+  if (unlabeled.length === 0 && orphaned.length === 0 && invalidValues.length === 0) return;
+
+  const total = scorableKeys.length;
+  const labeled = total - unlabeled.length;
+  const msg: string[] = [];
+
+  msg.push("");
+  msg.push(`ERROR: Incomplete label set — ${labeled} of ${total} scorable hooks labeled.`);
+  msg.push("");
+
+  if (unlabeled.length > 0) {
+    msg.push(`UNLABELED HOOKS (${unlabeled.length}) — add a label for each:`);
+    msg.push("");
+    for (const u of unlabeled) {
+      const defaultVal = u.type === "tool_use" ? "allow" : "pass";
+      const desc = u.type === "tool_use" ? `tool: ${u.tool}` : "stop point";
+      msg.push(`  "${u.key}": "${defaultVal}"    (line ${u.line}, ${desc})`);
+    }
+    msg.push("");
+  }
+
+  if (orphaned.length > 0) {
+    msg.push(`ORPHANED KEYS (${orphaned.length}) — no matching hook, remove from label file:`);
+    for (const o of orphaned) msg.push(`  "${o}"`);
+    msg.push("");
+  }
+
+  if (unresolved.length > 0) {
+    msg.push(`UNRESOLVED (${unresolved.length}) — still marked "INVESTIGATE", must be "allow"/"deny" or "pass"/"block":`);
+    for (const [k] of unresolved) msg.push(`  "${k}"`);
+    msg.push("");
+  }
+
+  if (invalidValues.length > 0) {
+    msg.push(`INVALID VALUES (${invalidValues.length}) — tool labels must be "allow"/"deny", stop labels "pass"/"block":`);
+    for (const [k, v] of invalidValues) msg.push(`  "${k}": "${v}"`);
+    msg.push("");
+  }
+
+  msg.push("HOW TO FIX:");
+  msg.push("  1. Run --scaffold to generate a starter label file with all keys pre-filled");
+  msg.push("  2. Run --list to see all scorable hooks with user reactions");
+  msg.push("  3. Positive user reaction (continues normally) -> \"allow\" for tools, \"pass\" for stops");
+  msg.push("  4. Negative user reaction -> run --expand <id> to investigate, then \"deny\" or \"block\"");
+  msg.push("  5. EVERY tool call and stop point must be labeled. No exceptions.");
+  msg.push("");
+
+  console.error(msg.join("\n"));
+  process.exit(2);
+}
+
+// ─── Negative Reaction Detection ───────────────────────────────────────────
+
+function looksNegative(reaction: string): boolean {
+  const lower = reaction.toLowerCase();
+  const patterns = [
+    "what the", "why did", "why are you", "don't", "dont", "stop",
+    "wrong", "fuck", "shit", "damn", "ugh", "not what", "didn't ask",
+    "didnt ask", "cancel", "undo", "revert", "i said", "that's not",
+    "thats not", "you forgot", "you missed", "you should have",
+    "no ", "broke", "break", "mistake", "error",
+  ];
+  return patterns.some((p) => lower.includes(p));
 }
 
 // ─── Tool Log Reader ────────────────────────────────────────────────────────
@@ -269,34 +391,144 @@ function summarizeLine(lines: Record<string, unknown>[], index: number): Record<
  * List all tool calls and stop points with the next user reaction.
  */
 function listToolCalls(lines: Record<string, unknown>[]): void {
+  let count = 0;
+  let investigateCount = 0;
+
   for (let i = 0; i < lines.length; i++) {
     const classification = classifyLine(lines[i], lines, i);
 
     if (classification.kind === "pre-tool-use") {
       const reaction = findNextUserReaction(lines, i);
       for (const block of classification.blocks) {
+        const isNeg = reaction ? looksNegative(reaction) : false;
+        const suggested = isNeg ? "INVESTIGATE" : "allow";
+        if (isNeg) investigateCount++;
         const entry: Record<string, unknown> = {
           line: i,
           type: "tool_use",
           tool: block.name,
           id: block.id,
+          suggested_label: suggested,
         };
         if (reaction) entry.user_reaction = reaction;
         console.log(JSON.stringify(entry));
+        count++;
       }
     }
 
     if (classification.kind === "stop-response-check") {
       const reaction = findNextUserReaction(lines, i);
+      const isNeg = reaction ? looksNegative(reaction) : false;
+      const suggested = isNeg ? "INVESTIGATE" : "pass";
+      if (isNeg) investigateCount++;
       const entry: Record<string, unknown> = {
         line: i,
         type: "stop",
         key: `stop:${i}`,
+        suggested_label: suggested,
       };
       if (reaction) entry.user_reaction = reaction;
       console.log(JSON.stringify(entry));
+      count++;
     }
   }
+
+  console.error(
+    `\n${count} scorable hooks found (${investigateCount} flagged INVESTIGATE).` +
+    ` Use --scaffold to generate a starter label file.\n`
+  );
+}
+
+/**
+ * Generate a starter label file with all scorable keys pre-filled.
+ */
+function scaffoldLabelFile(
+  lines: Record<string, unknown>[],
+  transcriptPath: string,
+  scorableKeys: Array<{ key: string; line: number; type: "tool_use" | "stop"; tool?: string }>,
+): void {
+  const transcriptName = path.basename(transcriptPath, ".jsonl");
+  const labelDir = "/tmp/test-harness-labels";
+  const labelPath = path.join(labelDir, `${transcriptName}.json`);
+
+  const labels: Record<string, string> = {};
+  let investigateCount = 0;
+
+  for (const sk of scorableKeys) {
+    const reaction = findNextUserReaction(lines, sk.line);
+    const isNeg = reaction ? looksNegative(reaction) : false;
+    if (sk.type === "tool_use") {
+      labels[sk.key] = isNeg ? "INVESTIGATE" : "allow";
+    } else {
+      labels[sk.key] = isNeg ? "INVESTIGATE" : "pass";
+    }
+    if (isNeg) investigateCount++;
+  }
+
+  const output = {
+    _meta: {
+      transcript: transcriptPath,
+      created: new Date().toISOString(),
+      total_hooks: scorableKeys.length,
+      needs_review: investigateCount,
+    },
+    labels,
+  };
+
+  fs.mkdirSync(labelDir, { recursive: true });
+  fs.writeFileSync(labelPath, JSON.stringify(output, null, 2) + "\n");
+
+  console.log(labelPath);
+  console.error(
+    `\nScaffold written: ${scorableKeys.length} hooks (${investigateCount} flagged INVESTIGATE)\n` +
+    `  File: ${labelPath}\n\n` +
+    "Next steps:\n" +
+    "  1. Review items marked \"INVESTIGATE\" — use --expand <id> for context\n" +
+    "  2. Change each \"INVESTIGATE\" to \"allow\"/\"deny\" (tools) or \"pass\"/\"block\" (stops)\n" +
+    "  3. Run --validate to check completeness\n" +
+    `  4. Run replay: npx tsx test-harness/replay.ts --transcript ${transcriptPath} --expect ${labelPath}\n`
+  );
+}
+
+/**
+ * Validate a label file for completeness and correctness without running hooks.
+ */
+function validateLabelFile(
+  expectations: ReplayExpectations,
+  scorableKeys: Array<{ key: string; line: number; type: "tool_use" | "stop"; tool?: string }>,
+): void {
+  const unlabeled = scorableKeys.filter(
+    (sk) => matchExpectation(expectations, sk.key) === undefined
+  );
+  const expectKeys = Object.keys(expectations).filter((k) => !k.startsWith("_"));
+  const orphaned = expectKeys.filter((ek) => {
+    return !scorableKeys.some((sk) =>
+      sk.key === ek || (ek.length >= MIN_PREFIX_LENGTH && sk.key.startsWith(ek))
+    );
+  });
+  const invalidValues = Object.entries(expectations).filter(([k, v]) => {
+    if (k.startsWith("_")) return false;
+    if (k.startsWith("stop:")) return !["pass", "block"].includes(v);
+    return !["allow", "deny"].includes(v);
+  });
+
+  const valid = unlabeled.length === 0 && orphaned.length === 0 && invalidValues.length === 0;
+
+  const result: Record<string, unknown> = {
+    valid,
+    scorable: scorableKeys.length,
+    labeled: scorableKeys.length - unlabeled.length,
+  };
+  if (unlabeled.length > 0) {
+    result.unlabeled = unlabeled.map((u) => ({ key: u.key, line: u.line, type: u.type, tool: u.tool }));
+  }
+  if (orphaned.length > 0) result.orphaned = orphaned;
+  if (invalidValues.length > 0) {
+    result.invalid_values = invalidValues.map(([k, v]) => ({ key: k, value: v }));
+  }
+
+  console.log(JSON.stringify(result, null, 2));
+  process.exit(valid ? 0 : 2);
 }
 
 /**
@@ -358,6 +590,81 @@ function expandContext(
   }));
 }
 
+// ─── Report Formatting ─────────────────────────────────────────────────────
+
+function formatReport(
+  results: ReplayEvent[],
+  transcriptPath: string,
+  labelFilePath: string | undefined,
+  elapsedMs: number,
+): void {
+  const scored = results.filter((r) => r.pass !== undefined);
+  const passed = scored.filter((r) => r.pass === true);
+  const failed = scored.filter((r) => r.pass === false);
+  const errors = results.filter((r) => r.decision === "error" || r.decision === "timeout");
+
+  const report: Record<string, unknown> = {
+    transcript: transcriptPath,
+    label_file: labelFilePath ?? null,
+    total_hooks_fired: results.length,
+    scored: scored.length,
+    passed: passed.length,
+    failed: failed.length,
+    errors: errors.length,
+    elapsed_ms: elapsedMs,
+  };
+
+  // Only include detailed entries for failures (label != hook decision)
+  if (failed.length > 0) {
+    report.failures = failed.map((f) => {
+      const entry: Record<string, unknown> = {
+        line: f.line,
+        hook: f.hook,
+      };
+      if (f.tool) entry.tool = f.tool;
+      if (f.id) entry.id = f.id;
+      entry.expected = f.expected;
+      entry.actual = f.decision;
+      if (f.gate) entry.gate = f.gate;
+      if (f.reason) entry.reason = f.reason;
+      return entry;
+    });
+  }
+
+  if (errors.length > 0) {
+    report.error_details = errors.map((e) => ({
+      line: e.line,
+      hook: e.hook,
+      tool: e.tool,
+      id: e.id,
+      error: e.error,
+    }));
+  }
+
+  // Write report to file
+  const transcriptName = path.basename(transcriptPath, ".jsonl");
+  const reportDir = "/tmp/test-harness-reports";
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const reportPath = path.join(reportDir, `${transcriptName}_${timestamp}.json`);
+  fs.mkdirSync(reportDir, { recursive: true });
+
+  report.report_file = reportPath;
+
+  const reportJson = JSON.stringify(report, null, 2);
+  fs.writeFileSync(reportPath, reportJson + "\n");
+  console.log(reportJson);
+
+  // Prominent instruction for the AI reading this output
+  console.log("");
+  console.log("=".repeat(80));
+  console.log("ACTION REQUIRED: You MUST inform the user that a replay report was saved.");
+  console.log(`Report file: ${reportPath}`);
+  console.log("Tell the user: \"A replay report has been saved at:");
+  console.log(`  ${reportPath}`);
+  console.log("You can review it anytime.\"");
+  console.log("=".repeat(80));
+}
+
 // ─── Main Replay ────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -374,7 +681,15 @@ async function main(): Promise<void> {
     }
   });
 
-  // 1b. List mode — output tool calls and stop points, then exit
+  const scorableKeys = collectScorableKeys(lines);
+
+  // Scaffold mode — generate starter label file, then exit
+  if (config.scaffold) {
+    scaffoldLabelFile(lines, config.transcript, scorableKeys);
+    process.exit(0);
+  }
+
+  // List mode — output tool calls and stop points, then exit
   if (config.list) {
     if (config.expand) {
       expandContext(lines, config.expand, config.depth);
@@ -382,6 +697,20 @@ async function main(): Promise<void> {
       listToolCalls(lines);
     }
     process.exit(0);
+  }
+
+  // Validate mode — check label file completeness without hooks, then exit
+  if (config.validate) {
+    if (!config.expect) {
+      console.error("ERROR: --validate requires --expect <label-file.json>");
+      process.exit(2);
+    }
+    validateLabelFile(config.expect, scorableKeys);
+  }
+
+  // Validate completeness before replay
+  if (config.expect) {
+    validateExpectationCompleteness(config.expect, scorableKeys);
   }
 
   // 2. Determine cwd
@@ -721,27 +1050,12 @@ async function main(): Promise<void> {
     }
   }
 
-  // 11. Output results as JSONL
-  for (const event of results) {
-    console.log(JSON.stringify(event));
-  }
+  // 11. Output structured report
+  const elapsedMs = Date.now() - startTime;
+  formatReport(results, config.transcript, config.expectPath, elapsedMs);
 
-  // 12. Compute and output summary
-  const scored = results.filter((r) => r.pass !== undefined);
-  const passed = scored.filter((r) => r.pass === true);
-  const failed = scored.filter((r) => r.pass === false);
-  const errors = results.filter((r) => r.decision === "error" || r.decision === "timeout");
-
-  const summary: ReplaySummary = {
-    type: "summary",
-    total: results.length,
-    scored: scored.length,
-    passed: passed.length,
-    failed: failed.length,
-    errors: errors.length,
-    ms: Date.now() - startTime,
-  };
-  console.log(JSON.stringify(summary));
+  // 12. Compute exit code
+  const failed = results.filter((r) => r.pass === false);
 
   // 13. Cleanup
   await cleanupBackgroundProcesses(sessionDir);

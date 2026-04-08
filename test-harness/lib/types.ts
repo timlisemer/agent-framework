@@ -46,9 +46,12 @@ export type ReplayExpectations = Record<string, string>;
 export interface ReplayArgs {
   transcript: string;
   expect?: ReplayExpectations;
+  expectPath?: string;
   cwd?: string;
   timeout: number;
   list: boolean;
   expand?: string;
   depth: number;
+  scaffold: boolean;
+  validate: boolean;
 }
