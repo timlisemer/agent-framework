@@ -1,90 +1,54 @@
 /**
- * Shared types for the test harness.
+ * Shared types for the transcript replay test harness.
  *
  * @module test-harness/lib/types
  */
 
 /**
- * Result of a single hook test execution.
+ * A single hook invocation result emitted as JSONL.
  */
-export interface TestResult {
-  pass: boolean;
+export interface ReplayEvent {
+  line: number;
   hook: string;
   decision: string;
-  expected: string;
-  agent?: string;
-  expectedAgent?: string;
+  tool?: string;
+  id?: string;
+  gate?: string;
   reason?: string;
-  label?: string;
+  expected?: string;
+  pass?: boolean;
   ms: number;
   error?: string;
 }
 
 /**
- * A tool_use entry extracted from a transcript for list mode.
+ * Final summary line emitted after all hook invocations.
  */
-export interface ToolUseEntry {
-  line: number;
-  toolName: string;
-  toolInput: unknown;
-  toolUseId: string;
-  planModeActive: boolean;
-  precedingUserMessage?: string;
+export interface ReplaySummary {
+  type: "summary";
+  total: number;
+  scored: number;
+  passed: number;
+  failed: number;
+  errors: number;
+  ms: number;
 }
 
 /**
- * CacheState wrapper format used by all session state files.
+ * Expectations map: tool_use_id (or prefix) -> expected decision,
+ * or "stop:<line>" -> expected decision.
  */
-export interface CacheState<T> {
-  sessionId: string;
-  data: T;
-}
+export type ReplayExpectations = Record<string, string>;
 
 /**
- * SessionState as expected by the framework's state.json.
+ * Parsed CLI arguments for replay.ts.
  */
-export interface SessionState {
-  lastUserMessageHash: string;
-  summaryVersion: number;
-  toolCallCount: number;
-  toolCallsSinceUpdate: number;
-  lastUpdated: number;
-  currentEditIntent: boolean | null;
-  previousEditIntent: boolean | null;
-  editIntentTimestamp: number;
-  editIntentOverturnCount: number;
-}
-
-/**
- * Default SessionState factory with optional overrides.
- */
-export function defaultSessionState(overrides: Partial<SessionState> = {}): SessionState {
-  return {
-    lastUserMessageHash: "",
-    summaryVersion: 0,
-    toolCallCount: 10,
-    toolCallsSinceUpdate: 10,
-    lastUpdated: Date.now(),
-    currentEditIntent: null,
-    previousEditIntent: null,
-    editIntentTimestamp: 0,
-    editIntentOverturnCount: 0,
-    ...overrides,
-  };
-}
-
-/**
- * CLI arguments parsed from run.ts.
- */
-export interface HarnessArgs {
-  hook: "pre-tool-use" | "stop-response-check";
+export interface ReplayArgs {
   transcript: string;
-  line: number;
-  expect: string;
-  expectAgent?: string;
-  label?: string;
+  expect?: ReplayExpectations;
   cwd?: string;
-  editIntent?: boolean | null;
-  toolCallCount?: number;
   timeout: number;
+  list: boolean;
+  expand?: string;
+  depth: number;
 }

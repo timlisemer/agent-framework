@@ -50,6 +50,11 @@ export function encodeProjectRoot(): string {
  * @returns Full path to the session directory
  */
 export function getSessionDir(transcriptPath: string): string {
+  if (process.env.AGENT_FRAMEWORK_SESSION_DIR) {
+    fs.mkdirSync(process.env.AGENT_FRAMEWORK_SESSION_DIR, { recursive: true });
+    return process.env.AGENT_FRAMEWORK_SESSION_DIR;
+  }
+
   const hash = hashString(transcriptPath);
 
   const cached = sessionDirCache.get(hash);

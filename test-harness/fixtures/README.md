@@ -1,36 +1,30 @@
-# Fixtures
+# Fixtures — Transcript Format
 
-Curated real JSONL transcripts for hook replay testing. Transcript files are gitignored — only this README is checked in.
+Reference for the JSONL transcript format used by the replay harness. Transcripts are read directly from `~/.claude/projects/<project>/*.jsonl` — do not copy or curate transcripts into this directory.
 
-## Transcript Format
+## Line Types
 
-Each fixture is a `.jsonl` file — one JSON object per line. Lines follow this structure:
+Each `.jsonl` file has one JSON object per line. The `type` field determines the line type:
 
-```jsonl
-{"type":"permission-mode","permissionMode":"default","sessionId":"70c52a93-..."}
-{"type":"file-history-snapshot","messageId":"...","snapshot":{...}}
-{"type":"user","message":{"role":"user","content":"Fix the bug in main.ts"},"cwd":"/home/user/project"}
-{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"Read","input":{"file_path":"main.ts"}}]}}
-{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01","type":"tool_result","content":"const x = 1;\n..."}]}}
-```
+- `permission-mode` — session permission config (no `cwd` field)
+- `file-history-snapshot` — file state at session start
+- `attachment` — attached files/images
+- `system` — system messages
+- `user` — user messages (real prompts or tool results)
+- `assistant` — assistant responses (may contain tool_use blocks)
 
-The first few lines are session metadata (`permission-mode`, `file-history-snapshot`, attachments). The `cwd` field appears in user message lines. Subsequent lines are conversation turns: `user` (containing text or `tool_result` blocks), and `assistant` (containing `tool_use` blocks).
+## Identifying Content
 
-## Adding Fixtures
+**User prompts vs tool results**: User messages (`type:"user"`) with string `message.content` are real prompts. User messages with array content containing `{type:"tool_result"}` blocks are tool returns.
 
-1. Find the transcript you want. Claude Code stores them at `~/.claude/projects/<project-dir>/<session-id>.jsonl`. The `<project-dir>` is the absolute path with both `/` and `_` replaced by `-` (e.g. `/home/tim/Coding/public_repos/my-project` becomes `-home-tim-Coding-public-repos-my-project`). List recent sessions: `ls -lt ~/.claude/projects/<project-dir>/`.
-2. Copy the transcript into `test-harness/fixtures/transcripts/`.
-3. **Sanitize the transcript** by editing the JSONL file in a text editor. Individual lines can be long (1000+ characters) — search-and-replace is more practical than eyeballing. For each line:
-   - **API keys / tokens** — search for `sk-`, `api_key`, `token`, `secret` and replace values with `REDACTED`
-   - **Personal data** — replace private emails, usernames, or repo names with generic values. Public project paths and GitHub usernames are fine to keep
-   - **Large blobs** — replace base64 content or huge tool results with `"...truncated..."` (keep JSON structure valid)
-   - **Verify validity** after editing: `python3 -c "import json; [json.loads(l) for l in open('fixture.jsonl')]"` — this will throw on any malformed line
-4. Run `--list` to identify testable tool calls:
-   ```bash
-   npx tsx test-harness/run.ts --list test-harness/fixtures/transcripts/<your-file>.jsonl
-   ```
-5. Document each fixture below with its test scenarios
+**System-injected messages**: User messages with `isMeta:true` are system-injected, not real user input. These are skipped during replay.
 
-## Fixture Index
+**tool_use blocks**: Found in `type:"assistant"` lines. Look in `message.content` array for `{type:"tool_use", id:"toolu_...", name:"...", input:{...}}`. The `id` field is the tool_use_id used in expectations.
 
-(No fixtures checked in — transcripts are gitignored. Copy one from `~/.claude/projects/` to get started.)
+**Stop points**: `type:"assistant"` lines with `message.stop_reason:"end_turn"` and no tool_use blocks in content.
+
+**tool_result content**: The `content` field on tool_result blocks can be a string, an array of text blocks, or tool_reference blocks. All formats are handled by the replay harness.
+
+## Main Session vs Subagent Transcripts
+
+Only use **main session transcripts** — the `{session-uuid}.jsonl` files at the top level of the project directory. Do not use subagent transcripts (`subagents/agent-{id}.jsonl`), which have `isSidechain: true` and `agentId` metadata fields.

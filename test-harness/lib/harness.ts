@@ -87,10 +87,14 @@ export async function cleanupBackgroundProcesses(sessionDir: string): Promise<vo
     const entries = fs.readdirSync(pidsDir);
     for (const entry of entries) {
       try {
-        const pid = parseInt(
-          fs.readFileSync(path.join(pidsDir, entry), "utf-8").trim(),
-          10
-        );
+        const raw = fs.readFileSync(path.join(pidsDir, entry), "utf-8").trim();
+        let pid: number;
+        try {
+          const parsed = JSON.parse(raw);
+          pid = parsed.pid;
+        } catch {
+          pid = parseInt(raw, 10);
+        }
         if (!isNaN(pid)) {
           try {
             process.kill(pid, "SIGTERM");
