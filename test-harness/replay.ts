@@ -16,8 +16,8 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import * as crypto from "crypto";
 import * as os from "os";
+import { execSync } from "child_process";
 import { ReplayEvent, ReplayExpectations, ReplayArgs } from "./lib/types.js";
 import { classifyLine, extractCwd } from "./lib/classifier.js";
 import { runHook, cleanupBackgroundProcesses } from "./lib/harness.js";
@@ -26,6 +26,26 @@ const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), 
 const BASE_DIR = path.join(os.homedir(), ".agent-framework");
 const TEST_RUNS_DIR = path.join(BASE_DIR, "test-runs");
 const MIN_PREFIX_LENGTH = 12;
+
+function transcriptSlug(transcriptPath: string): string {
+  return path.basename(transcriptPath, ".jsonl");
+}
+
+function transcriptDir(transcriptPath: string): string {
+  return path.join(TEST_RUNS_DIR, transcriptSlug(transcriptPath));
+}
+
+function cacheDir(transcriptPath: string): string {
+  return path.join(transcriptDir(transcriptPath), "cache");
+}
+
+function getHeadCommit(): string {
+  try {
+    return execSync("git rev-parse HEAD", { cwd: REPO_ROOT, encoding: "utf-8" }).trim();
+  } catch {
+    return "unknown";
+  }
+}
 
 // ─── Arg Parsing ────────────────────────────────────────────────────────────
 
@@ -47,6 +67,7 @@ function parseArgs(): ReplayArgs {
   const list = args.includes("--list");
   const scaffold = args.includes("--scaffold");
   const validate = args.includes("--validate");
+  const generateLabels = args.includes("--generate-labels");
   const expand = getArg("expand");
   const depthRaw = getArg("depth");
   const depth = depthRaw ? parseInt(depthRaw, 10) : 1;
@@ -61,7 +82,7 @@ function parseArgs(): ReplayArgs {
     if (!expectRaw.endsWith(".json")) {
       console.error(
         "ERROR: --expect requires a path to a .json file. Inline JSON is not supported.\n\n" +
-        "  Store labels at: /tmp/test-harness-labels/<transcript-name>.json\n" +
+        "  Store labels at: ~/.agent-framework/test-runs/<name>/labels.json\n" +
         "  Use --scaffold to generate a starter file with all keys pre-filled.\n"
       );
       process.exit(2);
@@ -80,7 +101,7 @@ function parseArgs(): ReplayArgs {
     }
   }
 
-  return { transcript, expect, expectPath: expectRaw, cwd, timeout, list, expand, depth, scaffold, validate };
+  return { transcript, expect, expectPath: expectRaw, cwd, timeout, list, expand, depth, scaffold, validate, generateLabels };
 }
 
 // ─── Expectation Matching ───────────────────────────────────────────────────
@@ -236,26 +257,26 @@ function readLastToolLogEntry(sessionDir: string): { gate?: string; reason?: str
 
 // ─── Stale Sweep ────────────────────────────────────────────────────────────
 
-function sweepStaleTestRuns(): void {
+function sweepStaleCaches(): void {
   try {
     const entries = fs.readdirSync(TEST_RUNS_DIR);
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
 
     for (const entry of entries) {
-      const runDir = path.join(TEST_RUNS_DIR, entry);
+      const cachePath = path.join(TEST_RUNS_DIR, entry, "cache");
       try {
-        const stat = fs.statSync(runDir);
+        const stat = fs.statSync(cachePath);
         if (stat.mtimeMs > oneHourAgo) continue;
 
         // Check if replay.pid exists and process is alive
-        const pidFile = path.join(runDir, "replay.pid");
+        const pidFile = path.join(cachePath, "replay.pid");
         try {
           const pidContent = fs.readFileSync(pidFile, "utf-8").trim();
           const pid = parseInt(pidContent, 10);
           if (!isNaN(pid)) {
             try {
               process.kill(pid, 0);
-              // Process is alive — skip this dir
+              // Process is alive — skip this cache
               continue;
             } catch {
               // Process is dead — safe to remove
@@ -265,9 +286,9 @@ function sweepStaleTestRuns(): void {
           // No replay.pid — safe to remove
         }
 
-        fs.rmSync(runDir, { recursive: true, force: true });
+        fs.rmSync(cachePath, { recursive: true, force: true });
       } catch {
-        // Skip entries we can't stat
+        // Skip entries without cache dir
       }
     }
   } catch {
@@ -447,9 +468,15 @@ function scaffoldLabelFile(
   transcriptPath: string,
   scorableKeys: Array<{ key: string; line: number; type: "tool_use" | "stop"; tool?: string }>,
 ): void {
-  const transcriptName = path.basename(transcriptPath, ".jsonl");
-  const labelDir = "/tmp/test-harness-labels";
-  const labelPath = path.join(labelDir, `${transcriptName}.json`);
+  const tDir = transcriptDir(transcriptPath);
+  const labelPath = path.join(tDir, "labels.draft.json");
+
+  // Create transcript dir and copy transcript if not present
+  fs.mkdirSync(tDir, { recursive: true });
+  const transcriptCopy = path.join(tDir, "transcript.jsonl");
+  if (!fs.existsSync(transcriptCopy)) {
+    fs.copyFileSync(transcriptPath, transcriptCopy);
+  }
 
   const labels: Record<string, string> = {};
   let investigateCount = 0;
@@ -469,13 +496,13 @@ function scaffoldLabelFile(
     _meta: {
       transcript: transcriptPath,
       created: new Date().toISOString(),
+      commit: getHeadCommit(),
       total_hooks: scorableKeys.length,
       needs_review: investigateCount,
     },
     labels,
   };
 
-  fs.mkdirSync(labelDir, { recursive: true });
   fs.writeFileSync(labelPath, JSON.stringify(output, null, 2) + "\n");
 
   console.log(labelPath);
@@ -486,7 +513,8 @@ function scaffoldLabelFile(
     "  1. Review items marked \"INVESTIGATE\" — use --expand <id> for context\n" +
     "  2. Change each \"INVESTIGATE\" to \"allow\"/\"deny\" (tools) or \"pass\"/\"block\" (stops)\n" +
     "  3. Run --validate to check completeness\n" +
-    `  4. Run replay: npx tsx test-harness/replay.ts --transcript ${transcriptPath} --expect ${labelPath}\n`
+    `  4. Rename labels.draft.json to labels.json when done\n` +
+    `  5. Run replay: npx tsx test-harness/replay.ts --transcript ${transcriptPath} --expect ${labelPath}\n`
   );
 }
 
@@ -641,12 +669,13 @@ function formatReport(
     }));
   }
 
+  // Add commit hash
+  report.commit = getHeadCommit();
+
   // Write report to file
-  const transcriptName = path.basename(transcriptPath, ".jsonl");
-  const reportDir = "/tmp/test-harness-reports";
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const reportPath = path.join(reportDir, `${transcriptName}_${timestamp}.json`);
-  fs.mkdirSync(reportDir, { recursive: true });
+  const tDir = transcriptDir(transcriptPath);
+  const reportPath = path.join(tDir, "report.json");
+  fs.mkdirSync(tDir, { recursive: true });
 
   report.report_file = reportPath;
 
@@ -659,6 +688,7 @@ function formatReport(
   console.log("=".repeat(80));
   console.log("ACTION REQUIRED: You MUST inform the user that a replay report was saved.");
   console.log(`Report file: ${reportPath}`);
+  console.log(`Transcript dir: ${tDir}`);
   console.log("Tell the user: \"A replay report has been saved at:");
   console.log(`  ${reportPath}`);
   console.log("You can review it anytime.\"");
@@ -670,6 +700,9 @@ function formatReport(
 async function main(): Promise<void> {
   const startTime = Date.now();
   const config = parseArgs();
+
+  // Background sweep of stale caches
+  sweepStaleCaches();
 
   // 1. Read all transcript lines
   const rawLines = fs.readFileSync(config.transcript, "utf-8").split("\n").filter(Boolean);
@@ -708,9 +741,19 @@ async function main(): Promise<void> {
     validateLabelFile(config.expect, scorableKeys);
   }
 
-  // Validate completeness before replay
-  if (config.expect) {
+  // Validate completeness before replay (only when running with expectations, not generate-labels)
+  if (config.expect && !config.generateLabels) {
     validateExpectationCompleteness(config.expect, scorableKeys);
+  }
+
+  // Auto build for modes that fire hooks
+  try {
+    console.error("Building project...");
+    execSync("just build", { cwd: REPO_ROOT, stdio: "inherit" });
+  } catch (err) {
+    console.error("ERROR: Build failed. Fix build errors before running the harness.");
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(2);
   }
 
   // 2. Determine cwd
@@ -720,10 +763,42 @@ async function main(): Promise<void> {
   process.env.CLAUDE_PROJECT_DIR = cwd;
   process.env.AGENT_FRAMEWORK_ROOT = REPO_ROOT;
 
-  // 4. Create test-run directory
-  const runId = crypto.randomUUID();
-  const sessionDir = path.join(TEST_RUNS_DIR, runId);
-  fs.mkdirSync(sessionDir, { recursive: true });
+  // 4. Create persistent transcript dir and cache
+  const tDir = transcriptDir(config.transcript);
+  fs.mkdirSync(tDir, { recursive: true });
+
+  // Copy transcript if not present
+  const transcriptCopy = path.join(tDir, "transcript.jsonl");
+  if (!fs.existsSync(transcriptCopy)) {
+    fs.copyFileSync(config.transcript, transcriptCopy);
+  }
+
+  // Clean previous cache (check for live process first)
+  const cachePath = cacheDir(config.transcript);
+  const prevPidFile = path.join(cachePath, "replay.pid");
+  try {
+    const pidContent = fs.readFileSync(prevPidFile, "utf-8").trim();
+    const pid = parseInt(pidContent, 10);
+    if (!isNaN(pid)) {
+      try {
+        process.kill(pid, 0);
+        console.error(`ERROR: A replay is already running for this transcript (PID ${pid}).`);
+        process.exit(2);
+      } catch {
+        // Process is dead — safe to clean
+      }
+    }
+  } catch {
+    // No previous replay.pid
+  }
+
+  if (fs.existsSync(cachePath)) {
+    fs.rmSync(cachePath, { recursive: true, force: true });
+  }
+
+  // Create fresh cache dir
+  fs.mkdirSync(cachePath, { recursive: true });
+  const sessionDir = cachePath;
 
   // 5. Write replay.pid
   const replayPidFile = path.join(sessionDir, "replay.pid");
@@ -737,7 +812,7 @@ async function main(): Promise<void> {
   fs.writeFileSync(transcriptPath, "");
 
   // 8. Generate session ID
-  const sessionId = "replay-" + runId;
+  const sessionId = "replay-" + transcriptSlug(config.transcript);
 
   const env = buildEnv(sessionDir, cwd);
   const results: ReplayEvent[] = [];
@@ -1050,14 +1125,66 @@ async function main(): Promise<void> {
     }
   }
 
-  // 11. Output structured report
+  // 11. Generate-labels mode — write labels.draft.json and exit
+  if (config.generateLabels) {
+    const labels: Record<string, string> = {};
+    let investigateCount = 0;
+
+    for (const event of results) {
+      if (event.hook === "pre-tool-use") {
+        const toolUseId = findFullToolUseId(event, scorableKeys);
+        if (event.decision === "error" || event.decision === "timeout") {
+          labels[toolUseId] = "INVESTIGATE";
+          investigateCount++;
+        } else {
+          labels[toolUseId] = event.decision === "allow" ? "allow" : "deny";
+        }
+      } else if (event.hook === "stop-response-check") {
+        const stopKey = `stop:${event.line}`;
+        if (event.decision === "error" || event.decision === "timeout") {
+          labels[stopKey] = "INVESTIGATE";
+          investigateCount++;
+        } else {
+          labels[stopKey] = event.decision === "block" ? "block" : "pass";
+        }
+      }
+    }
+
+    const draftPath = path.join(tDir, "labels.draft.json");
+    const draftOutput = {
+      _meta: {
+        transcript: config.transcript,
+        created: new Date().toISOString(),
+        commit: getHeadCommit(),
+        status: "in_progress",
+        total_hooks: Object.keys(labels).length,
+        investigate_count: investigateCount,
+      },
+      labels,
+    };
+
+    fs.writeFileSync(draftPath, JSON.stringify(draftOutput, null, 2) + "\n");
+
+    // Cleanup background processes but leave cache intact
+    await cleanupBackgroundProcesses(sessionDir);
+    try {
+      fs.unlinkSync(replayPidFile);
+    } catch {
+      // Best-effort
+    }
+
+    console.log(draftPath);
+    process.exit(0);
+  }
+
+  // 12. Output structured report
   const elapsedMs = Date.now() - startTime;
   formatReport(results, config.transcript, config.expectPath, elapsedMs);
 
-  // 12. Compute exit code
+  // 13. Compute exit code
   const failed = results.filter((r) => r.pass === false);
 
-  // 13. Cleanup
+  // 14. Cleanup
   await cleanupBackgroundProcesses(sessionDir);
 
   // Remove replay.pid
@@ -1067,22 +1194,28 @@ async function main(): Promise<void> {
     // Best-effort
   }
 
-  // Remove test-run dir
-  try {
-    fs.rmSync(sessionDir, { recursive: true, force: true });
-  } catch {
-    // Best-effort
-  }
-
-  // Sweep stale test-run dirs
-  sweepStaleTestRuns();
-
   // Exit with appropriate code
   if (failed.length > 0) {
     process.exit(1);
   }
 
   process.exit(0);
+}
+
+/**
+ * Find the full tool_use_id for a replay event by matching its truncated id
+ * against the scorable keys list.
+ */
+function findFullToolUseId(
+  event: ReplayEvent,
+  scorableKeys: Array<{ key: string; line: number; type: "tool_use" | "stop"; tool?: string }>,
+): string {
+  if (!event.id) return `unknown:${event.line}`;
+  // The event.id is truncated to 16 chars — find the full key
+  const match = scorableKeys.find(
+    (sk) => sk.type === "tool_use" && sk.key.startsWith(event.id!)
+  );
+  return match?.key ?? event.id;
 }
 
 main().catch((err) => {

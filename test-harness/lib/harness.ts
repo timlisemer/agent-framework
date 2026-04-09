@@ -114,18 +114,3 @@ export async function cleanupBackgroundProcesses(sessionDir: string): Promise<vo
   await new Promise((r) => setTimeout(r, 500));
 }
 
-/**
- * Clean up temp directory and session directory.
- */
-export function cleanupTempFiles(tempDir: string, sessionDir: string): void {
-  try {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  } catch {
-    // Best-effort cleanup
-  }
-  try {
-    fs.rmSync(sessionDir, { recursive: true, force: true });
-  } catch {
-    // Best-effort cleanup
-  }
-}

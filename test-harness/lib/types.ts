@@ -54,4 +54,5 @@ export interface ReplayArgs {
   depth: number;
   scaffold: boolean;
   validate: boolean;
+  generateLabels: boolean;
 }
