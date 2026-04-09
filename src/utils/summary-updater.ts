@@ -76,6 +76,8 @@ function isSignificantIntentChange(oldIntent: string, newIntent: string): boolea
  */
 function derivePredictionsFromMisalignments(misalignments: string): BlockedTool[] {
   const blockedTools: BlockedTool[] = [];
+  // Truncate for reason messages — enough context to understand, not so long it floods output
+  const context = misalignments.length > 200 ? misalignments.slice(0, 200) + "..." : misalignments;
 
   // Detect file-specific misalignment mentions
   const fileMatches = misalignments.match(/[\w./\\-]+\.\w{1,6}/g);
@@ -84,7 +86,7 @@ function derivePredictionsFromMisalignments(misalignments: string): BlockedTool[
       blockedTools.push({
         toolName: "Edit|Write",
         targetPattern: `*${file}`,
-        reason: `misalignment flagged for ${file}`,
+        reason: `misalignment flagged for ${file}: ${context}`,
       });
     }
   }
@@ -93,7 +95,7 @@ function derivePredictionsFromMisalignments(misalignments: string): BlockedTool[
   if (/\b(unauthorized|unexpected)\s+(execution|command|bash)\b/i.test(misalignments)) {
     blockedTools.push({
       toolName: "Bash",
-      reason: "misalignment flagged unauthorized execution",
+      reason: `misalignment flagged unauthorized execution: ${context}`,
     });
   }
 
@@ -101,7 +103,7 @@ function derivePredictionsFromMisalignments(misalignments: string): BlockedTool[
   if (/\b(scope\s+creep|out\s+of\s+scope|unrelated)\b/i.test(misalignments)) {
     blockedTools.push({
       toolName: "Edit|Write|NotebookEdit",
-      reason: "misalignment flagged scope creep",
+      reason: `misalignment flagged scope creep: ${context}`,
     });
   }
 

@@ -569,12 +569,29 @@ async function main() {
         const validation = await runPlanValidation("edit");
 
         if (!validation.approved) {
-          await exitPipeline({
-            decision: "deny",
-            agent: "plan-validate",
-            reason: `Plan drift detected: ${validation.reason}`,
-          });
-          return;
+          // IMPORTANT: Do NOT remove this appeal call. Without it, user overrides
+          // are ignored and plan writes get stuck in an infinite deny loop.
+          const planTranscript = formatTranscriptResult(recentContext);
+
+          const appeal = await appealHelper(
+            toolName,
+            `${toolName} to plan file ${filePath}`,
+            planTranscript,
+            validation.reason || "Plan validation failed",
+            projectDir,
+            "PreToolUse",
+            `plan-validate blocked: ${validation.reason}`
+          );
+
+          if (!appeal.overturned) {
+            await exitPipeline({
+              decision: "deny",
+              agent: "plan-validate",
+              reason: `Plan drift detected: ${validation.reason}`,
+            });
+            return;
+          }
+          currentGateNote = appeal.gateNote;
         }
 
         await exitPipeline({
