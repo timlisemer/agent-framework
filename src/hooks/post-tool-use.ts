@@ -10,7 +10,7 @@ import { isSubagent } from "../utils/subagent-detector.js";
 import { spawnBackground } from "../utils/spawn-background.js";
 import { getSessionDir, appendToolLog, getActiveSubagentCount } from "../utils/summary-cache.js";
 import { writeUser, writeTool, formatTodoState, extractAskUserAnswer, type TodoItem } from "../utils/synthetic.js";
-import { getAllPredictions, matchBlockedTool } from "../utils/prediction-cache.js";
+import { getAllPredictions, matchBlockedTool, deactivatePrediction } from "../utils/prediction-cache.js";
 import { writeCorrection } from "../utils/correction-cache.js";
 import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
 
@@ -42,6 +42,12 @@ async function main() {
       for (const pred of predictions) {
         const match = matchBlockedTool(input.tool_name, input.tool_input, pred.blockedTools);
         if (match) {
+          // Skip edit-intent predictions for edit tools: PreToolUse already handles
+          // the edit-intent gate with proper appeals. Writing a correction here would
+          // override that decision and block the next edit call without appeal.
+          if (isEditTool(input.tool_name) && pred.source === "micro" && /edit intent/i.test(match.reason)) {
+            continue;
+          }
           await writeCorrection(sessionDir, {
             toolName: input.tool_name,
             toolTarget: predFilePath
@@ -51,6 +57,9 @@ async function main() {
             timestamp: Date.now(),
             consumed: false,
           });
+          // Deactivate the prediction that fired so it does not keep generating
+          // corrections for every subsequent tool call of the same type
+          await deactivatePrediction(sessionDir, input.tool_name, input.tool_input);
           break;
         }
       }

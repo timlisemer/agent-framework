@@ -242,7 +242,14 @@ async function main() {
       });
     }
 
-    // 4. OUTPUT
+    // 4. Deactivate edit-intent predictions when allowing an edit tool.
+    //    This prevents PostToolUse from re-creating corrections based on stale
+    //    edit-intent predictions that PreToolUse already resolved.
+    if (exit.decision === "allow" && isEditTool(toolName) && !subagent) {
+      await deactivatePrediction(sessionDir, toolName, toolInput);
+    }
+
+    // 5. OUTPUT
     if (exit.decision === "allow") {
       return outputAllow();
     }
@@ -704,6 +711,10 @@ If in doubt, UPHOLD.
           editIntentOverturnCount: overturnCount,
           ...(overturnCount >= 2 ? { currentEditIntent: true as const, editIntentTimestamp: Date.now() } : {}),
         }));
+
+        // Deactivate the micro-prediction that generated this edit-intent block
+        // so PostToolUse does not re-create a correction for the same prediction
+        await deactivatePrediction(sessionDir, toolName, toolInput);
 
         currentGateNote = appeal.gateNote;
         // Fall through to normal pipeline

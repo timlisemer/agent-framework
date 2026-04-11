@@ -98,6 +98,11 @@ const NON_EDIT_SIGNAL_PATTERNS: RegExp[] = [
 // Compound override: non-edit matched BUT message also contains "and/then + edit_verb"
 const COMPOUND_OVERRIDE_PATTERN = /\b(and|then)\s+(fix|update|change|modify|edit|refactor|rename|replace|rewrite|add|create|implement|write|remove|delete)\b/i;
 
+// Follow-up confirmation questions that should NOT flip edit intent to non-edit.
+// "are you sure X is fixed?" / "did you actually change it?" / "is the label corrected?"
+// These are checking on a prior edit, not requesting read-only exploration.
+const FOLLOWUP_CONFIRMATION_PATTERN = /^(are you sure|did you|have you|is (it|the|this|that)\b.*\b(correct|fixed|changed|updated|done|applied|saved|modified|set|adjusted|written))/i;
+
 /**
  * Deterministic edit signal detection.
  * Returns tristate: "edit", "non-edit", or "ambiguous".
@@ -121,6 +126,12 @@ export function detectEditSignal(userMessage: string, previousEditIntent: boolea
     // Compound override: "review and fix" -> edit
     if (COMPOUND_OVERRIDE_PATTERN.test(stripped)) {
       return "edit";
+    }
+    // Follow-up confirmation questions: "are you sure the label is corrected?"
+    // These check on a prior edit rather than requesting read-only exploration.
+    // Treat as ambiguous so sticky edit intent survives.
+    if (previousEditIntent && FOLLOWUP_CONFIRMATION_PATTERN.test(stripped)) {
+      return "ambiguous";
     }
     return "non-edit";
   }

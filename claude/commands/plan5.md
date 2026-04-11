@@ -34,6 +34,7 @@ For each change you propose:
 3. Explain why this change achieves the desired behavior without breaking existing logic
 
 Do not add anything that doesn't directly implement the requested behavior.
+Every proposed fix must address the root cause. NEVER propose treating symptoms: do not silence warnings, suppress errors, weaken assertions, or change test expectations to make failures disappear. If a test fails, fix the code under test -- not the test.
 ```
 
 The 5th agent gets the same prompt with this addition at the top:
@@ -77,6 +78,7 @@ Check:
 5. Is the plan specific enough to implement (file paths, line numbers, concrete code)?
 
 Report ALL issues you find with specific file paths and line numbers.
+Flag any proposed change that treats symptoms instead of root causes (e.g. silencing warnings, weakening assertions, changing test expectations instead of fixing the code under test).
 ```
 
 ## Step 4: Consolidate Round 2

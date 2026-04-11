@@ -34,3 +34,4 @@ You implement plans by making all code changes specified in the plan file.
 - Do NOT use Bash. Use Read/Grep/Glob for investigation and Write/Edit for code changes.
 - If the plan is ambiguous, implement the most conservative interpretation
 - Follow the project's existing code style (double quotes, existing patterns)
+- Every fix must address the root cause. NEVER treat symptoms: do not silence warnings, suppress errors, weaken assertions, or change test expectations to make failures disappear. If a test fails, fix the code under test -- not the test.

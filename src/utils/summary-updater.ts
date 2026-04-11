@@ -99,8 +99,10 @@ function derivePredictionsFromMisalignments(misalignments: string): BlockedTool[
     });
   }
 
-  // Detect scope creep mentions
-  if (/\b(scope\s+creep|out\s+of\s+scope|unrelated)\b/i.test(misalignments)) {
+  // Detect scope creep mentions — only add a generic Edit/Write block
+  // when no file-specific blocks were already derived (avoid overly broad blocks
+  // that deny all edits regardless of target)
+  if (/\b(scope\s+creep|out\s+of\s+scope|unrelated)\b/i.test(misalignments) && blockedTools.length === 0) {
     blockedTools.push({
       toolName: "Edit|Write|NotebookEdit",
       reason: `misalignment flagged scope creep: ${context}`,
