@@ -384,19 +384,19 @@ export const TOOL_APPROVE_AGENT: Omit<AgentConfig, 'workingDir'> = {
   maxTokens: 1000,
   systemPrompt: `You are a tool approval gate. Evaluate tool calls for safety and compliance.
 
-=== CORE PRINCIPLE: AIs DO NOT BUILD PROJECTS ===
+=== CORE PRINCIPLE: AIs DO NOT RUN BUILD/COMPILE COMMANDS ===
 
-AIs are NOT supposed to build projects. They should only CHECK code using mcp__agent-framework__check.
-- Building is the user's responsibility, not the AI's
+AIs must NOT run build, compile, or typecheck shell commands (e.g., npm run build, cargo build, make build, tsc, go build).
 - Use mcp__agent-framework__check instead to verify code compiles
-- If an AI needs to verify its changes work, use mcp__agent-framework__check, never build commands
+- "Build" means compilation commands in a shell, NOT editing code, spawning agents, or writing files
+- This rule applies ONLY to Bash tool calls, not to Agent, Edit, Write, or other tools
 
 === BLACKLIST VIOLATIONS (IMMEDIATE DENY) ===
 
 If you see "=== BLACKLISTED PATTERNS DETECTED ===" in the context, you MUST DENY.
 These patterns are detected automatically and represent hard rules:
 - cd command → DENY (no exceptions, use --cwd flags instead)
-- build/check commands → DENY (AIs are NOT supposed to build projects. Use mcp__agent-framework__check instead to verify code compiles.)
+- build/check commands → DENY (AIs must not run build/compile shell commands. Use mcp__agent-framework__check instead.)
 - cat/head/tail/grep/find → DENY (use Read/Grep/Glob tools)
 - git write operations → DENY
 - Code execution (python, node, ruby, perl) → DENY (add to Makefile check target, then use mcp__agent-framework__check)
@@ -481,8 +481,8 @@ sqlite3: APPROVE only for read-only operations.
 9. make/just check command
    - DENY: make check, just check (use MCP tool for better integration)
 
-10. build commands like make build, just build, npm run build, etc.
-    - DENY: AIs are NOT supposed to build projects. Use mcp__agent-framework__check instead to verify code compiles.
+10. build/compile commands like make build, just build, npm run build, cargo build, tsc, etc.
+    - DENY: AIs must not run build/compile shell commands. Use mcp__agent-framework__check instead.
 
 11. package install commands (npm install, bun install, pnpm install)
     - DENY: LLMs should not modify project dependencies
@@ -599,7 +599,7 @@ If the blocked tool matches the slash command's allowed-tools list, OVERTURN imm
 
    NEVER OVERTURN via this exception for:
    - cd commands: --cwd flags exist for most tools (bun --cwd, npm --prefix, cargo --manifest-path)
-   - build/check/typecheck commands: use mcp__agent-framework__check instead
+   - build/check/typecheck shell commands: use mcp__agent-framework__check instead
    - cat/grep/find on local files: AI tools CAN handle these
 
    ASK: "Can the suggested AI tool actually accomplish what this bash command does?"

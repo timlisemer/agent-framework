@@ -292,12 +292,7 @@ export function checkAndIncrementRunLimit(transcriptName: string, action: "gener
     }
     state.scaffold_count++;
   } else if (action === "run_single_hook") {
-    if (state.run_single_hook_count >= 20) {
-      throw new Error(
-        "Maximum 20 single-hook runs reached for this transcript. " +
-        "Use run_test for a full validation run."
-      );
-    }
+    // No limit — single-hook runs are cheap and useful for iterating
     state.run_single_hook_count++;
   } else {
     if (state.run_test_count >= 5) {
