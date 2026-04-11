@@ -306,17 +306,40 @@ async function main() {
           );
 
           if (!hasTextAfterUser) {
-            logFastPathDeny("respond-first", "PreToolUse", toolName, projectDir,
-              "No text response before first tool call");
-            // Set flag BEFORE exitPipeline (which returns Promise<never>).
-            // One denial is sufficient -- repeated denials cause infinite loops.
-            await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
-            await exitPipeline({
-              decision: "deny",
-              agent: "respond-first",
-              reason: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
-            });
-            return;
+            // TIMING ISSUE: When Claude produces text + tool_use blocks in the
+            // same assistant message, PreToolUse hooks fire before the message
+            // is written to the transcript. readTranscriptExact can't see the
+            // text that IS present alongside these tool_use blocks.
+            //
+            // We detect this by checking if our tool_use_id appears anywhere in
+            // the raw transcript file. tool_use_ids are unique UUIDs (toolu_...)
+            // so substring matching is safe — no false positive risk.
+            //
+            // - ID found → message IS in transcript but has no text → genuine
+            //   violation, deny normally
+            // - ID not found → message not yet written → the AI likely produced
+            //   text alongside these tool calls, skip enforcement
+            //
+            // This matches the test harness behavior where transcript lines are
+            // written before hooks fire (replay.ts:897), so test harness
+            // enforcement is unaffected — tool_use_id will always be found there.
+            const rawTranscript = await fs.promises.readFile(input.transcript_path, "utf-8");
+            const currentToolInTranscript = rawTranscript.includes(input.tool_use_id);
+
+            if (currentToolInTranscript) {
+              logFastPathDeny("respond-first", "PreToolUse", toolName, projectDir,
+                "No text response before first tool call");
+              await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
+              await exitPipeline({
+                decision: "deny",
+                agent: "respond-first",
+                reason: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
+              });
+              return;
+            }
+            // tool_use_id not in transcript — message not yet written.
+            // Skip enforcement; respondFirstChecked is set to true below
+            // so subsequent tool calls in this turn won't re-check.
           }
         }
       }
