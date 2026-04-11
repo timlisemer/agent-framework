@@ -191,7 +191,7 @@ describe("counter fallback", () => {
     return filePath;
   }
 
-  it("detects subagent via counter when main session transcript has active subagents", () => {
+  it("does not treat confirmed main session as subagent even with active counter", () => {
     const filePath = writeTranscript("session-parent.jsonl", [
       JSON.stringify({ cwd: "/home/user/project", model: "claude-3" }),
     ]);
@@ -200,7 +200,7 @@ describe("counter fallback", () => {
     incrementActiveSubagents(tempDir);
 
     const result = detectSubagent(filePath);
-    expect(result).toEqual({ isSubagent: true, method: "counter-fallback", activeSubagentCount: 2 });
+    expect(result).toEqual({ isSubagent: false, method: "none", activeSubagentCount: 0 });
   });
 
   it("returns false when counter is 0", () => {
@@ -211,16 +211,13 @@ describe("counter fallback", () => {
     expect(result).toEqual({ isSubagent: false, method: "none", activeSubagentCount: 0 });
   });
 
-  it("returns false when counter file is stale (>10 min old)", () => {
-    const filePath = writeTranscript("session-parent.jsonl", [
-      JSON.stringify({ cwd: "/home/user/project", model: "claude-3" }),
+  it("returns false when counter has dead parent PID (staleness)", () => {
+    const filePath = writeTranscript("session-parent-stale.jsonl", [
+      JSON.stringify({ some: "data" }),
     ]);
-    incrementActiveSubagents(tempDir);
-
-    // Backdate the counter file
+    // Write a counter with a PID that doesn't exist
     const counterPath = path.join(tempDir, "active-subagents.json");
-    const oldTime = new Date(Date.now() - 11 * 60 * 1000);
-    fs.utimesSync(counterPath, oldTime, oldTime);
+    fs.writeFileSync(counterPath, JSON.stringify({ count: 1, pid: 999999 }));
 
     const result = detectSubagent(filePath);
     expect(result).toEqual({ isSubagent: false, method: "none", activeSubagentCount: 0 });
@@ -283,11 +280,9 @@ describe("active subagent counter", () => {
     expect(getActiveSubagentCount(tempDir)).toBe(0);
   });
 
-  it("returns 0 when file is older than 10 minutes (staleness)", () => {
-    incrementActiveSubagents(tempDir);
+  it("returns 0 when parent PID is dead (staleness)", () => {
     const filePath = path.join(tempDir, "active-subagents.json");
-    const oldTime = new Date(Date.now() - 11 * 60 * 1000);
-    fs.utimesSync(filePath, oldTime, oldTime);
+    fs.writeFileSync(filePath, JSON.stringify({ count: 2, pid: 999999 }));
     expect(getActiveSubagentCount(tempDir)).toBe(0);
   });
 });

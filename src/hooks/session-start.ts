@@ -11,6 +11,7 @@ import {
   readSummary,
   getSessionState,
   deleteSummary,
+  resetActiveSubagents,
 } from "../utils/summary-cache.js";
 
 /**
@@ -34,6 +35,15 @@ const MAX_SUMMARY_SIZE = 4096;
 async function main() {
   const input = await readStdinJson<SessionStartHookInput>();
   const { source, transcript_path } = input;
+
+  // Reset subagent counter on startup -- leaked counters from crashed
+  // subagents must not poison the new session
+  if (source === "startup") {
+    try {
+      const earlySessionDir = getSessionDir(transcript_path);
+      resetActiveSubagents(earlySessionDir);
+    } catch {}
+  }
 
   // No summary system for subagents
   if (isSubagent(transcript_path)) {

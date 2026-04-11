@@ -21,7 +21,11 @@ interface SubagentStopHookInput {
 async function main() {
   const input = await readStdinJson<SubagentStopHookInput>();
   const sessionDir = getSessionDir(input.transcript_path);
-  decrementActiveSubagents(sessionDir);
+  try {
+    decrementActiveSubagents(sessionDir);
+  } catch (err) {
+    console.error("[subagent-stop] decrement failed:", err);
+  }
   process.exit(0);
 }
 

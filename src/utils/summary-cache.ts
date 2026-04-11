@@ -365,4 +365,4 @@ export async function createEmptySummary(summaryPath: string): Promise<void> {
 }
 
 // Active subagent counter — consolidated in subagent-detector.ts
-export { getActiveSubagentCount, incrementActiveSubagents, decrementActiveSubagents } from "./subagent-detector.js";
+export { getActiveSubagentCount, incrementActiveSubagents, decrementActiveSubagents, resetActiveSubagents } from "./subagent-detector.js";

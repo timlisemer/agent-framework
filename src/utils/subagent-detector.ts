@@ -44,11 +44,11 @@ export interface SubagentDetectionResult {
 // ── Active subagent counter ──────────────────────────────────────────
 // SubagentStart/SubagentStop hooks maintain a counter so the detector
 // and PostToolUse can adapt behavior during subagent execution.
-// Staleness protection: if the counter file is older than 10 minutes,
-// return 0 (assumes subagent crashed without firing SubagentStop).
+// Staleness protection: PID-based. The parent Claude Code process PID
+// is stored alongside the counter. If that process is no longer alive,
+// the counter is stale (subagent crashed without firing SubagentStop).
 
 const SUBAGENT_COUNTER_FILE = "active-subagents.json";
-const SUBAGENT_STALE_MS = 10 * 60 * 1000;
 
 let counterCache: { sessionDir: string; count: number; ts: number } | null = null;
 const COUNTER_CACHE_TTL_MS = 2000;
@@ -97,14 +97,26 @@ function releaseSubagentLock(lockPath: string): void {
   try { fs.unlinkSync(lockPath); } catch {}
 }
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function readSubagentCount(filePath: string): number {
   try {
-    const stat = fs.statSync(filePath);
-    if (Date.now() - stat.mtimeMs > SUBAGENT_STALE_MS) {
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    const count = typeof data.count === "number" ? data.count : 0;
+    if (count <= 0) return 0;
+    // PID-based staleness: if the parent Claude Code process is dead,
+    // the counter is stale (subagent crashed without firing SubagentStop)
+    if (typeof data.pid === "number" && !isProcessAlive(data.pid)) {
       return 0;
     }
-    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    return typeof data.count === "number" ? data.count : 0;
+    return count;
   } catch {
     return 0;
   }
@@ -120,11 +132,11 @@ export function incrementActiveSubagents(sessionDir: string): void {
   const lockPath = filePath + ".lock";
   const locked = acquireSubagentLock(lockPath);
   try {
-    if (!locked) return;
     const current = readSubagentCount(filePath);
-    fs.writeFileSync(filePath, JSON.stringify({ count: current + 1 }));
+    fs.writeFileSync(filePath, JSON.stringify({ count: current + 1, pid: process.ppid }));
   } finally {
     if (locked) releaseSubagentLock(lockPath);
+    counterCache = null;
   }
 }
 
@@ -133,12 +145,21 @@ export function decrementActiveSubagents(sessionDir: string): void {
   const lockPath = filePath + ".lock";
   const locked = acquireSubagentLock(lockPath);
   try {
-    if (!locked) return;
+    // Proceed even without lock -- a stuck counter is worse than a brief race
     const current = readSubagentCount(filePath);
     fs.writeFileSync(filePath, JSON.stringify({ count: Math.max(0, current - 1) }));
   } finally {
     if (locked) releaseSubagentLock(lockPath);
+    counterCache = null;
   }
+}
+
+export function resetActiveSubagents(sessionDir: string): void {
+  const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
+  try {
+    fs.writeFileSync(filePath, JSON.stringify({ count: 0 }));
+  } catch {}
+  counterCache = null;
 }
 
 // ── Detection ────────────────────────────────────────────────────────
@@ -219,12 +240,12 @@ export function detectSubagent(transcriptPath: string): SubagentDetectionResult 
           return { isSubagent: true, method: "content", activeSubagentCount: 0 };
         }
 
-        // Main session markers without subagent markers — fall through to counter
+        // Main session markers without subagent markers — confirmed main session
         if (entry.cwd && entry.model && entry.isSidechain === undefined) {
           if (DEBUG) {
             console.error(`[subagent-detector] MAIN SESSION detected: has cwd/model, no isSidechain`);
           }
-          return checkCounterFallback(transcriptPath, basename);
+          return { isSubagent: false, method: "none", activeSubagentCount: 0 };
         }
       } catch {
         // Line isn't valid JSON, continue
