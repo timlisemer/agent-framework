@@ -29,7 +29,7 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\b(grep|rg)\s+/, name: 'grep/rg', alternative: 'Use Grep tool' },
 
   // File finding - should use Glob tool
-  { pattern: /\bfind\s+/, name: 'find', alternative: 'Use Glob tool' },
+  { pattern: /\bfind\s+/, name: 'find', alternative: 'Use Glob tool', bashOnly: true },
 
   // File writing - should use Write tool
   { pattern: /\becho\s+.*>/, name: 'echo redirect', alternative: 'Use Write tool' },

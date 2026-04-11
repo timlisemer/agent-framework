@@ -479,6 +479,7 @@ function scaffoldLabelFile(
   }
 
   const labels: Record<string, string> = {};
+  const reasoning: Record<string, string> = {};
   let investigateCount = 0;
 
   for (const sk of scorableKeys) {
@@ -486,8 +487,18 @@ function scaffoldLabelFile(
     const isNeg = reaction ? looksNegative(reaction) : false;
     if (sk.type === "tool_use") {
       labels[sk.key] = isNeg ? "INVESTIGATE" : "allow";
+      reasoning[sk.key] = isNeg
+        ? `Negative reaction detected: "${reaction?.slice(0, 100)}"`
+        : reaction
+          ? "User continued normally"
+          : "No user reaction found";
     } else {
       labels[sk.key] = isNeg ? "INVESTIGATE" : "pass";
+      reasoning[sk.key] = isNeg
+        ? `Negative reaction detected: "${reaction?.slice(0, 100)}"`
+        : reaction
+          ? "User continued with new input"
+          : "End of transcript or no reaction";
     }
     if (isNeg) investigateCount++;
   }
@@ -501,6 +512,7 @@ function scaffoldLabelFile(
       needs_review: investigateCount,
     },
     labels,
+    reasoning,
   };
 
   fs.writeFileSync(labelPath, JSON.stringify(output, null, 2) + "\n");
@@ -1128,6 +1140,7 @@ async function main(): Promise<void> {
   // 11. Generate-labels mode — write labels.draft.json and exit
   if (config.generateLabels) {
     const labels: Record<string, string> = {};
+    const reasoning: Record<string, string> = {};
     let investigateCount = 0;
 
     for (const event of results) {
@@ -1135,17 +1148,24 @@ async function main(): Promise<void> {
         const toolUseId = findFullToolUseId(event, scorableKeys);
         if (event.decision === "error" || event.decision === "timeout") {
           labels[toolUseId] = "INVESTIGATE";
+          reasoning[toolUseId] = event.error ?? "Hook error or timeout";
           investigateCount++;
         } else {
           labels[toolUseId] = event.decision === "allow" ? "allow" : "deny";
+          const parts: string[] = [];
+          if (event.gate) parts.push(`gate: ${event.gate}`);
+          if (event.reason) parts.push(event.reason);
+          reasoning[toolUseId] = parts.length > 0 ? parts.join(" - ") : "Hook decision recorded";
         }
       } else if (event.hook === "stop-response-check") {
         const stopKey = `stop:${event.line}`;
         if (event.decision === "error" || event.decision === "timeout") {
           labels[stopKey] = "INVESTIGATE";
+          reasoning[stopKey] = event.error ?? "Hook error or timeout";
           investigateCount++;
         } else {
           labels[stopKey] = event.decision === "block" ? "block" : "pass";
+          reasoning[stopKey] = event.reason ?? "Hook decision recorded";
         }
       }
     }
@@ -1161,6 +1181,7 @@ async function main(): Promise<void> {
         investigate_count: investigateCount,
       },
       labels,
+      reasoning,
     };
 
     fs.writeFileSync(draftPath, JSON.stringify(draftOutput, null, 2) + "\n");

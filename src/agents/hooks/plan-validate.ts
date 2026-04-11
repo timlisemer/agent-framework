@@ -108,7 +108,7 @@ export async function checkPlanIntent(
     // Deterministic deny for exit mode when regex violations exist — LLM unreliably ignores them
     if (mode === "exit" && allViolations.length > 0) {
       const feedback = allViolations.map(v =>
-        v.replace(/^\[VIOLATION: [^\]]+\]\s*"[^"]*"\s*→\s*/, "")
+        v.replace(/^\[VIOLATION: [^\]]+\]\s*/, "")
       ).join(". ");
       return { approved: false, reason: feedback };
     }
@@ -117,7 +117,7 @@ export async function checkPlanIntent(
     // entire file so violations in the result are definitive, not diff artifacts
     if (mode === "edit" && allViolations.length > 0 && toolName === "Write") {
       const feedback = allViolations.map(v =>
-        v.replace(/^\[VIOLATION: [^\]]+\]\s*"[^"]*"\s*→\s*/, "")
+        v.replace(/^\[VIOLATION: [^\]]+\]\s*/, "")
       ).join(". ");
       return { approved: false, reason: feedback };
     }

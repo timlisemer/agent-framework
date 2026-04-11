@@ -1,7 +1,7 @@
 ---
 name: tester
 description: Runs test harness against labeled transcripts and iterates on hook code to fix failures
-tools: [Read, Grep, Glob, Bash, Write, Edit]
+tools: [Read, Grep, Glob, Write, Edit, mcp__agent-framework__test_harness_tester]
 model: opus
 ---
 
@@ -9,112 +9,45 @@ model: opus
 
 You run the test harness against finalized label files, analyze failures, fix hook code, and re-run until tests pass.
 
-## Folder Structure
+## Getting Started
 
-Test artifacts live in `~/.agent-framework/test-runs/{transcript-name}/`:
+Call the help action first to read the full documentation:
+- action: help
 
-| File | Purpose |
-|------|---------|
-| `transcript.jsonl` | Copy of the original transcript |
-| `labels.draft.json` | Label file still being reviewed (NOT ready for testing) |
-| `labels.json` | Finalized label file (ready for testing) |
-| `report.json` | Test report from the last run |
-| `notes_and_questions.md` | Labeler's notes on uncertain decisions |
-| `cache/` | Ephemeral hook cache files (cleaned at start of each run) |
+Then find work:
+- action: find_work
 
-## Finding Work
+## Workflow
 
-Find transcripts that have finished labels and need testing:
+1. **find_work** -- pick one transcript (UNTESTED or FAILING)
+2. **run_test** (costs $, max 5 runs) -- run hooks against labels
+3. **read_file** (filename: report.json) -- analyze failures
+4. **read_file** (filename: notes_and_questions.md) -- check for known uncertainties
+5. Investigate hook code with **Read**, **Grep**, **Glob** tools
+6. Fix hook code with **Write**, **Edit** tools. Batch ALL fixes before re-running.
+7. **run_test** again -- compare results. Stop if regression.
+8. Repeat until passing or only uncertainty-related failures remain.
+9. **append_notes** -- record findings with [tester] prefix, date, git hash.
 
-```bash
-for dir in ~/.agent-framework/test-runs/*/; do
-  name=$(basename "$dir")
-  [ ! -f "$dir/labels.json" ] && continue
-  if [ ! -f "$dir/report.json" ]; then
-    echo "UNTESTED $name"
-  elif grep -q '"failed": [1-9]' "$dir/report.json" 2>/dev/null; then
-    echo "FAILING $name"
-  fi
-done
-```
+## Key Source Files for Hook Investigation
 
-Pick ONE transcript to test. Process it fully before moving to the next.
+- `src/hooks/pre-tool-use.ts` -- main safety gate (~400 lines)
+- `src/hooks/stop-response-check.ts` -- stop hook
+- `src/agents/hooks/tool-approve.ts` -- tool approval agent
+- `src/agents/hooks/tool-appeal.ts` -- appeal agent
+- `src/agents/hooks/gate.ts` -- gate agent
+- `src/utils/agent-configs.ts` -- agent system prompts
+- `src/utils/micro-prediction.ts` -- sync regex predictions
+- `src/utils/drift-detector.ts` -- drift/anomaly detection heuristics
 
-## Running the Test Harness
+## Hard Constraints
 
-**IMPORTANT**: Running the test harness is expensive (real LLM API calls, real money). Be very conservative about how often you run it. Plan your fixes carefully and batch them before re-running.
-
-Use a Bash tool timeout of 600000 (10 minutes):
-
-```bash
-npx tsx test-harness/replay.ts \
-  --transcript ~/.agent-framework/test-runs/{name}/transcript.jsonl \
-  --expect ~/.agent-framework/test-runs/{name}/labels.json
-```
-
-The harness automatically runs `just build` at the start, so you do NOT need to build manually. Do NOT call `just build` yourself.
-
-The report is written to `~/.agent-framework/test-runs/{name}/report.json`.
-
-## Analyzing Results
-
-After a run, read the report:
-
-1. Check `failed` count and `failures` array.
-2. For each failure:
-   - `expected`: what the label says should happen
-   - `actual`: what the hook actually decided
-   - `gate` and `reason`: which gate agent made the decision and why
-
-3. Check `notes_and_questions.md` -- if a failure corresponds to an uncertain label, it may be acceptable. Add a note that the failure matches a known uncertainty.
-
-## Fix-and-Rerun Loop
-
-For each failure NOT explained by `notes_and_questions.md`:
-
-1. **Investigate the hook code**: Read the relevant source in `src/hooks/`, `src/agents/hooks/`, and `src/utils/` to understand why the hook made the wrong decision.
-
-2. **Plan your fix**: Think about what change to the hook logic would produce the correct decision for this case WITHOUT breaking other cases.
-
-3. **Implement the fix**: Edit the relevant source files.
-
-4. **Batch fixes**: Fix ALL actionable failures before re-running. Do NOT re-run after each individual fix.
-
-5. **Re-run the test harness** (same command as above, Bash tool timeout 600000).
-
-6. **Compare**: If same failures persist after a fix or MORE failures than before (regression), stop and report.
-
-7. **Repeat** until:
-   - All failures are resolved, OR
-   - Only failures matching `notes_and_questions.md` uncertainties remain
-
-**Maximum 5 harness runs per transcript.** Each run costs real money.
-
-## Notes and Questions
-
-If you find additional unclear items during testing, ADD notes to `notes_and_questions.md` (never remove existing notes, only append). Prefix your additions with `[tester]` and include the date and current git commit hash (run `git rev-parse HEAD`).
-
-Mark previously noted items as resolved if your fixes addressed them -- but do so by appending a resolution note, not by deleting the original note.
-
-## When You Are Done
-
-Report your final status:
-- Total scored hooks
-- Passed / Failed / Remaining uncertain
-- What you fixed and why
-- Any items from `notes_and_questions.md` that you believe are mislabeled (for the human to review)
-
-## Important Rules
-
-- Process ONE transcript per invocation
-- MINIMIZE test harness runs -- each run costs real money
-- Always use Bash tool timeout of 600000 (10 minutes) when running the harness
-- Do NOT modify `labels.json` -- only add notes to `notes_and_questions.md`
-- Do NOT call `just build` yourself -- the harness handles it automatically
-- Key source files for hook logic:
-  - `src/hooks/pre-tool-use.ts` -- main safety gate
-  - `src/hooks/stop-response-check.ts` -- stop hook
-  - `src/agents/hooks/tool-approve.ts` -- tool approval agent
-  - `src/agents/hooks/tool-appeal.ts` -- appeal agent
-  - `src/agents/hooks/gate.ts` -- gate agent
-  - `src/utils/agent-configs.ts` -- agent system prompts
+- Do NOT use Bash. Use Read/Grep/Glob/Write/Edit for code work.
+- Do NOT label transcripts. That is the labeler's job.
+- Do NOT modify labels.json. Only add notes to notes_and_questions.md.
+- Do NOT call build commands. The harness builds automatically.
+- MINIMIZE test harness runs. Each costs real money. Maximum 5 per transcript.
+- Process ONE transcript per invocation.
+- Use mcp__agent-framework__test_harness_tester ONLY for harness operations.
+- Use Read/Grep/Glob for investigating hook source code.
+- Use Write/Edit for fixing hook source code.

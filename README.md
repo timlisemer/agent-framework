@@ -2,7 +2,7 @@
 
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
-1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent` agents (portable, works with any MCP client)
+1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent`, `test_harness_labeler`, `test_harness_tester` agents (portable, works with any MCP client)
 2. **PreToolUse Hook** - Multi-layer safety gate with `gate`, `tool-approve`, `tool-appeal`, `response-align`, `plan-validate`, `style-drift`, `claude-md-validate`, `question-validate`, and `edit-intent` agents
 3. **Stop Hook** - For `intent-validate` agent (detects when AI goes off-track)
 
@@ -20,9 +20,13 @@ The framework implements 15 specialized agents organized into three categories:
 | confirm         | opus   | Binary quality gate: CONFIRMED or DECLINED                   |
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
-| validate_intent | sonnet | Manual post-session review (requires transcript_path)        |
+| validate_intent        | sonnet | Manual post-session review (requires transcript_path)        |
+| test_harness_labeler   | -      | Test harness operations for the @labeler subagent            |
+| test_harness_tester    | -      | Test harness operations for the @tester subagent             |
 
 **Note on validate_intent**: Unlike other MCP tools, `validate_intent` is not auto-triggered. It's a manual post-session review tool that analyzes a conversation transcript to check if the AI followed user intentions. Requires `transcript_path` parameter pointing to a `.jsonl` transcript file. Returns `ALIGNED` or `DRIFTED` verdict.
+
+**Note on test_harness tools**: These are subagent-only tools that wrap `test-harness/replay.ts` operations. The labeler tool handles transcript labeling workflows; the tester tool handles test execution and report reading. Neither makes LLM calls internally.
 
 ### Validation Agents (Hook-Triggered)
 

@@ -7,6 +7,8 @@ import { runConfirmAgent } from "../agents/mcp/confirm.js";
 import { runCommitAgent } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
 import { runValidateIntentAgent } from "../agents/mcp/validate-intent.js";
+import { handleTestHarnessLabeler } from "../agents/mcp/test-harness-labeler.js";
+import { handleTestHarnessTester } from "../agents/mcp/test-harness-tester.js";
 import { getRepoInfo } from "../utils/git-utils.js";
 import { initializeTelemetry } from "../telemetry/index.js";
 import {
@@ -363,6 +365,63 @@ server.registerTool(
       args.working_dir || process.cwd(),
       args.transcript_path
     );
+    return { content: [{ type: "text", text: result }] };
+  }
+);
+
+server.registerTool(
+  "test_harness_labeler",
+  {
+    title: "Test Harness Labeler",
+    description: "Label test harness transcripts. Actions: find_work, generate_labels, scaffold, list, expand, validate, update_label, update_labels, finalize, read_file, append_notes, git_hash, help. Use help action for full documentation.",
+    inputSchema: {
+      action: z.enum([
+        "find_work", "generate_labels", "scaffold", "list", "expand", "validate",
+        "update_label", "update_labels", "finalize", "read_file", "append_notes",
+        "git_hash", "help"
+      ]).describe("The action to perform"),
+      transcript_name: z.string().optional().describe("Transcript name (without .jsonl extension)"),
+      target: z.string().optional().describe("For expand: tool_use_id or stop:N key"),
+      depth: z.number().optional().describe("For expand: context radius multiplier (default 1)"),
+      key: z.string().optional().describe("For update_label: the label key to update"),
+      value: z.string().optional().describe("For update_label: the new label value (allow/deny/pass/block)"),
+      reasoning: z.string().optional().describe("For update_label: explanation for this label decision"),
+      updates: z.array(z.object({
+        key: z.string(),
+        value: z.string(),
+        reasoning: z.string(),
+      })).optional().describe("For update_labels: array of {key, value, reasoning} updates"),
+      filename: z.string().optional().describe("For read_file: labels.draft.json, labels.json, notes_and_questions.md, or report.json"),
+      content: z.string().optional().describe("For append_notes: content to append"),
+      date_from: z.string().optional().describe("For find_work: only transcripts modified on or after this date (YYYY-MM-DD)"),
+      date_to: z.string().optional().describe("For find_work: only transcripts modified on or before this date (YYYY-MM-DD)"),
+    }
+  },
+  async (args) => {
+    const result = await handleTestHarnessLabeler(args);
+    return { content: [{ type: "text", text: result }] };
+  }
+);
+
+server.registerTool(
+  "test_harness_tester",
+  {
+    title: "Test Harness Tester",
+    description: "Run test harness against labeled transcripts. Actions: find_work, run_test, list, expand, read_file, append_notes, git_hash, help. Use help action for full documentation.",
+    inputSchema: {
+      action: z.enum([
+        "find_work", "run_test", "list", "expand", "read_file", "append_notes",
+        "git_hash", "help"
+      ]).describe("The action to perform"),
+      transcript_name: z.string().optional().describe("Transcript name (without .jsonl extension)"),
+      target: z.string().optional().describe("For expand: tool_use_id or stop:N key"),
+      depth: z.number().optional().describe("For expand: context radius multiplier (default 1)"),
+      filename: z.string().optional().describe("For read_file: report.json, labels.json, labels.draft.json, or notes_and_questions.md"),
+      content: z.string().optional().describe("For append_notes: content to append"),
+    }
+  },
+  async (args) => {
+    const result = await handleTestHarnessTester(args);
     return { content: [{ type: "text", text: result }] };
   }
 );
