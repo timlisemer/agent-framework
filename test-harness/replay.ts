@@ -17,8 +17,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { execSync } from "child_process";
 import { ReplayEvent, ReplayExpectations, ReplayArgs } from "./lib/types.js";
+import { runCommand } from "../src/utils/command.js";
 import { classifyLine, extractCwd } from "./lib/classifier.js";
 import { runHook, cleanupBackgroundProcesses } from "./lib/harness.js";
 
@@ -775,15 +775,16 @@ async function main(): Promise<void> {
     validateExpectationCompleteness(config.expect, scorableKeys);
   }
 
-  // Auto build for modes that fire hooks
-  try {
+  // Auto build for modes that fire hooks (skip in deployed Docker volume — dist/ is pre-built)
+  if (REPO_ROOT.startsWith("/mnt/docker-data/volumes/")) {
+    console.error("Skipping build (deployed volume)");
+  } else {
     console.error("Building project...");
-    execSync("just build", { cwd: REPO_ROOT, stdio: "inherit" });
-  } catch (err) {
-    const exitCode = err && typeof err === "object" && "status" in err ? (err as { status: number }).status : "unknown";
-    console.error(`ERROR: 'just build' failed (exit code ${exitCode}). Fix build errors before running the harness.`);
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(2);
+    const buildResult = runCommand("just build 2>&1", REPO_ROOT);
+    if (buildResult.exitCode !== 0) {
+      console.error(`ERROR: 'just build' failed (exit code ${buildResult.exitCode}):\n${buildResult.output}`);
+      process.exit(2);
+    }
   }
 
   // 2. Determine cwd

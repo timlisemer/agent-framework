@@ -55,3 +55,4 @@ Then find work:
 - Use mcp__agent-framework__test_harness_tester ONLY for harness operations.
 - Use Read/Grep/Glob for investigating hook source code.
 - Use Write/Edit for fixing hook source code.
+- If run_test returns a build failure error, STOP IMMEDIATELY. Report the error to the user and do not continue testing. Build failures must be fixed before testing can proceed.
