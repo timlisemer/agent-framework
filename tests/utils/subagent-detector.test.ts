@@ -196,8 +196,8 @@ describe("counter fallback", () => {
       JSON.stringify({ cwd: "/home/user/project", model: "claude-3" }),
     ]);
     // Simulate subagent-start having incremented the counter
-    incrementActiveSubagents(tempDir);
-    incrementActiveSubagents(tempDir);
+    incrementActiveSubagents(tempDir, "agent-1");
+    incrementActiveSubagents(tempDir, "agent-2");
 
     const result = detectSubagent(filePath);
     expect(result).toEqual({ isSubagent: false, method: "none", activeSubagentCount: 0 });
@@ -217,7 +217,7 @@ describe("counter fallback", () => {
     ]);
     // Write a counter with a PID that doesn't exist
     const counterPath = path.join(tempDir, "active-subagents.json");
-    fs.writeFileSync(counterPath, JSON.stringify({ count: 1, pid: 999999 }));
+    fs.writeFileSync(counterPath, JSON.stringify({ agents: ["agent-1"], pid: 999999 }));
 
     const result = detectSubagent(filePath);
     expect(result).toEqual({ isSubagent: false, method: "none", activeSubagentCount: 0 });
@@ -226,7 +226,7 @@ describe("counter fallback", () => {
   it("detects via counter for empty transcript file with active subagents", () => {
     const filePath = path.join(tempDir, "session-empty.jsonl");
     fs.writeFileSync(filePath, "");
-    incrementActiveSubagents(tempDir);
+    incrementActiveSubagents(tempDir, "agent-1");
 
     const result = detectSubagent(filePath);
     expect(result).toEqual({ isSubagent: true, method: "counter-fallback", activeSubagentCount: 1 });
@@ -234,7 +234,7 @@ describe("counter fallback", () => {
 
   it("detects via counter for non-existent transcript with active subagents", () => {
     const filePath = path.join(tempDir, "does-not-exist.jsonl");
-    incrementActiveSubagents(tempDir);
+    incrementActiveSubagents(tempDir, "agent-1");
 
     const result = detectSubagent(filePath);
     expect(result).toEqual({ isSubagent: true, method: "counter-fallback", activeSubagentCount: 1 });
@@ -257,32 +257,45 @@ describe("active subagent counter", () => {
   });
 
   it("returns correct count after increment", () => {
-    incrementActiveSubagents(tempDir);
+    incrementActiveSubagents(tempDir, "agent-1");
     expect(getActiveSubagentCount(tempDir)).toBe(1);
   });
 
   it("increments multiple times", () => {
-    incrementActiveSubagents(tempDir);
-    incrementActiveSubagents(tempDir);
-    incrementActiveSubagents(tempDir);
+    incrementActiveSubagents(tempDir, "agent-1");
+    incrementActiveSubagents(tempDir, "agent-2");
+    incrementActiveSubagents(tempDir, "agent-3");
     expect(getActiveSubagentCount(tempDir)).toBe(3);
   });
 
   it("decrements correctly", () => {
-    incrementActiveSubagents(tempDir);
-    incrementActiveSubagents(tempDir);
-    decrementActiveSubagents(tempDir);
+    incrementActiveSubagents(tempDir, "agent-1");
+    incrementActiveSubagents(tempDir, "agent-2");
+    decrementActiveSubagents(tempDir, "agent-1");
     expect(getActiveSubagentCount(tempDir)).toBe(1);
   });
 
   it("does not go below 0 on decrement", () => {
-    decrementActiveSubagents(tempDir);
+    decrementActiveSubagents(tempDir, "agent-nonexistent");
     expect(getActiveSubagentCount(tempDir)).toBe(0);
   });
 
   it("returns 0 when parent PID is dead (staleness)", () => {
     const filePath = path.join(tempDir, "active-subagents.json");
-    fs.writeFileSync(filePath, JSON.stringify({ count: 2, pid: 999999 }));
+    fs.writeFileSync(filePath, JSON.stringify({ agents: ["agent-1"], pid: 999999 }));
     expect(getActiveSubagentCount(tempDir)).toBe(0);
+  });
+
+  it("is idempotent: incrementing same ID twice gives count 1", () => {
+    incrementActiveSubagents(tempDir, "agent-same");
+    incrementActiveSubagents(tempDir, "agent-same");
+    expect(getActiveSubagentCount(tempDir)).toBe(1);
+  });
+
+  it("targeted removal: increment A and B, remove A, count = 1", () => {
+    incrementActiveSubagents(tempDir, "agent-A");
+    incrementActiveSubagents(tempDir, "agent-B");
+    decrementActiveSubagents(tempDir, "agent-A");
+    expect(getActiveSubagentCount(tempDir)).toBe(1);
   });
 });

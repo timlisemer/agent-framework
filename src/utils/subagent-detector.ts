@@ -45,8 +45,8 @@ export interface SubagentDetectionResult {
 // SubagentStart/SubagentStop hooks maintain a counter so the detector
 // and PostToolUse can adapt behavior during subagent execution.
 // Staleness protection: PID-based. The parent Claude Code process PID
-// is stored alongside the counter. If that process is no longer alive,
-// the counter is stale (subagent crashed without firing SubagentStop).
+// is stored alongside the agent set. If that process is no longer alive,
+// all tracked agents are stale (session ended without proper cleanup).
 
 const SUBAGENT_COUNTER_FILE = "active-subagents.json";
 
@@ -106,20 +106,25 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-function readSubagentCount(filePath: string): number {
+function readActiveAgents(filePath: string): string[] {
   try {
     const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-    const count = typeof data.count === "number" ? data.count : 0;
-    if (count <= 0) return 0;
-    // PID-based staleness: if the parent Claude Code process is dead,
-    // the counter is stale (subagent crashed without firing SubagentStop)
-    if (typeof data.pid === "number" && !isProcessAlive(data.pid)) {
-      return 0;
+    if (Array.isArray(data.agents)) {
+      // PID staleness: if parent Claude Code process is dead, all agents are stale
+      if (typeof data.pid === "number" && !isProcessAlive(data.pid)) {
+        return [];
+      }
+      return [...data.agents];
     }
-    return count;
+    // Legacy format { count, pid } -- treat as empty (clears stuck counters)
+    return [];
   } catch {
-    return 0;
+    return [];
   }
+}
+
+function readSubagentCount(filePath: string): number {
+  return readActiveAgents(filePath).length;
 }
 
 export function getActiveSubagentCount(sessionDir: string): number {
@@ -127,27 +132,36 @@ export function getActiveSubagentCount(sessionDir: string): number {
   return readSubagentCount(filePath);
 }
 
-export function incrementActiveSubagents(sessionDir: string): void {
+export function incrementActiveSubagents(sessionDir: string, agentId?: string): void {
   const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
   const lockPath = filePath + ".lock";
   const locked = acquireSubagentLock(lockPath);
   try {
-    const current = readSubagentCount(filePath);
-    fs.writeFileSync(filePath, JSON.stringify({ count: current + 1, pid: process.ppid }));
+    const agents = readActiveAgents(filePath);
+    const id = agentId ?? `unknown-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    if (!agents.includes(id)) {
+      agents.push(id);
+    }
+    fs.writeFileSync(filePath, JSON.stringify({ agents, pid: process.ppid }));
   } finally {
     if (locked) releaseSubagentLock(lockPath);
     counterCache = null;
   }
 }
 
-export function decrementActiveSubagents(sessionDir: string): void {
+export function decrementActiveSubagents(sessionDir: string, agentId?: string): void {
   const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
   const lockPath = filePath + ".lock";
   const locked = acquireSubagentLock(lockPath);
   try {
-    // Proceed even without lock -- a stuck counter is worse than a brief race
-    const current = readSubagentCount(filePath);
-    fs.writeFileSync(filePath, JSON.stringify({ count: Math.max(0, current - 1) }));
+    const agents = readActiveAgents(filePath);
+    if (agentId) {
+      const idx = agents.indexOf(agentId);
+      if (idx !== -1) agents.splice(idx, 1);
+    } else if (agents.length > 0) {
+      agents.shift();
+    }
+    fs.writeFileSync(filePath, JSON.stringify({ agents, pid: process.ppid }));
   } finally {
     if (locked) releaseSubagentLock(lockPath);
     counterCache = null;
@@ -157,7 +171,7 @@ export function decrementActiveSubagents(sessionDir: string): void {
 export function resetActiveSubagents(sessionDir: string): void {
   const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
   try {
-    fs.writeFileSync(filePath, JSON.stringify({ count: 0 }));
+    fs.writeFileSync(filePath, JSON.stringify({ agents: [] }));
   } catch {}
   counterCache = null;
 }

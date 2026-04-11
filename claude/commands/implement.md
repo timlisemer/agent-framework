@@ -16,8 +16,6 @@ Find the active plan file. Check in this order:
 3. Look for the most recent plan file in ~/.claude/plans/
 4. If no plan file is found, tell the user and stop
 
-Read the plan file to confirm it exists and has content.
-
 ## Step 2: Launch the Implementer agent
 
 Launch exactly 1 Agent tool call with `subagent_type: "implementer"` and the following prompt:

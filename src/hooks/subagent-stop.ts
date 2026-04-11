@@ -22,7 +22,7 @@ async function main() {
   const input = await readStdinJson<SubagentStopHookInput>();
   const sessionDir = getSessionDir(input.transcript_path);
   try {
-    decrementActiveSubagents(sessionDir);
+    decrementActiveSubagents(sessionDir, input.agent_id);
   } catch (err) {
     console.error("[subagent-stop] decrement failed:", err);
   }

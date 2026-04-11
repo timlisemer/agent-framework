@@ -20,7 +20,7 @@ interface SubagentStartHookInput {
 async function main() {
   const input = await readStdinJson<SubagentStartHookInput>();
   const sessionDir = getSessionDir(input.transcript_path);
-  incrementActiveSubagents(sessionDir);
+  incrementActiveSubagents(sessionDir, input.agent_id);
   process.exit(0);
 }
 
