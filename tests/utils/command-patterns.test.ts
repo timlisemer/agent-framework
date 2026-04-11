@@ -61,6 +61,33 @@ describe("getContentBlacklistHighlights", () => {
     expect(highlights.length).toBeGreaterThan(0);
     expect(highlights[0]).toContain("tsc");
   });
+
+  it("ignores commands inside function call expressions", () => {
+    expect(getContentBlacklistHighlights("replay.ts uses execSync('just build')")).toEqual([]);
+  });
+
+  it("ignores commands inside double-quoted strings", () => {
+    expect(getContentBlacklistHighlights('the config has "npm run build" as a script')).toEqual([]);
+  });
+
+  it("ignores commands in function calls with double quotes", () => {
+    expect(getContentBlacklistHighlights('the script calls execSync("npm run build")')).toEqual([]);
+  });
+
+  it("still catches bare unquoted command instructions", () => {
+    const highlights = getContentBlacklistHighlights("Run just build to verify");
+    expect(highlights.length).toBe(1);
+    expect(highlights[0]).toContain("just build");
+  });
+
+  it("still catches commands outside quotes on same line", () => {
+    const highlights = getContentBlacklistHighlights('After "setup", run npm run build');
+    expect(highlights.length).toBe(1);
+  });
+
+  it("ignores commands inside backticks (existing behavior)", () => {
+    expect(getContentBlacklistHighlights("Remove `npm run build` from the docs")).toEqual([]);
+  });
 });
 
 describe("getBlacklistHighlights", () => {

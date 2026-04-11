@@ -170,14 +170,17 @@ export function getContentBlacklistHighlights(content: string): string[] {
     }
     if (inCodeBlock) continue;
 
-    // Strip inline backtick spans — plan prose uses backticks to reference
-    // commands (e.g., "Remove `npm run build` from docs") which are not
-    // instructions to execute.
-    const lineWithoutBackticks = line.replace(/`[^`]+`/g, "");
+    // Strip references to commands in prose — backticks, double quotes, and
+    // function-call expressions like execSync('just build') or spawn("npm run build").
+    // Single quotes alone are NOT stripped (too many false interactions with apostrophes).
+    const strippedLine = line
+      .replace(/`[^`]+`/g, "")                              // `just build`
+      .replace(/"[^"]+"/g, "")                               // "just build"
+      .replace(/\b\w+\s*\([^)]*\)/g, "");                    // execSync('just build'), spawn(cmd)
 
     for (const { pattern, name, alternative, bashOnly } of BLACKLIST_PATTERNS) {
       if (bashOnly) continue; // Skip patterns too broad for plan prose (e.g., bare "test")
-      if (pattern.test(lineWithoutBackticks)) {
+      if (pattern.test(strippedLine)) {
         highlights.push(`[VIOLATION: ${name}] "${line.trim()}" → ${alternative}`);
         break; // One highlight per line
       }
