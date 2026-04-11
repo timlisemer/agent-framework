@@ -79,7 +79,7 @@ export function testRunFileExists(transcriptName: string, filename: string): boo
   return fs.existsSync(filePath);
 }
 
-// ─── execFileSync Wrapper ──────────────────────────────────────────────────
+// ─── Replay Command Wrapper ───────────────────────────────────────────────
 
 function getAgentFrameworkRoot(): string {
   const root = process.env.AGENT_FRAMEWORK_ROOT;
@@ -122,7 +122,10 @@ export function runReplayCommand(args: string[], timeoutMs: number = 600000): st
   });
 
   const stdout = result.stdout || "";
-  const stderr = result.stderr || "";
+  // Filter git discovery noise from stderr (AGENT_FRAMEWORK_ROOT may not be a git repo)
+  const stderr = (result.stderr || "").split("\n").filter(
+    (line) => !line.includes("fatal: not a git repository") && !line.includes("GIT_DISCOVERY_ACROSS_FILESYSTEM")
+  ).join("\n");
 
   // Spawn-level failure (binary not found, signal killed, timeout)
   if (result.error) {
@@ -144,17 +147,12 @@ export function runReplayCommand(args: string[], timeoutMs: number = 600000): st
   return output;
 }
 
-// ─── Git Hash ──────────────────────────────────────────────────────────────
+// ─── Version ──────────────────────────────────────────────────────────────
 
-export function getGitHash(): string {
-  try {
-    return execFileSync("git", ["rev-parse", "HEAD"], {
-      encoding: "utf-8",
-      cwd: getAgentFrameworkRoot(),
-    }).trim();
-  } catch {
-    return "unknown";
-  }
+import { VERSION } from "../../version.js";
+
+export function getVersion(): string {
+  return VERSION;
 }
 
 // ─── Label File Operations ─────────────────────────────────────────────────

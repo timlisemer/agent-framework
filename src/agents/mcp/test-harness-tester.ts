@@ -10,7 +10,7 @@
  *   expand       - Run replay.ts --list --expand (free)
  *   read_file    - Read report, labels, or notes
  *   append_notes - Append to notes_and_questions.md
- *   git_hash     - Get current HEAD commit hash
+ *   git_hash     - Get current framework version
  *   help         - Full tester documentation
  *
  * @module test-harness-tester
@@ -24,7 +24,7 @@ import {
   transcriptRunDir,
   readTestRunFile,
   runReplayCommand,
-  getGitHash,
+  getVersion,
   checkAndIncrementRunLimit,
   detectWorkflowState,
   formatStatusFooter,
@@ -95,7 +95,7 @@ function handleAppendNotes(transcriptName: string, content: string): string {
 }
 
 function handleGitHash(): string {
-  return getGitHash();
+  return getVersion();
 }
 
 function handleHelp(): string {

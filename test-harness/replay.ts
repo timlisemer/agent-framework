@@ -39,9 +39,12 @@ function cacheDir(transcriptPath: string): string {
   return path.join(transcriptDir(transcriptPath), "cache");
 }
 
-function getHeadCommit(): string {
+function getVersion(): string {
   try {
-    return execSync("git rev-parse HEAD", { cwd: REPO_ROOT, encoding: "utf-8" }).trim();
+    const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf-8"));
+    const [major, minor] = pkg.version.split(".");
+    const data = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "dist", "version-data.json"), "utf-8"));
+    return `${major}.${minor}.${data.commitCount}`;
   } catch {
     return "unknown";
   }
@@ -507,7 +510,7 @@ function scaffoldLabelFile(
     _meta: {
       transcript: transcriptPath,
       created: new Date().toISOString(),
-      commit: getHeadCommit(),
+      commit: getVersion(),
       total_hooks: scorableKeys.length,
       needs_review: investigateCount,
     },
@@ -682,7 +685,7 @@ function formatReport(
   }
 
   // Add commit hash
-  report.commit = getHeadCommit();
+  report.commit = getVersion();
 
   // Write report to file
   const tDir = transcriptDir(transcriptPath);
@@ -1175,7 +1178,7 @@ async function main(): Promise<void> {
       _meta: {
         transcript: config.transcript,
         created: new Date().toISOString(),
-        commit: getHeadCommit(),
+        commit: getVersion(),
         status: "in_progress",
         total_hooks: Object.keys(labels).length,
         investigate_count: investigateCount,

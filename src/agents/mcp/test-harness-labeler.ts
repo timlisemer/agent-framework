@@ -15,7 +15,7 @@
  *   finalize        - Validate, check reasoning, rename draft to final
  *   read_file       - Read labels_draft, labels, or notes
  *   append_notes    - Append to notes_and_questions.md
- *   git_hash        - Get current HEAD commit hash
+ *   git_hash        - Get current framework version
  *   help            - Full labeler documentation
  *
  * @module test-harness-labeler
@@ -33,7 +33,7 @@ import {
   updateSingleLabel,
   updateMultipleLabels,
   runReplayCommand,
-  getGitHash,
+  getVersion,
   checkAndIncrementRunLimit,
   detectWorkflowState,
   formatStatusFooter,
@@ -188,7 +188,7 @@ function handleAppendNotes(transcriptName: string, content: string): string {
 }
 
 function handleGitHash(): string {
-  return getGitHash();
+  return getVersion();
 }
 
 function handleHelp(): string {
@@ -370,7 +370,7 @@ Every label MUST have reasoning explaining your decision.
 ### Step 6: Record uncertainty
 For any label where confidence < 80%:
 Action: append_notes (transcript_name, content)
-Include git hash (from git_hash action), date, tool_use_id, context, uncertainty.
+Include version (from git_hash action), date, tool_use_id, context, uncertainty.
 
 ### Step 7: Validate
 Action: validate (transcript_name)
@@ -426,7 +426,7 @@ Only use main session transcripts, not sidechain/subagent transcripts.
 ## Notes Format
 
 # Notes and Questions
-Commit: {hash from git_hash}
+Version: {version from git_hash action}
 Date: {ISO date}
 
 ## {tool_use_id or stop:N} - Label: {value}

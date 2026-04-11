@@ -1,33 +1,34 @@
 /**
- * Version module - generates version string from git commit count
+ * Version module - reads version baked in at build time.
  *
  * Version format: {major}.{minor}.{commit_count}
  * - major/minor from package.json
- * - commit_count from git rev-list --count HEAD
+ * - commit_count written by `just build` into dist/version-data.json
+ *
+ * At build time the justfile runs a script that writes the commit count.
+ * At runtime this module reads the pre-computed value — no git needed.
  */
 
-import { execSync } from "child_process";
 import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 
-// Get base version from package.json
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(
-  readFileSync(join(__dirname, "../package.json"), "utf-8")
-);
-const [major, minor] = pkg.version.split(".");
 
-// Get git commit count for patch version
-function getCommitCount(): number {
+function loadVersion(): string {
+  const pkg = JSON.parse(
+    readFileSync(join(__dirname, "../package.json"), "utf-8")
+  );
+  const [major, minor] = pkg.version.split(".");
+
   try {
-    return parseInt(
-      execSync("git rev-list --count HEAD", { encoding: "utf-8" }).trim(),
-      10
+    const data = JSON.parse(
+      readFileSync(join(__dirname, "version-data.json"), "utf-8")
     );
+    return `${major}.${minor}.${data.commitCount}`;
   } catch {
-    return 0;
+    return `${major}.${minor}.0`;
   }
 }
 
-export const VERSION = `${major}.${minor}.${getCommitCount()}`;
+export const VERSION = loadVersion();
