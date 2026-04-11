@@ -281,6 +281,39 @@ async function main() {
   }
 
   // ============================================================
+  // STEP 0: Respond-first enforcement (first tool call only)
+  // When the user says something, AI must respond with text
+  // before calling any tool. Pure TypeScript, no LLM.
+  // ============================================================
+  if (!subagent && !state.respondFirstChecked) {
+    if (toolName !== "AskUserQuestion" && toolName !== "ExitPlanMode") {
+      const rfResult = await readTranscriptExact(input.transcript_path, {
+        counts: { user: 1, assistant: 3 },
+      });
+
+      if (rfResult.user.length > 0) {
+        const lastUser = rfResult.user.reduce((a, b) => a.index > b.index ? a : b);
+        const hasTextAfterUser = rfResult.assistant.some(
+          (m) => m.index > lastUser.index && m.content.trim().length > 0
+        );
+
+        if (!hasTextAfterUser) {
+          logFastPathDeny("respond-first", "PreToolUse", toolName, projectDir,
+            "No text response before first tool call");
+          await exitPipeline({
+            decision: "deny",
+            agent: "respond-first",
+            reason: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
+          });
+          return;
+        }
+      }
+    }
+    // Text confirmed present (or exempt tool) -- skip check for rest of turn
+    await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
+  }
+
+  // ============================================================
   // STEP 1: Low-risk auto-approve
   // ============================================================
 

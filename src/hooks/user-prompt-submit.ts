@@ -63,6 +63,7 @@ async function main() {
     currentEditIntent: result,
     editIntentTimestamp: now,
     editIntentOverturnCount: 0,
+    respondFirstChecked: false,
   }));
 
   // Clear stale corrections from previous turn

@@ -34,77 +34,17 @@
  * @module response-align
  */
 
-import { getModelId, MODEL_TIERS, EXECUTION_TYPES, type CheckResult, type StopCheckResult, type ModelTier } from "../../types.js";
+import { getModelId, MODEL_TIERS, EXECUTION_TYPES, type StopCheckResult, type ModelTier } from "../../types.js";
 import { runAgent, type AgentExecutionResult } from "../../utils/agent-runner.js";
-import { RESPONSE_ALIGN_AGENT } from "../../utils/agent-configs.js";
-import { getAnthropicClient } from "../../utils/anthropic-client.js";
-import { logApprove, logDeny, logFastPathApproval, logAgentStarted } from "../../utils/logger.js";
-import { retryUntilValid, startsWithAny } from "../../utils/retry.js";
+import { logApprove, logDeny, logFastPathApproval } from "../../utils/logger.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
 import { readTranscriptExact, type TranscriptMessage } from "../../utils/transcript.js";
 import {
   FIRST_RESPONSE_STOP_COUNTS,
 } from "../../utils/transcript-presets.js";
-import type { TranscriptReadOptions } from "../../utils/transcript.js";
 
-/**
- * For intent alignment checks (inlined from removed transcript-presets).
- *
- * Gets all user messages to preserve AskUserQuestion responses and plan acceptances.
- * Includes first user message to capture original request context.
- * More assistant messages to catch acknowledgments in the current turn.
- */
-const INTENT_ALIGNMENT_COUNTS: TranscriptReadOptions = {
-  counts: { user: Infinity, assistant: 5, tool: 5 },
-  includeFirstUserMessage: true,
-  toolOptions: {
-    trim: true,
-    maxLines: 100,
-  },
-};
 import { detectUserDirectedQuestions } from "../../utils/content-patterns.js";
 import { stripQuotedContent } from "../../utils/quote-detection.js";
-
-// Patterns indicating AI is asking a question/clarification that should wait for user response
-const PREAMBLE_CONCERN_PATTERNS = [
-  /I need to clarify/i,
-  /let me clarify/i,
-  /to clarify/i,
-  /before I proceed/i,
-  /before we continue/i,
-  /just to confirm/i,
-  /to make sure/i,
-  /I'm not sure if/i,
-  /I'm uncertain/i,
-];
-
-/**
- * Check if the AI acknowledgment contains potential preamble violations.
- * Returns true if the LLM should be alerted to check this.
- */
-function hasPreambleConcern(ackText: string): boolean {
-  if (!ackText) return false;
-
-  // Check for explicit clarification patterns
-  for (const pattern of PREAMBLE_CONCERN_PATTERNS) {
-    if (pattern.test(ackText)) {
-      return true;
-    }
-  }
-
-  // Check for direct questions to user (ends with ? and seems directed at user)
-  const sentences = ackText.split(/[.!]\s*/);
-  for (const sentence of sentences) {
-    if (sentence.trim().endsWith("?")) {
-      // Skip rhetorical/self-directed questions
-      if (!/^(?:I wonder|wondering|why (?:does|is|would) (?:this|that))/i.test(sentence)) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
 
 /**
  * Find the most recent message by transcript index.
@@ -114,163 +54,6 @@ function getMostRecentMessage(messages: TranscriptMessage[]): TranscriptMessage 
   return messages.reduce((latest, msg) =>
     msg.index > latest.index ? msg : latest
   );
-}
-
-/**
- * Check if the AI's tool call aligns with the user's request.
- *
- * This function validates:
- * 1. Preamble violations - AI asked clarification then continued anyway
- * 2. Intent alignment - Tool call matches user's request
- *
- * Note: The "first tool call" gating is now handled by rewind-cache.ts.
- * This function always runs the full alignment check when called.
- *
- * @param toolName - Name of the tool being called
- * @param toolInput - Input parameters for the tool
- * @param transcriptPath - Path to the transcript file
- * @param workingDir - Working directory for context
- * @param hookName - Hook that triggered this check (for telemetry)
- * @returns Check result with approval status and optional reason
- *
- * @example
- * ```typescript
- * const result = await checkResponseAlignment(
- *   'Edit',
- *   { file_path: 'src/auth.ts', ... },
- *   transcriptPath,
- *   cwd,
- *   'PreToolUse'
- * );
- * if (!result.approved) {
- *   // Block: AI's action doesn't match user request
- * }
- * ```
- */
-export async function checkResponseAlignment(
-  toolName: string,
-  toolInput: unknown,
-  transcriptPath: string,
-  workingDir: string,
-  hookName: string
-): Promise<CheckResult> {
-  // Skip response alignment checks for subagents (Task-spawned agents)
-  if (isSubagent(transcriptPath)) {
-    logFastPathApproval("response-align", hookName, toolName, workingDir, "Subagent skip");
-    return { approved: true };
-  }
-
-  // Read transcript to get context
-  const transcriptResult = await readTranscriptExact(
-    transcriptPath,
-    INTENT_ALIGNMENT_COUNTS
-  );
-
-  if (transcriptResult.user.length === 0) {
-    // No user message found - skip check
-    logFastPathApproval("response-align", hookName, toolName, workingDir, "No user message");
-    return { approved: true };
-  }
-
-  // Check if user answered via AskUserQuestion tool (tool result with answer indicator)
-  // This means user provided fresh input that supersedes any prior stop hook feedback
-  const hasUserToolAnswer = transcriptResult.tool.some(
-    (tr) => tr.content.includes("User answered") || tr.content.includes("answered Claude's questions") || tr.content.includes("→")
-  );
-  if (hasUserToolAnswer) {
-    logFastPathApproval("response-align", hookName, toolName, workingDir, "Fresh AskUserQuestion answer");
-    return { approved: true };
-  }
-
-  // Get most recent user message (highest index, not last in array)
-  const lastUserMessage = getMostRecentMessage(transcriptResult.user);
-  const lastUserIndex = lastUserMessage.index;
-  const userRequest = lastUserMessage.content;
-
-  // Get assistant messages AFTER the last user message (acknowledgments)
-  const assistantAfterUser = transcriptResult.assistant.filter(
-    (msg) => msg.index > lastUserIndex
-  );
-
-  // Combine any acknowledgment text
-  const ackText = assistantAfterUser.map((m) => m.content).join("\n").trim();
-
-  const toolDescription = `${toolName} with ${JSON.stringify(toolInput).slice(0, 300)}`;
-
-  // Format recent tool results for context
-  const toolsText =
-    transcriptResult.tool.length > 0
-      ? `\nRECENT TOOL RESULTS:\n${transcriptResult.tool
-          .map(
-            (r) =>
-              `- ${r.content.slice(0, 300)}${r.content.length > 300 ? "..." : ""}`
-          )
-          .join("\n")}\n`
-      : "";
-
-  // Check for preamble concerns and add to context if detected
-  const preambleConcern = hasPreambleConcern(ackText);
-  const preambleSection = preambleConcern
-    ? `\n⚠️ PREAMBLE CONCERN: The AI acknowledgment appears to contain a question or clarification directed at the user. Check if the AI should have waited for user response before proceeding with this tool call.\n`
-    : "";
-
-  // Build context for the agent
-  const context = `USER MESSAGE:
-${userRequest}
-
-${ackText ? `AI ACKNOWLEDGMENT (text before this tool call):\n${ackText}\n` : ""}${preambleSection}TOOL CALL:
-Tool: ${toolName}
-Input: ${JSON.stringify(toolInput, null, 2).slice(0, 500)}
-${toolsText}`;
-
-  // Mark agent as running in statusline
-  logAgentStarted("response-align", toolName);
-
-  try {
-    // Run alignment check via unified runner
-    const result = await runAgent(
-      { ...RESPONSE_ALIGN_AGENT },
-      {
-        prompt: "Check if this tool call aligns with the user's request.",
-        context,
-      }
-    );
-
-    // Retry if format is invalid (must start with OK or BLOCK:)
-    const anthropic = getAnthropicClient();
-    const decision = await retryUntilValid(
-      anthropic,
-      getModelId(RESPONSE_ALIGN_AGENT.tier),
-      result.output,
-      toolDescription,
-      {
-        maxRetries: 1,
-        formatValidator: (text) => startsWithAny(text, ["OK", "BLOCK:"]),
-        formatReminder: "Reply with EXACTLY: OK or BLOCK: <reason>",
-      }
-    );
-
-    if (decision.startsWith("OK")) {
-      logApprove(result, "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, "Aligned with request");
-      return { approved: true };
-    }
-
-    // Extract block reason
-    const reason = decision.startsWith("BLOCK: ")
-      ? decision.substring(7).trim()
-      : `Misaligned response: ${decision}`;
-
-    logDeny(result, "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.LLM, reason);
-
-    return {
-      approved: false,
-      reason,
-    };
-  } catch {
-    // Fail closed on errors
-    logFastPathApproval("response-align", hookName, toolName, workingDir, "Error path - fail closed");
-    return { approved: false, reason: "Error during alignment check - retry" };
-  }
 }
 
 
@@ -286,7 +69,7 @@ async function classifyStopResponse(
   workingDir: string,
   stopHookError?: string,
   questionHint?: string[]
-): Promise<{ classification: "QUESTION" | "PLAN_APPROVAL" | "IGNORED_ERROR" | "OK"; latencyMs: number; modelTier: ModelTier; success: boolean; errorCount: number; generationId?: string }> {
+): Promise<{ classification: "QUESTION" | "PLAN_APPROVAL" | "IGNORED_ERROR" | "MISUNDERSTOOD" | "OK"; latencyMs: number; modelTier: ModelTier; success: boolean; errorCount: number; generationId?: string }> {
   const stopHookSection = stopHookError
     ? `\nPREVIOUS STOP HOOK ERROR:\n${stopHookError}\n`
     : "";
@@ -387,6 +170,19 @@ KEY TEST: Does the user need to make a SPECIFIC decision to proceed?
 - OPTION PRESENTATION IN STATEMENT FORM: When AI says "X or Y. Those are the only options." without a question mark, this is still QUESTION because the user must choose.
 When regex detected a pattern AND the response contains option presentation, default to QUESTION.
 
+MISUNDERSTOOD - Use when:
+- The user's message has a clear, specific intent or question
+- The AI's response addresses something DIFFERENT from what was asked
+- The AI misinterprets the user's words (user asked X, AI thinks Y)
+- User corrects the AI ("no, I meant...", "that's not what I asked") and AI still responds off-topic
+
+NOT MISUNDERSTOOD (use OK):
+- AI gives a partial answer (incomplete but on-topic)
+- AI's response is vague but in the right direction
+- The user's message was itself ambiguous
+
+DEFAULT: When in doubt between MISUNDERSTOOD and OK, prefer OK.
+
 OK - Use when:
 - Task completion with open-ended follow-up ("Done. Anything else?")
 - Rhetorical or self-directed questions
@@ -397,7 +193,7 @@ OK - Use when:
 
 DEFAULT: When in doubt between QUESTION and OK, prefer OK. Only use QUESTION when you are confident the AI is blocked on a specific implementation decision.
 
-Reply with EXACTLY one of: IGNORED_ERROR, PLAN_APPROVAL, QUESTION, or OK`;
+Reply with EXACTLY one of: IGNORED_ERROR, PLAN_APPROVAL, QUESTION, MISUNDERSTOOD, or OK`;
 
   const response = await runAgent(
     {
@@ -412,11 +208,13 @@ Reply with EXACTLY one of: IGNORED_ERROR, PLAN_APPROVAL, QUESTION, or OK`;
   );
 
   const trimmed = response.output.trim().toUpperCase();
-  let classification: "QUESTION" | "PLAN_APPROVAL" | "IGNORED_ERROR" | "OK";
+  let classification: "QUESTION" | "PLAN_APPROVAL" | "IGNORED_ERROR" | "MISUNDERSTOOD" | "OK";
   if (trimmed.includes("IGNORED_ERROR")) {
     classification = "IGNORED_ERROR";
   } else if (trimmed.includes("PLAN_APPROVAL")) {
     classification = "PLAN_APPROVAL";
+  } else if (trimmed.includes("MISUNDERSTOOD")) {
+    classification = "MISUNDERSTOOD";
   } else if (trimmed.includes("QUESTION")) {
     classification = "QUESTION";
   } else {
@@ -672,7 +470,9 @@ export async function checkStopResponseAlignment(
   // Check for responses ending with ? (likely asking user a question)
   const endsWithQuestion = trimmedAssistant.endsWith("?");
 
-  const needsLLMCheck = questionCheck.detected || stopHookError || regexQuestionHints.length > 0 || isShortResponse || endsWithQuestion || planMode;
+  const hasCorrectionLanguage = /\b(no[,.\s]|that'?s (wrong|not)|I (said|meant|asked)|not what I|actually[,.\s])/i.test(userText.trim());
+
+  const needsLLMCheck = questionCheck.detected || stopHookError || regexQuestionHints.length > 0 || isShortResponse || endsWithQuestion || planMode || hasCorrectionLanguage;
 
   if (needsLLMCheck) {
     // When conversational exemption matched, suppress regex hints to avoid biasing LLM toward QUESTION
@@ -721,6 +521,13 @@ export async function checkStopResponseAlignment(
         reason: "Plain text question detected",
         systemMessage:
           "[AUTOGENERATED STOP HOOK FEEDBACK]\nDo not ask questions in plain text. Use the AskUserQuestion tool to present structured options to the user.",
+      };
+    } else if (classifyResult.classification === "MISUNDERSTOOD") {
+      logDeny(classifyAgentResult, "response-align-stop", hookName, "StopResponse", workingDir, EXECUTION_TYPES.LLM, "Intent misunderstanding detected");
+      return {
+        approved: false,
+        reason: "Intent misunderstanding detected",
+        systemMessage: "[AUTOGENERATED STOP HOOK FEEDBACK]\nYour response does not address what the user actually asked. Re-read their message carefully and respond to their actual question or request.",
       };
     }
     // classification === "OK" - allow it

@@ -36,6 +36,5 @@ export { checkPlanIntent } from './plan-validate.js';
 export { checkForOffTopic } from './intent-validate.js';
 export { checkStyleDrift } from './style-drift.js';
 export {
-  checkResponseAlignment,
   checkStopResponseAlignment,
 } from './response-align.js';

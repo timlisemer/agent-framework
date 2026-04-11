@@ -44,6 +44,7 @@ export interface SessionState {
   previousEditIntent: boolean | null;
   editIntentTimestamp: number;
   editIntentOverturnCount: number;
+  respondFirstChecked?: boolean;
 }
 
 type SessionStateManager = CacheManager<SessionState>;
@@ -349,6 +350,7 @@ export function getSessionState(sessionDir: string): SessionStateManager {
       previousEditIntent: null,
       editIntentTimestamp: 0,
       editIntentOverturnCount: 0,
+      respondFirstChecked: false,
     }),
   });
 }
