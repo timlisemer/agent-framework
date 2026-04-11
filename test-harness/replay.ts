@@ -318,11 +318,25 @@ function buildEnv(sessionDir: string, cwd: string): Record<string, string> {
 /**
  * Find the next real user prompt after a given line index.
  * Skips tool_result messages and system-injected (isMeta) messages.
+ * Stops at the next scorable assistant event (tool_use or stop point) since
+ * the user reaction beyond that boundary is about the later actions, not ours.
  * Returns the prompt text (truncated to 200 chars) or undefined.
  */
 function findNextUserReaction(lines: Record<string, unknown>[], afterIndex: number): string | undefined {
   for (let j = afterIndex + 1; j < lines.length; j++) {
     const line = lines[j];
+
+    // Stop at the next assistant turn with tool calls or a stop point.
+    // If the assistant made more tool calls after ours, the eventual user
+    // reaction is about those later calls, not ours.
+    if (line.type === "assistant") {
+      const classification = classifyLine(line, lines, j);
+      if (classification.kind === "pre-tool-use" || classification.kind === "stop-response-check") {
+        return undefined;
+      }
+      continue;
+    }
+
     if (line.type !== "user" || line.isMeta === true) continue;
 
     const message = line.message as Record<string, unknown> | undefined;
