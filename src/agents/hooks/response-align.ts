@@ -351,6 +351,7 @@ Examples that ARE QUESTION:
 - "Which approach do you prefer?" (requires user input)
 - "Should cached messages be cleared when X or Y?" (decision about behavior)
 - "Should synthesis happen for all readers or only specific ones?" (decision about scope)
+- "What exactly do you want me to do?" (bare deflection question without substance — even if user is angry, this requires a decision and should use AskUserQuestion)
 
 OPTION PRESENTATION (always QUESTION):
 When AI presents structured options in ANY of these formats, it is ALWAYS a QUESTION:
@@ -364,8 +365,9 @@ Examples:
 - "Here are two ways: 1. Simple approach 2. Complex approach. Which sounds better?" → QUESTION
 
 NOT QUESTION (use OK instead):
-- EMOTIONAL CONTEXT: When the user is angry/frustrated (profanity, ALL CAPS, accusations) and the AI acknowledges mistakes then asks what the user wants as conflict resolution — these are conversational, not blocking. Using AskUserQuestion during heated exchanges would be robotic and dismissive.
+- EMOTIONAL CONTEXT: When the user is angry/frustrated (profanity, ALL CAPS, accusations) and the AI provides a SUBSTANTIVE acknowledgment of its mistakes AND THEN asks what the user wants as conflict resolution — these are conversational, not blocking. Using AskUserQuestion during heated exchanges would be robotic and dismissive. HOWEVER: If the AI ONLY asks a bare question like "What do you want me to do?" or "What exactly do you want?" WITHOUT first acknowledging the problem, this is STILL a QUESTION — the AI is deflecting rather than de-escalating, and should use AskUserQuestion to give the user structured options.
 - SUBSTANTIVE RESPONSE + TRAILING QUESTION: When the AI first provides a thorough response (>150 words) addressing the user's complaint and THEN asks a follow-up, the response as a whole is OK. The question is natural follow-up, not a standalone blocker.
+- COMPLETION CHECK-IN: After completing a discrete task step (creating a plan, writing a file, exiting plan mode), "Should I proceed?" or "Ready for your review" with a trailing question is OK — it is a polite handoff, not a blocking decision. The user can simply say "yes" or give a new instruction.
 - Open-ended "what's next": "Done! Do you have another topic?" "Anything else?" "What would you like to work on next?"
 - Rhetorical: "Why would this fail?" (thinking aloud)
 - Confirmation of completion: "Task complete. Need anything else?"

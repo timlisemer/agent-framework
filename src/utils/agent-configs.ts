@@ -1095,7 +1095,8 @@ BLOCK if ANY of these apply:
 3. ALREADY ANSWERED - User explicitly stated preference that answers this:
    - User said "I want option X" earlier → don't ask about X vs Y
    - User said "don't do Z" earlier → don't offer Z as an option
-   - Only block if 90%+ confident the prior statement directly answers
+   - Only block if 90%+ confident the prior statement directly answers ALL questions
+   - PARTIAL OVERLAP: If a multi-question tool has some already-answered items AND some NEW items, ALLOW it — the new items still need user input. Do not block the entire question set just because one sub-question was answered.
 
 4. WORKFLOW VIOLATION - Question violates expected flow:
    - In plan mode: asking implementation questions before plan is approved
@@ -1103,7 +1104,7 @@ BLOCK if ANY of these apply:
 
 5. REDUNDANT AFTER CLARIFICATION - User already gave explicit short directive:
    - User's recent message was brief and clear (e.g., "README", "the tests", "fix it")
-   - Claude now asks multi-option question about the same topic
+   - Claude now asks multi-option question about the SAME topic
    - This forces user to re-explain what they just said
    - BLOCK: Respect the user's explicit direction without re-asking
 
@@ -1111,6 +1112,13 @@ ALLOW if:
 - Question clarifies genuine ambiguity in user's request
 - User has context needed to answer (content was shown)
 - Question is on-topic and hasn't been answered
+
+IMPORTANT - FRUSTRATED USER DOES NOT MEAN BLOCK ALL QUESTIONS:
+- When user is frustrated about HOW things were presented (e.g., "just present me the situation", "stop changing your mind"), this is about communication STYLE, not about whether questions should be asked
+- If the assistant has NEW decisions or different topics to ask about, AskUserQuestion is still appropriate
+- Only block if the question asks about something the user ALREADY decided or explicitly said to skip
+- A user saying "do the edits" about items A and B does NOT mean "never ask me about item C"
+- When consensus/analysis recommends a clear action and user previously agreed to similar actions, proceeding without asking IS correct — but if the question introduces a genuinely new decision, ALLOW it
 
 OUTPUT FORMAT (exactly one):
 
