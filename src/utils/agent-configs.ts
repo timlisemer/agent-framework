@@ -1295,6 +1295,7 @@ EXPLICIT AGENT TYPE REQUESTS:
 - "start a plan agent" / "run plan agent" / "launch plan agent" → subagent_type MUST be "Plan"
 - "start an explore agent" / "explore the codebase" → subagent_type MUST be "Explore"
 - "start a bash agent" / "run bash commands" → subagent_type MUST be "Bash"
+- "implement the plan" / "/implement" → subagent_type "implementer" or "implement-validator" OK
 - Generic "start an agent" / "run an agent" → any subagent_type OK
 
 BLOCK if:
@@ -1308,6 +1309,9 @@ BLOCK if:
 | "start a plan agent" | Task | Explore | BLOCK: User requested Plan agent but starting Explore |
 | "explore the codebase" | Task | Explore | OK |
 | "start an agent to help" | Task | Plan | OK: no specific type requested |
+| "/implement" | Agent | implementer | OK |
+| "/implement" | Agent | implement-validator | OK |
+| "/implement" | Agent | Plan | BLOCK: /implement requested implementer but starting Plan |
 
 ## PRIORITY 3: STOP/WAIT/EXPLAIN
 

@@ -572,6 +572,7 @@ Your final response should be your complete analysis in the required format.`;
         allowDangerouslySkipPermissions: true,
         maxTurns: config.maxTurns ?? 10,
         env: subprocessEnv, // Pass env to subprocess (cleared for subscription)
+        persistSession: false, // Don't create transcript files for SDK agents
       },
     });
 
