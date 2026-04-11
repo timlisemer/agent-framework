@@ -17,17 +17,21 @@ Call the help action first to read the full documentation:
 Then find work:
 - action: find_work
 
+## Working Directory
+
+**CRITICAL**: Always pass `working_dir` with your current working directory on every `run_test`, `list`, and `expand` call. This ensures the harness runs YOUR edited code, not the deployed version.
+
 ## Workflow
 
 1. **find_work** -- pick one transcript (UNTESTED or FAILING)
-2. **run_test** (costs $, max 5 runs) -- run hooks against labels
+2. **run_test** (costs $, max 5 runs, working_dir: your cwd) -- run hooks against labels
 3. **read_file** (filename: report.json) -- analyze failures
 4. **read_file** (filename: notes_and_questions.md) -- check for known uncertainties
 5. Investigate hook code with **Read**, **Grep**, **Glob** tools
 6. Fix hook code with **Write**, **Edit** tools. Batch ALL fixes before re-running.
-7. **run_test** again -- compare results. Stop if regression.
+7. **run_test** again (working_dir: your cwd) -- compare results. Stop if regression.
 8. Repeat until passing or only uncertainty-related failures remain.
-9. **append_notes** -- record findings with [tester] prefix, date, git hash.
+9. **append_notes** -- record findings with [tester] prefix, date, version.
 
 ## Key Source Files for Hook Investigation
 

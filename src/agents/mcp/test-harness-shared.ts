@@ -89,9 +89,6 @@ function getAgentFrameworkRoot(): string {
   return root;
 }
 
-function getReplayScriptPath(): string {
-  return path.join(getAgentFrameworkRoot(), "test-harness", "replay.ts");
-}
 
 function getNpxPath(): string {
   // tsx may not be installed as a standalone binary (e.g. NixOS).
@@ -103,9 +100,10 @@ function getNpxPath(): string {
   }
 }
 
-export function runReplayCommand(args: string[], timeoutMs: number = 600000): string {
+export function runReplayCommand(args: string[], timeoutMs: number = 600000, rootOverride?: string): string {
+  const root = rootOverride || getAgentFrameworkRoot();
   const npxPath = getNpxPath();
-  const replayPath = getReplayScriptPath();
+  const replayPath = path.join(root, "test-harness", "replay.ts");
   const fullArgs = ["tsx", replayPath, ...args];
 
   // Use spawnSync to capture both stdout and stderr.
@@ -113,10 +111,10 @@ export function runReplayCommand(args: string[], timeoutMs: number = 600000): st
   const result = spawnSync(npxPath, fullArgs, {
     encoding: "utf-8",
     timeout: timeoutMs,
-    cwd: getAgentFrameworkRoot(),
+    cwd: root,
     env: {
       ...process.env,
-      AGENT_FRAMEWORK_ROOT: getAgentFrameworkRoot(),
+      AGENT_FRAMEWORK_ROOT: root,
     },
     maxBuffer: 10 * 1024 * 1024,
   });

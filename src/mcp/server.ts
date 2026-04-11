@@ -418,6 +418,7 @@ server.registerTool(
       depth: z.number().optional().describe("For expand: context radius multiplier (default 1)"),
       filename: z.string().optional().describe("For read_file: report.json, labels.json, labels.draft.json, or notes_and_questions.md"),
       content: z.string().optional().describe("For append_notes: content to append"),
+      working_dir: z.string().optional().describe("Local repo path for run_test/list/expand (overrides AGENT_FRAMEWORK_ROOT so edited code is tested)"),
     }
   },
   async (args) => {

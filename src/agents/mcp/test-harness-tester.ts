@@ -47,7 +47,7 @@ function handleFindWork(): string {
   return lines.join("\n");
 }
 
-function handleRunTest(transcriptName: string): string {
+function handleRunTest(transcriptName: string, rootOverride?: string): string {
   checkAndIncrementRunLimit(transcriptName, "run_test");
   const transcriptPath = resolveTranscriptPath(transcriptName);
   const labelsPath = path.join(transcriptRunDir(transcriptName), "labels.json");
@@ -57,25 +57,25 @@ function handleRunTest(transcriptName: string): string {
   const output = runReplayCommand([
     "--transcript", transcriptPath,
     "--expect", labelsPath,
-  ]);
+  ], 600000, rootOverride);
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state);
 }
 
-function handleList(transcriptName: string): string {
+function handleList(transcriptName: string, rootOverride?: string): string {
   const transcriptPath = resolveTranscriptPath(transcriptName);
-  const output = runReplayCommand(["--list", "--transcript", transcriptPath]);
+  const output = runReplayCommand(["--list", "--transcript", transcriptPath], 600000, rootOverride);
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state);
 }
 
-function handleExpand(transcriptName: string, target: string, depth: number): string {
+function handleExpand(transcriptName: string, target: string, depth: number, rootOverride?: string): string {
   const transcriptPath = resolveTranscriptPath(transcriptName);
   const args = ["--list", "--transcript", transcriptPath, "--expand", target];
   if (depth > 1) {
     args.push("--depth", String(depth));
   }
-  const output = runReplayCommand(args);
+  const output = runReplayCommand(args, 600000, rootOverride);
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state);
 }
@@ -131,6 +131,7 @@ export interface TesterInput {
   depth?: number;
   filename?: string;
   content?: string;
+  working_dir?: string;
 }
 
 export async function handleTestHarnessTester(input: TesterInput): Promise<string> {
@@ -141,16 +142,16 @@ export async function handleTestHarnessTester(input: TesterInput): Promise<strin
 
       case "run_test":
         if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleRunTest(input.transcript_name);
+        return handleRunTest(input.transcript_name, input.working_dir);
 
       case "list":
         if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleList(input.transcript_name);
+        return handleList(input.transcript_name, input.working_dir);
 
       case "expand":
         if (!input.transcript_name) throw new Error("transcript_name is required");
         if (!input.target) throw new Error("target is required (tool_use_id or stop:N)");
-        return handleExpand(input.transcript_name, input.target, input.depth ?? 1);
+        return handleExpand(input.transcript_name, input.target, input.depth ?? 1, input.working_dir);
 
       case "read_file":
         if (!input.transcript_name) throw new Error("transcript_name is required");
