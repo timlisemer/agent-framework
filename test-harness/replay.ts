@@ -780,7 +780,8 @@ async function main(): Promise<void> {
     console.error("Building project...");
     execSync("just build", { cwd: REPO_ROOT, stdio: "inherit" });
   } catch (err) {
-    console.error("ERROR: Build failed. Fix build errors before running the harness.");
+    const exitCode = err && typeof err === "object" && "status" in err ? (err as { status: number }).status : "unknown";
+    console.error(`ERROR: 'just build' failed (exit code ${exitCode}). Fix build errors before running the harness.`);
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(2);
   }

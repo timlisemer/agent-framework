@@ -36,6 +36,7 @@ import {
   runReplayCommand,
   getVersion,
   checkAndIncrementRunLimit,
+  rollbackRunLimit,
   detectWorkflowState,
   formatStatusFooter,
   appendTestRunFile,
@@ -67,7 +68,7 @@ function handleFindWork(dateFrom?: string, dateTo?: string, limit?: number): str
 function handleGenerateLabels(transcriptName: string): string {
   checkAndIncrementRunLimit(transcriptName, "generate_labels");
   const transcriptPath = resolveTranscriptPath(transcriptName);
-  const output = runReplayCommand(["--generate-labels", "--transcript", transcriptPath]);
+  const output = runReplayCommand(["--generate-labels", "--transcript", transcriptPath], 1800000);
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state);
 }
@@ -93,7 +94,41 @@ function handleAutoLabel(transcriptName: string): string {
 
   // Step 2: Run generate_labels (costs $, enforces 1x limit)
   checkAndIncrementRunLimit(transcriptName, "generate_labels");
-  runReplayCommand(["--generate-labels", "--transcript", transcriptPath]);
+  let genError: string | null = null;
+  try {
+    runReplayCommand(["--generate-labels", "--transcript", transcriptPath], 1800000);
+  } catch (err) {
+    genError = err instanceof Error ? err.message : String(err);
+    // Rollback both counters so auto_label can be fully retried
+    rollbackRunLimit(transcriptName, "generate_labels");
+    rollbackRunLimit(transcriptName, "scaffold");
+  }
+
+  if (genError) {
+    // Restore scaffold draft (generate_labels may have partially overwritten it)
+    writeLabelFile(transcriptName, true, {
+      _meta: {
+        ...(scaffoldData._meta ?? {}),
+        method: "auto_label_scaffold_only",
+        generate_labels_error: genError,
+      },
+      labels: scaffoldLabels,
+      reasoning: Object.fromEntries(
+        Object.entries(scaffoldReasoning).map(([k, v]) => [k, `[scaffold-only] ${v}`])
+      ),
+    });
+    const state = detectWorkflowState(transcriptName);
+    return [
+      `Auto-label partial for "${transcriptName}" (generate_labels failed):`,
+      `  Error: ${genError}`,
+      `  Scaffold labels preserved: ${Object.keys(scaffoldLabels).length}`,
+      "",
+      "Scaffold (user reactions) used as sole signal.",
+      "Review with expand, update any that need correction, then finalize.",
+      "auto_label can be retried (counters were rolled back).",
+      formatStatusFooter(state),
+    ].join("\n");
+  }
 
   // Read generate_labels results (it overwrote labels.draft.json)
   const genData = readLabelFile(transcriptName, true);

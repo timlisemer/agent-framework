@@ -127,14 +127,32 @@ export function runReplayCommand(args: string[], timeoutMs: number = 600000, roo
 
   // Spawn-level failure (binary not found, signal killed, timeout)
   if (result.error) {
+    if ((result as unknown as { killed: boolean }).killed) {
+      throw new Error(
+        `replay.ts timed out after ${Math.round(timeoutMs / 1000)}s. ` +
+        `The transcript may be too large for the current timeout. ` +
+        `Partial output:\n${(stderr || stdout || "(none)").slice(0, 500)}`
+      );
+    }
     throw new Error(`replay.ts spawn failed: ${result.error.message}`);
+  }
+
+  // Process killed by signal without error (e.g. external SIGTERM/SIGKILL)
+  if (result.signal) {
+    throw new Error(
+      `replay.ts was killed by signal ${result.signal}. ` +
+      `Partial output:\n${(stderr || stdout || "(none)").slice(0, 500)}`
+    );
   }
 
   // Exit code 1 = test failures (valid output with failure details)
   // Exit code 2 = harness error (incomplete labels, build failure, parse error)
   // Any other non-zero = unexpected crash
   if (result.status !== null && result.status !== 0 && result.status !== 1) {
-    throw new Error(stderr || stdout || `replay.ts exited with code ${result.status}`);
+    throw new Error(
+      `replay.ts exited with code ${result.status}: ` +
+      `${(stderr || stdout || "(no output)").slice(0, 1000)}`
+    );
   }
 
   const output = (stdout + (stderr ? "\n" + stderr : "")).trim();
@@ -280,6 +298,18 @@ export function checkAndIncrementRunLimit(transcriptName: string, action: "gener
       );
     }
     state.run_test_count++;
+  }
+  writeMcpState(transcriptName, state);
+}
+
+export function rollbackRunLimit(transcriptName: string, action: "generate_labels" | "scaffold" | "run_test"): void {
+  const state = readMcpState(transcriptName);
+  if (action === "generate_labels" && state.generate_labels_count > 0) {
+    state.generate_labels_count--;
+  } else if (action === "scaffold" && state.scaffold_count > 0) {
+    state.scaffold_count--;
+  } else if (action === "run_test" && state.run_test_count > 0) {
+    state.run_test_count--;
   }
   writeMcpState(transcriptName, state);
 }
