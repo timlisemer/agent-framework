@@ -10,7 +10,14 @@ Follow these steps exactly. Do NOT skip any step.
 
 ## Step 1: Launch 5 Plan agents in parallel
 
-Launch exactly 5 Agent tool calls in a SINGLE message, all with `subagent_type: "Plan"`.
+You MUST call the Agent tool exactly 5 times in your SINGLE NEXT RESPONSE. All 5 Agent tool calls go in ONE message -- do NOT send one agent, wait for it, then send the next. You must emit all 5 tool_use blocks together so they run concurrently. If you only launch 1 agent, you have failed this step.
+
+Correct pattern (all 5 in one response):
+- Agent call 1: subagent_type "Plan", description "Plan agent 1 of 4", prompt = (see below)
+- Agent call 2: subagent_type "Plan", description "Plan agent 2 of 4", prompt = (same)
+- Agent call 3: subagent_type "Plan", description "Plan agent 3 of 4", prompt = (same)
+- Agent call 4: subagent_type "Plan", description "Plan agent 4 of 4", prompt = (same)
+- Agent call 5: subagent_type "Plan", description "Plan agent 5 outside-the-box", prompt = (same + special instruction)
 
 The first 4 agents get the IDENTICAL prompt:
 
@@ -51,7 +58,7 @@ Write the consolidated plan to the plan file. Include:
 
 ## Step 3: Launch 5 Validation agents in parallel
 
-Launch exactly 5 Agent tool calls in a SINGLE message, all with `subagent_type: "Plan"`. Each agent gets the IDENTICAL prompt:
+Same rule as Step 1: you MUST call the Agent tool exactly 5 times in your SINGLE NEXT RESPONSE. All 5 in ONE message, running concurrently. Each agent gets the IDENTICAL prompt:
 
 ```
 Do NOT write a plan file. Report your validation findings directly to me.
