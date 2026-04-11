@@ -373,10 +373,10 @@ server.registerTool(
   "test_harness_labeler",
   {
     title: "Test Harness Labeler",
-    description: "Label test harness transcripts. Actions: find_work, generate_labels, scaffold, list, expand, validate, update_label, update_labels, finalize, read_file, append_notes, git_hash, help. Use help action for full documentation.",
+    description: "Label test harness transcripts. Actions: find_work, auto_label, generate_labels, scaffold, list, expand, validate, update_label, update_labels, finalize, read_file, append_notes, git_hash, help. Use help action for full documentation.",
     inputSchema: {
       action: z.enum([
-        "find_work", "generate_labels", "scaffold", "list", "expand", "validate",
+        "find_work", "auto_label", "generate_labels", "scaffold", "list", "expand", "validate",
         "update_label", "update_labels", "finalize", "read_file", "append_notes",
         "git_hash", "help"
       ]).describe("The action to perform"),
@@ -395,6 +395,7 @@ server.registerTool(
       content: z.string().optional().describe("For append_notes: content to append"),
       date_from: z.string().optional().describe("For find_work: only transcripts modified on or after this date (YYYY-MM-DD)"),
       date_to: z.string().optional().describe("For find_work: only transcripts modified on or before this date (YYYY-MM-DD)"),
+      limit: z.number().optional().describe("For find_work: how many transcripts to process. Omit=1, 0=unlimited, N=N"),
     }
   },
   async (args) => {

@@ -60,7 +60,7 @@ You are validating an implementation plan. Read all relevant source files to ver
 
 The original task: {paste $ARGUMENTS here}
 
-The current plan: {paste the full plan file content here}
+The current plan is at: {paste the plan file path here}
 
 Check:
 1. Does the plan's assumptions about file locations, types, and patterns match the actual code?

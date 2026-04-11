@@ -239,15 +239,17 @@ export function updateMultipleLabels(
 
 interface McpState {
   generate_labels_count: number;
+  scaffold_count: number;
   run_test_count: number;
 }
 
 function readMcpState(transcriptName: string): McpState {
+  const defaults: McpState = { generate_labels_count: 0, scaffold_count: 0, run_test_count: 0 };
   try {
     const content = readTestRunFile(transcriptName, "mcp-state.json");
-    return JSON.parse(content);
+    return { ...defaults, ...JSON.parse(content) };
   } catch {
-    return { generate_labels_count: 0, run_test_count: 0 };
+    return defaults;
   }
 }
 
@@ -255,7 +257,7 @@ function writeMcpState(transcriptName: string, state: McpState): void {
   writeTestRunFile(transcriptName, "mcp-state.json", JSON.stringify(state, null, 2) + "\n");
 }
 
-export function checkAndIncrementRunLimit(transcriptName: string, action: "generate_labels" | "run_test"): void {
+export function checkAndIncrementRunLimit(transcriptName: string, action: "generate_labels" | "scaffold" | "run_test"): void {
   const state = readMcpState(transcriptName);
   if (action === "generate_labels") {
     if (state.generate_labels_count >= 1) {
@@ -265,6 +267,11 @@ export function checkAndIncrementRunLimit(transcriptName: string, action: "gener
       );
     }
     state.generate_labels_count++;
+  } else if (action === "scaffold") {
+    if (state.scaffold_count >= 1) {
+      throw new Error("scaffold has already been run for this transcript.");
+    }
+    state.scaffold_count++;
   } else {
     if (state.run_test_count >= 5) {
       throw new Error(
@@ -311,7 +318,7 @@ export function detectWorkflowState(transcriptName: string): WorkflowState {
 
   if (!hasDraft && !hasLabels) {
     step = "NOT_STARTED";
-    guidance = "No labels exist. Use generate_labels (recommended, costs $) or scaffold (free) to create initial labels.";
+    guidance = "No labels exist. Use auto_label (recommended) to create initial labels from both heuristic and hook signals.";
   } else if (hasDraft && !hasLabels) {
     step = "LABELING_IN_PROGRESS";
     guidance = "labels.draft.json exists. Review labels with list/expand, update with update_label, then finalize when ready.";

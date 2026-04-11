@@ -30,6 +30,7 @@ import {
   testRunFileExists,
   readTestRunFile,
   readLabelFile,
+  writeLabelFile,
   updateSingleLabel,
   updateMultipleLabels,
   runReplayCommand,
@@ -42,20 +43,24 @@ import {
 
 // ─── Action Handlers ───────────────────────────────────────────────────────
 
-function handleFindWork(dateFrom?: string, dateTo?: string): string {
+function handleFindWork(dateFrom?: string, dateTo?: string, limit?: number): string {
   const transcripts = findUnlabeledTranscripts(10, dateFrom, dateTo);
   if (transcripts.length === 0) {
     const dateHint = dateFrom || dateTo
       ? ` in date range ${dateFrom || "any"}..${dateTo || "any"}`
       : "";
-    return `No unlabeled transcripts found${dateHint}. All transcripts have labels.draft.json or labels.json.`;
+    return `No unlabeled transcripts found${dateHint}.`;
   }
   const lines = ["UNLABELED TRANSCRIPTS (sorted by size, largest first):", ""];
   for (const t of transcripts) {
     lines.push(`  ${t.lines} lines  ${t.name}`);
   }
   lines.push("");
-  lines.push("Pick ONE transcript to label. Use generate_labels (costs $) or scaffold (free) to start.");
+  const effectiveLimit = limit === undefined || limit === null ? 1 : limit === 0 ? transcripts.length : Math.min(limit, transcripts.length);
+  const limitDesc = limit === 0
+    ? "Process ALL unlabeled transcripts."
+    : `Process ${effectiveLimit} transcript(s).`;
+  lines.push(limitDesc + " Use auto_label (recommended) to start each one.");
   return lines.join("\n");
 }
 
@@ -72,6 +77,90 @@ function handleScaffold(transcriptName: string): string {
   const output = runReplayCommand(["--scaffold", "--transcript", transcriptPath]);
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state);
+}
+
+function handleAutoLabel(transcriptName: string): string {
+  const transcriptPath = resolveTranscriptPath(transcriptName);
+
+  // Step 1: Run scaffold (free heuristic) — enforces 1x limit inside auto_label only
+  checkAndIncrementRunLimit(transcriptName, "scaffold");
+  runReplayCommand(["--scaffold", "--transcript", transcriptPath]);
+
+  // Save scaffold results before generate_labels overwrites labels.draft.json
+  const scaffoldData = readLabelFile(transcriptName, true);
+  const scaffoldLabels = { ...scaffoldData.labels };
+  const scaffoldReasoning = { ...(scaffoldData.reasoning ?? {}) };
+
+  // Step 2: Run generate_labels (costs $, enforces 1x limit)
+  checkAndIncrementRunLimit(transcriptName, "generate_labels");
+  runReplayCommand(["--generate-labels", "--transcript", transcriptPath]);
+
+  // Read generate_labels results (it overwrote labels.draft.json)
+  const genData = readLabelFile(transcriptName, true);
+  const genLabels = genData.labels;
+  const genReasoning = genData.reasoning ?? {};
+
+  // Step 3: Merge — scaffold is baseline, hooks are advisory
+  const mergedLabels: Record<string, string> = {};
+  const mergedReasoning: Record<string, string> = {};
+  let agreeCount = 0;
+  let conflictCount = 0;
+
+  const allKeys = new Set([...Object.keys(scaffoldLabels), ...Object.keys(genLabels)]);
+
+  for (const key of allKeys) {
+    const sVal = scaffoldLabels[key];
+    const gVal = genLabels[key];
+    const sReason = scaffoldReasoning[key] ?? "";
+    const gReason = genReasoning[key] ?? "";
+
+    if (!sVal && gVal) {
+      mergedLabels[key] = "INVESTIGATE";
+      mergedReasoning[key] = `[hooks-only] hook=${gVal} (${gReason}). Not in scaffold.`;
+      conflictCount++;
+    } else if (sVal && !gVal) {
+      mergedLabels[key] = "INVESTIGATE";
+      mergedReasoning[key] = `[scaffold-only] scaffold=${sVal} (${sReason}). Not in hooks.`;
+      conflictCount++;
+    } else if (sVal === "INVESTIGATE" || gVal === "INVESTIGATE") {
+      mergedLabels[key] = "INVESTIGATE";
+      mergedReasoning[key] = `[flagged] scaffold=${sVal} (${sReason}) | hook=${gVal} (${gReason})`;
+      conflictCount++;
+    } else if (sVal === gVal) {
+      mergedLabels[key] = sVal;
+      mergedReasoning[key] = `[agree] both=${sVal}. scaffold: ${sReason} | hook: ${gReason}`;
+      agreeCount++;
+    } else {
+      mergedLabels[key] = "INVESTIGATE";
+      mergedReasoning[key] = `[CONFLICT] scaffold=${sVal} (${sReason}) | hook=${gVal} (${gReason}). Hooks are NOT authoritative.`;
+      conflictCount++;
+    }
+  }
+
+  // Write merged draft
+  writeLabelFile(transcriptName, true, {
+    _meta: {
+      ...(genData._meta ?? {}),
+      method: "auto_label",
+      agreed: agreeCount,
+      conflicts: conflictCount,
+      needs_review: conflictCount,
+    },
+    labels: mergedLabels,
+    reasoning: mergedReasoning,
+  });
+
+  const state = detectWorkflowState(transcriptName);
+  return [
+    `Auto-label complete for "${transcriptName}":`,
+    `  Total: ${allKeys.size}`,
+    `  Agreed (high confidence): ${agreeCount}`,
+    `  Conflicts (INVESTIGATE): ${conflictCount}`,
+    "",
+    "Scaffold (user reactions) is the baseline. Hook decisions are advisory.",
+    "Review all INVESTIGATE labels with expand, lean toward user reactions when in doubt.",
+    formatStatusFooter(state),
+  ].join("\n");
 }
 
 function handleList(transcriptName: string): string {
@@ -238,13 +327,18 @@ export interface LabelerInput {
   content?: string;
   date_from?: string;
   date_to?: string;
+  limit?: number;
 }
 
 export async function handleTestHarnessLabeler(input: LabelerInput): Promise<string> {
   try {
     switch (input.action) {
       case "find_work":
-        return handleFindWork(input.date_from, input.date_to);
+        return handleFindWork(input.date_from, input.date_to, input.limit);
+
+      case "auto_label":
+        if (!input.transcript_name) throw new Error("transcript_name is required");
+        return handleAutoLabel(input.transcript_name);
 
       case "generate_labels":
         if (!input.transcript_name) throw new Error("transcript_name is required");
@@ -304,7 +398,7 @@ export async function handleTestHarnessLabeler(input: LabelerInput): Promise<str
       default:
         throw new Error(
           `Unknown action: "${input.action}". ` +
-          "Valid actions: find_work, generate_labels, scaffold, list, expand, validate, " +
+          "Valid actions: find_work, auto_label, generate_labels, scaffold, list, expand, validate, " +
           "update_label, update_labels, finalize, read_file, append_notes, git_hash, help"
         );
     }
@@ -321,42 +415,42 @@ const LABELER_HELP = `# Test Harness Labeler -- Complete Reference
 ## Purpose
 
 You label test harness transcripts for the agent-framework project. You find
-unlabeled transcripts, generate initial labels from actual hook decisions, then
-review and correct those labels using hindsight from the transcript.
+unlabeled transcripts, create initial labels using auto_label (merges free
+heuristic scaffold with hook replay), then review and resolve conflicts.
 
 ## Workflow
 
 Follow this workflow exactly. Do not deviate.
 
 ### Step 0: Find work
-Action: find_work (optional: date_from, date_to in YYYY-MM-DD format)
-Returns the 10 largest unlabeled transcripts. Pick ONE to process fully.
-Use date_from/date_to to filter by file modification date.
+Action: find_work (optional: date_from, date_to, limit)
+Returns the 10 largest unlabeled transcripts. limit controls how many to process
+(omit=1, 0=unlimited, N=N). Use date_from/date_to to filter by file modification date.
 
-### Step 1: Generate initial labels
-Action: generate_labels (transcript_name required)
-Runs all hooks against the transcript and records their actual decisions.
-Creates labels.draft.json in ~/.agent-framework/test-runs/{name}/.
-COSTS REAL MONEY (LLM API calls). Run ONCE per transcript. NEVER re-run.
+### Step 1: Create initial labels
+Action: auto_label (transcript_name required) -- RECOMMENDED
+Runs scaffold (free heuristic from user reactions) then generate_labels (hook
+replay, costs $), and merges both signals. Where they agree the label is high
+confidence. Where they disagree the label is set to INVESTIGATE with both
+perspectives recorded. Scaffold is the closer-to-truth baseline; hooks are
+advisory because they are imperfect (that is why we are labeling).
 
-Alternative: scaffold (transcript_name required)
-Free heuristic-based labels from user reactions. Less accurate but no cost.
+Alternative standalone actions (auto_label is preferred):
+- generate_labels (costs $, max 1x) -- hook replay only
+- scaffold (free, unlimited standalone) -- heuristic only
 
 ### Step 2: Read the draft labels
 Action: read_file (transcript_name, filename: "labels.draft.json")
-Review all labels. Focus on denials and blocks first.
+Review all labels. Focus on INVESTIGATE labels first (these are conflicts).
 
-### Step 3: Review denials
-For every "deny" or "block" label, investigate with expand:
+### Step 3: Expand and resolve INVESTIGATE labels
+For every INVESTIGATE label, investigate with expand:
 Action: expand (transcript_name, target: tool_use_id or stop:N, depth: 1-3)
+Read the reasoning prefix ([agree], [CONFLICT], [flagged], [hooks-only], [scaffold-only])
+to understand what happened. Lean toward the scaffold (user reaction) when in doubt.
 
-Key questions:
-- Did the user continue normally after this? -> Change to "allow"/"pass"
-- Did the user express frustration or correct the AI? -> Keep "deny"/"block"
-- Was the tool call genuinely dangerous/wrong? -> Keep "deny"/"block"
-
-### Step 4: Review approvals
-For every "allow" or "pass" label, verify:
+### Step 4: Review agreed labels
+For every agreed label, spot-check a sample:
 - Did the user react negatively? -> Change to "deny"/"block"
 - Did the tool do something not asked for? -> Change to "deny"
 - User continued normally? -> Keep "allow"/"pass"
@@ -379,6 +473,15 @@ Checks all labels are present and valid. Fix any issues.
 ### Step 8: Finalize
 Action: finalize (transcript_name)
 Validates, checks reasoning coverage, renames draft to labels.json.
+
+### Step 9: Loop
+If limit allows more transcripts, go back to Step 1 with the next transcript.
+
+## Trust Hierarchy
+
+1. User reactions (scaffold) -- closest to ground truth
+2. Hook decisions (generate_labels) -- advisory, hooks are imperfect
+3. When they disagree -- INVESTIGATE, lean toward user reactions
 
 ## Decision Guidelines
 
@@ -418,9 +521,9 @@ Only use main session transcripts, not sidechain/subagent transcripts.
 ## Label File Format
 
 {
-  "_meta": { transcript, created, commit, total_hooks, needs_review },
+  "_meta": { transcript, created, commit, total_hooks, needs_review, method, agreed, conflicts },
   "labels": { "toolu_01...": "allow", "stop:20": "block" },
-  "reasoning": { "toolu_01...": "User continued normally", "stop:20": "User said AI stopped too early" }
+  "reasoning": { "toolu_01...": "[agree] both=allow. scaffold: ... | hook: ...", "stop:20": "[CONFLICT] scaffold=pass (...) | hook=block (...)" }
 }
 
 ## Notes Format
@@ -448,11 +551,10 @@ Date: {ISO date}
 
 ## Rules
 
-- Process ONE transcript per invocation
-- NEVER re-run generate_labels after Step 1
+- NEVER re-run auto_label or generate_labels after Step 1
 - list, expand, validate are FREE (no LLM calls, no cost)
-- Only generate_labels costs money (Step 1)
-- Be conservative -- when in doubt, keep the hook's original decision and note uncertainty
+- Only auto_label and generate_labels cost money (Step 1)
+- Be conservative -- when in doubt, lean toward user reactions and note uncertainty
 - Do NOT read transcript .jsonl files directly -- use list and expand
 - Do NOT read source code or attempt to fix hooks
 - Do NOT attempt to run tests

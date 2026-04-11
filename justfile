@@ -1,6 +1,6 @@
 build:
     npm run build
-    echo '{"commitCount":'"$(git rev-list --count HEAD)"'}' > dist/version-data.json
+    echo '{"commitCount":'"$(git rev-list --count HEAD 2>/dev/null || echo 0)"'}' > dist/version-data.json
 
 check:
     npx tsc --noEmit
