@@ -60,7 +60,7 @@ function handleRunTest(transcriptName: string, rootOverride?: string): string {
     "--expect", labelsPath,
   ], 600000, rootOverride);
   const state = detectWorkflowState(transcriptName);
-  return output + formatStatusFooter(state);
+  return output + formatStatusFooter(state) + "\n\nWORKFLOW: You must call run_single_hook (free, unlimited) before your next run_test.";
 }
 
 function handleRunSingleHook(transcriptName: string, hookKey: string, rootOverride?: string): string {
@@ -76,7 +76,7 @@ function handleRunSingleHook(transcriptName: string, hookKey: string, rootOverri
     "--filter", hookKey,
   ], 300000, rootOverride);
   const state = detectWorkflowState(transcriptName);
-  return output + formatStatusFooter(state);
+  return output + formatStatusFooter(state) + "\n\nWORKFLOW: You must call run_single_hook (free, unlimited) before your next run_test.";
 }
 
 function handleList(transcriptName: string, rootOverride?: string): string {

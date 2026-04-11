@@ -60,6 +60,7 @@ Then find work:
 - Use Write/Edit for fixing hook source code.
 - If run_test returns a build failure error, STOP IMMEDIATELY. Report the error to the user and do not continue testing. Build failures must be fixed before testing can proceed.
 - Every fix must address the root cause. NEVER treat symptoms: do not silence warnings, suppress errors, weaken assertions, or change test/label expectations to make failures disappear. If a test fails, fix the hook code -- not the test conditions.
+- Do NOT add backwards-compatibility shims, deprecated re-exports, or legacy fallbacks. If something is replaced, remove the old code entirely.
 
 ## Investigating Failures -- MANDATORY
 

@@ -35,3 +35,4 @@ You implement plans by making all code changes specified in the plan file.
 - If the plan is ambiguous, implement the most conservative interpretation
 - Follow the project's existing code style (double quotes, existing patterns)
 - Every fix must address the root cause. NEVER treat symptoms: do not silence warnings, suppress errors, weaken assertions, or change test expectations to make failures disappear. If a test fails, fix the code under test -- not the test.
+- Do NOT add backwards-compatibility shims, deprecated re-exports, or legacy fallbacks. If something is replaced, remove the old code entirely.

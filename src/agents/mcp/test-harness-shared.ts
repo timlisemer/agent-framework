@@ -260,10 +260,11 @@ interface McpState {
   scaffold_count: number;
   run_test_count: number;
   run_single_hook_count: number;
+  run_single_hook_since_last_run_test: number;
 }
 
 function readMcpState(transcriptName: string): McpState {
-  const defaults: McpState = { generate_labels_count: 0, scaffold_count: 0, run_test_count: 0, run_single_hook_count: 0 };
+  const defaults: McpState = { generate_labels_count: 0, scaffold_count: 0, run_test_count: 0, run_single_hook_count: 0, run_single_hook_since_last_run_test: 0 };
   try {
     const content = readTestRunFile(transcriptName, "mcp-state.json");
     return { ...defaults, ...JSON.parse(content) };
@@ -294,6 +295,7 @@ export function checkAndIncrementRunLimit(transcriptName: string, action: "gener
   } else if (action === "run_single_hook") {
     // No limit — single-hook runs are cheap and useful for iterating
     state.run_single_hook_count++;
+    state.run_single_hook_since_last_run_test++;
   } else {
     if (state.run_test_count >= 5) {
       throw new Error(
@@ -301,7 +303,16 @@ export function checkAndIncrementRunLimit(transcriptName: string, action: "gener
         "Each run costs real money. Report current status and stop."
       );
     }
+    if (state.run_test_count >= 1 && state.run_single_hook_since_last_run_test === 0) {
+      throw new Error(
+        `run_test blocked: you have used ${state.run_test_count} of 5 full runs. ` +
+        "You must call run_single_hook on failing hooks before running the full test again. " +
+        "run_single_hook is cheap and does not count against the 5-run limit. " +
+        "Use run_single_hook to verify your fixes, then run_test only for final regression."
+      );
+    }
     state.run_test_count++;
+    state.run_single_hook_since_last_run_test = 0;
   }
   writeMcpState(transcriptName, state);
 }
@@ -314,6 +325,9 @@ export function rollbackRunLimit(transcriptName: string, action: "generate_label
     state.scaffold_count--;
   } else if (action === "run_single_hook" && state.run_single_hook_count > 0) {
     state.run_single_hook_count--;
+    if (state.run_single_hook_since_last_run_test > 0) {
+      state.run_single_hook_since_last_run_test--;
+    }
   } else if (action === "run_test" && state.run_test_count > 0) {
     state.run_test_count--;
   }
