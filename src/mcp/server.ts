@@ -408,10 +408,10 @@ server.registerTool(
   "test_harness_tester",
   {
     title: "Test Harness Tester",
-    description: "Run test harness against labeled transcripts. Actions: find_work, run_test, list, expand, read_file, append_notes, git_hash, help. Use help action for full documentation.",
+    description: "Run test harness against labeled transcripts. Actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, git_hash, help. Use help action for full documentation.",
     inputSchema: {
       action: z.enum([
-        "find_work", "run_test", "list", "expand", "read_file", "append_notes",
+        "find_work", "run_test", "run_single_hook", "list", "expand", "read_file", "append_notes",
         "git_hash", "help"
       ]).describe("The action to perform"),
       transcript_name: z.string().optional().describe("Transcript name (without .jsonl extension)"),
@@ -419,7 +419,8 @@ server.registerTool(
       depth: z.number().optional().describe("For expand: context radius multiplier (default 1)"),
       filename: z.string().optional().describe("For read_file: report.json, labels.json, labels.draft.json, or notes_and_questions.md"),
       content: z.string().optional().describe("For append_notes: content to append"),
-      working_dir: z.string().optional().describe("Local repo path for run_test/list/expand (overrides AGENT_FRAMEWORK_ROOT so edited code is tested)"),
+      hook_key: z.string().optional().describe("For run_single_hook: hook key to test (tool_use_id or stop:N from report failures)"),
+      working_dir: z.string().optional().describe("Local repo path for run_test/run_single_hook/list/expand (overrides AGENT_FRAMEWORK_ROOT so edited code is tested)"),
     }
   },
   async (args) => {

@@ -4,14 +4,15 @@
  * Pure TypeScript + execFileSync. NO LLM calls. NO runAgent. NO Anthropic API.
  *
  * Actions:
- *   find_work    - Scan for testable transcripts (labeled but untested/failing)
- *   run_test     - Run replay.ts with --expect (costs $, max 5x)
- *   list         - Run replay.ts --list (free)
- *   expand       - Run replay.ts --list --expand (free)
- *   read_file    - Read report, labels, or notes
- *   append_notes - Append to notes_and_questions.md
- *   git_hash     - Get current framework version
- *   help         - Full tester documentation
+ *   find_work       - Scan for testable transcripts (labeled but untested/failing)
+ *   run_test        - Run replay.ts with --expect (costs $, max 5x)
+ *   run_single_hook - Run replay.ts with --filter for one hook (max 20x)
+ *   list            - Run replay.ts --list (free)
+ *   expand          - Run replay.ts --list --expand (free)
+ *   read_file       - Read report, labels, or notes
+ *   append_notes    - Append to notes_and_questions.md
+ *   git_hash        - Get current framework version
+ *   help            - Full tester documentation
  *
  * @module test-harness-tester
  */
@@ -62,6 +63,22 @@ function handleRunTest(transcriptName: string, rootOverride?: string): string {
   return output + formatStatusFooter(state);
 }
 
+function handleRunSingleHook(transcriptName: string, hookKey: string, rootOverride?: string): string {
+  checkAndIncrementRunLimit(transcriptName, "run_single_hook");
+  const transcriptPath = resolveTranscriptPath(transcriptName);
+  const labelsPath = path.join(transcriptRunDir(transcriptName), "labels.json");
+  if (!fs.existsSync(labelsPath)) {
+    throw new Error("labels.json not found. This transcript is not ready for testing.");
+  }
+  const output = runReplayCommand([
+    "--transcript", transcriptPath,
+    "--expect", labelsPath,
+    "--filter", hookKey,
+  ], 300000, rootOverride);
+  const state = detectWorkflowState(transcriptName);
+  return output + formatStatusFooter(state);
+}
+
 function handleList(transcriptName: string, rootOverride?: string): string {
   const transcriptPath = resolveTranscriptPath(transcriptName);
   const output = runReplayCommand(["--list", "--transcript", transcriptPath], 600000, rootOverride);
@@ -81,7 +98,7 @@ function handleExpand(transcriptName: string, target: string, depth: number, roo
 }
 
 function handleReadFile(transcriptName: string, filename: string): string {
-  const allowedFiles = ["report.json", "labels.json", "labels.draft.json", "notes_and_questions.md"];
+  const allowedFiles = ["report.json", "report-single.json", "labels.json", "labels.draft.json", "notes_and_questions.md"];
   if (!allowedFiles.includes(filename)) {
     throw new Error(`Cannot read "${filename}". Allowed files: ${allowedFiles.join(", ")}`);
   }
@@ -132,6 +149,7 @@ export interface TesterInput {
   filename?: string;
   content?: string;
   working_dir?: string;
+  hook_key?: string;
 }
 
 export async function handleTestHarnessTester(input: TesterInput): Promise<string> {
@@ -143,6 +161,11 @@ export async function handleTestHarnessTester(input: TesterInput): Promise<strin
       case "run_test":
         if (!input.transcript_name) throw new Error("transcript_name is required");
         return handleRunTest(input.transcript_name, input.working_dir);
+
+      case "run_single_hook":
+        if (!input.transcript_name) throw new Error("transcript_name is required");
+        if (!input.hook_key) throw new Error("hook_key is required (tool_use_id or stop:N)");
+        return handleRunSingleHook(input.transcript_name, input.hook_key, input.working_dir);
 
       case "list":
         if (!input.transcript_name) throw new Error("transcript_name is required");
@@ -172,7 +195,7 @@ export async function handleTestHarnessTester(input: TesterInput): Promise<strin
       default:
         throw new Error(
           `Unknown action: "${input.action}". ` +
-          "Valid actions: find_work, run_test, list, expand, read_file, append_notes, git_hash, help"
+          "Valid actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, git_hash, help"
         );
     }
   } catch (error: unknown) {
@@ -203,6 +226,14 @@ Runs all hooks against the transcript and compares decisions to labels.
 COSTS REAL MONEY (LLM API calls). Maximum 5 runs per transcript.
 The harness automatically builds the project first.
 
+### Step 1b: Run a single hook (iterative development)
+Action: run_single_hook (transcript_name + hook_key required, working_dir required)
+Runs ONLY the specified hook point. Skips all other pre-tool-use and stop LLM
+calls. Does NOT count against the 5-run limit. Max 20 per transcript.
+hook_key: tool_use_id prefix from report failures, or stop:N key.
+Use this for iterative fix-test cycles.
+Read report-single.json for results.
+
 ### Step 2: Read the report
 Action: read_file (transcript_name, filename: "report.json")
 Check failed count and failures array. For each failure:
@@ -231,18 +262,23 @@ Key source files:
 Use Write, Edit tools (NOT this MCP tool) to fix hook source files.
 Plan fixes carefully. Batch ALL fixes before re-running.
 
-### Step 6: Re-run
-Action: run_test (same transcript_name)
-Compare results. If same failures persist or MORE failures (regression), stop and report.
+### Step 6: Iterate with single-hook runs
+Action: run_single_hook (transcript_name + hook_key)
+For each failure: fix code, then run_single_hook to test just that hook.
+If the same failure appears 3 times in a row, it is a CODE BUG, not LLM
+non-determinism. Investigate the code path deeper.
 
-### Step 7: Repeat
+### Step 7: Confirm with full run
+Action: run_test (same transcript_name)
+Only after all individual hooks pass via run_single_hook, run full test to
+confirm no regressions. Skip if no code changes were made.
+
+### Step 8: Repeat
 Continue until:
 - All failures resolved, OR
 - Only failures matching notes_and_questions.md uncertainties remain
 
-Maximum 5 harness runs per transcript. Each run costs real money.
-
-### Step 8: Record findings
+### Step 9: Record findings
 Action: append_notes (transcript_name, content)
 Prefix additions with [tester], include date and git hash.
 Mark resolved items by appending resolution notes (never delete existing notes).
@@ -268,7 +304,8 @@ Mark resolved items by appending resolution notes (never delete existing notes).
   transcript.jsonl          Copy of original transcript
   labels.draft.json         Label file in progress (NOT ready for testing)
   labels.json               Finalized label file (ready for testing)
-  report.json               Test report from last run
+  report.json               Test report from last full run
+  report-single.json        Test report from last single-hook run
   notes_and_questions.md    Labeler/tester notes on uncertain decisions
   mcp-state.json            Run limit tracking
   cache/                    Ephemeral hook runtime files
@@ -288,7 +325,10 @@ Shows surrounding context for a specific hook point.
 - Do NOT call build commands -- the harness builds automatically
 - Do NOT label transcripts -- that is the labeler's job
 - Do NOT use Bash -- use Read/Grep/Glob/Write/Edit for code investigation
-- Use this MCP tool ONLY for harness operations (run_test, list, expand, read_file, append_notes)
+- Use this MCP tool ONLY for harness operations (run_test, run_single_hook, list, expand, read_file, append_notes)
 - Use Read/Grep/Glob for investigating hook source code
 - Use Write/Edit for fixing hook source code
+- Use run_single_hook for iterative development (cheap, does not count against run limit)
+- NEVER dismiss failures as "non-deterministic LLM behavior" without investigating code
+- If run_single_hook returns the same result 3x in a row, it IS a code bug
 `;

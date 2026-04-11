@@ -259,10 +259,11 @@ interface McpState {
   generate_labels_count: number;
   scaffold_count: number;
   run_test_count: number;
+  run_single_hook_count: number;
 }
 
 function readMcpState(transcriptName: string): McpState {
-  const defaults: McpState = { generate_labels_count: 0, scaffold_count: 0, run_test_count: 0 };
+  const defaults: McpState = { generate_labels_count: 0, scaffold_count: 0, run_test_count: 0, run_single_hook_count: 0 };
   try {
     const content = readTestRunFile(transcriptName, "mcp-state.json");
     return { ...defaults, ...JSON.parse(content) };
@@ -275,7 +276,7 @@ function writeMcpState(transcriptName: string, state: McpState): void {
   writeTestRunFile(transcriptName, "mcp-state.json", JSON.stringify(state, null, 2) + "\n");
 }
 
-export function checkAndIncrementRunLimit(transcriptName: string, action: "generate_labels" | "scaffold" | "run_test"): void {
+export function checkAndIncrementRunLimit(transcriptName: string, action: "generate_labels" | "scaffold" | "run_test" | "run_single_hook"): void {
   const state = readMcpState(transcriptName);
   if (action === "generate_labels") {
     if (state.generate_labels_count >= 1) {
@@ -290,6 +291,14 @@ export function checkAndIncrementRunLimit(transcriptName: string, action: "gener
       throw new Error("scaffold has already been run for this transcript.");
     }
     state.scaffold_count++;
+  } else if (action === "run_single_hook") {
+    if (state.run_single_hook_count >= 20) {
+      throw new Error(
+        "Maximum 20 single-hook runs reached for this transcript. " +
+        "Use run_test for a full validation run."
+      );
+    }
+    state.run_single_hook_count++;
   } else {
     if (state.run_test_count >= 5) {
       throw new Error(
@@ -302,12 +311,14 @@ export function checkAndIncrementRunLimit(transcriptName: string, action: "gener
   writeMcpState(transcriptName, state);
 }
 
-export function rollbackRunLimit(transcriptName: string, action: "generate_labels" | "scaffold" | "run_test"): void {
+export function rollbackRunLimit(transcriptName: string, action: "generate_labels" | "scaffold" | "run_test" | "run_single_hook"): void {
   const state = readMcpState(transcriptName);
   if (action === "generate_labels" && state.generate_labels_count > 0) {
     state.generate_labels_count--;
   } else if (action === "scaffold" && state.scaffold_count > 0) {
     state.scaffold_count--;
+  } else if (action === "run_single_hook" && state.run_single_hook_count > 0) {
+    state.run_single_hook_count--;
   } else if (action === "run_test" && state.run_test_count > 0) {
     state.run_test_count--;
   }

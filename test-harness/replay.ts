@@ -78,6 +78,7 @@ function parseArgs(): ReplayArgs {
   const timeoutRaw = getArg("timeout");
   const timeout = timeoutRaw ? parseInt(timeoutRaw, 10) : 60000;
   const cwd = getArg("cwd");
+  const filter = getArg("filter");
 
   let expect: ReplayExpectations | undefined;
   const expectRaw = getArg("expect");
@@ -104,7 +105,7 @@ function parseArgs(): ReplayArgs {
     }
   }
 
-  return { transcript, expect, expectPath: expectRaw, cwd, timeout, list, expand, depth, scaffold, validate, generateLabels };
+  return { transcript, expect, expectPath: expectRaw, cwd, timeout, list, expand, depth, scaffold, validate, generateLabels, filter };
 }
 
 // ─── Expectation Matching ───────────────────────────────────────────────────
@@ -654,6 +655,7 @@ function formatReport(
   transcriptPath: string,
   labelFilePath: string | undefined,
   elapsedMs: number,
+  reportFilename: string = "report.json",
 ): void {
   const scored = results.filter((r) => r.pass !== undefined);
   const passed = scored.filter((r) => r.pass === true);
@@ -703,7 +705,7 @@ function formatReport(
 
   // Write report to file
   const tDir = transcriptDir(transcriptPath);
-  const reportPath = path.join(tDir, "report.json");
+  const reportPath = path.join(tDir, reportFilename);
   fs.mkdirSync(tDir, { recursive: true });
 
   report.report_file = reportPath;
@@ -771,7 +773,7 @@ async function main(): Promise<void> {
   }
 
   // Validate completeness before replay (only when running with expectations, not generate-labels)
-  if (config.expect && !config.generateLabels) {
+  if (config.expect && !config.generateLabels && !config.filter) {
     validateExpectationCompleteness(config.expect, scorableKeys);
   }
 
@@ -945,6 +947,11 @@ async function main(): Promise<void> {
         // Register in toolUseMap
         toolUseMap.set(block.id, { name: block.name, input: block.input });
 
+        // If --filter is active, skip hooks that don't match the target key
+        if (config.filter && !block.id.startsWith(config.filter) && config.filter !== block.id) {
+          continue;
+        }
+
         const hookStart = Date.now();
         try {
           const input = JSON.stringify({
@@ -1088,6 +1095,10 @@ async function main(): Promise<void> {
     }
 
     if (classification.kind === "stop-response-check") {
+      const stopKey = `stop:${i}`;
+      if (config.filter && config.filter !== stopKey) {
+        continue;
+      }
       const hookStart = Date.now();
       try {
         const input = JSON.stringify({
@@ -1156,6 +1167,10 @@ async function main(): Promise<void> {
     }
   }
 
+  if (config.filter && results.filter(r => r.hook === "pre-tool-use" || r.hook === "stop-response-check").length === 0) {
+    console.error(`WARNING: --filter "${config.filter}" matched no hooks in the transcript.`);
+  }
+
   // 11. Generate-labels mode — write labels.draft.json and exit
   if (config.generateLabels) {
     const labels: Record<string, string> = {};
@@ -1219,7 +1234,8 @@ async function main(): Promise<void> {
 
   // 12. Output structured report
   const elapsedMs = Date.now() - startTime;
-  formatReport(results, config.transcript, config.expectPath, elapsedMs);
+  const reportFilename = config.filter ? "report-single.json" : "report.json";
+  formatReport(results, config.transcript, config.expectPath, elapsedMs, reportFilename);
 
   // 13. Compute exit code
   const failed = results.filter((r) => r.pass === false);

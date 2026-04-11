@@ -55,4 +55,5 @@ export interface ReplayArgs {
   scaffold: boolean;
   validate: boolean;
   generateLabels: boolean;
+  filter?: string;
 }
