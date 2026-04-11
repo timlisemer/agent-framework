@@ -107,6 +107,8 @@ const LOW_RISK_TOOLS = [
   "Skill",
 ];
 
+const CONFIRMATION_PATTERN = /^\s*(y(es|ep|eah|up)?(\s*please)?|ok(ay)?|sure|go\s*ahead|do\s*it|proceed|confirm(ed)?|approved?|lgtm|sounds?\s*good|that('?s| is)\s*(fine|good|correct|right)|please(\s*do)?|yea|aye|k)\s*[.!]?\s*$/i;
+
 function isPathInDirectory(filePath: string, dirPath: string): boolean {
   const resolved = path.resolve(filePath);
   const dirResolved = path.resolve(dirPath);
@@ -293,23 +295,33 @@ async function main() {
 
       if (rfResult.user.length > 0) {
         const lastUser = rfResult.user.reduce((a, b) => a.index > b.index ? a : b);
-        const hasTextAfterUser = rfResult.assistant.some(
-          (m) => m.index > lastUser.index && m.content.trim().length > 0
-        );
 
-        if (!hasTextAfterUser) {
-          logFastPathDeny("respond-first", "PreToolUse", toolName, projectDir,
-            "No text response before first tool call");
-          await exitPipeline({
-            decision: "deny",
-            agent: "respond-first",
-            reason: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
-          });
-          return;
+        // Short confirmations (yes, ok, go ahead, etc.) are approving
+        // a previously-explained action -- skip respond-first enforcement.
+        const isConfirmation = CONFIRMATION_PATTERN.test(lastUser.content);
+
+        if (!isConfirmation) {
+          const hasTextAfterUser = rfResult.assistant.some(
+            (m) => m.index > lastUser.index && m.content.trim().length > 0
+          );
+
+          if (!hasTextAfterUser) {
+            logFastPathDeny("respond-first", "PreToolUse", toolName, projectDir,
+              "No text response before first tool call");
+            // Set flag BEFORE exitPipeline (which returns Promise<never>).
+            // One denial is sufficient -- repeated denials cause infinite loops.
+            await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
+            await exitPipeline({
+              decision: "deny",
+              agent: "respond-first",
+              reason: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
+            });
+            return;
+          }
         }
       }
     }
-    // Text confirmed present (or exempt tool) -- skip check for rest of turn
+    // Text confirmed present (or exempt tool or confirmation) -- skip check for rest of turn
     await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
   }
 
