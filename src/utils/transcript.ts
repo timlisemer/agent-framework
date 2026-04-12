@@ -819,3 +819,142 @@ export function hasMinimumTranscript(
 
   return true;
 }
+
+export interface ParallelBatchInfo {
+  /** Position of this tool in the batch (0 = leader, 1+ = sibling) */
+  position: number;
+  /** Total tools in this batch */
+  batchSize: number;
+  /** tool_use_id of the leader (position 0) */
+  leaderId: string;
+  /** All tool_use_ids in the batch, in transcript order */
+  allIds: string[];
+}
+
+/**
+ * Detect if a tool_use_id belongs to a parallel batch.
+ *
+ * Scans backwards from end of transcript for consecutive assistant entries
+ * with tool_use blocks, skipping non-message metadata entries. Returns null
+ * for solo tool calls (batch size 1).
+ */
+export async function detectParallelBatch(
+  transcriptPath: string,
+  toolUseId: string,
+): Promise<ParallelBatchInfo | null> {
+  const content = await fs.promises.readFile(transcriptPath, "utf-8");
+  const lines = content.trim().split("\n");
+
+  // Parse each line as JSON
+  const parsed: (Record<string, unknown> | null)[] = lines.map((line) => {
+    try {
+      return JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  });
+
+  // Collect all assistant tool_use entries with their line indices and tool_use_ids
+  interface ToolUseEntry {
+    lineIndex: number;
+    toolUseId: string;
+    toolName: string;
+  }
+  const toolUseEntries: ToolUseEntry[] = [];
+
+  for (let i = 0; i < parsed.length; i++) {
+    const entry = parsed[i];
+    if (!entry) continue;
+    const message = entry.message as Record<string, unknown> | undefined;
+    if (!message || message.role !== "assistant") continue;
+    const entryContent = message.content;
+    if (!Array.isArray(entryContent)) continue;
+    for (const block of entryContent) {
+      const b = block as Record<string, unknown>;
+      if (b.type === "tool_use" && b.id) {
+        toolUseEntries.push({
+          lineIndex: i,
+          toolUseId: b.id as string,
+          toolName: (b.name as string) ?? "",
+        });
+      }
+    }
+  }
+
+  // Find the line containing the target toolUseId
+  const targetEntry = toolUseEntries.find((e) => e.toolUseId === toolUseId);
+  if (!targetEntry) return null;
+  const targetLineIndex = targetEntry.lineIndex;
+
+  // Helper: check if a line is an assistant tool_use line
+  function isAssistantToolUseLine(lineIdx: number): boolean {
+    return toolUseEntries.some((e) => e.lineIndex === lineIdx);
+  }
+
+  // Helper: check if a line is a non-message metadata line (skip type)
+  function isNonMessageLine(lineIdx: number): boolean {
+    const entry = parsed[lineIdx];
+    if (!entry) return false;
+    return !entry.message;
+  }
+
+  // Helper: check if a line is an assistant thinking-only line
+  function isThinkingOnlyLine(lineIdx: number): boolean {
+    const entry = parsed[lineIdx];
+    if (!entry) return false;
+    const message = entry.message as Record<string, unknown> | undefined;
+    if (!message || message.role !== "assistant") return false;
+    const entryContent = message.content;
+    if (!Array.isArray(entryContent)) return false;
+    const hasToolUse = entryContent.some((b: Record<string, unknown>) => b.type === "tool_use");
+    const hasText = entryContent.some((b: Record<string, unknown>) => b.type === "text" && (b.text as string)?.length > 0);
+    if (hasToolUse || hasText) return false;
+    const hasThinking = entryContent.some((b: Record<string, unknown>) => b.type === "thinking");
+    return hasThinking;
+  }
+
+  // Collect batch line indices (including target)
+  const batchLineIndices = new Set<number>();
+  batchLineIndices.add(targetLineIndex);
+
+  // Walk backward from target
+  for (let i = targetLineIndex - 1; i >= 0; i--) {
+    if (isNonMessageLine(i) || isThinkingOnlyLine(i)) continue;
+    if (isAssistantToolUseLine(i)) {
+      batchLineIndices.add(i);
+      continue;
+    }
+    break; // user/tool_result or text-only assistant
+  }
+
+  // Walk forward from target
+  for (let i = targetLineIndex + 1; i < parsed.length; i++) {
+    if (isNonMessageLine(i) || isThinkingOnlyLine(i)) continue;
+    if (isAssistantToolUseLine(i)) {
+      batchLineIndices.add(i);
+      continue;
+    }
+    break;
+  }
+
+  // Collect all tool_use_ids from batch lines, sorted by line index
+  const sortedLineIndices = Array.from(batchLineIndices).sort((a, b) => a - b);
+  const batchIds: string[] = [];
+  for (const lineIdx of sortedLineIndices) {
+    for (const entry of toolUseEntries) {
+      if (entry.lineIndex === lineIdx) {
+        batchIds.push(entry.toolUseId);
+      }
+    }
+  }
+
+  if (batchIds.length < 2) return null;
+
+  const position = batchIds.indexOf(toolUseId);
+  return {
+    position,
+    batchSize: batchIds.length,
+    leaderId: batchIds[0],
+    allIds: batchIds,
+  };
+}

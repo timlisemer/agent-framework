@@ -1361,3 +1361,27 @@ Output EXACTLY: APPROVE or DENY: <feedback>
 When denying, tell the AI: "Before calling tools, respond with: (1) what the user asked, (2) your interpretation, (3) planned actions."
 When in doubt, APPROVE. False denials are worse than false approvals.`,
 };
+
+/**
+ * Rule Gate Agent Configuration
+ *
+ * Combined evaluator for the rule-based pre-tool-use pipeline.
+ * When multiple rules trigger with llmContext, this agent evaluates
+ * all of them in a single LLM call.
+ *
+ * **Tier: haiku** - Must be fast, simple APPROVE/DENY decision
+ * **Mode: direct** - All rule contexts provided upfront
+ */
+export const RULE_GATE_AGENT: Omit<AgentConfig, "workingDir"> = {
+  name: "rule-gate",
+  tier: MODEL_TIERS.HAIKU,
+  mode: "direct",
+  maxTokens: 300,
+  systemPrompt: `You evaluate a tool call against one or more rules. Each rule section describes what to check and provides context.
+
+ALL rules must pass for APPROVE. If ANY rule fails, DENY with the reason.
+
+Output EXACTLY: APPROVE or DENY: <reason from the failing rule>
+
+When in doubt, APPROVE. False denials are worse than false approvals.`,
+};

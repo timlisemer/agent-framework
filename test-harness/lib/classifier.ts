@@ -22,7 +22,7 @@ export type LineClassification =
 /**
  * Metadata-only line types that produce no hook invocation.
  */
-const SKIP_TYPES = new Set([
+export const SKIP_TYPES = new Set([
   "permission-mode",
   "file-history-snapshot",
   "attachment",
@@ -164,6 +164,70 @@ export function isRealStop(
   }
 
   return true;
+}
+
+export interface BatchGroup {
+  lineIndices: number[];
+  toolUseIds: string[];
+  toolNames: string[];
+}
+
+/**
+ * Detect all parallel batches in a transcript.
+ * Returns a Map from tool_use_id to its BatchGroup (only for batches of size >= 2).
+ */
+export function detectBatches(lines: Record<string, unknown>[]): Map<string, BatchGroup> {
+  const result = new Map<string, BatchGroup>();
+
+  // Collect runs of consecutive pre-tool-use lines (skipping skip lines between them)
+  let i = 0;
+  while (i < lines.length) {
+    const classification = classifyLine(lines[i], lines, i);
+    if (classification.kind !== "pre-tool-use") {
+      i++;
+      continue;
+    }
+
+    // Start of a potential batch
+    const run: Array<{ lineIndex: number; blocks: Array<{ id: string; name: string }> }> = [];
+    run.push({ lineIndex: i, blocks: classification.blocks.map((b) => ({ id: b.id, name: b.name })) });
+
+    let j = i + 1;
+    while (j < lines.length) {
+      const nextClassification = classifyLine(lines[j], lines, j);
+      if (nextClassification.kind === "skip") {
+        j++;
+        continue;
+      }
+      if (nextClassification.kind === "pre-tool-use") {
+        run.push({ lineIndex: j, blocks: nextClassification.blocks.map((b) => ({ id: b.id, name: b.name })) });
+        j++;
+        continue;
+      }
+      break;
+    }
+
+    if (run.length >= 2) {
+      const lineIndices: number[] = [];
+      const toolUseIds: string[] = [];
+      const toolNames: string[] = [];
+      for (const entry of run) {
+        for (const block of entry.blocks) {
+          lineIndices.push(entry.lineIndex);
+          toolUseIds.push(block.id);
+          toolNames.push(block.name);
+        }
+      }
+      const group: BatchGroup = { lineIndices, toolUseIds, toolNames };
+      for (const id of toolUseIds) {
+        result.set(id, group);
+      }
+    }
+
+    i = j;
+  }
+
+  return result;
 }
 
 /**

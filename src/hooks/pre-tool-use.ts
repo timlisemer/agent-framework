@@ -7,143 +7,45 @@ import * as path from "path";
 import * as os from "os";
 import * as fs from "fs";
 import { readStdinJson, initHookProcess, exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { checkToolApproval } from "../agents/hooks/tool-approve.js";
 import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
-import { checkStyleDrift } from "../agents/hooks/style-drift.js";
-import { checkQuestionValidity } from "../agents/hooks/question-validate.js";
-import { checkGate } from "../agents/hooks/gate.js";
-import { detectWorkaroundPattern } from "../utils/command-patterns.js";
 import { detectRewind } from "../utils/rewind-cache.js";
-import {
-  recordDenial,
-  MAX_SIMILAR_DENIALS,
-} from "../utils/denial-cache.js";
-import { readPlanContent, resolvePlanPath } from "../utils/session-utils.js";
+import { readPlanContent } from "../utils/session-utils.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
 import {
   readTranscriptExact,
   formatTranscriptResult,
+  detectParallelBatch,
+  type ParallelBatchInfo,
 } from "../utils/transcript.js";
 import {
   APPEAL_COUNTS,
   PLAN_VALIDATE_COUNTS,
-  STYLE_DRIFT_COUNTS,
-  QUESTION_VALIDATE_COUNTS,
 } from "../utils/transcript-presets.js";
 import { getPlanModeContext } from "../utils/plan-mode-detector.js";
 import { isSubagent } from "../utils/subagent-detector.js";
-import { getUnconsumedCorrections, consumeCorrections } from "../utils/correction-cache.js";
-import { logFastPathApproval, logFastPathDeny } from "../utils/logger.js";
+import { logFastPathApproval } from "../utils/logger.js";
 import {
   getSessionDir,
   getSessionState,
-  getSummaryPath,
-  readSection,
   appendToolLog,
-  formatToolDetail,
   readToolLogEntries,
+  formatToolDetail,
 } from "../utils/summary-cache.js";
 import {
   addEntry,
   addPatternWarnings,
-  formatForPrompt,
   clearGateReasoning,
 } from "../utils/gate-reasoning-cache.js";
-import { isEditTool, isEditIntentExemptPath, planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
+import { isEditTool } from "../utils/edit-intent.js";
 import {
-  getActivePrediction,
-  getAllPredictions,
-  savePrediction,
   deactivatePrediction,
   deactivateAllPredictions,
-  matchBlockedToolFromAll,
-  formatPredictionContext,
 } from "../utils/prediction-cache.js";
-import { detectDrift } from "../utils/drift-detector.js";
 import { writeTool, writeUser } from "../utils/synthetic.js";
-import { runAgentWithRetryAndTelemetry } from "../utils/agent-runner.js";
-import { RESPOND_FIRST_QUALITY_AGENT } from "../utils/agent-configs.js";
-import { EXECUTION_TYPES } from "../types.js";
-import { startsWithAny } from "../utils/retry.js";
-
-
-// File tools that go through path-based risk classification (trusted/sensitive)
-// and write-specific gates (edit-intent, CLAUDE.md validation, plan-file validation,
-// style-drift). Read is NOT here — it's read-only with no side effects, so it
-// belongs in LOW_RISK_TOOLS alongside Grep/Glob for immediate auto-approval.
-const FILE_TOOLS = ["Write", "Edit", "NotebookEdit"];
-
-// Sensitive file patterns - always require LLM approval
-const SENSITIVE_PATTERNS = [
-  ".env",
-  "credentials",
-  ".ssh",
-  ".aws",
-  "secrets",
-  ".key",
-  ".pem",
-  "password",
-];
-
-// Low-risk tools get immediate auto-approval with no further checks.
-// These are all read-only or side-effect-free — they can't modify files,
-// execute commands, or affect shared state. Contrast with FILE_TOOLS above,
-// which go through write-specific gates (edit-intent, style-drift, etc.).
-const LOW_RISK_TOOLS = [
-  // Read-only file/search/navigation
-  "Read",
-  "LSP",
-  "Grep",
-  "Glob",
-  "WebSearch",
-  "WebFetch",
-  "ToolSearch",
-
-  // MCP resource reading (read-only)
-  "ListMcpResources",
-  "ReadMcpResource",
-
-  // Internal/meta tools (low impact)
-  "TodoWrite",
-  "TaskOutput",
-  "EnterPlanMode",
-  "Skill",
-];
-
-const CONFIRMATION_PATTERN = /^\s*(y(es|ep|eah|up)?(\s*please)?|ok(ay)?|sure|go\s*ahead|do\s*it|proceed|confirm(ed)?|approved?|lgtm|sounds?\s*good|that('?s| is)\s*(fine|good|correct|right)|please(\s*do)?|yea|aye|k)\s*[.!]?\s*$/i;
-
-function isPathInDirectory(filePath: string, dirPath: string): boolean {
-  const resolved = path.resolve(filePath);
-  const dirResolved = path.resolve(dirPath);
-  return (
-    resolved.startsWith(dirResolved + path.sep) || resolved === dirResolved
-  );
-}
-
-function isTrustedPath(filePath: string, projectDir: string): boolean {
-  const claudeDir = path.join(os.homedir(), ".claude");
-  return (
-    isPathInDirectory(filePath, projectDir) ||
-    isPathInDirectory(filePath, claudeDir)
-  );
-}
-
-function isSensitivePath(filePath: string): boolean {
-  const lower = filePath.toLowerCase();
-  return SENSITIVE_PATTERNS.some((p) => lower.includes(p));
-}
-
-/**
- * Extract path or command from tool input for logging.
- */
-function extractPathOrCmd(toolInput: unknown): { path?: string; cmd?: string } {
-  const input = toolInput as Record<string, unknown>;
-  return {
-    path: (input?.file_path as string) ?? (input?.path as string) ?? undefined,
-    cmd: (input?.command as string) ?? undefined,
-  };
-}
+import { FILE_TOOLS, isPathInDirectory, extractPathOrCmd } from "../rules/utils.js";
+import { ALL_RULES, evaluateRules } from "../rules/index.js";
+import type { RuleContext } from "../rules/types.js";
 
 
 /**
@@ -181,6 +83,32 @@ interface PipelineExit {
   decision: "allow" | "deny";
   agent: string;
   reason: string;
+  usesLlm?: boolean;
+}
+
+async function waitForBatchLeader(
+  sessionDir: string,
+  leaderId: string,
+): Promise<{ decision: "allow" | "deny"; reason: string }> {
+  // Poll tool-log.jsonl for the leader's entry.
+  // In production, hooks fire as separate parallel processes — the leader
+  // may still be running when siblings start. Siblings poll until the
+  // leader writes its result. In the test harness, hooks fire sequentially
+  // so the leader always finishes first.
+  const maxAttempts = 600; // 600 * 100ms = 60s max (leader may run multiple LLM calls)
+  for (let i = 0; i < maxAttempts; i++) {
+    const entries = readToolLogEntries(sessionDir, 50);
+    const leader = entries.find((e) => e.toolUseId === leaderId);
+    if (leader) {
+      return {
+        decision: leader.status === "allowed" ? "allow" : "deny",
+        reason: leader.reason ?? "Batch leader decision",
+      };
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  // Timeout: fail open
+  return { decision: "allow", reason: "Batch leader timed out — fail open" };
 }
 
 async function main() {
@@ -199,17 +127,19 @@ async function main() {
   const toolName = input.tool_name;
   const toolInput = input.tool_input;
   let currentGateNote: string | undefined;
-  let lastAgent = "tool-approve";  // Tracks the last LLM agent that ran
   const startTime = Date.now();
 
-  const DEBUG = process.env.AGENT_FRAMEWORK_DEBUG === "1";
   const planModeCtx = getPlanModeContext(input.transcript_path);
   const planMode = planModeCtx.active;
   const subagent = isSubagent(input.transcript_path);
   const coldStart = toolCallCount < 3;
 
-  if (DEBUG && !subagent) {
-    console.error(`[pre-tool-use] subagent=false transcript=${path.basename(input.transcript_path)}`);
+  // Fail open on any detection error — falls through to normal single-tool pipeline
+  let batchInfo: ParallelBatchInfo | null = null;
+  try {
+    batchInfo = await detectParallelBatch(input.transcript_path, input.tool_use_id);
+  } catch {
+    // Detection failed — treat as solo tool (safe fallback)
   }
 
   // Subagents always use async/lazy pipeline; main agent uses sync for plan mode or cold start
@@ -224,6 +154,9 @@ async function main() {
     appendToolLog(sessionDir, {
       ts: Date.now(),
       tool: toolName,
+      toolUseId: input.tool_use_id,
+      batchPosition: batchInfo?.position,
+      batchSize: batchInfo?.batchSize,
       path: extractPathOrCmd(toolInput).path,
       cmd: extractPathOrCmd(toolInput).cmd,
       status: exit.decision === "allow" ? "allowed" : "denied",
@@ -233,8 +166,8 @@ async function main() {
     });
 
     // 3. GATE REASONING: Write entry for LLM agent decisions and denials
-    const isLlmAgent = ["tool-approve", "gate", "respond-first-quality", "style-drift", "plan-validate", "claude-md-validate", "question-validate", "edit-intent", "prediction-block"].includes(exit.agent);
-    if (!subagent && (exit.decision === "deny" || currentGateNote || isLlmAgent)) {
+    const usesLlm = exit.usesLlm ?? false;
+    if (!subagent && (exit.decision === "deny" || currentGateNote || usesLlm)) {
       const warnings = await addPatternWarnings(toolName, toolInput, sessionDir);
       await addEntry(sessionDir, {
         toolCallIndex: toolCallCount,
@@ -249,8 +182,6 @@ async function main() {
     }
 
     // 4. Deactivate edit-intent predictions when allowing an edit tool.
-    //    This prevents PostToolUse from re-creating corrections based on stale
-    //    edit-intent predictions that PreToolUse already resolved.
     if (exit.decision === "allow" && isEditTool(toolName) && !subagent) {
       await deactivatePrediction(sessionDir, toolName, toolInput);
     }
@@ -264,7 +195,7 @@ async function main() {
 
   /**
    * Shared plan-validate helper: reads plan content + transcript, calls checkPlanIntent,
-   * and returns the validation result. Does NOT call exitPipeline — caller decides.
+   * and returns the validation result. Does NOT call exitPipeline -- caller decides.
    */
   async function runPlanValidation(
     mode: "edit" | "exit",
@@ -286,357 +217,82 @@ async function main() {
     );
   }
 
-  // ============================================================
-  // STEP 0: Respond-first enforcement (first tool call only)
-  // When the user says something, AI must respond with text
-  // before calling any tool. Pure TypeScript, no LLM.
-  // ============================================================
-  if (!subagent && !state.respondFirstChecked) {
-    if (toolName !== "AskUserQuestion" && toolName !== "ExitPlanMode") {
-      const rfResult = await readTranscriptExact(input.transcript_path, {
-        counts: { user: 1, assistant: 1 },
-      });
+  if (batchInfo && batchInfo.position > 0) {
+    // Sibling in a parallel batch. The leader (position 0) runs the full
+    // pipeline. Wait for the leader's result and propagate it.
+    const leaderResult = await waitForBatchLeader(sessionDir, batchInfo.leaderId);
 
-      const lastUser = rfResult.user.length > 0 ? rfResult.user[0] : null;
-      const lastAssistant = rfResult.assistant.length > 0 ? rfResult.assistant[0] : null;
-
-      if (lastUser && !CONFIRMATION_PATTERN.test(lastUser.content)) {
-        if (!lastAssistant || lastAssistant.index < lastUser.index) {
-          // RULE 1: The last message before this tool call was a USER message
-          // (no assistant message after it). The AI must respond first.
-          logFastPathDeny("respond-first", "PreToolUse", toolName, projectDir,
-            "No text response before first tool call");
-          await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
-          await exitPipeline({
-            decision: "deny",
-            agent: "respond-first",
-            reason: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
-          });
-          return;
-        } else if (lastAssistant.index > lastUser.index) {
-          // RULE 2: The last message before this tool call was an ASSISTANT message,
-          // and there WAS a user message right before it. Check if the AI's response
-          // actually addresses the user properly.
-          if (lastAssistant.content.trim().length === 0) {
-            // Empty assistant text — deny
-            logFastPathDeny("respond-first", "PreToolUse", toolName, projectDir,
-              "Empty assistant response");
-            await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
-            await exitPipeline({
-              decision: "deny",
-              agent: "respond-first",
-              reason: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
-            });
-            return;
-          }
-
-          // Non-empty assistant text — verify quality via LLM
-          let qualityOutput = "APPROVE";
-          try {
-            const qualityResult = await runAgentWithRetryAndTelemetry(
-              { ...RESPOND_FIRST_QUALITY_AGENT, workingDir: projectDir },
-              {
-                prompt: "Evaluate this response.",
-                context: `USER MESSAGE:\n${lastUser.content.slice(0, 500)}\n\nASSISTANT RESPONSE:\n${lastAssistant.content.slice(0, 500)}`,
-              },
-              {
-                formatValidator: (text: string) => startsWithAny(text, ["APPROVE", "DENY:"]),
-                formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
-              },
-              {
-                agent: "respond-first-quality",
-                hookName: "PreToolUse",
-                toolName,
-                workingDir: projectDir,
-                executionType: EXECUTION_TYPES.LLM,
-              }
-            );
-            qualityOutput = qualityResult.output;
-          } catch {
-            logFastPathApproval("respond-first-quality", "PreToolUse", toolName, projectDir, "LLM error - fail open");
-          }
-
-          if (qualityOutput.startsWith("DENY:")) {
-            const reason = qualityOutput.slice(5).trim()
-              || "Before calling tools, respond with: (1) what the user asked, (2) your interpretation, (3) planned actions.";
-            logFastPathDeny("respond-first-quality", "PreToolUse", toolName, projectDir, reason);
-            await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
-            await exitPipeline({
-              decision: "deny",
-              agent: "respond-first-quality",
-              reason,
-            });
-            return;
-          }
-        }
-      }
+    // Only increment toolCallsSinceUpdate on allow (matching leader behavior —
+    // the leader's increment only runs on the allow path)
+    if (leaderResult.decision === "allow") {
+      await stateManager.update((s) => ({
+        ...s,
+        toolCallsSinceUpdate: s.toolCallsSinceUpdate + 1,
+      }));
     }
-    // Passed checks (or exempt tool or confirmation or no user message) — skip for rest of turn
-    await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
-  }
 
-  // ============================================================
-  // STEP 1: Low-risk auto-approve
-  // ============================================================
-
-  // Synthetic message for entering plan mode (before exitPipeline exits the process)
-  if (toolName === "EnterPlanMode" && !subagent) {
-    await writeTool(
-      input.transcript_path,
-      input.session_id,
-      "EnterPlanMode",
-      "Entering plan mode. All subsequent tool calls are read-only until ExitPlanMode."
-    );
-    await deactivateAllPredictions(sessionDir);
-  }
-
-  if (
-    LOW_RISK_TOOLS.includes(toolName) ||
-    (toolName.startsWith("mcp__") && !/(commit|push|confirm)$/.test(toolName))
-  ) {
-    logFastPathApproval("low-risk-bypass", "PreToolUse", toolName, projectDir, "Low-risk tool auto-approval");
+    // Route through exitPipeline for consistent telemetry (tool log, gate
+    // reasoning for denials, prediction deactivation). Gate reasoning is
+    // naturally skipped for allowed siblings because "batch-sibling" is not
+    // an LLM agent and currentGateNote is unset.
+    const reason = leaderResult.decision === "deny"
+      ? `Error in parallel tool call: ${leaderResult.reason}`
+      : leaderResult.reason;
     await exitPipeline({
-      decision: "allow",
-      agent: "low-risk-bypass",
-      reason: "Low-risk tool auto-approval",
+      decision: leaderResult.decision,
+      agent: "batch-sibling",
+      reason,
+    });
+    return; // exitPipeline calls process.exit
+  }
+
+  // Build rule context
+  const ctx: RuleContext = {
+    toolName,
+    toolInput,
+    projectDir,
+    transcriptPath: input.transcript_path,
+    sessionDir,
+    sessionId: input.session_id,
+    state,
+    stateManager,
+    planMode,
+    planModeCtx,
+    subagent,
+    coldStart,
+    useSyncPipeline,
+    toolCallCount,
+  };
+
+  // Run all rules (respond-first, low-risk, plan-mode-block, subagent,
+  // question-validate, prediction-block, drift-detect, correction,
+  // error-acknowledge, trusted-path, edit-intent, style-drift, gate, tool-approve)
+  const ruleResult = await evaluateRules(ALL_RULES, ctx, "PreToolUse");
+
+  if (ruleResult) {
+    // Rule produced a decision (allow or deny)
+    currentGateNote = ruleResult.gateNote;
+    await exitPipeline({
+      decision: ruleResult.decision,
+      agent: ruleResult.agent,
+      reason: ruleResult.reason,
+      usesLlm: ruleResult.usesLlm,
     });
     return;
   }
 
-  // ============================================================
-  // STEP 1.5: Plan mode hard block (TypeScript only, no appeal)
-  // ============================================================
-  if (planMode) {
-    if (FILE_TOOLS.includes(toolName)) {
-      const filePath =
-        (toolInput as { file_path?: string }).file_path ||
-        (toolInput as { path?: string }).path || "";
-      const editBlock = planModeEditBlock(planMode, toolName, filePath);
-      if (editBlock) {
-        logFastPathDeny("plan-mode-block", "PreToolUse", toolName, projectDir, editBlock);
-        await exitPipeline({
-          decision: "deny",
-          agent: "plan-mode-block",
-          reason: editBlock,
-        });
-        return;
-      }
-    }
-
-    if (toolName === "Bash") {
-      const command = (toolInput as { command?: string }).command || "";
-      const bashBlock = planModeBashBlock(planMode, toolName, command);
-      if (bashBlock) {
-        logFastPathDeny("plan-mode-block", "PreToolUse", toolName, projectDir, bashBlock);
-        await exitPipeline({
-          decision: "deny",
-          agent: "plan-mode-block",
-          reason: bashBlock,
-        });
-        return;
-      }
-    }
-  }
-
-  // ============================================================
-  // SUBAGENT PATH: low-risk already handled, tool-approve only
-  // ============================================================
-  if (subagent) {
-    if (toolName === "Bash") {
-      logFastPathDeny("subagent-bash-block", "PreToolUse", toolName, projectDir, "Bash denied in subagents");
-      await exitPipeline({
-        decision: "deny",
-        agent: "subagent-bash-block",
-        reason: "Bash tool is not available in subagents",
-      });
-      return;
-    }
-    const decision = await checkToolApproval(toolName, toolInput, projectDir, "PreToolUse", { lazyMode: true, planModeContext: planModeCtx.contextString });
-    if (!decision.approved) {
-      await exitPipeline({
-        decision: "deny",
-        agent: "tool-approve",
-        reason: decision.reason ?? "Tool denied",
-        });
-      return;
-    }
-    await exitPipeline({
-      decision: "allow",
-      agent: "tool-approve",
-      reason: "Subagent tool approved",
-    });
-    return;
-  }
-
-  // ============================================================
-  // STEP 2: AskUserQuestion validation
-  // ============================================================
-  if (toolName === "AskUserQuestion") {
-    const questionTranscript = await readTranscriptExact(input.transcript_path, QUESTION_VALIDATE_COUNTS);
-    const questionContext = formatTranscriptResult(questionTranscript);
-
-    const validation = await checkQuestionValidity(
-      toolInput,
-      questionContext,
-      input.transcript_path,
-      projectDir,
-      "PreToolUse"
-    );
-
-    if (!validation.approved) {
-      const appeal = await appealHelper(
-        toolName,
-        `AskUserQuestion: ${JSON.stringify(toolInput).slice(0, 200)}`,
-        questionContext,
-        validation.reason || "Question validation failed",
-        projectDir,
-        "PreToolUse",
-        `question-validate blocked: ${validation.reason}`
-      );
-
-      if (!appeal.overturned) {
-        await exitPipeline({
-          decision: "deny",
-          agent: "question-validate",
-          reason: validation.reason || "Question validation failed - show referenced content first",
-            });
-        return;
-      }
-    }
-
-    // Question validated or appeal overturned - allow
-    await exitPipeline({
-      decision: "allow",
-      agent: "question-validate",
-      reason: "Question validated",
-    });
-    return;
-  }
-
-  // ============================================================
-  // STEP 2.5: Tool prediction blocking (checks ALL predictions)
-  // ============================================================
-  if (!subagent) {
-    if (toolName.startsWith("mcp__") && /(commit|push|confirm|check)$/.test(toolName)) {
-      await deactivateAllPredictions(sessionDir);
-    }
-
-    const allPredictions = await getAllPredictions(sessionDir);
-    if (allPredictions.length > 0) {
-      const predFilePath = (toolInput as { file_path?: string }).file_path || (toolInput as { path?: string }).path || "";
-      if (isEditTool(toolName) && isEditIntentExemptPath(predFilePath)) {
-        // Exempt paths skip prediction blocking — they have their own validators
-      } else {
-        const blockedResult = matchBlockedToolFromAll(toolName, toolInput, allPredictions);
-        if (blockedResult) {
-          const blockReason = `Tool "${toolName}" is not aligned with current user intent. ${blockedResult.blocked.reason}`;
-
-          const predTranscript = formatTranscriptResult(
-            await readTranscriptExact(input.transcript_path, APPEAL_COUNTS)
-          );
-
-          const appeal = await appealHelper(
-            toolName,
-            `${toolName} with ${JSON.stringify(toolInput).slice(0, 200)}`,
-            predTranscript,
-            blockReason,
-            projectDir,
-            "PreToolUse",
-            `prediction-block: ${blockedResult.blocked.reason}`
-          );
-
-          if (!appeal.overturned) {
-            await exitPipeline({
-              decision: "deny",
-              agent: "prediction-block",
-              reason: blockReason,
-            });
-            return;
-          }
-          // Appeal overturned: clear the matching prediction
-          await deactivatePrediction(sessionDir, toolName, toolInput);
-          currentGateNote = appeal.gateNote;
-        }
-      }
-    }
-  }
-
-  // ============================================================
-  // STEP 2.7: Drift detection (lazy mode only)
-  // ============================================================
-  if (!useSyncPipeline && !subagent) {
-    let userIntent = "";
-    let misalignments = "";
-    try {
-      const summaryPath = getSummaryPath(input.transcript_path);
-      userIntent = await readSection(summaryPath, "User Intent");
-      misalignments = await readSection(summaryPath, "Flagged Misalignments");
-    } catch {
-      // No summary yet
-    }
-
-    const recentLog = readToolLogEntries(sessionDir, 10);
-    const drift = detectDrift(toolName, toolInput, userIntent, misalignments, recentLog);
-    if (drift.detected && drift.severity === "block") {
-      const driftTranscript = formatTranscriptResult(
-        await readTranscriptExact(input.transcript_path, APPEAL_COUNTS)
-      );
-
-      const appeal = await appealHelper(
-        toolName,
-        `${toolName} with ${JSON.stringify(toolInput).slice(0, 200)}`,
-        driftTranscript,
-        drift.reason,
-        projectDir,
-        "PreToolUse",
-        `drift-block: ${drift.reason}`
-      );
-
-      if (!appeal.overturned) {
-        await exitPipeline({
-          decision: "deny",
-          agent: "drift-block",
-          reason: drift.reason,
-        });
-        return;
-      }
-      currentGateNote = appeal.gateNote;
-    }
-  }
-
-  // ============================================================
-  // STEP 3: Check corrections from PostToolUse
-  // ============================================================
-  const isSubagentLauncher = toolName === "Agent" || toolName === "Task";
-  if (!subagent && !isSubagentLauncher) {
-    const corrections = await getUnconsumedCorrections(sessionDir);
-    const relevantCorrection = corrections.find((c) => c.toolName === toolName);
-    if (relevantCorrection) {
-      await consumeCorrections(sessionDir);
-      await exitPipeline({
-        decision: "deny",
-        agent: "correction",
-        reason: relevantCorrection.reason,
-      });
-      return;
-    }
-  }
-
-  // Detect rewind - if user rewound, clear all caches
+  // Rewind detection -- runs AFTER evaluateRules, preserving current position
   await detectRewind(input.transcript_path);
 
-  // ============================================================
-  // FILE TOOLS PATH
-  // ============================================================
+  // EXCEPTIONS: plan-validate and claude-md-validate run AFTER all rules pass.
+  // trusted-path rule (priority 58) explicitly excludes plan/CLAUDE.md files
+  // so they always reach this point.
   if (FILE_TOOLS.includes(toolName)) {
     const filePath =
       (toolInput as { file_path?: string }).file_path ||
       (toolInput as { path?: string }).path;
 
     if (filePath) {
-      const trusted = isTrustedPath(filePath, projectDir);
-      const sensitive = isSensitivePath(filePath);
-
       // Plan-validate: Write/Edit to ~/.claude/plans/
       const plansDir = path.join(os.homedir(), ".claude", "plans");
       if (
@@ -648,9 +304,6 @@ async function main() {
           input.transcript_path,
           APPEAL_COUNTS
         );
-        // Check for actual ExitPlanMode tool result via its [ExitPlanMode] prefix
-        // (set by transcript.ts:799). Do NOT use naive content.includes() here —
-        // that false-positives on Read/Grep results containing ExitPlanMode source code.
         const hasExitPlanModeApproval = recentContext.tool.some(
           (r) => r.content.startsWith("[ExitPlanMode]")
         );
@@ -660,13 +313,9 @@ async function main() {
             decision: "allow",
             agent: "exit-plan-mode",
             reason: "ExitPlanMode previously approved",
-                });
+          });
           return;
         }
-
-        // Plan files at ~/.claude/plans/ are exempt from edit-intent blocking.
-        // classifyEditIntent always returns false in plan mode, making this check
-        // fire unconditionally. The plan-validate LLM check below handles validation.
 
         const validation = await runPlanValidation("edit");
 
@@ -690,6 +339,7 @@ async function main() {
               decision: "deny",
               agent: "plan-validate",
               reason: `Plan drift detected: ${validation.reason}`,
+              usesLlm: true,
             });
             return;
           }
@@ -700,6 +350,7 @@ async function main() {
           decision: "allow",
           agent: "plan-validate",
           reason: "Plan validation passed",
+          usesLlm: true,
         });
         return;
       }
@@ -744,7 +395,8 @@ async function main() {
               decision: "deny",
               agent: "claude-md-validate",
               reason: `CLAUDE.md validation failed: ${validation.reason}`,
-                    });
+              usesLlm: true,
+            });
             return;
           }
           currentGateNote = appeal.gateNote;
@@ -754,298 +406,14 @@ async function main() {
           decision: "allow",
           agent: "claude-md-validate",
           reason: "CLAUDE.md validation passed",
-            });
+          usesLlm: true,
+        });
         return;
       }
-
-      // EDIT INTENT GATE: Block edit tools when editIntent === false
-      // Plan files and CLAUDE.md are handled by their own validators above (already returned)
-      // Exempt paths (memory files, etc.) skip this gate
-      if (
-        !isEditIntentExemptPath(filePath) &&
-        isEditTool(toolName) &&
-        (state.currentEditIntent ?? null) === false
-      ) {
-        const editIntentReason = `Edit intent is false - user has not requested file modifications. Target: ${filePath}`;
-
-        // Appeal with MAJOR HINT (strong signal to uphold)
-        const eiTranscript = formatTranscriptResult(
-          await readTranscriptExact(input.transcript_path, APPEAL_COUNTS)
-        );
-
-        const appeal = await appealHelper(
-          toolName,
-          `${toolName} to ${filePath}`,
-          eiTranscript,
-          editIntentReason,
-          projectDir,
-          "PreToolUse",
-          `=== EDIT INTENT WARNING ===
-The edit intent classifier has determined the user does NOT want file edits right now.
-This is a STRONG signal. The user's message was analyzed and classified as non-edit intent.
-You should STRONGLY LEAN toward UPHOLD unless you find EXPLICIT, UNAMBIGUOUS user approval
-for editing files (e.g., "make the change", "fix it", "implement it", "go ahead and edit").
-Questions, discussions, or exploration of code do NOT count as edit approval.
-If in doubt, UPHOLD.
-=== END EDIT INTENT WARNING ===`
-        );
-
-        if (!appeal.overturned) {
-          await exitPipeline({
-            decision: "deny",
-            agent: "edit-intent",
-            reason: editIntentReason,
-          });
-          return;
-        }
-
-        // BREAKTHROUGH: Track overturned edit-intent appeals (persisted in SessionState)
-        const overturnCount = (state.editIntentOverturnCount ?? 0) + 1;
-        await stateManager.update((s) => ({
-          ...s,
-          editIntentOverturnCount: overturnCount,
-          ...(overturnCount >= 2 ? { currentEditIntent: true as const, editIntentTimestamp: Date.now() } : {}),
-        }));
-
-        // Deactivate the micro-prediction that generated this edit-intent block
-        // so PostToolUse does not re-create a correction for the same prediction
-        await deactivatePrediction(sessionDir, toolName, toolInput);
-
-        currentGateNote = appeal.gateNote;
-        // Fall through to normal pipeline
-      }
-
-      if (trusted && !sensitive) {
-        if (!useSyncPipeline) {
-          logFastPathApproval("trusted-path", "PreToolUse", toolName, projectDir, "Trusted file fast-path");
-          await exitPipeline({
-            decision: "allow",
-            agent: "trusted-path",
-            reason: "Trusted file fast-path",
-          });
-          return;
-        }
-
-        // Plan mode / cold start: run style-drift check for Edit, then fall through to gate
-        if (toolName === "Edit") {
-          const transcriptResult = await readTranscriptExact(
-            input.transcript_path,
-            STYLE_DRIFT_COUNTS
-          );
-          const userMessages = formatTranscriptResult(transcriptResult);
-
-          const styleDriftResult = await checkStyleDrift(
-            toolName,
-            toolInput,
-            projectDir,
-            userMessages,
-            "PreToolUse"
-          );
-
-          if (!styleDriftResult.approved) {
-            const appeal = await appealHelper(
-              toolName,
-              `Edit to ${filePath}`,
-              userMessages,
-              styleDriftResult.reason || "Style drift detected",
-              projectDir,
-              "PreToolUse",
-              `style-drift blocked: ${styleDriftResult.reason}`
-            );
-
-            if (!appeal.overturned) {
-              await exitPipeline({
-                decision: "deny",
-                agent: "style-drift",
-                reason: `Style drift detected: ${styleDriftResult.reason}`,
-                        });
-              return;
-            }
-            currentGateNote = appeal.gateNote;
-          }
-        }
-        // After style-drift passes (or not Edit), fall through to gate agent
-      }
-      // High risk (untrusted or sensitive) - fall through to gate/tool-approve
     }
   }
 
-  // ============================================================
-  // PLAN MODE / COLD START: Gate agent SYNC
-  // ============================================================
-  if (useSyncPipeline) {
-    let userIntent = "";
-    let misalignments = "";
-    let gateReasoning = "";
-    try {
-      const summaryPath = getSummaryPath(input.transcript_path);
-      userIntent = await readSection(summaryPath, "User Intent");
-      misalignments = await readSection(summaryPath, "Flagged Misalignments");
-      gateReasoning = await formatForPrompt(sessionDir);
-    } catch {
-      // No summary yet - proceed without context
-    }
-
-    // Read predictions and edit intent for gate context
-    let predictions: string | undefined;
-    try {
-      const prediction = await getActivePrediction(sessionDir);
-      if (prediction) {
-        predictions = formatPredictionContext(prediction);
-      }
-    } catch {
-      // Non-fatal
-    }
-    const editIntent = state.currentEditIntent ?? null;
-
-    let gateResult: { approved: boolean; reason?: string };
-    try {
-      gateResult = await checkGate(
-        toolName,
-        toolInput,
-        { userIntent, misalignments, gateReasoning, predictions, editIntent, planModeContext: planModeCtx.contextString },
-        projectDir,
-        "PreToolUse"
-      );
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      logFastPathDeny("gate", "PreToolUse", toolName, projectDir, `Gate error (fail open): ${errorMsg}`);
-      gateResult = { approved: true };
-    }
-
-    if (!gateResult.approved) {
-      // Get transcript for appeal
-      const gateTranscriptResult = await readTranscriptExact(input.transcript_path, {
-        ...APPEAL_COUNTS,
-        includeSlashCommandContext: true,
-      });
-      const gateTranscript = formatTranscriptResult(gateTranscriptResult);
-
-      const appeal = await appealHelper(
-        toolName,
-        `${toolName} with ${JSON.stringify(toolInput).slice(0, 200)}`,
-        gateTranscript,
-        gateResult.reason || "Gate check failed",
-        projectDir,
-        "PreToolUse",
-        `${planModeCtx.contextString}gate blocked: ${gateResult.reason}`,
-        gateTranscriptResult.slashCommandContext
-      );
-
-      if (!appeal.overturned) {
-        await exitPipeline({
-          decision: "deny",
-          agent: "gate",
-          reason: gateResult.reason ?? "Gate check failed",
-            });
-        return;
-      }
-      currentGateNote = appeal.gateNote;
-    }
-    lastAgent = "gate";
-  }
-
-  // ============================================================
-  // TOOL-APPROVE (final gate)
-  // ============================================================
-
-  // ExitPlanMode: block if plan file doesn't exist or is empty
-  if (toolName === "ExitPlanMode") {
-    const planPath = await resolvePlanPath(input.transcript_path);
-    if (!planPath || !(await fs.promises.stat(planPath)).size) {
-      logFastPathDeny("exit-plan-mode", "PreToolUse", toolName, projectDir, "Cannot exit plan mode without a plan.");
-      await exitPipeline({
-        decision: "deny",
-        agent: "exit-plan-mode",
-        reason: "Cannot exit plan mode without a plan.",
-      });
-      return;
-    }
-
-    // Plan exists and is non-empty — validate content before allowing exit
-    const exitValidation = await runPlanValidation("exit");
-    if (!exitValidation.approved) {
-      await exitPipeline({
-        decision: "deny",
-        agent: "plan-validate",
-        reason: `Plan validation failed: ${exitValidation.reason}`,
-      });
-      return;
-    }
-  }
-
-  const decision = await checkToolApproval(
-    toolName,
-    toolInput,
-    projectDir,
-    "PreToolUse",
-    {
-      lazyMode: !useSyncPipeline,
-      sessionDir,
-      planModeContext: planModeCtx.contextString,
-    }
-  );
-
-  if (!decision.approved) {
-    currentGateNote = decision.gateNote;
-
-    // Get transcript for appeal - WITH slash command context for MCP tools
-    const approveTranscriptResult = await readTranscriptExact(input.transcript_path, {
-      ...APPEAL_COUNTS,
-      includeSlashCommandContext: true,
-    });
-    const approveTranscript = formatTranscriptResult(approveTranscriptResult);
-
-    const appeal = await appealHelper(
-      toolName,
-      `${toolName} with ${JSON.stringify(toolInput).slice(0, 200)}`,
-      approveTranscript,
-      decision.reason || "Tool denied",
-      projectDir,
-      "PreToolUse",
-      `${planModeCtx.contextString}tool-approve blocked: ${decision.reason}`,
-      approveTranscriptResult.slashCommandContext
-    );
-
-    if (!appeal.overturned) {
-      // Track workaround patterns for escalation
-      let finalReason = decision.reason;
-      const workaroundCategory = detectWorkaroundPattern(toolName, toolInput);
-      if (workaroundCategory) {
-        const count = await recordDenial(workaroundCategory);
-        if (count >= MAX_SIMILAR_DENIALS) {
-          finalReason += ` CRITICAL: You have attempted ${count} similar workarounds for '${workaroundCategory}'. STOP trying alternatives. Either use the approved MCP tool, ask the user for guidance, or acknowledge that this action cannot be performed.`;
-        }
-
-        // Force check: block all non-low-risk tools until check MCP is called
-        await savePrediction(sessionDir, {
-          expectedIntent: "run mcp__agent-framework__check to verify project state",
-          blockedIntent: "all non-read tools until check has been run",
-          blockedTools: [{
-            toolName: ".*",
-            reason: `Bash command denied (${workaroundCategory}). You must run mcp__agent-framework__check first.`,
-            exceptions: ["mcp__agent-framework__check", "ToolSearch"],
-          }],
-          userMessageSnippet: `denied: ${(finalReason ?? "").slice(0, 100)}`,
-          timestamp: Date.now(),
-          active: true,
-        });
-      }
-
-      await exitPipeline({
-        decision: "deny",
-        agent: "tool-approve",
-        reason: finalReason ?? "Tool denied",
-        });
-      return;
-    }
-    currentGateNote = appeal.gateNote;
-    if (appeal.gateNote) currentGateNote = appeal.gateNote;
-  } else {
-    currentGateNote = decision.gateNote;
-  }
-
-  // Increment tool count
+  // Post-allow bookkeeping (tool count, ExitPlanMode cleanup)
   await stateManager.update((s) => ({
     ...s,
     toolCallCount: s.toolCallCount + 1,
@@ -1079,17 +447,16 @@ If in doubt, UPHOLD.
     }
   }
 
-  logFastPathApproval(lastAgent, "PreToolUse", toolName, projectDir, "All checks passed");
+  logFastPathApproval("all-rules", "PreToolUse", toolName, projectDir, "All checks passed");
   await exitPipeline({
     decision: "allow",
-    agent: lastAgent,
+    agent: "all-rules",
     reason: "All checks passed",
   });
 }
 
 main().catch(async (err) => {
   // Safety net: Always output a valid JSON response before exiting
-  // This prevents Claude Code from prompting for manual confirmation
   const errorMessage = err instanceof Error ? err.message : String(err);
   const output = JSON.stringify({
     hookSpecificOutput: {

@@ -3,14 +3,14 @@
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
 1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent`, `test_harness_labeler`, `test_harness_tester` agents (portable, works with any MCP client)
-2. **PreToolUse Hook** - Multi-layer safety gate with `gate`, `tool-approve`, `tool-appeal`, `response-align`, `plan-validate`, `style-drift`, `claude-md-validate`, `question-validate`, and `edit-intent` agents
+2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `plan-validate`, `style-drift`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
 3. **Stop Hook** - For `response-align` agent (validates stop responses)
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
 
 ## Agents
 
-The framework implements 15 specialized agents organized into three categories:
+The framework implements 17 specialized agents organized into three categories:
 
 ### MCP Tools (User-Facing)
 
@@ -32,12 +32,13 @@ The framework implements 15 specialized agents organized into three categories:
 
 | Agent            | Model  | Hook        | Purpose                                        |
 | ---------------- | ------ | ----------- | ---------------------------------------------- |
+| rule-gate        | haiku  | PreToolUse  | Combined evaluator for triggered rule contexts |
 | respond-first-quality | haiku | PreToolUse | Validate AI's first response acknowledges user message |
+| error-acknowledge| haiku  | PreToolUse  | Require error acknowledgment before proceeding |
 | plan-validate    | sonnet | PreToolUse  | Detect plan drift from user intent             |
 | gate             | haiku  | PreToolUse  | Validate tool calls against user intent/errors |
 | style-drift      | haiku  | PreToolUse  | Detect unrequested cosmetic/style changes      |
 | claude-md-validate| sonnet | PreToolUse  | Validate CLAUDE.md edits against conventions   |
-| response-align   | sonnet | PreToolUse  | Validate AI response aligns with user request  |
 | question-validate| haiku  | PreToolUse  | Validate AskUserQuestion before showing to user|
 | edit-intent      | haiku  | PreToolUse  | Classify user message as edit or non-edit intent|
 
@@ -65,31 +66,27 @@ The `commit` agent enforces the complete verification chain before committing.
 ```
 ┌─ Tool Call Received
 │
-├─ Auto-approve low-risk tools (Grep, Glob, LSP, MCP tools, etc.)
+├─ Rule Pipeline (evaluateRules, sequential by priority):
+│  ├─ respond-first (5): AI must respond before tools
+│  ├─ low-risk (10): Auto-approve read-only tools
+│  ├─ plan-mode-block (15): Block writes in plan mode
+│  ├─ subagent (20): Subagent tool approval
+│  ├─ question-validate (30): Validate AskUserQuestion
+│  ├─ prediction-block (35): Block predicted-bad tools
+│  ├─ drift-detect (40): Detect drift from intent
+│  ├─ correction (45): Post-tool corrections
+│  ├─ error-acknowledge (50): Require error acknowledgment
+│  ├─ trusted-path (58): Fast-allow trusted paths
+│  ├─ edit-intent (60): Block edits without intent
+│  ├─ style-drift (65): Detect style changes
+│  ├─ gate (70): Gate agent (sync pipeline)
+│  └─ tool-approve (100): Final tool approval
+│     └─ fastDeny with appealable → tool-appeal with transcript
 │
-├─ Check pending async gate validation
+├─ plan-validate: Check for plan drift on ~/.claude/plans writes
+├─ claude-md-validate: Validate CLAUDE.md edits
 │
-├─ gate: Validate tool call against user intent and error context
-│  └─ BLOCK if misaligned with intent or errors unacknowledged
-│
-├─ Path-based classification for file tools
-│  ├─ Trusted path (project dir or ~/.claude) + not sensitive → ALLOW
-│  ├─ plan-validate: Check for plan drift on ~/.claude/plans writes
-│  └─ claude-md-validate: Validate CLAUDE.md edits
-│
-├─ question-validate: For AskUserQuestion tool
-│  └─ BLOCK if asking about unseen content or redundant questions
-│
-├─ style-drift: For Edit tool
-│  └─ DENY if style-only changes not requested
-│
-├─ tool-approve: Evaluate tool call against CLAUDE.md + rules
-│  └─ DENY → tool-appeal: Review with transcript context
-│           ├─ OVERTURN: APPROVE → allow
-│           ├─ OVERTURN: <reason> → deny with new reason
-│           └─ UPHOLD → deny with original reason
-│
-└─ Workaround detection: Escalate after 3 similar denied attempts
+└─ Post-allow bookkeeping (tool count, ExitPlanMode cleanup)
 ```
 
 ## Performance

@@ -26,6 +26,9 @@ export interface SummaryDocument {
 export interface ToolLogEntry {
   ts: number;
   tool: string;
+  toolUseId?: string;
+  batchPosition?: number;
+  batchSize?: number;
   path?: string;
   cmd?: string;
   status: string;

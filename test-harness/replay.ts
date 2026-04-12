@@ -19,7 +19,7 @@ import * as path from "path";
 import * as os from "os";
 import { ReplayEvent, ReplayExpectations, ReplayArgs } from "./lib/types.js";
 import { runCommand } from "../src/utils/command.js";
-import { classifyLine, extractCwd } from "./lib/classifier.js";
+import { classifyLine, extractCwd, detectBatches, type BatchGroup } from "./lib/classifier.js";
 import { runHook, cleanupBackgroundProcesses } from "./lib/harness.js";
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -154,6 +154,7 @@ function collectScorableKeys(
 function validateExpectationCompleteness(
   expectations: ReplayExpectations,
   scorableKeys: Array<{ key: string; line: number; type: "tool_use" | "stop"; tool?: string }>,
+  batchMap?: Map<string, BatchGroup>,
 ): void {
   const unlabeled = scorableKeys.filter(
     (sk) => matchExpectation(expectations, sk.key) === undefined
@@ -177,7 +178,30 @@ function validateExpectationCompleteness(
     return !["allow", "deny"].includes(v);
   });
 
-  if (unlabeled.length === 0 && orphaned.length === 0 && invalidValues.length === 0) return;
+  // Check batch label consistency
+  const batchMismatches: Array<{ siblingId: string; siblingLabel: string; leaderId: string; leaderLabel: string }> = [];
+  if (batchMap) {
+    const seen = new Set<string>();
+    for (const [toolUseId, group] of batchMap) {
+      if (seen.has(group.toolUseIds[0])) continue;
+      seen.add(group.toolUseIds[0]);
+      const leaderLabel = matchExpectation(expectations, group.toolUseIds[0]);
+      if (!leaderLabel) continue;
+      for (let idx = 1; idx < group.toolUseIds.length; idx++) {
+        const siblingLabel = matchExpectation(expectations, group.toolUseIds[idx]);
+        if (siblingLabel && siblingLabel !== leaderLabel) {
+          batchMismatches.push({
+            siblingId: group.toolUseIds[idx],
+            siblingLabel,
+            leaderId: group.toolUseIds[0],
+            leaderLabel,
+          });
+        }
+      }
+    }
+  }
+
+  if (unlabeled.length === 0 && orphaned.length === 0 && invalidValues.length === 0 && batchMismatches.length === 0) return;
 
   const total = scorableKeys.length;
   const labeled = total - unlabeled.length;
@@ -213,6 +237,14 @@ function validateExpectationCompleteness(
   if (invalidValues.length > 0) {
     msg.push(`INVALID VALUES (${invalidValues.length}) — tool labels must be "allow"/"deny", stop labels "pass"/"block":`);
     for (const [k, v] of invalidValues) msg.push(`  "${k}": "${v}"`);
+    msg.push("");
+  }
+
+  if (batchMismatches.length > 0) {
+    msg.push(`BATCH LABEL MISMATCHES (${batchMismatches.length}) — sibling labels must match leader:`);
+    for (const m of batchMismatches) {
+      msg.push(`  "${m.siblingId}" is "${m.siblingLabel}" but leader "${m.leaderId}" is "${m.leaderLabel}"`);
+    }
     msg.push("");
   }
 
@@ -429,7 +461,7 @@ function summarizeLine(lines: Record<string, unknown>[], index: number): Record<
 /**
  * List all tool calls and stop points with the next user reaction.
  */
-function listToolCalls(lines: Record<string, unknown>[]): void {
+function listToolCalls(lines: Record<string, unknown>[], batchMap: Map<string, BatchGroup>): void {
   let count = 0;
   let investigateCount = 0;
 
@@ -449,6 +481,13 @@ function listToolCalls(lines: Record<string, unknown>[]): void {
           id: block.id,
           suggested_label: suggested,
         };
+        const batch = batchMap.get(block.id);
+        if (batch) {
+          const pos = batch.toolUseIds.indexOf(block.id);
+          entry.batch_position = pos;
+          entry.batch_size = batch.toolUseIds.length;
+          entry.batch_leader = batch.toolUseIds[0];
+        }
         if (reaction) entry.user_reaction = reaction;
         console.log(JSON.stringify(entry));
         count++;
@@ -485,6 +524,7 @@ function scaffoldLabelFile(
   lines: Record<string, unknown>[],
   transcriptPath: string,
   scorableKeys: Array<{ key: string; line: number; type: "tool_use" | "stop"; tool?: string }>,
+  batchMap: Map<string, BatchGroup>,
 ): void {
   const tDir = transcriptDir(transcriptPath);
   const labelPath = path.join(tDir, "labels.draft.json");
@@ -504,12 +544,18 @@ function scaffoldLabelFile(
     const reaction = findNextUserReaction(lines, sk.line);
     const isNeg = reaction ? looksNegative(reaction) : false;
     if (sk.type === "tool_use") {
+      const batch = batchMap.get(sk.key);
+      const batchPos = batch ? batch.toolUseIds.indexOf(sk.key) : -1;
       labels[sk.key] = isNeg ? "INVESTIGATE" : "allow";
-      reasoning[sk.key] = isNeg
-        ? `Negative reaction detected: "${reaction?.slice(0, 100)}"`
-        : reaction
-          ? "User continued normally"
-          : "No user reaction found";
+      if (batch && batchPos > 0) {
+        reasoning[sk.key] = `Batch sibling (pos ${batchPos}/${batch.toolUseIds.length}) — label must match leader ${batch.toolUseIds[0]}`;
+      } else {
+        reasoning[sk.key] = isNeg
+          ? `Negative reaction detected: "${reaction?.slice(0, 100)}"`
+          : reaction
+            ? "User continued normally"
+            : "No user reaction found";
+      }
     } else {
       labels[sk.key] = isNeg ? "INVESTIGATE" : "pass";
       reasoning[sk.key] = isNeg
@@ -746,10 +792,11 @@ async function main(): Promise<void> {
   });
 
   const scorableKeys = collectScorableKeys(lines);
+  const batchMap = detectBatches(lines);
 
   // Scaffold mode — generate starter label file, then exit
   if (config.scaffold) {
-    scaffoldLabelFile(lines, config.transcript, scorableKeys);
+    scaffoldLabelFile(lines, config.transcript, scorableKeys, batchMap);
     process.exit(0);
   }
 
@@ -758,7 +805,7 @@ async function main(): Promise<void> {
     if (config.expand) {
       expandContext(lines, config.expand, config.depth);
     } else {
-      listToolCalls(lines);
+      listToolCalls(lines, batchMap);
     }
     process.exit(0);
   }
@@ -774,7 +821,7 @@ async function main(): Promise<void> {
 
   // Validate completeness before replay (only when running with expectations, not generate-labels)
   if (config.expect && !config.generateLabels && !config.filter) {
-    validateExpectationCompleteness(config.expect, scorableKeys);
+    validateExpectationCompleteness(config.expect, scorableKeys, batchMap);
   }
 
   // Auto build for modes that fire hooks (skip in deployed Docker volume — dist/ is pre-built)
@@ -943,92 +990,118 @@ async function main(): Promise<void> {
     }
 
     if (classification.kind === "pre-tool-use") {
-      for (const block of classification.blocks) {
-        // Register in toolUseMap
-        toolUseMap.set(block.id, { name: block.name, input: block.input });
-
-        // If --filter is active, skip hooks that don't match the target key
-        if (config.filter && !block.id.startsWith(config.filter) && config.filter !== block.id) {
+      // Look ahead: append all consecutive assistant-tool_use lines
+      // (and intervening skip lines) BEFORE firing any hooks.
+      // This reproduces production behavior where all parallel tool_use
+      // entries exist in the transcript before any hook fires.
+      // Line i is already appended (line 897). Append i+1 onwards.
+      let j = i + 1;
+      while (j < lines.length) {
+        const nextClassification = classifyLine(lines[j], lines, j);
+        if (nextClassification.kind === "skip" || nextClassification.kind === "pre-tool-use") {
+          fs.appendFileSync(transcriptPath, rawLines[j] + "\n");
+          j++;
           continue;
         }
+        break;
+      }
 
-        const hookStart = Date.now();
-        try {
-          const input = JSON.stringify({
-            hook_event_name: "PreToolUse",
-            session_id: sessionId,
-            transcript_path: transcriptPath,
-            cwd,
-            tool_name: block.name,
-            tool_input: block.input,
-            tool_use_id: block.id,
-          });
+      // Now fire hooks for all pre-tool-use lines in [i, j)
+      for (let k = i; k < j; k++) {
+        const kClassification = classifyLine(lines[k], lines, k);
+        if (kClassification.kind !== "pre-tool-use") continue;
 
-          const hookResult = await runHook({
-            hookScript: hookScript("pre-tool-use"),
-            inputJson: input,
-            env,
-            timeoutMs: config.timeout,
-          });
+        for (const block of kClassification.blocks) {
+          // Register in toolUseMap
+          toolUseMap.set(block.id, { name: block.name, input: block.input });
 
-          // Parse decision
-          let decision = "allow";
-          if (hookResult.timedOut) {
-            decision = "timeout";
-          } else if (hookResult.exitCode === 1) {
-            decision = "error";
-          } else {
-            try {
-              const output = JSON.parse(hookResult.stdout);
-              const hookOutput = output.hookSpecificOutput ?? output;
-              decision = hookOutput.permissionDecision === "allow" ? "allow" : "deny";
-            } catch {
-              decision = hookResult.stdout.trim() === "" ? "allow" : "error";
+          // If --filter is active, skip hooks that don't match the target key
+          if (config.filter && !block.id.startsWith(config.filter) && config.filter !== block.id) {
+            continue;
+          }
+
+          const hookStart = Date.now();
+          try {
+            const input = JSON.stringify({
+              hook_event_name: "PreToolUse",
+              session_id: sessionId,
+              transcript_path: transcriptPath,
+              cwd,
+              tool_name: block.name,
+              tool_input: block.input,
+              tool_use_id: block.id,
+            });
+
+            const hookResult = await runHook({
+              hookScript: hookScript("pre-tool-use"),
+              inputJson: input,
+              env,
+              timeoutMs: config.timeout,
+            });
+
+            // Parse decision
+            let decision = "allow";
+            if (hookResult.timedOut) {
+              decision = "timeout";
+            } else if (hookResult.exitCode === 1) {
+              decision = "error";
+            } else {
+              try {
+                const output = JSON.parse(hookResult.stdout);
+                const hookOutput = output.hookSpecificOutput ?? output;
+                decision = hookOutput.permissionDecision === "allow" ? "allow" : "deny";
+              } catch {
+                decision = hookResult.stdout.trim() === "" ? "allow" : "error";
+              }
             }
+
+            // Read tool-log for diagnostics
+            const { gate, reason } = readLastToolLogEntry(sessionDir);
+
+            // Match against expectations
+            const expectedDecision = matchExpectation(config.expect, block.id);
+
+            const event: ReplayEvent = {
+              line: k,
+              hook: "pre-tool-use",
+              tool: block.name,
+              id: block.id.slice(0, 16),
+              decision,
+              ms: Date.now() - hookStart,
+            };
+
+            if (gate) event.gate = gate;
+            if (reason) event.reason = reason;
+
+            if (expectedDecision !== undefined) {
+              event.expected = expectedDecision;
+              event.pass = decision === expectedDecision;
+            }
+
+            if (hookResult.timedOut) {
+              event.error = `Hook timed out after ${config.timeout}ms`;
+            } else if (hookResult.exitCode === 1) {
+              event.error = hookResult.stderr.slice(0, 500);
+            }
+
+            results.push(event);
+          } catch (err) {
+            results.push({
+              line: k,
+              hook: "pre-tool-use",
+              tool: block.name,
+              id: block.id.slice(0, 16),
+              decision: "error",
+              ms: Date.now() - hookStart,
+              error: err instanceof Error ? err.message : String(err),
+            });
           }
-
-          // Read tool-log for diagnostics
-          const { gate, reason } = readLastToolLogEntry(sessionDir);
-
-          // Match against expectations
-          const expectedDecision = matchExpectation(config.expect, block.id);
-
-          const event: ReplayEvent = {
-            line: i,
-            hook: "pre-tool-use",
-            tool: block.name,
-            id: block.id.slice(0, 16),
-            decision,
-            ms: Date.now() - hookStart,
-          };
-
-          if (gate) event.gate = gate;
-          if (reason) event.reason = reason;
-
-          if (expectedDecision !== undefined) {
-            event.expected = expectedDecision;
-            event.pass = decision === expectedDecision;
-          }
-
-          if (hookResult.timedOut) {
-            event.error = `Hook timed out after ${config.timeout}ms`;
-          } else if (hookResult.exitCode === 1) {
-            event.error = hookResult.stderr.slice(0, 500);
-          }
-
-          results.push(event);
-        } catch (err) {
-          results.push({
-            line: i,
-            hook: "pre-tool-use",
-            tool: block.name,
-            id: block.id.slice(0, 16),
-            decision: "error",
-            ms: Date.now() - hookStart,
-            error: err instanceof Error ? err.message : String(err),
-          });
         }
       }
+
+      // j points to the first non-batch line. Set i = j - 1 because the
+      // for loop's i++ will advance to j, processing that line normally.
+      i = j - 1;
       continue;
     }
 

@@ -62,6 +62,8 @@ const AGENT_DISPLAY_NAMES: Record<string, string> = {
   "question-validate": "Question Validate",
   "claude-md-validate": "Claude MD Check",
   "validate-intent": "Intent Validate",
+  "rule-gate": "Rule Gate",
+  "error-acknowledge": "Error Ack",
   check: "Check",
   confirm: "Confirm",
   commit: "Commit",

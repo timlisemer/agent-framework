@@ -37,8 +37,28 @@ src/                                # TypeScript source
       question-validate.ts          # Validates AskUserQuestion calls
       index.ts                      # Barrel export
 
+  rules/                            # Rule-based pre-tool-use pipeline
+    types.ts                        # PreToolRule interface and RuleContext
+    evaluator.ts                    # Rule evaluation engine (sequential + combined LLM)
+    utils.ts                        # Shared constants (FILE_TOOLS, LOW_RISK_TOOLS, etc.)
+    index.ts                        # ALL_RULES barrel export
+    respond-first.ts                # Priority 5: AI must respond before tools
+    low-risk.ts                     # Priority 10: Auto-approve read-only tools
+    plan-mode-block.ts              # Priority 15: Block writes in plan mode
+    subagent.ts                     # Priority 20: Subagent tool approval
+    question-validate.ts            # Priority 30: Validate AskUserQuestion
+    prediction-block.ts             # Priority 35: Block predicted-bad tools
+    drift-detect.ts                 # Priority 40: Detect drift from intent
+    correction.ts                   # Priority 45: Post-tool corrections
+    error-acknowledge.ts            # Priority 50: Require error acknowledgment
+    trusted-path.ts                 # Priority 58: Fast-allow trusted paths
+    edit-intent.ts                  # Priority 60: Block edits without intent
+    style-drift.ts                  # Priority 65: Detect style changes
+    gate.ts                         # Priority 70: Gate agent (sync pipeline)
+    tool-approve.ts                 # Priority 100: Final tool approval
+
   hooks/                            # Claude Code hook entry points
-    pre-tool-use.ts                 # PreToolUse hook (main safety gate)
+    pre-tool-use.ts                 # PreToolUse hook (orchestrator for rule pipeline)
     post-tool-use.ts                # PostToolUse hook
     stop-response-check.ts          # Stop hook
     session-start.ts                # SessionStart hook (lifecycle)
@@ -267,31 +287,38 @@ This ensures the SDK agent can investigate but not modify anything.
 
 ## Hook Flow (PreToolUse)
 
-The PreToolUse hook is the main safety gate (~400 lines):
+The PreToolUse hook uses a rule-based pipeline. Each check is a `PreToolRule` object
+evaluated sequentially by priority. Rules return `fastDeny`, `fastAllow`, `llmContext`,
+or `null` (skip). Triggered `llmContext` rules are combined into one haiku LLM call.
 
 ```
 Tool call received
-├─> Auto-approve if low-risk (LSP, Grep, Glob, MCP tools)
-├─> Error acknowledgment check (Haiku)
-│   ├─> Quick pattern check (no LLM)
-│   └─> If patterns found: Haiku decides (block or allow)
-├─> Response alignment check (Sonnet)
-│   └─> Validates first response aligns with user request
-├─> Path classification (for file tools)
-│   ├─> Plan validation (Sonnet) if writing to ~/.claude/plans/
-│   ├─> CLAUDE.md validation (Sonnet) for CLAUDE.md edits
-│   └─> Trusted paths (project/~/.claude) + not sensitive → allow
-├─> Question validation (Haiku) for AskUserQuestion
-│   └─> Blocks questions about unseen content or redundant questions
-├─> Style drift check (Haiku) for Edit tool
-│   └─> Blocks unrequested style-only changes
-├─> Tool approve (Haiku) → decision
-│   └─> If denied:
-│       └─> Appeal (Haiku) with transcript
-│           ├─> OVERTURN → allow
-│           └─> UPHOLD → deny with reason
-└─> Workaround detection (escalate after 3 similar denials)
+├─> Rule pipeline (evaluateRules):
+│   ├─> respond-first (5)     Fast deny if no text before tools
+│   ├─> low-risk (10)         Fast allow read-only tools
+│   ├─> plan-mode-block (15)  Fast deny writes in plan mode
+│   ├─> subagent (20)         Subagent tool approval
+│   ├─> question-validate (30) Validate AskUserQuestion
+│   ├─> prediction-block (35)  Block predicted-bad tools (appealable)
+│   ├─> drift-detect (40)      Detect drift from user intent (appealable)
+│   ├─> correction (45)        Post-tool corrections
+│   ├─> error-acknowledge (50) Require error acknowledgment (appealable, LLM)
+│   ├─> trusted-path (58)      Fast allow trusted non-sensitive paths
+│   ├─> edit-intent (60)       Block edits without intent (appealable)
+│   ├─> style-drift (65)       Detect style changes (appealable, LLM)
+│   ├─> gate (70)              Gate agent sync pipeline (LLM)
+│   └─> tool-approve (100)     Final tool approval (appealable, LLM)
+│
+├─> Rewind detection (after rules, before validators)
+│
+├─> plan-validate (Sonnet) if writing to ~/.claude/plans/
+├─> claude-md-validate (Sonnet) for CLAUDE.md edits
+│
+└─> Post-allow bookkeeping (tool count, ExitPlanMode cleanup)
 ```
+
+Adding a new check: create `src/rules/my-rule.ts` implementing `PreToolRule`,
+add to `ALL_RULES` in `src/rules/index.ts`, add display name to statusline.
 
 ## Performance Optimization: Lazy Validation
 
