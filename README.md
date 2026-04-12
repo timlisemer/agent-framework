@@ -4,7 +4,7 @@ A TypeScript framework for custom AI agents using the Anthropic API. Agents are 
 
 1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent`, `test_harness_labeler`, `test_harness_tester` agents (portable, works with any MCP client)
 2. **PreToolUse Hook** - Multi-layer safety gate with `gate`, `tool-approve`, `tool-appeal`, `response-align`, `plan-validate`, `style-drift`, `claude-md-validate`, `question-validate`, and `edit-intent` agents
-3. **Stop Hook** - For `intent-validate` agent (detects when AI goes off-track)
+3. **Stop Hook** - For `response-align` agent (validates stop responses)
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
 
@@ -32,7 +32,7 @@ The framework implements 15 specialized agents organized into three categories:
 
 | Agent            | Model  | Hook        | Purpose                                        |
 | ---------------- | ------ | ----------- | ---------------------------------------------- |
-| intent-validate  | haiku  | Stop        | Detect off-topic questions or misunderstood requests |
+| respond-first-quality | haiku | PreToolUse | Validate AI's first response acknowledges user message |
 | plan-validate    | sonnet | PreToolUse  | Detect plan drift from user intent             |
 | gate             | haiku  | PreToolUse  | Validate tool calls against user intent/errors |
 | style-drift      | haiku  | PreToolUse  | Detect unrequested cosmetic/style changes      |
@@ -347,13 +347,7 @@ a1b2c3d
 
 The tool-approve hook runs automatically on every tool call Claude tries to execute.
 
-The intent-validate hook runs when Claude stops and is waiting for user input. It detects when Claude:
-
-- Asks questions that were already answered earlier in the conversation
-- Asks questions unrelated to what the user requested
-- Suggests actions the user never asked for
-
-When detected, it injects a course-correction message to get Claude back on track.
+The respond-first-quality agent runs on the first tool call after a user message. It verifies the AI's text response adequately acknowledges, interprets, and states planned actions before proceeding with tools.
 
 ### Programmatic Usage
 

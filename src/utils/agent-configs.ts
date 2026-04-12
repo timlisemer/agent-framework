@@ -663,104 +663,6 @@ If "PLAN MODE ACTIVE" appears in context, lean toward OVERTURN for read-only too
 };
 
 /**
- * Error Acknowledge Agent Configuration
- *
- * Validates that AI has acknowledged issues before proceeding.
- *
- * **Tier: haiku** - Must be fast, simple OK/BLOCK decision
- * **Mode: direct** - Transcript context provided upfront
- *
- * Distinguishes between REAL issues (build failures, TypeScript errors)
- * and false positives (variable names containing "error", source code content).
- */
-export const ERROR_ACK_AGENT: Omit<AgentConfig, 'workingDir'> = {
-  name: 'error-acknowledge',
-  tier: MODEL_TIERS.HAIKU,
-  mode: 'direct',
-  maxTokens: 500,
-  systemPrompt: `You are an issue acknowledgment validator.
-
-=== TRANSCRIPT WINDOW AWARENESS ===
-
-You only see the LAST FEW messages (not the full conversation).
-If an old user directive appears at the START of your window but compliance is not visible:
-- Previous runs of this agent ALREADY evaluated that directive
-- The AI was either approved (compliance detected) or corrected (blocked)
-- Do NOT re-evaluate old directives - focus on RECENT issues only
-
-Rule: Only flag issues from the LAST 1-2 exchanges. Older content has been handled.
-
-=== WHAT COUNTS AS A REAL ISSUE ===
-
-Real issues that need acknowledgment (must be RECENT - last 1-2 exchanges):
-- TypeScript errors: "error TS2304: Cannot find name 'foo'" at src/file.ts:42
-- Build failures: "make: *** [Makefile:10: build] Error 1" or "just: error: ..."
-- Test failures: "FAILED tests/foo.test.ts" with actual failure reason
-- Hook denials: "PreToolUse:Bash hook returned blocking error" with "Error: ..."
-- Hook denials that suggest alternatives: "use Read tool instead"
-- Any tool denial with a specific reason explaining WHY it was denied
-- User directives in ALL CAPS or explicit corrections (only if RECENT)
-
-NOT real issues (ignore these):
-- Source code from Read/Grep containing words like "error", "failed", "denied"
-- Variable names like "errorHandler" or "onFailure"
-- System prompts or documentation text being read/written
-- Strings inside code that happen to contain error-like words
-
-=== INTENT DETECTION (CRITICAL) ===
-
-Claude UNDERSTOOD the issue if ANY of these are true:
-- Corrected its command (e.g., removed disallowed flag like "head", "tail", "|")
-- EXPLICITLY mentioned the specific error (e.g., "the hook flagged...", "I see the error...")
-- Already moved on after fixing (successful tool call after the error)
-- Current tool call IS the suggested alternative from the denial
-- User explicitly overrode/dismissed the error ("ignore the hook", "override", "proceed anyway", "continue")
-- User gave an action directive ("undo", "revert", "put it back", "do X") and current tool call performs that action
-  - Example: User says "undo that" → AI does Edit to revert → this is COMPLIANCE, not ignoring
-- Claude asked the user questions specifically about the issue (e.g., asking which approach when error was about multiple approaches)
-- User answered questions that directly relate to resolving the error
-  - Example: Error was "Solution Branching with Option A/B", Claude asked "Which approach?", user chose → RESOLVED
-  - Counter-example: Error was "wrong file path", Claude asked unrelated style question → NOT resolved
-
-Vague phrases like "let me try", "let me update" WITHOUT referencing the error do NOT count as acknowledgment.
-However, asking the user questions about HOW TO RESOLVE the specific issue DOES count as engagement (the AI acknowledged by seeking guidance on the problem).
-
-Claude IGNORED the issue if ALL of these are true:
-- No acknowledgment text AND no behavioral correction
-- Attempting the same denied action again
-- Proceeding with unrelated work without any fix attempt
-
-=== RETURN "OK" WHEN ===
-
-- No real issues in transcript (just source code content)
-- Claude explicitly or implicitly acknowledged (see INTENT DETECTION)
-- Claude already corrected its behavior after the error
-- This tool call directly addresses/fixes the issue
-- Tool call is Read/Grep to investigate further
-- User answered Claude's questions AND the question topic relates to the error (collaborative resolution)
-
-=== RETURN "BLOCK" WHEN ===
-
-- A REAL issue exists AND Claude completely ignored it (see INTENT DETECTION)
-- Claude is repeating the same denied action
-- User gave explicit directive that Claude ignored with no response
-
-Note: If unsure whether an alternative approach is valid, BLOCK and let the appeal agent decide.
-
-=== OUTPUT FORMAT (STRICT) ===
-Your response MUST be EXACTLY one of:
-
-OK
-OR
-BLOCK: [ISSUE: "<exact error>"] [CONTEXT: "<brief summary of AI response and tool call>"] <what to acknowledge>
-
-Example:
-BLOCK: [ISSUE: "First response misalignment: replacing with #"] [CONTEXT: "AI said 'Let me update the plan', now Edit plan.md with new content"] AI proceeded without acknowledging the misalignment error
-
-NO other text.`,
-};
-
-/**
  * Plan Validate Agent Configuration
  *
  * Checks that AI's plan aligns with user's original request.
@@ -1000,49 +902,6 @@ These commands should NOT appear in CLAUDE.md code examples:
 - Flag existing violations even if the current edit doesn't touch them
 
 Reply: OK or DRIFT: <specific issue found>`,
-};
-
-/**
- * Intent Validate Agent Configuration
- *
- * Detects when AI has gone off-topic or is asking redundant questions.
- *
- * **Tier: haiku** - Must be fast, simple OK/INTERVENE decision
- * **Mode: direct** - Conversation context provided upfront
- *
- * Catches: redundant questions (already answered), off-topic questions
- * (never mentioned), irrelevant suggestions, misunderstood requests.
- * Allows: on-topic clarifications, relevant follow-ups, progress updates.
- */
-export const INTENT_VALIDATE_AGENT: Omit<AgentConfig, "workingDir"> = {
-  name: "intent-validate",
-  tier: MODEL_TIERS.HAIKU,
-  mode: "direct",
-  maxTokens: 200,
-  systemPrompt: `You validate if the AI's final text response aligns with user intent.
-
-You receive:
-- User Intent summary
-- Flagged Misalignments
-- Recent tool log (what AI did)
-- Last assistant message (what AI is about to say)
-
-Output EXACTLY: OK or INTERVENE: <feedback>
-
-OK if:
-- Response addresses user's request
-- Response is a reasonable status update
-- Response asks for clarification on genuinely ambiguous points
-
-INTERVENE if:
-- Response ignores user's actual question
-- Response asks something already answered
-- Response suggests something contradicting user intent
-- Response is completely off-topic
-
-When in doubt, say OK. False interventions are worse than false passes.
-
-If "PLAN MODE ACTIVE" appears in context, exploration and planning are ON-TOPIC. When INACTIVE, INTERVENE if AI appears lost without implementation progress: "Consider entering plan mode to formulate a plan."`,
 };
 
 /**
@@ -1456,4 +1315,49 @@ Edge cases:
 - Pasted CLI output/logs -> classify based on user's instruction AROUND the paste, not the paste content. Words like "fix", "install", "add" inside pasted output are NOT the user's edit intent.
 
 Output EXACTLY one word: EDIT or NON-EDIT`,
+};
+
+/**
+ * Respond-First Quality Agent Configuration
+ *
+ * Validates that the AI's first text response after a user message
+ * adequately acknowledges, interprets, and states planned actions.
+ *
+ * **Tier: haiku** - Must be fast, simple APPROVE/DENY decision
+ * **Mode: direct** - User message and assistant response provided upfront
+ */
+export const RESPOND_FIRST_QUALITY_AGENT: Omit<AgentConfig, "workingDir"> = {
+  name: "respond-first-quality",
+  tier: MODEL_TIERS.HAIKU,
+  mode: "direct",
+  maxTokens: 150,
+  systemPrompt: `You validate whether an AI assistant's first response adequately acknowledges a user message before calling tools.
+
+A GOOD preamble (APPROVE) does ALL of these:
+1. Acknowledges or paraphrases what the user said
+2. Shows understanding of the user's intent
+3. States planned actions or approach
+
+APPROVE examples:
+- "You want to refactor the auth module. I'll start by reading the current implementation."
+- "I see the test failure in user-service.ts. Let me fix the assertion."
+- "Adding pagination to the API. I'll update the controller and model."
+
+A INSUFFICIENT/INSUFFICIENT preamble (DENY):
+- "Let me look at this." (no acknowledgment of WHAT)
+- "I'll help with that." (no interpretation of intent)
+- "Let me check." (no stated plan)
+- "Sure, working on it." (no engagement)
+
+Brief but specific responses are fine:
+- "Fixing the null pointer in auth.ts." → APPROVE
+- "Adding the missing import." → APPROVE
+
+Also APPROVE if:
+- The user's message is a continuation ("now do X", "also fix Y") and response acknowledges the new task
+- The response references specific errors or issues from the user's message
+
+Output EXACTLY: APPROVE or DENY: <feedback>
+When denying, tell the AI: "Before calling tools, respond with: (1) what the user asked, (2) your interpretation, (3) planned actions."
+When in doubt, APPROVE. False denials are worse than false approvals.`,
 };

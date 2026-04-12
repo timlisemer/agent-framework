@@ -31,7 +31,6 @@ src/                                # TypeScript source
       tool-appeal.ts                # Reviews denials with user context
       gate.ts                       # Gate agent (error + intent check)
       plan-validate.ts              # Checks plan drift
-      intent-validate.ts            # Detects off-topic AI behavior
       style-drift.ts                # Detects unrequested style changes
       claude-md-validate.ts         # Validates CLAUDE.md edits
       response-align.ts             # Validates response aligns with request
@@ -207,7 +206,7 @@ Models are centrally configured in `src/types.ts`:
 
 | Tier   | Mode   | Agents                                                                       |
 |--------|--------|------------------------------------------------------------------------------|
-| haiku  | direct | tool-approve, tool-appeal, error-ack, intent-validate, commit, style-drift, question-validate |
+| haiku  | direct | tool-approve, tool-appeal, commit, style-drift, question-validate, respond-first-quality |
 | sonnet | direct | check, plan-validate, claude-md-validate, response-align, validate-intent    |
 | opus   | sdk    | confirm (code quality gate with investigation)                               |
 
@@ -300,7 +299,7 @@ Tool call received
 
 The PreToolUse hook was causing ~3 second delays for trusted file operations due to:
 - Rewind detection reading entire transcript (~400-1200ms)
-- Multiple transcript reads for error-ack, style-drift (~300-600ms each)
+- Multiple transcript reads for style-drift (~300-600ms each)
 - Synchronous LLM validation calls (~500-1000ms each)
 
 ### Solution: Hybrid Validation Strategy
@@ -368,7 +367,7 @@ Tool N (trusted, regular mode)
     ├─ Allow immediately (tool executes)
     └─ Spawn async-validator.ts (background process)
             │
-            └─ Runs: intent, error-ack, style-drift
+            └─ Runs: style-drift
             └─ Writes result to pending validation cache
 
 Tool N+1 (any)
@@ -420,10 +419,9 @@ Centralized agent configurations with documentation:
 - `VALIDATE_INTENT_AGENT` - sonnet, direct (MCP tool)
 - `TOOL_APPROVE_AGENT` - haiku, direct
 - `TOOL_APPEAL_AGENT` - haiku, direct
-- `ERROR_ACK_AGENT` - haiku, direct
 - `PLAN_VALIDATE_AGENT` - sonnet, direct
 - `CLAUDE_MD_VALIDATE_AGENT` - sonnet, direct
-- `INTENT_VALIDATE_AGENT` - haiku, direct
+- `RESPOND_FIRST_QUALITY_AGENT` - haiku, direct
 - `STYLE_DRIFT_AGENT` - haiku, direct
 - `RESPONSE_ALIGN_AGENT` - sonnet, direct
 - `QUESTION_VALIDATE_AGENT` - haiku, direct
@@ -440,9 +438,7 @@ Singleton factory for Anthropic client. Used by direct mode agents.
 
 ### `transcript-presets.ts`
 Standard configurations for different use cases:
-- `ERROR_CHECK_PRESET` - for error acknowledgment
 - `APPEAL_PRESET` - for tool appeal decisions
-- `OFF_TOPIC_PRESET` - for intent validation
 - `PLAN_VALIDATE_PRESET` - for plan drift checks
 
 ### `git-utils.ts`
@@ -480,7 +476,6 @@ Standard configurations for different use cases:
 | File | Purpose | Expiry |
 |------|---------|--------|
 | `/tmp/claude-hook-denials.json` | Workaround tracking | 1 minute |
-| `/tmp/claude-error-acks.json` | Error acknowledgment cache | 5 minutes |
 
 ## Telemetry
 
@@ -518,7 +513,6 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 | `tool-approve.ts` | 1 | `APPROVE`, `DENY` | `direct` |
 | `tool-appeal.ts` | 1 | `APPROVE`, `DENY` | `direct` |
 | `response-align.ts` | 5 | `APPROVE`, `DENY` | `direct` |
-| `intent-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
 | `plan-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
 | `claude-md-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
 | `style-drift.ts` | 2 | `APPROVE`, `DENY` | `direct` |
@@ -576,5 +570,6 @@ The following components were removed in favor of the summary system:
 - `async-gate-validator.ts` - Replaced by micro-prediction + drift-detector + correction-cache
 - `pending-validation-cache.ts` - Replaced by correction-cache
 - `error-acknowledge.ts` - Absorbed into the gate agent
+- `intent-validate.ts` - Dead code, removed (gate agent covers per-tool intent validation)
 - `ack-cache.ts` - Replaced by Flagged Misalignments in summary
 - `strict-mode-tracker.ts` - Replaced by tool log + session state in summary

@@ -62,6 +62,10 @@ import {
 } from "../utils/prediction-cache.js";
 import { detectDrift } from "../utils/drift-detector.js";
 import { writeTool, writeUser } from "../utils/synthetic.js";
+import { runAgentWithRetryAndTelemetry } from "../utils/agent-runner.js";
+import { RESPOND_FIRST_QUALITY_AGENT } from "../utils/agent-configs.js";
+import { EXECUTION_TYPES } from "../types.js";
+import { startsWithAny } from "../utils/retry.js";
 
 
 // File tools that go through path-based risk classification (trusted/sensitive)
@@ -229,7 +233,7 @@ async function main() {
     });
 
     // 3. GATE REASONING: Write entry for LLM agent decisions and denials
-    const isLlmAgent = ["tool-approve", "gate", "style-drift", "plan-validate", "claude-md-validate", "question-validate", "edit-intent", "prediction-block"].includes(exit.agent);
+    const isLlmAgent = ["tool-approve", "gate", "respond-first-quality", "style-drift", "plan-validate", "claude-md-validate", "question-validate", "edit-intent", "prediction-block"].includes(exit.agent);
     if (!subagent && (exit.decision === "deny" || currentGateNote || isLlmAgent)) {
       const warnings = await addPatternWarnings(toolName, toolInput, sessionDir);
       await addEntry(sessionDir, {
@@ -290,61 +294,84 @@ async function main() {
   if (!subagent && !state.respondFirstChecked) {
     if (toolName !== "AskUserQuestion" && toolName !== "ExitPlanMode") {
       const rfResult = await readTranscriptExact(input.transcript_path, {
-        counts: { user: 1, assistant: 3 },
+        counts: { user: 1, assistant: 1 },
       });
 
-      if (rfResult.user.length > 0) {
-        const lastUser = rfResult.user.reduce((a, b) => a.index > b.index ? a : b);
+      const lastUser = rfResult.user.length > 0 ? rfResult.user[0] : null;
+      const lastAssistant = rfResult.assistant.length > 0 ? rfResult.assistant[0] : null;
 
-        // Short confirmations (yes, ok, go ahead, etc.) are approving
-        // a previously-explained action -- skip respond-first enforcement.
-        const isConfirmation = CONFIRMATION_PATTERN.test(lastUser.content);
+      if (lastUser && !CONFIRMATION_PATTERN.test(lastUser.content)) {
+        if (!lastAssistant || lastAssistant.index < lastUser.index) {
+          // RULE 1: The last message before this tool call was a USER message
+          // (no assistant message after it). The AI must respond first.
+          logFastPathDeny("respond-first", "PreToolUse", toolName, projectDir,
+            "No text response before first tool call");
+          await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
+          await exitPipeline({
+            decision: "deny",
+            agent: "respond-first",
+            reason: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
+          });
+          return;
+        } else if (lastAssistant.index > lastUser.index) {
+          // RULE 2: The last message before this tool call was an ASSISTANT message,
+          // and there WAS a user message right before it. Check if the AI's response
+          // actually addresses the user properly.
+          if (lastAssistant.content.trim().length === 0) {
+            // Empty assistant text — deny
+            logFastPathDeny("respond-first", "PreToolUse", toolName, projectDir,
+              "Empty assistant response");
+            await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
+            await exitPipeline({
+              decision: "deny",
+              agent: "respond-first",
+              reason: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
+            });
+            return;
+          }
 
-        if (!isConfirmation) {
-          const hasTextAfterUser = rfResult.assistant.some(
-            (m) => m.index > lastUser.index && m.content.trim().length > 0
-          );
+          // Non-empty assistant text — verify quality via LLM
+          let qualityOutput = "APPROVE";
+          try {
+            const qualityResult = await runAgentWithRetryAndTelemetry(
+              { ...RESPOND_FIRST_QUALITY_AGENT, workingDir: projectDir },
+              {
+                prompt: "Evaluate this response.",
+                context: `USER MESSAGE:\n${lastUser.content.slice(0, 500)}\n\nASSISTANT RESPONSE:\n${lastAssistant.content.slice(0, 500)}`,
+              },
+              {
+                formatValidator: (text: string) => startsWithAny(text, ["APPROVE", "DENY:"]),
+                formatReminder: "Reply with EXACTLY: APPROVE or DENY: <reason>",
+              },
+              {
+                agent: "respond-first-quality",
+                hookName: "PreToolUse",
+                toolName,
+                workingDir: projectDir,
+                executionType: EXECUTION_TYPES.LLM,
+              }
+            );
+            qualityOutput = qualityResult.output;
+          } catch {
+            logFastPathApproval("respond-first-quality", "PreToolUse", toolName, projectDir, "LLM error - fail open");
+          }
 
-          if (!hasTextAfterUser) {
-            // TIMING ISSUE: When Claude produces text + tool_use blocks in the
-            // same assistant message, PreToolUse hooks fire before the message
-            // is written to the transcript. readTranscriptExact can't see the
-            // text that IS present alongside these tool_use blocks.
-            //
-            // We detect this by checking if our tool_use_id appears anywhere in
-            // the raw transcript file. tool_use_ids are unique UUIDs (toolu_...)
-            // so substring matching is safe — no false positive risk.
-            //
-            // - ID found → message IS in transcript but has no text → genuine
-            //   violation, deny normally
-            // - ID not found → message not yet written → the AI likely produced
-            //   text alongside these tool calls, skip enforcement
-            //
-            // This matches the test harness behavior where transcript lines are
-            // written before hooks fire (replay.ts:897), so test harness
-            // enforcement is unaffected — tool_use_id will always be found there.
-            const rawTranscript = await fs.promises.readFile(input.transcript_path, "utf-8");
-            const currentToolInTranscript = rawTranscript.includes(input.tool_use_id);
-
-            if (currentToolInTranscript) {
-              logFastPathDeny("respond-first", "PreToolUse", toolName, projectDir,
-                "No text response before first tool call");
-              await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
-              await exitPipeline({
-                decision: "deny",
-                agent: "respond-first",
-                reason: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
-              });
-              return;
-            }
-            // tool_use_id not in transcript — message not yet written.
-            // Skip enforcement; respondFirstChecked is set to true below
-            // so subsequent tool calls in this turn won't re-check.
+          if (qualityOutput.startsWith("DENY:")) {
+            const reason = qualityOutput.slice(5).trim()
+              || "Before calling tools, respond with: (1) what the user asked, (2) your interpretation, (3) planned actions.";
+            logFastPathDeny("respond-first-quality", "PreToolUse", toolName, projectDir, reason);
+            await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
+            await exitPipeline({
+              decision: "deny",
+              agent: "respond-first-quality",
+              reason,
+            });
+            return;
           }
         }
       }
     }
-    // Text confirmed present (or exempt tool or confirmation) -- skip check for rest of turn
+    // Passed checks (or exempt tool or confirmation or no user message) — skip for rest of turn
     await stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
   }
 

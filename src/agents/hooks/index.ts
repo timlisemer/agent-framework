@@ -33,7 +33,6 @@
 export { checkToolApproval } from './tool-approve.js';
 export { appealHelper } from './tool-appeal.js';
 export { checkPlanIntent } from './plan-validate.js';
-export { checkForOffTopic } from './intent-validate.js';
 export { checkStyleDrift } from './style-drift.js';
 export {
   checkStopResponseAlignment,
