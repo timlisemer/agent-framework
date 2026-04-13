@@ -60,12 +60,21 @@ Write the consolidated plan to the plan file. Include:
 
 ## Step 3: Launch 5 Validation agents in parallel
 
-Same rule as Step 1: you MUST call the Agent tool exactly 5 times in your SINGLE NEXT RESPONSE. All 5 in ONE message, running concurrently. Each agent gets the IDENTICAL prompt:
+Same rule as Step 1: you MUST call the Agent tool exactly 5 times in your SINGLE NEXT RESPONSE. All 5 in ONE message, running concurrently.
+
+Correct pattern (all 5 in one response):
+- Agent call 1: subagent_type "Plan", description "Plan validation agent 1 of 4", prompt = (see below)
+- Agent call 2: subagent_type "Plan", description "Plan validation agent 2 of 4", prompt = (same)
+- Agent call 3: subagent_type "Plan", description "Plan validation agent 3 of 4", prompt = (same)
+- Agent call 4: subagent_type "Plan", description "Plan validation agent 4 of 4", prompt = (same)
+- Agent call 5: subagent_type "Plan", description "Plan validation agent 5 alternative-approach", prompt = (see alternative prompt below)
+
+The first 4 validation agents get the IDENTICAL prompt:
 
 ```
 Do NOT write a plan file. Report your validation findings directly to me.
 
-You are validating an implementation plan. Read all relevant source files to verify the plan's assumptions against the actual codebase.
+You are validating an implementation plan. Read all relevant source files to verify the plan's assumptions against the actual codebase. Ask yourself whether the plan is even correct and truly ready to implement.
 
 The original task: {paste $ARGUMENTS here}
 
@@ -83,11 +92,35 @@ Flag any proposed change that treats symptoms instead of root causes (e.g. silen
 Flag any proposed change that adds backwards-compatibility shims, deprecated re-exports, or legacy fallbacks instead of cleanly replacing old code.
 ```
 
+The 5th validation agent gets this ALTERNATIVE prompt instead:
+
+```
+Do NOT write a plan file. Report your findings directly to me.
+
+You are the alternative-approach validator. Read all relevant source files and the current plan carefully. Fully understand the plan and everything it does -- what it changes, why, and the behavior it produces.
+
+Then set the existing plan aside and propose a COMPLETELY DIFFERENT approach that achieves the same goal better. Challenge the plan's core assumptions, architecture, and strategy. Do not incrementally critique the plan -- design an alternative from scratch.
+
+The original task: {paste $ARGUMENTS here}
+
+The current plan is at: {paste the plan file path here}
+
+Your report must include:
+1. A brief summary proving you understood what the current plan does and why
+2. Your completely different alternative approach, with concrete file paths, line numbers, and code
+3. A clear explanation of why your alternative is better (simpler, more correct, more robust, smaller blast radius, fewer moving parts, better root-cause fix, etc.)
+4. Honest trade-offs: what does your alternative give up compared to the current plan?
+
+Every proposed change must address the root cause. NEVER propose treating symptoms: do not silence warnings, suppress errors, weaken assertions, or change test expectations to make failures disappear.
+Do not propose backwards-compatibility shims, deprecated re-exports, or legacy fallbacks. If something is replaced, remove the old code entirely.
+```
+
 ## Step 4: Consolidate Round 2
 
 After all 5 validation agents return:
 - Fix every issue that multiple validators flagged
 - Evaluate single-validator issues on merit
+- Seriously weigh the 5th validator's alternative approach against the current plan. If the alternative is genuinely better, replace the plan with it; if parts of it are better, incorporate those parts; otherwise keep the current plan and briefly note why.
 - Update the plan file with corrections
 
 ## Step 5: Exit plan mode
