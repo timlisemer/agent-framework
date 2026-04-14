@@ -1,7 +1,39 @@
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { CONFIRMATION_PATTERN } from "./utils.js";
 import { readTranscriptExact } from "../utils/transcript.js";
 import { RESPOND_FIRST_QUALITY_AGENT } from "../utils/agent-configs.js";
+
+// Slash commands from claude/commands/*.md are injected into the transcript
+// as synthetic user messages tagged with <command-name>/foo</command-name>.
+// Those "messages" never come from a human, so requiring the assistant to
+// respond with text before calling tools produces false positives. Exempt any
+// user message that resolves to a real command file in claude/commands/.
+let cachedCommandNames: Set<string> | null = null;
+function getCommandNames(): Set<string> {
+  if (cachedCommandNames) return cachedCommandNames;
+  const root = process.env.AGENT_FRAMEWORK_ROOT;
+  if (!root) {
+    cachedCommandNames = new Set();
+    return cachedCommandNames;
+  }
+  try {
+    const entries = readdirSync(join(root, "claude", "commands"));
+    cachedCommandNames = new Set(
+      entries.filter((f) => f.endsWith(".md")).map((f) => f.slice(0, -3)),
+    );
+  } catch {
+    cachedCommandNames = new Set();
+  }
+  return cachedCommandNames;
+}
+
+function isSlashCommandInvocation(userContent: string): boolean {
+  const match = userContent.match(/<command-name>\/([^<\s]+)<\/command-name>/);
+  if (!match) return false;
+  return getCommandNames().has(match[1]);
+}
 
 // UNIFIED PATTERN: This rule uses { llmContext } to contribute to the shared
 // RULE_GATE_AGENT call, matching error-acknowledge/gate/tool-approve.
@@ -50,7 +82,11 @@ export const respondFirstRule: PreToolRule = {
     const lastUser = rfResult.user.length > 0 ? rfResult.user[0] : null;
     const lastAssistant = rfResult.assistant.length > 0 ? rfResult.assistant[0] : null;
 
-    if (lastUser && !CONFIRMATION_PATTERN.test(lastUser.content)) {
+    if (
+      lastUser &&
+      !CONFIRMATION_PATTERN.test(lastUser.content) &&
+      !isSlashCommandInvocation(lastUser.content)
+    ) {
       if (!lastAssistant) {
         // readTranscriptExact is contractually forbidden from returning a
         // prior-turn assistant under lastAssistant (see the
