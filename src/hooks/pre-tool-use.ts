@@ -43,7 +43,13 @@ import {
   deactivateAllPredictions,
 } from "../utils/prediction-cache.js";
 import { writeTool, writeUser } from "../utils/synthetic.js";
-import { FILE_TOOLS, isPathInDirectory, extractPathOrCmd } from "../rules/utils.js";
+import {
+  FILE_TOOLS,
+  isPathInDirectory,
+  extractPathOrCmd,
+  isPlanFile,
+  extractFilePath,
+} from "../rules/utils.js";
 import { ALL_RULES, evaluateRules } from "../rules/index.js";
 import type { RuleContext } from "../rules/types.js";
 
@@ -246,6 +252,24 @@ async function main() {
     return; // exitPipeline calls process.exit
   }
 
+  // Deterministic outside-project-root classification.
+  // - Plan files (~/.claude/plans/*.md): handled by the existing plan-validate
+  //   block below; NOT flagged here.
+  // - In-project files: normal flow.
+  // - Otherwise (true outside-project, e.g. /etc/hosts): flag the context so
+  //   downstream LLM gates inject a harsh "be extra conservative" warning.
+  //   NEVER a hard block — the task explicitly requires soft LLM review.
+  let outsideRootPath: string | undefined;
+  if (FILE_TOOLS.includes(toolName)) {
+    const raw = extractFilePath(toolName, toolInput);
+    if (raw) {
+      const abs = path.isAbsolute(raw) ? raw : path.resolve(projectDir, raw);
+      if (!isPathInDirectory(abs, projectDir) && !isPlanFile(abs)) {
+        outsideRootPath = abs;
+      }
+    }
+  }
+
   // Build rule context
   const ctx: RuleContext = {
     toolName,
@@ -262,6 +286,7 @@ async function main() {
     coldStart,
     useSyncPipeline,
     toolCallCount,
+    outsideRootPath,
   };
 
   // Run all rules (respond-first, low-risk, plan-mode-block, subagent,

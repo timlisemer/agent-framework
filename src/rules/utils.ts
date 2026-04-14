@@ -77,3 +77,31 @@ export function extractPathOrCmd(toolInput: unknown): { path?: string; cmd?: str
     cmd: (input?.command as string) ?? undefined,
   };
 }
+
+/**
+ * True iff filePath (resolved absolute) is inside ~/.claude/plans.
+ */
+export function isPlanFile(filePath: string): boolean {
+  const plansDir = path.join(os.homedir(), ".claude", "plans");
+  return isPathInDirectory(filePath, plansDir);
+}
+
+/**
+ * Extract the file path arg from a file-tool input (Write/Edit/NotebookEdit).
+ * NotebookEdit uses `notebook_path`; others use `file_path`. Read uses `path`
+ * but is not a file-mutating tool so callers generally skip it.
+ */
+export function extractFilePath(
+  toolName: string,
+  toolInput: unknown,
+): string | undefined {
+  const input = toolInput as {
+    file_path?: unknown;
+    notebook_path?: unknown;
+    path?: unknown;
+  } | undefined;
+  const raw =
+    (toolName === "NotebookEdit" ? input?.notebook_path : input?.file_path) ??
+    input?.path;
+  return typeof raw === "string" && raw.length > 0 ? raw : undefined;
+}

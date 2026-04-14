@@ -14,7 +14,7 @@
  *
  * ## RULES ENFORCED
  *
- * - File operations: Deny outside project, deny sensitive files
+ * - File operations: Deny sensitive files (outside-project handled deterministically upstream)
  * - Bash: Deny cd, deny tool duplication, deny git write ops
  * - Build: Deny make/just check/build (use MCP tools)
  * - Network: Deny curl/wget by default
@@ -39,6 +39,7 @@ export interface ToolApprovalOptions {
   lazyMode?: boolean;
   sessionDir?: string;
   planModeContext?: string;
+  outsideRootPath?: string;
 }
 
 export async function checkToolApproval(
@@ -102,6 +103,16 @@ export async function checkToolApproval(
     }
   }
 
+  const outsideRootSection = options?.outsideRootPath
+    ? `\n!!! WARNING: THIS TOOL CALL TARGETS A FILE OUTSIDE THE PROJECT ROOT\n` +
+      `  target: ${options.outsideRootPath}\n` +
+      `BE EXTRA CAREFUL AND CONSERVATIVE. Scrutinize intent heavily before ` +
+      `approving. Prefer DENY unless the user's most recent message explicitly ` +
+      `authorized editing this specific path. Routine, exploratory, or ` +
+      `scope-creep edits to out-of-tree files must be denied. False denials ` +
+      `here are much cheaper than false approvals.\n`
+    : "";
+
   // Retry with exponential backoff
   const maxRetries = 2;
   let lastError: unknown;
@@ -116,7 +127,7 @@ export async function checkToolApproval(
 
 PROJECT RULES (from CLAUDE.md):
 ${rules || "No project-specific rules."}
-${highlightSection}${gateReasoningSection}${options?.planModeContext ?? ""}
+${highlightSection}${gateReasoningSection}${options?.planModeContext ?? ""}${outsideRootSection}
 TOOL TO EVALUATE:
 Tool: ${toolName}
 Input: ${JSON.stringify(toolInput)}`,

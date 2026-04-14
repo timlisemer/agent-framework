@@ -1,6 +1,8 @@
 import * as fs from "fs";
+import * as path from "node:path";
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { TOOL_APPROVE_AGENT } from "../utils/agent-configs.js";
+import { FILE_TOOLS, extractFilePath, isPlanFile } from "./utils.js";
 import { checkToolApproval } from "../agents/hooks/tool-approve.js";
 import { detectWorkaroundPattern } from "../utils/command-patterns.js";
 import { recordDenial, MAX_SIMILAR_DENIALS } from "../utils/denial-cache.js";
@@ -20,6 +22,18 @@ export const toolApproveRule: PreToolRule = {
   promptSection: TOOL_APPROVE_AGENT.systemPrompt,
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
+    // Plan files are handled by the dedicated plan-validate block in
+    // pre-tool-use.ts. Never let the tool-approve LLM speak for them —
+    // it has no concept of the plans-dir exception and would sample
+    // "DENY outside project" nondeterministically.
+    if (FILE_TOOLS.includes(ctx.toolName)) {
+      const fp = extractFilePath(ctx.toolName, ctx.toolInput);
+      if (fp) {
+        const abs = path.isAbsolute(fp) ? fp : path.resolve(ctx.projectDir, fp);
+        if (isPlanFile(abs)) return null;
+      }
+    }
+
     // ExitPlanMode: block if plan file doesn't exist or is empty
     if (ctx.toolName === "ExitPlanMode") {
       const planPath = await resolvePlanPath(ctx.transcriptPath);
@@ -53,9 +67,10 @@ export const toolApproveRule: PreToolRule = {
       ctx.projectDir,
       "PreToolUse",
       {
-        lazyMode: !ctx.useSyncPipeline,
+        lazyMode: !ctx.useSyncPipeline && !ctx.outsideRootPath,
         sessionDir: ctx.sessionDir,
         planModeContext: ctx.planModeCtx.contextString,
+        outsideRootPath: ctx.outsideRootPath,
       }
     );
 
@@ -70,8 +85,13 @@ export const toolApproveRule: PreToolRule = {
     }
 
     // Sync mode -- contribute gate note and context for LLM
+    const outsideWarning = ctx.outsideRootPath
+      ? `\n\n!!! OUT-OF-TREE TARGET: ${ctx.outsideRootPath} — be extra conservative; prefer DENY unless explicitly authorized.\n`
+      : "";
     return {
-      llmContext: `TOOL APPROVAL CONTEXT:\n${decision.gateNote || "No additional context"}`,
+      llmContext:
+        `TOOL APPROVAL CONTEXT:\n${decision.gateNote || "No additional context"}` +
+        outsideWarning,
     };
   },
 

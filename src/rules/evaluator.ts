@@ -102,7 +102,13 @@ export async function evaluateRules(
   }
 
   // Build combined prompt for ONE haiku LLM call
-  const promptSections = triggered.map(({ rule, llmContext }) =>
+  const outsideSection = ctx.outsideRootPath
+    ? `!!! WARNING: THIS TOOL CALL TARGETS A FILE OUTSIDE THE PROJECT ROOT\n` +
+      `  target: ${ctx.outsideRootPath}\n` +
+      `Be extra conservative. Prefer DENY unless the user's most recent message ` +
+      `explicitly authorized editing this specific path.\n\n`
+    : "";
+  const promptSections = outsideSection + triggered.map(({ rule, llmContext }) =>
     `=== RULE: ${rule.name} ===\n${rule.promptSection}\n\nCONTEXT:\n${llmContext}`
   ).join("\n\n");
 

@@ -16,6 +16,15 @@ export interface RuleContext {
   coldStart: boolean;
   useSyncPipeline: boolean;
   toolCallCount: number;
+  /**
+   * Set by pre-tool-use.ts when the current file tool call targets an
+   * absolute path that is OUTSIDE projectDir AND is NOT a Claude plan file.
+   * Deterministic classification. Downstream LLM gates (tool-approve,
+   * rule-gate) read this and inject a harsh "be extra conservative" warning
+   * into their prompts. Undefined means in-project, a plan file, or not a
+   * file-tool call.
+   */
+  outsideRootPath?: string;
 }
 
 export type RuleCheckResult =

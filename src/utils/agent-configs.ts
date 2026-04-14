@@ -418,7 +418,6 @@ Then the AI uses mcp__agent-framework__check to run it.
 
 === UNIVERSAL RULES ===
 
-- DENY modifying files outside project directory (Edit/Write/NotebookEdit)
 - ALLOW reading files outside project (Read) for documentation/resources, BUT deny sensitive files
 - DENY sensitive files anywhere: .env, credentials.json, secrets.*, id_rsa, private keys, ~/.ssh/, ~/.aws/credentials, etc.
 
@@ -430,7 +429,6 @@ For Read:
 - ALLOW reading within project (except sensitive files)
 
 For Edit/Write/NotebookEdit:
-- DENY if file path is outside project directory
 - DENY if editing sensitive files (.env, credentials, secrets, keys)
 - DENY if editing system files (/etc, /sys, /proc, /usr, /var)
 
@@ -476,21 +474,19 @@ sqlite3: APPROVE only for read-only operations.
 7. Secret/credential exposure
    - Commands that could leak API keys, tokens, passwords
 
-8. System modifications outside project
-
-9. make/just check command
+8. make/just check command
    - DENY: make check, just check (use MCP tool for better integration)
 
-10. build/compile commands like make build, just build, npm run build, cargo build, tsc, etc.
+9. build/compile commands like make build, just build, npm run build, cargo build, tsc, etc.
     - DENY: AIs must not run build/compile shell commands. Use mcp__agent-framework__check instead.
 
-11. package install commands (npm install, bun install, pnpm install)
+10. package install commands (npm install, bun install, pnpm install)
     - DENY: LLMs should not modify project dependencies
 
-12. curl/wget commands (network requests)
+11. curl/wget commands (network requests)
     - DENY by default (requires explicit user permission)
 
-13. ssh commands (remote execution)
+12. ssh commands (remote execution)
     - DENY: ssh <host> <command>
     - AI tools (Read, Grep, Glob) cannot operate over SSH
 
