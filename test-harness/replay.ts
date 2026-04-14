@@ -17,7 +17,13 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { ReplayEvent, ReplayExpectations, ReplayArgs } from "./lib/types.js";
+import {
+  ReplayEvent,
+  ReplayExpectations,
+  ReplayArgs,
+  RichExpectation,
+  normalizeExpectation,
+} from "./lib/types.js";
 import { runCommand } from "../src/utils/command.js";
 import { classifyLine, extractCwd, detectBatches, type BatchGroup } from "./lib/classifier.js";
 import { runHook, cleanupBackgroundProcesses } from "./lib/harness.js";
@@ -79,6 +85,24 @@ function parseArgs(): ReplayArgs {
   const timeout = timeoutRaw ? parseInt(timeoutRaw, 10) : 60000;
   const cwd = getArg("cwd");
   const filter = getArg("filter");
+  const truncateToLineRaw = getArg("truncate-to-line");
+  const truncateToLine = truncateToLineRaw
+    ? parseInt(truncateToLineRaw, 10)
+    : undefined;
+  if (truncateToLine !== undefined) {
+    if (!Number.isFinite(truncateToLine) || truncateToLine < 1) {
+      console.error(
+        `Error: --truncate-to-line must be a positive 1-based integer, got "${truncateToLineRaw}"`,
+      );
+      process.exit(2);
+    }
+    if (!filter) {
+      console.error(
+        "Error: --truncate-to-line requires --filter to target a single hook",
+      );
+      process.exit(2);
+    }
+  }
 
   let expect: ReplayExpectations | undefined;
   const expectRaw = getArg("expect");
@@ -105,28 +129,57 @@ function parseArgs(): ReplayArgs {
     }
   }
 
-  return { transcript, expect, expectPath: expectRaw, cwd, timeout, list, expand, depth, scaffold, validate, generateLabels, filter };
+  return { transcript, expect, expectPath: expectRaw, cwd, timeout, list, expand, depth, scaffold, validate, generateLabels, filter, truncateToLine };
 }
 
 // ─── Expectation Matching ───────────────────────────────────────────────────
 
-function matchExpectation(
+/**
+ * Look up the label entry for a key, handling prefix matches and returning
+ * the raw entry without normalization (so callers can distinguish "no label"
+ * from "label found but rich").
+ */
+function findExpectationEntry(
   expectations: ReplayExpectations | undefined,
   key: string,
-): string | undefined {
+): ReplayExpectations[string] | undefined {
   if (!expectations) return undefined;
-
-  // Exact match first
   if (expectations[key] !== undefined) return expectations[key];
-
-  // Prefix match for tool_use_ids (minimum 12 chars)
   for (const [prefix, value] of Object.entries(expectations)) {
     if (prefix.length >= MIN_PREFIX_LENGTH && key.startsWith(prefix)) {
       return value;
     }
   }
-
   return undefined;
+}
+
+/**
+ * Normalize the label entry for a key into an array of RichExpectation.
+ * Legacy string labels become `[{ expected: "<value>" }]`. Returns [] when
+ * no label is present.
+ */
+function matchExpectation(
+  expectations: ReplayExpectations | undefined,
+  key: string,
+): RichExpectation[] {
+  return normalizeExpectation(findExpectationEntry(expectations, key));
+}
+
+/**
+ * Filter a normalized expectation list by the current run's truncation.
+ * A rich entry with `at: number | "full"` is only in scope when it matches
+ * the run's truncation setting; an entry with no `at` always applies to
+ * full-file runs (the default) and never to truncated runs.
+ */
+function scopedExpectations(
+  expectations: RichExpectation[],
+  truncateToLine: number | undefined,
+): RichExpectation[] {
+  const runAt: number | "full" = truncateToLine ?? "full";
+  return expectations.filter((e) => {
+    const entryAt: number | "full" = e.at ?? "full";
+    return entryAt === runAt;
+  });
 }
 
 // ─── Scorable Key Collection ───────────────────────────────────────────────
@@ -157,7 +210,7 @@ function validateExpectationCompleteness(
   batchMap?: Map<string, BatchGroup>,
 ): void {
   const unlabeled = scorableKeys.filter(
-    (sk) => matchExpectation(expectations, sk.key) === undefined
+    (sk) => matchExpectation(expectations, sk.key).length === 0,
   );
   const expectKeys = Object.keys(expectations).filter((k) => !k.startsWith("_"));
   const orphaned = expectKeys.filter((ek) => {
@@ -166,29 +219,63 @@ function validateExpectationCompleteness(
     );
   });
 
-  // Check for unresolved INVESTIGATE values
-  const unresolved = Object.entries(expectations).filter(
-    ([k, v]) => !k.startsWith("_") && v === "INVESTIGATE"
-  );
+  // Unwrap rich expectations. Only consider the full-file ("at" absent or
+  // "full") slice for INVESTIGATE / invalid-value checks, since truncation-
+  // scoped entries are effectively extra assertions layered on top of a
+  // full-file label and are allowed to omit the default "full" variant.
+  const entriesNormalized: Array<{
+    key: string;
+    expected: string;
+    by?: string;
+    at?: number | "full";
+  }> = [];
+  for (const [k, raw] of Object.entries(expectations)) {
+    if (k.startsWith("_")) continue;
+    for (const e of normalizeExpectation(raw)) {
+      entriesNormalized.push({ key: k, expected: e.expected, by: e.by, at: e.at });
+    }
+  }
 
-  // Check for invalid label values
-  const invalidValues = Object.entries(expectations).filter(([k, v]) => {
-    if (k.startsWith("_")) return false;
-    if (k.startsWith("stop:")) return !["pass", "block"].includes(v);
-    return !["allow", "deny"].includes(v);
+  // Check for unresolved INVESTIGATE values.
+  const unresolved = entriesNormalized.filter((e) => e.expected === "INVESTIGATE");
+
+  // Check for invalid label values on the "full" (or unspecified) slice.
+  const invalidValues = entriesNormalized.filter((e) => {
+    const at = e.at ?? "full";
+    if (at !== "full") return false;
+    if (e.key.startsWith("stop:")) return !["pass", "block"].includes(e.expected);
+    return !["allow", "deny"].includes(e.expected);
   });
 
-  // Check batch label consistency
+  // Rich-only: `by` must be a non-empty string when present.
+  const invalidBy = entriesNormalized.filter(
+    (e) => e.by !== undefined && (typeof e.by !== "string" || e.by.length === 0),
+  );
+
+  // Rich-only: `at` must be "full" or a positive integer when present.
+  const invalidAt = entriesNormalized.filter(
+    (e) =>
+      e.at !== undefined &&
+      e.at !== "full" &&
+      !(typeof e.at === "number" && Number.isFinite(e.at) && e.at >= 1),
+  );
+
+  // Check batch label consistency on the full-file slice only.
+  const fullExpectedFor = (key: string): string | undefined => {
+    const matches = matchExpectation(expectations, key);
+    const fullMatch = matches.find((e) => (e.at ?? "full") === "full");
+    return fullMatch?.expected;
+  };
   const batchMismatches: Array<{ siblingId: string; siblingLabel: string; leaderId: string; leaderLabel: string }> = [];
   if (batchMap) {
     const seen = new Set<string>();
     for (const [toolUseId, group] of batchMap) {
       if (seen.has(group.toolUseIds[0])) continue;
       seen.add(group.toolUseIds[0]);
-      const leaderLabel = matchExpectation(expectations, group.toolUseIds[0]);
+      const leaderLabel = fullExpectedFor(group.toolUseIds[0]);
       if (!leaderLabel) continue;
       for (let idx = 1; idx < group.toolUseIds.length; idx++) {
-        const siblingLabel = matchExpectation(expectations, group.toolUseIds[idx]);
+        const siblingLabel = fullExpectedFor(group.toolUseIds[idx]);
         if (siblingLabel && siblingLabel !== leaderLabel) {
           batchMismatches.push({
             siblingId: group.toolUseIds[idx],
@@ -201,7 +288,14 @@ function validateExpectationCompleteness(
     }
   }
 
-  if (unlabeled.length === 0 && orphaned.length === 0 && invalidValues.length === 0 && batchMismatches.length === 0) return;
+  if (
+    unlabeled.length === 0 &&
+    orphaned.length === 0 &&
+    invalidValues.length === 0 &&
+    invalidBy.length === 0 &&
+    invalidAt.length === 0 &&
+    batchMismatches.length === 0
+  ) return;
 
   const total = scorableKeys.length;
   const labeled = total - unlabeled.length;
@@ -230,13 +324,25 @@ function validateExpectationCompleteness(
 
   if (unresolved.length > 0) {
     msg.push(`UNRESOLVED (${unresolved.length}) — still marked "INVESTIGATE", must be "allow"/"deny" or "pass"/"block":`);
-    for (const [k] of unresolved) msg.push(`  "${k}"`);
+    for (const u of unresolved) msg.push(`  "${u.key}"`);
     msg.push("");
   }
 
   if (invalidValues.length > 0) {
     msg.push(`INVALID VALUES (${invalidValues.length}) — tool labels must be "allow"/"deny", stop labels "pass"/"block":`);
-    for (const [k, v] of invalidValues) msg.push(`  "${k}": "${v}"`);
+    for (const v of invalidValues) msg.push(`  "${v.key}": "${v.expected}"`);
+    msg.push("");
+  }
+
+  if (invalidBy.length > 0) {
+    msg.push(`INVALID "by" (${invalidBy.length}) — rich expectations with "by" must provide a non-empty rule name:`);
+    for (const v of invalidBy) msg.push(`  "${v.key}": by=${JSON.stringify(v.by)}`);
+    msg.push("");
+  }
+
+  if (invalidAt.length > 0) {
+    msg.push(`INVALID "at" (${invalidAt.length}) — rich expectations with "at" must be a positive integer or "full":`);
+    for (const v of invalidAt) msg.push(`  "${v.key}": at=${JSON.stringify(v.at)}`);
     msg.push("");
   }
 
@@ -602,7 +708,7 @@ function validateLabelFile(
   scorableKeys: Array<{ key: string; line: number; type: "tool_use" | "stop"; tool?: string }>,
 ): void {
   const unlabeled = scorableKeys.filter(
-    (sk) => matchExpectation(expectations, sk.key) === undefined
+    (sk) => matchExpectation(expectations, sk.key).length === 0,
   );
   const expectKeys = Object.keys(expectations).filter((k) => !k.startsWith("_"));
   const orphaned = expectKeys.filter((ek) => {
@@ -610,11 +716,22 @@ function validateLabelFile(
       sk.key === ek || (ek.length >= MIN_PREFIX_LENGTH && sk.key.startsWith(ek))
     );
   });
-  const invalidValues = Object.entries(expectations).filter(([k, v]) => {
-    if (k.startsWith("_")) return false;
-    if (k.startsWith("stop:")) return !["pass", "block"].includes(v);
-    return !["allow", "deny"].includes(v);
-  });
+
+  const invalidValues: Array<{ key: string; value: string | number | "full" | undefined }> = [];
+  for (const [k, raw] of Object.entries(expectations)) {
+    if (k.startsWith("_")) continue;
+    for (const e of normalizeExpectation(raw)) {
+      const at = e.at ?? "full";
+      if (at !== "full") continue; // truncation-scoped entries aren't validated for value shape
+      const isValid = k.startsWith("stop:")
+        ? ["pass", "block"].includes(e.expected)
+        : ["allow", "deny"].includes(e.expected);
+      if (!isValid) invalidValues.push({ key: k, value: e.expected });
+      if (e.by !== undefined && (typeof e.by !== "string" || e.by.length === 0)) {
+        invalidValues.push({ key: k, value: `by=${JSON.stringify(e.by)}` });
+      }
+    }
+  }
 
   const valid = unlabeled.length === 0 && orphaned.length === 0 && invalidValues.length === 0;
 
@@ -628,7 +745,7 @@ function validateLabelFile(
   }
   if (orphaned.length > 0) result.orphaned = orphaned;
   if (invalidValues.length > 0) {
-    result.invalid_values = invalidValues.map(([k, v]) => ({ key: k, value: v }));
+    result.invalid_values = invalidValues;
   }
 
   console.log(JSON.stringify(result, null, 2));
@@ -702,6 +819,7 @@ function formatReport(
   labelFilePath: string | undefined,
   elapsedMs: number,
   reportFilename: string = "report.json",
+  truncateToLine?: number,
 ): void {
   const scored = results.filter((r) => r.pass !== undefined);
   const passed = scored.filter((r) => r.pass === true);
@@ -719,6 +837,10 @@ function formatReport(
     elapsed_ms: elapsedMs,
   };
 
+  if (truncateToLine !== undefined) {
+    report.truncate_to_line = truncateToLine;
+  }
+
   // Only include detailed entries for failures (label != hook decision)
   if (failed.length > 0) {
     report.failures = failed.map((f) => {
@@ -731,6 +853,8 @@ function formatReport(
       entry.expected = f.expected;
       entry.actual = f.decision;
       if (f.gate) entry.gate = f.gate;
+      if (f.gate_expected) entry.gate_expected = f.gate_expected;
+      if (f.at !== undefined) entry.at = f.at;
       if (f.reason) entry.reason = f.reason;
       return entry;
     });
@@ -935,13 +1059,23 @@ async function main(): Promise<void> {
     });
   }
 
+  // Truncation cap (1-based). When set, only transcript entries whose
+  // 1-based line index <= config.truncateToLine are appended to the
+  // on-disk temp transcript. Hooks still fire for tool_use entries whose
+  // line is beyond the cap because the hook input is synthesized from the
+  // in-memory parsed lines, not read from the temp file.
+  const appendAllowed = (lineIndex: number): boolean =>
+    config.truncateToLine === undefined || (lineIndex + 1) <= config.truncateToLine;
+
   // 10. Walk transcript lines
   for (let i = 0; i < lines.length; i++) {
     const parsed = lines[i];
     const rawLine = rawLines[i];
 
-    // Append line to temp transcript
-    fs.appendFileSync(transcriptPath, rawLine + "\n");
+    // Append line to temp transcript (subject to truncation cap).
+    if (appendAllowed(i)) {
+      fs.appendFileSync(transcriptPath, rawLine + "\n");
+    }
 
     // Classify the line
     const classification = classifyLine(parsed, lines, i);
@@ -991,15 +1125,17 @@ async function main(): Promise<void> {
 
     if (classification.kind === "pre-tool-use") {
       // Look ahead: append all consecutive assistant-tool_use lines
-      // (and intervening skip lines) BEFORE firing any hooks.
-      // This reproduces production behavior where all parallel tool_use
-      // entries exist in the transcript before any hook fires.
-      // Line i is already appended (line 897). Append i+1 onwards.
+      // (and intervening skip lines) BEFORE firing any hooks, subject to
+      // the truncation cap. The look-ahead itself still walks so that
+      // `j` advances past the whole batch — we just skip the physical
+      // append when truncation blocks it.
       let j = i + 1;
       while (j < lines.length) {
         const nextClassification = classifyLine(lines[j], lines, j);
         if (nextClassification.kind === "skip" || nextClassification.kind === "pre-tool-use") {
-          fs.appendFileSync(transcriptPath, rawLines[j] + "\n");
+          if (appendAllowed(j)) {
+            fs.appendFileSync(transcriptPath, rawLines[j] + "\n");
+          }
           j++;
           continue;
         }
@@ -1058,10 +1194,11 @@ async function main(): Promise<void> {
             // Read tool-log for diagnostics
             const { gate, reason } = readLastToolLogEntry(sessionDir);
 
-            // Match against expectations
-            const expectedDecision = matchExpectation(config.expect, block.id);
+            // Match against expectations, filtered to the run's truncation slice.
+            const matched = matchExpectation(config.expect, block.id);
+            const scopedMatches = scopedExpectations(matched, config.truncateToLine);
 
-            const event: ReplayEvent = {
+            const baseEvent: ReplayEvent = {
               line: k,
               hook: "pre-tool-use",
               tool: block.name,
@@ -1070,21 +1207,38 @@ async function main(): Promise<void> {
               ms: Date.now() - hookStart,
             };
 
-            if (gate) event.gate = gate;
-            if (reason) event.reason = reason;
-
-            if (expectedDecision !== undefined) {
-              event.expected = expectedDecision;
-              event.pass = decision === expectedDecision;
+            if (gate) baseEvent.gate = gate;
+            if (reason) baseEvent.reason = reason;
+            if (config.truncateToLine !== undefined) {
+              baseEvent.at = config.truncateToLine;
             }
 
             if (hookResult.timedOut) {
-              event.error = `Hook timed out after ${config.timeout}ms`;
+              baseEvent.error = `Hook timed out after ${config.timeout}ms`;
             } else if (hookResult.exitCode === 1) {
-              event.error = hookResult.stderr.slice(0, 500);
+              baseEvent.error = hookResult.stderr.slice(0, 500);
             }
 
-            results.push(event);
+            if (scopedMatches.length === 0) {
+              // No scoring entry for this run's truncation slice.
+              results.push(baseEvent);
+            } else {
+              for (const exp of scopedMatches) {
+                const event: ReplayEvent = { ...baseEvent };
+                event.expected = exp.expected;
+                event.at = exp.at ?? "full";
+                if (exp.by) {
+                  event.gate_expected = exp.by;
+                }
+                const decisionOk = decision === exp.expected;
+                const gateOk = !exp.by || exp.by === gate;
+                event.pass = decisionOk && gateOk;
+                if (!event.pass && decisionOk && !gateOk) {
+                  event.reason = `decision matched (${decision}) but wrong rule: got ${JSON.stringify(gate ?? "")}, expected ${JSON.stringify(exp.by)}`;
+                }
+                results.push(event);
+              }
+            }
           } catch (err) {
             results.push({
               line: k,
@@ -1204,29 +1358,36 @@ async function main(): Promise<void> {
           }
         }
 
-        // Match against expectations
-        const stopKey = `stop:${i}`;
-        const expectedDecision = matchExpectation(config.expect, stopKey);
+        // Match against expectations (rich-form aware)
+        const stopMatched = matchExpectation(config.expect, stopKey);
+        const stopScoped = scopedExpectations(stopMatched, config.truncateToLine);
 
-        const event: ReplayEvent = {
+        const baseStopEvent: ReplayEvent = {
           line: i,
           hook: "stop-response-check",
           decision,
           ms: Date.now() - hookStart,
         };
 
-        if (reason) event.reason = reason;
-
-        if (expectedDecision !== undefined) {
-          event.expected = expectedDecision;
-          event.pass = decision === expectedDecision;
+        if (reason) baseStopEvent.reason = reason;
+        if (config.truncateToLine !== undefined) {
+          baseStopEvent.at = config.truncateToLine;
         }
-
         if (hookResult.timedOut) {
-          event.error = `Hook timed out after ${config.timeout}ms`;
+          baseStopEvent.error = `Hook timed out after ${config.timeout}ms`;
         }
 
-        results.push(event);
+        if (stopScoped.length === 0) {
+          results.push(baseStopEvent);
+        } else {
+          for (const exp of stopScoped) {
+            const event: ReplayEvent = { ...baseStopEvent };
+            event.expected = exp.expected;
+            event.at = exp.at ?? "full";
+            event.pass = decision === exp.expected;
+            results.push(event);
+          }
+        }
       } catch (err) {
         results.push({
           line: i,
@@ -1308,7 +1469,14 @@ async function main(): Promise<void> {
   // 12. Output structured report
   const elapsedMs = Date.now() - startTime;
   const reportFilename = config.filter ? "report-single.json" : "report.json";
-  formatReport(results, config.transcript, config.expectPath, elapsedMs, reportFilename);
+  formatReport(
+    results,
+    config.transcript,
+    config.expectPath,
+    elapsedMs,
+    reportFilename,
+    config.truncateToLine,
+  );
 
   // 13. Compute exit code
   const failed = results.filter((r) => r.pass === false);

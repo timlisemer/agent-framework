@@ -48,9 +48,13 @@ function handleFindWork(): string {
   return lines.join("\n");
 }
 
-function handleRunTest(transcriptName: string, rootOverride?: string): string {
+function handleRunTest(
+  transcriptName: string,
+  rootOverride?: string,
+  transcriptPathOverride?: string,
+): string {
   checkAndIncrementRunLimit(transcriptName, "run_test");
-  const transcriptPath = resolveTranscriptPath(transcriptName);
+  const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
   const labelsPath = path.join(transcriptRunDir(transcriptName), "labels.json");
   if (!fs.existsSync(labelsPath)) {
     throw new Error("labels.json not found. This transcript is not ready for testing.");
@@ -63,31 +67,58 @@ function handleRunTest(transcriptName: string, rootOverride?: string): string {
   return output + formatStatusFooter(state) + "\n\nWORKFLOW: You must call run_single_hook (free, unlimited) before your next run_test.";
 }
 
-function handleRunSingleHook(transcriptName: string, hookKey: string, rootOverride?: string): string {
+function handleRunSingleHook(
+  transcriptName: string,
+  hookKey: string,
+  rootOverride?: string,
+  truncateToLine?: number,
+  transcriptPathOverride?: string,
+): string {
   checkAndIncrementRunLimit(transcriptName, "run_single_hook");
-  const transcriptPath = resolveTranscriptPath(transcriptName);
+  const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
   const labelsPath = path.join(transcriptRunDir(transcriptName), "labels.json");
   if (!fs.existsSync(labelsPath)) {
     throw new Error("labels.json not found. This transcript is not ready for testing.");
   }
-  const output = runReplayCommand([
+  if (truncateToLine !== undefined) {
+    if (!Number.isFinite(truncateToLine) || truncateToLine < 1) {
+      throw new Error(
+        `truncate_to_line must be a positive 1-based integer, got ${truncateToLine}`,
+      );
+    }
+  }
+  const args = [
     "--transcript", transcriptPath,
     "--expect", labelsPath,
     "--filter", hookKey,
-  ], 300000, rootOverride);
+  ];
+  if (truncateToLine !== undefined) {
+    args.push("--truncate-to-line", String(truncateToLine));
+  }
+  const output = runReplayCommand(args, 300000, rootOverride);
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state) + "\n\nWORKFLOW: You must call run_single_hook (free, unlimited) before your next run_test.";
 }
 
-function handleList(transcriptName: string, rootOverride?: string): string {
-  const transcriptPath = resolveTranscriptPath(transcriptName);
+function handleList(
+  transcriptName: string,
+  rootOverride?: string,
+  transcriptPathOverride?: string,
+): string {
+  const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
   const output = runReplayCommand(["--list", "--transcript", transcriptPath], 600000, rootOverride);
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state);
 }
 
-function handleExpand(transcriptName: string, target: string, depth: number, rootOverride?: string): string {
-  const transcriptPath = resolveTranscriptPath(transcriptName);
+function handleExpand(
+  transcriptName: string,
+  target: string,
+  depth: number,
+  rootOverride?: string,
+  transcriptPathOverride?: string,
+): string {
+  const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
   const args = ["--list", "--transcript", transcriptPath, "--expand", target];
   if (depth > 1) {
     args.push("--depth", String(depth));
@@ -121,7 +152,13 @@ function handleHelp(): string {
 
 // ─── Transcript Path Resolution ────────────────────────────────────────────
 
-function resolveTranscriptPath(transcriptName: string): string {
+function resolveTranscriptPath(transcriptName: string, override?: string): string {
+  if (override) {
+    if (!fs.existsSync(override)) {
+      throw new Error(`transcript_path override "${override}" does not exist`);
+    }
+    return override;
+  }
   // Prefer test-runs copy
   const runPath = path.join(transcriptRunDir(transcriptName), "transcript.jsonl");
   if (fs.existsSync(runPath)) {
@@ -136,7 +173,11 @@ function resolveTranscriptPath(transcriptName: string): string {
   if (fs.existsSync(projectPath)) {
     return projectPath;
   }
-  throw new Error(`Transcript not found for "${transcriptName}". Check the name and try find_work.`);
+  throw new Error(
+    `Transcript not found for "${transcriptName}". Check the name and try find_work. ` +
+    `If the transcript lives outside ~/.claude/projects/-home-tim-Coding-public-repos-agent-framework, ` +
+    `pass "transcript_path" to point at the file directly.`,
+  );
 }
 
 // ─── Main Handler ──────────────────────────────────────────────────────────
@@ -150,6 +191,21 @@ export interface TesterInput {
   content?: string;
   working_dir?: string;
   hook_key?: string;
+  /**
+   * For run_single_hook: optional 1-based transcript line cap. When set,
+   * replay.ts appends only transcript entries whose 1-based line index is
+   * <= truncate_to_line before firing the target hook. Lets you score the
+   * hook against a partial file state (e.g. pre-flush timing replay).
+   */
+  truncate_to_line?: number;
+  /**
+   * Absolute path to the transcript .jsonl file. Use when the transcript
+   * lives outside the default ~/.claude/projects/-home-tim-Coding-public-
+   * repos-agent-framework directory. After auto_label/scaffold has copied
+   * the transcript into ~/.agent-framework/test-runs/<name>/, the override
+   * is no longer needed; the resolver finds it there automatically.
+   */
+  transcript_path?: string;
 }
 
 export async function handleTestHarnessTester(input: TesterInput): Promise<string> {
@@ -160,21 +216,27 @@ export async function handleTestHarnessTester(input: TesterInput): Promise<strin
 
       case "run_test":
         if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleRunTest(input.transcript_name, input.working_dir);
+        return handleRunTest(input.transcript_name, input.working_dir, input.transcript_path);
 
       case "run_single_hook":
         if (!input.transcript_name) throw new Error("transcript_name is required");
         if (!input.hook_key) throw new Error("hook_key is required (tool_use_id or stop:N)");
-        return handleRunSingleHook(input.transcript_name, input.hook_key, input.working_dir);
+        return handleRunSingleHook(
+          input.transcript_name,
+          input.hook_key,
+          input.working_dir,
+          input.truncate_to_line,
+          input.transcript_path,
+        );
 
       case "list":
         if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleList(input.transcript_name, input.working_dir);
+        return handleList(input.transcript_name, input.working_dir, input.transcript_path);
 
       case "expand":
         if (!input.transcript_name) throw new Error("transcript_name is required");
         if (!input.target) throw new Error("target is required (tool_use_id or stop:N)");
-        return handleExpand(input.transcript_name, input.target, input.depth ?? 1, input.working_dir);
+        return handleExpand(input.transcript_name, input.target, input.depth ?? 1, input.working_dir, input.transcript_path);
 
       case "read_file":
         if (!input.transcript_name) throw new Error("transcript_name is required");
@@ -233,6 +295,42 @@ calls. Does NOT count against the 5-run limit. Max 20 per transcript.
 hook_key: tool_use_id prefix from report failures, or stop:N key.
 Use this for iterative fix-test cycles.
 Read report-single.json for results.
+
+Optional parameter: truncate_to_line (1-based integer).
+  When set, the harness appends only transcript lines whose 1-based index
+  is <= truncate_to_line before firing the target hook. The hook still
+  fires with its original tool_use_id because the input is built from the
+  in-memory parsed lines, not from the on-disk temp transcript. Use this
+  to reproduce timing-sensitive states (e.g. pre-flush replay where the
+  text entry preceding a tool_use has not been written yet).
+
+  report-single.json will include \`truncate_to_line\` at the top level and
+  each scored event will carry an \`at\` field ("full" or the cap line).
+
+### Labels: rich expectations
+
+A labels.json entry may be either the legacy string form or a rich object:
+
+  "toolu_014rEfFTifPuw3iud1KWZCQg": {
+    "expected": "deny",
+    "by": "respond-first",
+    "at": "full"
+  }
+
+  "toolu_01R7fQpyC7s6E3BazAoBhM6y": [
+    { "expected": "allow", "at": 105,
+      "notes": "Pre-flush timing state: respond-first must skip, not fastDeny" },
+    { "expected": "allow", "at": "full" }
+  ]
+
+- "expected" is the same four-value vocabulary as before (allow/deny/pass/block).
+- "by" is an optional rule name. When set, the hook passes only if the
+  decision matches AND the \`gate\` in tool-log matches \`by\`. A failure
+  reason like \`decision matched (deny) but wrong rule: got "X", expected "Y"\`
+  is written to the report when the decision is right but the rule is wrong.
+- "at" is a 1-based transcript line index or "full". Each rich entry is
+  scored only on a run whose truncate_to_line matches \`at\` (or "full" if
+  \`at\` is absent/"full" and no truncation was requested).
 
 ### Step 2: Read the report
 Action: read_file (transcript_name, filename: "report.json")

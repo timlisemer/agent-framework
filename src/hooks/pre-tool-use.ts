@@ -276,6 +276,7 @@ async function main() {
   const ctx: RuleContext = {
     toolName,
     toolInput,
+    toolUseId: input.tool_use_id,
     projectDir,
     transcriptPath: input.transcript_path,
     sessionDir,

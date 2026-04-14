@@ -173,9 +173,28 @@ export function getVersion(): string {
 
 // ─── Label File Operations ─────────────────────────────────────────────────
 
+/**
+ * A rich expectation entry with optional rule match and truncation target.
+ * Mirrors test-harness/lib/types.ts:RichExpectation so shared callers do
+ * not need to import from the test-harness package.
+ */
+export interface RichExpectation {
+  expected: string;
+  by?: string;
+  at?: number | "full";
+  notes?: string;
+}
+
+/**
+ * A label value may be a legacy string, a rich object, or an array of
+ * rich objects (for scoring the same hook under multiple truncation
+ * states). The on-disk labels.json is tolerant of all three forms.
+ */
+export type LabelValue = string | RichExpectation | RichExpectation[];
+
 interface LabelFile {
   _meta?: Record<string, unknown>;
-  labels: Record<string, string>;
+  labels: Record<string, LabelValue>;
   reasoning?: Record<string, string>;
 }
 
@@ -220,6 +239,66 @@ export function updateSingleLabel(
     throw new Error(`Invalid value "${value}" for key "${key}". Valid: ${validValues.join(", ")}`);
   }
   labelFile.labels[key] = value;
+  if (!labelFile.reasoning) {
+    labelFile.reasoning = {};
+  }
+  labelFile.reasoning[key] = reasoning;
+  writeLabelFile(transcriptName, true, labelFile);
+  return labelFile;
+}
+
+/**
+ * Write a rich expectation (or array of them) for a key. Unlike
+ * updateSingleLabel, this:
+ *
+ * - accepts the `by` (gate name) and `at` (truncation) fields
+ * - allows a single rich object OR an array of rich objects
+ * - may be used to CREATE a new key as well as update an existing one
+ *
+ * Intended for use cases where the heuristic-labeled string "allow" is
+ * wrong and you need to assert "deny from rule X" or "allow at @105 and
+ * allow at full". The legacy updateSingleLabel path is preserved so plain
+ * pass/deny flips stay ergonomic.
+ */
+export function setRichLabel(
+  transcriptName: string,
+  key: string,
+  expectation: RichExpectation | RichExpectation[],
+  reasoning: string,
+): LabelFile {
+  const labelFile = readLabelFile(transcriptName, true);
+  const entries = Array.isArray(expectation) ? expectation : [expectation];
+  if (entries.length === 0) {
+    throw new Error(`expectation must be a rich object or a non-empty array`);
+  }
+  const validToolValues = ["allow", "deny"];
+  const validStopValues = ["pass", "block"];
+  const baseValid = key.startsWith("stop:") ? validStopValues : validToolValues;
+  for (const e of entries) {
+    if (typeof e !== "object" || e === null) {
+      throw new Error(`expectation entry must be an object, got ${JSON.stringify(e)}`);
+    }
+    if (!baseValid.includes(e.expected) && e.expected !== "INVESTIGATE") {
+      throw new Error(
+        `Invalid expected value "${e.expected}" for key "${key}". Valid: ${baseValid.join(", ")}`,
+      );
+    }
+    if (e.by !== undefined && (typeof e.by !== "string" || e.by.length === 0)) {
+      throw new Error(
+        `"by" must be a non-empty string when set, got ${JSON.stringify(e.by)}`,
+      );
+    }
+    if (
+      e.at !== undefined &&
+      e.at !== "full" &&
+      !(typeof e.at === "number" && Number.isFinite(e.at) && e.at >= 1)
+    ) {
+      throw new Error(
+        `"at" must be a positive integer or "full" when set, got ${JSON.stringify(e.at)}`,
+      );
+    }
+  }
+  labelFile.labels[key] = entries.length === 1 ? entries[0] : entries;
   if (!labelFile.reasoning) {
     labelFile.reasoning = {};
   }

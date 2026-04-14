@@ -33,6 +33,8 @@ import {
   writeLabelFile,
   updateSingleLabel,
   updateMultipleLabels,
+  setRichLabel,
+  type RichExpectation,
   runReplayCommand,
   getVersion,
   checkAndIncrementRunLimit,
@@ -65,38 +67,68 @@ function handleFindWork(dateFrom?: string, dateTo?: string, limit?: number): str
   return lines.join("\n");
 }
 
-function handleGenerateLabels(transcriptName: string): string {
+function handleGenerateLabels(
+  transcriptName: string,
+  transcriptPathOverride?: string,
+  rootOverride?: string,
+): string {
   checkAndIncrementRunLimit(transcriptName, "generate_labels");
-  const transcriptPath = resolveTranscriptPath(transcriptName);
-  const output = runReplayCommand(["--generate-labels", "--transcript", transcriptPath], 1800000);
+  const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
+  const output = runReplayCommand(
+    ["--generate-labels", "--transcript", transcriptPath],
+    1800000,
+    rootOverride,
+  );
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state);
 }
 
-function handleScaffold(transcriptName: string): string {
-  const transcriptPath = resolveTranscriptPath(transcriptName);
-  const output = runReplayCommand(["--scaffold", "--transcript", transcriptPath]);
+function handleScaffold(
+  transcriptName: string,
+  transcriptPathOverride?: string,
+  rootOverride?: string,
+): string {
+  const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
+  const output = runReplayCommand(
+    ["--scaffold", "--transcript", transcriptPath],
+    600000,
+    rootOverride,
+  );
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state);
 }
 
-function handleAutoLabel(transcriptName: string): string {
-  const transcriptPath = resolveTranscriptPath(transcriptName);
+function handleAutoLabel(
+  transcriptName: string,
+  transcriptPathOverride?: string,
+  rootOverride?: string,
+): string {
+  const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
 
   // Step 1: Run scaffold (free heuristic) — enforces 1x limit inside auto_label only
   checkAndIncrementRunLimit(transcriptName, "scaffold");
-  runReplayCommand(["--scaffold", "--transcript", transcriptPath]);
+  runReplayCommand(
+    ["--scaffold", "--transcript", transcriptPath],
+    600000,
+    rootOverride,
+  );
 
   // Save scaffold results before generate_labels overwrites labels.draft.json
   const scaffoldData = readLabelFile(transcriptName, true);
-  const scaffoldLabels = { ...scaffoldData.labels };
+  // auto_label only merges string-form labels. scaffold and generate_labels
+  // both write plain strings, so it's safe to narrow here.
+  const scaffoldLabels: Record<string, string> = { ...scaffoldData.labels } as Record<string, string>;
   const scaffoldReasoning = { ...(scaffoldData.reasoning ?? {}) };
 
   // Step 2: Run generate_labels (costs $, enforces 1x limit)
   checkAndIncrementRunLimit(transcriptName, "generate_labels");
   let genError: string | null = null;
   try {
-    runReplayCommand(["--generate-labels", "--transcript", transcriptPath], 1800000);
+    runReplayCommand(
+      ["--generate-labels", "--transcript", transcriptPath],
+      1800000,
+      rootOverride,
+    );
   } catch (err) {
     genError = err instanceof Error ? err.message : String(err);
     // Rollback both counters so auto_label can be fully retried
@@ -132,7 +164,7 @@ function handleAutoLabel(transcriptName: string): string {
 
   // Read generate_labels results (it overwrote labels.draft.json)
   const genData = readLabelFile(transcriptName, true);
-  const genLabels = genData.labels;
+  const genLabels: Record<string, string> = genData.labels as Record<string, string>;
   const genReasoning = genData.reasoning ?? {};
 
   // Step 3: Merge — scaffold is baseline, hooks are advisory
@@ -198,32 +230,54 @@ function handleAutoLabel(transcriptName: string): string {
   ].join("\n");
 }
 
-function handleList(transcriptName: string): string {
-  const transcriptPath = resolveTranscriptForList(transcriptName);
-  const output = runReplayCommand(["--list", "--transcript", transcriptPath]);
+function handleList(
+  transcriptName: string,
+  transcriptPathOverride?: string,
+  rootOverride?: string,
+): string {
+  const transcriptPath = resolveTranscriptForList(transcriptName, transcriptPathOverride);
+  const output = runReplayCommand(
+    ["--list", "--transcript", transcriptPath],
+    600000,
+    rootOverride,
+  );
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state);
 }
 
-function handleExpand(transcriptName: string, target: string, depth: number): string {
-  const transcriptPath = resolveTranscriptForList(transcriptName);
+function handleExpand(
+  transcriptName: string,
+  target: string,
+  depth: number,
+  transcriptPathOverride?: string,
+  rootOverride?: string,
+): string {
+  const transcriptPath = resolveTranscriptForList(transcriptName, transcriptPathOverride);
   const args = ["--list", "--transcript", transcriptPath, "--expand", target];
   if (depth > 1) {
     args.push("--depth", String(depth));
   }
-  const output = runReplayCommand(args);
+  const output = runReplayCommand(args, 600000, rootOverride);
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state);
 }
 
-function handleValidate(transcriptName: string): string {
-  const transcriptPath = resolveTranscriptForList(transcriptName);
+function handleValidate(
+  transcriptName: string,
+  transcriptPathOverride?: string,
+  rootOverride?: string,
+): string {
+  const transcriptPath = resolveTranscriptForList(transcriptName, transcriptPathOverride);
   const draftPath = path.join(transcriptRunDir(transcriptName), "labels.draft.json");
   if (!fs.existsSync(draftPath)) {
     throw new Error("labels.draft.json not found. Generate labels first.");
   }
   try {
-    const output = runReplayCommand(["--validate", "--transcript", transcriptPath, "--expect", draftPath]);
+    const output = runReplayCommand(
+      ["--validate", "--transcript", transcriptPath, "--expect", draftPath],
+      600000,
+      rootOverride,
+    );
     const state = detectWorkflowState(transcriptName);
     return output + formatStatusFooter(state);
   } catch (error: unknown) {
@@ -249,7 +303,25 @@ function handleUpdateLabels(
   return `Updated ${updates.length} labels.\nRemaining INVESTIGATE: ${remaining}` + formatStatusFooter(state);
 }
 
-function handleFinalize(transcriptName: string): string {
+function handleSetLabel(
+  transcriptName: string,
+  key: string,
+  expectation: RichExpectation | RichExpectation[],
+  reasoning: string,
+): string {
+  setRichLabel(transcriptName, key, expectation, reasoning);
+  const state = detectWorkflowState(transcriptName);
+  const desc = Array.isArray(expectation)
+    ? `${expectation.length} rich entries`
+    : `expected=${expectation.expected}${expectation.by ? `, by=${expectation.by}` : ""}${expectation.at !== undefined ? `, at=${expectation.at}` : ""}`;
+  return `Set rich label for "${key}" (${desc})` + formatStatusFooter(state);
+}
+
+function handleFinalize(
+  transcriptName: string,
+  transcriptPathOverride?: string,
+  rootOverride?: string,
+): string {
   // Step 1: Check draft exists
   if (!testRunFileExists(transcriptName, "labels.draft.json")) {
     throw new Error("labels.draft.json not found. Nothing to finalize.");
@@ -257,8 +329,24 @@ function handleFinalize(transcriptName: string): string {
 
   // Step 2: Read and validate
   const labelFile = readLabelFile(transcriptName, true);
+  const unwrapExpected = (v: unknown): string[] => {
+    if (typeof v === "string") return [v];
+    if (Array.isArray(v)) {
+      const out: string[] = [];
+      for (const e of v) {
+        if (e && typeof e === "object" && typeof (e as { expected?: unknown }).expected === "string") {
+          out.push((e as { expected: string }).expected);
+        }
+      }
+      return out;
+    }
+    if (v && typeof v === "object" && typeof (v as { expected?: unknown }).expected === "string") {
+      return [(v as { expected: string }).expected];
+    }
+    return [];
+  };
   const investigateRemaining = Object.entries(labelFile.labels).filter(
-    ([, v]) => v === "INVESTIGATE"
+    ([, v]) => unwrapExpected(v).some((x) => x === "INVESTIGATE"),
   );
   if (investigateRemaining.length > 0) {
     const keys = investigateRemaining.map(([k]) => k).join(", ");
@@ -280,10 +368,14 @@ function handleFinalize(transcriptName: string): string {
   }
 
   // Step 4: Run validate via replay.ts
-  const transcriptPath = resolveTranscriptForList(transcriptName);
+  const transcriptPath = resolveTranscriptForList(transcriptName, transcriptPathOverride);
   const draftPath = path.join(transcriptRunDir(transcriptName), "labels.draft.json");
   try {
-    runReplayCommand(["--validate", "--transcript", transcriptPath, "--expect", draftPath]);
+    runReplayCommand(
+      ["--validate", "--transcript", transcriptPath, "--expect", draftPath],
+      600000,
+      rootOverride,
+    );
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error("Validation failed, cannot finalize:\n" + message);
@@ -321,7 +413,15 @@ function handleHelp(): string {
 
 // ─── Transcript Path Resolution ────────────────────────────────────────────
 
-function resolveTranscriptPath(transcriptName: string): string {
+function resolveTranscriptPath(transcriptName: string, override?: string): string {
+  // Explicit override wins (e.g. sessions from a different project dir
+  // that the default resolver doesn't know about, like iocto transcripts).
+  if (override) {
+    if (!fs.existsSync(override)) {
+      throw new Error(`transcript_path override "${override}" does not exist`);
+    }
+    return override;
+  }
   // For generate_labels/scaffold, use original transcript from project dir
   const projectPath = path.join(
     path.join(os.homedir(), ".claude", "projects", "-home-tim-Coding-public-repos-agent-framework"),
@@ -335,10 +435,20 @@ function resolveTranscriptPath(transcriptName: string): string {
   if (fs.existsSync(runPath)) {
     return runPath;
   }
-  throw new Error(`Transcript not found for "${transcriptName}". Check the name and try find_work.`);
+  throw new Error(
+    `Transcript not found for "${transcriptName}". Check the name and try find_work. ` +
+    `If the transcript lives outside ~/.claude/projects/-home-tim-Coding-public-repos-agent-framework, ` +
+    `pass "transcript_path" to point at the file directly.`,
+  );
 }
 
-function resolveTranscriptForList(transcriptName: string): string {
+function resolveTranscriptForList(transcriptName: string, override?: string): string {
+  if (override) {
+    if (!fs.existsSync(override)) {
+      throw new Error(`transcript_path override "${override}" does not exist`);
+    }
+    return override;
+  }
   // Prefer test-runs copy (always there after generate/scaffold)
   const runPath = path.join(transcriptRunDir(transcriptName), "transcript.jsonl");
   if (fs.existsSync(runPath)) {
@@ -363,6 +473,32 @@ export interface LabelerInput {
   date_from?: string;
   date_to?: string;
   limit?: number;
+  /**
+   * For set_label: a rich expectation (or array of rich expectations).
+   * Shape: { expected, by?, at?, notes? }. See test-harness-shared.ts
+   * :RichExpectation for the full contract.
+   */
+  expectation?: RichExpectation | RichExpectation[];
+  /**
+   * Absolute path to the transcript .jsonl file. Use when the transcript
+   * lives outside the default ~/.claude/projects/-home-tim-Coding-public-
+   * repos-agent-framework directory (e.g. a session from another project
+   * like iocto). Applies to auto_label / generate_labels / scaffold /
+   * list / expand / validate. After auto_label or scaffold runs, the
+   * transcript is copied into ~/.agent-framework/test-runs/<name>/ and
+   * subsequent actions find it there automatically, so the override is
+   * only needed once per transcript.
+   */
+  transcript_path?: string;
+  /**
+   * Local repo path. When set, the labeler invokes replay.ts from this
+   * directory instead of the deployed AGENT_FRAMEWORK_ROOT, so locally
+   * edited test-harness/ source is used. Mirrors the tester's existing
+   * `working_dir` option. Without this, the labeler runs the previously
+   * deployed test-harness code from /mnt/docker-data/... which won't
+   * include local edits.
+   */
+  working_dir?: string;
 }
 
 export async function handleTestHarnessLabeler(input: LabelerInput): Promise<string> {
@@ -373,28 +509,28 @@ export async function handleTestHarnessLabeler(input: LabelerInput): Promise<str
 
       case "auto_label":
         if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleAutoLabel(input.transcript_name);
+        return handleAutoLabel(input.transcript_name, input.transcript_path, input.working_dir);
 
       case "generate_labels":
         if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleGenerateLabels(input.transcript_name);
+        return handleGenerateLabels(input.transcript_name, input.transcript_path, input.working_dir);
 
       case "scaffold":
         if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleScaffold(input.transcript_name);
+        return handleScaffold(input.transcript_name, input.transcript_path, input.working_dir);
 
       case "list":
         if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleList(input.transcript_name);
+        return handleList(input.transcript_name, input.transcript_path, input.working_dir);
 
       case "expand":
         if (!input.transcript_name) throw new Error("transcript_name is required");
         if (!input.target) throw new Error("target is required (tool_use_id or stop:N)");
-        return handleExpand(input.transcript_name, input.target, input.depth ?? 1);
+        return handleExpand(input.transcript_name, input.target, input.depth ?? 1, input.transcript_path, input.working_dir);
 
       case "validate":
         if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleValidate(input.transcript_name);
+        return handleValidate(input.transcript_name, input.transcript_path, input.working_dir);
 
       case "update_label":
         if (!input.transcript_name) throw new Error("transcript_name is required");
@@ -410,9 +546,16 @@ export async function handleTestHarnessLabeler(input: LabelerInput): Promise<str
         }
         return handleUpdateLabels(input.transcript_name, input.updates);
 
+      case "set_label":
+        if (!input.transcript_name) throw new Error("transcript_name is required");
+        if (!input.key) throw new Error("key is required");
+        if (input.expectation === undefined) throw new Error("expectation is required (RichExpectation or RichExpectation[])");
+        if (!input.reasoning) throw new Error("reasoning is required");
+        return handleSetLabel(input.transcript_name, input.key, input.expectation, input.reasoning);
+
       case "finalize":
         if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleFinalize(input.transcript_name);
+        return handleFinalize(input.transcript_name, input.transcript_path, input.working_dir);
 
       case "read_file":
         if (!input.transcript_name) throw new Error("transcript_name is required");
@@ -434,7 +577,7 @@ export async function handleTestHarnessLabeler(input: LabelerInput): Promise<str
         throw new Error(
           `Unknown action: "${input.action}". ` +
           "Valid actions: find_work, auto_label, generate_labels, scaffold, list, expand, validate, " +
-          "update_label, update_labels, finalize, read_file, append_notes, git_hash, help"
+          "update_label, update_labels, set_label, finalize, read_file, append_notes, git_hash, help"
         );
     }
   } catch (error: unknown) {

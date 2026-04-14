@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { CONFIRMATION_PATTERN } from "./utils.js";
 import { readTranscriptExact } from "../utils/transcript.js";
@@ -55,11 +56,32 @@ export const respondFirstRule: PreToolRule = {
         // readTranscriptExact is contractually forbidden from returning a
         // prior-turn assistant under lastAssistant (see the
         // firstUserSeenIndex boundary in src/utils/transcript.ts). So
-        // lastAssistant === null means the scan has no data about the
-        // current turn at all -- not evidence of a violation. Mark checked
-        // so we don't rescan on every tool call in this turn and let the
-        // other rules decide.
+        // lastAssistant === null means the scan has no current-turn
+        // assistant text to report.
+        //
+        // That can mean two different things, and they have opposite
+        // correct actions:
+        //
+        // 1. Claude Code has already flushed this turn's tool_use entry
+        //    (so the whole current turn, including thinking and any text
+        //    block, is in the transcript) and there is still no text ->
+        //    the assistant went straight to tools, this is a real
+        //    violation and we must fastDeny.
+        //
+        // 2. Claude Code has NOT yet flushed this turn's tool_use entry
+        //    (so any text block that exists is also not yet visible) ->
+        //    we cannot judge; skip.
+        //
+        // The objective marker for which case we're in is whether the
+        // specific tool_use_id this hook is firing for already appears in
+        // the raw transcript file.
+        const raw = await fs.promises.readFile(ctx.transcriptPath, "utf-8");
         await ctx.stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
+        if (raw.includes(ctx.toolUseId)) {
+          return {
+            fastDeny: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
+          };
+        }
         return null;
       } else if (lastAssistant.index > lastUser.index) {
         // Assistant message exists after user -- check quality

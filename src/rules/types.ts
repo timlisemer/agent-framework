@@ -4,6 +4,7 @@ import type { CacheManager } from "../utils/cache-manager.js";
 export interface RuleContext {
   toolName: string;
   toolInput: unknown;
+  toolUseId: string;
   projectDir: string;
   transcriptPath: string;
   sessionDir: string;

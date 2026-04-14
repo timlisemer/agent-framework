@@ -369,33 +369,43 @@ server.registerTool(
   }
 );
 
+const richExpectationSchema = z.object({
+  expected: z.string().describe("The decision the hook must produce: allow/deny/pass/block (or INVESTIGATE placeholder)."),
+  by: z.string().optional().describe("Rule/gate name the denial must come from (matches tool-log gate field)."),
+  at: z.union([z.number(), z.literal("full")]).optional().describe("1-based line cap this expectation scores under. Omit or 'full' for the default post-flush run."),
+  notes: z.string().optional().describe("Free-text explanation of why this expectation exists."),
+});
+
 server.registerTool(
   "test_harness_labeler",
   {
     title: "Test Harness Labeler",
-    description: "Label test harness transcripts. Actions: find_work, auto_label, generate_labels, scaffold, list, expand, validate, update_label, update_labels, finalize, read_file, append_notes, git_hash, help. Use help action for full documentation.",
+    description: "Label test harness transcripts. Actions: find_work, auto_label, generate_labels, scaffold, list, expand, validate, update_label, update_labels, set_label, finalize, read_file, append_notes, git_hash, help. Use help action for full documentation.",
     inputSchema: {
       action: z.enum([
         "find_work", "auto_label", "generate_labels", "scaffold", "list", "expand", "validate",
-        "update_label", "update_labels", "finalize", "read_file", "append_notes",
+        "update_label", "update_labels", "set_label", "finalize", "read_file", "append_notes",
         "git_hash", "help"
       ]).describe("The action to perform"),
       transcript_name: z.string().optional().describe("Transcript name (without .jsonl extension)"),
       target: z.string().optional().describe("For expand: tool_use_id or stop:N key"),
       depth: z.number().optional().describe("For expand: context radius multiplier (default 1)"),
-      key: z.string().optional().describe("For update_label: the label key to update"),
+      key: z.string().optional().describe("For update_label/set_label: the label key to update"),
       value: z.string().optional().describe("For update_label: the new label value (allow/deny/pass/block)"),
-      reasoning: z.string().optional().describe("For update_label: explanation for this label decision"),
+      reasoning: z.string().optional().describe("For update_label/set_label: explanation for this label decision"),
       updates: z.array(z.object({
         key: z.string(),
         value: z.string(),
         reasoning: z.string(),
       })).optional().describe("For update_labels: array of {key, value, reasoning} updates"),
+      expectation: z.union([richExpectationSchema, z.array(richExpectationSchema)]).optional().describe("For set_label: a rich expectation object (or array of them) with {expected, by?, at?, notes?}. Use this when you need 'expected deny by rule X' or per-truncation assertions that the plain update_label string form cannot express."),
       filename: z.string().optional().describe("For read_file: labels.draft.json, labels.json, notes_and_questions.md, or report.json"),
       content: z.string().optional().describe("For append_notes: content to append"),
       date_from: z.string().optional().describe("For find_work: only transcripts modified on or after this date (YYYY-MM-DD)"),
       date_to: z.string().optional().describe("For find_work: only transcripts modified on or before this date (YYYY-MM-DD)"),
       limit: z.number().optional().describe("For find_work: how many transcripts to process. Omit=1, 0=unlimited, N=N"),
+      transcript_path: z.string().optional().describe("Absolute path to a transcript .jsonl file. Use when the transcript lives outside ~/.claude/projects/-home-tim-Coding-public-repos-agent-framework (e.g. sessions from other project dirs like iocto). Applies to auto_label/generate_labels/scaffold/list/expand/validate. Only needed once; subsequent actions find the transcript in ~/.agent-framework/test-runs/<name>/ after the first copy."),
+      working_dir: z.string().optional().describe("Local repo path. When set, the labeler invokes replay.ts from this directory instead of the deployed AGENT_FRAMEWORK_ROOT, so locally edited test-harness/ source is used. Mirrors the tester's `working_dir`."),
     }
   },
   async (args) => {
@@ -421,6 +431,8 @@ server.registerTool(
       content: z.string().optional().describe("For append_notes: content to append"),
       hook_key: z.string().optional().describe("For run_single_hook: hook key to test (tool_use_id or stop:N from report failures)"),
       working_dir: z.string().optional().describe("Local repo path for run_test/run_single_hook/list/expand (overrides AGENT_FRAMEWORK_ROOT so edited code is tested)"),
+      truncate_to_line: z.number().optional().describe("For run_single_hook: 1-based line cap. When set, the harness appends only transcript lines <= truncate_to_line before firing the target hook. The hook still fires with its full tool_use_id because input is synthesized from the in-memory parsed lines. Use this to reproduce timing-sensitive states like pre-flush replay."),
+      transcript_path: z.string().optional().describe("Absolute path to a transcript .jsonl file. Use when the transcript lives outside ~/.claude/projects/-home-tim-Coding-public-repos-agent-framework (e.g. iocto sessions). Only needed if the test-runs copy is not yet in place."),
     }
   },
   async (args) => {
