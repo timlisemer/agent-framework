@@ -555,6 +555,17 @@ export async function readTranscriptExact(
   // - This prevents "AI ignored directive" false positives when AI already addressed it
   let scanDistance = 0;
 
+  // Hard boundary for assistant collection: once we push the most recent user
+  // message, any assistant entry at a lower index belongs to a previous turn
+  // and must not be reported as `lastAssistant`. The backward scan is
+  // otherwise happy to hand back a prior-turn assistant when the current
+  // turn's entries are not yet in the transcript (Claude Code can fire
+  // PreToolUse hooks before all of this turn's assistant content blocks have
+  // been written). Reporting a prior-turn assistant under a fresh user is a
+  // category error — the two are unrelated. `firstUserSeenIndex` prevents it.
+  let firstUserSeenIndex: number | null = null;
+  const userLenBeforeIter = () => collected.user.length;
+
   for (let i = parsedEntries.length - 1; i >= 0; i--) {
     scanDistance++; // Track how far back we've scanned from the end
 
@@ -592,6 +603,7 @@ export async function readTranscriptExact(
         (!userStale && collected.user.length < targetUser) ||
         (!toolStale && collected.tool.length < targetTool)
       ) {
+        const beforeLen = userLenBeforeIter();
         processUserEntry(msgContent, i, collected, {
           // Pass 0 as target if stale to prevent collection
           targetUser: userStale ? 0 : targetUser,
@@ -601,8 +613,19 @@ export async function readTranscriptExact(
           toolOptions,
           toolUseIdToName,
         });
+        // If processUserEntry actually pushed a user message, record the
+        // first (most recent, since we scan backward) user index we've seen.
+        if (firstUserSeenIndex === null && collected.user.length > beforeLen) {
+          firstUserSeenIndex = i;
+        }
       }
     } else if (role === 'assistant' && collected.assistant.length < targetAssistant) {
+      // Hard boundary: assistants from before the most recent user message
+      // belong to a previous turn and must not be reported as the current
+      // turn's assistant.
+      if (firstUserSeenIndex !== null && i < firstUserSeenIndex) {
+        continue;
+      }
       // Check staleness for assistant messages
       const assistantStale = assistantSpec.maxStale !== undefined && scanDistance > assistantSpec.maxStale;
       if (!assistantStale) {

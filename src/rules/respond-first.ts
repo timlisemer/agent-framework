@@ -51,12 +51,16 @@ export const respondFirstRule: PreToolRule = {
     const lastAssistant = rfResult.assistant.length > 0 ? rfResult.assistant[0] : null;
 
     if (lastUser && !CONFIRMATION_PATTERN.test(lastUser.content)) {
-      if (!lastAssistant || lastAssistant.index < lastUser.index) {
-        // No assistant message after user -- deterministic deny, no LLM needed
+      if (!lastAssistant) {
+        // readTranscriptExact is contractually forbidden from returning a
+        // prior-turn assistant under lastAssistant (see the
+        // firstUserSeenIndex boundary in src/utils/transcript.ts). So
+        // lastAssistant === null means the scan has no data about the
+        // current turn at all -- not evidence of a violation. Mark checked
+        // so we don't rescan on every tool call in this turn and let the
+        // other rules decide.
         await ctx.stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
-        return {
-          fastDeny: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
-        };
+        return null;
       } else if (lastAssistant.index > lastUser.index) {
         // Assistant message exists after user -- check quality
         if (lastAssistant.content.trim().length === 0) {
