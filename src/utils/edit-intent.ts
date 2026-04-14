@@ -241,12 +241,17 @@ const BASH_WRITE_PATTERNS: RegExp[] = [
   /\bnpm\s+(install|run\s+build)\b/,
 ];
 
+const PLAN_MODE_SCRATCH_GUIDANCE =
+  "If you need a scratch/test script, do NOT write to /tmp directly. Instead write it under " +
+  "/tmp/claude-test-scripts/<repo-path>/<YYYY-MM-DD-HHMM>/ (repo-path = absolute path of the current " +
+  "working directory, date/time to the minute) AND first ask the user for explicit permission via the " +
+  "AskUserQuestion tool before creating the file.";
+
 /**
- * Hard block for edit tools during plan mode.
+ * Appealable block for edit tools during plan mode.
  * Returns a denial reason if the tool should be blocked, or null if allowed.
- *
- * During plan mode, ONLY plan files and exempt paths may be edited.
- * This is a hard block — no LLM appeal can overturn it.
+ * Only plan files and exempt paths may be edited; everything else is routed
+ * through the tool-appeal agent.
  */
 export function planModeEditBlock(
   planMode: boolean,
@@ -256,11 +261,11 @@ export function planModeEditBlock(
   if (!planMode) return null;
   if (!isEditTool(toolName)) return null;
   if (isEditIntentExemptPath(filePath)) return null;
-  return `Plan mode is active - file edits are blocked. Only plan files may be modified. Target: ${filePath}`;
+  return `Plan mode is active - file edits are blocked. Only plan files may be modified. Target: ${filePath}. ${PLAN_MODE_SCRATCH_GUIDANCE}`;
 }
 
 /**
- * Hard block for write-like Bash commands during plan mode.
+ * Appealable block for write-like Bash commands during plan mode.
  * Returns a denial reason if the command should be blocked, or null if allowed.
  */
 export function planModeBashBlock(
@@ -272,7 +277,7 @@ export function planModeBashBlock(
   if (toolName !== "Bash") return null;
   for (const pattern of BASH_WRITE_PATTERNS) {
     if (pattern.test(command)) {
-      return `Plan mode is active - write commands are blocked. Command: ${command.slice(0, 100)}`;
+      return `Plan mode is active - write commands are blocked. Command: ${command.slice(0, 100)}. ${PLAN_MODE_SCRATCH_GUIDANCE}`;
     }
   }
   return null;
