@@ -22,7 +22,7 @@ import {
   APPEAL_COUNTS,
   PLAN_VALIDATE_COUNTS,
 } from "../utils/transcript-presets.js";
-import { getPlanModeContext } from "../utils/plan-mode-detector.js";
+import { getPlanModeContext, isPlanModeFromInput, isPlanModeActive } from "../utils/plan-mode-detector.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { logFastPathApproval } from "../utils/logger.js";
 import {
@@ -135,8 +135,10 @@ async function main() {
   let currentGateNote: string | undefined;
   const startTime = Date.now();
 
-  const planModeCtx = getPlanModeContext(input.transcript_path);
-  const planMode = planModeCtx.active;
+  const planMode = input.permission_mode !== undefined
+    ? isPlanModeFromInput(input)
+    : isPlanModeActive(input.transcript_path);
+  const planModeCtx = getPlanModeContext(planMode);
   const subagent = isSubagent(input.transcript_path);
   const coldStart = toolCallCount < 3;
 

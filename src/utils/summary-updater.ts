@@ -27,7 +27,7 @@ import { isSubagent } from "./subagent-detector.js";
 import { parseIntentOutput, parseActionsOutput } from "./summary-updater-parsing.js";
 import { parseEditIntentOutput } from "./edit-intent.js";
 import { savePrediction, type BlockedTool } from "./prediction-cache.js";
-import { getPlanModeContext } from "./plan-mode-detector.js";
+import { getPlanModeContext, isPlanModeActive } from "./plan-mode-detector.js";
 import { clearGateReasoning } from "./gate-reasoning-cache.js";
 import { stripQuotedAndPastedContent } from "./quote-detection.js";
 import { cleanupPidFile } from "./spawn-background.js";
@@ -118,7 +118,7 @@ async function main(): Promise<void> {
 
   if (isSubagent(transcript)) return;
 
-  const planModeCtx = getPlanModeContext(transcript);
+  const planModeCtx = getPlanModeContext(isPlanModeActive(transcript));
 
   const sessionDir = getSessionDir(transcript);
   const dedupKey = `summary-updater-${mode}`;

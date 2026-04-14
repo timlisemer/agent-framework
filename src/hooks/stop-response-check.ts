@@ -11,7 +11,7 @@ import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { getSessionDir } from "../utils/summary-cache.js";
 import { getUnconsumedCorrections, consumeCorrections } from "../utils/correction-cache.js";
 import { getAllPredictions, isStopBlocked } from "../utils/prediction-cache.js";
-import { isPlanModeActive } from "../utils/plan-mode-detector.js";
+import { isPlanModeActive, isPlanModeFromInput } from "../utils/plan-mode-detector.js";
 
 /**
  * Stop Hook: Response Check
@@ -41,7 +41,9 @@ async function main() {
     return;
   }
 
-  const planMode = isPlanModeActive(input.transcript_path);
+  const planMode = input.permission_mode !== undefined
+    ? isPlanModeFromInput(input)
+    : isPlanModeActive(input.transcript_path);
 
   const result = await checkStopResponseAlignment(
     input.transcript_path,

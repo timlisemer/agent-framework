@@ -8,7 +8,7 @@ import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { spawnBackground } from "../utils/spawn-background.js";
 import { getSessionDir, getSessionState } from "../utils/summary-cache.js";
-import { isPlanModeActive } from "../utils/plan-mode-detector.js";
+import { isPlanModeActive, isPlanModeFromInput } from "../utils/plan-mode-detector.js";
 import { classifyEditIntent } from "../utils/edit-intent.js";
 import { generateMicroPredictions } from "../utils/micro-prediction.js";
 import { savePrediction } from "../utils/prediction-cache.js";
@@ -30,6 +30,7 @@ interface UserPromptSubmitHookInput {
   prompt: string;
   transcript_path: string;
   session_id: string;
+  permission_mode?: string;
 }
 
 async function main() {
@@ -46,7 +47,9 @@ async function main() {
   const stateManager = getSessionState(sessionDir);
   const oldState = await stateManager.load();
 
-  const planMode = isPlanModeActive(input.transcript_path);
+  const planMode = input.permission_mode !== undefined
+    ? isPlanModeFromInput(input)
+    : isPlanModeActive(input.transcript_path);
   const now = Date.now();
 
   const result = classifyEditIntent(
