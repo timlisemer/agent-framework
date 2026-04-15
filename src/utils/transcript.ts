@@ -177,9 +177,85 @@ interface ContentBlock {
 interface TranscriptEntry {
   isMeta?: boolean;
   message?: {
+    id?: string;
     role: string;
     content: string | ContentBlock[];
+    stop_reason?: string;
   };
+}
+
+/**
+ * One logical assistant API message, which Claude Code may split across
+ * multiple jsonl lines sharing the same `message.id`. Under load those
+ * sibling lines can be flushed to disk out of stream order (e.g. tool_use
+ * before text), so the scanner must treat them as one unit.
+ */
+interface AssistantGroup {
+  msgId: string;
+  indices: number[];
+  lastIndex: number;
+  text: string;
+  hasThinking: boolean;
+  hasToolUse: boolean;
+  toolUseIds: string[];
+  entryCount: number;
+}
+
+/**
+ * Build a map from jsonl index -> AssistantGroup. Consecutive assistant
+ * entries sharing a message.id collapse into one group; assistants without
+ * an id each form a singleton group keyed by their index.
+ */
+function buildAssistantGroups(
+  parsedEntries: (TranscriptEntry | null)[]
+): Map<number, AssistantGroup> {
+  const byMsgId = new Map<string, AssistantGroup>();
+  const byIndex = new Map<number, AssistantGroup>();
+
+  for (let i = 0; i < parsedEntries.length; i++) {
+    const entry = parsedEntries[i];
+    if (!entry || !entry.message || entry.message.role !== "assistant") continue;
+
+    const msgId = entry.message.id ?? `__singleton_${i}`;
+    let group = byMsgId.get(msgId);
+    if (!group) {
+      group = {
+        msgId,
+        indices: [],
+        lastIndex: i,
+        text: "",
+        hasThinking: false,
+        hasToolUse: false,
+        toolUseIds: [],
+        entryCount: 0,
+      };
+      byMsgId.set(msgId, group);
+    }
+
+    group.indices.push(i);
+    group.entryCount++;
+    if (i > group.lastIndex) group.lastIndex = i;
+
+    const content = entry.message.content;
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === "text" && block.text) {
+          group.text = group.text ? `${group.text} ${block.text}` : block.text;
+        } else if (block.type === "thinking") {
+          group.hasThinking = true;
+        } else if (block.type === "tool_use") {
+          group.hasToolUse = true;
+          if (block.id) group.toolUseIds.push(block.id);
+        }
+      }
+    } else if (typeof content === "string" && content) {
+      group.text = group.text ? `${group.text} ${content}` : content;
+    }
+
+    byIndex.set(i, group);
+  }
+
+  return byIndex;
 }
 
 /**
@@ -317,19 +393,6 @@ function extractSlashCommandMetadata(content: string): SlashCommandContext | nul
     description,
     allowedTools,
   };
-}
-
-function extractTextFromContent(content: string | ContentBlock[]): string {
-  if (typeof content === 'string') {
-    return content;
-  }
-  if (Array.isArray(content)) {
-    return content
-      .filter((b) => b.type === 'text' && b.text)
-      .map((b) => b.text!)
-      .join(' ');
-  }
-  return '';
 }
 
 function extractToolResultContent(block: ContentBlock): string {
@@ -497,6 +560,11 @@ export async function readTranscriptExact(
     }
   });
 
+  // Group assistant entries by message.id — Claude Code splits one logical
+  // API message across multiple jsonl lines, one per content block, and can
+  // flush them out of order. The backward scan consumes groups, not lines.
+  const assistantGroupByIndex = buildAssistantGroups(parsedEntries);
+
   // First pass: build tool_use ID map from entire file
   // Also extract slash command context if requested
   for (const entry of parsedEntries) {
@@ -620,19 +688,19 @@ export async function readTranscriptExact(
         }
       }
     } else if (role === 'assistant' && collected.assistant.length < targetAssistant) {
-      // Hard boundary: assistants from before the most recent user message
-      // belong to a previous turn and must not be reported as the current
-      // turn's assistant.
-      if (firstUserSeenIndex !== null && i < firstUserSeenIndex) {
+      const group = assistantGroupByIndex.get(i);
+      if (!group) continue;
+      // Process each group exactly once — on its highest index, which is the
+      // first index we hit scanning backward.
+      if (i !== group.lastIndex) continue;
+      // Hard boundary: the whole group is "previous turn" only if its latest
+      // line sits before the most recent user entry.
+      if (firstUserSeenIndex !== null && group.lastIndex < firstUserSeenIndex) {
         continue;
       }
-      // Check staleness for assistant messages
       const assistantStale = assistantSpec.maxStale !== undefined && scanDistance > assistantSpec.maxStale;
-      if (!assistantStale) {
-        const text = extractTextFromContent(msgContent);
-        if (text) {
-          collected.assistant.push({ role: 'assistant', content: text, index: i });
-        }
+      if (!assistantStale && group.text) {
+        collected.assistant.push({ role: 'assistant', content: group.text, index: group.lastIndex });
       }
     }
   }
@@ -685,6 +753,115 @@ export async function readTranscriptExact(
     collected.user.length + collected.assistant.length + collected.tool.length;
 
   return collected;
+}
+
+export type CurrentTurnAssistantState =
+  | { kind: "has-text"; text: string; msgId?: string }
+  | { kind: "no-current-turn" }
+  | { kind: "no-text-definitive"; msgId?: string; toolUseIds: string[] }
+  | { kind: "no-text-racing"; msgId: string; toolUseIds: string[] };
+
+/**
+ * Classify the current turn's assistant state for a PreToolUse hook.
+ *
+ * Claude Code writes one logical assistant message as multiple jsonl lines
+ * sharing a `message.id`, and those siblings can be flushed to disk out of
+ * stream order. Consumers that want to know "has the assistant responded
+ * with text on the current turn yet?" must reason about the whole msg_id
+ * group, not the individual line that the hook happens to observe first.
+ *
+ * - `has-text`: at least one sibling line carries a text block. Safe to
+ *   treat as "responded".
+ * - `no-current-turn`: no user message follows the last assistant boundary.
+ * - `no-text-definitive`: the current-turn group is a single jsonl line
+ *   with no text and no thinking — a genuine "straight to tools" turn.
+ * - `no-text-racing`: the group spans multiple jsonl lines OR has a
+ *   thinking sibling but no text yet. Claude Code is mid-flush; callers
+ *   MUST NOT deny on this state.
+ */
+export async function currentTurnAssistantState(
+  transcriptPath: string,
+  firingToolUseId?: string
+): Promise<CurrentTurnAssistantState> {
+  const content = await fs.promises.readFile(transcriptPath, "utf-8");
+  const allLines = content.trim().split("\n");
+  const parsedEntries: (TranscriptEntry | null)[] = allLines.map((line) => {
+    try {
+      return JSON.parse(line) as TranscriptEntry;
+    } catch {
+      return null;
+    }
+  });
+
+  // Find the last non-meta user entry.
+  let lastUserIndex = -1;
+  for (let i = parsedEntries.length - 1; i >= 0; i--) {
+    const entry = parsedEntries[i];
+    if (!entry || !entry.message || entry.message.role !== "user") continue;
+    if (entry.isMeta === true) continue;
+    lastUserIndex = i;
+    break;
+  }
+  if (lastUserIndex === -1) {
+    return { kind: "no-current-turn" };
+  }
+
+  const groups = buildAssistantGroups(parsedEntries);
+
+  // Select the current-turn group: the one whose lastIndex is the highest
+  // value still greater than lastUserIndex. If none, fall back to the group
+  // containing the firing tool_use_id (must also be after the user).
+  let current: AssistantGroup | undefined;
+  const seen = new Set<AssistantGroup>();
+  for (const group of groups.values()) {
+    if (seen.has(group)) continue;
+    seen.add(group);
+    if (group.lastIndex <= lastUserIndex) continue;
+    if (!current || group.lastIndex > current.lastIndex) current = group;
+  }
+  if (!current && firingToolUseId) {
+    for (const group of groups.values()) {
+      if (group.toolUseIds.includes(firingToolUseId) && group.lastIndex > lastUserIndex) {
+        current = group;
+        break;
+      }
+    }
+  }
+  if (!current) {
+    return { kind: "no-current-turn" };
+  }
+
+  if (current.text.length > 0) {
+    return { kind: "has-text", text: current.text, msgId: current.msgId };
+  }
+
+  const isSingleton = current.msgId.startsWith("__singleton_");
+  // Multi-line group without text: Claude Code is splitting this message
+  // across jsonl lines and the text sibling hasn't flushed yet.
+  if (current.entryCount > 1) {
+    return {
+      kind: "no-text-racing",
+      msgId: current.msgId,
+      toolUseIds: current.toolUseIds,
+    };
+  }
+  // Same-line thinking without text on a group whose id is a real msg_id
+  // (not a singleton synthetic key) — treat as racing. A singleton with
+  // thinking and tool_use in the same content array is the scenario
+  // harness's genuine "straight to tools" test case.
+  if (current.hasThinking && !isSingleton) {
+    return {
+      kind: "no-text-racing",
+      msgId: current.msgId,
+      toolUseIds: current.toolUseIds,
+    };
+  }
+
+  return {
+    kind: "no-text-definitive",
+    msgId: isSingleton ? undefined : current.msgId,
+    toolUseIds: current.toolUseIds,
+  };
 }
 
 /**

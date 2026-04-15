@@ -92,48 +92,32 @@ function materializeTranscript(
   }> = [];
   const finalIndex = scenario.transcript.length - 1;
 
-  // Mutate each entry in-place so synthesized ids propagate to callers.
-  const materializedEntries = scenario.transcript.map((entry, i) => {
-    const uuid = crypto.randomUUID();
-    const timestamp = new Date(baseTs + i * 10).toISOString();
-    let message: Record<string, unknown>;
-    if (entry.role === "user") {
-      const content =
-        typeof entry.content === "string"
-          ? entry.content
-          : materializeBlocks(entry.content, () => {
-              toolUseCounter += 1;
-              return `toolu_scenario_${toolUseCounter}`;
-            });
-      message = { role: "user", content };
-    } else {
-      const blocks = materializeBlocks(entry.content, () => {
-        toolUseCounter += 1;
-        return `toolu_scenario_${toolUseCounter}`;
-      }) as ScenarioBlock[];
-      const hasToolUse = blocks.some((b) => b.type === "tool_use");
-      message = {
-        id: `msg_scenario_${i}`,
-        model: "claude-opus-4-6",
-        role: "assistant",
-        content: blocks,
-        stop_reason: hasToolUse ? "tool_use" : "end_turn",
-        stop_sequence: null,
-        usage: { input_tokens: 1, output_tokens: 1 },
-      };
-      if (i === finalIndex) {
-        for (const b of blocks) {
-          if (b.type === "tool_use") {
-            finalAssistantToolUses.push({
-              id: (b as { id: string }).id,
-              name: b.name,
-              input: b.input,
-            });
-          }
-        }
-      }
-    }
+  const nextToolUseId = () => {
+    toolUseCounter += 1;
+    return `toolu_scenario_${toolUseCounter}`;
+  };
 
+  // Emit one materialized jsonl object for a given set of blocks + msg id.
+  const emitAssistantLine = (
+    blocks: ScenarioBlock[],
+    msgId: string,
+    entryIndex: number,
+    lineOffset: number,
+    collectFinalToolUses: boolean,
+  ): void => {
+    materializeBlocks(blocks, nextToolUseId);
+    const hasToolUse = blocks.some((b) => b.type === "tool_use");
+    const uuid = crypto.randomUUID();
+    const timestamp = new Date(baseTs + entryIndex * 100 + lineOffset * 10).toISOString();
+    const message: Record<string, unknown> = {
+      id: msgId,
+      model: "claude-opus-4-6",
+      role: "assistant",
+      content: blocks,
+      stop_reason: hasToolUse ? "tool_use" : "end_turn",
+      stop_sequence: null,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    };
     const line: Record<string, unknown> = {
       parentUuid: prevUuid,
       isSidechain: false,
@@ -141,19 +125,63 @@ function materializeTranscript(
       cwd: ctx.cwd,
       sessionId: ctx.sessionId,
       version: "0.0.0",
-      type: entry.role,
+      type: "assistant",
       message,
       uuid,
       timestamp,
       permissionMode,
     };
     prevUuid = uuid;
-    return line;
-  });
-
-  for (const line of materializedEntries) {
     lines.push(JSON.stringify(line));
+    if (collectFinalToolUses) {
+      for (const b of blocks) {
+        if (b.type === "tool_use") {
+          finalAssistantToolUses.push({
+            id: (b as { id: string }).id,
+            name: b.name,
+            input: b.input,
+          });
+        }
+      }
+    }
+  };
+
+  for (let i = 0; i < scenario.transcript.length; i++) {
+    const entry = scenario.transcript[i];
+    const isFinal = i === finalIndex;
+    if (entry.role === "user") {
+      const content =
+        typeof entry.content === "string"
+          ? entry.content
+          : materializeBlocks(entry.content, nextToolUseId);
+      const uuid = crypto.randomUUID();
+      const timestamp = new Date(baseTs + i * 100).toISOString();
+      const line: Record<string, unknown> = {
+        parentUuid: prevUuid,
+        isSidechain: false,
+        userType: "external",
+        cwd: ctx.cwd,
+        sessionId: ctx.sessionId,
+        version: "0.0.0",
+        type: "user",
+        message: { role: "user", content },
+        uuid,
+        timestamp,
+        permissionMode,
+      };
+      prevUuid = uuid;
+      lines.push(JSON.stringify(line));
+    } else if (entry.role === "assistant") {
+      emitAssistantLine(entry.content, `msg_scenario_${i}`, i, 0, isFinal);
+    } else {
+      // assistant_split — one jsonl line per lines[j], all sharing msg_id.
+      // Order preserved: caller decides whether text precedes tool_use.
+      for (let j = 0; j < entry.lines.length; j++) {
+        emitAssistantLine(entry.lines[j].blocks, entry.msg_id, i, j, isFinal);
+      }
+    }
   }
+
   fs.writeFileSync(ctx.transcriptPath, lines.join("\n") + "\n");
   return finalAssistantToolUses;
 }

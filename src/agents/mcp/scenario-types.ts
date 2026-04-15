@@ -46,7 +46,23 @@ export interface ScenarioAssistantEntry {
   content: ScenarioBlock[];
 }
 
-export type ScenarioEntry = ScenarioUserEntry | ScenarioAssistantEntry;
+/**
+ * A single logical assistant API message authored as multiple jsonl lines
+ * that share one `message.id`. Reproduces Claude Code's split-message
+ * write pattern (thinking / text / tool_use each on their own line). The
+ * materializer writes one jsonl line per `lines[j]`, all carrying the
+ * same `msg_id`, in the order given.
+ */
+export interface ScenarioAssistantSplitEntry {
+  role: "assistant_split";
+  msg_id: string;
+  lines: Array<{ blocks: ScenarioBlock[] }>;
+}
+
+export type ScenarioEntry =
+  | ScenarioUserEntry
+  | ScenarioAssistantEntry
+  | ScenarioAssistantSplitEntry;
 
 /** Target hook + which tool_use / prompt to fire for. */
 export interface ScenarioTarget {
@@ -142,18 +158,40 @@ export function validateScenario(raw: unknown): Scenario {
   }
   for (let i = 0; i < r.transcript.length; i++) {
     const e = r.transcript[i] as Record<string, unknown>;
-    if (!e || (e.role !== "user" && e.role !== "assistant")) {
+    if (!e || (e.role !== "user" && e.role !== "assistant" && e.role !== "assistant_split")) {
       throw new Error(
-        `scenario.transcript[${i}].role must be "user" or "assistant"`,
+        `scenario.transcript[${i}].role must be "user", "assistant", or "assistant_split"`,
       );
     }
-    if (e.content === undefined) {
-      throw new Error(`scenario.transcript[${i}].content is required`);
-    }
-    if (e.role === "assistant" && !Array.isArray(e.content)) {
-      throw new Error(
-        `scenario.transcript[${i}].content must be an array of blocks for assistant entries`,
-      );
+    if (e.role === "user" || e.role === "assistant") {
+      if (e.content === undefined) {
+        throw new Error(`scenario.transcript[${i}].content is required`);
+      }
+      if (e.role === "assistant" && !Array.isArray(e.content)) {
+        throw new Error(
+          `scenario.transcript[${i}].content must be an array of blocks for assistant entries`,
+        );
+      }
+    } else {
+      // assistant_split
+      if (typeof e.msg_id !== "string" || e.msg_id.length === 0) {
+        throw new Error(
+          `scenario.transcript[${i}].msg_id must be a non-empty string for assistant_split entries`,
+        );
+      }
+      if (!Array.isArray(e.lines) || e.lines.length === 0) {
+        throw new Error(
+          `scenario.transcript[${i}].lines must be a non-empty array for assistant_split entries`,
+        );
+      }
+      for (let j = 0; j < e.lines.length; j++) {
+        const ln = (e.lines as Array<Record<string, unknown>>)[j];
+        if (!ln || !Array.isArray(ln.blocks)) {
+          throw new Error(
+            `scenario.transcript[${i}].lines[${j}].blocks must be an array`,
+          );
+        }
+      }
     }
   }
 
@@ -175,19 +213,36 @@ export function validateScenario(raw: unknown): Scenario {
   }
   const hook = target.hook as HookEventName;
 
+  // Collect all tool_use blocks from the final entry, whether it's a
+  // normal assistant entry or a split-message assistant_split entry.
+  function collectFinalAssistantBlocks(
+    last: Record<string, unknown>,
+  ): ScenarioBlock[] | null {
+    if (last.role === "assistant" && Array.isArray(last.content)) {
+      return last.content as ScenarioBlock[];
+    }
+    if (last.role === "assistant_split" && Array.isArray(last.lines)) {
+      const out: ScenarioBlock[] = [];
+      for (const ln of last.lines as Array<{ blocks: ScenarioBlock[] }>) {
+        out.push(...ln.blocks);
+      }
+      return out;
+    }
+    return null;
+  }
+
   // For PreToolUse / PostToolUse: the final entry must be an assistant
-  // with at least one tool_use block, and tool_use_ref (if a specific id)
-  // must match one of them.
+  // (or assistant_split) with at least one tool_use block, and
+  // tool_use_ref (if a specific id) must match one of them.
   if (hook === "PreToolUse" || hook === "PostToolUse") {
     const last = r.transcript[r.transcript.length - 1] as Record<string, unknown>;
-    if (last.role !== "assistant" || !Array.isArray(last.content)) {
+    const blocks = collectFinalAssistantBlocks(last);
+    if (!blocks) {
       throw new Error(
-        `scenario.target.hook=${hook} requires the final transcript entry to be an assistant with content blocks`,
+        `scenario.target.hook=${hook} requires the final transcript entry to be an assistant (or assistant_split) with content blocks`,
       );
     }
-    const toolUses = (last.content as ScenarioBlock[]).filter(
-      (b) => b.type === "tool_use",
-    );
+    const toolUses = blocks.filter((b) => b.type === "tool_use");
     if (toolUses.length === 0) {
       throw new Error(
         `scenario.target.hook=${hook} requires at least one tool_use block in the final assistant entry`,
@@ -213,20 +268,16 @@ export function validateScenario(raw: unknown): Scenario {
 
   if (hook === "Stop") {
     const last = r.transcript[r.transcript.length - 1] as Record<string, unknown>;
-    if (last.role !== "assistant") {
+    if (last.role !== "assistant" && last.role !== "assistant_split") {
       throw new Error(
         "scenario.target.hook=Stop requires the final transcript entry to be an assistant",
       );
     }
-    if (Array.isArray(last.content)) {
-      const hasToolUse = (last.content as ScenarioBlock[]).some(
-        (b) => b.type === "tool_use",
+    const blocks = collectFinalAssistantBlocks(last);
+    if (blocks && blocks.some((b) => b.type === "tool_use")) {
+      throw new Error(
+        "scenario.target.hook=Stop requires the final assistant entry to have no tool_use blocks",
       );
-      if (hasToolUse) {
-        throw new Error(
-          "scenario.target.hook=Stop requires the final assistant entry to have no tool_use blocks",
-        );
-      }
     }
   }
 

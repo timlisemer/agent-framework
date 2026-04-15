@@ -419,12 +419,21 @@ const scenarioBlockSchema = z.record(z.unknown());
 const scenarioSchema = z.object({
   name: z.string().describe("Slug for the scenario. Must match [A-Za-z0-9._-]+."),
   description: z.string().optional(),
-  transcript: z.array(z.object({
-    role: z.enum(["user", "assistant"]),
-    content: z.union([z.string(), z.array(scenarioBlockSchema)]),
-    uuid: z.string().optional(),
-    parentUuid: z.string().nullable().optional(),
-  })).min(1),
+  transcript: z.array(z.union([
+    z.object({
+      role: z.enum(["user", "assistant"]),
+      content: z.union([z.string(), z.array(scenarioBlockSchema)]),
+      uuid: z.string().optional(),
+      parentUuid: z.string().nullable().optional(),
+    }),
+    z.object({
+      role: z.literal("assistant_split"),
+      msg_id: z.string(),
+      lines: z.array(z.object({
+        blocks: z.array(scenarioBlockSchema),
+      })).min(1),
+    }),
+  ])).min(1),
   target: z.object({
     hook: z.enum(["PreToolUse","PostToolUse","Stop","UserPromptSubmit","SessionStart"]),
     tool_use_ref: z.union([z.string(), z.literal("last")]).optional(),
