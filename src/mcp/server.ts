@@ -439,6 +439,7 @@ const scenarioSchema = z.object({
     tool_use_ref: z.union([z.string(), z.literal("last")]).optional(),
     prompt_override: z.string().optional(),
     batch_visible_through: z.number().int().nonnegative().optional(),
+    fanout: z.boolean().optional(),
   }),
   env: z.object({
     permission_mode: z.enum(["default","plan","acceptEdits","bypassPermissions","dontAsk"]).optional(),
@@ -446,11 +447,19 @@ const scenarioSchema = z.object({
     cwd: z.string().optional(),
     timeout_ms: z.number().optional(),
   }).optional(),
-  expect: z.object({
-    expected: z.string(),
-    by: z.string().optional(),
-    notes: z.string().optional(),
-  }),
+  expect: z.union([
+    z.object({
+      expected: z.string(),
+      by: z.string().optional(),
+      notes: z.string().optional(),
+    }),
+    z.array(z.object({
+      position: z.number().int().nonnegative(),
+      expected: z.string(),
+      by: z.string().optional(),
+      notes: z.string().optional(),
+    })).min(1),
+  ]),
 });
 
 server.registerTool(

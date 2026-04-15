@@ -128,5 +128,6 @@ export type {
   ScenarioEnv,
   Scenario,
   ScenarioResult,
+  FanoutFireResult,
 } from "../../src/agents/mcp/scenario-types.js";
 export { validateScenario } from "../../src/agents/mcp/scenario-types.js";

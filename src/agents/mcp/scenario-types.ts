@@ -91,6 +91,16 @@ export interface ScenarioTarget {
    * visible slice. See `validateScenario` for the full rule set.
    */
   batch_visible_through?: number;
+  /**
+   * When true, the runner fires one PreToolUse hook per tool_use sub-line
+   * in the final `assistant_split`, in order, with shared state
+   * accumulating across fires in one cache dir. Mutually exclusive with
+   * `tool_use_ref` and `batch_visible_through`. Requires `hook: PreToolUse`
+   * and the final entry to be `assistant_split` of pure tool_use sub-lines
+   * (optionally preceded by text/thinking sub-lines). Expect must be the
+   * array form.
+   */
+  fanout?: boolean;
 }
 
 /** Environment / setup flags plumbed into the hook stdin and transcript. */
@@ -119,34 +129,79 @@ export interface Scenario {
   target: ScenarioTarget;
   /** Optional setup flags. */
   env?: ScenarioEnv;
-  /** Scoring spec. Reuses RichExpectation minus `at`. */
-  expect: {
-    expected: string;
-    by?: string;
-    notes?: string;
-  };
+  /**
+   * Scoring spec. Single form (reuses RichExpectation minus `at`) is used
+   * when `target.fanout` is unset. Array form is used when
+   * `target.fanout: true`; each entry is keyed by 0-based `position` into
+   * the final `assistant_split.lines`. Positions not listed are fired but
+   * not asserted (recorded in report, not a pass/fail input). Run passes
+   * iff every listed position's fire matches its expectation.
+   */
+  expect:
+    | {
+        expected: string;
+        by?: string;
+        notes?: string;
+      }
+    | Array<{
+        position: number;
+        expected: string;
+        by?: string;
+        notes?: string;
+      }>;
+}
+
+/**
+ * Per-fire result inside a fan-out `ScenarioResult`. Each entry is one
+ * PreToolUse hook invocation against one sub-line in the final
+ * `assistant_split`.
+ */
+export interface FanoutFireResult {
+  position: number;
+  tool_use_id: string;
+  decision: string;
+  gate?: string;
+  reason?: string;
+  ms: number;
+  expected?: string;
+  gate_expected?: string;
+  pass: boolean;
+  asserted: boolean;
 }
 
 /**
  * Result of running a scenario — written to report-scenario.json and
  * echoed to stdout by test-harness/scenario.ts.
  */
-export interface ScenarioResult {
-  scenario: string;
-  hook: HookEventName;
-  decision: string;
-  gate?: string;
-  gate_expected?: string;
-  reason?: string;
-  expected: string;
-  pass: boolean;
-  ms: number;
-  error?: string;
-  transcript_path: string;
-  commit: string;
-  /** Echoed from target.batch_visible_through for reproducibility. */
-  batch_visible_through?: number;
-}
+export type ScenarioResult =
+  | {
+      mode: "single";
+      scenario: string;
+      hook: HookEventName;
+      decision: string;
+      gate?: string;
+      gate_expected?: string;
+      reason?: string;
+      expected: string;
+      pass: boolean;
+      ms: number;
+      error?: string;
+      transcript_path: string;
+      commit: string;
+      /** Echoed from target.batch_visible_through for reproducibility. */
+      batch_visible_through?: number;
+    }
+  | {
+      mode: "fanout";
+      scenario: string;
+      hook: HookEventName;
+      fires: FanoutFireResult[];
+      pass: boolean;
+      ms: number;
+      error?: string;
+      transcript_path: string;
+      commit: string;
+    };
 
 /**
  * Validate a raw JSON value as a Scenario. Throws descriptive errors on
@@ -245,10 +300,155 @@ export function validateScenario(raw: unknown): Scenario {
     return null;
   }
 
+  const fanout = (target as { fanout?: unknown }).fanout;
+  if (fanout !== undefined && typeof fanout !== "boolean") {
+    throw new Error("scenario.target.fanout must be a boolean when set");
+  }
+
+  // ── Fan-out branch (F1..F7). When target.fanout === true we run the
+  // fan-out rule set and skip both the B1..B7 branch and the single-form
+  // expect-object validation further down.
+  if (fanout === true) {
+    // F1: hook must be PreToolUse.
+    if (hook !== "PreToolUse") {
+      throw new Error(
+        `scenario.target.fanout=true requires hook=PreToolUse, got ${hook}`,
+      );
+    }
+    // F2/F3: mutually exclusive with tool_use_ref / batch_visible_through.
+    if ((target as { tool_use_ref?: unknown }).tool_use_ref !== undefined) {
+      throw new Error(
+        "scenario.target.fanout=true is mutually exclusive with tool_use_ref",
+      );
+    }
+    if (
+      (target as { batch_visible_through?: unknown }).batch_visible_through !==
+      undefined
+    ) {
+      throw new Error(
+        "scenario.target.fanout=true is mutually exclusive with batch_visible_through",
+      );
+    }
+    // F4: final entry must be assistant_split.
+    const last = r.transcript[r.transcript.length - 1] as Record<
+      string,
+      unknown
+    >;
+    if (last.role !== "assistant_split" || !Array.isArray(last.lines)) {
+      throw new Error(
+        "scenario.target.fanout=true requires the final transcript entry to be role=assistant_split",
+      );
+    }
+    const splitLines = last.lines as Array<{ blocks: ScenarioBlock[] }>;
+    // F5: compute firstToolUseIdx. Sub-lines [0..firstToolUseIdx-1] may
+    // carry exactly one text or thinking block. Sub-lines
+    // [firstToolUseIdx..end] must each contain exactly one tool_use block.
+    let firstToolUseIdx = -1;
+    for (let j = 0; j < splitLines.length; j++) {
+      const blocks = splitLines[j].blocks;
+      if (blocks.length === 1 && blocks[0].type === "tool_use") {
+        firstToolUseIdx = j;
+        break;
+      }
+      if (
+        blocks.length === 1 &&
+        (blocks[0].type === "text" || blocks[0].type === "thinking")
+      ) {
+        continue;
+      }
+      throw new Error(
+        `scenario.transcript[${r.transcript.length - 1}].lines[${j}] must contain exactly one text/thinking block (before any tool_use) or one tool_use block under fanout`,
+      );
+    }
+    if (firstToolUseIdx === -1) {
+      throw new Error(
+        "scenario.target.fanout=true requires at least one tool_use sub-line in the final assistant_split",
+      );
+    }
+    for (let j = firstToolUseIdx; j < splitLines.length; j++) {
+      const blocks = splitLines[j].blocks;
+      if (blocks.length !== 1 || blocks[0].type !== "tool_use") {
+        throw new Error(
+          `scenario.transcript[${r.transcript.length - 1}].lines[${j}] must contain exactly one tool_use block (no text/thinking interleaved after the first tool_use sub-line under fanout)`,
+        );
+      }
+    }
+    const toolUseCount = splitLines.length - firstToolUseIdx;
+    if (toolUseCount < 2) {
+      throw new Error(
+        "scenario.target.fanout=true requires at least 2 tool_use sub-lines; use single-hook mode for a batch of 1",
+      );
+    }
+    // F6: ids are either explicit or will be synthesized by materializeBlocks.
+    // No hard id requirement on the author.
+
+    // F7: expect must be the array form.
+    const expectRaw = r.expect;
+    if (!Array.isArray(expectRaw)) {
+      throw new Error(
+        "scenario.expect must be the array form when target.fanout=true",
+      );
+    }
+    if (expectRaw.length === 0) {
+      throw new Error(
+        "scenario.expect (array form) must have at least one entry",
+      );
+    }
+    const preVocab = ["allow", "deny"];
+    const seenPositions = new Set<number>();
+    for (let k = 0; k < expectRaw.length; k++) {
+      const e = expectRaw[k] as Record<string, unknown>;
+      if (!e || typeof e !== "object") {
+        throw new Error(`scenario.expect[${k}] must be an object`);
+      }
+      if (
+        typeof e.position !== "number" ||
+        !Number.isInteger(e.position) ||
+        e.position < 0
+      ) {
+        throw new Error(
+          `scenario.expect[${k}].position must be a non-negative integer`,
+        );
+      }
+      if (e.position < firstToolUseIdx || e.position >= splitLines.length) {
+        throw new Error(
+          `scenario.expect[${k}].position (${e.position}) must be in [${firstToolUseIdx}, ${splitLines.length - 1}]`,
+        );
+      }
+      if (seenPositions.has(e.position)) {
+        throw new Error(
+          `scenario.expect[${k}].position (${e.position}) is duplicated`,
+        );
+      }
+      seenPositions.add(e.position);
+      if (typeof e.expected !== "string") {
+        throw new Error(`scenario.expect[${k}].expected must be a string`);
+      }
+      if (!preVocab.includes(e.expected)) {
+        throw new Error(
+          `scenario.expect[${k}].expected must be one of ${preVocab.join(", ")}, got ${JSON.stringify(e.expected)}`,
+        );
+      }
+      if (e.by !== undefined && typeof e.by !== "string") {
+        throw new Error(
+          `scenario.expect[${k}].by must be a string when set`,
+        );
+      }
+      if (e.notes !== undefined && typeof e.notes !== "string") {
+        throw new Error(
+          `scenario.expect[${k}].notes must be a string when set`,
+        );
+      }
+    }
+
+    // env block still validates below via the shared code path.
+    // Single-form expect-object check below is skipped for fanout.
+  }
+
   // For PreToolUse / PostToolUse: the final entry must be an assistant
   // (or assistant_split) with at least one tool_use block, and
   // tool_use_ref (if a specific id) must match one of them.
-  if (hook === "PreToolUse" || hook === "PostToolUse") {
+  if (fanout !== true && (hook === "PreToolUse" || hook === "PostToolUse")) {
     const last = r.transcript[r.transcript.length - 1] as Record<string, unknown>;
     const blocks = collectFinalAssistantBlocks(last);
     if (!blocks) {
@@ -410,7 +610,18 @@ export function validateScenario(raw: unknown): Scenario {
     }
   }
 
+  if (fanout === true) {
+    // Fan-out already validated its own array-form expect above. Skip the
+    // single-form validation entirely.
+    return raw as Scenario;
+  }
+
   const expect = r.expect as Record<string, unknown> | undefined;
+  if (Array.isArray(expect)) {
+    throw new Error(
+      "scenario.expect array form is only valid when target.fanout=true",
+    );
+  }
   if (!expect || typeof expect !== "object") {
     throw new Error("scenario.expect is required");
   }

@@ -690,6 +690,90 @@ would put no tool_use on disk at all, and firing a hook against a
 tool_use id that isn't in the visible slice is incoherent -- the
 validator rejects it.
 
+B.4a verifies one isolated per-position state per scenario. To verify
+the full leader-denies -> siblings-inherit chain end-to-end in a single
+run, use the fan-out mode described in B.4b below.
+
+### B.4b End-to-end batch fan-out
+
+When to use: verifying the leader's decision AND the sibling inheritance
+path (\`src/hooks/pre-tool-use.ts\` lines 95-118, 228-239) in one run.
+B.4a's per-position pre-flush single-hook mode cannot observe
+\`waitForBatchLeader\` because each scenario run starts with an empty
+cache and never writes a leader entry first. Use B.4a for isolated
+per-position assertions; use B.4b for the full chain.
+
+Schema summary: \`target.fanout: true\`, mutually exclusive with
+\`tool_use_ref\` and \`batch_visible_through\`. Final entry must be
+\`assistant_split\`. Sub-lines strictly before the first tool_use may
+be \`text\`/\`thinking\` (exactly one block each). Sub-lines at and
+after the first tool_use must each contain exactly one \`tool_use\`
+block. At least two tool_use sub-lines are required -- a batch of 1
+should use single-hook mode.
+
+\`expect\` must be the array form, keyed by 0-based \`position\` in
+\`assistant_split.lines\`:
+
+  "expect": [
+    { "position": 1, "expected": "deny", "by": "respond-first" },
+    { "position": 2, "expected": "deny", "by": "batch-sibling" },
+    { "position": 3, "expected": "deny", "by": "batch-sibling" }
+  ]
+
+Positions not listed are still fired and recorded, but their decisions
+do not contribute to the aggregate pass/fail. The run passes iff every
+listed position's fire matches its \`expected\` (and \`by\` when set).
+
+Worked example -- leader fast-deny + siblings inherit. Batch of 3 Bash
+tool_uses preceded by a thinking sub-line, no user-visible text:
+
+  {
+    "name": "fanout-bash-thinking-leader",
+    "transcript": [
+      { "role": "user", "content": "delete everything" },
+      { "role": "assistant_split", "msg_id": "msg_f1", "lines": [
+        { "blocks": [{ "type": "thinking", "thinking": "planning..." }] },
+        { "blocks": [{ "type": "tool_use", "id": "toolu_b1",
+                       "name": "Bash", "input": { "command": "rm -rf /" } }] },
+        { "blocks": [{ "type": "tool_use", "id": "toolu_b2",
+                       "name": "Bash", "input": { "command": "rm -rf a" } }] },
+        { "blocks": [{ "type": "tool_use", "id": "toolu_b3",
+                       "name": "Bash", "input": { "command": "rm -rf b" } }] }
+      ]}
+    ],
+    "target": { "hook": "PreToolUse", "fanout": true },
+    "expect": [
+      { "position": 1, "expected": "deny", "by": "respond-first" },
+      { "position": 2, "expected": "deny", "by": "batch-sibling" },
+      { "position": 3, "expected": "deny", "by": "batch-sibling" }
+    ]
+  }
+
+Expected report: 3 fires, \`fires[0].gate === "respond-first"\`,
+\`fires[1..2].gate === "batch-sibling"\`, all deny, \`pass: true\`.
+
+Report shape (fan-out):
+
+  {
+    "mode": "fanout",
+    "scenario": "...",
+    "hook": "PreToolUse",
+    "fires": [
+      { "position": 1, "tool_use_id": "toolu_b1",
+        "decision": "deny", "gate": "respond-first",
+        "expected": "deny", "gate_expected": "respond-first",
+        "pass": true, "asserted": true, "ms": 157, "reason": "..." },
+      ...
+    ],
+    "pass": true,
+    "ms": 480,
+    "transcript_path": "...",
+    "commit": "..."
+  }
+
+Single-hook mode's report still uses \`mode: "single"\` with the
+existing fields. Report readers must dispatch on \`mode\`.
+
 ### B.5 env flags (setup knobs)
 
   permission_mode   One of "default" | "plan" | "acceptEdits"
