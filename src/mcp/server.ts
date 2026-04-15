@@ -438,6 +438,7 @@ const scenarioSchema = z.object({
     hook: z.enum(["PreToolUse","PostToolUse","Stop","UserPromptSubmit","SessionStart"]),
     tool_use_ref: z.union([z.string(), z.literal("last")]).optional(),
     prompt_override: z.string().optional(),
+    batch_visible_through: z.number().int().nonnegative().optional(),
   }),
   env: z.object({
     permission_mode: z.enum(["default","plan","acceptEdits","bypassPermissions","dontAsk"]).optional(),

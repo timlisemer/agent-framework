@@ -79,6 +79,18 @@ export interface ScenarioTarget {
    * to the final user entry's text.
    */
   prompt_override?: string;
+  /**
+   * For PreToolUse / PostToolUse against a parallel tool_use batch
+   * authored as an `assistant_split`. 0-based inclusive index into the
+   * FINAL entry's `lines` array. When set, the materializer stops
+   * flushing the final split after this sub-line, reproducing the
+   * on-disk state at the instant sub-line K's hook fires in real
+   * Claude Code (only positions 0..K are on disk yet). Requires the
+   * final transcript entry to be `role: "assistant_split"` and
+   * `tool_use_ref` to be an explicit concrete id pointing inside the
+   * visible slice. See `validateScenario` for the full rule set.
+   */
+  batch_visible_through?: number;
 }
 
 /** Environment / setup flags plumbed into the hook stdin and transcript. */
@@ -132,6 +144,8 @@ export interface ScenarioResult {
   error?: string;
   transcript_path: string;
   commit: string;
+  /** Echoed from target.batch_visible_through for reproducibility. */
+  batch_visible_through?: number;
 }
 
 /**
@@ -261,6 +275,82 @@ export function validateScenario(raw: unknown): Scenario {
       if (!found) {
         throw new Error(
           `scenario.target.tool_use_ref "${ref}" does not match any tool_use block id in the final assistant entry`,
+        );
+      }
+    }
+
+    // Rule 7 (B7): reject interleaved text/thinking sub-lines between
+    // tool_use sub-lines inside the final assistant_split. Real Claude
+    // Code never writes this shape, and detectParallelBatch's back-walk
+    // at src/utils/transcript.ts:1127 breaks on text-only assistant
+    // lines, which would orphan tool_uses on one side. Thinking-only
+    // sub-lines strictly before all tool_use sub-lines are fine
+    // because the back-walk skips them.
+    if (last.role === "assistant_split" && Array.isArray(last.lines)) {
+      const splitLines = last.lines as Array<{ blocks: ScenarioBlock[] }>;
+      let sawToolUse = false;
+      for (let j = 0; j < splitLines.length; j++) {
+        const ln = splitLines[j];
+        const hasToolUse = ln.blocks.some((b) => b.type === "tool_use");
+        const hasText = ln.blocks.some((b) => b.type === "text");
+        if (hasToolUse) {
+          sawToolUse = true;
+          continue;
+        }
+        if (sawToolUse && hasText) {
+          throw new Error(
+            `scenario.transcript[${r.transcript.length - 1}].lines[${j}] has a text block after a tool_use sub-line; text/thinking must occur strictly before any tool_use sub-line in an assistant_split`,
+          );
+        }
+      }
+    }
+
+    // batch_visible_through rules (B1..B6).
+    const cap = (target as { batch_visible_through?: unknown })
+      .batch_visible_through;
+    if (cap !== undefined) {
+      if (typeof cap !== "number" || !Number.isInteger(cap) || cap < 0) {
+        throw new Error(
+          "scenario.target.batch_visible_through must be a non-negative integer",
+        );
+      }
+      if (last.role !== "assistant_split") {
+        throw new Error(
+          "scenario.target.batch_visible_through requires the final transcript entry to be role=assistant_split (byte-indistinguishability from real Claude Code parallel batches)",
+        );
+      }
+      const splitLines = (last.lines as Array<{ blocks: ScenarioBlock[] }>);
+      if (cap >= splitLines.length) {
+        throw new Error(
+          `scenario.target.batch_visible_through (${cap}) must be < final assistant_split.lines.length (${splitLines.length})`,
+        );
+      }
+      if (ref === undefined) {
+        throw new Error(
+          "scenario.target.tool_use_ref is required when batch_visible_through is set (default 'last' is ambiguous under truncation)",
+        );
+      }
+      if (ref === "last") {
+        throw new Error(
+          'scenario.target.tool_use_ref="last" is not allowed when batch_visible_through is set; use the concrete tool_use id',
+        );
+      }
+      // ref is a concrete id string. Verify it points to a tool_use in
+      // the visible slice of the FINAL assistant_split (rule B6).
+      let foundInVisibleSlice = false;
+      for (let j = 0; j <= cap; j++) {
+        const ln = splitLines[j];
+        for (const b of ln.blocks) {
+          if (b.type === "tool_use" && (b as { id?: string }).id === ref) {
+            foundInVisibleSlice = true;
+            break;
+          }
+        }
+        if (foundInVisibleSlice) break;
+      }
+      if (!foundInVisibleSlice) {
+        throw new Error(
+          `scenario.target.tool_use_ref "${ref}" must point to a tool_use in final assistant_split.lines[0..${cap}]; batch_visible_through applies only to the final entry's flush state`,
         );
       }
     }

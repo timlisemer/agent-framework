@@ -176,7 +176,23 @@ function materializeTranscript(
     } else {
       // assistant_split — one jsonl line per lines[j], all sharing msg_id.
       // Order preserved: caller decides whether text precedes tool_use.
-      for (let j = 0; j < entry.lines.length; j++) {
+      //
+      // When this is the FINAL entry and target.batch_visible_through is
+      // set, stop flushing after that 0-based sub-line index. This
+      // reproduces the pre-flush on-disk state at the instant sub-line
+      // `cap`'s hook fires in real Claude Code (only positions 0..cap
+      // are on disk yet). The final tool_use collection in
+      // emitAssistantLine is transitively shortened because
+      // collectFinalToolUses only runs inside emitAssistantLine calls
+      // that actually execute — do NOT separately "fix" one without
+      // the other. See TranscriptEntry / AssistantGroup in
+      // src/utils/transcript.ts for the on-disk shape this must match.
+      const lastIdx = entry.lines.length - 1;
+      const cap =
+        isFinal && scenario.target.batch_visible_through !== undefined
+          ? scenario.target.batch_visible_through
+          : lastIdx;
+      for (let j = 0; j <= cap; j++) {
         emitAssistantLine(entry.lines[j].blocks, entry.msg_id, i, j, isFinal);
       }
     }
@@ -209,6 +225,15 @@ function resolveToolUseBlock(
 ): { id: string; name: string; input: Record<string, unknown> } {
   const ref = scenario.target.tool_use_ref ?? "last";
   if (ref === "last") {
+    // Defensive: the validator rejects tool_use_ref="last" (and omission,
+    // which defaults to "last") whenever batch_visible_through is set,
+    // because "last" is ambiguous under truncation. This branch must
+    // therefore never run under a cap. Assert the contract explicitly.
+    if (scenario.target.batch_visible_through !== undefined) {
+      throw new Error(
+        'internal: tool_use_ref="last" combined with batch_visible_through should have been rejected by validateScenario',
+      );
+    }
     if (finalToolUses.length === 0) {
       throw new Error(
         "target.tool_use_ref='last' but the final assistant entry has no tool_use blocks",
@@ -420,6 +445,7 @@ async function main() {
       error: parseError,
       transcript_path: transcriptPath,
       commit: getVersion(),
+      batch_visible_through: scenario.target.batch_visible_through,
     };
 
     fs.writeFileSync(

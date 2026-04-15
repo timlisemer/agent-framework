@@ -631,6 +631,65 @@ Target shapes:
   SessionStart:
     { "hook": "SessionStart" }
 
+### B.4a Authoring parallel tool_use batches
+
+Real Claude Code writes a parallel tool_use batch as multiple jsonl
+assistant lines that all share one \`message.id\`. Author that shape with
+an \`assistant_split\` entry -- one \`tool_use\` per sub-line, all sharing
+\`msg_id\`:
+
+  { "role": "assistant_split", "msg_id": "msg_batch_1", "lines": [
+      { "blocks": [{ "type": "tool_use", "id": "toolu_p1",
+                     "name": "Agent", "input": { ... } }] },
+      { "blocks": [{ "type": "tool_use", "id": "toolu_p2",
+                     "name": "Agent", "input": { ... } }] },
+      { "blocks": [{ "type": "tool_use", "id": "toolu_p3",
+                     "name": "Agent", "input": { ... } }] }
+  ]}
+
+Text-bundled form (text block shares the same \`msg_id\` as the batch --
+the "response is part of the batch" shape): put the text on sub-line 0
+and the tool_uses on subsequent sub-lines of the SAME split. Text and
+thinking sub-lines must occur strictly before any tool_use sub-line; an
+interleaved text sub-line between tool_uses is rejected because
+\`detectParallelBatch\`'s back-walk breaks on text-only assistant lines
+and would orphan tool_uses on one side.
+
+  { "role": "assistant_split", "msg_id": "msg_batch_2", "lines": [
+      { "blocks": [{ "type": "text", "text": "running 3 plan agents" }] },
+      { "blocks": [{ "type": "tool_use", "id": "toolu_p1", ... }] },
+      { "blocks": [{ "type": "tool_use", "id": "toolu_p2", ... }] },
+      { "blocks": [{ "type": "tool_use", "id": "toolu_p3", ... }] }
+  ]}
+
+Per-position pre-flush: a single hook fires per \`run_scenario\`, and in
+real Claude Code the on-disk transcript at the instant sub-line K's
+hook fires contains only sub-lines 0..K. Set
+\`target.batch_visible_through\` to the 0-based sub-line index through
+which flushing has occurred, and set \`target.tool_use_ref\` to the
+concrete id of the tool_use whose hook is firing. The ref must lie
+inside the visible slice; "last" and omitted refs are rejected under a
+cap because they are ambiguous under truncation. The cap only applies
+to the FINAL entry's flush state -- earlier-entry targets are not
+valid with it.
+
+Worked example -- a 3-call parallel batch produces 3 scenarios, one per
+firing position:
+
+  Position 0: batch_visible_through: 0, tool_use_ref: "toolu_p1"
+    -- only the leader is on disk. \`detectParallelBatch\` returns null
+       because batchIds.length < 2 at that instant; this matches real
+       Claude Code. Rules that key off ParallelBatchInfo see no batch.
+  Position 1: batch_visible_through: 1, tool_use_ref: "toolu_p2"
+  Position 2: batch_visible_through: 2, tool_use_ref: "toolu_p3"
+    -- steady state, full batch visible.
+
+Text-bundled caveat: when sub-line 0 is a text block, \`batch_visible_through\`
+must be >= the index of the first tool_use sub-line. Setting it to 0
+would put no tool_use on disk at all, and firing a hook against a
+tool_use id that isn't in the visible slice is incoherent -- the
+validator rejects it.
+
 ### B.5 env flags (setup knobs)
 
   permission_mode   One of "default" | "plan" | "acceptEdits"
@@ -806,7 +865,6 @@ permission_mode, subagent, cwd, timeout_ms, and arbitrary transcript
 content. That is the minimum contract. If your test case needs a setup
 knob NOT in that list -- for example:
 
-  - an active tool_use batch state (parallel tool calls)
   - a specific session-state file under ~/.agent-framework/sessions/
   - hook-internal cache state (correction-cache, gate-reasoning cache)
   - a new hook event not in the 5 supported
