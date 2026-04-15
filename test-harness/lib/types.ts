@@ -110,3 +110,23 @@ export function normalizeExpectation(
   if (Array.isArray(entry)) return entry;
   return [entry];
 }
+
+// ─── Scenario Testing (synthetic transcripts) ──────────────────────────────
+//
+// Scenario types + validateScenario live in src/agents/mcp/scenario-types.ts
+// so src-side MCP handlers can import them (tsconfig rootDir is src/).
+// Re-exported here as a convenience for test-harness consumers.
+
+export type {
+  HookEventName,
+  PermissionMode,
+  ScenarioBlock,
+  ScenarioUserEntry,
+  ScenarioAssistantEntry,
+  ScenarioEntry,
+  ScenarioTarget,
+  ScenarioEnv,
+  Scenario,
+  ScenarioResult,
+} from "../../src/agents/mcp/scenario-types.js";
+export { validateScenario } from "../../src/agents/mcp/scenario-types.js";

@@ -11,6 +11,9 @@
  *   expand          - Run replay.ts --list --expand (free)
  *   read_file       - Read report, labels, or notes
  *   append_notes    - Append to notes_and_questions.md
+ *   run_scenario    - Execute a synthetic scenario (unit-test a single hook)
+ *   list_scenarios  - List stored scenarios
+ *   read_scenario   - Read scenario.json or report-scenario.json
  *   git_hash        - Get current framework version
  *   help            - Full tester documentation
  *
@@ -20,16 +23,22 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { validateScenario } from "./scenario-types.js";
 import {
   findTestableTranscripts,
   transcriptRunDir,
   readTestRunFile,
   runReplayCommand,
+  runScenarioCommand,
   getVersion,
   checkAndIncrementRunLimit,
   detectWorkflowState,
   formatStatusFooter,
   appendTestRunFile,
+  scenarioDir,
+  writeScenarioFile,
+  readScenarioFile,
+  listScenarios,
 } from "./test-harness-shared.js";
 
 // ─── Action Handlers ───────────────────────────────────────────────────────
@@ -142,6 +151,51 @@ function handleAppendNotes(transcriptName: string, content: string): string {
   return `Appended to ${filePath}` + formatStatusFooter(state);
 }
 
+function handleRunScenario(
+  scenarioName: string | undefined,
+  inline: unknown | undefined,
+  rootOverride?: string,
+): string {
+  if (!scenarioName && inline === undefined) {
+    throw new Error(
+      "run_scenario: scenario_name or scenario (inline) is required",
+    );
+  }
+  // If inline provided: validate, write, then run (by resolved name).
+  let resolvedName = scenarioName;
+  if (inline !== undefined) {
+    const scenario = validateScenario(inline);
+    resolvedName = scenarioName ?? scenario.name;
+    writeScenarioFile(resolvedName, scenario);
+  }
+  if (!resolvedName) {
+    throw new Error("run_scenario: scenario_name is required when no inline scenario is provided");
+  }
+  const scenarioPath = path.join(scenarioDir(resolvedName), "scenario.json");
+  if (!fs.existsSync(scenarioPath)) {
+    throw new Error(
+      `scenario "${resolvedName}" has no scenario.json. Pass the 'scenario' parameter inline to create one.`,
+    );
+  }
+  return runScenarioCommand(["--scenario", scenarioPath], 300000, rootOverride);
+}
+
+function handleListScenarios(): string {
+  const items = listScenarios();
+  if (items.length === 0) {
+    return "No scenarios. Use run_scenario with an inline 'scenario' object to create one.";
+  }
+  const lines = ["SCENARIOS:", ""];
+  for (const s of items) {
+    lines.push(`  ${s.name}${s.hasReport ? "  (has report-scenario.json)" : ""}`);
+  }
+  return lines.join("\n");
+}
+
+function handleReadScenario(scenarioName: string, filename: string): string {
+  return readScenarioFile(scenarioName, filename);
+}
+
 function handleGitHash(): string {
   return getVersion();
 }
@@ -206,6 +260,20 @@ export interface TesterInput {
    * is no longer needed; the resolver finds it there automatically.
    */
   transcript_path?: string;
+  /**
+   * For run_scenario / list_scenarios / read_scenario: slug identifying a
+   * scenario under ~/.agent-framework/test-runs/scenarios/<name>/. Must
+   * match [A-Za-z0-9._-]+.
+   */
+  scenario_name?: string;
+  /**
+   * For run_scenario: inline Scenario JSON. When set, the handler
+   * validates the object and writes it to
+   * ~/.agent-framework/test-runs/scenarios/<name>/scenario.json
+   * (overwriting) before executing. When omitted, the handler loads the
+   * previously stored scenario.json for `scenario_name`.
+   */
+  scenario?: unknown;
 }
 
 export async function handleTestHarnessTester(input: TesterInput): Promise<string> {
@@ -248,6 +316,17 @@ export async function handleTestHarnessTester(input: TesterInput): Promise<strin
         if (!input.content) throw new Error("content is required");
         return handleAppendNotes(input.transcript_name, input.content);
 
+      case "run_scenario":
+        return handleRunScenario(input.scenario_name, input.scenario, input.working_dir);
+
+      case "list_scenarios":
+        return handleListScenarios();
+
+      case "read_scenario":
+        if (!input.scenario_name) throw new Error("scenario_name is required");
+        if (!input.filename) throw new Error("filename is required (scenario.json or report-scenario.json)");
+        return handleReadScenario(input.scenario_name, input.filename);
+
       case "git_hash":
         return handleGitHash();
 
@@ -257,7 +336,7 @@ export async function handleTestHarnessTester(input: TesterInput): Promise<strin
       default:
         throw new Error(
           `Unknown action: "${input.action}". ` +
-          "Valid actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, git_hash, help"
+          "Valid actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, run_scenario, list_scenarios, read_scenario, git_hash, help"
         );
     }
   } catch (error: unknown) {
@@ -268,33 +347,49 @@ export async function handleTestHarnessTester(input: TesterInput): Promise<strin
 
 // ─── Help Documentation ────────────────────────────────────────────────────
 
-const TESTER_HELP = `# Test Harness Tester -- Complete Reference
+const TESTER_HELP = `# Test Harness Tester -- Full Workflow Reference
 
-## Purpose
+## Two testing modes
 
-You run the test harness against finalized label files, analyze failures, fix
-hook code, and re-run until tests pass.
+The tester supports two complementary ways to test hook behavior:
 
-## Workflow
+1. TRANSCRIPT REPLAY (run_test / run_single_hook) -- replays a real recorded
+   ~/.claude/projects/*/session.jsonl against the real hook system and
+   scores decisions against labels.json. Use this to verify that a fix
+   works on real historical sessions and to catch regressions on
+   known-good transcripts.
 
-### Step 0: Find work
+2. SCENARIOS (run_scenario) -- hand-author a small synthetic session state
+   in a JSON blob, fire exactly one hook against it, and score the result.
+   Use this for unit-test-style verification of a specific hook rule
+   against a hypothetical state ("what if permission_mode is plan and the
+   assistant tries to Edit?") without needing a recorded session.
+
+Choose Scenario mode first when you can -- it is faster, cheaper, and
+isolates one rule. Fall back to Transcript Replay only when the rule
+depends on state Scenarios cannot express.
+
+---
+
+## Workflow A: Transcript Replay (real sessions + labels)
+
+### A.0 Find work
 Action: find_work
 Returns transcripts with labels.json that need testing (UNTESTED or FAILING).
 Pick ONE to process fully.
 
-### Step 1: Run the test harness
+### A.1 Run the full test
 Action: run_test (transcript_name required)
 Runs all hooks against the transcript and compares decisions to labels.
 COSTS REAL MONEY (LLM API calls). Maximum 5 runs per transcript.
 The harness automatically builds the project first.
 
-### Step 1b: Run a single hook (iterative development)
+### A.2 Run a single hook (iterative development)
 Action: run_single_hook (transcript_name + hook_key required, working_dir required)
 Runs ONLY the specified hook point. Skips all other pre-tool-use and stop LLM
 calls. Does NOT count against the 5-run limit. Max 20 per transcript.
 hook_key: tool_use_id prefix from report failures, or stop:N key.
-Use this for iterative fix-test cycles.
-Read report-single.json for results.
+Use this for iterative fix-test cycles. Read report-single.json for results.
 
 Optional parameter: truncate_to_line (1-based integer).
   When set, the harness appends only transcript lines whose 1-based index
@@ -307,9 +402,10 @@ Optional parameter: truncate_to_line (1-based integer).
   report-single.json will include \`truncate_to_line\` at the top level and
   each scored event will carry an \`at\` field ("full" or the cap line).
 
-### Labels: rich expectations
+### A.3 Rich labels (labels.json)
 
-A labels.json entry may be either the legacy string form or a rich object:
+A labels.json entry may be a legacy string, a rich object, or an array of
+rich objects:
 
   "toolu_014rEfFTifPuw3iud1KWZCQg": {
     "expected": "deny",
@@ -323,28 +419,28 @@ A labels.json entry may be either the legacy string form or a rich object:
     { "expected": "allow", "at": "full" }
   ]
 
-- "expected" is the same four-value vocabulary as before (allow/deny/pass/block).
-- "by" is an optional rule name. When set, the hook passes only if the
+- "expected": allow/deny for tool hooks, pass/block for Stop.
+- "by": optional rule name. When set, the hook passes only if the
   decision matches AND the \`gate\` in tool-log matches \`by\`. A failure
   reason like \`decision matched (deny) but wrong rule: got "X", expected "Y"\`
   is written to the report when the decision is right but the rule is wrong.
-- "at" is a 1-based transcript line index or "full". Each rich entry is
-  scored only on a run whose truncate_to_line matches \`at\` (or "full" if
-  \`at\` is absent/"full" and no truncation was requested).
+- "at": 1-based transcript line index or "full". Each rich entry is scored
+  only on a run whose truncate_to_line matches \`at\` (or "full" when \`at\`
+  is absent/"full" and no truncation was requested).
 
-### Step 2: Read the report
+### A.4 Read the report
 Action: read_file (transcript_name, filename: "report.json")
 Check failed count and failures array. For each failure:
 - expected: what the label says should happen
 - actual: what the hook actually decided
 - gate and reason: which gate agent made the decision and why
 
-### Step 3: Check labeler notes
+### A.5 Check labeler notes
 Action: read_file (transcript_name, filename: "notes_and_questions.md")
 If a failure corresponds to an uncertain label, it may be acceptable.
 Add a note that the failure matches a known uncertainty.
 
-### Step 4: Investigate hook code
+### A.6 Investigate hook code
 Use Read, Grep, Glob tools (NOT this MCP tool) to examine hook source code.
 Key source files:
 - src/hooks/pre-tool-use.ts -- main safety gate (~400 lines)
@@ -356,32 +452,33 @@ Key source files:
 - src/utils/micro-prediction.ts -- sync regex predictions
 - src/utils/drift-detector.ts -- drift/anomaly detection heuristics
 
-### Step 5: Fix hook code
-Use Write, Edit tools (NOT this MCP tool) to fix hook source files.
-Plan fixes carefully. Batch ALL fixes before re-running.
+### A.7 Fix hook code
+Use Write, Edit tools to fix hook source files. Plan fixes carefully.
+Batch ALL fixes before re-running.
 
-### Step 6: Iterate with single-hook runs
+### A.8 Iterate with single-hook runs
 Action: run_single_hook (transcript_name + hook_key)
 For each failure: fix code, then run_single_hook to test just that hook.
 If the same failure appears 3 times in a row, it is a CODE BUG, not LLM
 non-determinism. Investigate the code path deeper.
 
-### Step 7: Confirm with full run
+### A.9 Confirm with full run
 Action: run_test (same transcript_name)
-Only after all individual hooks pass via run_single_hook, run full test to
-confirm no regressions. Skip if no code changes were made.
+Only after all individual hooks pass via run_single_hook, run full test
+to confirm no regressions. Skip if no code changes were made.
 
-### Step 8: Repeat
-Continue until:
-- All failures resolved, OR
-- Only failures matching notes_and_questions.md uncertainties remain
-
-### Step 9: Record findings
+### A.10 Record findings
 Action: append_notes (transcript_name, content)
-Prefix additions with [tester], include date and git hash.
-Mark resolved items by appending resolution notes (never delete existing notes).
+Prefix additions with [tester], include date and git hash. Mark resolved
+items by appending resolution notes (never delete existing notes).
 
-## Report Format
+### A.11 Using expand for investigation
+Action: expand (transcript_name, target, depth)
+Shows surrounding context for a specific hook point.
+- target: tool_use_id or stop:N key from the report failures
+- depth: 1 = +-3 messages, 2 = +-6, 3 = +-9
+
+### A.12 Workflow A report format
 
 {
   "transcript": "/path/to/transcript.jsonl",
@@ -393,10 +490,11 @@ Mark resolved items by appending resolution notes (never delete existing notes).
   "failed": 2,
   "errors": 0,
   "elapsed_ms": 45200,
-  "failures": [{ line, hook, tool, id, expected, actual, gate, reason }]
+  "truncate_to_line": 95,             // only when run_single_hook used it
+  "failures": [{ line, hook, tool, id, expected, actual, gate, gate_expected, at, reason }]
 }
 
-## Folder Structure
+### A.13 Workflow A folder structure
 
 ~/.agent-framework/test-runs/{transcript-name}/
   transcript.jsonl          Copy of original transcript
@@ -408,14 +506,7 @@ Mark resolved items by appending resolution notes (never delete existing notes).
   mcp-state.json            Run limit tracking
   cache/                    Ephemeral hook runtime files
 
-## Using expand for investigation
-
-Action: expand (transcript_name, target, depth)
-Shows surrounding context for a specific hook point.
-- target: tool_use_id or stop:N key from the report failures
-- depth: 1 = +-3 messages, 2 = +-6, 3 = +-9
-
-## Rules
+### A.14 Workflow A rules
 
 - Process ONE transcript per invocation
 - MINIMIZE test harness runs -- each costs real money (max 5)
@@ -423,10 +514,321 @@ Shows surrounding context for a specific hook point.
 - Do NOT call build commands -- the harness builds automatically
 - Do NOT label transcripts -- that is the labeler's job
 - Do NOT use Bash -- use Read/Grep/Glob/Write/Edit for code investigation
-- Use this MCP tool ONLY for harness operations (run_test, run_single_hook, list, expand, read_file, append_notes)
-- Use Read/Grep/Glob for investigating hook source code
-- Use Write/Edit for fixing hook source code
-- Use run_single_hook for iterative development (cheap, does not count against run limit)
-- NEVER dismiss failures as "non-deterministic LLM behavior" without investigating code
+- Use this MCP tool ONLY for harness operations
+- Use run_single_hook for iterative development (cheap, does not count
+  against run limit)
+- NEVER dismiss failures as "non-deterministic LLM behavior" without
+  investigating code
 - If run_single_hook returns the same result 3x in a row, it IS a code bug
+
+---
+
+## Workflow B: Scenario Testing (synthetic unit tests)
+
+### B.1 When to use scenarios
+
+Use run_scenario when ANY of the following is true:
+- You are writing a new hook rule and want to verify it against specific
+  inputs before deploying to production sessions.
+- You are debugging an existing rule and need to isolate its behavior
+  from other rules and real transcript state.
+- You want to catch a regression that no historical transcript happens
+  to contain (e.g. "assistant goes straight from thinking to tool_use
+  with no text, in plan mode, in a subagent context").
+- The bug report is a hypothetical ("what if X?") -- scenarios turn
+  hypotheticals into executable tests.
+
+DO NOT use scenarios when the behavior you care about depends on:
+- Multi-turn LLM reasoning outside the rule itself (use Workflow A).
+- Cached state that can only accumulate over a long session (use
+  Workflow A or ask the user to extend the scenario schema).
+- Background processes, spawned subagents, or MCP-side I/O not covered
+  by the scenario env flags (ask the user before expanding).
+
+### B.2 Scenario-first workflow
+
+Step 1 -- Identify the hook + rule you want to test.
+  What file holds the rule? What decision should it emit on what input?
+  What does the rule read (hook stdin, transcript file, session state)?
+
+Step 2 -- Write the smallest scenario that exercises the rule.
+  Start with ONE user message and ONE assistant turn. Only add prior
+  turns when the rule genuinely needs them.
+
+Step 3 -- Call run_scenario with the inline \`scenario\` object. The first
+  call creates scenarios/<name>/scenario.json and executes it. Review
+  report-scenario.json for pass/fail.
+
+Step 4 -- Iterate. If the hook decides wrong, fix the rule, rebuild
+  (via mcp__agent-framework__check), re-run the same scenario by name
+  (no inline blob) to confirm the fix. Iteration is free -- run_scenario
+  has no LLM cost and no run-limit.
+
+Step 5 -- Keep the scenario. Every scenario file under
+  ~/.agent-framework/test-runs/scenarios/ is a permanent regression test.
+  Re-run all of them after any rule change using list_scenarios +
+  run_scenario scenario_name:<each>.
+
+### B.3 Scenario actions
+
+**run_scenario** -- create and/or execute a scenario
+  Required: scenario_name OR scenario (inline JSON)
+  Optional: working_dir
+  Behavior:
+    - If scenario (inline) is provided: validate it, write to
+      scenarios/<scenario_name or scenario.name>/scenario.json
+      (overwriting), then execute.
+    - If only scenario_name is provided: load the stored scenario.json
+      and execute.
+    - Exit status: pass -> 0, fail -> 1, validation error -> 2.
+    - Writes scenarios/<name>/report-scenario.json.
+
+**list_scenarios** -- list all stored scenarios (name + has-report flag)
+
+**read_scenario** -- read scenarios/<name>/scenario.json or
+  scenarios/<name>/report-scenario.json
+  Required: scenario_name, filename
+
+### B.4 Scenario JSON schema
+
+Top-level fields:
+  name           (required)  Slug under scenarios/. Must match
+                             [A-Za-z0-9._-]+. Used as the on-disk dir name.
+  description    (optional)  Human note. Not scored.
+  transcript     (required)  Non-empty array of user/assistant entries,
+                             oldest first.
+  target         (required)  Which hook to fire and what it fires for.
+  env            (optional)  Environment flags (see B.5).
+  expect         (required)  { expected, by?, notes? } -- scoring spec.
+
+Transcript entry shapes:
+
+  { "role": "user", "content": "plain string OR array of content blocks" }
+
+  { "role": "assistant", "content": [
+      { "type": "text",      "text": "..." },
+      { "type": "thinking",  "thinking": "..." },
+      { "type": "tool_use",  "id": "toolu_*", "name": "Edit",
+                              "input": { ... } },
+      { "type": "tool_result", "tool_use_id": "toolu_*", "content": "..." }
+  ] }
+
+Target shapes:
+
+  PreToolUse / PostToolUse:
+    { "hook": "PreToolUse", "tool_use_ref": "last" }
+    -- "last" picks the final tool_use block in the last assistant entry
+    OR supply a specific id that matches a block in the transcript.
+
+  Stop:
+    { "hook": "Stop" }
+    -- no tool_use needed. Final entry must be assistant with no tool_use.
+
+  UserPromptSubmit:
+    { "hook": "UserPromptSubmit", "prompt_override": "..." }
+    -- defaults to the last user entry's text.
+
+  SessionStart:
+    { "hook": "SessionStart" }
+
+### B.5 env flags (setup knobs)
+
+  permission_mode   One of "default" | "plan" | "acceptEdits"
+                    | "bypassPermissions" | "dontAsk".
+                    Copied into hook stdin's \`permission_mode\` (read by
+                    isPlanModeFromInput) AND written onto every transcript
+                    entry's \`permissionMode\` (read by isPlanModeActive's
+                    file-scan fallback). Both detection paths agree.
+
+  subagent          Boolean. When true, the materialized transcript file
+                    is named agent-<name>.jsonl so detectSubagent() takes
+                    its filename short-circuit branch and returns
+                    isSubagent: true. When false, the cache dir contains
+                    an empty active-subagents.json counter file so the
+                    counter fallback deterministically returns false.
+
+  cwd               Directory the hook runs in (passed as
+                    CLAUDE_PROJECT_DIR and \`cwd\` in hook stdin). Defaults
+                    to the scenario run dir under test-runs/scenarios/.
+
+  timeout_ms        Hook timeout in milliseconds. Defaults to 60000.
+
+### B.6 expect spec
+
+  {
+    "expected": "<value>",    // required
+    "by":       "<rule-name>",// optional -- matches tool-log \`gate\`
+    "notes":    "<string>"    // optional, for documentation only
+  }
+
+Vocabulary for \`expected\`, by hook type:
+  PreToolUse:       "allow" | "deny"
+  PostToolUse:      "ok"    | "error"
+  Stop:             "pass"  | "block"
+  UserPromptSubmit: "ok"    | "error"
+  SessionStart:     "ok"    | "error"
+
+\`by\` is the rule name that produced the decision. For PreToolUse denials
+this must match the \`gate\` field in the cache dir's tool-log.jsonl
+(e.g. "plan-mode-block", "respond-first"). When set, the scenario passes
+only if the decision matches AND the denying rule matches. Omit \`by\` to
+accept any rule.
+
+\`at\` is NOT allowed in scenario expectations -- scenarios always run
+against the full file state. Passing \`at\` is a validation error.
+
+### B.7 End-to-end example: plan-mode blocks Edit
+
+  run_scenario
+    working_dir: /home/tim/Coding/public_repos/agent-framework
+    scenario: {
+      "name": "plan-mode-blocks-edit",
+      "description": "Edit tool in plan mode must be denied by plan-mode-block rule",
+      "transcript": [
+        { "role": "user", "content": "quick edit please" },
+        { "role": "assistant", "content": [
+          { "type": "text", "text": "on it" },
+          { "type": "tool_use", "id": "toolu_s1", "name": "Edit",
+            "input": { "file_path": "/tmp/a.ts",
+                       "old_string": "x", "new_string": "y" } }
+        ]}
+      ],
+      "target": { "hook": "PreToolUse", "tool_use_ref": "last" },
+      "env":    { "permission_mode": "plan", "cwd": "/tmp" },
+      "expect": { "expected": "deny", "by": "plan-mode-block" }
+    }
+
+Expected result:
+  pass: true
+  decision: "deny"
+  gate: "plan-mode-block"
+
+Re-run later with: run_scenario scenario_name: "plan-mode-blocks-edit"
+
+### B.8 End-to-end example: respond-first no-text violation
+
+  run_scenario
+    working_dir: /home/tim/Coding/public_repos/agent-framework
+    scenario: {
+      "name": "respond-first-no-text",
+      "transcript": [
+        { "role": "user", "content": "go" },
+        { "role": "assistant", "content": [
+          { "type": "thinking", "thinking": "starting now" },
+          { "type": "tool_use", "id": "toolu_s2", "name": "Bash",
+            "input": { "command": "ls" } }
+        ]}
+      ],
+      "target": { "hook": "PreToolUse", "tool_use_ref": "last" },
+      "expect": { "expected": "deny", "by": "respond-first" }
+    }
+
+Notes:
+- The user prompt "go" does not match CONFIRMATION_PATTERN, so the rule
+  runs. Avoid prompts like "ok", "yes", "sure", "please do" -- those are
+  whitelisted by respond-first and produce an allow decision.
+- The assistant turn has a thinking block + tool_use, no text block.
+  respond-first reads the materialized transcript file and -- because the
+  tool_use id is present with no text preceding it -- fastDenies.
+
+### B.9 End-to-end example: legitimate turn (allow)
+
+Same transcript as B.8 but with a text block before the tool_use:
+
+  run_scenario
+    working_dir: /home/tim/Coding/public_repos/agent-framework
+    scenario: {
+      "name": "respond-first-with-text",
+      "transcript": [
+        { "role": "user", "content": "go" },
+        { "role": "assistant", "content": [
+          { "type": "text", "text": "working on it" },
+          { "type": "tool_use", "id": "toolu_s3", "name": "Bash",
+            "input": { "command": "ls" } }
+        ]}
+      ],
+      "target": { "hook": "PreToolUse", "tool_use_ref": "last" },
+      "expect": { "expected": "allow" }
+    }
+
+### B.10 Multi-rule scenario sets
+
+When a rule interacts with others (edit-intent, plan-mode-block, style-
+drift), store a set of related scenarios with a shared prefix:
+
+  plan-mode-blocks-edit       (Edit denied in plan mode)
+  plan-mode-allows-plan-file  (plan file is exempt)
+  plan-mode-allows-claude-md  (CLAUDE.md is exempt)
+  plan-mode-blocks-bash-git   (git commit denied in plan mode)
+
+Run the whole set with list_scenarios + iterate. The set becomes a
+regression suite for that rule family.
+
+### B.11 Debugging scenario failures
+
+1. Read report-scenario.json via read_scenario. It has the decision,
+   gate (the rule that actually produced it), reason, and the
+   transcript_path of the materialized file.
+
+2. Inspect the materialized transcript at transcript_path. It's a real
+   .jsonl file -- open it, check that the messages and tool_use blocks
+   match what your scenario specified.
+
+3. If the gate in the failure is a DIFFERENT rule than your \`expect.by\`,
+   that rule fired first. Either adjust the scenario so the earlier rule
+   doesn't trigger, or update expect.by to match.
+
+4. Check ~/.agent-framework/test-runs/scenarios/<name>/cache/tool-log.jsonl
+   for the full chain of rule decisions.
+
+5. If the hook behaves one way via scenario and another way in a real
+   session, the scenario is likely missing state the real session has.
+   Inspect the real session's transcript around the failing tool_use and
+   look for differences. If you cannot express the difference in a
+   scenario field, STOP and ask the user to extend the schema.
+
+### B.12 Scenario folder structure
+
+~/.agent-framework/test-runs/scenarios/{scenario-name}/
+  scenario.json             The scenario definition you wrote
+  report-scenario.json      Last run's decision, gate, pass flag
+  cache/                    Ephemeral hook runtime files
+    <name>.jsonl            Materialized transcript (may be agent-*.jsonl)
+    tool-log.jsonl          Rule decisions from the last hook run
+    active-subagents.json   Empty counter file for deterministic subagent detection
+
+---
+
+## Workflow C: ESCAPE HATCH -- expanding the MCP
+
+The scenario schema intentionally covers the common setup knobs:
+permission_mode, subagent, cwd, timeout_ms, and arbitrary transcript
+content. That is the minimum contract. If your test case needs a setup
+knob NOT in that list -- for example:
+
+  - an active tool_use batch state (parallel tool calls)
+  - a specific session-state file under ~/.agent-framework/sessions/
+  - hook-internal cache state (correction-cache, gate-reasoning cache)
+  - a new hook event not in the 5 supported
+  - a way to inject fake tool_result content from prior calls
+  - running multiple hooks in sequence in one scenario
+
+STOP. Do not work around a missing knob by faking transcript entries,
+mutating labels.json, editing session-state files, or patching source.
+
+The correct workflow is:
+
+  1. Describe to the user, in plain language, which hook/rule you cannot
+     test and why the scenario schema can't express it.
+
+  2. Propose the smallest possible extension: a new env flag, a new block
+     type, a new hook event, a new cache-seed field on env, etc. Be
+     specific about what field and what value shape you need.
+
+  3. Wait for explicit approval before editing test-harness/scenario.ts,
+     test-harness/lib/types.ts, the tester MCP schema in src/mcp/server.ts,
+     or any other test-harness code.
+
+The user owns scenario expressiveness as a design decision. Do not make
+that decision for them.
 `;

@@ -414,25 +414,57 @@ server.registerTool(
   }
 );
 
+const scenarioBlockSchema = z.record(z.unknown());
+
+const scenarioSchema = z.object({
+  name: z.string().describe("Slug for the scenario. Must match [A-Za-z0-9._-]+."),
+  description: z.string().optional(),
+  transcript: z.array(z.object({
+    role: z.enum(["user", "assistant"]),
+    content: z.union([z.string(), z.array(scenarioBlockSchema)]),
+    uuid: z.string().optional(),
+    parentUuid: z.string().nullable().optional(),
+  })).min(1),
+  target: z.object({
+    hook: z.enum(["PreToolUse","PostToolUse","Stop","UserPromptSubmit","SessionStart"]),
+    tool_use_ref: z.union([z.string(), z.literal("last")]).optional(),
+    prompt_override: z.string().optional(),
+  }),
+  env: z.object({
+    permission_mode: z.enum(["default","plan","acceptEdits","bypassPermissions","dontAsk"]).optional(),
+    subagent: z.boolean().optional(),
+    cwd: z.string().optional(),
+    timeout_ms: z.number().optional(),
+  }).optional(),
+  expect: z.object({
+    expected: z.string(),
+    by: z.string().optional(),
+    notes: z.string().optional(),
+  }),
+});
+
 server.registerTool(
   "test_harness_tester",
   {
     title: "Test Harness Tester",
-    description: "Run test harness against labeled transcripts. Actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, git_hash, help. Use help action for full documentation.",
+    description: "Run test harness against labeled transcripts OR against synthetic scenarios. Actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, run_scenario, list_scenarios, read_scenario, git_hash, help. Use help action for full documentation.",
     inputSchema: {
       action: z.enum([
         "find_work", "run_test", "run_single_hook", "list", "expand", "read_file", "append_notes",
+        "run_scenario", "list_scenarios", "read_scenario",
         "git_hash", "help"
       ]).describe("The action to perform"),
       transcript_name: z.string().optional().describe("Transcript name (without .jsonl extension)"),
       target: z.string().optional().describe("For expand: tool_use_id or stop:N key"),
       depth: z.number().optional().describe("For expand: context radius multiplier (default 1)"),
-      filename: z.string().optional().describe("For read_file: report.json, labels.json, labels.draft.json, or notes_and_questions.md"),
+      filename: z.string().optional().describe("For read_file: report.json, labels.json, labels.draft.json, or notes_and_questions.md. For read_scenario: scenario.json or report-scenario.json."),
       content: z.string().optional().describe("For append_notes: content to append"),
       hook_key: z.string().optional().describe("For run_single_hook: hook key to test (tool_use_id or stop:N from report failures)"),
-      working_dir: z.string().optional().describe("Local repo path for run_test/run_single_hook/list/expand (overrides AGENT_FRAMEWORK_ROOT so edited code is tested)"),
+      working_dir: z.string().optional().describe("Local repo path for run_test/run_single_hook/list/expand/run_scenario (overrides AGENT_FRAMEWORK_ROOT so edited code is tested)"),
       truncate_to_line: z.number().optional().describe("For run_single_hook: 1-based line cap. When set, the harness appends only transcript lines <= truncate_to_line before firing the target hook. The hook still fires with its full tool_use_id because input is synthesized from the in-memory parsed lines. Use this to reproduce timing-sensitive states like pre-flush replay."),
       transcript_path: z.string().optional().describe("Absolute path to a transcript .jsonl file. Use when the transcript lives outside ~/.claude/projects/-home-tim-Coding-public-repos-agent-framework (e.g. iocto sessions). Only needed if the test-runs copy is not yet in place."),
+      scenario_name: z.string().optional().describe("For run_scenario / list_scenarios / read_scenario: slug identifying a scenario under ~/.agent-framework/test-runs/scenarios/<name>/. Must match [A-Za-z0-9._-]+."),
+      scenario: scenarioSchema.optional().describe("For run_scenario: inline Scenario JSON. When set, overwrites the on-disk scenarios/<name>/scenario.json before running. Omit to re-run a previously stored scenario. See the 'help' action (Workflow B) for the full schema and examples."),
     }
   },
   async (args) => {

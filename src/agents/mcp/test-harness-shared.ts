@@ -100,14 +100,24 @@ function getNpxPath(): string {
   }
 }
 
-export function runReplayCommand(args: string[], timeoutMs: number = 600000, rootOverride?: string): string {
+/**
+ * Low-level helper: spawn `npx tsx <root>/<scriptRelPath>` with args.
+ * Shared by runReplayCommand and runScenarioCommand.
+ */
+export function runHarnessCommand(
+  scriptRelPath: string,
+  args: string[],
+  timeoutMs: number = 600000,
+  rootOverride?: string,
+): string {
   const root = rootOverride || getAgentFrameworkRoot();
   const npxPath = getNpxPath();
-  const replayPath = path.join(root, "test-harness", "replay.ts");
-  const fullArgs = ["tsx", replayPath, ...args];
+  const scriptPath = path.join(root, scriptRelPath);
+  const fullArgs = ["tsx", scriptPath, ...args];
 
   // Use spawnSync to capture both stdout and stderr.
-  // replay.ts prints user-facing output to stderr and only file paths to stdout.
+  // The harness scripts print user-facing output to stderr and only
+  // structured JSON / file paths to stdout.
   const result = spawnSync(npxPath, fullArgs, {
     encoding: "utf-8",
     timeout: timeoutMs,
@@ -129,18 +139,17 @@ export function runReplayCommand(args: string[], timeoutMs: number = 600000, roo
   if (result.error) {
     if ((result as unknown as { killed: boolean }).killed) {
       throw new Error(
-        `replay.ts timed out after ${Math.round(timeoutMs / 1000)}s. ` +
-        `The transcript may be too large for the current timeout. ` +
+        `${scriptRelPath} timed out after ${Math.round(timeoutMs / 1000)}s. ` +
         `Partial output:\n${(stderr || stdout || "(none)").slice(0, 500)}`
       );
     }
-    throw new Error(`replay.ts spawn failed: ${result.error.message}`);
+    throw new Error(`${scriptRelPath} spawn failed: ${result.error.message}`);
   }
 
   // Process killed by signal without error (e.g. external SIGTERM/SIGKILL)
   if (result.signal) {
     throw new Error(
-      `replay.ts was killed by signal ${result.signal}. ` +
+      `${scriptRelPath} was killed by signal ${result.signal}. ` +
       `Partial output:\n${(stderr || stdout || "(none)").slice(0, 500)}`
     );
   }
@@ -150,17 +159,25 @@ export function runReplayCommand(args: string[], timeoutMs: number = 600000, roo
   // Any other non-zero = unexpected crash
   if (result.status !== null && result.status !== 0 && result.status !== 1) {
     throw new Error(
-      `replay.ts exited with code ${result.status}: ` +
+      `${scriptRelPath} exited with code ${result.status}: ` +
       `${(stderr || stdout || "(no output)").slice(0, 1000)}`
     );
   }
 
   const output = (stdout + (stderr ? "\n" + stderr : "")).trim();
   if (!output) {
-    throw new Error("replay.ts produced no output — command may have failed silently");
+    throw new Error(`${scriptRelPath} produced no output — command may have failed silently`);
   }
 
   return output;
+}
+
+export function runReplayCommand(args: string[], timeoutMs: number = 600000, rootOverride?: string): string {
+  return runHarnessCommand("test-harness/replay.ts", args, timeoutMs, rootOverride);
+}
+
+export function runScenarioCommand(args: string[], timeoutMs: number = 300000, rootOverride?: string): string {
+  return runHarnessCommand("test-harness/scenario.ts", args, timeoutMs, rootOverride);
 }
 
 // ─── Version ──────────────────────────────────────────────────────────────
@@ -588,4 +605,71 @@ export function findTestableTranscripts(): Array<{ name: string; status: "UNTEST
   }
 
   return results;
+}
+
+// ─── Scenario Helpers ──────────────────────────────────────────────────────
+
+const SCENARIOS_DIR = path.join(TEST_RUNS_DIR, "scenarios");
+
+/** Absolute path to the scenarios root under TEST_RUNS_DIR. */
+export function scenariosDir(): string {
+  return SCENARIOS_DIR;
+}
+
+/**
+ * Resolve a scenario's on-disk directory. Validates the slug to keep
+ * scenario names from escaping the scenarios root.
+ */
+export function scenarioDir(name: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+    throw new Error(`invalid scenario name (must match [A-Za-z0-9._-]+): ${name}`);
+  }
+  const resolved = path.join(SCENARIOS_DIR, name);
+  if (!resolved.startsWith(SCENARIOS_DIR)) {
+    throw new Error(`scenario name escapes scenarios dir: ${name}`);
+  }
+  return resolved;
+}
+
+/**
+ * Write a scenario object to disk at scenarios/<name>/scenario.json.
+ * Caller is expected to have validated the object shape first.
+ */
+export function writeScenarioFile(name: string, scenario: unknown): string {
+  const dir = scenarioDir(name);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "scenario.json");
+  fs.writeFileSync(file, JSON.stringify(scenario, null, 2) + "\n");
+  return file;
+}
+
+/**
+ * Read scenario.json or report-scenario.json for a named scenario.
+ * Rejects any other filename.
+ */
+export function readScenarioFile(name: string, filename: string): string {
+  const allowed = ["scenario.json", "report-scenario.json"];
+  if (!allowed.includes(filename)) {
+    throw new Error(`Cannot read "${filename}". Allowed: ${allowed.join(", ")}`);
+  }
+  const file = path.join(scenarioDir(name), filename);
+  if (!fs.existsSync(file)) {
+    throw new Error(`${filename} not found for scenario "${name}" at ${file}`);
+  }
+  return fs.readFileSync(file, "utf-8");
+}
+
+/**
+ * List all scenarios with a stored scenario.json, flagging whether each
+ * has a report-scenario.json from the last run.
+ */
+export function listScenarios(): Array<{ name: string; hasReport: boolean }> {
+  if (!fs.existsSync(SCENARIOS_DIR)) return [];
+  return fs
+    .readdirSync(SCENARIOS_DIR)
+    .filter((n) => fs.existsSync(path.join(SCENARIOS_DIR, n, "scenario.json")))
+    .map((n) => ({
+      name: n,
+      hasReport: fs.existsSync(path.join(SCENARIOS_DIR, n, "report-scenario.json")),
+    }));
 }

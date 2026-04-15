@@ -27,8 +27,17 @@ import {
 import { runCommand } from "../src/utils/command.js";
 import { classifyLine, extractCwd, detectBatches, type BatchGroup } from "./lib/classifier.js";
 import { runHook, cleanupBackgroundProcesses } from "./lib/harness.js";
+import {
+  REPO_ROOT,
+  getVersion,
+  hookScript,
+  buildEnv,
+  readLastToolLogEntry,
+  parsePreToolUseDecision,
+  parseStopDecision,
+  scoreRichExpectation,
+} from "./lib/hook-runner.js";
 
-const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const BASE_DIR = path.join(os.homedir(), ".agent-framework");
 const TEST_RUNS_DIR = path.join(BASE_DIR, "test-runs");
 const MIN_PREFIX_LENGTH = 12;
@@ -43,17 +52,6 @@ function transcriptDir(transcriptPath: string): string {
 
 function cacheDir(transcriptPath: string): string {
   return path.join(transcriptDir(transcriptPath), "cache");
-}
-
-function getVersion(): string {
-  try {
-    const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf-8"));
-    const [major, minor] = pkg.version.split(".");
-    const data = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "dist", "version-data.json"), "utf-8"));
-    return `${major}.${minor}.${data.commitCount}`;
-  } catch {
-    return "unknown";
-  }
 }
 
 // ─── Arg Parsing ────────────────────────────────────────────────────────────
@@ -380,23 +378,6 @@ function looksNegative(reaction: string): boolean {
   return patterns.some((p) => lower.includes(p));
 }
 
-// ─── Tool Log Reader ────────────────────────────────────────────────────────
-
-function readLastToolLogEntry(sessionDir: string): { gate?: string; reason?: string } {
-  const toolLogPath = path.join(sessionDir, "tool-log.jsonl");
-  try {
-    const content = fs.readFileSync(toolLogPath, "utf-8");
-    const logLines = content.split("\n").filter(Boolean);
-    if (logLines.length > 0) {
-      const lastEntry = JSON.parse(logLines[logLines.length - 1]);
-      return { gate: lastEntry.gate, reason: lastEntry.reason };
-    }
-  } catch {
-    // No tool-log yet
-  }
-  return {};
-}
-
 // ─── Stale Sweep ────────────────────────────────────────────────────────────
 
 function sweepStaleCaches(): void {
@@ -436,20 +417,6 @@ function sweepStaleCaches(): void {
   } catch {
     // No test-runs dir yet
   }
-}
-
-// ─── Hook Spawning Helpers ──────────────────────────────────────────────────
-
-function hookScript(name: string): string {
-  return path.join(REPO_ROOT, "dist", "hooks", `${name}.js`);
-}
-
-function buildEnv(sessionDir: string, cwd: string): Record<string, string> {
-  return {
-    AGENT_FRAMEWORK_ROOT: REPO_ROOT,
-    CLAUDE_PROJECT_DIR: cwd,
-    AGENT_FRAMEWORK_SESSION_DIR: sessionDir,
-  };
 }
 
 // ─── List Mode ─────────────────────────────────────────────────────────────
@@ -1176,20 +1143,9 @@ async function main(): Promise<void> {
             });
 
             // Parse decision
-            let decision = "allow";
-            if (hookResult.timedOut) {
-              decision = "timeout";
-            } else if (hookResult.exitCode === 1) {
-              decision = "error";
-            } else {
-              try {
-                const output = JSON.parse(hookResult.stdout);
-                const hookOutput = output.hookSpecificOutput ?? output;
-                decision = hookOutput.permissionDecision === "allow" ? "allow" : "deny";
-              } catch {
-                decision = hookResult.stdout.trim() === "" ? "allow" : "error";
-              }
-            }
+            const parsed = parsePreToolUseDecision(hookResult, config.timeout);
+            const decision = parsed.decision;
+            const parseError = parsed.error;
 
             // Read tool-log for diagnostics
             const { gate, reason } = readLastToolLogEntry(sessionDir);
@@ -1213,11 +1169,7 @@ async function main(): Promise<void> {
               baseEvent.at = config.truncateToLine;
             }
 
-            if (hookResult.timedOut) {
-              baseEvent.error = `Hook timed out after ${config.timeout}ms`;
-            } else if (hookResult.exitCode === 1) {
-              baseEvent.error = hookResult.stderr.slice(0, 500);
-            }
+            if (parseError) baseEvent.error = parseError;
 
             if (scopedMatches.length === 0) {
               // No scoring entry for this run's truncation slice.
@@ -1230,11 +1182,10 @@ async function main(): Promise<void> {
                 if (exp.by) {
                   event.gate_expected = exp.by;
                 }
-                const decisionOk = decision === exp.expected;
-                const gateOk = !exp.by || exp.by === gate;
-                event.pass = decisionOk && gateOk;
-                if (!event.pass && decisionOk && !gateOk) {
-                  event.reason = `decision matched (${decision}) but wrong rule: got ${JSON.stringify(gate ?? "")}, expected ${JSON.stringify(exp.by)}`;
+                const scored = scoreRichExpectation(decision, gate, exp);
+                event.pass = scored.pass;
+                if (scored.reason) {
+                  event.reason = scored.reason;
                 }
                 results.push(event);
               }
@@ -1343,20 +1294,10 @@ async function main(): Promise<void> {
           timeoutMs: config.timeout,
         });
 
-        // Parse decision: empty stdout = pass, JSON with decision: "block" = block
-        let decision = "pass";
-        let reason: string | undefined;
-        if (hookResult.timedOut) {
-          decision = "timeout";
-        } else if (hookResult.stdout.trim() !== "") {
-          try {
-            const output = JSON.parse(hookResult.stdout);
-            decision = output.decision === "block" ? "block" : "pass";
-            reason = output.reason;
-          } catch {
-            decision = "pass";
-          }
-        }
+        // Parse decision
+        const stopParsed = parseStopDecision(hookResult, config.timeout);
+        const decision = stopParsed.decision;
+        const reason = stopParsed.reason;
 
         // Match against expectations (rich-form aware)
         const stopMatched = matchExpectation(config.expect, stopKey);
@@ -1373,8 +1314,8 @@ async function main(): Promise<void> {
         if (config.truncateToLine !== undefined) {
           baseStopEvent.at = config.truncateToLine;
         }
-        if (hookResult.timedOut) {
-          baseStopEvent.error = `Hook timed out after ${config.timeout}ms`;
+        if (stopParsed.error) {
+          baseStopEvent.error = stopParsed.error;
         }
 
         if (stopScoped.length === 0) {
@@ -1384,7 +1325,9 @@ async function main(): Promise<void> {
             const event: ReplayEvent = { ...baseStopEvent };
             event.expected = exp.expected;
             event.at = exp.at ?? "full";
-            event.pass = decision === exp.expected;
+            const scored = scoreRichExpectation(decision, undefined, exp);
+            event.pass = scored.pass;
+            if (scored.reason) event.reason = scored.reason;
             results.push(event);
           }
         }
