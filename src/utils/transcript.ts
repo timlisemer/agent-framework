@@ -286,37 +286,13 @@ export function trimToolOutput(output: string, maxLines = 20): string {
 
 
 /**
- * Detect if content is a slash command system prompt.
- * These have YAML frontmatter with allowed-tools/description metadata,
- * OR contain body patterns that indicate slash command instructions.
+ * Detect if content is a slash command invocation message.
+ * When a user invokes a slash command, Claude Code wraps the input in
+ * <command-name>/commandname</command-name> tags.
  */
 function isSlashCommandPrompt(content: string): boolean {
-  // Check for YAML frontmatter pattern at start
-  if (content.startsWith("---")) {
-    const frontmatterEnd = content.indexOf("---", 3);
-    if (frontmatterEnd !== -1) {
-      const frontmatter = content.slice(0, frontmatterEnd + 3);
-      if (/allowed-tools:|description:/.test(frontmatter)) {
-        return true;
-      }
-    }
-  }
-
-  // Check for slash command body patterns (when frontmatter is stripped)
-  // These patterns indicate slash command instructions, not user constraints
-  const bodyPatterns = [
-    /IMMEDIATELY call the mcp__/i,
-    /CRITICAL:.*(?:Do NOT|only use).*(?:tools?|mcp)/i,
-    /allowed-tools.*mcp__/i,
-  ];
-
-  for (const pattern of bodyPatterns) {
-    if (pattern.test(content)) {
-      return true;
-    }
-  }
-
-  return false;
+  // Check for Claude Code's slash command invocation tags
+  return /<command-name>\s*\//.test(content);
 }
 
 /**
@@ -519,7 +495,7 @@ export async function readTranscriptExact(
     counts,
     toolOptions = {},
     excludeSystemReminders = true,
-    excludeSlashCommandPrompts = true,
+    excludeSlashCommandPrompts = false,
     excludeMetaMessages = true,
     includeFirstUserMessage = false,
     includeSlashCommandContext = false,

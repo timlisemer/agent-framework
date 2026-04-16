@@ -33,6 +33,7 @@ export const respondFirstRule: PreToolRule = {
 
     const rfResult = await readTranscriptExact(ctx.transcriptPath, {
       counts: { user: 1 },
+      excludeSlashCommandPrompts: true,
     });
     const lastUser = rfResult.user.length > 0 ? rfResult.user[0] : null;
 
