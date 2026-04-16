@@ -83,10 +83,10 @@ describe("toolApproveRule ExitPlanMode short-circuit", () => {
     };
   }
 
-  it("returns null and does NOT invoke tool-approve LLM when plan validation passes", async () => {
+  it("returns fastAllow and does NOT invoke tool-approve LLM when plan validation passes", async () => {
     mockCheckPlanIntent.mockResolvedValue({ approved: true, reason: "ok" });
     const result = await toolApproveRule.check(makeCtx());
-    expect(result).toBeNull();
+    expect(result).toEqual({ fastAllow: "ExitPlanMode approved after plan validation" });
     expect(mockCheckToolApproval).not.toHaveBeenCalled();
   });
 

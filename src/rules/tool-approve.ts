@@ -59,11 +59,10 @@ export const toolApproveRule: PreToolRule = {
       if (!exitValidation.approved) {
         return { fastDeny: `Plan validation failed: ${exitValidation.reason}` };
       }
-      // Plan validation is the authoritative gate for ExitPlanMode. Do not
-      // fall through to the tool-approve LLM -- it has been observed
-      // generalising the commit/push/confirm blacklist into a hallucinated
-      // "ExitPlanMode needs a slash command" denial.
-      return null;
+      // Plan validation passed -- allow without LLM tool-approve check.
+      // `return null` is insufficient: it passes to later rules (gate LLM)
+      // which incorrectly classify ExitPlanMode as an "implementation action" in plan mode.
+      return { fastAllow: "ExitPlanMode approved after plan validation" };
     }
 
     const decision = await checkToolApproval(
