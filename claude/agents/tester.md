@@ -80,3 +80,11 @@ When a hook produces the wrong decision, you MUST investigate the code path. Do 
 5. Try at least one code fix and verify with run_single_hook
 
 Only after exhausting ALL of the above AND seeing genuinely different results across runs (different gate, different reason, different decision) may you note it as potentially non-deterministic.
+
+## Prediction-Annotation Failures
+
+The scoring layer can flag prediction-related regressions in `failures[].reason`:
+
+- `regression: prediction labeled "wrong" but still blocked at this tool_use` -- the prediction was supposed to be removed/narrowed; investigate `src/utils/micro-prediction.ts` (for source: micro), `src/utils/summary-updater.ts` (for source: llm), or `src/rules/tool-approve.ts` (for source: gate).
+- `regression: prediction still blocks forbidden pattern X` -- the prediction needs to be narrowed; the forbidden pattern in the failure tells you what should NOT match.
+- `regression: live prediction's blockedIntent no longer contains "..."` -- the prediction's intent semantics drifted (likely an LLM-source prediction); re-run summary-updater or check the prompt.

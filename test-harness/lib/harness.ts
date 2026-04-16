@@ -78,6 +78,75 @@ export async function runHook(options: {
 }
 
 /**
+ * Wait for background updater processes (e.g., summary-updater) to finish
+ * writing before SIGTERM-ing them. Required so `prediction-cache.json` and
+ * other cache writes complete cleanly. Polls every 250ms and returns when
+ * all PID files report dead processes OR `timeoutMs` elapses.
+ *
+ * Drains ALL pid files (not just summary-updater-*) — future-proof against
+ * new background spawners. Default ceiling 120000ms matches STALE_PID_MS in
+ * src/utils/spawn-background.ts (twice the summary-updater 60s hard timeout,
+ * with slack for flushTelemetry + final savePrediction).
+ */
+export async function drainBackgroundUpdaters(
+  sessionDir: string,
+  timeoutMs: number = 120_000,
+): Promise<void> {
+  const pidsDir = path.join(sessionDir, "pids");
+  const deadline = Date.now() + timeoutMs;
+  const pollIntervalMs = 250;
+
+  function readPidFiles(): Array<{ pid: number; file: string }> {
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(pidsDir);
+    } catch {
+      return [];
+    }
+    const out: Array<{ pid: number; file: string }> = [];
+    for (const entry of entries) {
+      if (!entry.endsWith(".pid")) continue;
+      const file = path.join(pidsDir, entry);
+      try {
+        const raw = fs.readFileSync(file, "utf-8").trim();
+        let pid: number;
+        try {
+          const parsed = JSON.parse(raw);
+          pid = parsed.pid;
+        } catch {
+          pid = parseInt(raw, 10);
+        }
+        if (!isNaN(pid)) {
+          out.push({ pid, file });
+        }
+      } catch {
+        // Unreadable PID file — skip
+      }
+    }
+    return out;
+  }
+
+  while (Date.now() < deadline) {
+    const pidEntries = readPidFiles();
+    if (pidEntries.length === 0) return;
+    const stillAlive = pidEntries.filter(({ pid }) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (stillAlive.length === 0) return;
+    await new Promise((r) => setTimeout(r, pollIntervalMs));
+  }
+
+  process.stderr.write(
+    `drainBackgroundUpdaters: timeout after ${timeoutMs}ms in ${sessionDir}\n`,
+  );
+}
+
+/**
  * Kill background processes spawned by hooks (e.g., summary-updater).
  * Hooks store PIDs in {sessionDir}/pids/ directory.
  */

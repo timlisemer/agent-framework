@@ -18,6 +18,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import {
+  LivePredictionSnapshot,
   ReplayEvent,
   ReplayExpectations,
   ReplayArgs,
@@ -26,9 +27,10 @@ import {
 } from "./lib/types.js";
 import { runCommand } from "../src/utils/command.js";
 import { classifyLine, extractCwd, detectBatches, type BatchGroup } from "./lib/classifier.js";
-import { runHook, cleanupBackgroundProcesses } from "./lib/harness.js";
+import { runHook, cleanupBackgroundProcesses, drainBackgroundUpdaters } from "./lib/harness.js";
 import {
   REPO_ROOT,
+  findActivePredictionMatching,
   getVersion,
   hookScript,
   buildEnv,
@@ -37,6 +39,8 @@ import {
   parseStopDecision,
   scoreRichExpectation,
 } from "./lib/hook-runner.js";
+import { readToolLogEntries, type ToolLogEntry } from "../src/utils/summary-cache.js";
+import type { LabelValue } from "../src/agents/mcp/test-harness-shared.js";
 
 const BASE_DIR = path.join(os.homedir(), ".agent-framework");
 const TEST_RUNS_DIR = path.join(BASE_DIR, "test-runs");
@@ -376,6 +380,78 @@ function looksNegative(reaction: string): boolean {
     "no ", "broke", "break", "mistake", "error",
   ];
   return patterns.some((p) => lower.includes(p));
+}
+
+// ─── Batch leader lookup ───────────────────────────────────────────────────
+
+/**
+ * Find the leader gate of the batch this entry belongs to.
+ * - If the entry has no batchPosition or is at position 0, returns the
+ *   entry's own gate.
+ * - Otherwise walks back through `toolLog` (bounded to entry.batchSize
+ *   entries) to find the most recent prior entry with the same batchSize
+ *   AND batchPosition === 0; returns that entry's gate.
+ * - Returns undefined if the leader cannot be found within the bound.
+ */
+function getBatchLeaderGate(
+  toolLog: ToolLogEntry[],
+  entry: ToolLogEntry,
+): string | undefined {
+  if (entry.batchPosition === undefined || entry.batchPosition === 0) {
+    return entry.gate;
+  }
+  const bound = entry.batchSize ?? 0;
+  // Find entry's index in the log; walk back at most `bound` entries.
+  const idx = toolLog.lastIndexOf(entry);
+  if (idx === -1) return undefined;
+  const start = Math.max(0, idx - bound);
+  for (let j = idx - 1; j >= start; j--) {
+    const candidate = toolLog[j];
+    if (
+      candidate.batchSize === entry.batchSize &&
+      candidate.batchPosition === 0
+    ) {
+      return candidate.gate;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Find the leader's tool name and input by walking the tool-log back the
+ * same way, then correlating via `toolUseMap`. Returns null when the
+ * leader entry cannot be located OR when the leader's toolUseId isn't in
+ * the map (e.g. transcript was malformed).
+ */
+function getBatchLeaderToolInfo(
+  toolLog: ToolLogEntry[],
+  entry: ToolLogEntry,
+  toolUseMap: Map<string, { name: string; input: unknown }>,
+): { toolName: string; toolInput: unknown } | null {
+  if (entry.batchPosition === undefined || entry.batchPosition === 0) {
+    if (entry.toolUseId) {
+      const info = toolUseMap.get(entry.toolUseId);
+      if (info) return { toolName: info.name, toolInput: info.input };
+    }
+    return null;
+  }
+  const bound = entry.batchSize ?? 0;
+  const idx = toolLog.lastIndexOf(entry);
+  if (idx === -1) return null;
+  const start = Math.max(0, idx - bound);
+  for (let j = idx - 1; j >= start; j--) {
+    const candidate = toolLog[j];
+    if (
+      candidate.batchSize === entry.batchSize &&
+      candidate.batchPosition === 0
+    ) {
+      if (!candidate.toolUseId) return null;
+      const info = toolUseMap.get(candidate.toolUseId);
+      if (!info) return null;
+      return { toolName: info.name, toolInput: info.input };
+    }
+  }
+  return null;
 }
 
 // ─── Stale Sweep ────────────────────────────────────────────────────────────
@@ -1150,6 +1226,53 @@ async function main(): Promise<void> {
             // Read tool-log for diagnostics
             const { gate, reason } = readLastToolLogEntry(sessionDir);
 
+            // Capture live prediction snapshot BEFORE any subsequent event
+            // mutates the cache. Only relevant for prediction-block deny
+            // chains (or batch-siblings whose leader was prediction-block).
+            let livePrediction: LivePredictionSnapshot | undefined;
+            if (decision === "deny" && (gate === "prediction-block" || gate === "batch-sibling")) {
+              const toolLog = readToolLogEntries(sessionDir, 200);
+              const lastEntry = toolLog.length > 0 ? toolLog[toolLog.length - 1] : undefined;
+              const isPredictionChain =
+                gate === "prediction-block" ||
+                (gate === "batch-sibling" &&
+                  lastEntry !== undefined &&
+                  getBatchLeaderGate(toolLog, lastEntry) === "prediction-block");
+              if (isPredictionChain) {
+                let matchTarget: { toolName: string; toolInput: unknown } | null = null;
+                if (gate === "batch-sibling" && lastEntry !== undefined) {
+                  matchTarget = getBatchLeaderToolInfo(toolLog, lastEntry, toolUseMap);
+                } else {
+                  matchTarget = { toolName: block.name, toolInput: block.input };
+                }
+                if (matchTarget) {
+                  const live = await findActivePredictionMatching(
+                    sessionDir,
+                    matchTarget.toolName,
+                    matchTarget.toolInput,
+                  );
+                  if (live) {
+                    livePrediction = {
+                      source: live.prediction.source ?? "micro",
+                      blockedIntent: live.prediction.blockedIntent,
+                      blockedTools: live.prediction.blockedTools.map((b) => ({
+                        toolName: b.toolName,
+                        targetPattern: b.targetPattern,
+                        reason: b.reason,
+                        exceptions: b.exceptions,
+                      })),
+                      matchedBlockedTool: {
+                        toolName: live.blocked.toolName,
+                        targetPattern: live.blocked.targetPattern,
+                        reason: live.blocked.reason,
+                        exceptions: live.blocked.exceptions,
+                      },
+                    };
+                  }
+                }
+              }
+            }
+
             // Match against expectations, filtered to the run's truncation slice.
             const matched = matchExpectation(config.expect, block.id);
             const scopedMatches = scopedExpectations(matched, config.truncateToLine);
@@ -1168,6 +1291,7 @@ async function main(): Promise<void> {
             if (config.truncateToLine !== undefined) {
               baseEvent.at = config.truncateToLine;
             }
+            if (livePrediction) baseEvent.livePrediction = livePrediction;
 
             if (parseError) baseEvent.error = parseError;
 
@@ -1182,7 +1306,11 @@ async function main(): Promise<void> {
                 if (exp.by) {
                   event.gate_expected = exp.by;
                 }
-                const scored = scoreRichExpectation(decision, gate, exp);
+                const scored = scoreRichExpectation(decision, gate, exp, {
+                  sessionDir,
+                  toolName: block.name,
+                  toolInput: block.input,
+                });
                 event.pass = scored.pass;
                 if (scored.reason) {
                   event.reason = scored.reason;
@@ -1350,7 +1478,7 @@ async function main(): Promise<void> {
 
   // 11. Generate-labels mode — write labels.draft.json and exit
   if (config.generateLabels) {
-    const labels: Record<string, string> = {};
+    const labels: Record<string, LabelValue> = {};
     const reasoning: Record<string, string> = {};
     let investigateCount = 0;
 
@@ -1361,6 +1489,29 @@ async function main(): Promise<void> {
           labels[toolUseId] = "INVESTIGATE";
           reasoning[toolUseId] = event.error ?? "Hook error or timeout";
           investigateCount++;
+        } else if (event.decision === "deny" && event.livePrediction) {
+          // Rich-form label with auto-populated prediction annotation.
+          // Reviewer flips verdict to too_broad/wrong per hindsight.
+          const intent = event.livePrediction.blockedIntent.trim();
+          const intentExcerpt = intent ? intent.slice(0, 60) : undefined;
+          const richLabel: RichExpectation = {
+            expected: "deny",
+            by: event.gate ?? "prediction-block",
+            prediction: {
+              verdict: "correct",
+              ...(intentExcerpt ? { intent_must_contain: intentExcerpt } : {}),
+              notes: intentExcerpt
+                ? "[auto] live blockedIntent excerpt; verify hindsight"
+                : "[auto] live prediction matched but blockedIntent was empty; verify hindsight",
+            },
+          };
+          labels[toolUseId] = richLabel;
+          const parts: string[] = [];
+          if (event.gate) parts.push(`gate: ${event.gate}`);
+          if (event.reason) parts.push(event.reason);
+          reasoning[toolUseId] = parts.length > 0
+            ? `${parts.join(" - ")} [prediction-annotation auto-set verdict=correct]`
+            : "Hook decision recorded [prediction-annotation auto-set verdict=correct]";
         } else {
           labels[toolUseId] = event.decision === "allow" ? "allow" : "deny";
           const parts: string[] = [];
@@ -1398,6 +1549,7 @@ async function main(): Promise<void> {
     fs.writeFileSync(draftPath, JSON.stringify(draftOutput, null, 2) + "\n");
 
     // Cleanup background processes but leave cache intact
+    await drainBackgroundUpdaters(sessionDir, 120_000);
     await cleanupBackgroundProcesses(sessionDir);
     try {
       fs.unlinkSync(replayPidFile);
@@ -1425,6 +1577,7 @@ async function main(): Promise<void> {
   const failed = results.filter((r) => r.pass === false);
 
   // 14. Cleanup
+  await drainBackgroundUpdaters(sessionDir, 120_000);
   await cleanupBackgroundProcesses(sessionDir);
 
   // Remove replay.pid

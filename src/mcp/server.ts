@@ -369,36 +369,66 @@ server.registerTool(
   }
 );
 
+const predictionAnnotationSchema = z.object({
+  verdict: z.enum(["correct", "too_broad", "wrong", "INVESTIGATE"]).describe("Hindsight verdict on the prediction that caused this deny."),
+  forbidden_blocks: z.array(z.object({
+    tool: z.string().optional(),
+    target_pattern: z.string().optional(),
+  })).optional().describe("Required when verdict='too_broad'. LITERAL tool names (no regex metachars) the prediction MUST NOT match after narrowing."),
+  intent_must_contain: z.string().optional().describe("Substring that must appear in the live prediction's blockedIntent. Auto-populated with first 60 chars."),
+  notes: z.string().optional(),
+});
+
 const richExpectationSchema = z.object({
   expected: z.string().describe("The decision the hook must produce: allow/deny/pass/block (or INVESTIGATE placeholder)."),
   by: z.string().optional().describe("Rule/gate name the denial must come from (matches tool-log gate field)."),
   at: z.union([z.number(), z.literal("full")]).optional().describe("1-based line cap this expectation scores under. Omit or 'full' for the default post-flush run."),
   notes: z.string().optional().describe("Free-text explanation of why this expectation exists."),
+  prediction: predictionAnnotationSchema.optional().describe("Set ONLY when expected='deny' AND by ∈ {prediction-block, batch-sibling}."),
 });
 
 server.registerTool(
   "test_harness_labeler",
   {
     title: "Test Harness Labeler",
-    description: "Label test harness transcripts. Actions: find_work, auto_label, generate_labels, scaffold, list, expand, validate, update_label, update_labels, set_label, finalize, read_file, append_notes, git_hash, help. Use help action for full documentation.",
+    description: "Label test harness transcripts. Actions: find_work, auto_label, generate_labels, scaffold, list, expand, validate, update_label, update_labels, set_label, update_label_prediction, update_label_predictions, reset_for_relabel, finalize, read_file, append_notes, git_hash, help. Use help action for full documentation.",
     inputSchema: {
       action: z.enum([
         "find_work", "auto_label", "generate_labels", "scaffold", "list", "expand", "validate",
-        "update_label", "update_labels", "set_label", "finalize", "read_file", "append_notes",
+        "update_label", "update_labels", "set_label",
+        "update_label_prediction", "update_label_predictions", "reset_for_relabel",
+        "finalize", "read_file", "append_notes",
         "git_hash", "help"
       ]).describe("The action to perform"),
       transcript_name: z.string().optional().describe("Transcript name (without .jsonl extension)"),
       target: z.string().optional().describe("For expand: tool_use_id or stop:N key"),
       depth: z.number().optional().describe("For expand: context radius multiplier (default 1)"),
-      key: z.string().optional().describe("For update_label/set_label: the label key to update"),
+      key: z.string().optional().describe("For update_label/set_label/update_label_prediction: the label key to update"),
       value: z.string().optional().describe("For update_label: the new label value (allow/deny/pass/block)"),
-      reasoning: z.string().optional().describe("For update_label/set_label: explanation for this label decision"),
+      reasoning: z.string().optional().describe("For update_label/set_label/update_label_prediction: explanation for this label decision"),
       updates: z.array(z.object({
         key: z.string(),
         value: z.string(),
         reasoning: z.string(),
       })).optional().describe("For update_labels: array of {key, value, reasoning} updates"),
-      expectation: z.union([richExpectationSchema, z.array(richExpectationSchema)]).optional().describe("For set_label: a rich expectation object (or array of them) with {expected, by?, at?, notes?}. Use this when you need 'expected deny by rule X' or per-truncation assertions that the plain update_label string form cannot express."),
+      expectation: z.union([richExpectationSchema, z.array(richExpectationSchema)]).optional().describe("For set_label: a rich expectation object (or array of them) with {expected, by?, at?, notes?, prediction?}. Use this when you need 'expected deny by rule X' or per-truncation assertions that the plain update_label string form cannot express."),
+      verdict: z.enum(["correct", "too_broad", "wrong", "INVESTIGATE"]).optional().describe("For update_label_prediction: hindsight verdict on the prediction that caused this deny."),
+      forbidden_blocks: z.array(z.object({
+        tool: z.string().optional(),
+        target_pattern: z.string().optional(),
+      })).optional().describe("For update_label_prediction: required when verdict='too_broad'. LITERAL tool names the prediction MUST NOT match after narrowing."),
+      intent_must_contain: z.string().optional().describe("For update_label_prediction: substring that must appear in the live prediction's blockedIntent."),
+      prediction_updates: z.array(z.object({
+        key: z.string(),
+        verdict: z.enum(["correct", "too_broad", "wrong", "INVESTIGATE"]),
+        forbidden_blocks: z.array(z.object({
+          tool: z.string().optional(),
+          target_pattern: z.string().optional(),
+        })).optional(),
+        intent_must_contain: z.string().optional(),
+        notes: z.string().optional(),
+        reasoning: z.string(),
+      })).optional().describe("For update_label_predictions: batch updates of prediction annotations."),
       filename: z.string().optional().describe("For read_file: labels.draft.json, labels.json, notes_and_questions.md, or report.json"),
       content: z.string().optional().describe("For append_notes: content to append"),
       date_from: z.string().optional().describe("For find_work: only transcripts modified on or after this date (YYYY-MM-DD)"),
@@ -452,14 +482,27 @@ const scenarioSchema = z.object({
       expected: z.string(),
       by: z.string().optional(),
       notes: z.string().optional(),
+      prediction: predictionAnnotationSchema.optional(),
     }),
     z.array(z.object({
       position: z.number().int().nonnegative(),
       expected: z.string(),
       by: z.string().optional(),
       notes: z.string().optional(),
+      prediction: predictionAnnotationSchema.optional(),
     })).min(1),
   ]),
+  predictions: z.object({
+    must_block: z.array(z.object({
+      tool: z.string(),
+      target_pattern: z.string().optional(),
+    })).optional(),
+    must_not_block: z.array(z.object({
+      tool: z.string(),
+      target_pattern: z.string().optional(),
+    })).optional(),
+    must_be_empty: z.boolean().optional(),
+  }).optional(),
 });
 
 server.registerTool(

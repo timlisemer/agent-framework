@@ -25,8 +25,13 @@ import {
   type ScenarioResult,
   validateScenario,
 } from "./lib/types.js";
-import { runHook, cleanupBackgroundProcesses } from "./lib/harness.js";
+import type {
+  PredictionAssertionResult,
+  ScenarioPredictionExpectation,
+} from "../src/agents/mcp/scenario-types.js";
+import { runHook, cleanupBackgroundProcesses, drainBackgroundUpdaters } from "./lib/harness.js";
 import {
+  blockedToolsContainsPattern,
   buildEnv,
   getVersion,
   hookScript,
@@ -36,6 +41,7 @@ import {
   readToolLogEntriesAfterOffset,
   scoreRichExpectation,
 } from "./lib/hook-runner.js";
+import { getAllPredictions } from "../src/utils/prediction-cache.js";
 
 function getArg(name: string, required: boolean = false): string | undefined {
   const args = process.argv.slice(2);
@@ -421,6 +427,59 @@ function parseDecisionForHook(
   }
 }
 
+/**
+ * Evaluate the optional `scenario.predictions` block against the live
+ * prediction-cache state in `cacheDir`. Returns one PredictionAssertionResult
+ * per assertion. Caller is responsible for draining background updaters
+ * BEFORE invoking this so the cache read sees a consistent state.
+ */
+async function evaluateScenarioPredictions(
+  cacheDir: string,
+  spec: ScenarioPredictionExpectation,
+): Promise<PredictionAssertionResult[]> {
+  const active = await getAllPredictions(cacheDir);
+  const results: PredictionAssertionResult[] = [];
+  if (spec.must_be_empty === true) {
+    results.push({
+      kind: "must_be_empty",
+      pass: active.length === 0,
+      reason:
+        active.length === 0
+          ? undefined
+          : `expected no active predictions, found ${active.length}`,
+    });
+    return results;
+  }
+  const allBlocked = active.flatMap((e) => e.blockedTools);
+  if (spec.must_block) {
+    for (const filter of spec.must_block) {
+      const matched = blockedToolsContainsPattern(allBlocked, filter);
+      results.push({
+        kind: "must_block",
+        filter,
+        pass: matched,
+        reason: matched
+          ? undefined
+          : `must_block: no active prediction's blockedTools matches tool=${filter.tool}${filter.target_pattern ? `, target_pattern=${filter.target_pattern}` : ""}`,
+      });
+    }
+  }
+  if (spec.must_not_block) {
+    for (const filter of spec.must_not_block) {
+      const matched = blockedToolsContainsPattern(allBlocked, filter);
+      results.push({
+        kind: "must_not_block",
+        filter,
+        pass: !matched,
+        reason: matched
+          ? `must_not_block: an active prediction's blockedTools matches tool=${filter.tool}${filter.target_pattern ? `, target_pattern=${filter.target_pattern}` : ""}`
+          : undefined,
+      });
+    }
+  }
+  return results;
+}
+
 async function main() {
   const scenarioPath = getArg("scenario", true)!;
   if (!fs.existsSync(scenarioPath)) {
@@ -529,7 +588,28 @@ async function main() {
         expected: string;
         by?: string;
       };
-      const scored = scoreRichExpectation(decision, gate, singleExpect);
+      const targetTool =
+        scenario.target.hook === "PreToolUse" || scenario.target.hook === "PostToolUse"
+          ? resolveToolUseBlock(scenario, built.finalToolUses)
+          : null;
+      const scoreCtx = targetTool
+        ? { sessionDir: cacheDir, toolName: targetTool.name, toolInput: targetTool.input }
+        : undefined;
+      const scored = scoreRichExpectation(decision, gate, singleExpect, scoreCtx);
+
+      // Phase 6/7.3: when scenario.predictions is set, drain background
+      // updaters BEFORE reading prediction-cache so the read sees a
+      // consistent state. Cleanup still happens at the end of main().
+      let predictionAssertions: PredictionAssertionResult[] | undefined;
+      let predictionsPass = true;
+      if (scenario.predictions) {
+        await drainBackgroundUpdaters(cacheDir, 120_000);
+        predictionAssertions = await evaluateScenarioPredictions(
+          cacheDir,
+          scenario.predictions,
+        );
+        predictionsPass = predictionAssertions.every((a) => a.pass);
+      }
 
       const result: ScenarioResult = {
         mode: "single",
@@ -540,12 +620,13 @@ async function main() {
         gate_expected: singleExpect.by,
         reason: scored.reason ?? tlReason ?? gateReason,
         expected: singleExpect.expected,
-        pass: scored.pass,
+        pass: scored.pass && predictionsPass,
         ms: Date.now() - started,
         error: parseError,
         transcript_path: transcriptPath,
         commit: getVersion(),
         batch_visible_through: scenario.target.batch_visible_through,
+        ...(predictionAssertions ? { prediction_assertions: predictionAssertions } : {}),
       };
 
       fs.writeFileSync(
@@ -554,8 +635,9 @@ async function main() {
       );
       console.log(JSON.stringify(result, null, 2));
 
+      await drainBackgroundUpdaters(cacheDir, 120_000);
       await cleanupBackgroundProcesses(cacheDir);
-      process.exit(scored.pass ? 0 : 1);
+      process.exit(result.pass ? 0 : 1);
     }
 
     // ── Fan-out mode ───────────────────────────────────────────────────
@@ -668,10 +750,19 @@ async function main() {
       if (expectEntry) {
         expected = expectEntry.expected;
         gateExpected = expectEntry.by;
-        const scored = scoreRichExpectation(parsed.decision, gate, {
-          expected: expectEntry.expected,
-          by: expectEntry.by,
-        });
+        const scored = scoreRichExpectation(
+          parsed.decision,
+          gate,
+          {
+            expected: expectEntry.expected,
+            by: expectEntry.by,
+          },
+          {
+            sessionDir: cacheDir,
+            toolName: sub.toolUse.name,
+            toolInput: sub.toolUse.input,
+          },
+        );
         pass = scored.pass;
         scoredReason = scored.reason;
       }
@@ -690,7 +781,21 @@ async function main() {
       });
     }
 
-    const aggregatePass = fires.every((f) => f.pass);
+    // Phase 6/7.3: drain before reading prediction-cache so the read sees a
+    // consistent state. Predictions are session-scoped; check once at end of
+    // fan-out, not per-fire.
+    let predictionAssertions: PredictionAssertionResult[] | undefined;
+    let predictionsPass = true;
+    if (scenario.predictions) {
+      await drainBackgroundUpdaters(cacheDir, 120_000);
+      predictionAssertions = await evaluateScenarioPredictions(
+        cacheDir,
+        scenario.predictions,
+      );
+      predictionsPass = predictionAssertions.every((a) => a.pass);
+    }
+
+    const aggregatePass = fires.every((f) => f.pass) && predictionsPass;
     const result: ScenarioResult = {
       mode: "fanout",
       scenario: scenario.name,
@@ -700,6 +805,7 @@ async function main() {
       ms: Date.now() - started,
       transcript_path: transcriptPath,
       commit: getVersion(),
+      ...(predictionAssertions ? { prediction_assertions: predictionAssertions } : {}),
     };
 
     fs.writeFileSync(
@@ -708,6 +814,7 @@ async function main() {
     );
     console.log(JSON.stringify(result, null, 2));
 
+    await drainBackgroundUpdaters(cacheDir, 120_000);
     await cleanupBackgroundProcesses(cacheDir);
     process.exit(aggregatePass ? 0 : 1);
   } catch (err) {
@@ -715,6 +822,7 @@ async function main() {
       "scenario run failed: " +
         (err instanceof Error ? err.message : String(err)),
     );
+    await drainBackgroundUpdaters(cacheDir, 120_000);
     await cleanupBackgroundProcesses(cacheDir);
     process.exit(2);
   }

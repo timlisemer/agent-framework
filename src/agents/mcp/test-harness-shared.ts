@@ -191,15 +191,30 @@ export function getVersion(): string {
 // ─── Label File Operations ─────────────────────────────────────────────────
 
 /**
+ * Hindsight verdict on a prediction that fired and produced a deny.
+ * Mirrors test-harness/lib/types.ts:PredictionAnnotation.
+ */
+export interface PredictionAnnotation {
+  verdict: "correct" | "too_broad" | "wrong" | "INVESTIGATE";
+  forbidden_blocks?: Array<{ tool?: string; target_pattern?: string }>;
+  intent_must_contain?: string;
+  notes?: string;
+}
+
+/**
  * A rich expectation entry with optional rule match and truncation target.
  * Mirrors test-harness/lib/types.ts:RichExpectation so shared callers do
  * not need to import from the test-harness package.
+ *
+ * `prediction` is set ONLY when `expected === "deny"` AND
+ * `by ∈ {"prediction-block", "batch-sibling"}`.
  */
 export interface RichExpectation {
   expected: string;
   by?: string;
   at?: number | "full";
   notes?: string;
+  prediction?: PredictionAnnotation;
 }
 
 /**
@@ -314,8 +329,107 @@ export function setRichLabel(
         `"at" must be a positive integer or "full" when set, got ${JSON.stringify(e.at)}`,
       );
     }
+    validatePredictionAnnotation(key, e);
   }
   labelFile.labels[key] = entries.length === 1 ? entries[0] : entries;
+  if (!labelFile.reasoning) {
+    labelFile.reasoning = {};
+  }
+  labelFile.reasoning[key] = reasoning;
+  writeLabelFile(transcriptName, true, labelFile);
+  return labelFile;
+}
+
+/**
+ * Inline validator shared by setRichLabel and updateLabelPrediction. Enforces:
+ * - prediction is allowed only when expected === "deny" AND by ∈
+ *   {"prediction-block", "batch-sibling"}.
+ * - verdict must be in the allowed set.
+ * - too_broad requires non-empty forbidden_blocks.
+ * - intent_must_contain must be a non-empty string when set.
+ */
+function validatePredictionAnnotation(key: string, e: RichExpectation): void {
+  if (e.prediction === undefined) return;
+  if (e.expected !== "deny") {
+    throw new Error(
+      `prediction annotation on key "${key}" requires expected="deny", got "${e.expected}"`,
+    );
+  }
+  if (e.by !== "prediction-block" && e.by !== "batch-sibling") {
+    throw new Error(
+      `prediction annotation on key "${key}" requires by ∈ {"prediction-block","batch-sibling"}, got ${JSON.stringify(e.by)}`,
+    );
+  }
+  const validVerdicts = ["correct", "too_broad", "wrong", "INVESTIGATE"];
+  if (!validVerdicts.includes(e.prediction.verdict)) {
+    throw new Error(
+      `prediction.verdict on key "${key}" must be one of ${validVerdicts.join(", ")}, got ${JSON.stringify(e.prediction.verdict)}`,
+    );
+  }
+  if (e.prediction.verdict === "too_broad") {
+    if (
+      !Array.isArray(e.prediction.forbidden_blocks) ||
+      e.prediction.forbidden_blocks.length === 0
+    ) {
+      throw new Error(
+        `prediction.forbidden_blocks on key "${key}" must be a non-empty array when verdict="too_broad"`,
+      );
+    }
+  }
+  if (e.prediction.intent_must_contain !== undefined) {
+    if (
+      typeof e.prediction.intent_must_contain !== "string" ||
+      e.prediction.intent_must_contain.length === 0
+    ) {
+      throw new Error(
+        `prediction.intent_must_contain on key "${key}" must be a non-empty string when set`,
+      );
+    }
+  }
+}
+
+/**
+ * Update (or set) the `prediction` annotation on a single label entry. The
+ * entry must already exist in labels.draft.json, must be a RichExpectation
+ * with `expected === "deny"` AND `by ∈ {"prediction-block","batch-sibling"}`.
+ * Plain string-form labels are first promoted to RichExpectation form.
+ */
+export function updateLabelPrediction(
+  transcriptName: string,
+  key: string,
+  prediction: PredictionAnnotation,
+  reasoning: string,
+): LabelFile {
+  const labelFile = readLabelFile(transcriptName, true);
+  const existing = labelFile.labels[key];
+  if (existing === undefined) {
+    throw new Error(`Key "${key}" not found in labels.draft.json`);
+  }
+  // Determine the rich entry to mutate. If the existing label is a string,
+  // we need to know its `by` to validate the prediction; we cannot derive
+  // that from a string-only label, so reject and instruct the caller to
+  // promote via set_label first.
+  let target: RichExpectation;
+  let arrayCarrier: RichExpectation[] | null = null;
+  if (typeof existing === "string") {
+    throw new Error(
+      `Key "${key}" is a plain string label; promote it to a RichExpectation with by="prediction-block" (or "batch-sibling") via set_label before adding a prediction annotation`,
+    );
+  } else if (Array.isArray(existing)) {
+    // Mutate the entry whose at === "full" if present, else the first entry.
+    const fullIdx = existing.findIndex((e) => (e.at ?? "full") === "full");
+    target = existing[fullIdx >= 0 ? fullIdx : 0];
+    arrayCarrier = existing;
+  } else {
+    target = existing;
+  }
+  target.prediction = prediction;
+  validatePredictionAnnotation(key, target);
+  if (arrayCarrier) {
+    labelFile.labels[key] = arrayCarrier;
+  } else {
+    labelFile.labels[key] = target;
+  }
   if (!labelFile.reasoning) {
     labelFile.reasoning = {};
   }

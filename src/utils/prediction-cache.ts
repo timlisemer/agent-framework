@@ -209,7 +209,7 @@ export function matchBlockedTool(
  * Match a tool name against a pattern.
  * If pattern contains regex metacharacters, treat as regex. Otherwise exact match.
  */
-function toolNameMatches(toolName: string, pattern: string): boolean {
+export function toolNameMatches(toolName: string, pattern: string): boolean {
   if (/[.*|[\]()^$+?\\]/.test(pattern)) {
     try {
       const regex = new RegExp(`^(?:${pattern})$`);
@@ -226,7 +226,7 @@ function toolNameMatches(toolName: string, pattern: string): boolean {
  * Supports * as wildcard at the end (e.g., "git *" matches "git push")
  * and * at the start (e.g., "*file.ts" matches "/path/to/file.ts").
  */
-function globMatch(value: string, pattern: string): boolean {
+export function globMatch(value: string, pattern: string): boolean {
   if (pattern.startsWith("*") && pattern.endsWith("*")) {
     return value.includes(pattern.slice(1, -1));
   }

@@ -32,8 +32,11 @@ import {
   readLabelFile,
   writeLabelFile,
   updateSingleLabel,
+  updateLabelPrediction,
   updateMultipleLabels,
   setRichLabel,
+  type LabelValue,
+  type PredictionAnnotation,
   type RichExpectation,
   runReplayCommand,
   getVersion,
@@ -43,6 +46,21 @@ import {
   formatStatusFooter,
   appendTestRunFile,
 } from "./test-harness-shared.js";
+
+/**
+ * Return the canonical `expected` string for any LabelValue form. Used to
+ * collapse rich vs string forms during the auto_label merge so the agree /
+ * conflict branches operate on stable comparisons.
+ */
+function extractExpected(value: LabelValue | undefined): string {
+  if (value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    const fullEntry = value.find((e) => (e.at ?? "full") === "full");
+    return (fullEntry ?? value[0])?.expected ?? "";
+  }
+  return value.expected;
+}
 
 // ─── Action Handlers ───────────────────────────────────────────────────────
 
@@ -115,9 +133,7 @@ function handleAutoLabel(
 
   // Save scaffold results before generate_labels overwrites labels.draft.json
   const scaffoldData = readLabelFile(transcriptName, true);
-  // auto_label only merges string-form labels. scaffold and generate_labels
-  // both write plain strings, so it's safe to narrow here.
-  const scaffoldLabels: Record<string, string> = { ...scaffoldData.labels } as Record<string, string>;
+  const scaffoldLabels: Record<string, LabelValue> = { ...scaffoldData.labels };
   const scaffoldReasoning = { ...(scaffoldData.reasoning ?? {}) };
 
   // Step 2: Run generate_labels (costs $, enforces 1x limit)
@@ -162,13 +178,16 @@ function handleAutoLabel(
     ].join("\n");
   }
 
-  // Read generate_labels results (it overwrote labels.draft.json)
+  // Read generate_labels results (it overwrote labels.draft.json). Note:
+  // generate_labels may emit RichExpectation entries when a deny carries a
+  // prediction annotation. The merge below preserves rich-form so the
+  // annotation survives.
   const genData = readLabelFile(transcriptName, true);
-  const genLabels: Record<string, string> = genData.labels as Record<string, string>;
+  const genLabels: Record<string, LabelValue> = genData.labels;
   const genReasoning = genData.reasoning ?? {};
 
   // Step 3: Merge — scaffold is baseline, hooks are advisory
-  const mergedLabels: Record<string, string> = {};
+  const mergedLabels: Record<string, LabelValue> = {};
   const mergedReasoning: Record<string, string> = {};
   let agreeCount = 0;
   let conflictCount = 0;
@@ -180,26 +199,33 @@ function handleAutoLabel(
     const gVal = genLabels[key];
     const sReason = scaffoldReasoning[key] ?? "";
     const gReason = genReasoning[key] ?? "";
+    const sExpected = extractExpected(sVal);
+    const gExpected = extractExpected(gVal);
 
-    if (!sVal && gVal) {
-      mergedLabels[key] = "INVESTIGATE";
-      mergedReasoning[key] = `[hooks-only] hook=${gVal} (${gReason}). Not in scaffold.`;
+    if (sVal === undefined && gVal !== undefined) {
+      // Preserve the generate_labels rich form (so prediction annotations
+      // survive). Reasoning prints the canonical expected string, not
+      // [object Object].
+      mergedLabels[key] = gVal;
+      mergedReasoning[key] = `[hooks-only] hook=${gExpected} (${gReason}). Not in scaffold.`;
       conflictCount++;
-    } else if (sVal && !gVal) {
+    } else if (sVal !== undefined && gVal === undefined) {
       mergedLabels[key] = "INVESTIGATE";
-      mergedReasoning[key] = `[scaffold-only] scaffold=${sVal} (${sReason}). Not in hooks.`;
+      mergedReasoning[key] = `[scaffold-only] scaffold=${sExpected} (${sReason}). Not in hooks.`;
       conflictCount++;
-    } else if (sVal === "INVESTIGATE" || gVal === "INVESTIGATE") {
+    } else if (sExpected === "INVESTIGATE" || gExpected === "INVESTIGATE") {
       mergedLabels[key] = "INVESTIGATE";
-      mergedReasoning[key] = `[flagged] scaffold=${sVal} (${sReason}) | hook=${gVal} (${gReason})`;
+      mergedReasoning[key] = `[flagged] scaffold=${sExpected} (${sReason}) | hook=${gExpected} (${gReason})`;
       conflictCount++;
-    } else if (sVal === gVal) {
-      mergedLabels[key] = sVal;
-      mergedReasoning[key] = `[agree] both=${sVal}. scaffold: ${sReason} | hook: ${gReason}`;
+    } else if (sExpected === gExpected) {
+      // Prefer the rich-form value when either side has it (preserves the
+      // prediction annotation auto-populated by generate_labels).
+      mergedLabels[key] = (typeof gVal === "object") ? gVal : sVal!;
+      mergedReasoning[key] = `[agree] both=${sExpected}. scaffold: ${sReason} | hook: ${gReason}`;
       agreeCount++;
     } else {
       mergedLabels[key] = "INVESTIGATE";
-      mergedReasoning[key] = `[CONFLICT] scaffold=${sVal} (${sReason}) | hook=${gVal} (${gReason}). Hooks are NOT authoritative.`;
+      mergedReasoning[key] = `[CONFLICT] scaffold=${sExpected} (${sReason}) | hook=${gExpected} (${gReason}). Hooks are NOT authoritative.`;
       conflictCount++;
     }
   }
@@ -259,7 +285,145 @@ function handleExpand(
   }
   const output = runReplayCommand(args, 600000, rootOverride);
   const state = detectWorkflowState(transcriptName);
-  return output + formatStatusFooter(state);
+
+  // Augment with prediction context when the target's label carries a
+  // prediction annotation (or its tool-log entry's gate is prediction-block
+  // / batch-sibling). Best-effort: if files don't exist, just skip.
+  const predictionContext = collectPredictionContext(transcriptName, target);
+  return output + (predictionContext ? "\n\n" + predictionContext : "") + formatStatusFooter(state);
+}
+
+/**
+ * For the labeler's expand action: inspect labels.draft.json (or labels.json
+ * if the draft is gone) and the cache's tool-log.jsonl + prediction-cache.json
+ * for the target tool_use_id. When the target has a prediction annotation OR
+ * its tool-log gate is prediction-block / batch-sibling, return a multi-line
+ * description of the live prediction's expectedIntent, blockedIntent,
+ * blockedTools, source, and matched entry. Returns empty string when nothing
+ * is available.
+ */
+function collectPredictionContext(transcriptName: string, target: string): string {
+  if (target.startsWith("stop:")) return "";
+  const runDir = transcriptRunDir(transcriptName);
+  // Read whichever label file exists.
+  let labelFile: ReturnType<typeof readLabelFile> | null = null;
+  try {
+    labelFile = readLabelFile(transcriptName, true);
+  } catch {
+    try {
+      labelFile = readLabelFile(transcriptName, false);
+    } catch {
+      labelFile = null;
+    }
+  }
+  // Find the matching label entry. Honor the same prefix-match semantics as
+  // replay.ts: keys >= 12 chars and target.startsWith(key) qualify.
+  let matchedEntry: LabelValue | undefined;
+  let matchedKey: string | undefined;
+  if (labelFile) {
+    if (labelFile.labels[target] !== undefined) {
+      matchedEntry = labelFile.labels[target];
+      matchedKey = target;
+    } else {
+      for (const [k, v] of Object.entries(labelFile.labels)) {
+        if (k.length >= 12 && target.startsWith(k)) {
+          matchedEntry = v;
+          matchedKey = k;
+          break;
+        }
+      }
+    }
+  }
+  // Look up the tool-log entry for the target (gate field).
+  let toolLogGate: string | undefined;
+  let toolLogToolUseId: string | undefined;
+  try {
+    const toolLogPath = path.join(runDir, "cache", "tool-log.jsonl");
+    const content = fs.readFileSync(toolLogPath, "utf-8");
+    const lines = content.split("\n").filter(Boolean);
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as { toolUseId?: string; gate?: string };
+        if (entry.toolUseId && (entry.toolUseId === target || target.startsWith(entry.toolUseId))) {
+          toolLogGate = entry.gate;
+          toolLogToolUseId = entry.toolUseId;
+        }
+      } catch {
+        // skip
+      }
+    }
+  } catch {
+    // No tool-log
+  }
+  // Determine whether this is a prediction-block / batch-sibling target.
+  const labelHasPrediction = (() => {
+    if (!matchedEntry || typeof matchedEntry === "string") return false;
+    if (Array.isArray(matchedEntry)) {
+      return matchedEntry.some((e) => e.prediction !== undefined);
+    }
+    return matchedEntry.prediction !== undefined;
+  })();
+  const isPredictionGate =
+    toolLogGate === "prediction-block" || toolLogGate === "batch-sibling";
+  if (!labelHasPrediction && !isPredictionGate) return "";
+
+  // Read prediction-cache and find the active prediction whose blockedTools
+  // would have matched the target tool. Prefer reading from cache/prediction-cache.json.
+  const lines: string[] = [];
+  lines.push("--- PREDICTION CONTEXT ---");
+  if (matchedKey) lines.push(`Label key: ${matchedKey}`);
+  if (toolLogGate) lines.push(`Tool-log gate: ${toolLogGate}`);
+  if (matchedEntry && typeof matchedEntry !== "string") {
+    const richArr = Array.isArray(matchedEntry) ? matchedEntry : [matchedEntry];
+    for (const re of richArr) {
+      if (re.prediction) {
+        lines.push(
+          `Annotation: verdict=${re.prediction.verdict}` +
+            (re.prediction.intent_must_contain
+              ? `, intent_must_contain="${re.prediction.intent_must_contain}"`
+              : "") +
+            (re.prediction.forbidden_blocks?.length
+              ? `, forbidden_blocks=${JSON.stringify(re.prediction.forbidden_blocks)}`
+              : "") +
+            (re.prediction.notes ? `, notes="${re.prediction.notes}"` : ""),
+        );
+      }
+    }
+  }
+  // Read prediction-cache.json for live prediction details.
+  try {
+    const cachePath = path.join(runDir, "cache", "prediction-cache.json");
+    const raw = fs.readFileSync(cachePath, "utf-8");
+    const state = JSON.parse(raw) as {
+      data?: { entries?: Array<{
+        expectedIntent?: string;
+        blockedIntent?: string;
+        blockedTools?: Array<{ toolName?: string; targetPattern?: string; reason?: string }>;
+        source?: string;
+        active?: boolean;
+      }> };
+    };
+    const entries = (state.data?.entries ?? []).filter((e) => e.active === true);
+    if (entries.length > 0) {
+      lines.push("");
+      lines.push(`Active predictions in cache: ${entries.length}`);
+      for (let i = 0; i < entries.length; i++) {
+        const e = entries[i];
+        lines.push(`  [${i}] source=${e.source ?? "unset"}`);
+        if (e.expectedIntent) lines.push(`      expectedIntent: ${e.expectedIntent}`);
+        if (e.blockedIntent) lines.push(`      blockedIntent: ${e.blockedIntent}`);
+        if (e.blockedTools && e.blockedTools.length > 0) {
+          lines.push(`      blockedTools: ${JSON.stringify(e.blockedTools)}`);
+        }
+      }
+    }
+  } catch {
+    // No cache or parse error — just emit what we have
+  }
+  if (toolLogToolUseId) {
+    lines.push(`Source tool_use_id: ${toolLogToolUseId}`);
+  }
+  return lines.join("\n");
 }
 
 function handleValidate(
@@ -315,6 +479,77 @@ function handleSetLabel(
     ? `${expectation.length} rich entries`
     : `expected=${expectation.expected}${expectation.by ? `, by=${expectation.by}` : ""}${expectation.at !== undefined ? `, at=${expectation.at}` : ""}`;
   return `Set rich label for "${key}" (${desc})` + formatStatusFooter(state);
+}
+
+function handleUpdateLabelPrediction(
+  transcriptName: string,
+  key: string,
+  prediction: PredictionAnnotation,
+  reasoning: string,
+): string {
+  updateLabelPrediction(transcriptName, key, prediction, reasoning);
+  const state = detectWorkflowState(transcriptName);
+  const desc =
+    `verdict=${prediction.verdict}` +
+    (prediction.forbidden_blocks?.length
+      ? `, forbidden_blocks=${prediction.forbidden_blocks.length}`
+      : "") +
+    (prediction.intent_must_contain ? `, intent_must_contain set` : "");
+  return `Updated prediction annotation for "${key}" (${desc})` + formatStatusFooter(state);
+}
+
+function handleUpdateLabelPredictions(
+  transcriptName: string,
+  updates: Array<{
+    key: string;
+    verdict: PredictionAnnotation["verdict"];
+    forbidden_blocks?: PredictionAnnotation["forbidden_blocks"];
+    intent_must_contain?: string;
+    notes?: string;
+    reasoning: string;
+  }>,
+): string {
+  for (const u of updates) {
+    const annotation: PredictionAnnotation = { verdict: u.verdict };
+    if (u.forbidden_blocks !== undefined) annotation.forbidden_blocks = u.forbidden_blocks;
+    if (u.intent_must_contain !== undefined) annotation.intent_must_contain = u.intent_must_contain;
+    if (u.notes !== undefined) annotation.notes = u.notes;
+    updateLabelPrediction(transcriptName, u.key, annotation, u.reasoning);
+  }
+  const state = detectWorkflowState(transcriptName);
+  return `Updated ${updates.length} prediction annotations.` + formatStatusFooter(state);
+}
+
+/**
+ * Reset a transcript's mcp-state.json and cache/ directory so auto_label /
+ * generate_labels can be re-run. Does NOT touch labels.json,
+ * labels.draft.json, or notes_and_questions.md.
+ */
+function handleResetForRelabel(transcriptName: string): string {
+  const runDir = transcriptRunDir(transcriptName);
+  const removed: string[] = [];
+  const mcpStatePath = path.join(runDir, "mcp-state.json");
+  try {
+    fs.unlinkSync(mcpStatePath);
+    removed.push("mcp-state.json");
+  } catch {
+    // Not present — nothing to remove
+  }
+  const cacheDir = path.join(runDir, "cache");
+  try {
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+    removed.push("cache/");
+  } catch {
+    // Not present
+  }
+  const state = detectWorkflowState(transcriptName);
+  return (
+    `Reset for re-label of "${transcriptName}":\n` +
+    `  Removed: ${removed.length > 0 ? removed.join(", ") : "(nothing — already clean)"}\n` +
+    `  Preserved: labels.json, labels.draft.json, notes_and_questions.md (if any)\n` +
+    `  You can now re-run auto_label or generate_labels.` +
+    formatStatusFooter(state)
+  );
 }
 
 function handleFinalize(
@@ -475,10 +710,37 @@ export interface LabelerInput {
   limit?: number;
   /**
    * For set_label: a rich expectation (or array of rich expectations).
-   * Shape: { expected, by?, at?, notes? }. See test-harness-shared.ts
-   * :RichExpectation for the full contract.
+   * Shape: { expected, by?, at?, notes?, prediction? }. See
+   * test-harness-shared.ts:RichExpectation for the full contract.
    */
   expectation?: RichExpectation | RichExpectation[];
+  /**
+   * For update_label_prediction: hindsight verdict on the prediction that
+   * caused this deny. Required when calling update_label_prediction.
+   */
+  verdict?: PredictionAnnotation["verdict"];
+  /**
+   * For update_label_prediction: list of forbidden filters when verdict is
+   * "too_broad". Each filter's `tool` must be a LITERAL tool name (no regex
+   * metachars).
+   */
+  forbidden_blocks?: PredictionAnnotation["forbidden_blocks"];
+  /**
+   * For update_label_prediction: substring that must appear in the live
+   * prediction's blockedIntent.
+   */
+  intent_must_contain?: string;
+  /**
+   * For update_label_predictions: batch updates of prediction annotations.
+   */
+  prediction_updates?: Array<{
+    key: string;
+    verdict: PredictionAnnotation["verdict"];
+    forbidden_blocks?: PredictionAnnotation["forbidden_blocks"];
+    intent_must_contain?: string;
+    notes?: string;
+    reasoning: string;
+  }>;
   /**
    * Absolute path to the transcript .jsonl file. Use when the transcript
    * lives outside the default ~/.claude/projects/-home-tim-Coding-public-
@@ -553,6 +815,32 @@ export async function handleTestHarnessLabeler(input: LabelerInput): Promise<str
         if (!input.reasoning) throw new Error("reasoning is required");
         return handleSetLabel(input.transcript_name, input.key, input.expectation, input.reasoning);
 
+      case "update_label_prediction": {
+        if (!input.transcript_name) throw new Error("transcript_name is required");
+        if (!input.key) throw new Error("key is required");
+        if (!input.verdict) throw new Error("verdict is required (correct/too_broad/wrong/INVESTIGATE)");
+        if (!input.reasoning) throw new Error("reasoning is required");
+        const annotation: PredictionAnnotation = { verdict: input.verdict };
+        if (input.forbidden_blocks !== undefined) annotation.forbidden_blocks = input.forbidden_blocks;
+        if (input.intent_must_contain !== undefined) annotation.intent_must_contain = input.intent_must_contain;
+        return handleUpdateLabelPrediction(input.transcript_name, input.key, annotation, input.reasoning);
+      }
+
+      case "update_label_predictions":
+        if (!input.transcript_name) throw new Error("transcript_name is required");
+        if (
+          !input.prediction_updates ||
+          !Array.isArray(input.prediction_updates) ||
+          input.prediction_updates.length === 0
+        ) {
+          throw new Error("prediction_updates array is required and must be non-empty");
+        }
+        return handleUpdateLabelPredictions(input.transcript_name, input.prediction_updates);
+
+      case "reset_for_relabel":
+        if (!input.transcript_name) throw new Error("transcript_name is required");
+        return handleResetForRelabel(input.transcript_name);
+
       case "finalize":
         if (!input.transcript_name) throw new Error("transcript_name is required");
         return handleFinalize(input.transcript_name, input.transcript_path, input.working_dir);
@@ -577,7 +865,8 @@ export async function handleTestHarnessLabeler(input: LabelerInput): Promise<str
         throw new Error(
           `Unknown action: "${input.action}". ` +
           "Valid actions: find_work, auto_label, generate_labels, scaffold, list, expand, validate, " +
-          "update_label, update_labels, set_label, finalize, read_file, append_notes, git_hash, help"
+          "update_label, update_labels, set_label, update_label_prediction, update_label_predictions, " +
+          "reset_for_relabel, finalize, read_file, append_notes, git_hash, help"
         );
     }
   } catch (error: unknown) {
@@ -632,6 +921,32 @@ For every agreed label, spot-check a sample:
 - Did the user react negatively? -> Change to "deny"/"block"
 - Did the tool do something not asked for? -> Change to "deny"
 - User continued normally? -> Keep "allow"/"pass"
+
+For tool labels with \`gate: prediction-block\` or \`gate: batch-sibling\`, the
+auto-labeler attaches a \`prediction\` annotation with verdict "correct" by default.
+Use expand <tool_use_id> to see the prediction's blockedIntent, blockedTools, and
+matched pattern alongside the surrounding transcript.
+
+Apply the trust hierarchy:
+- User said the block was wrong (looksNegative + reaction text mentions the block)
+  -> set verdict "wrong"; the prediction should not have fired
+- User asked the AI to retry on a narrower target after the block (or you can see
+  this is over-blocking by inspecting the prediction's blockedTools regex against
+  the original tool input)
+  -> set verdict "too_broad" and provide forbidden_blocks: the patterns the
+    prediction must NOT match after narrowing. forbidden_blocks.tool is a
+    LITERAL tool name (no regex metachars).
+- AI complained but user was silent -> keep verdict "correct" (skeptical of AI)
+- Silence after block -> keep verdict "correct" (auto-default)
+
+Use update_label_prediction to set the verdict.
+
+### Re-labeling existing transcripts
+Action: reset_for_relabel (transcript_name)
+Removes mcp-state.json and cache/ for the given transcript so auto_label and
+generate_labels can be re-run. Preserves labels.json, labels.draft.json, and
+notes_and_questions.md. Use this if you need to re-run hook replay after a
+prediction-cache or prediction-rule change.
 
 ### Step 5: Update labels
 Action: update_label (transcript_name, key, value, reasoning)
@@ -729,7 +1044,9 @@ Date: {ISO date}
 
 ## Rules
 
-- NEVER re-run auto_label or generate_labels after Step 1
+- auto_label and generate_labels cost real money. Run ONCE per transcript by
+  default. Re-running is only allowed via the explicit reset_for_relabel MCP
+  action -- direct re-invocation of auto_label without reset is forbidden.
 - list, expand, validate are FREE (no LLM calls, no cost)
 - Only auto_label and generate_labels cost money (Step 1)
 - Be conservative -- when in doubt, lean toward user reactions and note uncertainty

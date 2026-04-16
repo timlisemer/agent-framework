@@ -930,6 +930,47 @@ regression suite for that rule family.
    look for differences. If you cannot express the difference in a
    scenario field, STOP and ask the user to extend the schema.
 
+### B.13 Asserting prediction state
+
+Scenarios may include an optional \`predictions\` block that asserts on the
+live prediction-cache state AFTER the target hook fires (and after the
+background-updater drain). Three primitives:
+
+  must_block        Array of {tool, target_pattern?} filters. Pass iff at
+                    least one active prediction's blockedTools matches each
+                    filter. \`tool\` is a LITERAL tool name (no regex
+                    metachars); the prediction's blockedTools.toolName IS
+                    often a regex, and the matcher asks "would the
+                    prediction's regex match this literal forbidden tool?".
+  must_not_block    Inverse: pass iff no active prediction's blockedTools
+                    matches the given filter. Same literal-tool-name
+                    semantics.
+  must_be_empty     Boolean. Pass iff there are zero active predictions
+                    after the hook fires. Mutually exclusive with
+                    must_block / must_not_block.
+
+The predictions block is evaluated AFTER the target hook fires (and after
+drainBackgroundUpdaters waits for summary-updater writes to finish).
+Run \`pass\` is \`expect-pass AND every prediction assertion passes\`.
+
+  // Positive: prompt that should produce a Bash-blocking prediction
+  {
+    "name": "micro-bash-prediction-generated",
+    "transcript": [{ "role": "user", "content": "don't run anything, just plan" }],
+    "target": { "hook": "UserPromptSubmit" },
+    "expect": { "expected": "ok" },
+    "predictions": { "must_block": [{ "tool": "Bash" }] }
+  }
+
+  // Negative: ambiguous prompt must NOT produce a Bash block
+  {
+    "name": "ambiguous-prompt-no-block",
+    "transcript": [{ "role": "user", "content": "let me see the diff" }],
+    "target": { "hook": "UserPromptSubmit" },
+    "expect": { "expected": "ok" },
+    "predictions": { "must_not_block": [{ "tool": "Bash" }] }
+  }
+
 ### B.12 Scenario folder structure
 
 ~/.agent-framework/test-runs/scenarios/{scenario-name}/

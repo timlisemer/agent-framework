@@ -117,6 +117,7 @@ export const toolApproveRule: PreToolRule = {
           reason: `Bash command denied (${workaroundCategory}). You must run mcp__agent-framework__check first.`,
           exceptions: ["mcp__agent-framework__check", "ToolSearch"],
         }],
+        source: "gate",
         userMessageSnippet: `denied: ${(reason ?? "").slice(0, 100)}`,
         timestamp: Date.now(),
         active: true,

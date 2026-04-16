@@ -103,6 +103,33 @@ export interface ScenarioTarget {
   fanout?: boolean;
 }
 
+/**
+ * Hindsight verdict on a prediction that fired and produced a deny.
+ * Mirrors test-harness/lib/types.ts:PredictionAnnotation.
+ */
+export interface PredictionAnnotation {
+  verdict: "correct" | "too_broad" | "wrong" | "INVESTIGATE";
+  forbidden_blocks?: Array<{ tool?: string; target_pattern?: string }>;
+  intent_must_contain?: string;
+  notes?: string;
+}
+
+/**
+ * Scenario-level prediction expectations evaluated AFTER the target hook
+ * fires. Reads the live prediction-cache via getAllPredictions and asserts
+ * structural shape. `must_be_empty` is mutually exclusive with the per-filter
+ * forms.
+ *
+ * `tool` in the filter is a LITERAL tool name (no regex metachars); the
+ * prediction's blockedTools `toolName` IS often a regex, and the matcher
+ * asks "would the prediction's regex match this literal forbidden tool?".
+ */
+export interface ScenarioPredictionExpectation {
+  must_block?: Array<{ tool: string; target_pattern?: string }>;
+  must_not_block?: Array<{ tool: string; target_pattern?: string }>;
+  must_be_empty?: boolean;
+}
+
 /** Environment / setup flags plumbed into the hook stdin and transcript. */
 export interface ScenarioEnv {
   /** Copied verbatim into hook input.permission_mode and onto every
@@ -142,13 +169,22 @@ export interface Scenario {
         expected: string;
         by?: string;
         notes?: string;
+        prediction?: PredictionAnnotation;
       }
     | Array<{
         position: number;
         expected: string;
         by?: string;
         notes?: string;
+        prediction?: PredictionAnnotation;
       }>;
+  /**
+   * Optional structural assertions on the live prediction-cache state AFTER
+   * the target hook fires (and after the background-updater drain). See
+   * ScenarioPredictionExpectation. When set, these assertions are AND-ed
+   * with the per-fire expect-pass result to determine the run's `pass`.
+   */
+  predictions?: ScenarioPredictionExpectation;
 }
 
 /**
@@ -167,6 +203,17 @@ export interface FanoutFireResult {
   gate_expected?: string;
   pass: boolean;
   asserted: boolean;
+}
+
+/**
+ * Per-assertion result inside ScenarioResult.prediction_assertions. One entry
+ * per filter the scenario specified.
+ */
+export interface PredictionAssertionResult {
+  kind: "must_block" | "must_not_block" | "must_be_empty";
+  filter?: { tool?: string; target_pattern?: string };
+  pass: boolean;
+  reason?: string;
 }
 
 /**
@@ -190,6 +237,8 @@ export type ScenarioResult =
       commit: string;
       /** Echoed from target.batch_visible_through for reproducibility. */
       batch_visible_through?: number;
+      /** Per-assertion results when scenario.predictions was set. */
+      prediction_assertions?: PredictionAssertionResult[];
     }
   | {
       mode: "fanout";
@@ -201,6 +250,8 @@ export type ScenarioResult =
       error?: string;
       transcript_path: string;
       commit: string;
+      /** Per-assertion results when scenario.predictions was set. */
+      prediction_assertions?: PredictionAssertionResult[];
     };
 
 /**
@@ -439,6 +490,14 @@ export function validateScenario(raw: unknown): Scenario {
           `scenario.expect[${k}].notes must be a string when set`,
         );
       }
+      if (e.prediction !== undefined) {
+        validateExpectPredictionAnnotation(
+          `scenario.expect[${k}]`,
+          e.expected as string,
+          e.by as string | undefined,
+          e.prediction,
+        );
+      }
     }
 
     // env block still validates below via the shared code path.
@@ -612,7 +671,9 @@ export function validateScenario(raw: unknown): Scenario {
 
   if (fanout === true) {
     // Fan-out already validated its own array-form expect above. Skip the
-    // single-form validation entirely.
+    // single-form validation entirely. Still validate the optional
+    // `predictions` block at the bottom of this function.
+    validateScenarioPredictions(r);
     return raw as Scenario;
   }
 
@@ -652,6 +713,121 @@ export function validateScenario(raw: unknown): Scenario {
   if (expect.notes !== undefined && typeof expect.notes !== "string") {
     throw new Error("scenario.expect.notes must be a string when set");
   }
+  if (expect.prediction !== undefined) {
+    validateExpectPredictionAnnotation(
+      "scenario.expect",
+      expect.expected as string,
+      expect.by as string | undefined,
+      expect.prediction,
+    );
+  }
+
+  validateScenarioPredictions(r);
 
   return raw as Scenario;
+}
+
+/**
+ * Validate a `prediction` annotation on a single-form or fanout-form expect
+ * entry. Mirrors the rules in test-harness-shared.ts:validatePredictionAnnotation.
+ */
+function validateExpectPredictionAnnotation(
+  ctx: string,
+  expected: string,
+  by: string | undefined,
+  prediction: unknown,
+): void {
+  if (!prediction || typeof prediction !== "object") {
+    throw new Error(`${ctx}.prediction must be an object when set`);
+  }
+  const p = prediction as Record<string, unknown>;
+  if (expected !== "deny") {
+    throw new Error(
+      `${ctx}.prediction requires expected="deny", got ${JSON.stringify(expected)}`,
+    );
+  }
+  if (by !== "prediction-block" && by !== "batch-sibling") {
+    throw new Error(
+      `${ctx}.prediction requires by ∈ {"prediction-block","batch-sibling"}, got ${JSON.stringify(by)}`,
+    );
+  }
+  const validVerdicts = ["correct", "too_broad", "wrong", "INVESTIGATE"];
+  if (typeof p.verdict !== "string" || !validVerdicts.includes(p.verdict)) {
+    throw new Error(
+      `${ctx}.prediction.verdict must be one of ${validVerdicts.join(", ")}, got ${JSON.stringify(p.verdict)}`,
+    );
+  }
+  if (p.verdict === "too_broad") {
+    if (!Array.isArray(p.forbidden_blocks) || p.forbidden_blocks.length === 0) {
+      throw new Error(
+        `${ctx}.prediction.forbidden_blocks must be a non-empty array when verdict="too_broad"`,
+      );
+    }
+  }
+  if (p.intent_must_contain !== undefined) {
+    if (typeof p.intent_must_contain !== "string" || p.intent_must_contain.length === 0) {
+      throw new Error(
+        `${ctx}.prediction.intent_must_contain must be a non-empty string when set`,
+      );
+    }
+  }
+}
+
+/**
+ * Validate the optional `scenario.predictions` block (Phase 7.2 rules).
+ */
+function validateScenarioPredictions(r: Record<string, unknown>): void {
+  const predictions = r.predictions as Record<string, unknown> | undefined;
+  if (predictions === undefined) return;
+  if (typeof predictions !== "object" || predictions === null) {
+    throw new Error("scenario.predictions must be an object when set");
+  }
+  const mustBlock = predictions.must_block as unknown;
+  const mustNotBlock = predictions.must_not_block as unknown;
+  const mustBeEmpty = predictions.must_be_empty as unknown;
+  const hasMustBlock = mustBlock !== undefined;
+  const hasMustNotBlock = mustNotBlock !== undefined;
+  const hasMustBeEmpty = mustBeEmpty !== undefined;
+  if (!hasMustBlock && !hasMustNotBlock && !hasMustBeEmpty) {
+    throw new Error(
+      "scenario.predictions block is set but contains no assertions (must_block / must_not_block / must_be_empty)",
+    );
+  }
+  if (hasMustBeEmpty && (hasMustBlock || hasMustNotBlock)) {
+    throw new Error(
+      "scenario.predictions.must_be_empty is mutually exclusive with must_block / must_not_block",
+    );
+  }
+  if (hasMustBeEmpty && typeof mustBeEmpty !== "boolean") {
+    throw new Error("scenario.predictions.must_be_empty must be a boolean when set");
+  }
+  const validateFilterArray = (name: string, arr: unknown): void => {
+    if (!Array.isArray(arr) || arr.length === 0) {
+      throw new Error(`scenario.predictions.${name} must be a non-empty array when set`);
+    }
+    for (let i = 0; i < arr.length; i++) {
+      const f = arr[i] as Record<string, unknown> | undefined;
+      if (!f || typeof f !== "object") {
+        throw new Error(`scenario.predictions.${name}[${i}] must be an object`);
+      }
+      if (typeof f.tool !== "string" || f.tool.length === 0) {
+        throw new Error(
+          `scenario.predictions.${name}[${i}].tool must be a non-empty literal tool name (no regex metachars)`,
+        );
+      }
+      // Reject regex metacharacters in `tool` to enforce literal semantics.
+      if (/[.*|[\]()^$+?\\]/.test(f.tool)) {
+        throw new Error(
+          `scenario.predictions.${name}[${i}].tool must be a LITERAL tool name without regex metacharacters, got ${JSON.stringify(f.tool)}`,
+        );
+      }
+      if (f.target_pattern !== undefined && typeof f.target_pattern !== "string") {
+        throw new Error(
+          `scenario.predictions.${name}[${i}].target_pattern must be a string when set`,
+        );
+      }
+    }
+  };
+  if (hasMustBlock) validateFilterArray("must_block", mustBlock);
+  if (hasMustNotBlock) validateFilterArray("must_not_block", mustNotBlock);
 }

@@ -44,6 +44,26 @@ For each transcript (up to the limit from find_work):
 2. Hook decisions (generate_labels) -- advisory, hooks are imperfect
 3. When they disagree -- INVESTIGATE, lean toward user reactions
 
+For every label whose `gate` field is "prediction-block" or "batch-sibling" (visible
+in expand <tool_use_id> output), the auto-labeler attaches a `prediction` annotation
+with verdict="correct" by default. You MUST review each one and call
+update_label_prediction to set the correct verdict per the trust hierarchy:
+
+- User explicitly complained about the block (looksNegative on next user reaction
+  AND the complaint references the block) -> set verdict="wrong"
+- AI retried on a narrower target after the block (visible in expand output) ->
+  set verdict="too_broad" and provide forbidden_blocks listing the patterns the
+  prediction must NOT match after narrowing. forbidden_blocks.tool is a LITERAL
+  tool name (no regex metachars).
+- AI complained but user was silent -> keep verdict="correct" (skeptical of AI)
+- Silence after block -> keep verdict="correct" (auto-default)
+
+After Phase 1.1 ships, gate-source predictions sort at score 1 (above micro at 2,
+below llm at 0). On transcripts re-labeled after the fix, the auto-populated
+`intent_must_contain` may capture a different prediction's blockedIntent than
+would have been captured before. Pre-fix and post-fix labels may have different
+excerpts on the same tool_use_id.
+
 ## Decision Guidelines
 
 - Tool call accepted by user, continued normally = "allow"
@@ -57,7 +77,7 @@ For each transcript (up to the limit from find_work):
 - Do NOT attempt to run tests or fix code. That is the tester's job.
 - Do NOT read transcript .jsonl files directly. Use list and expand actions.
 - Do NOT read source code or repository files.
-- auto_label and generate_labels cost real money. Run ONCE per transcript. NEVER re-run.
+- auto_label and generate_labels cost real money. Run ONCE per transcript by default. Re-running is only allowed via the explicit reset_for_relabel MCP action -- direct re-invocation of auto_label without reset is forbidden.
 - list, expand, validate are FREE (no LLM calls).
 - Every label MUST have reasoning before finalize.
 - Be conservative: when in doubt, lean toward user reactions and note uncertainty.

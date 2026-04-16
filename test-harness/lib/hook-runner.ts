@@ -17,6 +17,14 @@ import * as fs from "fs";
 import * as path from "path";
 import type { RichExpectation } from "./types.js";
 import type { HookRunResult } from "./harness.js";
+import {
+  getAllPredictions,
+  globMatch,
+  matchBlockedToolFromAll,
+  toolNameMatches,
+  type BlockedTool,
+  type ToolPrediction,
+} from "../../src/utils/prediction-cache.js";
 
 /**
  * Absolute path to the repo root. This module lives at
@@ -212,21 +220,171 @@ export function parseExitCodeDecision(
   return { decision: "error", error: hookResult.stderr.slice(0, 500) };
 }
 
+// ─── Prediction lookup helpers ────────────────────────────────────────────
+
+/**
+ * Look up the active prediction (if any) whose blockedTools matches the
+ * given tool invocation. Uses the canonical `getAllPredictions` accessor so
+ * expiry / max-entries semantics match production. Returns null when no
+ * active prediction matches.
+ */
+export async function findActivePredictionMatching(
+  sessionDir: string,
+  toolName: string,
+  toolInput: unknown,
+): Promise<{ prediction: ToolPrediction; blocked: BlockedTool } | null> {
+  const predictions = await getAllPredictions(sessionDir);
+  return matchBlockedToolFromAll(toolName, toolInput, predictions);
+}
+
+/**
+ * Synchronous variant — re-implements getAllPredictions inline by reading
+ * the cache JSON. Used by callers that cannot await (the per-event scoring
+ * loop). Applies the same expiry / max-entries semantics.
+ */
+export function findActivePredictionMatchingSync(
+  sessionDir: string,
+  toolName: string,
+  toolInput: unknown,
+): { prediction: ToolPrediction; blocked: BlockedTool } | null {
+  const filePath = path.join(sessionDir, "prediction-cache.json");
+  let entries: ToolPrediction[];
+  try {
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const state = JSON.parse(raw) as { data?: { entries?: ToolPrediction[] } };
+    entries = state.data?.entries ?? [];
+  } catch {
+    return null;
+  }
+  // Mirror CacheManager.load() semantics: expiry (10 min) + max 20 entries.
+  const expiryMs = 10 * 60 * 1000;
+  const maxEntries = 20;
+  const now = Date.now();
+  let filtered = entries.filter((e) => now - e.timestamp < expiryMs);
+  if (filtered.length > maxEntries) {
+    filtered = filtered.slice(-maxEntries);
+  }
+  const active = filtered.filter((e) => e.active === true);
+  return matchBlockedToolFromAll(toolName, toolInput, active);
+}
+
+/**
+ * Test whether a prediction's blockedTools entries would match a given
+ * forbidden filter. The filter's `tool` is a LITERAL tool name (no regex
+ * metachars); the prediction's `entry.toolName` IS often a regex. The
+ * matcher asks: "would the prediction's regex match this literal forbidden
+ * tool name?".
+ */
+export function blockedToolsContainsPattern(
+  blockedTools: BlockedTool[],
+  forbidden: { tool?: string; target_pattern?: string },
+): boolean {
+  return blockedTools.some((entry) => {
+    // Tool match: forbidden.tool is literal, entry.toolName may be regex.
+    // toolNameMatches(target, pattern) tests pattern against target.
+    const toolMatch =
+      forbidden.tool === undefined ||
+      toolNameMatches(forbidden.tool, entry.toolName);
+    if (!toolMatch) return false;
+
+    if (forbidden.target_pattern === undefined) return true;
+    if (entry.targetPattern === undefined) return true;
+    return globMatch(forbidden.target_pattern, entry.targetPattern);
+  });
+}
+
 // ─── Scoring ───────────────────────────────────────────────────────────────
+
+/**
+ * Optional context passed into scoreRichExpectation when the caller has
+ * tool-name and input information. When omitted, prediction-verdict scoring
+ * is skipped (Stop hooks have no tool info, so this degrades gracefully).
+ */
+export interface ScoreContext {
+  sessionDir: string;
+  toolName: string;
+  toolInput: unknown;
+}
 
 /**
  * Score a hook decision against a RichExpectation. Compares decision
  * verbatim, plus (when `exp.by` is set) compares gate verbatim. Returns
  * a specific failure reason when the decision matched but the gate didn't.
+ *
+ * When `exp.prediction` is set AND `ctx` is provided, additionally scores
+ * the prediction-verdict assertions described in
+ * test-harness/lib/types.ts:PredictionAnnotation.
  */
 export function scoreRichExpectation(
   decision: string,
   gate: string | undefined,
   exp: RichExpectation,
+  ctx?: ScoreContext,
 ): { pass: boolean; reason?: string } {
   const decisionOk = decision === exp.expected;
   const gateOk = !exp.by || exp.by === gate;
-  if (decisionOk && gateOk) return { pass: true };
+  if (decisionOk && gateOk) {
+    // Decision and gate matched. Now apply prediction-verdict scoring.
+    if (exp.prediction && ctx) {
+      const pred = exp.prediction;
+      const verdict = pred.verdict;
+
+      if (verdict === "wrong") {
+        // The prediction should have been removed/narrowed entirely. If the
+        // live decision is STILL deny via prediction-block (or batch-sibling
+        // chained to one), we have a regression.
+        if (
+          decision === "deny" &&
+          (gate === "prediction-block" || gate === "batch-sibling")
+        ) {
+          return {
+            pass: false,
+            reason: `regression: prediction labeled "wrong" but still blocked at this tool_use`,
+          };
+        }
+      }
+
+      if (verdict === "too_broad" && pred.forbidden_blocks?.length) {
+        const livePred = findActivePredictionMatchingSync(
+          ctx.sessionDir,
+          ctx.toolName,
+          ctx.toolInput,
+        );
+        if (livePred) {
+          for (const forbidden of pred.forbidden_blocks) {
+            const matches = blockedToolsContainsPattern(
+              livePred.prediction.blockedTools,
+              forbidden,
+            );
+            if (matches) {
+              return {
+                pass: false,
+                reason: `regression: prediction still blocks forbidden pattern ${forbidden.tool ?? "*"}:${forbidden.target_pattern ?? "*"}`,
+              };
+            }
+          }
+        }
+      }
+
+      if (verdict === "correct" && pred.intent_must_contain) {
+        const livePred = findActivePredictionMatchingSync(
+          ctx.sessionDir,
+          ctx.toolName,
+          ctx.toolInput,
+        );
+        if (
+          !livePred ||
+          !livePred.prediction.blockedIntent.includes(pred.intent_must_contain)
+        ) {
+          return {
+            pass: false,
+            reason: `regression: live prediction's blockedIntent no longer contains "${pred.intent_must_contain}"`,
+          };
+        }
+      }
+    }
+    return { pass: true };
+  }
   if (decisionOk && !gateOk) {
     return {
       pass: false,

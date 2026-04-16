@@ -254,6 +254,13 @@ export class CacheManager<T> {
    * Applies time expiry and max entries limits if configured.
    */
   async load(): Promise<T> {
+    // One-time stale .tmp sweep: prevents leftover atomic-write temp files
+    // from a crashed prior run from accumulating on disk.
+    try {
+      fs.unlinkSync(this.config.filePath + ".tmp");
+    } catch {
+      // No stale .tmp — nothing to clean
+    }
     try {
       const raw = await fs.promises.readFile(this.config.filePath, "utf-8");
       const state: CacheState<T> = JSON.parse(raw);
@@ -313,7 +320,11 @@ export class CacheManager<T> {
       };
       const content = JSON.stringify(state);
 
-      await fs.promises.writeFile(this.config.filePath, content);
+      // Atomic write: write to .tmp then rename. Eliminates the race where
+      // a concurrent reader observes a partially written file during truncate.
+      const tmp = this.config.filePath + ".tmp";
+      await fs.promises.writeFile(tmp, content);
+      await fs.promises.rename(tmp, this.config.filePath);
     } catch {
       // Ignore write errors - cache is best-effort
     }
