@@ -164,6 +164,13 @@ export interface TranscriptReadResult {
   totalCount: number;
   /** Slash command context if includeSlashCommandContext was true and a slash command was found */
   slashCommandContext?: SlashCommandContext;
+  /**
+   * True when the newest user-role entry in the transcript is a slash-command
+   * invocation (`<command-name>/...</command-name>`). Populated independently
+   * of `excludeSlashCommandPrompts` so callers can distinguish "no user
+   * message" from "newest user message was a slash command and was filtered."
+   */
+  newestUserWasSlashCommand?: boolean;
 }
 
 interface ContentBlock {
@@ -631,6 +638,26 @@ export async function readTranscriptExact(
     const { role, content: msgContent } = entry.message;
 
     if (role === 'user') {
+      // Detect whether the newest user-role entry is a slash-command
+      // invocation, regardless of filters. Callers (e.g. respond-first) use
+      // this to distinguish "no user message" from "newest was filtered."
+      if (collected.newestUserWasSlashCommand === undefined) {
+        let probe: string | undefined;
+        if (typeof msgContent === 'string') {
+          probe = msgContent;
+        } else if (Array.isArray(msgContent)) {
+          for (const block of msgContent) {
+            if (block.type === 'text' && block.text) {
+              probe = block.text;
+              break;
+            }
+          }
+        }
+        if (probe !== undefined) {
+          collected.newestUserWasSlashCommand = isSlashCommandPrompt(probe);
+        }
+      }
+
       // Skip system-injected meta messages (stop-hook feedback, slash command
       // instructions). These are not real user input and waste context slots.
       if (excludeMetaMessages && entry.isMeta === true) {

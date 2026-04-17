@@ -37,7 +37,11 @@ export const respondFirstRule: PreToolRule = {
     });
     const lastUser = rfResult.user.length > 0 ? rfResult.user[0] : null;
 
-    if (!lastUser || CONFIRMATION_PATTERN.test(lastUser.content)) {
+    if (
+      !lastUser ||
+      rfResult.newestUserWasSlashCommand ||
+      CONFIRMATION_PATTERN.test(lastUser.content)
+    ) {
       await ctx.stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
       return null;
     }
