@@ -6,7 +6,6 @@ import { FILE_TOOLS, extractFilePath, isPlanFile } from "./utils.js";
 import { checkToolApproval } from "../agents/hooks/tool-approve.js";
 import { detectWorkaroundPattern } from "../utils/command-patterns.js";
 import { recordDenial, MAX_SIMILAR_DENIALS } from "../utils/denial-cache.js";
-import { savePrediction } from "../utils/prediction-cache.js";
 import { resolvePlanPath, readPlanContent } from "../utils/session-utils.js";
 import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
@@ -99,8 +98,10 @@ export const toolApproveRule: PreToolRule = {
     };
   },
 
-  async onDenialConfirmed(ctx: RuleContext, reason: string): Promise<void> {
-    // Track workaround patterns for escalation
+  async onDenialConfirmed(ctx: RuleContext, _reason: string): Promise<void> {
+    // Track workaround patterns for escalation. The force-check-required rule
+    // (priority 32) consumes state.forceCheckPending to deny all subsequent
+    // tools except mcp__agent-framework__check / ToolSearch.
     const workaroundCategory = detectWorkaroundPattern(ctx.toolName, ctx.toolInput);
     if (workaroundCategory) {
       const count = await recordDenial(workaroundCategory);
@@ -108,20 +109,7 @@ export const toolApproveRule: PreToolRule = {
         // Note: reason is modified by the evaluator based on this count
       }
 
-      // Force check: block all non-low-risk tools until check MCP is called
-      await savePrediction(ctx.sessionDir, {
-        expectedIntent: "run mcp__agent-framework__check to verify project state",
-        blockedIntent: "all non-read tools until check has been run",
-        blockedTools: [{
-          toolName: ".*",
-          reason: `Bash command denied (${workaroundCategory}). You must run mcp__agent-framework__check first.`,
-          exceptions: ["mcp__agent-framework__check", "ToolSearch"],
-        }],
-        source: "gate",
-        userMessageSnippet: `denied: ${(reason ?? "").slice(0, 100)}`,
-        timestamp: Date.now(),
-        active: true,
-      });
+      await ctx.stateManager.update((s) => ({ ...s, forceCheckPending: true }));
     }
   },
 };

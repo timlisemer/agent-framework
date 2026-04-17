@@ -26,7 +26,6 @@ import {
 import { isSubagent } from "./subagent-detector.js";
 import { parseIntentOutput, parseActionsOutput } from "./summary-updater-parsing.js";
 import { parseEditIntentOutput } from "./edit-intent.js";
-import { savePrediction, type BlockedTool } from "./prediction-cache.js";
 import { getPlanModeContext, isPlanModeActive } from "./plan-mode-detector.js";
 import { clearGateReasoning } from "./gate-reasoning-cache.js";
 import { stripQuotedAndPastedContent } from "./quote-detection.js";
@@ -69,47 +68,6 @@ function isSignificantIntentChange(oldIntent: string, newIntent: string): boolea
   if (oldWords.length === 0) return false;
   const overlap = oldWords.filter((w) => newWords.has(w)).length;
   return (overlap / oldWords.length) < 0.4;
-}
-
-/**
- * Extract tool/file patterns from misalignment text to produce blocking predictions.
- */
-function derivePredictionsFromMisalignments(misalignments: string): BlockedTool[] {
-  const blockedTools: BlockedTool[] = [];
-  // Truncate for reason messages — enough context to understand, not so long it floods output
-  const context = misalignments.length > 200 ? misalignments.slice(0, 200) + "..." : misalignments;
-
-  // Detect file-specific misalignment mentions
-  const fileMatches = misalignments.match(/[\w./\\-]+\.\w{1,6}/g);
-  if (fileMatches) {
-    for (const file of fileMatches) {
-      blockedTools.push({
-        toolName: "Edit|Write",
-        targetPattern: `*${file}`,
-        reason: `misalignment flagged for ${file}: ${context}`,
-      });
-    }
-  }
-
-  // Detect execution-related misalignment
-  if (/\b(unauthorized|unexpected)\s+(execution|command|bash)\b/i.test(misalignments)) {
-    blockedTools.push({
-      toolName: "Bash",
-      reason: `misalignment flagged unauthorized execution: ${context}`,
-    });
-  }
-
-  // Detect scope creep mentions — only add a generic Edit/Write block
-  // when no file-specific blocks were already derived (avoid overly broad blocks
-  // that deny all edits regardless of target)
-  if (/\b(scope\s+creep|out\s+of\s+scope|unrelated)\b/i.test(misalignments) && blockedTools.length === 0) {
-    blockedTools.push({
-      toolName: "Edit|Write|NotebookEdit",
-      reason: `misalignment flagged scope creep: ${context}`,
-    });
-  }
-
-  return blockedTools;
 }
 
 async function main(): Promise<void> {
@@ -220,47 +178,6 @@ async function main(): Promise<void> {
       }
     }
 
-    // --- Derive LLM-enhanced predictions (override micro-predictions) ---
-    // Micro-predictions are generated synchronously in UserPromptSubmit.
-    // Here we produce LLM-enhanced predictions with source "llm" that take priority.
-    const updatedState = await stateManager.load();
-    const editIntent = updatedState.currentEditIntent ?? null;
-    const planMode = planModeCtx.active;
-
-    const llmBlockedTools: BlockedTool[] = [];
-    let llmExpectedIntent = "";
-    let llmBlockedIntent = "";
-
-    // LLM-derived: use parsed intent to produce nuanced scope-aware predictions
-    if (parsed.intent) {
-      // Detect scope limitations from LLM-parsed intent
-      const scopeFiles = parsed.intent.match(/[\w./\\-]+\.\w{1,6}/g);
-      if (scopeFiles && scopeFiles.length > 0 && editIntent === true) {
-        llmExpectedIntent = `editing scoped to: ${scopeFiles.join(", ")}`;
-      }
-    }
-
-    // Edit intent blocking from LLM classification (higher confidence than micro)
-    if (editIntent === false && !planMode) {
-      llmExpectedIntent = "read-only exploration tools";
-      llmBlockedIntent = "no write/edit tools (LLM-confirmed)";
-      llmBlockedTools.push({
-        toolName: "Edit|Write|NotebookEdit",
-        reason: "edit intent is false (LLM-confirmed) - read-only exploration",
-      });
-    }
-
-    if (llmBlockedTools.length > 0 || llmExpectedIntent) {
-      await savePrediction(sessionDir, {
-        expectedIntent: llmExpectedIntent,
-        blockedIntent: llmBlockedIntent,
-        blockedTools: llmBlockedTools,
-        source: "llm",
-        userMessageSnippet: userPrompt.slice(0, 200),
-        timestamp: Date.now(),
-        active: true,
-      });
-    }
   } else if (mode === "actions") {
     // Throttle: skip if < 3s since last update (but always run on first invocation)
     const state = await stateManager.load();
@@ -291,22 +208,6 @@ async function main(): Promise<void> {
     }
     if (parsedActions.misalignments) {
       await updateSection(summaryPath, "Flagged Misalignments", parsedActions.misalignments);
-    }
-
-    // Misalignment-to-correction bridge: derive predictions from new misalignments
-    if (parsedActions.misalignments && parsedActions.misalignments !== currentMisalignments) {
-      const newBlockedTools = derivePredictionsFromMisalignments(parsedActions.misalignments);
-      if (newBlockedTools.length > 0) {
-        await savePrediction(sessionDir, {
-          expectedIntent: currentIntent.slice(0, 100),
-          blockedIntent: "misalignment-derived blocks",
-          blockedTools: newBlockedTools,
-          userMessageSnippet: "",
-          timestamp: Date.now(),
-          active: true,
-          source: "llm",
-        });
-      }
     }
 
     await stateManager.update((state) => ({

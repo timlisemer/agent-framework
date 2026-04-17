@@ -7,10 +7,7 @@ import {
 import {
   formatForPrompt,
 } from "../utils/gate-reasoning-cache.js";
-import {
-  getActivePrediction,
-  formatPredictionContext,
-} from "../utils/prediction-cache.js";
+import { formatPredictionContext } from "../utils/prediction-types.js";
 
 export const gateRule: PreToolRule = {
   name: "gate",
@@ -38,15 +35,8 @@ export const gateRule: PreToolRule = {
     }
 
     // Read predictions and edit intent for gate context
-    let predictions: string | undefined;
-    try {
-      const prediction = await getActivePrediction(ctx.sessionDir);
-      if (prediction) {
-        predictions = formatPredictionContext(prediction);
-      }
-    } catch {
-      // Non-fatal
-    }
+    const prediction = ctx.state.currentPrediction ?? null;
+    const predictions = prediction ? formatPredictionContext(prediction) : undefined;
     const editIntent = ctx.state.currentEditIntent ?? null;
 
     let llmContextParts: string[] = [];

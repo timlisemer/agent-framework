@@ -1,6 +1,5 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
-import { deactivatePrediction } from "../utils/prediction-cache.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
 import { APPEAL_COUNTS } from "../utils/transcript-presets.js";
@@ -66,8 +65,8 @@ If in doubt, UPHOLD.
       ...(overturnCount >= 2 ? { currentEditIntent: true as const, editIntentTimestamp: Date.now() } : {}),
     }));
 
-    // Deactivate the micro-prediction that generated this edit-intent block
-    await deactivatePrediction(ctx.sessionDir, ctx.toolName, ctx.toolInput);
+    // Clear the prediction so the next tool isn't auto-blocked again.
+    await ctx.stateManager.update((s) => ({ ...s, currentPrediction: null }));
 
     // Return null to continue pipeline (appeal overturned)
     return null;

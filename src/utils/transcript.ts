@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { stripQuotedAndPastedContent } from "./quote-detection.js";
 
 /**
  * Claude Code Interruption Message Filter
@@ -994,6 +995,69 @@ export function hasMinimumTranscript(
   }
 
   return true;
+}
+
+/**
+ * Read the last N real user text messages from a transcript JSONL, oldest
+ * first, separated by `---`. Filters out tool_result blocks, system reminders,
+ * slash command prompts, and meta entries. Each message has
+ * `stripQuotedAndPastedContent` applied so the SENTIMENT_AGENT sees the user's
+ * own words, not pasted CLI output.
+ *
+ * Returns an empty string when the file can't be read.
+ */
+export async function readRecentUserMessages(
+  transcriptPath: string,
+  n: number,
+): Promise<string> {
+  let raw: string;
+  try {
+    raw = await fs.promises.readFile(transcriptPath, "utf-8");
+  } catch {
+    return "";
+  }
+  const lines = raw.trim().split("\n");
+  const collected: string[] = [];
+  for (let i = lines.length - 1; i >= 0 && collected.length < n; i--) {
+    let entry: TranscriptEntry | null = null;
+    try {
+      entry = JSON.parse(lines[i]) as TranscriptEntry;
+    } catch {
+      continue;
+    }
+    if (!entry || !entry.message || entry.message.role !== "user") continue;
+    if (entry.isMeta === true) continue;
+
+    const content = entry.message.content;
+    let text: string | undefined;
+    if (typeof content === "string") {
+      if (content.startsWith("<system-reminder>")) continue;
+      if (isSlashCommandPrompt(content)) continue;
+      text = content;
+    } else if (Array.isArray(content)) {
+      // Skip entries that are pure tool_result; collect first text block.
+      let foundText: string | undefined;
+      let onlyToolResults = true;
+      for (const block of content) {
+        if (block.type === "text" && block.text) {
+          if (block.text.startsWith("<system-reminder>")) continue;
+          if (isSlashCommandPrompt(block.text)) continue;
+          foundText = block.text;
+          onlyToolResults = false;
+          break;
+        }
+        if (block.type !== "tool_result") onlyToolResults = false;
+      }
+      if (onlyToolResults) continue;
+      text = foundText;
+    }
+    if (!text) continue;
+    const stripped = stripQuotedAndPastedContent(text);
+    if (!stripped.trim()) continue;
+    collected.push(stripped);
+  }
+  // Reverse so oldest is first.
+  return collected.reverse().join("\n---\n");
 }
 
 export interface ParallelBatchInfo {

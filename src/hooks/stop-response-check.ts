@@ -8,9 +8,9 @@ import { initRewindSession, detectRewind } from "../utils/rewind-cache.js";
 import { setTranscriptPath } from "../utils/execution-context.js";
 import { writeTool } from "../utils/synthetic.js";
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { getSessionDir } from "../utils/summary-cache.js";
+import { getSessionDir, getSessionState } from "../utils/summary-cache.js";
 import { getUnconsumedCorrections, consumeCorrections } from "../utils/correction-cache.js";
-import { getAllPredictions, isStopBlocked } from "../utils/prediction-cache.js";
+import { isHighFrictionPrediction } from "../utils/prediction-types.js";
 import { isPlanModeActive, isPlanModeFromInput } from "../utils/plan-mode-detector.js";
 
 /**
@@ -66,8 +66,8 @@ async function main() {
   // Check for unconsumed corrections from PostToolUse — only block if a prediction says stopping is wrong
   const corrections = await getUnconsumedCorrections(sessionDir);
   if (corrections.length > 0) {
-    const predictions = await getAllPredictions(sessionDir);
-    if (isStopBlocked(predictions)) {
+    const state = await getSessionState(sessionDir).load();
+    if (isHighFrictionPrediction(state.currentPrediction)) {
       const messages = corrections
         .map((c) => `CORRECTION: ${c.toolName} (${c.toolTarget}) - ${c.reason}`)
         .join("\n");

@@ -47,6 +47,7 @@ src/                                # TypeScript source
     plan-mode-block.ts              # Priority 15: Block writes in plan mode
     subagent.ts                     # Priority 20: Subagent tool approval
     question-validate.ts            # Priority 30: Validate AskUserQuestion
+    force-check-required.ts         # Priority 32: Lock to mcp__check after workaround denial
     prediction-block.ts             # Priority 35: Block predicted-bad tools
     drift-detect.ts                 # Priority 40: Detect drift from intent
     correction.ts                   # Priority 45: Post-tool corrections
@@ -82,7 +83,8 @@ src/                                # TypeScript source
     summary-cache.ts                # Summary document, JSONL tool log, session state
     summary-updater.ts              # Background LLM for summary updates
     correction-cache.ts             # Post-tool correction cache
-    micro-prediction.ts             # Sync regex predictions from user messages
+    prediction-types.ts             # Sentiment-prediction shape + policy table
+    prediction-parser.ts            # Marker-section parser for SENTIMENT_AGENT
     drift-detector.ts               # Pure TypeScript drift/anomaly heuristics
     gate-reasoning-cache.ts         # Gate reasoning persistent memory
     hook-bootstrap.ts               # Shared hook stdin/exit infrastructure
@@ -299,6 +301,7 @@ Tool call received
 │   ├─> plan-mode-block (15)  Fast deny writes in plan mode
 │   ├─> subagent (20)         Subagent tool approval
 │   ├─> question-validate (30) Validate AskUserQuestion
+│   ├─> force-check-required (32) Lock to mcp__check after workaround denial
 │   ├─> prediction-block (35)  Block predicted-bad tools (appealable)
 │   ├─> drift-detect (40)      Detect drift from user intent (appealable)
 │   ├─> correction (45)        Post-tool corrections

@@ -10,9 +10,6 @@ import { isSubagent } from "../utils/subagent-detector.js";
 import { spawnBackground } from "../utils/spawn-background.js";
 import { getSessionDir, appendToolLog, getActiveSubagentCount } from "../utils/summary-cache.js";
 import { writeUser, writeTool, formatTodoState, extractAskUserAnswer, type TodoItem } from "../utils/synthetic.js";
-import { getAllPredictions, matchBlockedTool, deactivatePrediction } from "../utils/prediction-cache.js";
-import { writeCorrection } from "../utils/correction-cache.js";
-import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,38 +29,6 @@ async function main() {
       gate: "post-tool-use",
       ms: 0,
     });
-
-    // Post-tool prediction validation: catch violations from predictions that arrived late
-    const predFilePath = (input.tool_input as Record<string, unknown>)?.file_path as string
-      || (input.tool_input as Record<string, unknown>)?.path as string || "";
-    // Skip prediction check for exempt paths (plan files, memory, CLAUDE.md) — same as pre-tool-use
-    if (!(isEditTool(input.tool_name) && isEditIntentExemptPath(predFilePath))) {
-      const predictions = await getAllPredictions(sessionDir);
-      for (const pred of predictions) {
-        const match = matchBlockedTool(input.tool_name, input.tool_input, pred.blockedTools);
-        if (match) {
-          // Skip edit-intent predictions for edit tools: PreToolUse already handles
-          // the edit-intent gate with proper appeals. Writing a correction here would
-          // override that decision and block the next edit call without appeal.
-          if (isEditTool(input.tool_name) && pred.source === "micro" && /edit intent/i.test(match.reason)) {
-            continue;
-          }
-          await writeCorrection(sessionDir, {
-            toolName: input.tool_name,
-            toolTarget: predFilePath
-              || (input.tool_input as Record<string, unknown>)?.command as string || "",
-            reason: `Tool ${input.tool_name} violated prediction: ${match.reason}`,
-            source: "post-tool",
-            timestamp: Date.now(),
-            consumed: false,
-          });
-          // Deactivate the prediction that fired so it does not keep generating
-          // corrections for every subsequent tool call of the same type
-          await deactivatePrediction(sessionDir, input.tool_name, input.tool_input);
-          break;
-        }
-      }
-    }
 
     // AskUserQuestion: write user's answer as a synthetic user message
     if (input.tool_name === "AskUserQuestion") {

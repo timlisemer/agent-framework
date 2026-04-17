@@ -31,8 +31,8 @@ import type {
 } from "../src/agents/mcp/scenario-types.js";
 import { runHook, cleanupBackgroundProcesses, drainBackgroundUpdaters } from "./lib/harness.js";
 import {
-  blockedToolsContainsPattern,
   buildEnv,
+  explicitlyBlockedContainsForbidden,
   getVersion,
   hookScript,
   parseExitCodeDecision,
@@ -41,7 +41,8 @@ import {
   readToolLogEntriesAfterOffset,
   scoreRichExpectation,
 } from "./lib/hook-runner.js";
-import { getAllPredictions } from "../src/utils/prediction-cache.js";
+import { sessionStateDefaults, type SessionState } from "../src/utils/summary-cache.js";
+import type { ToolPrediction } from "../src/utils/prediction-types.js";
 
 function getArg(name: string, required: boolean = false): string | undefined {
   const args = process.argv.slice(2);
@@ -428,54 +429,106 @@ function parseDecisionForHook(
 }
 
 /**
+ * Read the live `currentPrediction` from `state.json`. Returns null when
+ * the file is missing, corrupt, or carries no prediction.
+ */
+function readLivePrediction(cacheDir: string): ToolPrediction | null {
+  const statePath = path.join(cacheDir, "state.json");
+  try {
+    const raw = fs.readFileSync(statePath, "utf-8");
+    const parsed = JSON.parse(raw) as { data?: { currentPrediction?: ToolPrediction | null } };
+    return parsed.data?.currentPrediction ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Evaluate the optional `scenario.predictions` block against the live
- * prediction-cache state in `cacheDir`. Returns one PredictionAssertionResult
+ * `state.json` `currentPrediction`. Returns one PredictionAssertionResult
  * per assertion. Caller is responsible for draining background updaters
- * BEFORE invoking this so the cache read sees a consistent state.
+ * BEFORE invoking this so the read sees a consistent state.
  */
 async function evaluateScenarioPredictions(
   cacheDir: string,
   spec: ScenarioPredictionExpectation,
 ): Promise<PredictionAssertionResult[]> {
-  const active = await getAllPredictions(cacheDir);
+  const live = readLivePrediction(cacheDir);
   const results: PredictionAssertionResult[] = [];
   if (spec.must_be_empty === true) {
     results.push({
       kind: "must_be_empty",
-      pass: active.length === 0,
+      pass: live === null,
       reason:
-        active.length === 0
-          ? undefined
-          : `expected no active predictions, found ${active.length}`,
+        live === null ? undefined : `expected no active prediction, found one (mood=${live.mood})`,
     });
     return results;
   }
-  const allBlocked = active.flatMap((e) => e.blockedTools);
   if (spec.must_block) {
     for (const filter of spec.must_block) {
-      const matched = blockedToolsContainsPattern(allBlocked, filter);
+      const matched =
+        live !== null &&
+        explicitlyBlockedContainsForbidden(live.explicitlyBlockedSubstrings, {
+          tool: filter.tool,
+          target_pattern: filter.target_substring,
+        });
       results.push({
         kind: "must_block",
         filter,
         pass: matched,
         reason: matched
           ? undefined
-          : `must_block: no active prediction's blockedTools matches tool=${filter.tool}${filter.target_pattern ? `, target_pattern=${filter.target_pattern}` : ""}`,
+          : `must_block: no explicitlyBlockedSubstrings entry matches tool=${filter.tool}${filter.target_substring ? `, target_substring=${filter.target_substring}` : ""}`,
       });
     }
   }
   if (spec.must_not_block) {
     for (const filter of spec.must_not_block) {
-      const matched = blockedToolsContainsPattern(allBlocked, filter);
+      const matched =
+        live !== null &&
+        explicitlyBlockedContainsForbidden(live.explicitlyBlockedSubstrings, {
+          tool: filter.tool,
+          target_pattern: filter.target_substring,
+        });
       results.push({
         kind: "must_not_block",
         filter,
         pass: !matched,
         reason: matched
-          ? `must_not_block: an active prediction's blockedTools matches tool=${filter.tool}${filter.target_pattern ? `, target_pattern=${filter.target_pattern}` : ""}`
+          ? `must_not_block: an explicitlyBlockedSubstrings entry matches tool=${filter.tool}${filter.target_substring ? `, target_substring=${filter.target_substring}` : ""}`
           : undefined,
       });
     }
+  }
+  if (spec.must_have_mood !== undefined) {
+    const ok = live !== null && live.mood === spec.must_have_mood;
+    results.push({
+      kind: "must_have_mood",
+      pass: ok,
+      reason: ok
+        ? undefined
+        : `must_have_mood: expected ${spec.must_have_mood}, got ${live ? live.mood : "(none)"}`,
+    });
+  }
+  if (spec.must_have_trust !== undefined) {
+    const ok = live !== null && live.trust === spec.must_have_trust;
+    results.push({
+      kind: "must_have_trust",
+      pass: ok,
+      reason: ok
+        ? undefined
+        : `must_have_trust: expected ${spec.must_have_trust}, got ${live ? live.trust : "(none)"}`,
+    });
+  }
+  if (spec.intent_must_contain !== undefined) {
+    const ok = live !== null && live.intent.includes(spec.intent_must_contain);
+    results.push({
+      kind: "intent_must_contain",
+      pass: ok,
+      reason: ok
+        ? undefined
+        : `intent_must_contain: live intent ${live ? `"${live.intent}"` : "(none)"} does not contain "${spec.intent_must_contain}"`,
+    });
   }
   return results;
 }
@@ -512,6 +565,34 @@ async function main() {
     path.join(cacheDir, "active-subagents.json"),
     JSON.stringify({ agents: [] }),
   );
+
+  // Optional: seed state.json with a partial currentPrediction / forceCheckPending
+  // BEFORE session-start fires so the hook pipeline observes the seeded values.
+  // CacheManager.load only applies defaults when the file is missing/corrupt;
+  // any explicit seed must include every SessionState field.
+  if (scenario.seed_state) {
+    const seeded: SessionState = { ...sessionStateDefaults() };
+    if (scenario.seed_state.currentPrediction !== undefined) {
+      const partial = scenario.seed_state.currentPrediction;
+      seeded.currentPrediction = {
+        mood: partial.mood ?? "neutral",
+        trust: partial.trust ?? "normal",
+        intent: partial.intent ?? "",
+        blockedIntent: partial.blockedIntent ?? "",
+        explicitlyAllowedTools: partial.explicitlyAllowedTools ?? [],
+        explicitlyBlockedSubstrings: partial.explicitlyBlockedSubstrings ?? [],
+        userMessageSnippet: partial.userMessageSnippet ?? "",
+        timestamp: partial.timestamp ?? Date.now(),
+      };
+    }
+    if (scenario.seed_state.forceCheckPending !== undefined) {
+      seeded.forceCheckPending = scenario.seed_state.forceCheckPending;
+    }
+    fs.writeFileSync(
+      path.join(cacheDir, "state.json"),
+      JSON.stringify({ version: 1, data: seeded }, null, 2),
+    );
+  }
 
   const cwd = scenario.env?.cwd ?? scenarioRoot;
   const sessionId = "scenario-" + scenario.name;

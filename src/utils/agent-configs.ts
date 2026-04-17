@@ -1370,6 +1370,105 @@ When in doubt, APPROVE. False denials are worse than false approvals.`,
 };
 
 /**
+ * Sentiment Agent Configuration
+ *
+ * Reads the latest user message in conversational context and produces a
+ * structured sentiment-aware prediction (mood + trust + intent + literal
+ * allow/block lists). Stored on `SessionState.currentPrediction`. The TS
+ * `decidePrediction` policy table consumes the structured output to decide
+ * tool allow/deny; the LLM never authors regex.
+ *
+ * **Tier: haiku** - Fires on every UserPromptSubmit, must be fast
+ * **Mode: direct** - All context (recent messages + previous prediction) is
+ *                    provided upfront
+ *
+ * Wrapped in a 6s `Promise.race` hard timeout in user-prompt-submit.ts so
+ * tier-fallback retries can't blow the wall-clock budget.
+ */
+export const SENTIMENT_AGENT: Omit<AgentConfig, "workingDir"> = {
+  name: "sentiment",
+  tier: MODEL_TIERS.HAIKU,
+  mode: "direct",
+  maxTokens: 600,
+  systemPrompt: `You read the user's most recent message in conversational context and produce a structured sentiment-aware prediction.
+
+You DO NOT pattern-match keywords. You READ the user's words and judge how they feel and what they want.
+
+INPUT:
+- PREVIOUS PREDICTION (or "(none — first message)")
+- RECENT USER MESSAGES: last 5 user messages, oldest first
+- LATEST USER MESSAGE
+
+OUTPUT EXACTLY this format (no preamble, no markdown fences):
+
+---MOOD---
+<one of: angry | frustrated | neutral | satisfied | happy>
+---TRUST---
+<one of: low | normal | high>
+---INTENT---
+<1-2 sentences in plain English describing what the user wants the AI to do right now>
+---BLOCKED-INTENT---
+<1-2 sentences describing what the user explicitly does NOT want, or "(none)">
+---EXPLICITLY-ALLOWED-TOOLS---
+<comma-separated list of literal tool names the user explicitly authorized in THIS message, or "(none)">
+---EXPLICITLY-BLOCKED---
+<one entry per line, format: TOOL_NAME | TARGET_SUBSTRING_OR_BLANK | REASON_QUOTING_USER_WORDS
+or "(none)">
+
+GUIDANCE FOR MOOD:
+- angry: shouting, profanity, "STOP", "WTF", strong rejection
+- frustrated: corrections, "no", "wrong", "I said X not Y"
+- neutral: technical clarifications, calm follow-ups
+- satisfied: "thanks", "ok", approval after a result
+- happy: "perfect", "exactly", "great work"
+
+GUIDANCE FOR TRUST:
+- low: user accuses AI of lying/sneaking/hiding; multiple recent corrections
+- normal: default
+- high: "go ahead", "you decide", consistent satisfaction
+
+DOWNGRADE-BY-ONE RULE: if PREVIOUS PREDICTION mood was angry/frustrated and the LATEST USER MESSAGE is calm and constructive, downgrade by ONE level per turn. Don't snap from hostile to happy in one message UNLESS the user explicitly thanks the AI in the LATEST message.
+
+GUIDANCE FOR EXPLICITLY-ALLOWED-TOOLS:
+ONLY populate when the user named a tool/operation in THIS message. Map verbs to canonical tool names:
+- "please read X" → Read
+- "go ahead and edit" → Edit, Write
+- "run the tests" → Bash
+- "commit" → mcp__agent-framework__commit
+- "push" → mcp__agent-framework__push
+- "check" → mcp__agent-framework__check
+
+GUIDANCE FOR EXPLICITLY-BLOCKED:
+ONLY populate when the user named a tool/operation as off-limits:
+- "don't push" → Bash | git push | user said "don't push"
+- "no commits" → mcp__agent-framework__commit |  | user said "no commits"
+TARGET_SUBSTRING is a LITERAL substring of the tool's command/file_path. NO REGEX.
+
+CRITICAL:
+- Do NOT invent blocks the user did not say.
+- Mood + trust drive a default policy in TypeScript that handles the angry-blocks-everything case automatically. Your EXPLICITLY-BLOCKED job is ONLY to capture explicit user words.
+- Quote user words verbatim in REASON. Never quote AI text.
+- Ignore tone of pasted CLI output, error logs, or third-party text.`,
+  formatValidation: {
+    validator: /---MOOD---[\s\S]*---TRUST---[\s\S]*---INTENT---[\s\S]*---BLOCKED-INTENT---[\s\S]*---EXPLICITLY-ALLOWED-TOOLS---[\s\S]*---EXPLICITLY-BLOCKED---/,
+    formatReminder:
+      "Reply with the six marker sections in order: ---MOOD---, ---TRUST---, ---INTENT---, ---BLOCKED-INTENT---, ---EXPLICITLY-ALLOWED-TOOLS---, ---EXPLICITLY-BLOCKED---",
+    fallbackOutput: `---MOOD---
+neutral
+---TRUST---
+normal
+---INTENT---
+unclear
+---BLOCKED-INTENT---
+(none)
+---EXPLICITLY-ALLOWED-TOOLS---
+(none)
+---EXPLICITLY-BLOCKED---
+(none)`,
+  },
+};
+
+/**
  * Rule Gate Agent Configuration
  *
  * Combined evaluator for the rule-based pre-tool-use pipeline.

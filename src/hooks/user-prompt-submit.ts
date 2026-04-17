@@ -10,9 +10,13 @@ import { spawnBackground } from "../utils/spawn-background.js";
 import { getSessionDir, getSessionState } from "../utils/summary-cache.js";
 import { isPlanModeActive, isPlanModeFromInput } from "../utils/plan-mode-detector.js";
 import { classifyEditIntent } from "../utils/edit-intent.js";
-import { generateMicroPredictions } from "../utils/micro-prediction.js";
-import { savePrediction } from "../utils/prediction-cache.js";
 import { clearCorrections } from "../utils/correction-cache.js";
+import { runAgent } from "../utils/agent-runner.js";
+import { SENTIMENT_AGENT } from "../utils/agent-configs.js";
+import { parseSentimentOutput } from "../utils/prediction-parser.js";
+import { formatPredictionContext } from "../utils/prediction-types.js";
+import { readRecentUserMessages } from "../utils/transcript.js";
+import { stripQuotedAndPastedContent } from "../utils/quote-detection.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,9 +25,9 @@ const __dirname = path.dirname(__filename);
  * UserPromptSubmit Hook
  *
  * Fires when the user submits a prompt. Performs synchronous edit intent
- * classification (fast path), then spawns background summary-updater
- * in intent mode to update User Intent, User Approvals, and LLM fallback
- * for ambiguous edit intent classification.
+ * classification (fast path), runs the SENTIMENT_AGENT under a hard 6s
+ * timeout to refresh `state.currentPrediction`, then spawns background
+ * summary-updater in intent mode.
  */
 
 interface UserPromptSubmitHookInput {
@@ -33,8 +37,11 @@ interface UserPromptSubmitHookInput {
   permission_mode?: string;
 }
 
+const SENTIMENT_TIMEOUT_MS = 6000;
+
 async function main() {
   const input = await readStdinJson<UserPromptSubmitHookInput>();
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
   // Skip for subagents
   if (isSubagent(input.transcript_path)) {
@@ -72,10 +79,42 @@ async function main() {
   // Clear stale corrections from previous turn
   await clearCorrections(sessionDir);
 
-  // Generate synchronous micro-predictions
-  const microPrediction = generateMicroPredictions(input.prompt, result, planMode);
-  if (microPrediction.blockedTools.length > 0 || (microPrediction.allowedTools?.length ?? 0) > 0) {
-    await savePrediction(sessionDir, microPrediction);
+  // --- Sentiment-aware prediction refresh (sync, hard 6s timeout) ---
+  const previousPrediction = (await stateManager.load()).currentPrediction;
+  const recent = await readRecentUserMessages(input.transcript_path, 5).catch(() => "");
+  const stripped = stripQuotedAndPastedContent(input.prompt);
+
+  const sentimentPromise = runAgent(
+    { ...SENTIMENT_AGENT, workingDir: projectDir },
+    {
+      prompt: "Classify the user's most recent message and produce a sentiment-aware prediction.",
+      context:
+        `PREVIOUS PREDICTION:\n${previousPrediction ? formatPredictionContext(previousPrediction) : "(none — first message)"}\n\n` +
+        `RECENT USER MESSAGES (newest last):\n${recent}\n\n` +
+        `LATEST USER MESSAGE:\n${stripped}`,
+    }
+  );
+  const timeoutPromise = new Promise<null>((resolve) =>
+    setTimeout(() => resolve(null), SENTIMENT_TIMEOUT_MS)
+  );
+
+  try {
+    const sentimentResult = await Promise.race([sentimentPromise, timeoutPromise]);
+    if (sentimentResult) {
+      const parsed = parseSentimentOutput(sentimentResult.output);
+      if (parsed) {
+        await stateManager.update((s) => ({
+          ...s,
+          currentPrediction: {
+            ...parsed,
+            userMessageSnippet: input.prompt.slice(0, 200),
+            timestamp: Date.now(),
+          },
+        }));
+      }
+    }
+  } catch (err) {
+    console.error("[user-prompt-submit] sentiment agent failed:", err);
   }
 
   // Spawn background summary-updater in intent mode

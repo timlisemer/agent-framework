@@ -79,14 +79,14 @@ export async function runHook(options: {
 
 /**
  * Wait for background updater processes (e.g., summary-updater) to finish
- * writing before SIGTERM-ing them. Required so `prediction-cache.json` and
- * other cache writes complete cleanly. Polls every 250ms and returns when
- * all PID files report dead processes OR `timeoutMs` elapses.
+ * writing before SIGTERM-ing them. Required so `state.json` and other cache
+ * writes complete cleanly. Polls every 250ms and returns when all PID files
+ * report dead processes OR `timeoutMs` elapses.
  *
  * Drains ALL pid files (not just summary-updater-*) — future-proof against
  * new background spawners. Default ceiling 120000ms matches STALE_PID_MS in
  * src/utils/spawn-background.ts (twice the summary-updater 60s hard timeout,
- * with slack for flushTelemetry + final savePrediction).
+ * with slack for flushTelemetry + final state writes).
  */
 export async function drainBackgroundUpdaters(
   sessionDir: string,

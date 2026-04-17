@@ -1253,20 +1253,25 @@ async function main(): Promise<void> {
                   );
                   if (live) {
                     livePrediction = {
-                      source: live.prediction.source ?? "micro",
+                      mood: live.prediction.mood,
+                      trust: live.prediction.trust,
+                      intent: live.prediction.intent,
                       blockedIntent: live.prediction.blockedIntent,
-                      blockedTools: live.prediction.blockedTools.map((b) => ({
-                        toolName: b.toolName,
-                        targetPattern: b.targetPattern,
+                      explicitlyAllowedTools: [...live.prediction.explicitlyAllowedTools],
+                      explicitlyBlockedSubstrings: live.prediction.explicitlyBlockedSubstrings.map((b) => ({
+                        tool: b.tool,
+                        targetSubstring: b.targetSubstring,
                         reason: b.reason,
-                        exceptions: b.exceptions,
                       })),
-                      matchedBlockedTool: {
-                        toolName: live.blocked.toolName,
-                        targetPattern: live.blocked.targetPattern,
-                        reason: live.blocked.reason,
-                        exceptions: live.blocked.exceptions,
-                      },
+                      ...(live.decision.matchedExplicit
+                        ? {
+                            matchedExplicit: {
+                              tool: live.decision.matchedExplicit.tool,
+                              targetSubstring: live.decision.matchedExplicit.targetSubstring,
+                              reason: live.decision.matchedExplicit.reason,
+                            },
+                          }
+                        : {}),
                     };
                   }
                 }
@@ -1492,7 +1497,7 @@ async function main(): Promise<void> {
         } else if (event.decision === "deny" && event.livePrediction) {
           // Rich-form label with auto-populated prediction annotation.
           // Reviewer flips verdict to too_broad/wrong per hindsight.
-          const intent = event.livePrediction.blockedIntent.trim();
+          const intent = event.livePrediction.intent.trim();
           const intentExcerpt = intent ? intent.slice(0, 60) : undefined;
           const richLabel: RichExpectation = {
             expected: "deny",
@@ -1500,9 +1505,10 @@ async function main(): Promise<void> {
             prediction: {
               verdict: "correct",
               ...(intentExcerpt ? { intent_must_contain: intentExcerpt } : {}),
+              expected_mood: event.livePrediction.mood,
               notes: intentExcerpt
-                ? "[auto] live blockedIntent excerpt; verify hindsight"
-                : "[auto] live prediction matched but blockedIntent was empty; verify hindsight",
+                ? "[auto] live intent excerpt + mood; verify hindsight"
+                : "[auto] live prediction matched but intent was empty; verify hindsight",
             },
           };
           labels[toolUseId] = richLabel;

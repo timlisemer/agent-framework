@@ -8,6 +8,8 @@
  * @module scenario-types
  */
 
+import type { Mood, ToolPrediction, Trust } from "../../utils/prediction-types.js";
+
 /** Which hook a scenario targets. */
 export type HookEventName =
   | "PreToolUse"
@@ -111,23 +113,28 @@ export interface PredictionAnnotation {
   verdict: "correct" | "too_broad" | "wrong" | "INVESTIGATE";
   forbidden_blocks?: Array<{ tool?: string; target_pattern?: string }>;
   intent_must_contain?: string;
+  expected_mood?: Mood;
+  expected_trust?: Trust;
   notes?: string;
 }
 
 /**
  * Scenario-level prediction expectations evaluated AFTER the target hook
- * fires. Reads the live prediction-cache via getAllPredictions and asserts
+ * fires. Reads the live `state.json` `currentPrediction` and asserts
  * structural shape. `must_be_empty` is mutually exclusive with the per-filter
- * forms.
+ * forms and the mood/trust/intent assertions.
  *
- * `tool` in the filter is a LITERAL tool name (no regex metachars); the
- * prediction's blockedTools `toolName` IS often a regex, and the matcher
- * asks "would the prediction's regex match this literal forbidden tool?".
+ * `tool` in the filter is a LITERAL tool name (no regex metachars).
+ * `target_substring` is a LITERAL substring matched against the live
+ * prediction's `explicitlyBlockedSubstrings[].targetSubstring`.
  */
 export interface ScenarioPredictionExpectation {
-  must_block?: Array<{ tool: string; target_pattern?: string }>;
-  must_not_block?: Array<{ tool: string; target_pattern?: string }>;
+  must_block?: Array<{ tool: string; target_substring?: string }>;
+  must_not_block?: Array<{ tool: string; target_substring?: string }>;
   must_be_empty?: boolean;
+  must_have_mood?: Mood;
+  must_have_trust?: Trust;
+  intent_must_contain?: string;
 }
 
 /** Environment / setup flags plumbed into the hook stdin and transcript. */
@@ -185,6 +192,15 @@ export interface Scenario {
    * with the per-fire expect-pass result to determine the run's `pass`.
    */
   predictions?: ScenarioPredictionExpectation;
+  /**
+   * Optional seed for `state.json`. Materialized BEFORE session-start fires,
+   * so the hook pipeline observes the seeded `currentPrediction` /
+   * `forceCheckPending`. Useful for testing mood-relief / lockout flows.
+   */
+  seed_state?: {
+    currentPrediction?: Partial<ToolPrediction>;
+    forceCheckPending?: boolean;
+  };
 }
 
 /**
@@ -210,8 +226,14 @@ export interface FanoutFireResult {
  * per filter the scenario specified.
  */
 export interface PredictionAssertionResult {
-  kind: "must_block" | "must_not_block" | "must_be_empty";
-  filter?: { tool?: string; target_pattern?: string };
+  kind:
+    | "must_block"
+    | "must_not_block"
+    | "must_be_empty"
+    | "must_have_mood"
+    | "must_have_trust"
+    | "intent_must_contain";
+  filter?: { tool?: string; target_substring?: string };
   pass: boolean;
   reason?: string;
 }
@@ -771,10 +793,26 @@ function validateExpectPredictionAnnotation(
       );
     }
   }
+  if (p.expected_mood !== undefined) {
+    const validMoods = ["angry", "frustrated", "neutral", "satisfied", "happy"];
+    if (typeof p.expected_mood !== "string" || !validMoods.includes(p.expected_mood as string)) {
+      throw new Error(
+        `${ctx}.prediction.expected_mood must be one of ${validMoods.join(", ")}, got ${JSON.stringify(p.expected_mood)}`,
+      );
+    }
+  }
+  if (p.expected_trust !== undefined) {
+    const validTrusts = ["low", "normal", "high"];
+    if (typeof p.expected_trust !== "string" || !validTrusts.includes(p.expected_trust as string)) {
+      throw new Error(
+        `${ctx}.prediction.expected_trust must be one of ${validTrusts.join(", ")}, got ${JSON.stringify(p.expected_trust)}`,
+      );
+    }
+  }
 }
 
 /**
- * Validate the optional `scenario.predictions` block (Phase 7.2 rules).
+ * Validate the optional `scenario.predictions` block.
  */
 function validateScenarioPredictions(r: Record<string, unknown>): void {
   const predictions = r.predictions as Record<string, unknown> | undefined;
@@ -785,21 +823,60 @@ function validateScenarioPredictions(r: Record<string, unknown>): void {
   const mustBlock = predictions.must_block as unknown;
   const mustNotBlock = predictions.must_not_block as unknown;
   const mustBeEmpty = predictions.must_be_empty as unknown;
+  const mustHaveMood = predictions.must_have_mood as unknown;
+  const mustHaveTrust = predictions.must_have_trust as unknown;
+  const intentMustContain = predictions.intent_must_contain as unknown;
   const hasMustBlock = mustBlock !== undefined;
   const hasMustNotBlock = mustNotBlock !== undefined;
   const hasMustBeEmpty = mustBeEmpty !== undefined;
-  if (!hasMustBlock && !hasMustNotBlock && !hasMustBeEmpty) {
+  const hasMustHaveMood = mustHaveMood !== undefined;
+  const hasMustHaveTrust = mustHaveTrust !== undefined;
+  const hasIntentMustContain = intentMustContain !== undefined;
+  if (
+    !hasMustBlock &&
+    !hasMustNotBlock &&
+    !hasMustBeEmpty &&
+    !hasMustHaveMood &&
+    !hasMustHaveTrust &&
+    !hasIntentMustContain
+  ) {
     throw new Error(
-      "scenario.predictions block is set but contains no assertions (must_block / must_not_block / must_be_empty)",
+      "scenario.predictions block is set but contains no assertions (must_block / must_not_block / must_be_empty / must_have_mood / must_have_trust / intent_must_contain)",
     );
   }
-  if (hasMustBeEmpty && (hasMustBlock || hasMustNotBlock)) {
+  if (
+    hasMustBeEmpty &&
+    (hasMustBlock || hasMustNotBlock || hasMustHaveMood || hasMustHaveTrust || hasIntentMustContain)
+  ) {
     throw new Error(
-      "scenario.predictions.must_be_empty is mutually exclusive with must_block / must_not_block",
+      "scenario.predictions.must_be_empty is mutually exclusive with all other assertions",
     );
   }
   if (hasMustBeEmpty && typeof mustBeEmpty !== "boolean") {
     throw new Error("scenario.predictions.must_be_empty must be a boolean when set");
+  }
+  if (hasMustHaveMood) {
+    const validMoods = ["angry", "frustrated", "neutral", "satisfied", "happy"];
+    if (typeof mustHaveMood !== "string" || !validMoods.includes(mustHaveMood as string)) {
+      throw new Error(
+        `scenario.predictions.must_have_mood must be one of ${validMoods.join(", ")}, got ${JSON.stringify(mustHaveMood)}`,
+      );
+    }
+  }
+  if (hasMustHaveTrust) {
+    const validTrusts = ["low", "normal", "high"];
+    if (typeof mustHaveTrust !== "string" || !validTrusts.includes(mustHaveTrust as string)) {
+      throw new Error(
+        `scenario.predictions.must_have_trust must be one of ${validTrusts.join(", ")}, got ${JSON.stringify(mustHaveTrust)}`,
+      );
+    }
+  }
+  if (hasIntentMustContain) {
+    if (typeof intentMustContain !== "string" || (intentMustContain as string).length === 0) {
+      throw new Error(
+        "scenario.predictions.intent_must_contain must be a non-empty string when set",
+      );
+    }
   }
   const validateFilterArray = (name: string, arr: unknown): void => {
     if (!Array.isArray(arr) || arr.length === 0) {
@@ -821,10 +898,23 @@ function validateScenarioPredictions(r: Record<string, unknown>): void {
           `scenario.predictions.${name}[${i}].tool must be a LITERAL tool name without regex metacharacters, got ${JSON.stringify(f.tool)}`,
         );
       }
-      if (f.target_pattern !== undefined && typeof f.target_pattern !== "string") {
+      if ("target_pattern" in f) {
         throw new Error(
-          `scenario.predictions.${name}[${i}].target_pattern must be a string when set`,
+          `scenario.predictions.${name}[${i}].target_pattern was renamed to target_substring (literal substring, not regex)`,
         );
+      }
+      if (f.target_substring !== undefined) {
+        if (typeof f.target_substring !== "string") {
+          throw new Error(
+            `scenario.predictions.${name}[${i}].target_substring must be a string when set`,
+          );
+        }
+        // target_substring is a LITERAL substring — reject regex metachars.
+        if (/[.*|[\]()^$+?\\]/.test(f.target_substring as string)) {
+          throw new Error(
+            `scenario.predictions.${name}[${i}].target_substring must be a LITERAL substring without regex metacharacters, got ${JSON.stringify(f.target_substring)}`,
+          );
+        }
       }
     }
   };

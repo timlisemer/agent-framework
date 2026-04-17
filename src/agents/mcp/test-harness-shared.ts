@@ -198,6 +198,8 @@ export interface PredictionAnnotation {
   verdict: "correct" | "too_broad" | "wrong" | "INVESTIGATE";
   forbidden_blocks?: Array<{ tool?: string; target_pattern?: string }>;
   intent_must_contain?: string;
+  expected_mood?: "angry" | "frustrated" | "neutral" | "satisfied" | "happy";
+  expected_trust?: "low" | "normal" | "high";
   notes?: string;
 }
 
@@ -383,6 +385,28 @@ function validatePredictionAnnotation(key: string, e: RichExpectation): void {
     ) {
       throw new Error(
         `prediction.intent_must_contain on key "${key}" must be a non-empty string when set`,
+      );
+    }
+  }
+  if (e.prediction.expected_mood !== undefined) {
+    const validMoods = ["angry", "frustrated", "neutral", "satisfied", "happy"];
+    if (
+      typeof e.prediction.expected_mood !== "string" ||
+      !validMoods.includes(e.prediction.expected_mood as string)
+    ) {
+      throw new Error(
+        `prediction.expected_mood on key "${key}" must be one of ${validMoods.join(", ")}, got ${JSON.stringify(e.prediction.expected_mood)}`,
+      );
+    }
+  }
+  if (e.prediction.expected_trust !== undefined) {
+    const validTrusts = ["low", "normal", "high"];
+    if (
+      typeof e.prediction.expected_trust !== "string" ||
+      !validTrusts.includes(e.prediction.expected_trust as string)
+    ) {
+      throw new Error(
+        `prediction.expected_trust on key "${key}" must be one of ${validTrusts.join(", ")}, got ${JSON.stringify(e.prediction.expected_trust)}`,
       );
     }
   }

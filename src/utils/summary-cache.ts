@@ -15,6 +15,7 @@ import {
   getSessionDir as getSessionDirFromCacheManager,
 } from "./cache-manager.js";
 import { readMarkdownSection } from "./markdown-parser.js";
+import type { ToolPrediction } from "./prediction-types.js";
 
 export interface SummaryDocument {
   userIntent: string;
@@ -48,6 +49,41 @@ export interface SessionState {
   editIntentTimestamp: number;
   editIntentOverturnCount: number;
   respondFirstChecked?: boolean;
+  /**
+   * Single sentiment-aware prediction overwritten each UserPromptSubmit by the
+   * SENTIMENT_AGENT. Read by prediction-block, gate, and stop-response-check.
+   */
+  currentPrediction: ToolPrediction | null;
+  /**
+   * Set true by tool-approve.onDenialConfirmed when a workaround Bash command is
+   * denied. Cleared when mcp__agent-framework__check (or any commit/push/confirm)
+   * is allowed. While true, the force-check-required rule denies all tools
+   * except check / ToolSearch.
+   */
+  forceCheckPending: boolean;
+}
+
+/**
+ * Default SessionState shape. Exported so test-harness code can seed
+ * state.json without applying a parallel default list (CacheManager.load only
+ * uses defaults when the file is missing/corrupt; explicit seeds need every
+ * field present).
+ */
+export function sessionStateDefaults(): SessionState {
+  return {
+    lastUserMessageHash: "",
+    summaryVersion: 0,
+    toolCallCount: 0,
+    toolCallsSinceUpdate: 0,
+    lastUpdated: Date.now(),
+    currentEditIntent: null,
+    previousEditIntent: null,
+    editIntentTimestamp: 0,
+    editIntentOverturnCount: 0,
+    respondFirstChecked: false,
+    currentPrediction: null,
+    forceCheckPending: false,
+  };
 }
 
 type SessionStateManager = CacheManager<SessionState>;
@@ -343,18 +379,7 @@ export async function readTranscriptForward(filePath: string, fromLine: number):
 export function getSessionState(sessionDir: string): SessionStateManager {
   return new CacheManager<SessionState>({
     filePath: path.join(sessionDir, "state.json"),
-    defaultData: () => ({
-      lastUserMessageHash: "",
-      summaryVersion: 0,
-      toolCallCount: 0,
-      toolCallsSinceUpdate: 0,
-      lastUpdated: Date.now(),
-      currentEditIntent: null,
-      previousEditIntent: null,
-      editIntentTimestamp: 0,
-      editIntentOverturnCount: 0,
-      respondFirstChecked: false,
-    }),
+    defaultData: sessionStateDefaults,
   });
 }
 

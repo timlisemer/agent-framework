@@ -18,13 +18,10 @@ import * as path from "path";
 import type { RichExpectation } from "./types.js";
 import type { HookRunResult } from "./harness.js";
 import {
-  getAllPredictions,
-  globMatch,
-  matchBlockedToolFromAll,
-  toolNameMatches,
-  type BlockedTool,
+  decidePrediction,
+  type PredictionDecision,
   type ToolPrediction,
-} from "../../src/utils/prediction-cache.js";
+} from "../../src/utils/prediction-types.js";
 
 /**
  * Absolute path to the repo root. This module lives at
@@ -223,73 +220,71 @@ export function parseExitCodeDecision(
 // ─── Prediction lookup helpers ────────────────────────────────────────────
 
 /**
- * Look up the active prediction (if any) whose blockedTools matches the
- * given tool invocation. Uses the canonical `getAllPredictions` accessor so
- * expiry / max-entries semantics match production. Returns null when no
- * active prediction matches.
+ * Read the live `currentPrediction` from `state.json` and return both it and
+ * the policy `decidePrediction` would render for the given tool. Returns null
+ * when no prediction is active.
+ *
+ * Async variant for callers that can `await`.
  */
 export async function findActivePredictionMatching(
   sessionDir: string,
   toolName: string,
   toolInput: unknown,
-): Promise<{ prediction: ToolPrediction; blocked: BlockedTool } | null> {
-  const predictions = await getAllPredictions(sessionDir);
-  return matchBlockedToolFromAll(toolName, toolInput, predictions);
+): Promise<{ prediction: ToolPrediction; decision: PredictionDecision } | null> {
+  const statePath = path.join(sessionDir, "state.json");
+  try {
+    const raw = await fs.promises.readFile(statePath, "utf-8");
+    const parsed = JSON.parse(raw) as {
+      data?: { currentPrediction?: ToolPrediction | null };
+    };
+    const pred = parsed.data?.currentPrediction;
+    if (!pred) return null;
+    const decision = decidePrediction(pred, toolName, toolInput);
+    return { prediction: pred, decision };
+  } catch {
+    return null;
+  }
 }
 
 /**
- * Synchronous variant — re-implements getAllPredictions inline by reading
- * the cache JSON. Used by callers that cannot await (the per-event scoring
- * loop). Applies the same expiry / max-entries semantics.
+ * Synchronous variant — used by callers that cannot await (the per-event
+ * scoring loop).
  */
 export function findActivePredictionMatchingSync(
   sessionDir: string,
   toolName: string,
   toolInput: unknown,
-): { prediction: ToolPrediction; blocked: BlockedTool } | null {
-  const filePath = path.join(sessionDir, "prediction-cache.json");
-  let entries: ToolPrediction[];
+): { prediction: ToolPrediction; decision: PredictionDecision } | null {
+  const statePath = path.join(sessionDir, "state.json");
   try {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const state = JSON.parse(raw) as { data?: { entries?: ToolPrediction[] } };
-    entries = state.data?.entries ?? [];
+    const raw = fs.readFileSync(statePath, "utf-8");
+    const parsed = JSON.parse(raw) as {
+      data?: { currentPrediction?: ToolPrediction | null };
+    };
+    const pred = parsed.data?.currentPrediction;
+    if (!pred) return null;
+    const decision = decidePrediction(pred, toolName, toolInput);
+    return { prediction: pred, decision };
   } catch {
     return null;
   }
-  // Mirror CacheManager.load() semantics: expiry (10 min) + max 20 entries.
-  const expiryMs = 10 * 60 * 1000;
-  const maxEntries = 20;
-  const now = Date.now();
-  let filtered = entries.filter((e) => now - e.timestamp < expiryMs);
-  if (filtered.length > maxEntries) {
-    filtered = filtered.slice(-maxEntries);
-  }
-  const active = filtered.filter((e) => e.active === true);
-  return matchBlockedToolFromAll(toolName, toolInput, active);
 }
 
 /**
- * Test whether a prediction's blockedTools entries would match a given
- * forbidden filter. The filter's `tool` is a LITERAL tool name (no regex
- * metachars); the prediction's `entry.toolName` IS often a regex. The
- * matcher asks: "would the prediction's regex match this literal forbidden
- * tool name?".
+ * Test whether the live prediction's `explicitlyBlockedSubstrings` contains
+ * an entry that would match a given forbidden filter. Both `tool` and
+ * `target_pattern` are LITERAL strings — `target_pattern` is treated as a
+ * substring matcher against the entry's `targetSubstring`.
  */
-export function blockedToolsContainsPattern(
-  blockedTools: BlockedTool[],
+export function explicitlyBlockedContainsForbidden(
+  blocks: ToolPrediction["explicitlyBlockedSubstrings"],
   forbidden: { tool?: string; target_pattern?: string },
 ): boolean {
-  return blockedTools.some((entry) => {
-    // Tool match: forbidden.tool is literal, entry.toolName may be regex.
-    // toolNameMatches(target, pattern) tests pattern against target.
-    const toolMatch =
-      forbidden.tool === undefined ||
-      toolNameMatches(forbidden.tool, entry.toolName);
-    if (!toolMatch) return false;
-
+  return blocks.some((entry) => {
+    if (forbidden.tool !== undefined && entry.tool !== forbidden.tool) return false;
     if (forbidden.target_pattern === undefined) return true;
-    if (entry.targetPattern === undefined) return true;
-    return globMatch(forbidden.target_pattern, entry.targetPattern);
+    if (entry.targetSubstring === undefined) return false;
+    return entry.targetSubstring.includes(forbidden.target_pattern);
   });
 }
 
@@ -352,8 +347,8 @@ export function scoreRichExpectation(
         );
         if (livePred) {
           for (const forbidden of pred.forbidden_blocks) {
-            const matches = blockedToolsContainsPattern(
-              livePred.prediction.blockedTools,
+            const matches = explicitlyBlockedContainsForbidden(
+              livePred.prediction.explicitlyBlockedSubstrings,
               forbidden,
             );
             if (matches) {
@@ -374,11 +369,39 @@ export function scoreRichExpectation(
         );
         if (
           !livePred ||
-          !livePred.prediction.blockedIntent.includes(pred.intent_must_contain)
+          !livePred.prediction.intent.includes(pred.intent_must_contain)
         ) {
           return {
             pass: false,
-            reason: `regression: live prediction's blockedIntent no longer contains "${pred.intent_must_contain}"`,
+            reason: `regression: live prediction's intent no longer contains "${pred.intent_must_contain}"`,
+          };
+        }
+      }
+
+      if (pred.expected_mood !== undefined) {
+        const livePred = findActivePredictionMatchingSync(
+          ctx.sessionDir,
+          ctx.toolName,
+          ctx.toolInput,
+        );
+        if (!livePred || livePred.prediction.mood !== pred.expected_mood) {
+          return {
+            pass: false,
+            reason: `regression: live prediction mood is ${livePred ? livePred.prediction.mood : "(none)"}, expected ${pred.expected_mood}`,
+          };
+        }
+      }
+
+      if (pred.expected_trust !== undefined) {
+        const livePred = findActivePredictionMatchingSync(
+          ctx.sessionDir,
+          ctx.toolName,
+          ctx.toolInput,
+        );
+        if (!livePred || livePred.prediction.trust !== pred.expected_trust) {
+          return {
+            pass: false,
+            reason: `regression: live prediction trust is ${livePred ? livePred.prediction.trust : "(none)"}, expected ${pred.expected_trust}`,
           };
         }
       }

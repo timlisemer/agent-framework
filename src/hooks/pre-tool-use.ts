@@ -38,10 +38,6 @@ import {
   clearGateReasoning,
 } from "../utils/gate-reasoning-cache.js";
 import { isEditTool } from "../utils/edit-intent.js";
-import {
-  deactivatePrediction,
-  deactivateAllPredictions,
-} from "../utils/prediction-cache.js";
 import { writeTool, writeUser } from "../utils/synthetic.js";
 import {
   FILE_TOOLS,
@@ -189,9 +185,18 @@ async function main() {
       });
     }
 
-    // 4. Deactivate edit-intent predictions when allowing an edit tool.
+    // 4. Clear current prediction when allowing an edit tool, or when allowing
+    // any MCP commit/push/confirm/check tool. The latter also clears the
+    // workaround force-check lockout.
     if (exit.decision === "allow" && isEditTool(toolName) && !subagent) {
-      await deactivatePrediction(sessionDir, toolName, toolInput);
+      await stateManager.update((s) => ({ ...s, currentPrediction: null }));
+    }
+    if (exit.decision === "allow" && /^mcp__.*(commit|push|confirm|check)$/.test(toolName)) {
+      await stateManager.update((s) => ({
+        ...s,
+        currentPrediction: null,
+        forceCheckPending: false,
+      }));
     }
 
     // 5. OUTPUT
@@ -451,9 +456,9 @@ async function main() {
   // Clear gate reasoning on plan approval - gives implementation phase a clean slate
   if (toolName === "ExitPlanMode") {
     await clearGateReasoning(sessionDir);
-    await deactivateAllPredictions(sessionDir);
     await stateManager.update((s) => ({
       ...s,
+      currentPrediction: null,
       currentEditIntent: true as const,
       previousEditIntent: s.currentEditIntent ?? null,
       editIntentTimestamp: Date.now(),

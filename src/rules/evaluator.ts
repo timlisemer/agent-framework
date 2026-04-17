@@ -7,7 +7,6 @@ import { APPEAL_COUNTS } from "../utils/transcript-presets.js";
 import { logFastPathDeny, logFastPathApproval } from "../utils/logger.js";
 import { EXECUTION_TYPES } from "../types.js";
 import { startsWithAny } from "../utils/retry.js";
-import { deactivatePrediction } from "../utils/prediction-cache.js";
 
 export interface EvaluatorResult {
   decision: "allow" | "deny";
@@ -70,9 +69,10 @@ export async function evaluateRules(
 
         if (appeal.overturned) {
           gateNote = appeal.gateNote;
-          // For prediction-block, deactivate the matching prediction on overturn
+          // For prediction-block, clear the prediction on overturn so the
+          // next tool call isn't auto-denied again.
           if (rule.name === "prediction-block") {
-            await deactivatePrediction(ctx.sessionDir, ctx.toolName, ctx.toolInput);
+            await ctx.stateManager.update((s) => ({ ...s, currentPrediction: null }));
           }
           continue;
         }

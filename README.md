@@ -72,6 +72,7 @@ The `commit` agent enforces the complete verification chain before committing.
 │  ├─ plan-mode-block (15): Block writes in plan mode
 │  ├─ subagent (20): Subagent tool approval
 │  ├─ question-validate (30): Validate AskUserQuestion
+│  ├─ force-check-required (32): Lock to mcp__check after workaround denial
 │  ├─ prediction-block (35): Block predicted-bad tools
 │  ├─ drift-detect (40): Detect drift from intent
 │  ├─ correction (45): Post-tool corrections

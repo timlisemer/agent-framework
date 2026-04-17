@@ -1,8 +1,6 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { LOW_RISK_TOOLS } from "./utils.js";
 import { writeTool } from "../utils/synthetic.js";
-import { deactivateAllPredictions } from "../utils/prediction-cache.js";
-import { getSessionDir } from "../utils/summary-cache.js";
 
 export const lowRiskRule: PreToolRule = {
   name: "low-risk-bypass",
@@ -21,8 +19,7 @@ export const lowRiskRule: PreToolRule = {
         "EnterPlanMode",
         "Entering plan mode. All subsequent tool calls are read-only until ExitPlanMode."
       );
-      const sessionDir = getSessionDir(ctx.transcriptPath);
-      await deactivateAllPredictions(sessionDir);
+      await ctx.stateManager.update((s) => ({ ...s, currentPrediction: null }));
     }
 
     if (

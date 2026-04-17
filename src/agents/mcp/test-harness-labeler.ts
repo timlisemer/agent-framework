@@ -295,12 +295,12 @@ function handleExpand(
 
 /**
  * For the labeler's expand action: inspect labels.draft.json (or labels.json
- * if the draft is gone) and the cache's tool-log.jsonl + prediction-cache.json
- * for the target tool_use_id. When the target has a prediction annotation OR
- * its tool-log gate is prediction-block / batch-sibling, return a multi-line
- * description of the live prediction's expectedIntent, blockedIntent,
- * blockedTools, source, and matched entry. Returns empty string when nothing
- * is available.
+ * if the draft is gone) and the cache's tool-log.jsonl + state.json's
+ * `currentPrediction` for the target tool_use_id. When the target has a
+ * prediction annotation OR its tool-log gate is prediction-block /
+ * batch-sibling, return a multi-line description of the live prediction's
+ * mood, trust, intent, blockedIntent, explicitlyAllowedTools, and
+ * explicitlyBlockedSubstrings. Returns empty string when nothing is available.
  */
 function collectPredictionContext(transcriptName: string, target: string): string {
   if (target.startsWith("stop:")) return "";
@@ -340,8 +340,8 @@ function collectPredictionContext(transcriptName: string, target: string): strin
   try {
     const toolLogPath = path.join(runDir, "cache", "tool-log.jsonl");
     const content = fs.readFileSync(toolLogPath, "utf-8");
-    const lines = content.split("\n").filter(Boolean);
-    for (const line of lines) {
+    const logLines = content.split("\n").filter(Boolean);
+    for (const line of logLines) {
       try {
         const entry = JSON.parse(line) as { toolUseId?: string; gate?: string };
         if (entry.toolUseId && (entry.toolUseId === target || target.startsWith(entry.toolUseId))) {
@@ -367,8 +367,6 @@ function collectPredictionContext(transcriptName: string, target: string): strin
     toolLogGate === "prediction-block" || toolLogGate === "batch-sibling";
   if (!labelHasPrediction && !isPredictionGate) return "";
 
-  // Read prediction-cache and find the active prediction whose blockedTools
-  // would have matched the target tool. Prefer reading from cache/prediction-cache.json.
   const lines: string[] = [];
   lines.push("--- PREDICTION CONTEXT ---");
   if (matchedKey) lines.push(`Label key: ${matchedKey}`);
@@ -382,6 +380,12 @@ function collectPredictionContext(transcriptName: string, target: string): strin
             (re.prediction.intent_must_contain
               ? `, intent_must_contain="${re.prediction.intent_must_contain}"`
               : "") +
+            (re.prediction.expected_mood
+              ? `, expected_mood=${re.prediction.expected_mood}`
+              : "") +
+            (re.prediction.expected_trust
+              ? `, expected_trust=${re.prediction.expected_trust}`
+              : "") +
             (re.prediction.forbidden_blocks?.length
               ? `, forbidden_blocks=${JSON.stringify(re.prediction.forbidden_blocks)}`
               : "") +
@@ -390,35 +394,45 @@ function collectPredictionContext(transcriptName: string, target: string): strin
       }
     }
   }
-  // Read prediction-cache.json for live prediction details.
+  // Read state.json for live currentPrediction details.
   try {
-    const cachePath = path.join(runDir, "cache", "prediction-cache.json");
-    const raw = fs.readFileSync(cachePath, "utf-8");
-    const state = JSON.parse(raw) as {
-      data?: { entries?: Array<{
-        expectedIntent?: string;
-        blockedIntent?: string;
-        blockedTools?: Array<{ toolName?: string; targetPattern?: string; reason?: string }>;
-        source?: string;
-        active?: boolean;
-      }> };
+    const statePath = path.join(runDir, "cache", "state.json");
+    const raw = fs.readFileSync(statePath, "utf-8");
+    const parsed = JSON.parse(raw) as {
+      data?: {
+        currentPrediction?: {
+          mood?: string;
+          trust?: string;
+          intent?: string;
+          blockedIntent?: string;
+          explicitlyAllowedTools?: string[];
+          explicitlyBlockedSubstrings?: Array<{
+            tool?: string;
+            targetSubstring?: string;
+            reason?: string;
+          }>;
+        } | null;
+      };
     };
-    const entries = (state.data?.entries ?? []).filter((e) => e.active === true);
-    if (entries.length > 0) {
+    const live = parsed.data?.currentPrediction ?? null;
+    if (live) {
       lines.push("");
-      lines.push(`Active predictions in cache: ${entries.length}`);
-      for (let i = 0; i < entries.length; i++) {
-        const e = entries[i];
-        lines.push(`  [${i}] source=${e.source ?? "unset"}`);
-        if (e.expectedIntent) lines.push(`      expectedIntent: ${e.expectedIntent}`);
-        if (e.blockedIntent) lines.push(`      blockedIntent: ${e.blockedIntent}`);
-        if (e.blockedTools && e.blockedTools.length > 0) {
-          lines.push(`      blockedTools: ${JSON.stringify(e.blockedTools)}`);
-        }
+      lines.push("Live currentPrediction:");
+      lines.push(`  mood: ${live.mood ?? "(unset)"}`);
+      lines.push(`  trust: ${live.trust ?? "(unset)"}`);
+      if (live.intent) lines.push(`  intent: ${live.intent}`);
+      if (live.blockedIntent) lines.push(`  blockedIntent: ${live.blockedIntent}`);
+      if (live.explicitlyAllowedTools && live.explicitlyAllowedTools.length > 0) {
+        lines.push(`  explicitlyAllowedTools: ${live.explicitlyAllowedTools.join(", ")}`);
+      }
+      if (live.explicitlyBlockedSubstrings && live.explicitlyBlockedSubstrings.length > 0) {
+        lines.push(
+          `  explicitlyBlockedSubstrings: ${JSON.stringify(live.explicitlyBlockedSubstrings)}`,
+        );
       }
     }
   } catch {
-    // No cache or parse error — just emit what we have
+    // No state.json or parse error — just emit what we have
   }
   if (toolLogToolUseId) {
     lines.push(`Source tool_use_id: ${toolLogToolUseId}`);
@@ -924,22 +938,31 @@ For every agreed label, spot-check a sample:
 
 For tool labels with \`gate: prediction-block\` or \`gate: batch-sibling\`, the
 auto-labeler attaches a \`prediction\` annotation with verdict "correct" by default.
-Use expand <tool_use_id> to see the prediction's blockedIntent, blockedTools, and
-matched pattern alongside the surrounding transcript.
+Use expand <tool_use_id> to see the prediction's mood, trust, intent, blockedIntent,
+explicitlyAllowedTools, and explicitlyBlockedSubstrings alongside the surrounding transcript.
 
 Apply the trust hierarchy:
 - User said the block was wrong (looksNegative + reaction text mentions the block)
   -> set verdict "wrong"; the prediction should not have fired
 - User asked the AI to retry on a narrower target after the block (or you can see
-  this is over-blocking by inspecting the prediction's blockedTools regex against
-  the original tool input)
-  -> set verdict "too_broad" and provide forbidden_blocks: the patterns the
-    prediction must NOT match after narrowing. forbidden_blocks.tool is a
-    LITERAL tool name (no regex metachars).
+  this is over-blocking by inspecting the prediction's explicitlyBlockedSubstrings
+  against the original tool input)
+  -> set verdict "too_broad" and provide forbidden_blocks: the LITERAL
+    {tool, target_pattern} filters the prediction must NOT match after narrowing.
 - AI complained but user was silent -> keep verdict "correct" (skeptical of AI)
 - Silence after block -> keep verdict "correct" (auto-default)
 
 Use update_label_prediction to set the verdict.
+
+### Mood verdicts
+
+The auto-labeler also auto-populates \`expected_mood\` from the live prediction
+(angry/frustrated/neutral/satisfied/happy). Override it when the live mood is
+clearly miscalibrated relative to the user's actual tone in the surrounding
+transcript. The semantics of \`intent_must_contain\` shifted: it now matches
+the live prediction's \`intent\` field (what the user wants), not the legacy
+\`blockedIntent\` field. Re-labeling existing transcripts may produce different
+auto-populated excerpts.
 
 ### Re-labeling existing transcripts
 Action: reset_for_relabel (transcript_name)

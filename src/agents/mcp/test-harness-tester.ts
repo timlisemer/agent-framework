@@ -448,8 +448,9 @@ Key source files:
 - src/agents/hooks/tool-approve.ts -- tool approval agent
 - src/agents/hooks/tool-appeal.ts -- appeal agent
 - src/agents/hooks/gate.ts -- gate agent
-- src/utils/agent-configs.ts -- agent system prompts
-- src/utils/micro-prediction.ts -- sync regex predictions
+- src/utils/agent-configs.ts -- agent system prompts (includes SENTIMENT_AGENT)
+- src/utils/prediction-types.ts -- sentiment-prediction shape + decidePrediction
+- src/rules/force-check-required.ts -- workaround-denial lockout
 - src/utils/drift-detector.ts -- drift/anomaly detection heuristics
 
 ### A.7 Fix hook code
@@ -933,42 +934,59 @@ regression suite for that rule family.
 ### B.13 Asserting prediction state
 
 Scenarios may include an optional \`predictions\` block that asserts on the
-live prediction-cache state AFTER the target hook fires (and after the
-background-updater drain). Three primitives:
+live \`state.json\` \`currentPrediction\` AFTER the target hook fires (and
+after the background-updater drain). Primitives:
 
-  must_block        Array of {tool, target_pattern?} filters. Pass iff at
-                    least one active prediction's blockedTools matches each
-                    filter. \`tool\` is a LITERAL tool name (no regex
-                    metachars); the prediction's blockedTools.toolName IS
-                    often a regex, and the matcher asks "would the
-                    prediction's regex match this literal forbidden tool?".
-  must_not_block    Inverse: pass iff no active prediction's blockedTools
-                    matches the given filter. Same literal-tool-name
-                    semantics.
-  must_be_empty     Boolean. Pass iff there are zero active predictions
-                    after the hook fires. Mutually exclusive with
-                    must_block / must_not_block.
+  must_block             Array of {tool, target_substring?} filters. Pass iff
+                         the live prediction's explicitlyBlockedSubstrings
+                         contains an entry matching each filter. Both
+                         \`tool\` and \`target_substring\` are LITERAL
+                         strings (no regex metachars); target_substring
+                         matches by .includes against the entry's literal
+                         targetSubstring.
+  must_not_block         Inverse: pass iff no entry matches.
+  must_be_empty          Boolean. Pass iff currentPrediction is null after
+                         the hook fires. Mutually exclusive with all other
+                         assertions.
+  must_have_mood         Pass iff currentPrediction.mood equals the given
+                         enum (angry|frustrated|neutral|satisfied|happy).
+  must_have_trust        Pass iff currentPrediction.trust equals the given
+                         enum (low|normal|high).
+  intent_must_contain    Pass iff currentPrediction.intent.includes(value).
 
 The predictions block is evaluated AFTER the target hook fires (and after
 drainBackgroundUpdaters waits for summary-updater writes to finish).
 Run \`pass\` is \`expect-pass AND every prediction assertion passes\`.
 
-  // Positive: prompt that should produce a Bash-blocking prediction
+Scenarios may also pre-seed \`state.json\` via the optional
+\`seed_state.currentPrediction\` / \`seed_state.forceCheckPending\` fields.
+The seed is materialized BEFORE session-start fires so the hook pipeline
+observes it.
+
+  // Positive: angry seed denies the next Edit
   {
-    "name": "micro-bash-prediction-generated",
-    "transcript": [{ "role": "user", "content": "don't run anything, just plan" }],
-    "target": { "hook": "UserPromptSubmit" },
-    "expect": { "expected": "ok" },
-    "predictions": { "must_block": [{ "tool": "Bash" }] }
+    "name": "sentiment-angry-blocks-edits",
+    "transcript": [...],
+    "target": { "hook": "PreToolUse", "tool_use_ref": "toolu_..." },
+    "seed_state": {
+      "currentPrediction": { "mood": "angry", "trust": "normal", "intent": "user is upset" }
+    },
+    "expect": { "expected": "deny", "by": "prediction-block" },
+    "predictions": { "must_have_mood": "angry" }
   }
 
-  // Negative: ambiguous prompt must NOT produce a Bash block
+  // Negative: explicit literal substring block on Bash 'git push'
   {
-    "name": "ambiguous-prompt-no-block",
-    "transcript": [{ "role": "user", "content": "let me see the diff" }],
-    "target": { "hook": "UserPromptSubmit" },
-    "expect": { "expected": "ok" },
-    "predictions": { "must_not_block": [{ "tool": "Bash" }] }
+    "name": "sentiment-explicit-forbid-push",
+    "transcript": [...],
+    "target": { "hook": "PreToolUse", "tool_use_ref": "toolu_..." },
+    "seed_state": {
+      "currentPrediction": {
+        "explicitlyBlockedSubstrings": [{ "tool": "Bash", "targetSubstring": "git push", "reason": "user said don't push" }]
+      }
+    },
+    "expect": { "expected": "deny", "by": "prediction-block" },
+    "predictions": { "must_block": [{ "tool": "Bash", "target_substring": "git push" }] }
   }
 
 ### B.12 Scenario folder structure

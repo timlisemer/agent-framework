@@ -12,6 +12,7 @@ import {
   getSessionState,
   deleteSummary,
   resetActiveSubagents,
+  sessionStateDefaults,
 } from "../utils/summary-cache.js";
 
 /**
@@ -58,17 +59,7 @@ async function main() {
     await createEmptySummary(summaryPath);
     // Init session state
     const stateManager = getSessionState(sessionDir);
-    await stateManager.save({
-      lastUserMessageHash: "",
-      summaryVersion: 0,
-      toolCallCount: 0,
-      toolCallsSinceUpdate: 0,
-      lastUpdated: Date.now(),
-      currentEditIntent: null,
-      previousEditIntent: null,
-      editIntentTimestamp: 0,
-      editIntentOverturnCount: 0,
-    });
+    await stateManager.save(sessionStateDefaults());
     exitAfterFlush(0);
     return;
   }

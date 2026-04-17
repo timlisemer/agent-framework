@@ -43,8 +43,9 @@ Then find work:
 - `src/agents/hooks/tool-approve.ts` -- tool approval agent
 - `src/agents/hooks/tool-appeal.ts` -- appeal agent
 - `src/agents/hooks/gate.ts` -- gate agent
-- `src/utils/agent-configs.ts` -- agent system prompts
-- `src/utils/micro-prediction.ts` -- sync regex predictions
+- `src/utils/agent-configs.ts` -- agent system prompts (includes SENTIMENT_AGENT)
+- `src/utils/prediction-types.ts` -- sentiment prediction shape + decidePrediction
+- `src/rules/force-check-required.ts` -- lockout rule reading state.forceCheckPending
 - `src/utils/drift-detector.ts` -- drift/anomaly detection heuristics
 
 ## Hard Constraints
@@ -66,16 +67,18 @@ Then find work:
 
 When a hook produces the wrong decision, you MUST investigate the code path. Do NOT attribute failures to "non-deterministic LLM behavior" without evidence. Most failures have concrete code-level causes:
 
-- Missing or imprecise regex patterns in `src/utils/micro-prediction.ts`
+- Wrong sentiment classification in the SENTIMENT_AGENT prompt (`src/utils/agent-configs.ts`)
+- Wrong policy mapping in `decidePrediction` (`src/utils/prediction-types.ts`)
 - Unclear or ambiguous system prompts in `src/utils/agent-configs.ts`
 - Missing context in the hook input construction
 - Edge cases in drift detection heuristics (`src/utils/drift-detector.ts`)
 - Logic errors in decision parsing or gate routing
+- Stale `state.forceCheckPending` not cleared after `mcp__agent-framework__check`
 
 **The 3-Strike Rule**: If `run_single_hook` returns the same failure 3 times in a row for the same hook, it is definitively a CODE issue, not LLM non-determinism. The LLM is highly reliable when given clear inputs. Investigate:
 1. Read the full hook code path that produced the decision
 2. Check if the prompt/context sent to the LLM is clear and unambiguous
-3. Check if regex patterns in micro-prediction could handle this case deterministically
+3. Check if `decidePrediction` policy / SENTIMENT_AGENT prompt could handle this case more deterministically
 4. Check if highlighting or formatting could make the decision more obvious to the LLM
 5. Try at least one code fix and verify with run_single_hook
 
@@ -85,6 +88,7 @@ Only after exhausting ALL of the above AND seeing genuinely different results ac
 
 The scoring layer can flag prediction-related regressions in `failures[].reason`:
 
-- `regression: prediction labeled "wrong" but still blocked at this tool_use` -- the prediction was supposed to be removed/narrowed; investigate `src/utils/micro-prediction.ts` (for source: micro), `src/utils/summary-updater.ts` (for source: llm), or `src/rules/tool-approve.ts` (for source: gate).
-- `regression: prediction still blocks forbidden pattern X` -- the prediction needs to be narrowed; the forbidden pattern in the failure tells you what should NOT match.
-- `regression: live prediction's blockedIntent no longer contains "..."` -- the prediction's intent semantics drifted (likely an LLM-source prediction); re-run summary-updater or check the prompt.
+- `regression: prediction labeled "wrong" but still blocked at this tool_use` -- the prediction was supposed to be removed/narrowed; investigate `src/utils/agent-configs.ts` (SENTIMENT_AGENT prompt), `src/utils/prediction-types.ts` (decidePrediction policy), or `src/hooks/user-prompt-submit.ts` (sentiment-agent invocation).
+- `regression: prediction still blocks forbidden pattern X` -- the prediction needs to be narrowed; the forbidden pattern in the failure tells you what should NOT match. Check the SENTIMENT_AGENT's `EXPLICITLY-BLOCKED` output for the offending entry.
+- `regression: live prediction's intent no longer contains "..."` -- the prediction's intent semantics drifted; re-check the SENTIMENT_AGENT prompt.
+- `regression: live prediction mood is X, expected Y` -- the SENTIMENT_AGENT classified mood differently than the labeler annotation; re-check the prompt or the annotation.

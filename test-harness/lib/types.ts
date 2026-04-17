@@ -4,25 +4,25 @@
  * @module test-harness/lib/types
  */
 
+import type { Mood, Trust } from "../../src/utils/prediction-types.js";
+
 /**
  * Snapshot of the live active prediction at fire-time, captured during the
  * per-event loop so the post-loop write block can read pre-mutation state.
  */
 export interface LivePredictionSnapshot {
-  source: "micro" | "llm" | "gate";
+  mood: Mood;
+  trust: Trust;
+  intent: string;
   blockedIntent: string;
-  blockedTools: Array<{
-    toolName: string;
-    targetPattern?: string;
+  explicitlyAllowedTools: string[];
+  explicitlyBlockedSubstrings: Array<{
+    tool: string;
+    targetSubstring?: string;
     reason: string;
-    exceptions?: string[];
   }>;
-  matchedBlockedTool: {
-    toolName: string;
-    targetPattern?: string;
-    reason: string;
-    exceptions?: string[];
-  };
+  /** When the deny matched an explicit block entry, the matching entry. */
+  matchedExplicit?: { tool: string; targetSubstring?: string; reason: string };
 }
 
 /**
@@ -78,17 +78,22 @@ export interface PredictionAnnotation {
   /** Reviewer's hindsight verdict on the prediction that caused this deny. */
   verdict: "correct" | "too_broad" | "wrong" | "INVESTIGATE";
   /**
-   * For too_broad verdicts: what the prediction's blockedTools MUST NOT contain
-   * after narrowing. Each entry is a {tool, target_pattern} filter; live scoring
-   * fails if any matches. `tool` is a LITERAL tool name (no regex metachars).
+   * For too_broad verdicts: what the prediction's explicitlyBlockedSubstrings
+   * MUST NOT contain after narrowing. Each entry is a {tool, target_pattern}
+   * filter; live scoring fails if any matches. `tool` is a LITERAL tool name
+   * (no regex metachars).
    */
   forbidden_blocks?: Array<{ tool?: string; target_pattern?: string }>;
   /**
-   * Optional: substring that must appear in the live prediction's blockedIntent.
-   * Auto-populated during scaffold with first 60 chars of live blockedIntent.
-   * Catches LLM-source predictions drifting to a completely different concept.
+   * Optional: substring that must appear in the live prediction's `intent`
+   * field. Auto-populated during scaffold with first 60 chars of live intent.
+   * Catches sentiment predictions drifting to a different concept.
    */
   intent_must_contain?: string;
+  /** Optional: assert the live prediction's mood field equals this value. */
+  expected_mood?: Mood;
+  /** Optional: assert the live prediction's trust field equals this value. */
+  expected_trust?: Trust;
   /** Optional reviewer note. */
   notes?: string;
 }

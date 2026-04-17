@@ -46,8 +46,9 @@ For each transcript (up to the limit from find_work):
 
 For every label whose `gate` field is "prediction-block" or "batch-sibling" (visible
 in expand <tool_use_id> output), the auto-labeler attaches a `prediction` annotation
-with verdict="correct" by default. You MUST review each one and call
-update_label_prediction to set the correct verdict per the trust hierarchy:
+with verdict="correct" and `expected_mood` populated from the live prediction.
+You MUST review each one and call update_label_prediction to set the correct
+verdict per the trust hierarchy:
 
 - User explicitly complained about the block (looksNegative on next user reaction
   AND the complaint references the block) -> set verdict="wrong"
@@ -58,11 +59,14 @@ update_label_prediction to set the correct verdict per the trust hierarchy:
 - AI complained but user was silent -> keep verdict="correct" (skeptical of AI)
 - Silence after block -> keep verdict="correct" (auto-default)
 
-After Phase 1.1 ships, gate-source predictions sort at score 1 (above micro at 2,
-below llm at 0). On transcripts re-labeled after the fix, the auto-populated
-`intent_must_contain` may capture a different prediction's blockedIntent than
-would have been captured before. Pre-fix and post-fix labels may have different
-excerpts on the same tool_use_id.
+### Sentiment verdicts
+
+The auto-labeler also fills in `expected_mood` from the live prediction. Override
+it via update_label_prediction (with `expected_mood` / `expected_trust`) when the
+SENTIMENT_AGENT clearly miscalibrated the user's tone in this turn. The semantics
+of `intent_must_contain` shifted: it now matches the live prediction's `intent`
+field (what the user wants), not the legacy `blockedIntent` field. Re-labeling
+existing transcripts may produce different auto-populated excerpts.
 
 ## Decision Guidelines
 

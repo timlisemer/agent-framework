@@ -375,7 +375,9 @@ const predictionAnnotationSchema = z.object({
     tool: z.string().optional(),
     target_pattern: z.string().optional(),
   })).optional().describe("Required when verdict='too_broad'. LITERAL tool names (no regex metachars) the prediction MUST NOT match after narrowing."),
-  intent_must_contain: z.string().optional().describe("Substring that must appear in the live prediction's blockedIntent. Auto-populated with first 60 chars."),
+  intent_must_contain: z.string().optional().describe("Substring that must appear in the live prediction's intent. Auto-populated with first 60 chars."),
+  expected_mood: z.enum(["angry", "frustrated", "neutral", "satisfied", "happy"]).optional().describe("Assert the live prediction's mood field equals this value."),
+  expected_trust: z.enum(["low", "normal", "high"]).optional().describe("Assert the live prediction's trust field equals this value."),
   notes: z.string().optional(),
 });
 
@@ -417,7 +419,7 @@ server.registerTool(
         tool: z.string().optional(),
         target_pattern: z.string().optional(),
       })).optional().describe("For update_label_prediction: required when verdict='too_broad'. LITERAL tool names the prediction MUST NOT match after narrowing."),
-      intent_must_contain: z.string().optional().describe("For update_label_prediction: substring that must appear in the live prediction's blockedIntent."),
+      intent_must_contain: z.string().optional().describe("For update_label_prediction: substring that must appear in the live prediction's intent."),
       prediction_updates: z.array(z.object({
         key: z.string(),
         verdict: z.enum(["correct", "too_broad", "wrong", "INVESTIGATE"]),
@@ -426,6 +428,8 @@ server.registerTool(
           target_pattern: z.string().optional(),
         })).optional(),
         intent_must_contain: z.string().optional(),
+        expected_mood: z.enum(["angry", "frustrated", "neutral", "satisfied", "happy"]).optional(),
+        expected_trust: z.enum(["low", "normal", "high"]).optional(),
         notes: z.string().optional(),
         reasoning: z.string(),
       })).optional().describe("For update_label_predictions: batch updates of prediction annotations."),
@@ -495,13 +499,33 @@ const scenarioSchema = z.object({
   predictions: z.object({
     must_block: z.array(z.object({
       tool: z.string(),
-      target_pattern: z.string().optional(),
+      target_substring: z.string().optional(),
     })).optional(),
     must_not_block: z.array(z.object({
       tool: z.string(),
-      target_pattern: z.string().optional(),
+      target_substring: z.string().optional(),
     })).optional(),
     must_be_empty: z.boolean().optional(),
+    must_have_mood: z.enum(["angry", "frustrated", "neutral", "satisfied", "happy"]).optional(),
+    must_have_trust: z.enum(["low", "normal", "high"]).optional(),
+    intent_must_contain: z.string().optional(),
+  }).optional(),
+  seed_state: z.object({
+    currentPrediction: z.object({
+      mood: z.enum(["angry", "frustrated", "neutral", "satisfied", "happy"]).optional(),
+      trust: z.enum(["low", "normal", "high"]).optional(),
+      intent: z.string().optional(),
+      blockedIntent: z.string().optional(),
+      explicitlyAllowedTools: z.array(z.string()).optional(),
+      explicitlyBlockedSubstrings: z.array(z.object({
+        tool: z.string(),
+        targetSubstring: z.string().optional(),
+        reason: z.string(),
+      })).optional(),
+      userMessageSnippet: z.string().optional(),
+      timestamp: z.number().optional(),
+    }).optional(),
+    forceCheckPending: z.boolean().optional(),
   }).optional(),
 });
 
