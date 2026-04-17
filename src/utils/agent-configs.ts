@@ -1382,77 +1382,84 @@ When in doubt, APPROVE. False denials are worse than false approvals.`,
  * **Mode: direct** - All context (recent messages + previous prediction) is
  *                    provided upfront
  *
- * Wrapped in a 6s `Promise.race` hard timeout in user-prompt-submit.ts so
+ * Wrapped in a 12s `Promise.race` hard timeout in user-prompt-submit.ts so
  * tier-fallback retries can't blow the wall-clock budget.
  */
 export const SENTIMENT_AGENT: Omit<AgentConfig, "workingDir"> = {
   name: "sentiment",
   tier: MODEL_TIERS.HAIKU,
   mode: "direct",
-  maxTokens: 600,
-  systemPrompt: `You read the user's most recent message in conversational context and produce a structured sentiment-aware prediction.
+  maxTokens: 280,
+  systemPrompt: `You read the user's recent message in conversational context and produce a structured sentiment-aware prediction. You DO NOT pattern-match keywords — you READ the user's words and judge how they feel and what they want.
 
-You DO NOT pattern-match keywords. You READ the user's words and judge how they feel and what they want.
-
-INPUT:
-- PREVIOUS PREDICTION (or "(none — first message)")
-- RECENT USER MESSAGES: last 5 user messages, oldest first
+INPUT (always present):
+- PREVIOUS PREDICTION (or "(none)")
+- FRUSTRATION STREAK: integer; consecutive negative-mood turns
+- CURRENT WINDOW SIZE: integer; how many recent user messages you currently see
+- RECENT USER MESSAGES: prefixed with [Tn]; T0 is most recent
 - LATEST USER MESSAGE
 
-OUTPUT EXACTLY this format (no preamble, no markdown fences):
+INPUT (only when AskUserQuestion is the candidate tool):
+- ASKUSERQUESTION CONTENT: the question text the AI is about to ask. You ALSO judge whether asking it RIGHT NOW is stalling.
 
+OUTPUT (no preamble, no fences):
 ---MOOD---
-<one of: angry | frustrated | neutral | satisfied | happy>
+<angry|frustrated|neutral|satisfied|happy>
 ---TRUST---
-<one of: low | normal | high>
+<low|normal|high>
 ---INTENT---
-<1-2 sentences in plain English describing what the user wants the AI to do right now>
+<1-2 sentences: what the user wants now>
 ---BLOCKED-INTENT---
-<1-2 sentences describing what the user explicitly does NOT want, or "(none)">
+<1-2 sentences: what the user explicitly does NOT want, or "(none)">
 ---EXPLICITLY-ALLOWED-TOOLS---
-<comma-separated list of literal tool names the user explicitly authorized in THIS message, or "(none)">
+<comma-separated literal tool names the user authorized in THIS message, or "(none)">
 ---EXPLICITLY-BLOCKED---
-<one entry per line, format: TOOL_NAME | TARGET_SUBSTRING_OR_BLANK | REASON_QUOTING_USER_WORDS
-or "(none)">
+<one per line: TOOL_NAME | TARGET_SUBSTRING_OR_BLANK | REASON_QUOTING_USER_WORDS, or "(none)">
+---NEXT-WINDOW-SIZE---
+<integer 2-15: window size for the NEXT turn>
+---CONTEXT-SWITCH---
+<yes|no: did the user just change topic / open a new unrelated task?>
+---QUESTION-IS-STALLING---
+<yes|no|n/a: judge ONLY when ASKUSERQUESTION CONTENT is present, otherwise n/a>
 
-GUIDANCE FOR MOOD:
-- angry: shouting, profanity, "STOP", "WTF", strong rejection
-- frustrated: corrections, "no", "wrong", "I said X not Y"
-- neutral: technical clarifications, calm follow-ups
-- satisfied: "thanks", "ok", approval after a result
-- happy: "perfect", "exactly", "great work"
+MOOD — JUDGE CONTENT, NOT FORM. Calm-form anger ("I told you not to do that. Why did you ignore me?", "you just promised me you weren't going to do any changes", "you seem to have a serious problem with acknowledging reality") IS angry. Multiple "[Request interrupted by user for tool use]" entries always indicate angry. Loud excitement ("GO GO GO") is happy.
+- angry: contempt, accusation, broken-promise, demands stop/apology, withdrawn trust
+- frustrated: 2nd+ correction on same point, "I just told you", "as I said before"
+- neutral: calm technical follow-up
+- satisfied: brief approval after a delivered result
+- happy: enthusiastic approval
 
-GUIDANCE FOR TRUST:
-- low: user accuses AI of lying/sneaking/hiding; multiple recent corrections
-- normal: default
-- high: "go ahead", "you decide", consistent satisfaction
+TRUST: low when accusation/multiple corrections/[Request interrupted]/apology demand/"you keep|always|still" framing. Trust does not recover within one turn.
 
-DOWNGRADE-BY-ONE RULE: if PREVIOUS PREDICTION mood was angry/frustrated and the LATEST USER MESSAGE is calm and constructive, downgrade by ONE level per turn. Don't snap from hostile to happy in one message UNLESS the user explicitly thanks the AI in the LATEST message.
+TRAJECTORY:
+- HOLD at angry if PREVIOUS=angry and LATEST is another correction even if calm
+- DOWNGRADE only on explicit acceptance language ("ok that works", "thanks") in LATEST; one level per turn
+- ESCALATE to angry when PREVIOUS=frustrated and LATEST has accusation or "you keep/still/always". TS auto-promotes when STREAK>=3 — output what you read
 
-GUIDANCE FOR EXPLICITLY-ALLOWED-TOOLS:
-ONLY populate when the user named a tool/operation in THIS message. Map verbs to canonical tool names:
-- "please read X" → Read
-- "go ahead and edit" → Edit, Write
-- "run the tests" → Bash
-- "commit" → mcp__agent-framework__commit
-- "push" → mcp__agent-framework__push
-- "check" → mcp__agent-framework__check
+NEXT-WINDOW-SIZE rules (integer 2-15):
+- INCREASE by 2-3 when mood is angry/frustrated, trust dropping, STREAK rising — slow-burn anger needs context
+- INCREASE on a mood SHIFT (angry→calm OR calm→angry): set to max(CURRENT+2, 6)
+- DECREASE by 2-3 when mood neutral/satisfied/happy AND streak=0
+- If CONTEXT-SWITCH=yes: set to 2 (drop history, fresh subject)
 
-GUIDANCE FOR EXPLICITLY-BLOCKED:
-ONLY populate when the user named a tool/operation as off-limits:
-- "don't push" → Bash | git push | user said "don't push"
-- "no commits" → mcp__agent-framework__commit |  | user said "no commits"
-TARGET_SUBSTRING is a LITERAL substring of the tool's command/file_path. NO REGEX.
+CONTEXT-SWITCH=yes when LATEST is on a NEW unrelated topic (different file/module/feature, fresh todo, new question without back-reference). LATEST quoting/correcting prior context is NOT a switch.
 
-CRITICAL:
-- Do NOT invent blocks the user did not say.
-- Mood + trust drive a default policy in TypeScript that handles the angry-blocks-everything case automatically. Your EXPLICITLY-BLOCKED job is ONLY to capture explicit user words.
-- Quote user words verbatim in REASON. Never quote AI text.
-- Ignore tone of pasted CLI output, error logs, or third-party text.`,
+EXPLICITLY-ALLOWED / EXPLICITLY-BLOCKED:
+- ONLY populate when user named a tool/operation in THIS message
+- Verb mapping: "read X" → Read, "edit" → Edit/Write, "tests" → Bash, "commit" → mcp__agent-framework__commit, "push" → mcp__agent-framework__push, "check" → mcp__agent-framework__check
+- TARGET_SUBSTRING is LITERAL (no regex). Quote user words in REASON.
+
+QUESTION-IS-STALLING (only when ASKUSERQUESTION CONTENT present):
+Judge the question as if it were a CHAT MESSAGE the AI sent the user.
+- yes: question deflects ("what do you want me to do?"), re-asks something the user just answered, offers options when user already preferred one, asks permission for what user demanded, apology-then-question
+- no: legitimate operational ambiguity blocking forward progress ("delete the file or back it up first?"), confirmation of new destructive side-effect user didn't authorize
+- n/a: ASKUSERQUESTION CONTENT not provided
+
+CRITICAL: do not invent blocks the user did not say; ignore tone of pasted CLI output.`,
   formatValidation: {
-    validator: /---MOOD---[\s\S]*---TRUST---[\s\S]*---INTENT---[\s\S]*---BLOCKED-INTENT---[\s\S]*---EXPLICITLY-ALLOWED-TOOLS---[\s\S]*---EXPLICITLY-BLOCKED---/,
+    validator: /---MOOD---[\s\S]*---TRUST---[\s\S]*---INTENT---[\s\S]*---BLOCKED-INTENT---[\s\S]*---EXPLICITLY-ALLOWED-TOOLS---[\s\S]*---EXPLICITLY-BLOCKED---[\s\S]*---NEXT-WINDOW-SIZE---[\s\S]*---CONTEXT-SWITCH---[\s\S]*---QUESTION-IS-STALLING---/,
     formatReminder:
-      "Reply with the six marker sections in order: ---MOOD---, ---TRUST---, ---INTENT---, ---BLOCKED-INTENT---, ---EXPLICITLY-ALLOWED-TOOLS---, ---EXPLICITLY-BLOCKED---",
+      "Reply with all 9 marker sections in order: ---MOOD---, ---TRUST---, ---INTENT---, ---BLOCKED-INTENT---, ---EXPLICITLY-ALLOWED-TOOLS---, ---EXPLICITLY-BLOCKED---, ---NEXT-WINDOW-SIZE---, ---CONTEXT-SWITCH---, ---QUESTION-IS-STALLING---",
     fallbackOutput: `---MOOD---
 neutral
 ---TRUST---
@@ -1464,7 +1471,13 @@ unclear
 ---EXPLICITLY-ALLOWED-TOOLS---
 (none)
 ---EXPLICITLY-BLOCKED---
-(none)`,
+(none)
+---NEXT-WINDOW-SIZE---
+2
+---CONTEXT-SWITCH---
+no
+---QUESTION-IS-STALLING---
+n/a`,
   },
 };
 

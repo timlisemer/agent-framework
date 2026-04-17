@@ -588,6 +588,12 @@ async function main() {
     if (scenario.seed_state.forceCheckPending !== undefined) {
       seeded.forceCheckPending = scenario.seed_state.forceCheckPending;
     }
+    if (scenario.seed_state.frustrationStreak !== undefined) {
+      seeded.frustrationStreak = scenario.seed_state.frustrationStreak;
+    }
+    if (scenario.seed_state.currentWindowSize !== undefined) {
+      seeded.currentWindowSize = scenario.seed_state.currentWindowSize;
+    }
     fs.writeFileSync(
       path.join(cacheDir, "state.json"),
       JSON.stringify({ version: 1, data: seeded }, null, 2),

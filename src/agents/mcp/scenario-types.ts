@@ -200,6 +200,8 @@ export interface Scenario {
   seed_state?: {
     currentPrediction?: Partial<ToolPrediction>;
     forceCheckPending?: boolean;
+    frustrationStreak?: number;
+    currentWindowSize?: number;
   };
 }
 

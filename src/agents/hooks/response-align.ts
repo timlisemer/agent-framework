@@ -45,6 +45,7 @@ import {
 
 import { detectUserDirectedQuestions } from "../../utils/content-patterns.js";
 import { stripQuotedContent } from "../../utils/quote-detection.js";
+import { formatPredictionContext, type ToolPrediction } from "../../utils/prediction-types.js";
 
 /**
  * Find the most recent message by transcript index.
@@ -67,6 +68,8 @@ async function classifyStopResponse(
   userText: string,
   assistantText: string,
   workingDir: string,
+  prediction: ToolPrediction | null,
+  frustrationStreak: number,
   stopHookError?: string,
   questionHint?: string[]
 ): Promise<{ classification: "QUESTION" | "PLAN_APPROVAL" | "IGNORED_ERROR" | "MISUNDERSTOOD" | "OK"; latencyMs: number; modelTier: ModelTier; success: boolean; errorCount: number; generationId?: string }> {
@@ -79,9 +82,15 @@ async function classifyStopResponse(
     ? `\n=== QUESTION PATTERNS DETECTED (REGEX) ===\nThe following patterns were detected by regex and may be false positives:\n${questionHint.join("\n")}\n\nNOTE: Use these as a hint but classify based on the full context. Conversational responses, small talk, and polite offers to elaborate are OK even if they match question patterns.\n=== END HINT ===\n`
     : "";
 
+  // Inject sentiment-aware prediction so the classifier can flip the
+  // EMOTIONAL CONTEXT carve-out under hostile mood.
+  const predictionSection = prediction
+    ? `\n=== USER SENTIMENT (CURRENT PREDICTION) ===\n${formatPredictionContext(prediction)}\nFrustration streak: ${frustrationStreak}\n=== END SENTIMENT ===\n`
+    : "";
+
   const context = `USER MESSAGE:
 ${userText}
-${stopHookSection}${questionHintSection}
+${stopHookSection}${questionHintSection}${predictionSection}
 ASSISTANT RESPONSE:
 ${assistantText}`;
 
@@ -148,7 +157,7 @@ Examples:
 - "Here are two ways: 1. Simple approach 2. Complex approach. Which sounds better?" → QUESTION
 
 NOT QUESTION (use OK instead):
-- EMOTIONAL CONTEXT: When the user is angry/frustrated (profanity, ALL CAPS, accusations) and the AI provides a SUBSTANTIVE acknowledgment of its mistakes AND THEN asks what the user wants as conflict resolution — these are conversational, not blocking. Using AskUserQuestion during heated exchanges would be robotic and dismissive. HOWEVER: If the AI ONLY asks a bare question like "What do you want me to do?" or "What exactly do you want?" WITHOUT first acknowledging the problem, this is STILL a QUESTION — the AI is deflecting rather than de-escalating, and should use AskUserQuestion to give the user structured options.
+- EMOTIONAL CONTEXT (INVERTED FOR HOSTILE MOOD): When the SENTIMENT block above shows mood=angry|frustrated OR frustrationStreak>=2, the carve-out is FLIPPED — bare deflections ("Done.", "What do you want me to do?", apology-then-question, A-vs-B option offers) classify as QUESTION (block), not OK. The user is hostile; stopping with a hollow reply is the failure mode being detected. ONLY when sentiment is calm (mood=neutral|satisfied|happy AND streak<2) AND the AI provides a SUBSTANTIVE acknowledgment of its mistakes AND THEN asks what the user wants as conflict resolution does the carve-out apply — these are conversational, not blocking. If the AI ONLY asks a bare question without first acknowledging the problem, this is STILL a QUESTION — the AI is deflecting rather than de-escalating, and should use AskUserQuestion to give the user structured options.
 - SUBSTANTIVE RESPONSE + TRAILING QUESTION: When the AI first provides a thorough response (>150 words) addressing the user's complaint and THEN asks a follow-up, the response as a whole is OK. The question is natural follow-up, not a standalone blocker.
 - COMPLETION CHECK-IN: After completing a discrete task step (creating a plan, writing a file, exiting plan mode), "Should I proceed?" or "Ready for your review" with a trailing question is OK — it is a polite handoff, not a blocking decision. The user can simply say "yes" or give a new instruction.
 - Open-ended "what's next": "Done! Do you have another topic?" "Anything else?" "What would you like to work on next?"
@@ -413,7 +422,9 @@ export async function checkStopResponseAlignment(
   transcriptPath: string,
   workingDir: string,
   hookName: string,
-  planMode = false
+  planMode = false,
+  prediction: ToolPrediction | null = null,
+  frustrationStreak = 0,
 ): Promise<StopCheckResult> {
   // Skip stop response checks for subagents (Task-spawned agents)
   if (isSubagent(transcriptPath)) {
@@ -483,6 +494,8 @@ export async function checkStopResponseAlignment(
       userText,
       assistantText,
       workingDir,
+      prediction,
+      frustrationStreak,
       stopHookError?.content,
       effectiveHints
     );

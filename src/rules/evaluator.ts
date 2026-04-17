@@ -69,11 +69,6 @@ export async function evaluateRules(
 
         if (appeal.overturned) {
           gateNote = appeal.gateNote;
-          // For prediction-block, clear the prediction on overturn so the
-          // next tool call isn't auto-denied again.
-          if (rule.name === "prediction-block") {
-            await ctx.stateManager.update((s) => ({ ...s, currentPrediction: null }));
-          }
           continue;
         }
         gateNote = appeal.gateNote;

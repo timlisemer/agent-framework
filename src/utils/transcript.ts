@@ -1036,6 +1036,7 @@ export function hasMinimumTranscript(
 export async function readRecentUserMessages(
   transcriptPath: string,
   n: number,
+  withIndices: boolean = false,
 ): Promise<string> {
   let raw: string;
   try {
@@ -1083,8 +1084,12 @@ export async function readRecentUserMessages(
     if (!stripped.trim()) continue;
     collected.push(stripped);
   }
-  // Reverse so oldest is first.
-  return collected.reverse().join("\n---\n");
+  // Reverse so oldest is first for display.
+  const reversed = collected.reverse();
+  const total = reversed.length;
+  return withIndices
+    ? reversed.map((msg, i) => `[T${total - 1 - i}] ${msg}`).join("\n---\n")
+    : reversed.join("\n---\n");
 }
 
 export interface ParallelBatchInfo {

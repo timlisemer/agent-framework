@@ -9,8 +9,6 @@ import { setTranscriptPath } from "../utils/execution-context.js";
 import { writeTool } from "../utils/synthetic.js";
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { getSessionDir, getSessionState } from "../utils/summary-cache.js";
-import { getUnconsumedCorrections, consumeCorrections } from "../utils/correction-cache.js";
-import { isHighFrictionPrediction } from "../utils/prediction-types.js";
 import { isPlanModeActive, isPlanModeFromInput } from "../utils/plan-mode-detector.js";
 
 /**
@@ -45,11 +43,14 @@ async function main() {
     ? isPlanModeFromInput(input)
     : isPlanModeActive(input.transcript_path);
 
+  const state = await getSessionState(sessionDir).load();
   const result = await checkStopResponseAlignment(
     input.transcript_path,
     process.env.CLAUDE_PROJECT_DIR || process.cwd(),
     "Stop",
-    planMode
+    planMode,
+    state.currentPrediction,
+    state.frustrationStreak ?? 0,
   );
 
   if (!result.approved && result.systemMessage) {
@@ -61,24 +62,6 @@ async function main() {
     });
     exitAfterFlush(0, output);
     return;
-  }
-
-  // Check for unconsumed corrections from PostToolUse — only block if a prediction says stopping is wrong
-  const corrections = await getUnconsumedCorrections(sessionDir);
-  if (corrections.length > 0) {
-    const state = await getSessionState(sessionDir).load();
-    if (isHighFrictionPrediction(state.currentPrediction)) {
-      const messages = corrections
-        .map((c) => `CORRECTION: ${c.toolName} (${c.toolTarget}) - ${c.reason}`)
-        .join("\n");
-      await consumeCorrections(sessionDir);
-      await writeTool(input.transcript_path, input.session_id, "correction-check",
-        `Actions need review:\n${messages}\nPlease address these issues.`);
-      exitAfterFlush(0, JSON.stringify({ decision: "block", reason: messages }));
-      return;
-    }
-    // No prediction blocks stopping — consume corrections silently
-    await consumeCorrections(sessionDir);
   }
 
   exitAfterFlush(0);

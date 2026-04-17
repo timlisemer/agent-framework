@@ -137,16 +137,25 @@ describe("isHighFrictionPrediction", () => {
     ).toBe(true);
   });
 
-  it("returns false for frustrated + normal/high trust", () => {
+  it("returns true for frustrated regardless of trust (widened semantics)", () => {
     expect(
       isHighFrictionPrediction(makePrediction({ mood: "frustrated", trust: "normal" })),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       isHighFrictionPrediction(makePrediction({ mood: "frustrated", trust: "high" })),
-    ).toBe(false);
+    ).toBe(true);
   });
 
-  it("returns false for neutral / satisfied / happy moods", () => {
+  it("returns true for low trust regardless of mood (widened semantics)", () => {
+    expect(
+      isHighFrictionPrediction(makePrediction({ mood: "neutral", trust: "low" })),
+    ).toBe(true);
+    expect(
+      isHighFrictionPrediction(makePrediction({ mood: "satisfied", trust: "low" })),
+    ).toBe(true);
+  });
+
+  it("returns false for neutral / satisfied / happy moods at normal+ trust", () => {
     expect(isHighFrictionPrediction(makePrediction({ mood: "neutral" }))).toBe(false);
     expect(isHighFrictionPrediction(makePrediction({ mood: "satisfied" }))).toBe(false);
     expect(isHighFrictionPrediction(makePrediction({ mood: "happy" }))).toBe(false);

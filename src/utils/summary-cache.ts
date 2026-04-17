@@ -61,6 +61,17 @@ export interface SessionState {
    * except check / ToolSearch.
    */
   forceCheckPending: boolean;
+  /**
+   * Consecutive UserPromptSubmit turns where prediction.mood was angry/frustrated.
+   * Reset to 0 on neutral/satisfied/happy. Capped at 5. Used by decidePrediction
+   * to harden policy and surfaced to SENTIMENT_AGENT prompt.
+   */
+  frustrationStreak: number;
+  /**
+   * Window size for NEXT UserPromptSubmit's SENTIMENT_AGENT call. Bounded [2, 15].
+   * Set by previous turn's agent via NEXT-WINDOW-SIZE output, clamped TS-side.
+   */
+  currentWindowSize: number;
 }
 
 /**
@@ -83,6 +94,8 @@ export function sessionStateDefaults(): SessionState {
     respondFirstChecked: false,
     currentPrediction: null,
     forceCheckPending: false,
+    frustrationStreak: 0,
+    currentWindowSize: 2,
   };
 }
 

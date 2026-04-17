@@ -65,9 +65,6 @@ If in doubt, UPHOLD.
       ...(overturnCount >= 2 ? { currentEditIntent: true as const, editIntentTimestamp: Date.now() } : {}),
     }));
 
-    // Clear the prediction so the next tool isn't auto-blocked again.
-    await ctx.stateManager.update((s) => ({ ...s, currentPrediction: null }));
-
     // Return null to continue pipeline (appeal overturned)
     return null;
   },

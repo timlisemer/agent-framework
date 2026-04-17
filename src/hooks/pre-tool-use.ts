@@ -37,7 +37,6 @@ import {
   addPatternWarnings,
   clearGateReasoning,
 } from "../utils/gate-reasoning-cache.js";
-import { isEditTool } from "../utils/edit-intent.js";
 import { writeTool, writeUser } from "../utils/synthetic.js";
 import {
   FILE_TOOLS,
@@ -185,16 +184,12 @@ async function main() {
       });
     }
 
-    // 4. Clear current prediction when allowing an edit tool, or when allowing
-    // any MCP commit/push/confirm/check tool. The latter also clears the
-    // workaround force-check lockout.
-    if (exit.decision === "allow" && isEditTool(toolName) && !subagent) {
-      await stateManager.update((s) => ({ ...s, currentPrediction: null }));
-    }
+    // 4. Clear the workaround force-check lockout when allowing any MCP
+    // commit/push/confirm/check tool. The currentPrediction is intentionally
+    // NOT cleared here — single clear point is the next UserPromptSubmit.
     if (exit.decision === "allow" && /^mcp__.*(commit|push|confirm|check)$/.test(toolName)) {
       await stateManager.update((s) => ({
         ...s,
-        currentPrediction: null,
         forceCheckPending: false,
       }));
     }
@@ -458,7 +453,6 @@ async function main() {
     await clearGateReasoning(sessionDir);
     await stateManager.update((s) => ({
       ...s,
-      currentPrediction: null,
       currentEditIntent: true as const,
       previousEditIntent: s.currentEditIntent ?? null,
       editIntentTimestamp: Date.now(),

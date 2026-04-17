@@ -5,7 +5,7 @@ import { writeTool } from "../utils/synthetic.js";
 export const lowRiskRule: PreToolRule = {
   name: "low-risk-bypass",
   displayName: "Low Risk",
-  priority: 10,
+  priority: 38,
   appealable: false,
   usesLlm: false,
   promptSection: "",
@@ -19,7 +19,6 @@ export const lowRiskRule: PreToolRule = {
         "EnterPlanMode",
         "Entering plan mode. All subsequent tool calls are read-only until ExitPlanMode."
       );
-      await ctx.stateManager.update((s) => ({ ...s, currentPrediction: null }));
     }
 
     if (

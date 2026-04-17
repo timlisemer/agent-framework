@@ -35,12 +35,24 @@ export interface ToolPrediction {
 
   userMessageSnippet: string;
   timestamp: number;
+
+  /** Window size proposal for the NEXT UserPromptSubmit (raw, unclamped). */
+  nextWindowSize?: number;
+  /** Whether the user just changed topic / opened a new unrelated task. */
+  contextSwitch?: "yes" | "no";
+  /**
+   * Only meaningful when SENTIMENT_AGENT was invoked with ASKUSERQUESTION CONTENT.
+   * Otherwise "n/a".
+   */
+  questionIsStalling?: "yes" | "no" | "n/a";
 }
 
 /**
- * Hardcoded framework-domain knowledge: which tools are read-only and therefore
- * always permitted under the restrictive mood policy. This is NOT a rule
- * derived from user words — it's a fact about the framework's tool catalog.
+ * Tools always permitted under restrictive mood. AskUserQuestion is
+ * INTENTIONALLY KEPT — its content is judged by predictionQuestionJudgeRule
+ * (priority 28) which calls SENTIMENT_AGENT with the question text injected.
+ * Blanket-deny was rejected because legitimate operational questions
+ * ("delete or back up first?") under angry mood should still be allowed.
  */
 export const READ_ONLY_TOOLS = new Set([
   "Read", "Glob", "Grep", "ToolSearch", "TodoWrite",
@@ -104,7 +116,7 @@ export function decidePrediction(
  * Replaces the legacy `blockStop` boolean field.
  */
 export function isHighFrictionPrediction(p: ToolPrediction | null): boolean {
-  return !!p && (p.mood === "angry" || (p.mood === "frustrated" && p.trust === "low"));
+  return !!p && (p.mood === "angry" || p.mood === "frustrated" || p.trust === "low");
 }
 
 /**

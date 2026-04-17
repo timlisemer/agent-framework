@@ -526,6 +526,8 @@ const scenarioSchema = z.object({
       timestamp: z.number().optional(),
     }).optional(),
     forceCheckPending: z.boolean().optional(),
+    frustrationStreak: z.number().optional(),
+    currentWindowSize: z.number().optional(),
   }).optional(),
 });
 
