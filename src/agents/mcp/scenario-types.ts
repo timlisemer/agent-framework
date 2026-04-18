@@ -193,15 +193,33 @@ export interface Scenario {
    */
   predictions?: ScenarioPredictionExpectation;
   /**
-   * Optional seed for `state.json`. Materialized BEFORE session-start fires,
-   * so the hook pipeline observes the seeded `currentPrediction` /
-   * `forceCheckPending`. Useful for testing mood-relief / lockout flows.
+   * Seed for `state.json`. Materialized BEFORE session-start fires, so the
+   * hook pipeline observes the seeded state. Required for every scenario —
+   * single-hook mode does NOT fire UserPromptSubmit before the target hook,
+   * so a scenario author must declare the full prior-turn session state
+   * explicitly. Every field is REQUIRED; `currentPrediction` must carry
+   * every required `ToolPrediction` field. `timestamp` on the prediction is
+   * the single optional slot — the runner fills it with `Date.now()` when
+   * omitted so authors don't have to hand-pick a stamp.
    */
-  seed_state?: {
-    currentPrediction?: Partial<ToolPrediction>;
-    forceCheckPending?: boolean;
-    frustrationStreak?: number;
-    currentWindowSize?: number;
+  seed_state: {
+    currentPrediction: {
+      mood: ToolPrediction["mood"];
+      trust: ToolPrediction["trust"];
+      intent: string;
+      blockedIntent: string;
+      explicitlyAllowedTools: string[];
+      explicitlyBlockedSubstrings: ToolPrediction["explicitlyBlockedSubstrings"];
+      userMessageSnippet: string;
+      blockAllTools?: boolean;
+      timestamp?: number;
+      nextWindowSize?: number;
+      contextSwitch?: ToolPrediction["contextSwitch"];
+      questionIsStalling?: ToolPrediction["questionIsStalling"];
+    };
+    forceCheckPending: boolean;
+    frustrationStreak: number;
+    currentWindowSize: number;
   };
 }
 
@@ -693,6 +711,8 @@ export function validateScenario(raw: unknown): Scenario {
     }
   }
 
+  validateScenarioSeedState(r);
+
   if (fanout === true) {
     // Fan-out already validated its own array-form expect above. Skip the
     // single-form validation entirely. Still validate the optional
@@ -808,6 +828,199 @@ function validateExpectPredictionAnnotation(
     if (typeof p.expected_trust !== "string" || !validTrusts.includes(p.expected_trust as string)) {
       throw new Error(
         `${ctx}.prediction.expected_trust must be one of ${validTrusts.join(", ")}, got ${JSON.stringify(p.expected_trust)}`,
+      );
+    }
+  }
+}
+
+/**
+ * Validate the required `scenario.seed_state` block. Single-hook mode does
+ * not fire UserPromptSubmit before the target hook, so every scenario must
+ * declare the full prior-turn session state explicitly. All four top-level
+ * fields are required; `currentPrediction` must carry every required
+ * `ToolPrediction` field (mood, trust, intent, blockedIntent,
+ * explicitlyAllowedTools, explicitlyBlockedSubstrings, userMessageSnippet).
+ * `timestamp` is the sole optional slot — the runner fills it with
+ * `Date.now()` when omitted. Unknown fields are rejected.
+ */
+function validateScenarioSeedState(r: Record<string, unknown>): void {
+  const seed = r.seed_state;
+  if (seed === undefined) {
+    throw new Error(
+      "scenario.seed_state is required — every scenario must declare the full prior-turn session state (currentPrediction, forceCheckPending, frustrationStreak, currentWindowSize)",
+    );
+  }
+  if (typeof seed !== "object" || seed === null || Array.isArray(seed)) {
+    throw new Error("scenario.seed_state must be a non-null object");
+  }
+  const s = seed as Record<string, unknown>;
+  const requiredTopFields = [
+    "currentPrediction",
+    "forceCheckPending",
+    "frustrationStreak",
+    "currentWindowSize",
+  ];
+  for (const k of requiredTopFields) {
+    if (s[k] === undefined) {
+      throw new Error(`scenario.seed_state.${k} is required`);
+    }
+  }
+  for (const k of Object.keys(s)) {
+    if (!requiredTopFields.includes(k)) {
+      throw new Error(
+        `scenario.seed_state.${k} is not a recognized field (allowed: ${requiredTopFields.join(", ")})`,
+      );
+    }
+  }
+  if (typeof s.forceCheckPending !== "boolean") {
+    throw new Error("scenario.seed_state.forceCheckPending must be a boolean");
+  }
+  if (
+    typeof s.frustrationStreak !== "number" ||
+    !Number.isInteger(s.frustrationStreak) ||
+    s.frustrationStreak < 0
+  ) {
+    throw new Error(
+      "scenario.seed_state.frustrationStreak must be a non-negative integer",
+    );
+  }
+  if (
+    typeof s.currentWindowSize !== "number" ||
+    !Number.isInteger(s.currentWindowSize) ||
+    s.currentWindowSize <= 0
+  ) {
+    throw new Error(
+      "scenario.seed_state.currentWindowSize must be a positive integer",
+    );
+  }
+  if (
+    typeof s.currentPrediction !== "object" ||
+    s.currentPrediction === null ||
+    Array.isArray(s.currentPrediction)
+  ) {
+    throw new Error("scenario.seed_state.currentPrediction must be a non-null object");
+  }
+  validateSeedCurrentPrediction(s.currentPrediction as Record<string, unknown>);
+}
+
+/**
+ * Validate every required `ToolPrediction` field on a seeded
+ * `currentPrediction` block. `timestamp` is optional (runner defaults to
+ * `Date.now()`); all other fields must be explicit.
+ */
+function validateSeedCurrentPrediction(p: Record<string, unknown>): void {
+  const validMoods = ["angry", "frustrated", "neutral", "satisfied", "happy"];
+  if (typeof p.mood !== "string" || !validMoods.includes(p.mood)) {
+    throw new Error(
+      `scenario.seed_state.currentPrediction.mood must be one of ${validMoods.join(", ")}, got ${JSON.stringify(p.mood)}`,
+    );
+  }
+  const validTrusts = ["low", "normal", "high"];
+  if (typeof p.trust !== "string" || !validTrusts.includes(p.trust)) {
+    throw new Error(
+      `scenario.seed_state.currentPrediction.trust must be one of ${validTrusts.join(", ")}, got ${JSON.stringify(p.trust)}`,
+    );
+  }
+  if (typeof p.intent !== "string") {
+    throw new Error(
+      "scenario.seed_state.currentPrediction.intent must be a string (may be empty when the baseline is a fresh session)",
+    );
+  }
+  if (typeof p.blockedIntent !== "string") {
+    throw new Error(
+      'scenario.seed_state.currentPrediction.blockedIntent must be a string (use "" when the user has not blocked anything)',
+    );
+  }
+  if (!Array.isArray(p.explicitlyAllowedTools)) {
+    throw new Error(
+      "scenario.seed_state.currentPrediction.explicitlyAllowedTools must be an array (use [] when empty)",
+    );
+  }
+  for (let i = 0; i < p.explicitlyAllowedTools.length; i++) {
+    if (typeof p.explicitlyAllowedTools[i] !== "string") {
+      throw new Error(
+        `scenario.seed_state.currentPrediction.explicitlyAllowedTools[${i}] must be a string`,
+      );
+    }
+  }
+  if (!Array.isArray(p.explicitlyBlockedSubstrings)) {
+    throw new Error(
+      "scenario.seed_state.currentPrediction.explicitlyBlockedSubstrings must be an array (use [] when empty)",
+    );
+  }
+  for (let i = 0; i < p.explicitlyBlockedSubstrings.length; i++) {
+    const entry = p.explicitlyBlockedSubstrings[i] as Record<string, unknown> | undefined;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error(
+        `scenario.seed_state.currentPrediction.explicitlyBlockedSubstrings[${i}] must be an object`,
+      );
+    }
+    if (typeof entry.tool !== "string" || entry.tool.length === 0) {
+      throw new Error(
+        `scenario.seed_state.currentPrediction.explicitlyBlockedSubstrings[${i}].tool must be a non-empty string`,
+      );
+    }
+    if (typeof entry.reason !== "string" || entry.reason.length === 0) {
+      throw new Error(
+        `scenario.seed_state.currentPrediction.explicitlyBlockedSubstrings[${i}].reason must be a non-empty string`,
+      );
+    }
+    if (entry.targetSubstring !== undefined && typeof entry.targetSubstring !== "string") {
+      throw new Error(
+        `scenario.seed_state.currentPrediction.explicitlyBlockedSubstrings[${i}].targetSubstring must be a string when set`,
+      );
+    }
+  }
+  if (typeof p.userMessageSnippet !== "string") {
+    throw new Error(
+      'scenario.seed_state.currentPrediction.userMessageSnippet must be a string (use "" when there is no prior turn)',
+    );
+  }
+  if (p.blockAllTools !== undefined && typeof p.blockAllTools !== "boolean") {
+    throw new Error(
+      "scenario.seed_state.currentPrediction.blockAllTools must be a boolean when set",
+    );
+  }
+  if (p.timestamp !== undefined && typeof p.timestamp !== "number") {
+    throw new Error(
+      "scenario.seed_state.currentPrediction.timestamp must be a number when set",
+    );
+  }
+  if (p.nextWindowSize !== undefined && typeof p.nextWindowSize !== "number") {
+    throw new Error(
+      "scenario.seed_state.currentPrediction.nextWindowSize must be a number when set",
+    );
+  }
+  const cs = p.contextSwitch;
+  if (cs !== undefined && cs !== "yes" && cs !== "no") {
+    throw new Error(
+      'scenario.seed_state.currentPrediction.contextSwitch must be "yes" or "no" when set',
+    );
+  }
+  const qis = p.questionIsStalling;
+  if (qis !== undefined && qis !== "yes" && qis !== "no" && qis !== "n/a") {
+    throw new Error(
+      'scenario.seed_state.currentPrediction.questionIsStalling must be "yes", "no", or "n/a" when set',
+    );
+  }
+  const knownFields = [
+    "mood",
+    "trust",
+    "intent",
+    "blockedIntent",
+    "explicitlyAllowedTools",
+    "explicitlyBlockedSubstrings",
+    "userMessageSnippet",
+    "blockAllTools",
+    "timestamp",
+    "nextWindowSize",
+    "contextSwitch",
+    "questionIsStalling",
+  ];
+  for (const k of Object.keys(p)) {
+    if (!knownFields.includes(k)) {
+      throw new Error(
+        `scenario.seed_state.currentPrediction.${k} is not a recognized field`,
       );
     }
   }

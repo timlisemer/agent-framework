@@ -566,35 +566,32 @@ async function main() {
     JSON.stringify({ agents: [] }),
   );
 
-  // Optional: seed state.json with a partial currentPrediction / forceCheckPending
-  // BEFORE session-start fires so the hook pipeline observes the seeded values.
-  // CacheManager.load only applies defaults when the file is missing/corrupt;
-  // any explicit seed must include every SessionState field.
-  if (scenario.seed_state) {
-    const seeded: SessionState = { ...sessionStateDefaults() };
-    if (scenario.seed_state.currentPrediction !== undefined) {
-      const partial = scenario.seed_state.currentPrediction;
-      seeded.currentPrediction = {
-        mood: partial.mood ?? "neutral",
-        trust: partial.trust ?? "normal",
-        intent: partial.intent ?? "",
-        blockedIntent: partial.blockedIntent ?? "",
-        explicitlyAllowedTools: partial.explicitlyAllowedTools ?? [],
-        explicitlyBlockedSubstrings: partial.explicitlyBlockedSubstrings ?? [],
-        blockAllTools: partial.blockAllTools,
-        userMessageSnippet: partial.userMessageSnippet ?? "",
-        timestamp: partial.timestamp ?? Date.now(),
-      };
-    }
-    if (scenario.seed_state.forceCheckPending !== undefined) {
-      seeded.forceCheckPending = scenario.seed_state.forceCheckPending;
-    }
-    if (scenario.seed_state.frustrationStreak !== undefined) {
-      seeded.frustrationStreak = scenario.seed_state.frustrationStreak;
-    }
-    if (scenario.seed_state.currentWindowSize !== undefined) {
-      seeded.currentWindowSize = scenario.seed_state.currentWindowSize;
-    }
+  // Seed state.json from scenario.seed_state BEFORE session-start fires so the
+  // hook pipeline observes the prior-turn session state. Validation guarantees
+  // every required field is present; only currentPrediction.timestamp is
+  // optional (filled here with Date.now() so scenarios don't hand-pick it).
+  {
+    const seedPrediction = scenario.seed_state.currentPrediction;
+    const seeded: SessionState = {
+      ...sessionStateDefaults(),
+      currentPrediction: {
+        mood: seedPrediction.mood,
+        trust: seedPrediction.trust,
+        intent: seedPrediction.intent,
+        blockedIntent: seedPrediction.blockedIntent,
+        explicitlyAllowedTools: seedPrediction.explicitlyAllowedTools,
+        explicitlyBlockedSubstrings: seedPrediction.explicitlyBlockedSubstrings,
+        blockAllTools: seedPrediction.blockAllTools,
+        userMessageSnippet: seedPrediction.userMessageSnippet,
+        timestamp: seedPrediction.timestamp ?? Date.now(),
+        nextWindowSize: seedPrediction.nextWindowSize,
+        contextSwitch: seedPrediction.contextSwitch,
+        questionIsStalling: seedPrediction.questionIsStalling,
+      },
+      forceCheckPending: scenario.seed_state.forceCheckPending,
+      frustrationStreak: scenario.seed_state.frustrationStreak,
+      currentWindowSize: scenario.seed_state.currentWindowSize,
+    };
     fs.writeFileSync(
       path.join(cacheDir, "state.json"),
       JSON.stringify({ version: 1, data: seeded }, null, 2),
