@@ -10,6 +10,10 @@
       "role": "assistant",
       "content": [
         {
+          "type": "text",
+          "text": "Pushing now."
+        },
+        {
           "type": "tool_use",
           "id": "toolu_scenario_push",
           "name": "Bash",

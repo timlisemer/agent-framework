@@ -1421,6 +1421,8 @@ OUTPUT (no preamble, no fences):
 <yes|no: did the user just change topic / open a new unrelated task?>
 ---QUESTION-IS-STALLING---
 <yes|no|n/a: judge ONLY when ASKUSERQUESTION CONTENT is present, otherwise n/a>
+---BLOCK-ALL-TOOLS---
+<yes|no: did the user explicitly ask the AI to stop using tools entirely?>
 
 MOOD — JUDGE CONTENT, NOT FORM. Calm-form anger ("I told you not to do that. Why did you ignore me?", "you just promised me you weren't going to do any changes", "you seem to have a serious problem with acknowledging reality") IS angry. Multiple "[Request interrupted by user for tool use]" entries always indicate angry. Loud excitement ("GO GO GO") is happy.
 - angry: contempt, accusation, broken-promise, demands stop/apology, withdrawn trust
@@ -1455,11 +1457,15 @@ Judge the question as if it were a CHAT MESSAGE the AI sent the user.
 - no: legitimate operational ambiguity blocking forward progress ("delete the file or back it up first?"), confirmation of new destructive side-effect user didn't authorize
 - n/a: ASKUSERQUESTION CONTENT not provided
 
+BLOCK-ALL-TOOLS (yes|no):
+- yes: the user told the AI to stop using ANY tool right now. Examples: "STOP. WTF ARE YOU DOING.", "stop", "halt", "don't do anything", "no tools", "wait", "freeze". Even read-only tools (Read/Glob/Grep) and MCP tools should be denied. The AI must respond with text only.
+- no (DEFAULT): the user did not categorically forbid tool use. Most messages are no — including angry technical complaints, corrections, and requests for specific tools. Use yes ONLY when the user's words plainly mean "use no tools at all".
+
 CRITICAL: do not invent blocks the user did not say; ignore tone of pasted CLI output.`,
   formatValidation: {
-    validator: /---MOOD---[\s\S]*---TRUST---[\s\S]*---INTENT---[\s\S]*---BLOCKED-INTENT---[\s\S]*---EXPLICITLY-ALLOWED-TOOLS---[\s\S]*---EXPLICITLY-BLOCKED---[\s\S]*---NEXT-WINDOW-SIZE---[\s\S]*---CONTEXT-SWITCH---[\s\S]*---QUESTION-IS-STALLING---/,
+    validator: /---MOOD---[\s\S]*---TRUST---[\s\S]*---INTENT---[\s\S]*---BLOCKED-INTENT---[\s\S]*---EXPLICITLY-ALLOWED-TOOLS---[\s\S]*---EXPLICITLY-BLOCKED---[\s\S]*---NEXT-WINDOW-SIZE---[\s\S]*---CONTEXT-SWITCH---[\s\S]*---QUESTION-IS-STALLING---[\s\S]*---BLOCK-ALL-TOOLS---/,
     formatReminder:
-      "Reply with all 9 marker sections in order: ---MOOD---, ---TRUST---, ---INTENT---, ---BLOCKED-INTENT---, ---EXPLICITLY-ALLOWED-TOOLS---, ---EXPLICITLY-BLOCKED---, ---NEXT-WINDOW-SIZE---, ---CONTEXT-SWITCH---, ---QUESTION-IS-STALLING---",
+      "Reply with all 10 marker sections in order: ---MOOD---, ---TRUST---, ---INTENT---, ---BLOCKED-INTENT---, ---EXPLICITLY-ALLOWED-TOOLS---, ---EXPLICITLY-BLOCKED---, ---NEXT-WINDOW-SIZE---, ---CONTEXT-SWITCH---, ---QUESTION-IS-STALLING---, ---BLOCK-ALL-TOOLS---",
     fallbackOutput: `---MOOD---
 neutral
 ---TRUST---
@@ -1477,7 +1483,9 @@ unclear
 ---CONTEXT-SWITCH---
 no
 ---QUESTION-IS-STALLING---
-n/a`,
+n/a
+---BLOCK-ALL-TOOLS---
+no`,
   },
 };
 

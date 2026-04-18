@@ -9,6 +9,8 @@
  * @module prediction-types
  */
 
+import { isLowRiskTool } from "../rules/utils.js";
+
 export type Mood = "angry" | "frustrated" | "neutral" | "satisfied" | "happy";
 export type Trust = "low" | "normal" | "high";
 
@@ -33,6 +35,14 @@ export interface ToolPrediction {
     reason: string;
   }>;
 
+  /**
+   * Set by SENTIMENT_AGENT when the user explicitly asked the AI to stop
+   * doing things entirely ("stop", "don't do anything", "halt everything",
+   * "STOP. WTF ARE YOU DOING."). When true, decidePrediction denies EVERY
+   * tool not in explicitlyAllowedTools — overrides the low-risk allowance.
+   */
+  blockAllTools?: boolean;
+
   userMessageSnippet: string;
   timestamp: number;
 
@@ -46,18 +56,6 @@ export interface ToolPrediction {
    */
   questionIsStalling?: "yes" | "no" | "n/a";
 }
-
-/**
- * Tools always permitted under restrictive mood. AskUserQuestion is
- * INTENTIONALLY KEPT — its content is judged by predictionQuestionJudgeRule
- * (priority 28) which calls SENTIMENT_AGENT with the question text injected.
- * Blanket-deny was rejected because legitimate operational questions
- * ("delete or back up first?") under angry mood should still be allowed.
- */
-export const READ_ONLY_TOOLS = new Set([
-  "Read", "Glob", "Grep", "ToolSearch", "TodoWrite",
-  "AskUserQuestion", "WebFetch", "WebSearch",
-]);
 
 export interface PredictionDecision {
   decision: "allow" | "deny";
@@ -94,20 +92,32 @@ export function decidePrediction(
     };
   }
 
-  // 3. Mood-driven default policy.
+  // 3. blockAllTools override: user explicitly asked for no tools at all.
+  // Overrides the low-risk allowance below — only explicitlyAllowedTools
+  // bypass (already handled in step 1).
+  if (prediction.blockAllTools) {
+    return {
+      decision: "deny",
+      reason: `User explicitly asked for no tools right now. User said: "${prediction.userMessageSnippet}". Intent: ${prediction.intent}`,
+    };
+  }
+
+  // 4. Mood-driven default policy. Allow set mirrors `low-risk-bypass`
+  // (single source of truth via isLowRiskTool) so the prediction system
+  // doesn't artificially block tools the framework treats as always-safe.
   const restrictive =
     prediction.mood === "angry" ||
     prediction.mood === "frustrated" ||
     prediction.trust === "low";
   if (restrictive) {
-    if (READ_ONLY_TOOLS.has(toolName)) return { decision: "allow" };
+    if (isLowRiskTool(toolName)) return { decision: "allow" };
     return {
       decision: "deny",
       reason: `User appears ${prediction.mood} (trust: ${prediction.trust}). Blocking ${toolName} unless explicitly requested. User said: "${prediction.userMessageSnippet}". Intent: ${prediction.intent}`,
     };
   }
 
-  // 4. neutral/satisfied/happy + normal/high trust → allow.
+  // 5. neutral/satisfied/happy + normal/high trust → allow.
   return { decision: "allow" };
 }
 

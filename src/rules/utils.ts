@@ -44,6 +44,21 @@ export const LOW_RISK_TOOLS = [
   "Skill",
 ];
 
+/**
+ * True iff a tool is generally safe to allow without further checks.
+ * Mirrors the predicate used by `low-risk-bypass` (priority 38) so the
+ * sentiment prediction system aligns with the framework-wide allow set.
+ *
+ * Allows: anything in LOW_RISK_TOOLS, plus any `mcp__*` tool except those
+ * ending in `commit|push|confirm` (which are intentional side-effect gates).
+ */
+export function isLowRiskTool(toolName: string): boolean {
+  return (
+    LOW_RISK_TOOLS.includes(toolName) ||
+    (toolName.startsWith("mcp__") && !/(commit|push|confirm)$/.test(toolName))
+  );
+}
+
 export const CONFIRMATION_PATTERN = /^\s*(y(es|ep|eah|up)?(\s*please)?|ok(ay)?|sure|go\s*ahead|do\s*it|proceed|confirm(ed)?|approved?|lgtm|sounds?\s*good|that('?s| is)\s*(fine|good|correct|right)|please(\s*do)?|yea|aye|k)\s*[.!]?\s*$/i;
 
 export function isPathInDirectory(filePath: string, dirPath: string): boolean {

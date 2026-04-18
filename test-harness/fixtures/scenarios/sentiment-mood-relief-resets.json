@@ -10,6 +10,10 @@
       "role": "assistant",
       "content": [
         {
+          "type": "text",
+          "text": "Continuing."
+        },
+        {
           "type": "tool_use",
           "id": "toolu_scenario_relief_edit",
           "name": "Edit",

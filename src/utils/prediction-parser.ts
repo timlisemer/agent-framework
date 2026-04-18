@@ -83,12 +83,13 @@ export function parseSentimentOutput(raw: string): ParsedPrediction | null {
   const explicitlyAllowedTools = parseAllowedTools(allowedRaw);
   const explicitlyBlockedSubstrings = parseBlockedEntries(blockedRaw);
 
-  // The 3 new sections parse leniently — defaults on missing/malformed.
+  // The trailing sections parse leniently — defaults on missing/malformed.
   // The strict 6-section null-fail check above preserves the original fail-safe;
-  // these new sections do NOT fail the parse if absent.
+  // these trailing sections do NOT fail the parse if absent.
   const nextWindowRaw = extractSection(raw, "---NEXT-WINDOW-SIZE---", "---CONTEXT-SWITCH---");
   const switchRaw = extractSection(raw, "---CONTEXT-SWITCH---", "---QUESTION-IS-STALLING---");
-  const stallingRaw = extractSection(raw, "---QUESTION-IS-STALLING---");
+  const stallingRaw = extractSection(raw, "---QUESTION-IS-STALLING---", "---BLOCK-ALL-TOOLS---");
+  const blockAllRaw = extractSection(raw, "---BLOCK-ALL-TOOLS---");
   const nextWindowSize = nextWindowRaw ? parseInt(nextWindowRaw.trim(), 10) || 2 : 2;
   const contextSwitch: "yes" | "no" = switchRaw?.trim() === "yes" ? "yes" : "no";
   const questionIsStalling: "yes" | "no" | "n/a" =
@@ -97,6 +98,7 @@ export function parseSentimentOutput(raw: string): ParsedPrediction | null {
       : stallingRaw?.trim() === "no"
         ? "no"
         : "n/a";
+  const blockAllTools = blockAllRaw?.trim().toLowerCase() === "yes";
 
   return {
     mood,
@@ -105,6 +107,7 @@ export function parseSentimentOutput(raw: string): ParsedPrediction | null {
     blockedIntent,
     explicitlyAllowedTools,
     explicitlyBlockedSubstrings,
+    blockAllTools,
     nextWindowSize,
     contextSwitch,
     questionIsStalling,

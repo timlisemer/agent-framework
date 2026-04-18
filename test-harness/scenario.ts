@@ -581,6 +581,7 @@ async function main() {
         blockedIntent: partial.blockedIntent ?? "",
         explicitlyAllowedTools: partial.explicitlyAllowedTools ?? [],
         explicitlyBlockedSubstrings: partial.explicitlyBlockedSubstrings ?? [],
+        blockAllTools: partial.blockAllTools,
         userMessageSnippet: partial.userMessageSnippet ?? "",
         timestamp: partial.timestamp ?? Date.now(),
       };

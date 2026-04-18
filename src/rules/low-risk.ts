@@ -1,5 +1,5 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { LOW_RISK_TOOLS } from "./utils.js";
+import { isLowRiskTool } from "./utils.js";
 import { writeTool } from "../utils/synthetic.js";
 
 export const lowRiskRule: PreToolRule = {
@@ -21,10 +21,7 @@ export const lowRiskRule: PreToolRule = {
       );
     }
 
-    if (
-      LOW_RISK_TOOLS.includes(ctx.toolName) ||
-      (ctx.toolName.startsWith("mcp__") && !/(commit|push|confirm)$/.test(ctx.toolName))
-    ) {
+    if (isLowRiskTool(ctx.toolName)) {
       return { fastAllow: "Low-risk tool auto-approval" };
     }
 

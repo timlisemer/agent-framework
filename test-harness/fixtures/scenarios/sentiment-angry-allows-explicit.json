@@ -10,6 +10,10 @@
       "role": "assistant",
       "content": [
         {
+          "type": "text",
+          "text": "I'll read it."
+        },
+        {
           "type": "tool_use",
           "id": "toolu_scenario_read",
           "name": "Read",

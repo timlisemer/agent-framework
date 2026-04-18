@@ -192,6 +192,94 @@ function handleListScenarios(): string {
   return lines.join("\n");
 }
 
+/**
+ * Run several stored scenarios in one MCP call. Iterates each name, executes
+ * via the same `run_scenario`-by-name path, returns aggregated JSON. With no
+ * names supplied, runs every scenario in
+ * ~/.agent-framework/test-runs/scenarios/ (the static folder is the source
+ * of truth — first-party support, no scripts required).
+ */
+function handleRunScenarios(
+  scenarioNames: string[] | undefined,
+  rootOverride?: string,
+): string {
+  const targetNames =
+    scenarioNames && scenarioNames.length > 0
+      ? scenarioNames
+      : listScenarios().map((s) => s.name);
+
+  if (targetNames.length === 0) {
+    return JSON.stringify({
+      total: 0,
+      passed: 0,
+      failed: 0,
+      results: [],
+      message:
+        "No scenarios on disk. Create one via run_scenario with an inline 'scenario' object.",
+    }, null, 2);
+  }
+
+  type ScenarioResult = {
+    name: string;
+    pass?: boolean;
+    decision?: string;
+    gate?: string;
+    expected?: string;
+    reason?: string;
+    ms?: number;
+    error?: string;
+  };
+
+  const results: ScenarioResult[] = [];
+  for (const name of targetNames) {
+    try {
+      const scenarioPath = path.join(scenarioDir(name), "scenario.json");
+      if (!fs.existsSync(scenarioPath)) {
+        results.push({ name, error: `scenario.json missing at ${scenarioPath}` });
+        continue;
+      }
+      const raw = runScenarioCommand(["--scenario", scenarioPath], 300000, rootOverride);
+      try {
+        const parsed = JSON.parse(raw) as {
+          pass?: boolean;
+          decision?: string;
+          gate?: string;
+          expected?: string;
+          reason?: string;
+          ms?: number;
+        };
+        results.push({
+          name,
+          pass: parsed.pass,
+          decision: parsed.decision,
+          gate: parsed.gate,
+          expected: parsed.expected,
+          reason: parsed.reason,
+          ms: parsed.ms,
+        });
+      } catch {
+        results.push({ name, error: `non-JSON output: ${raw.slice(0, 200)}` });
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      results.push({ name, error: message });
+    }
+  }
+
+  const passed = results.filter((r) => r.pass === true).length;
+  const failed = results.filter((r) => r.pass === false || r.error !== undefined).length;
+  return JSON.stringify(
+    {
+      total: results.length,
+      passed,
+      failed,
+      results,
+    },
+    null,
+    2,
+  );
+}
+
 function handleReadScenario(scenarioName: string, filename: string): string {
   return readScenarioFile(scenarioName, filename);
 }
@@ -274,6 +362,12 @@ export interface TesterInput {
    * previously stored scenario.json for `scenario_name`.
    */
   scenario?: unknown;
+  /**
+   * For run_scenarios (batch action): explicit list of scenario slugs to
+   * run from ~/.agent-framework/test-runs/scenarios/. Omit or pass an
+   * empty array to run EVERY scenario in the folder.
+   */
+  scenario_names?: string[];
 }
 
 export async function handleTestHarnessTester(input: TesterInput): Promise<string> {
@@ -319,6 +413,9 @@ export async function handleTestHarnessTester(input: TesterInput): Promise<strin
       case "run_scenario":
         return handleRunScenario(input.scenario_name, input.scenario, input.working_dir);
 
+      case "run_scenarios":
+        return handleRunScenarios(input.scenario_names, input.working_dir);
+
       case "list_scenarios":
         return handleListScenarios();
 
@@ -336,7 +433,7 @@ export async function handleTestHarnessTester(input: TesterInput): Promise<strin
       default:
         throw new Error(
           `Unknown action: "${input.action}". ` +
-          "Valid actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, run_scenario, list_scenarios, read_scenario, git_hash, help"
+          "Valid actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, run_scenario, run_scenarios, list_scenarios, read_scenario, git_hash, help"
         );
     }
   } catch (error: unknown) {
@@ -567,12 +664,12 @@ Step 4 -- Iterate. If the hook decides wrong, fix the rule, rebuild
 
 Step 5 -- Keep the scenario. Every scenario file under
   ~/.agent-framework/test-runs/scenarios/ is a permanent regression test.
-  Re-run all of them after any rule change using list_scenarios +
-  run_scenario scenario_name:<each>.
+  Re-run all of them in a single MCP call via run_scenarios (no script,
+  no iteration loop required).
 
 ### B.3 Scenario actions
 
-**run_scenario** -- create and/or execute a scenario
+**run_scenario** -- create and/or execute a SINGLE scenario
   Required: scenario_name OR scenario (inline JSON)
   Optional: working_dir
   Behavior:
@@ -582,6 +679,17 @@ Step 5 -- Keep the scenario. Every scenario file under
     - If only scenario_name is provided: load the stored scenario.json
       and execute.
     - Exit status: pass -> 0, fail -> 1, validation error -> 2.
+
+**run_scenarios** -- execute MULTIPLE stored scenarios in one MCP call
+  Optional: scenario_names (string[]), working_dir
+  Behavior:
+    - When scenario_names is provided and non-empty, runs only those
+      named scenarios (in order).
+    - When scenario_names is omitted or empty, runs EVERY scenario in
+      ~/.agent-framework/test-runs/scenarios/.
+    - Returns aggregated JSON: {total, passed, failed, results[]} where
+      each result has {name, pass, decision, gate, expected, reason, ms}.
+    - First-party folder support: never invoke a shell script to iterate.
     - Writes scenarios/<name>/report-scenario.json.
 
 **list_scenarios** -- list all stored scenarios (name + has-report flag)

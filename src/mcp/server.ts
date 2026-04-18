@@ -522,6 +522,7 @@ const scenarioSchema = z.object({
         targetSubstring: z.string().optional(),
         reason: z.string(),
       })).optional(),
+      blockAllTools: z.boolean().optional(),
       userMessageSnippet: z.string().optional(),
       timestamp: z.number().optional(),
     }).optional(),
@@ -535,11 +536,11 @@ server.registerTool(
   "test_harness_tester",
   {
     title: "Test Harness Tester",
-    description: "Run test harness against labeled transcripts OR against synthetic scenarios. Actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, run_scenario, list_scenarios, read_scenario, git_hash, help. Use help action for full documentation.",
+    description: "Run test harness against labeled transcripts OR against synthetic scenarios. Actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, run_scenario, run_scenarios, list_scenarios, read_scenario, git_hash, help. Use help action for full documentation.",
     inputSchema: {
       action: z.enum([
         "find_work", "run_test", "run_single_hook", "list", "expand", "read_file", "append_notes",
-        "run_scenario", "list_scenarios", "read_scenario",
+        "run_scenario", "run_scenarios", "list_scenarios", "read_scenario",
         "git_hash", "help"
       ]).describe("The action to perform"),
       transcript_name: z.string().optional().describe("Transcript name (without .jsonl extension)"),
@@ -553,6 +554,7 @@ server.registerTool(
       transcript_path: z.string().optional().describe("Absolute path to a transcript .jsonl file. Use when the transcript lives outside ~/.claude/projects/-home-tim-Coding-public-repos-agent-framework (e.g. iocto sessions). Only needed if the test-runs copy is not yet in place."),
       scenario_name: z.string().optional().describe("For run_scenario / list_scenarios / read_scenario: slug identifying a scenario under ~/.agent-framework/test-runs/scenarios/<name>/. Must match [A-Za-z0-9._-]+."),
       scenario: scenarioSchema.optional().describe("For run_scenario: inline Scenario JSON. When set, overwrites the on-disk scenarios/<name>/scenario.json before running. Omit to re-run a previously stored scenario. See the 'help' action (Workflow B) for the full schema and examples."),
+      scenario_names: z.array(z.string()).optional().describe("For run_scenarios: explicit list of scenario slugs to run from ~/.agent-framework/test-runs/scenarios/. Omit or pass an empty array to run EVERY scenario in the folder. Returns aggregated JSON {total, passed, failed, results[]}."),
     }
   },
   async (args) => {

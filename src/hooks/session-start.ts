@@ -57,9 +57,16 @@ async function main() {
 
   if (source === "startup") {
     await createEmptySummary(summaryPath);
-    // Init session state
+    // Init session state ONLY when no prior state exists. Unconditionally
+    // overwriting nukes seeded test-harness state and any pre-existing
+    // session fields (currentPrediction, frustrationStreak, currentWindowSize,
+    // forceCheckPending, currentEditIntent, etc.). lastUpdated === 0 is a
+    // reliable proxy for "CacheManager.load returned defaultData".
     const stateManager = getSessionState(sessionDir);
-    await stateManager.save(sessionStateDefaults());
+    const existing = await stateManager.load();
+    if (existing.lastUpdated === 0) {
+      await stateManager.save(sessionStateDefaults());
+    }
     exitAfterFlush(0);
     return;
   }
