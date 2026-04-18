@@ -75,12 +75,11 @@ The `commit` agent enforces the complete verification chain before committing.
 │  ├─ force-check-required (32): Lock to mcp__check after workaround denial
 │  ├─ prediction-block (35): Block predicted-bad tools
 │  ├─ drift-detect (40): Detect drift from intent
-│  ├─ correction (45): Post-tool corrections
 │  ├─ error-acknowledge (50): Require error acknowledgment
-│  ├─ trusted-path (58): Fast-allow trusted paths
+│  ├─ sensitive-path-block (58): Deny sensitive-path writes
 │  ├─ edit-intent (60): Block edits without intent
 │  ├─ style-drift (65): Detect style changes
-│  ├─ gate (70): Gate agent (sync pipeline)
+│  ├─ gate (70): Gate agent contribution to rule-gate LLM
 │  └─ tool-approve (100): Final tool approval
 │     └─ fastDeny with appealable → tool-appeal with transcript
 │
@@ -92,28 +91,9 @@ The `commit` agent enforces the complete verification chain before committing.
 
 ## Performance
 
-### Trusted Path Optimization
+Every rule runs on every tool call. Rules short-circuit with `fastAllow` or `fastDeny` (pure TypeScript, <10ms) or contribute `llmContext`. Triggered `llmContext` rules are aggregated into a single rule-gate haiku LLM call. Subagents use a dedicated lightweight path via `subagentRule` with `skipLlmOnClean: true`.
 
-For file operations (Read, Write, Edit) on trusted paths in regular mode:
-- **Response time**: ~10ms (instant)
-- **Validation**: Runs asynchronously in background
-- **Failure detection**: On next tool call
-
-### Strict Mode (Plan Mode)
-
-In plan mode, all validations run synchronously:
-- **Response time**: ~2-4 seconds
-- **Validation**: Blocking, before tool execution
-- **Failure detection**: Immediate
-
-### Why Two Modes?
-
-| Mode | Priority | Behavior |
-|------|----------|----------|
-| Plan mode | Design accuracy | Catch issues before execution |
-| Regular mode | Implementation speed | Instant response, async validation |
-
-See [ARCHITECTURE.md](ARCHITECTURE.md#performance-optimization-lazy-validation) for technical details.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 
 ## Build & Install
 

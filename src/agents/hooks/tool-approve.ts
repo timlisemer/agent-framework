@@ -36,7 +36,7 @@ import { extractGateNote, formatForPrompt } from "../../utils/gate-reasoning-cac
 import { planModeEditBlock, planModeBashBlock } from "../../utils/edit-intent.js";
 
 export interface ToolApprovalOptions {
-  lazyMode?: boolean;
+  skipLlmOnClean?: boolean;
   sessionDir?: string;
   planModeContext?: string;
   outsideRootPath?: string;
@@ -70,8 +70,8 @@ export async function checkToolApproval(
     return { approved: false, reason };
   }
 
-  // Lazy mode: skip LLM if no blacklist violations
-  if (options?.lazyMode && highlights.length === 0) {
+  // Skip LLM on clean: skip LLM if no blacklist violations (subagent fast path)
+  if (options?.skipLlmOnClean && highlights.length === 0) {
     logFastPathApproval("tool-approve", hookName, toolName, workingDir, "No blacklist violations");
     return { approved: true };
   }

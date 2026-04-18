@@ -1,5 +1,5 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { readToolLogEntries } from "../utils/summary-cache.js";
+import { readToolLogEntries } from "../utils/session-store.js";
 import { readTranscriptExact } from "../utils/transcript.js";
 
 export const errorAcknowledgeRule: PreToolRule = {

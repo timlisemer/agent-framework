@@ -187,9 +187,9 @@ export interface Scenario {
       }>;
   /**
    * Optional structural assertions on the live prediction-cache state AFTER
-   * the target hook fires (and after the background-updater drain). See
-   * ScenarioPredictionExpectation. When set, these assertions are AND-ed
-   * with the per-fire expect-pass result to determine the run's `pass`.
+   * the target hook fires. See ScenarioPredictionExpectation. When set,
+   * these assertions are AND-ed with the per-fire expect-pass result to
+   * determine the run's `pass`.
    */
   predictions?: ScenarioPredictionExpectation;
   /**

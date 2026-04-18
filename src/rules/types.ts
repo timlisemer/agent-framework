@@ -1,4 +1,4 @@
-import type { SessionState } from "../utils/summary-cache.js";
+import type { SessionState } from "../utils/session-store.js";
 import type { CacheManager } from "../utils/cache-manager.js";
 
 export interface RuleContext {
@@ -14,8 +14,6 @@ export interface RuleContext {
   planMode: boolean;
   planModeCtx: { active: boolean; contextString: string };
   subagent: boolean;
-  coldStart: boolean;
-  useSyncPipeline: boolean;
   toolCallCount: number;
   /**
    * Set by pre-tool-use.ts when the current file tool call targets an

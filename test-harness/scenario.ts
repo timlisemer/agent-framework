@@ -29,7 +29,7 @@ import type {
   PredictionAssertionResult,
   ScenarioPredictionExpectation,
 } from "../src/agents/mcp/scenario-types.js";
-import { runHook, cleanupBackgroundProcesses, drainBackgroundUpdaters } from "./lib/harness.js";
+import { runHook } from "./lib/harness.js";
 import {
   buildEnv,
   explicitlyBlockedContainsForbidden,
@@ -41,7 +41,7 @@ import {
   readToolLogEntriesAfterOffset,
   scoreRichExpectation,
 } from "./lib/hook-runner.js";
-import { sessionStateDefaults, type SessionState } from "../src/utils/summary-cache.js";
+import { sessionStateDefaults, type SessionState } from "../src/utils/session-store.js";
 import type { ToolPrediction } from "../src/utils/prediction-types.js";
 
 function getArg(name: string, required: boolean = false): string | undefined {
@@ -685,13 +685,9 @@ async function main() {
         : undefined;
       const scored = scoreRichExpectation(decision, gate, singleExpect, scoreCtx);
 
-      // Phase 6/7.3: when scenario.predictions is set, drain background
-      // updaters BEFORE reading prediction-cache so the read sees a
-      // consistent state. Cleanup still happens at the end of main().
       let predictionAssertions: PredictionAssertionResult[] | undefined;
       let predictionsPass = true;
       if (scenario.predictions) {
-        await drainBackgroundUpdaters(cacheDir, 120_000);
         predictionAssertions = await evaluateScenarioPredictions(
           cacheDir,
           scenario.predictions,
@@ -723,27 +719,18 @@ async function main() {
       );
       console.log(JSON.stringify(result, null, 2));
 
-      await drainBackgroundUpdaters(cacheDir, 120_000);
-      await cleanupBackgroundProcesses(cacheDir);
       process.exit(result.pass ? 0 : 1);
     }
 
     // ── Fan-out mode ───────────────────────────────────────────────────
     // Fire one PreToolUse hook per tool_use sub-line in the final
     // assistant_split, in order. Shared state (tool-log.jsonl, state.json,
-    // gate reasoning, summary cache) accumulates across fires in one
+    // gate reasoning) accumulates across fires in one
     // cacheDir — cache/ is NOT wiped between fires (the rmSync at the
     // start of main() runs once per scenario run, preserving the clean
     // slate invariant per run). Siblings inherit the leader's decision
     // via waitForBatchLeader reading the leader's on-disk tool-log
     // entry that the prior fire appended.
-    //
-    // NOTE: orphan summary-updater pid files. src/utils/spawn-background.ts
-    // keys pid files by dedupKey so a later fire's child pid file may
-    // overwrite an earlier fire's. Any already-exited earlier child is
-    // harmless; a still-running earlier child becomes unreachable from
-    // cleanupBackgroundProcesses and runs until it exits on its own.
-    // Summary-updater children exit quickly so this is benign.
     const finalSplitSubLines = built.finalSplitSubLines;
     // Determine firstToolUseIdx from the materialized sub-lines (F5
     // already validated the shape).
@@ -869,13 +856,10 @@ async function main() {
       });
     }
 
-    // Phase 6/7.3: drain before reading prediction-cache so the read sees a
-    // consistent state. Predictions are session-scoped; check once at end of
-    // fan-out, not per-fire.
+    // Predictions are session-scoped; check once at end of fan-out.
     let predictionAssertions: PredictionAssertionResult[] | undefined;
     let predictionsPass = true;
     if (scenario.predictions) {
-      await drainBackgroundUpdaters(cacheDir, 120_000);
       predictionAssertions = await evaluateScenarioPredictions(
         cacheDir,
         scenario.predictions,
@@ -902,16 +886,12 @@ async function main() {
     );
     console.log(JSON.stringify(result, null, 2));
 
-    await drainBackgroundUpdaters(cacheDir, 120_000);
-    await cleanupBackgroundProcesses(cacheDir);
     process.exit(aggregatePass ? 0 : 1);
   } catch (err) {
     console.error(
       "scenario run failed: " +
         (err instanceof Error ? err.message : String(err)),
     );
-    await drainBackgroundUpdaters(cacheDir, 120_000);
-    await cleanupBackgroundProcesses(cacheDir);
     process.exit(2);
   }
 }

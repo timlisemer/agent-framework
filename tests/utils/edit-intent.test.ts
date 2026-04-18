@@ -1,199 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
-  detectEditSignal,
-  parseEditIntentOutput,
   isEditTool,
   isEditIntentExemptPath,
   shouldBlockEdit,
-  classifyEditIntent,
   planModeEditBlock,
   planModeBashBlock,
-  STICKINESS_TIMEOUT_MS,
+  deriveEditIntentFromPrediction,
 } from "../../src/utils/edit-intent.js";
-
-describe("detectEditSignal", () => {
-  describe("direct imperatives", () => {
-    it("detects 'fix the bug' as edit", () => {
-      expect(detectEditSignal("fix the bug", false)).toBe("edit");
-    });
-
-    it("detects 'refactor the module' as edit", () => {
-      expect(detectEditSignal("refactor the module", false)).toBe("edit");
-    });
-
-    it("detects 'add endpoint' as edit", () => {
-      expect(detectEditSignal("add endpoint", false)).toBe("edit");
-    });
-  });
-
-  describe("polite requests", () => {
-    it("detects 'can you fix this' as edit", () => {
-      expect(detectEditSignal("can you fix this", false)).toBe("edit");
-    });
-
-    it("detects 'please update the config' as edit", () => {
-      expect(detectEditSignal("please update the config", false)).toBe("edit");
-    });
-  });
-
-  describe("informal requests", () => {
-    it("detects 'let's refactor this' as edit", () => {
-      expect(detectEditSignal("let's refactor this", false)).toBe("edit");
-    });
-
-    it("detects 'gonna need you to fix this' as edit", () => {
-      expect(detectEditSignal("gonna need you to fix this", false)).toBe("edit");
-    });
-  });
-
-  describe("error-driven requests", () => {
-    it("detects 'it's broken' as edit", () => {
-      expect(detectEditSignal("it's broken", false)).toBe("edit");
-    });
-
-    it("detects 'not working' as edit", () => {
-      expect(detectEditSignal("not working", false)).toBe("edit");
-    });
-  });
-
-  describe("file-targeted requests", () => {
-    it("detects 'change something in src/auth.ts' as edit", () => {
-      expect(detectEditSignal("change something in src/auth.ts", false)).toBe("edit");
-    });
-  });
-
-  describe("plan transitions", () => {
-    it("detects 'start implementing' as edit", () => {
-      expect(detectEditSignal("start implementing", false)).toBe("edit");
-    });
-  });
-
-  describe("continuation with previous edit intent", () => {
-    it("detects 'ok' with prev=true as edit", () => {
-      expect(detectEditSignal("ok", true)).toBe("edit");
-    });
-
-    it("detects 'yes' with prev=true as edit", () => {
-      expect(detectEditSignal("yes", true)).toBe("edit");
-    });
-
-    it("detects 'go ahead' with prev=true as edit", () => {
-      expect(detectEditSignal("go ahead", true)).toBe("edit");
-    });
-  });
-
-  describe("continuation with no previous edit intent", () => {
-    it("detects 'ok' with prev=false as ambiguous", () => {
-      expect(detectEditSignal("ok", false)).toBe("ambiguous");
-    });
-
-    it("detects 'yes' with prev=false as ambiguous", () => {
-      expect(detectEditSignal("yes", false)).toBe("ambiguous");
-    });
-  });
-
-  describe("read verbs", () => {
-    it("detects 'explain this code' as non-edit", () => {
-      expect(detectEditSignal("explain this code", false)).toBe("non-edit");
-    });
-
-    it("detects 'show me the output' as non-edit", () => {
-      expect(detectEditSignal("show me the output", false)).toBe("non-edit");
-    });
-
-    it("detects 'read the file' as non-edit", () => {
-      expect(detectEditSignal("read the file", false)).toBe("non-edit");
-    });
-  });
-
-  describe("negation", () => {
-    it("detects 'don't edit anything' as non-edit", () => {
-      expect(detectEditSignal("don't edit anything", false)).toBe("non-edit");
-    });
-
-    it("detects 'do not change the code' as non-edit", () => {
-      expect(detectEditSignal("do not change the code", false)).toBe("non-edit");
-    });
-  });
-
-  describe("questions", () => {
-    it("detects 'what does this do?' as non-edit", () => {
-      expect(detectEditSignal("what does this do?", false)).toBe("non-edit");
-    });
-
-    it("detects 'how does it work?' as non-edit", () => {
-      expect(detectEditSignal("how does it work?", false)).toBe("non-edit");
-    });
-  });
-
-  describe("explain dominates over fix", () => {
-    it("detects 'explain how to fix' as non-edit", () => {
-      expect(detectEditSignal("explain how to fix", false)).toBe("non-edit");
-    });
-  });
-
-  describe("compound override", () => {
-    it("detects 'review and fix' as edit", () => {
-      expect(detectEditSignal("review and fix", false)).toBe("edit");
-    });
-  });
-
-  describe("plan without implement", () => {
-    it("detects 'plan how to implement this feature' as non-edit", () => {
-      expect(detectEditSignal("plan how to implement this feature", false)).toBe("non-edit");
-    });
-  });
-
-  describe("conversation enders", () => {
-    it("detects 'thanks' as non-edit", () => {
-      expect(detectEditSignal("thanks", false)).toBe("non-edit");
-    });
-
-    it("detects 'got it' as non-edit", () => {
-      expect(detectEditSignal("got it", false)).toBe("non-edit");
-    });
-
-    it("detects 'never mind' as non-edit", () => {
-      expect(detectEditSignal("never mind", false)).toBe("non-edit");
-    });
-  });
-
-  describe("edge cases", () => {
-    it("detects empty string as ambiguous", () => {
-      expect(detectEditSignal("", false)).toBe("ambiguous");
-    });
-
-    it("detects 'What about the tests?' as non-edit", () => {
-      expect(detectEditSignal("What about the tests?", false)).toBe("non-edit");
-    });
-  });
-});
-
-describe("parseEditIntentOutput", () => {
-  it("parses 'EDIT' as true", () => {
-    expect(parseEditIntentOutput("EDIT")).toBe(true);
-  });
-
-  it("parses 'NON-EDIT' as false", () => {
-    expect(parseEditIntentOutput("NON-EDIT")).toBe(false);
-  });
-
-  it("parses 'EDIT - user wants changes' as true", () => {
-    expect(parseEditIntentOutput("EDIT - user wants changes")).toBe(true);
-  });
-
-  it("parses lowercase 'non-edit' as false", () => {
-    expect(parseEditIntentOutput("non-edit")).toBe(false);
-  });
-
-  it("parses empty string as null", () => {
-    expect(parseEditIntentOutput("")).toBe(null);
-  });
-
-  it("parses 'maybe' as null", () => {
-    expect(parseEditIntentOutput("maybe")).toBe(null);
-  });
-});
+import type { ToolPrediction } from "../../src/utils/prediction-types.js";
 
 describe("isEditTool", () => {
   it("returns true for 'Edit'", () => {
@@ -289,46 +103,6 @@ describe("shouldBlockEdit", () => {
   });
 });
 
-describe("classifyEditIntent", () => {
-  const recentTimestamp = Date.now() - 1000; // 1 second ago
-  const staleTimestamp = Date.now() - (STICKINESS_TIMEOUT_MS + 1000); // timed out
-
-  it("returns false in plan mode", () => {
-    expect(classifyEditIntent("fix the bug", true, recentTimestamp, true)).toBe(false);
-  });
-
-  it("returns true for clear edit signal", () => {
-    expect(classifyEditIntent("fix the bug", null, 0, false)).toBe(true);
-  });
-
-  it("returns false for clear non-edit signal", () => {
-    expect(classifyEditIntent("explain this code", null, 0, false)).toBe(false);
-  });
-
-  it("returns null for ambiguous signal", () => {
-    expect(classifyEditIntent("hmm interesting", null, 0, false)).toBe(null);
-  });
-
-  it("maintains stickiness when previous was edit and not timed out", () => {
-    expect(classifyEditIntent("also the tests", true, recentTimestamp, false)).toBe(true);
-  });
-
-  it("breaks stickiness on non-edit signal", () => {
-    expect(classifyEditIntent("explain this code", true, recentTimestamp, false)).toBe(false);
-  });
-
-  it("does not apply stickiness when timed out", () => {
-    // "hmm" with stale timestamp -> falls through to regex with prev=true, returns ambiguous -> null
-    expect(classifyEditIntent("hmm interesting", true, staleTimestamp, false)).toBe(null);
-  });
-});
-
-describe("STICKINESS_TIMEOUT_MS", () => {
-  it("equals 600000", () => {
-    expect(STICKINESS_TIMEOUT_MS).toBe(600000);
-  });
-});
-
 describe("planModeEditBlock", () => {
   it("blocks Edit to non-exempt path when plan mode active", () => {
     const result = planModeEditBlock(true, "Edit", "/project/src/foo.ts");
@@ -410,5 +184,74 @@ describe("planModeBashBlock", () => {
 
   it("returns null for non-Bash tools", () => {
     expect(planModeBashBlock(true, "Edit", "anything")).toBeNull();
+  });
+});
+
+function makePrediction(overrides: Partial<ToolPrediction> = {}): ToolPrediction {
+  return {
+    mood: "neutral",
+    trust: "normal",
+    intent: "",
+    blockedIntent: "",
+    explicitlyAllowedTools: [],
+    explicitlyBlockedSubstrings: [],
+    userMessageSnippet: "",
+    timestamp: Date.now(),
+    ...overrides,
+  };
+}
+
+describe("deriveEditIntentFromPrediction", () => {
+  it("returns false when blockAllTools is true (priority 1)", () => {
+    const p = makePrediction({
+      blockAllTools: true,
+      intent: "fix the bug",
+    });
+    expect(deriveEditIntentFromPrediction(p)).toBe(false);
+  });
+
+  it("returns true when explicitlyAllowedTools contains an edit tool (priority 2)", () => {
+    const p = makePrediction({
+      explicitlyAllowedTools: ["Edit"],
+      intent: "just read the files",
+    });
+    expect(deriveEditIntentFromPrediction(p)).toBe(true);
+  });
+
+  it("returns false when explicitlyBlockedSubstrings targets an edit tool (priority 3)", () => {
+    const p = makePrediction({
+      explicitlyBlockedSubstrings: [{ tool: "Edit", reason: "no edits" }],
+      intent: "fix the bug",
+    });
+    expect(deriveEditIntentFromPrediction(p)).toBe(false);
+  });
+
+  it("returns false when blockedIntent contains read-only verb (priority 4)", () => {
+    const p = makePrediction({
+      blockedIntent: "just explore the code",
+      intent: "look at auth",
+    });
+    expect(deriveEditIntentFromPrediction(p)).toBe(false);
+  });
+
+  it("returns true when intent contains implementation verb (priority 5)", () => {
+    const p = makePrediction({
+      intent: "refactor the auth module",
+    });
+    expect(deriveEditIntentFromPrediction(p)).toBe(true);
+  });
+
+  it("returns false when intent contains read-only verb (priority 6)", () => {
+    const p = makePrediction({
+      intent: "explain how auth works",
+    });
+    expect(deriveEditIntentFromPrediction(p)).toBe(false);
+  });
+
+  it("returns null when no branch matches (priority 7)", () => {
+    const p = makePrediction({
+      intent: "hmm interesting",
+    });
+    expect(deriveEditIntentFromPrediction(p)).toBeNull();
   });
 });

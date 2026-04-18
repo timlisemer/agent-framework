@@ -70,7 +70,6 @@ export const toolApproveRule: PreToolRule = {
       ctx.projectDir,
       "PreToolUse",
       {
-        lazyMode: !ctx.useSyncPipeline && !ctx.outsideRootPath,
         sessionDir: ctx.sessionDir,
         planModeContext: ctx.planModeCtx.contextString,
         outsideRootPath: ctx.outsideRootPath,
@@ -82,12 +81,7 @@ export const toolApproveRule: PreToolRule = {
       return { fastDeny: decision.reason ?? "Tool denied" };
     }
 
-    if (!ctx.useSyncPipeline) {
-      // Lazy mode with no violations -- pass
-      return null;
-    }
-
-    // Sync mode -- contribute gate note and context for LLM
+    // Contribute gate note and context for LLM
     const outsideWarning = ctx.outsideRootPath
       ? `\n\n!!! OUT-OF-TREE TARGET: ${ctx.outsideRootPath} — be extra conservative; prefer DENY unless explicitly authorized.\n`
       : "";

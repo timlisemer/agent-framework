@@ -8,7 +8,6 @@ import { forceCheckRequiredRule } from "./force-check-required.js";
 import { predictionQuestionJudgeRule } from "./prediction-question-judge.js";
 import { predictionBlockRule } from "./prediction-block.js";
 import { driftDetectRule } from "./drift-detect.js";
-import { correctionRule } from "./correction.js";
 import { errorAcknowledgeRule } from "./error-acknowledge.js";
 import { trustedPathRule } from "./trusted-path.js";
 import { editIntentRule } from "./edit-intent.js";
@@ -29,7 +28,6 @@ export const ALL_RULES: PreToolRule[] = [
   predictionQuestionJudgeRule,
   predictionBlockRule,
   driftDetectRule,
-  correctionRule,
   errorAcknowledgeRule,
   trustedPathRule,
   editIntentRule,

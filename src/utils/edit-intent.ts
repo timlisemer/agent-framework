@@ -1,14 +1,14 @@
 /**
- * Edit Intent Detection - Deterministic + LLM fallback classification
+ * Edit Intent Detection - prediction-derived classification.
  *
- * Pure TypeScript utilities for detecting whether a user message indicates
- * intent to edit files. Used by user-prompt-submit.ts (sync fast path)
- * and summary-updater.ts (LLM fallback for ambiguous cases).
+ * Edit-intent derivation utilities. `deriveEditIntentFromPrediction` computes
+ * intent from a ToolPrediction post-SENTIMENT_AGENT. `shouldBlockEdit`,
+ * `planModeEditBlock`, `planModeBashBlock` enforce downstream policy.
  *
  * @module edit-intent
  */
 
-import { stripQuotedAndPastedContent } from "./quote-detection.js";
+import type { ToolPrediction } from "./prediction-types.js";
 
 // Tools that modify files
 const EDIT_TOOLS = ["Write", "Edit", "NotebookEdit"];
@@ -34,141 +34,6 @@ export function isEditIntentExemptPath(filePath: string): boolean {
   return false;
 }
 
-export type EditSignalResult = "edit" | "non-edit" | "ambiguous";
-
-// --- EDIT SIGNAL PATTERNS (positive -- user wants edits) ---
-const EDIT_SIGNAL_PATTERNS: RegExp[] = [
-  // Direct imperative verbs
-  /^(please\s+)?(fix|update|change|modify|edit|refactor|rename|replace|rewrite|restructure|delete|remove|add|create|implement|write|build|set up|setup|configure|integrate|convert|migrate|extract|split|merge|introduce|insert)\b/i,
-
-  // Polite imperatives: "can you fix", "could you update"
-  /\b(can you|could you|would you|please)\s+(fix|update|change|modify|edit|refactor|rename|replace|rewrite|add|create|implement|write|remove|delete)\b/i,
-
-  // Informal: "let's refactor", "gonna need you to fix"
-  /\b(gonna need you to|let'?s|lets|go ahead and|need you to|want you to)\s+(fix|update|change|modify|edit|add|create|implement|write|remove|delete|refactor)\b/i,
-
-  // "Make it work/better/correct"
-  /\bmake\s+(it|this|that|the)\b.*\b(work|better|faster|correct|proper|right)\b/i,
-
-  // Error-driven edits: "fix the bug", "it doesn't work"
-  /\b(fix|resolve|handle|address|patch)\s+(the\s+)?(bug|error|issue|problem|crash)\b/i,
-  /\b(it'?s broken|doesn'?t work|not working|fails|failing|crashed)\b/i,
-
-  // File-targeted: "in src/auth.ts"
-  /\b(in|to)\s+\S+\.(ts|js|py|rs|go|java|tsx|jsx|svelte|css|html|json|yaml|toml|nix)\b/i,
-
-  // Plan-to-implementation transitions
-  /\b(exit plan|start implementing|begin implementation|implement the plan|execute)\b/i,
-];
-
-// Short affirmative patterns (only edit when previousEditIntent=true)
-const SHORT_AFFIRMATIVE_PATTERN = /^(yes|yeah|yep|sure|ok|okay|go ahead|proceed|continue|do it|go for it|sounds good|looks good|lgtm|ship it|approved)\s*[.!]?\s*$/i;
-
-// Affirmative + edit verb combos: "Yes, implement it", "Sure, fix the bug", "Yeah, make the change"
-const AFFIRMATIVE_PLUS_EDIT_PATTERN = /^(yes|yeah|yep|sure|ok|okay|go ahead|go for it|sounds good|approved|absolutely|definitely|please do)\b[,.\s!]*(please\s+)?(fix|update|change|modify|edit|refactor|rename|replace|rewrite|add|create|implement|write|remove|delete|build|set up|setup|configure|make)\b/i;
-
-// --- NON-EDIT SIGNAL PATTERNS (negative -- user does NOT want edits) ---
-const NON_EDIT_SIGNAL_PATTERNS: RegExp[] = [
-  // Pure reading/investigation
-  /^(please\s+)?(explain|describe|show|read|look at|check|review|examine|find|search|list|summarize|compare|analyze|understand|trace|investigate|explore)\b/i,
-
-  // Explicit negation of edits
-  /\b(don'?t|do not|never|stop)\s+(edit|change|modify|update|write|create|delete|remove|touch|alter)\b/i,
-
-  // Questions (excluding "can you fix" style)
-  /^(what|where|when|why|how|which|who|is|are|does|do|did|has|have)\s+(?!you\s+(fix|update|change|modify|edit|add|create|implement|write|remove|delete))/i,
-
-  // "Explain how to" (explain, not do)
-  /\b(explain|describe|tell me)\s+(how to|what|why|when|where)\b/i,
-
-  // Pure conversation enders
-  /^(thanks|thank you|thx|ty|cool|nice|great|got it|understood|i see|makes sense|never mind|nvm)\s*[.!?]?\s*$/i,
-
-  // "What about X?" (inquiry, not instruction)
-  /^what about\b/i,
-
-  // Plan/design requests (not implementation)
-  /\b(plan|design|architect|outline|propose|brainstorm|think about|consider)\s+(for|how|a|the|this|an)\b/i,
-
-  // "Don't write plan yet" detection
-  /\b(don'?t|do not)\s+(write|create|start)\s+(a\s+|the\s+)?plan\b/i,
-  /\b(not ready|hold off|wait|don'?t start)\b.*\b(yet|first|now)\b/i,
-];
-
-// Compound override: non-edit matched BUT message also contains "and/then + edit_verb"
-const COMPOUND_OVERRIDE_PATTERN = /\b(and|then)\s+(fix|update|change|modify|edit|refactor|rename|replace|rewrite|add|create|implement|write|remove|delete)\b/i;
-
-// Follow-up confirmation questions that should NOT flip edit intent to non-edit.
-// "are you sure X is fixed?" / "did you actually change it?" / "is the label corrected?"
-// These are checking on a prior edit, not requesting read-only exploration.
-const FOLLOWUP_CONFIRMATION_PATTERN = /^(are you sure|did you|have you|is (it|the|this|that)\b.*\b(correct|fixed|changed|updated|done|applied|saved|modified|set|adjusted|written))/i;
-
-/**
- * Deterministic edit signal detection.
- * Returns tristate: "edit", "non-edit", or "ambiguous".
- *
- * Evaluation order:
- * 1. Non-edit patterns checked FIRST so "explain how to fix" resolves to non-edit
- * 2. Compound override: "review and fix" flips back to edit
- * 3. Edit patterns checked
- * 4. Short affirmatives depend on previousEditIntent
- * 5. Fallback: ambiguous
- */
-export function detectEditSignal(userMessage: string, previousEditIntent: boolean): EditSignalResult {
-  const trimmed = userMessage.trim();
-  if (!trimmed) return "ambiguous";
-  const stripped = stripQuotedAndPastedContent(trimmed);
-
-  // Check non-edit patterns first
-  const isNonEdit = NON_EDIT_SIGNAL_PATTERNS.some((p) => p.test(stripped));
-
-  if (isNonEdit) {
-    // Compound override: "review and fix" -> edit
-    if (COMPOUND_OVERRIDE_PATTERN.test(stripped)) {
-      return "edit";
-    }
-    // Follow-up confirmation questions: "are you sure the label is corrected?"
-    // These check on a prior edit rather than requesting read-only exploration.
-    // Treat as ambiguous so sticky edit intent survives.
-    if (previousEditIntent && FOLLOWUP_CONFIRMATION_PATTERN.test(stripped)) {
-      return "ambiguous";
-    }
-    return "non-edit";
-  }
-
-  // Check edit patterns
-  const isEdit = EDIT_SIGNAL_PATTERNS.some((p) => p.test(stripped));
-  if (isEdit) return "edit";
-
-  // Affirmative + edit verb: "Yes, implement it", "Sure, fix the bug"
-  if (AFFIRMATIVE_PLUS_EDIT_PATTERN.test(trimmed)) return "edit";
-
-  // Short affirmatives: edit ONLY when previousEditIntent=true
-  if (SHORT_AFFIRMATIVE_PATTERN.test(trimmed)) {
-    if (previousEditIntent) return "edit";
-    return "ambiguous";
-  }
-
-  return "ambiguous";
-}
-
-/**
- * Parse the output of the EDIT_INTENT_AGENT LLM.
- * Returns true for EDIT, false for NON-EDIT, null for garbage.
- */
-export function parseEditIntentOutput(output: string): boolean | null {
-  const trimmed = output.trim().toUpperCase();
-  if (trimmed === "EDIT" || trimmed.startsWith("EDIT")) {
-    // Make sure it's not "EDIT" as part of "NON-EDIT"
-    if (trimmed.startsWith("NON-EDIT") || trimmed.startsWith("NON EDIT")) return false;
-    return true;
-  }
-  if (trimmed === "NON-EDIT" || trimmed.startsWith("NON-EDIT") || trimmed.startsWith("NON EDIT")) {
-    return false;
-  }
-  return null;
-}
-
 /**
  * Determine if an edit tool call should be blocked based on edit intent and path.
  * Returns true if the tool should be blocked (denied).
@@ -190,46 +55,36 @@ export function shouldBlockEdit(
 }
 
 /**
- * Classify edit intent from a user message synchronously.
- * Encapsulates the plan-mode check, stickiness check, and regex detection.
+ * Derive edit-intent from a completed ToolPrediction. Returns true/false/null.
  *
- * @param userMessage - The user's message text
- * @param previousEditIntent - The previous edit intent value (from SessionState)
- * @param editIntentTimestamp - When the previous edit intent was set
- * @param planMode - Whether plan mode is currently active
- * @returns true (edit), false (non-edit), or null (ambiguous, needs LLM)
+ * Signal priority (first hit wins):
+ *   1. blockAllTools → false
+ *   2. any explicitlyAllowedTools entry is an edit tool → true
+ *   3. any explicitlyBlockedSubstrings entry targets an edit tool → false
+ *   4. blockedIntent contains a read-only or don't-edit verb → false
+ *   5. intent contains an implementation verb → true
+ *   6. intent contains a read-only verb → false
+ *   7. otherwise → null (genuinely ambiguous)
  */
-export function classifyEditIntent(
-  userMessage: string,
-  previousEditIntent: boolean | null,
-  editIntentTimestamp: number,
-  planMode: boolean
+export function deriveEditIntentFromPrediction(
+  p: ToolPrediction,
 ): boolean | null {
-  const now = Date.now();
+  if (p.blockAllTools) return false;
+  if (p.explicitlyAllowedTools.some(isEditTool)) return true;
+  if (p.explicitlyBlockedSubstrings.some((b) => isEditTool(b.tool))) return false;
 
-  // Plan mode -> non-edit
-  if (planMode) return false;
+  const blocked = p.blockedIntent.toLowerCase();
+  if (/\b(read[-\s]?only|just\s+(explor\w*|read\w*|look\w*|investigat\w*|analy[sz]\w*|review\w*|check\w*|examin\w*))\b/.test(blocked)) return false;
+  if (/\b(don'?t|do\s+not|no|never|stop|avoid)\s+(edit\w*|chang\w*|modif\w*|writ\w*|creat\w*|updat\w*|delet\w*|touch\w*|refactor\w*|add\w*|remov\w*|replac\w*)\b/.test(blocked)) return false;
 
-  // Stickiness: if previous was edit and not timed out
-  if (
-    previousEditIntent === true &&
-    (now - editIntentTimestamp) < STICKINESS_TIMEOUT_MS
-  ) {
-    const signal = detectEditSignal(userMessage, true);
-    if (signal === "non-edit") return false;
-    // Sticky: keep edit intent (both "edit" and "ambiguous" maintain stickiness)
-    return true;
-  }
+  const intent = p.intent.toLowerCase();
+  // Stem-match implementation verbs to catch morphological variants
+  // (fixes/fixing/fixed, refactoring/refactored, changes/changing/changed, etc.)
+  if (/\b(fix\w*|implement\w*|refactor\w*|add\w*|edit\w*|writ\w*|creat\w*|modif\w*|delet\w*|remov\w*|updat\w*|chang\w*|build\w*|set\s+up|setup|configur\w*|renam\w*|replac\w*|rewrit\w*|integrat\w*|migrat\w*|extract\w*|split\w*|merg\w*|introduc\w*|insert\w*|adjust\w*|tweak\w*|correct\w*|improv\w*|enhanc\w*|optimi[sz]\w*|appl\w*|patch\w*|restructur\w*|clean\s*up|hook\s*up|wire\s*up|tidy\w*|format\w*|simplif\w*|polish\w*|port\w*|rollback\w*|upgrad\w*|bump\w*|hotfix\w*|extend\w*|revert\w*|commit\w*|ship\w*|swap\w*)\b/.test(intent)) return true;
+  if (/\b(explain\w*|read\w*|plan\w*|investigat\w*|explor\w*|review\w*|describ\w*|analy[sz]\w*|understand\w*|trac\w*|show\w*|examin\w*|check\w*|find\w*|look\w*|search\w*|list\w*|summari[sz]\w*|compar\w*|inspect\w*|walk\w*|document\w*)\b/.test(intent)) return false;
 
-  // TypeScript detection
-  const signal = detectEditSignal(userMessage, previousEditIntent === true);
-  if (signal === "edit") return true;
-  if (signal === "non-edit") return false;
-  return null; // ambiguous -> LLM fallback
+  return null;
 }
-
-/** Stickiness timeout: 10 minutes */
-export const STICKINESS_TIMEOUT_MS = 10 * 60 * 1000;
 
 // --- Bash commands that perform writes/mutations ---
 const BASH_WRITE_PATTERNS: RegExp[] = [

@@ -23,7 +23,7 @@ export const subagentRule: PreToolRule = {
       ctx.toolInput,
       ctx.projectDir,
       "PreToolUse",
-      { lazyMode: true, planModeContext: ctx.planModeCtx.contextString }
+      { skipLlmOnClean: true, planModeContext: ctx.planModeCtx.contextString }
     );
 
     if (!decision.approved) {

@@ -8,7 +8,7 @@ import { initRewindSession, detectRewind } from "../utils/rewind-cache.js";
 import { setTranscriptPath } from "../utils/execution-context.js";
 import { writeTool } from "../utils/synthetic.js";
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { getSessionDir, getSessionState } from "../utils/summary-cache.js";
+import { getSessionDir, getSessionState } from "../utils/session-store.js";
 import { isPlanModeActive, isPlanModeFromInput } from "../utils/plan-mode-detector.js";
 
 /**

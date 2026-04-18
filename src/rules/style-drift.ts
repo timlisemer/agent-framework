@@ -14,12 +14,8 @@ export const styleDriftRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    // Only for Edit tool on trusted non-sensitive paths in sync pipeline
+    // Only for Edit tool on trusted non-sensitive paths
     if (ctx.toolName !== "Edit") {
-      return null;
-    }
-
-    if (!ctx.useSyncPipeline) {
       return null;
     }
 

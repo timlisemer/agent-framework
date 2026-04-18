@@ -1,14 +1,6 @@
 import * as fs from "fs";
-import * as path from "path";
-import { fileURLToPath } from "url";
 import { isSubagent } from "./subagent-detector.js";
-import { getSessionDir, appendToolLog, getActiveSubagentCount, getSessionState } from "./summary-cache.js";
-import { spawnBackground } from "./spawn-background.js";
-import { classifyEditIntent } from "./edit-intent.js";
-import { isPlanModeActive } from "./plan-mode-detector.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { getSessionDir, appendToolLog } from "./session-store.js";
 
 type MessageKind = "user" | "ai" | "tool";
 
@@ -68,7 +60,7 @@ function buildEntry(kind: MessageKind, source: string, content: string): object 
 
 async function writeSynthetic(
   transcriptPath: string,
-  sessionId: string,
+  _sessionId: string,
   kind: MessageKind,
   source: string,
   content: string
@@ -77,34 +69,7 @@ async function writeSynthetic(
   const entry = buildEntry(kind, source, content);
   await fs.promises.appendFile(transcriptPath, JSON.stringify(entry) + "\n");
 
-  // 2. Sync edit-intent reclassification for synthetic user messages (pure regex, no LLM)
-  if (kind === "user" && !isSubagent(transcriptPath)) {
-    try {
-      const syncSessionDir = getSessionDir(transcriptPath);
-      const stateManager = getSessionState(syncSessionDir);
-      const currentState = await stateManager.load();
-      const planMode = isPlanModeActive(transcriptPath);
-      const classified = classifyEditIntent(
-        content,
-        currentState.currentEditIntent ?? null,
-        currentState.editIntentTimestamp ?? 0,
-        planMode
-      );
-      if (classified !== null) {
-        await stateManager.update((s) => ({
-          ...s,
-          previousEditIntent: s.currentEditIntent ?? null,
-          currentEditIntent: classified,
-          editIntentTimestamp: Date.now(),
-          editIntentOverturnCount: 0,
-        }));
-      }
-    } catch {
-      // Fail-open: don't block the pipeline
-    }
-  }
-
-  // 3. Update summary (main agent only)
+  // 2. Append to tool log (main agent only)
   if (isSubagent(transcriptPath)) return;
 
   const sessionDir = getSessionDir(transcriptPath);
@@ -116,24 +81,6 @@ async function writeSynthetic(
     reason: content.slice(0, 200),
     ms: 0,
   });
-
-  if (getActiveSubagentCount(sessionDir) > 0) return;
-
-  const updaterPath = path.join(__dirname, "summary-updater.js");
-  if (kind === "user") {
-    spawnBackground(updaterPath, [
-      "--mode", "intent",
-      "--transcript", transcriptPath,
-      "--prompt", Buffer.from(content).toString("base64"),
-      "--session-id", sessionId,
-    ], { dedupKey: "summary-updater-intent", sessionDir });
-  } else {
-    spawnBackground(updaterPath, [
-      "--mode", "actions",
-      "--transcript", transcriptPath,
-      "--session-id", sessionId,
-    ], { dedupKey: "summary-updater-actions", sessionDir });
-  }
 }
 
 export async function writeUser(
@@ -143,15 +90,6 @@ export async function writeUser(
   content: string
 ): Promise<void> {
   return writeSynthetic(transcriptPath, sessionId, "user", source, content);
-}
-
-export async function writeAI(
-  transcriptPath: string,
-  sessionId: string,
-  source: string,
-  content: string
-): Promise<void> {
-  return writeSynthetic(transcriptPath, sessionId, "ai", source, content);
 }
 
 export async function writeTool(

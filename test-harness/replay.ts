@@ -27,7 +27,7 @@ import {
 } from "./lib/types.js";
 import { runCommand } from "../src/utils/command.js";
 import { classifyLine, extractCwd, detectBatches, type BatchGroup } from "./lib/classifier.js";
-import { runHook, cleanupBackgroundProcesses, drainBackgroundUpdaters } from "./lib/harness.js";
+import { runHook } from "./lib/harness.js";
 import {
   REPO_ROOT,
   findActivePredictionMatching,
@@ -39,7 +39,7 @@ import {
   parseStopDecision,
   scoreRichExpectation,
 } from "./lib/hook-runner.js";
-import { readToolLogEntries, type ToolLogEntry } from "../src/utils/summary-cache.js";
+import { readToolLogEntries, type ToolLogEntry } from "../src/utils/session-store.js";
 import type { LabelValue } from "../src/agents/mcp/test-harness-shared.js";
 
 const BASE_DIR = path.join(os.homedir(), ".agent-framework");
@@ -1554,9 +1554,6 @@ async function main(): Promise<void> {
 
     fs.writeFileSync(draftPath, JSON.stringify(draftOutput, null, 2) + "\n");
 
-    // Cleanup background processes but leave cache intact
-    await drainBackgroundUpdaters(sessionDir, 120_000);
-    await cleanupBackgroundProcesses(sessionDir);
     try {
       fs.unlinkSync(replayPidFile);
     } catch {
@@ -1583,9 +1580,6 @@ async function main(): Promise<void> {
   const failed = results.filter((r) => r.pass === false);
 
   // 14. Cleanup
-  await drainBackgroundUpdaters(sessionDir, 120_000);
-  await cleanupBackgroundProcesses(sessionDir);
-
   // Remove replay.pid
   try {
     fs.unlinkSync(replayPidFile);

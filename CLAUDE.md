@@ -21,14 +21,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details and design decision
 | `src/utils/anthropic-client.ts`     | Singleton Anthropic client factory                                 |
 | `src/utils/elicitation.ts`          | MCP elicitation helpers (repo selection, preferences, uncertainty) |
 | `claude/settings.json`              | Hook configuration for Claude Code                                 |
-| `src/utils/summary-cache.ts`        | Summary document management, JSONL tool log, session state         |
-| `src/utils/summary-updater.ts`      | Background LLM for summary updates                                 |
-| `src/utils/correction-cache.ts`     | Post-tool correction cache for prediction violations               |
+| `src/utils/session-store.ts`        | SessionState cache + JSONL tool log                                |
 | `src/utils/prediction-types.ts`     | Sentiment-prediction shape + decidePrediction policy table         |
 | `src/utils/drift-detector.ts`      | Pure TypeScript drift/anomaly detection heuristics                 |
-| `src/agents/hooks/gate.ts`          | Gate agent (replaces error-ack + response-align)                   |
 | `src/utils/gate-reasoning-cache.ts` | Gate reasoning persistent memory for tool-approve                  |
-| `src/hooks/session-start.ts`        | Session lifecycle, post-compaction recovery                        |
+| `src/hooks/session-start.ts`        | Session lifecycle                                                  |
 | `src/utils/hook-bootstrap.ts`       | Shared hook stdin/exit infrastructure                              |
 
 ## Testing MCP Server

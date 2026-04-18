@@ -27,8 +27,8 @@ export function isPlanModeFromInput(input: { permission_mode?: string }): boolea
 
 /**
  * Fallback plan-mode detection for code paths that only have a transcript
- * path (e.g. background summary-updater, synthetic tool writes). Scans the
- * tail of the transcript for the most recent `permission-mode` marker.
+ * path (e.g. synthetic tool writes). Scans the tail of the transcript for
+ * the most recent `permission-mode` marker.
  *
  * Transcripts contain two authoritative markers for plan mode:
  *   1. Dedicated events:   {"type":"permission-mode","permissionMode":"plan"|"default"|...}

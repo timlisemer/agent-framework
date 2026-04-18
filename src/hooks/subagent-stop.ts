@@ -1,13 +1,12 @@
 import "../utils/load-env.js";
 
 import { readStdinJson } from "../utils/hook-bootstrap.js";
-import { getSessionDir, decrementActiveSubagents } from "../utils/summary-cache.js";
+import { getSessionDir, decrementActiveSubagents } from "../utils/session-store.js";
 
 /**
  * SubagentStop Hook
  *
- * Decrements the active subagent counter so PostToolUse resumes
- * spawning summary-updater LLM calls after subagent completes.
+ * Decrements the active subagent counter.
  */
 
 interface SubagentStopHookInput {

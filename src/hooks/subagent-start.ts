@@ -1,13 +1,12 @@
 import "../utils/load-env.js";
 
 import { readStdinJson } from "../utils/hook-bootstrap.js";
-import { getSessionDir, incrementActiveSubagents } from "../utils/summary-cache.js";
+import { getSessionDir, incrementActiveSubagents } from "../utils/session-store.js";
 
 /**
  * SubagentStart Hook
  *
- * Increments the active subagent counter so PostToolUse knows to skip
- * summary-updater LLM calls during subagent execution.
+ * Increments the active subagent counter.
  */
 
 interface SubagentStartHookInput {

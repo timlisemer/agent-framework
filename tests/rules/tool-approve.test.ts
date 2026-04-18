@@ -67,6 +67,7 @@ describe("toolApproveRule ExitPlanMode short-circuit", () => {
     return {
       toolName: "ExitPlanMode",
       toolInput: { plan: "# Plan" },
+      toolUseId: "toolu_test",
       projectDir: tempDir,
       transcriptPath: path.join(tempDir, "transcript.jsonl"),
       sessionDir: tempDir,
@@ -76,8 +77,6 @@ describe("toolApproveRule ExitPlanMode short-circuit", () => {
       planMode: true,
       planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
       subagent: false,
-      coldStart: false,
-      useSyncPipeline: true,
       toolCallCount: 1,
       ...overrides,
     };

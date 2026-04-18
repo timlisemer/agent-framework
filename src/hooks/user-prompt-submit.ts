@@ -2,15 +2,12 @@ import "../utils/load-env.js";
 import { initializeTelemetry } from "../telemetry/index.js";
 initializeTelemetry();
 
-import * as path from "path";
-import { fileURLToPath } from "url";
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
-import { spawnBackground } from "../utils/spawn-background.js";
-import { getSessionDir, getSessionState } from "../utils/summary-cache.js";
+import { getSessionDir, getSessionState } from "../utils/session-store.js";
 import { isPlanModeActive, isPlanModeFromInput } from "../utils/plan-mode-detector.js";
-import { classifyEditIntent } from "../utils/edit-intent.js";
-import { clearCorrections } from "../utils/correction-cache.js";
+import { deriveEditIntentFromPrediction } from "../utils/edit-intent.js";
+import { clearGateReasoning } from "../utils/gate-reasoning-cache.js";
 import { runAgent } from "../utils/agent-runner.js";
 import { SENTIMENT_AGENT } from "../utils/agent-configs.js";
 import { parseSentimentOutput } from "../utils/prediction-parser.js";
@@ -18,16 +15,12 @@ import { formatPredictionContext } from "../utils/prediction-types.js";
 import { readRecentUserMessages } from "../utils/transcript.js";
 import { stripQuotedAndPastedContent } from "../utils/quote-detection.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 /**
  * UserPromptSubmit Hook
  *
- * Fires when the user submits a prompt. Performs synchronous edit intent
- * classification (fast path), runs the SENTIMENT_AGENT under a hard 12s
- * timeout to refresh `state.currentPrediction`, then spawns background
- * summary-updater in intent mode.
+ * Fires when the user submits a prompt. Runs the SENTIMENT_AGENT under a
+ * hard 12s timeout to refresh `state.currentPrediction`, then derives
+ * `currentEditIntent` from the prediction.
  */
 
 interface UserPromptSubmitHookInput {
@@ -49,35 +42,12 @@ async function main() {
     return;
   }
 
-  // --- Synchronous edit intent classification (fast path) ---
   const sessionDir = getSessionDir(input.transcript_path);
   const stateManager = getSessionState(sessionDir);
-  const oldState = await stateManager.load();
 
   const planMode = input.permission_mode !== undefined
     ? isPlanModeFromInput(input)
     : isPlanModeActive(input.transcript_path);
-  const now = Date.now();
-
-  const result = classifyEditIntent(
-    input.prompt,
-    oldState.currentEditIntent ?? null,
-    oldState.editIntentTimestamp ?? 0,
-    planMode
-  );
-
-  // ATOMIC WRITE: single stateManager.update call
-  await stateManager.update((s) => ({
-    ...s,
-    previousEditIntent: s.currentEditIntent ?? null,
-    currentEditIntent: result,
-    editIntentTimestamp: now,
-    editIntentOverturnCount: 0,
-    respondFirstChecked: false,
-  }));
-
-  // Clear stale corrections from previous turn
-  await clearCorrections(sessionDir);
 
   // --- Sentiment-aware prediction refresh (sync, hard 12s timeout) ---
   const reloadedState = await stateManager.load();
@@ -148,11 +118,25 @@ async function main() {
       // Context-switch cap LAST — overrides any growth above.
       if (parsed.contextSwitch === "yes") {
         nextWindow = Math.min(nextWindow, 3);
+        await clearGateReasoning(sessionDir);
       }
       nextWindow = Math.max(2, Math.min(15, nextWindow));
 
+      const predictionForDerivation = {
+        ...parsed,
+        userMessageSnippet: input.prompt.slice(0, 200),
+        timestamp: Date.now(),
+      };
+      const derivedEditIntent = deriveEditIntentFromPrediction(predictionForDerivation);
+      const finalEditIntent = planMode ? false : derivedEditIntent;
+
       await stateManager.update((s) => ({
         ...s,
+        previousEditIntent: s.currentEditIntent ?? null,
+        currentEditIntent: finalEditIntent,
+        editIntentTimestamp: Date.now(),
+        editIntentOverturnCount: 0,
+        respondFirstChecked: false,
         frustrationStreak: newStreak,
         currentWindowSize: nextWindow,
         currentPrediction: {
@@ -170,6 +154,11 @@ async function main() {
       // call returns garbage.
       await stateManager.update((s) => ({
         ...s,
+        previousEditIntent: s.currentEditIntent ?? null,
+        currentEditIntent: null,
+        editIntentTimestamp: Date.now(),
+        editIntentOverturnCount: 0,
+        respondFirstChecked: false,
         currentPrediction: {
           mood: "neutral",
           trust: "normal",
@@ -186,17 +175,6 @@ async function main() {
   } catch (err) {
     console.error("[user-prompt-submit] sentiment agent failed:", err);
   }
-
-  // Spawn background summary-updater in intent mode
-  const updaterPath = path.join(__dirname, "../utils/summary-updater.js");
-  const encodedPrompt = Buffer.from(input.prompt).toString("base64");
-
-  spawnBackground(updaterPath, [
-    "--mode", "intent",
-    "--transcript", input.transcript_path,
-    "--prompt", encodedPrompt,
-    "--session-id", input.session_id,
-  ], { dedupKey: "summary-updater-intent", sessionDir });
 
   exitAfterFlush(0);
 }

@@ -29,7 +29,6 @@ src/                                # TypeScript source
     hooks/                          # Hook-triggered agents
       tool-approve.ts               # Policy enforcement
       tool-appeal.ts                # Reviews denials with user context
-      gate.ts                       # Gate agent (error + intent check)
       plan-validate.ts              # Checks plan drift
       style-drift.ts                # Detects unrequested style changes
       claude-md-validate.ts         # Validates CLAUDE.md edits
@@ -50,12 +49,11 @@ src/                                # TypeScript source
     force-check-required.ts         # Priority 32: Lock to mcp__check after workaround denial
     prediction-block.ts             # Priority 35: Block predicted-bad tools
     drift-detect.ts                 # Priority 40: Detect drift from intent
-    correction.ts                   # Priority 45: Post-tool corrections
     error-acknowledge.ts            # Priority 50: Require error acknowledgment
-    trusted-path.ts                 # Priority 58: Fast-allow trusted paths
+    trusted-path.ts                 # Priority 58: Deny sensitive-path writes
     edit-intent.ts                  # Priority 60: Block edits without intent
     style-drift.ts                  # Priority 65: Detect style changes
-    gate.ts                         # Priority 70: Gate agent (sync pipeline)
+    gate.ts                         # Priority 70: Gate agent (rule-gate LLM contribution)
     tool-approve.ts                 # Priority 100: Final tool approval
 
   hooks/                            # Claude Code hook entry points
@@ -64,7 +62,6 @@ src/                                # TypeScript source
     stop-response-check.ts          # Stop hook
     session-start.ts                # SessionStart hook (lifecycle)
     user-prompt-submit.ts           # UserPromptSubmit hook
-    pre-compact.ts                  # PreCompact hook (snapshot before compaction)
     post-tool-use-failure.ts        # PostToolUseFailure hook
 
   mcp/
@@ -80,16 +77,12 @@ src/                                # TypeScript source
     transcript-presets.ts           # Standard transcript configurations
     transcript.ts                   # Transcript reading utilities
     logger.ts                       # Telemetry logging
-    summary-cache.ts                # Summary document, JSONL tool log, session state
-    summary-updater.ts              # Background LLM for summary updates
-    correction-cache.ts             # Post-tool correction cache
+    session-store.ts                # SessionState cache + JSONL tool log
     prediction-types.ts             # Sentiment-prediction shape + policy table
     prediction-parser.ts            # Marker-section parser for SENTIMENT_AGENT
     drift-detector.ts               # Pure TypeScript drift/anomaly heuristics
     gate-reasoning-cache.ts         # Gate reasoning persistent memory
     hook-bootstrap.ts               # Shared hook stdin/exit infrastructure
-    spawn-background.ts             # Background process spawner
-    markdown-parser.ts              # Markdown section extraction
     git-utils.ts                    # Git operations (status, diff)
     command.ts                      # Safe command execution
     command-patterns.ts             # Blacklist pattern detection
@@ -304,12 +297,11 @@ Tool call received
 │   ├─> force-check-required (32) Lock to mcp__check after workaround denial
 │   ├─> prediction-block (35)  Block predicted-bad tools (appealable)
 │   ├─> drift-detect (40)      Detect drift from user intent (appealable)
-│   ├─> correction (45)        Post-tool corrections
 │   ├─> error-acknowledge (50) Require error acknowledgment (appealable, LLM)
-│   ├─> trusted-path (58)      Fast allow trusted non-sensitive paths
+│   ├─> trusted-path (58)      Fast deny sensitive paths
 │   ├─> edit-intent (60)       Block edits without intent (appealable)
 │   ├─> style-drift (65)       Detect style changes (appealable, LLM)
-│   ├─> gate (70)              Gate agent sync pipeline (LLM)
+│   ├─> gate (70)              Gate agent contribution to rule-gate LLM
 │   └─> tool-approve (100)     Final tool approval (appealable, LLM)
 │
 ├─> Rewind detection (after rules, before validators)
@@ -323,106 +315,9 @@ Tool call received
 Adding a new check: create `src/rules/my-rule.ts` implementing `PreToolRule`,
 add to `ALL_RULES` in `src/rules/index.ts`, add display name to statusline.
 
-## Performance Optimization: Lazy Validation
+### Pipeline: one evaluator, one LLM call
 
-### Problem
-
-The PreToolUse hook was causing ~3 second delays for trusted file operations due to:
-- Rewind detection reading entire transcript (~400-1200ms)
-- Multiple transcript reads for style-drift (~300-600ms each)
-- Synchronous LLM validation calls (~500-1000ms each)
-
-### Solution: Hybrid Validation Strategy
-
-The hook uses **two validation modes** based on context:
-
-**Strict Mode** triggers:
-1. First tool after user message (intent alignment most critical here)
-2. After any denial (one-shot, resets after next tool)
-3. After tool errors (one-shot, resets after next tool)
-4. Large edits (>20 lines changed)
-5. Session start (first 3 tools)
-6. Plan mode (unless subagent)
-7. Special files (CLAUDE.md, plan files)
-8. Untrusted or sensitive paths
-
-All validations run synchronously (~2-4 seconds per tool call).
-
-**Lazy Mode** (when none of the above triggers apply):
-- Fast TypeScript checks run first (~10ms)
-- If TS says "safe": allow immediately, spawn background validator
-- Background validator runs all LLM checks asynchronously
-- Failures caught on next tool call
-- ~10ms per tool call (instant response)
-
-**Subagent Behavior**: All Task-spawned subagents get lazy validation - they are typically read-only exploration agents that don't need strict validation even when the parent is in plan mode.
-
-### Decision Flow
-
-```
-Tool Call
-    │
-    ├─ Check pending validation cache (catch previous failures)
-    │
-    ├─ LOW_RISK_TOOLS (Grep, Glob, etc.)
-    │       └─> Instant allow (~1ms)
-    │
-    ├─ FILE_TOOLS (Read, Write, Edit)
-    │       │
-    │       ├─ Fast TS Checks (~10ms)
-    │       │   ├─ isTrustedPath()
-    │       │   ├─ isSensitivePath()
-    │       │   └─ isPlanModeActive()
-    │       │
-    │       ├─ TS "SAFE" + Regular Mode
-    │       │       └─> Allow + Async Validator (~10ms)
-    │       │
-    │       ├─ TS "SAFE" + Plan Mode
-    │       │       └─> Strict validation (~2-4s)
-    │       │
-    │       └─ Special files (plan/CLAUDE.md) or untrusted
-    │               └─> Strict validation (~2-4s)
-    │
-    └─ HIGH_RISK_TOOLS (Bash, Agent, etc.)
-            └─> Strict validation (~1-2s)
-```
-
-### Lazy Validation Flow
-
-```
-Tool N (trusted, regular mode)
-    │
-    ├─ Check pending validation cache → no failures
-    ├─ Fast TS checks → "SAFE"
-    ├─ Allow immediately (tool executes)
-    └─ Spawn async-validator.ts (background process)
-            │
-            └─ Runs: style-drift
-            └─ Writes result to pending validation cache
-
-Tool N+1 (any)
-    │
-    ├─ Check pending validation cache
-    │       └─ If FAILED: deny with reason
-    │       └─ If PASSED: continue normally
-    └─ ...
-```
-
-### Key Files
-
-| File | Purpose |
-|------|---------|
-| `src/utils/correction-cache.ts` | Stores post-tool corrections for prediction violations |
-| `src/utils/micro-prediction.ts` | Sync regex predictions from user messages |
-| `src/utils/drift-detector.ts` | Pure TypeScript drift/anomaly detection heuristics |
-| `src/utils/plan-mode-detector.ts` | Detects if plan mode is active |
-
-### Temporary Files
-
-| File | Purpose | Expiry |
-|------|---------|--------|
-| `correction-cache.json` | Post-tool correction entries | 5 minutes |
-| `/tmp/claude-strict-mode.json` | Strict mode state (tool count, denial/error flags) | Session-scoped |
+Every tool call runs every rule in `src/rules/index.ts`'s `ALL_RULES`. Rules either short-circuit with `fastAllow`/`fastDeny` (pure TypeScript, <10ms) or return `llmContext`. The evaluator aggregates every triggered rule's `llmContext` into a SINGLE rule-gate haiku call (`rules/evaluator.ts:99–135`). There is no sync-vs-lazy bifurcation — every rule participates on every call (except subagents, which use a dedicated lightweight path via `subagentRule` at priority 20 with `skipLlmOnClean: true`).
 
 ## Shared Utilities
 
@@ -549,23 +444,15 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 | `question-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
 | `push.ts` | 0 | - | - |
 
-## Session Summary System
+## Session State Persistence
 
-### Execution Modes
+Each session persists three files under `~/.agent-framework/sessions/{project}/{hash}/`:
 
-The framework operates in two modes:
-- **Plan mode**: Active when a plan file exists in `~/.claude/plans/`. Stricter validation, all checks run synchronously.
-- **Non-plan mode**: Normal operation. Trusted file operations use fast-path validation.
+1. **`state.json`** — SessionState (prediction, edit-intent, force-check lockout, frustration streak, window size, tool count).
+2. **`gate-reasoning.json`** — priority-evicted denial memory with NOTE/WARNING/appeal outcomes.
+3. **`tool-log.jsonl`** — append-only audit trail consumed by drift-detect, error-acknowledge, pre-tool-use, gate-reasoning, and the test-harness.
 
-### Summary Document Structure
-
-Each session maintains a summary document (JSONL-backed) with 5 sections:
-
-1. **Active Plan** - Current plan context and step tracking
-2. **Flagged Misalignments** - Issues detected by gate/response-align agents (replaces ack-cache)
-3. **Tool Log** - JSONL append-only log of tool calls and results (replaces strict-mode-tracker)
-4. **Session State** - Key-value state surviving compaction (denial counts, mode flags)
-5. **Conversation Digest** - Compressed conversation context for post-compaction recovery
+Compaction recovery relies on Claude Code's native transcript compaction — no app-layer summary re-inject.
 
 ### Hook Lifecycle
 
@@ -573,33 +460,30 @@ Hooks execute in this order during a session:
 
 | Hook | Trigger | Purpose |
 |------|---------|---------|
-| `SessionStart` | Session begins or resumes post-compaction | Initialize summary, recover state |
-| `UserPromptSubmit` | User sends a message | Record user message, update digest |
+| `SessionStart` | Session begins or resumes | Initialize session state |
+| `UserPromptSubmit` | User sends a message | Refresh SENTIMENT_AGENT prediction, derive edit-intent |
 | `PreToolUse` | Before each tool call | Safety gate, policy enforcement |
-| `PostToolUse` | After each tool call | Log tool result, update summary |
+| `PostToolUse` | After each tool call | Log tool result |
 | `PostToolUseFailure` | After a tool call fails | Log failure, track error patterns |
-| `PreCompact` | Before context compaction | Persist summary to survive compaction |
 | `Stop` | AI attempts to stop responding | Validate response completeness |
-
-### Compaction Survival
-
-When Claude Code compacts context, the summary document persists on disk. The `SessionStart` hook detects post-compaction resumption and injects the summary back into context, preserving:
-- Active plan state and progress
-- Flagged misalignment history
-- Session state (denial counts, flags)
-- Conversation digest for continuity
 
 ### Subagent Isolation
 
-Task-spawned subagents (detected via transcript path patterns) receive lazy validation. They operate in isolated contexts and do not share the parent session's summary document.
+Task-spawned subagents (detected via transcript path patterns) use a dedicated lightweight path through `subagentRule` at priority 20 with `skipLlmOnClean: true`.
 
 ### Removed Components
 
-The following components were removed in favor of the summary system:
-- `async-validator.ts` - Replaced by prediction-driven checks + correction-cache
-- `async-gate-validator.ts` - Replaced by micro-prediction + drift-detector + correction-cache
-- `pending-validation-cache.ts` - Replaced by correction-cache
-- `error-acknowledge.ts` - Absorbed into the gate agent
-- `intent-validate.ts` - Dead code, removed (gate agent covers per-tool intent validation)
-- `ack-cache.ts` - Replaced by Flagged Misalignments in summary
-- `strict-mode-tracker.ts` - Replaced by tool log + session state in summary
+The following components were removed:
+- `async-validator.ts` — never existed as a source file; the concept was replaced by prediction-driven synchronous rules.
+- `async-gate-validator.ts` — Replaced by the single rule-gate aggregator LLM call.
+- `pending-validation-cache.ts` — Replaced by synchronous rule pipeline.
+- `intent-validate.ts` — Dead code, removed (gate agent covers per-tool intent validation).
+- `ack-cache.ts` — Replaced by `gate-reasoning.json` priority-evicted denial memory.
+- `strict-mode-tracker.ts` — Replaced by `tool-log.jsonl` and SessionState.
+- `summary-updater.ts` / `summary-cache.ts` summary document surface — Replaced by prediction-driven checks and `gate-reasoning.json`.
+- `spawn-background.ts` — No background forks remain; SENTIMENT_AGENT runs synchronously with a hard timeout.
+- `pre-compact.ts` — No app-layer compaction recovery; Claude Code's native compaction handles it.
+- `correction-cache.ts` — Dead after summary-updater removal.
+- `checkGate` dead export from `src/agents/hooks/gate.ts` — evaluator's rule-gate path replaces it.
+- `useSyncPipeline` / `coldStart` fields — sync/lazy pipeline bifurcation deleted; every rule runs on every call.
+- `trusted-path` rule — trimmed to `sensitive-path-block` fastDeny only.

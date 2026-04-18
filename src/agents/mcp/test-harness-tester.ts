@@ -1042,8 +1042,8 @@ regression suite for that rule family.
 ### B.13 Asserting prediction state
 
 Scenarios may include an optional \`predictions\` block that asserts on the
-live \`state.json\` \`currentPrediction\` AFTER the target hook fires (and
-after the background-updater drain). Primitives:
+live \`state.json\` \`currentPrediction\` AFTER the target hook fires.
+Primitives:
 
   must_block             Array of {tool, target_substring?} filters. Pass iff
                          the live prediction's explicitlyBlockedSubstrings
@@ -1062,8 +1062,7 @@ after the background-updater drain). Primitives:
                          enum (low|normal|high).
   intent_must_contain    Pass iff currentPrediction.intent.includes(value).
 
-The predictions block is evaluated AFTER the target hook fires (and after
-drainBackgroundUpdaters waits for summary-updater writes to finish).
+The predictions block is evaluated AFTER the target hook fires.
 Run \`pass\` is \`expect-pass AND every prediction assertion passes\`.
 
 Scenarios may also pre-seed \`state.json\` via the optional
@@ -1117,7 +1116,7 @@ content. That is the minimum contract. If your test case needs a setup
 knob NOT in that list -- for example:
 
   - a specific session-state file under ~/.agent-framework/sessions/
-  - hook-internal cache state (correction-cache, gate-reasoning cache)
+  - hook-internal cache state (gate-reasoning cache)
   - a new hook event not in the 5 supported
   - a way to inject fake tool_result content from prior calls
   - running multiple hooks in sequence in one scenario

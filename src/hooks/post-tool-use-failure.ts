@@ -4,7 +4,7 @@ initializeTelemetry();
 
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
-import { getSessionDir, appendToolLog } from "../utils/summary-cache.js";
+import { getSessionDir, appendToolLog } from "../utils/session-store.js";
 
 /**
  * PostToolUseFailure Hook

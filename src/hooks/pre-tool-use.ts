@@ -31,7 +31,7 @@ import {
   appendToolLog,
   readToolLogEntries,
   formatToolDetail,
-} from "../utils/summary-cache.js";
+} from "../utils/session-store.js";
 import {
   addEntry,
   addPatternWarnings,
@@ -135,7 +135,6 @@ async function main() {
     : isPlanModeActive(input.transcript_path);
   const planModeCtx = getPlanModeContext(planMode);
   const subagent = isSubagent(input.transcript_path);
-  const coldStart = toolCallCount < 3;
 
   // Fail open on any detection error — falls through to normal single-tool pipeline
   let batchInfo: ParallelBatchInfo | null = null;
@@ -144,9 +143,6 @@ async function main() {
   } catch {
     // Detection failed — treat as solo tool (safe fallback)
   }
-
-  // Subagents always use async/lazy pipeline; main agent uses sync for plan mode or cold start
-  const useSyncPipeline = (planMode || coldStart) && !subagent;
 
   /**
    * Sole exit function - replaces all direct outputAllow()/outputDeny() calls.
@@ -230,15 +226,6 @@ async function main() {
     // pipeline. Wait for the leader's result and propagate it.
     const leaderResult = await waitForBatchLeader(sessionDir, batchInfo.leaderId);
 
-    // Only increment toolCallsSinceUpdate on allow (matching leader behavior —
-    // the leader's increment only runs on the allow path)
-    if (leaderResult.decision === "allow") {
-      await stateManager.update((s) => ({
-        ...s,
-        toolCallsSinceUpdate: s.toolCallsSinceUpdate + 1,
-      }));
-    }
-
     // Route through exitPipeline for consistent telemetry (tool log, gate
     // reasoning for denials, prediction deactivation). Gate reasoning is
     // naturally skipped for allowed siblings because "batch-sibling" is not
@@ -286,15 +273,13 @@ async function main() {
     planMode,
     planModeCtx,
     subagent,
-    coldStart,
-    useSyncPipeline,
     toolCallCount,
     outsideRootPath,
   };
 
   // Run all rules (respond-first, low-risk, plan-mode-block, subagent,
-  // question-validate, prediction-block, drift-detect, correction,
-  // error-acknowledge, trusted-path, edit-intent, style-drift, gate, tool-approve)
+  // question-validate, prediction-block, drift-detect,
+  // error-acknowledge, sensitive-path-block, edit-intent, style-drift, gate, tool-approve)
   const ruleResult = await evaluateRules(ALL_RULES, ctx, "PreToolUse");
 
   if (ruleResult) {
@@ -313,8 +298,8 @@ async function main() {
   await detectRewind(input.transcript_path);
 
   // EXCEPTIONS: plan-validate and claude-md-validate run AFTER all rules pass.
-  // trusted-path rule (priority 58) explicitly excludes plan/CLAUDE.md files
-  // so they always reach this point.
+  // sensitive-path-block rule (priority 58) does not apply to plan/CLAUDE.md
+  // files so they always reach this point.
   if (FILE_TOOLS.includes(toolName)) {
     const filePath =
       (toolInput as { file_path?: string }).file_path ||
@@ -445,7 +430,6 @@ async function main() {
   await stateManager.update((s) => ({
     ...s,
     toolCallCount: s.toolCallCount + 1,
-    toolCallsSinceUpdate: s.toolCallsSinceUpdate + 1,
   }));
 
   // Clear gate reasoning on plan approval - gives implementation phase a clean slate

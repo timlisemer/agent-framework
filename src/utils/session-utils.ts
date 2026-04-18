@@ -1,5 +1,5 @@
 /**
- * Session Utilities - Plan File Resolution and Summary Access
+ * Session Utilities - Plan File Resolution
  *
  * Claude Code stores session metadata in JSONL files at:
  *   ~/.claude/projects/{encoded-path}/agent-{id}.jsonl
@@ -18,12 +18,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import {
-  getSummaryPath,
-  readSummary,
-  readSection,
-  type SummaryDocument,
-} from "./summary-cache.js";
 
 interface SessionMetadata {
   slug?: string;
@@ -84,31 +78,5 @@ export async function readPlanContent(transcriptPath: string): Promise<string | 
     return await fs.promises.readFile(planPath, "utf-8");
   } catch {
     return null;
-  }
-}
-
-/**
- * Read the full session summary for a given transcript.
- * Returns null if no summary exists.
- */
-export async function readSessionSummary(transcriptPath: string): Promise<SummaryDocument | null> {
-  try {
-    const summaryPath = getSummaryPath(transcriptPath);
-    return await readSummary(summaryPath);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Read a single section from the session summary.
- * Returns empty string if summary or section doesn't exist.
- */
-export async function readSummarySection(transcriptPath: string, section: string): Promise<string> {
-  try {
-    const summaryPath = getSummaryPath(transcriptPath);
-    return await readSection(summaryPath, section);
-  } catch {
-    return "";
   }
 }

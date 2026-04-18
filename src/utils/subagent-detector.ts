@@ -13,8 +13,8 @@
  * 4. Content-based: Look for subagent-specific patterns in first few lines
  * 5. Counter fallback: active subagent counter > 0 (catches race condition)
  *
- * All subagents get lazy validation - they are typically read-only exploration
- * agents that don't need strict validation even when the parent is in plan mode.
+ * Subagents route through `subagentRule` at priority 20 with
+ * `skipLlmOnClean: true` for fast approval on non-blacklisted tools.
  *
  * @module subagent-detector
  */

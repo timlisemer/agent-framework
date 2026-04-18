@@ -15,7 +15,6 @@ import { setTranscriptPath } from "./execution-context.js";
 import { getSessionDir } from "./cache-manager.js";
 import { initDenialSession } from "./denial-cache.js";
 import { initRewindSession } from "./rewind-cache.js";
-import { initCorrectionSession } from "./correction-cache.js";
 import { initStatuslineSession } from "./statusline-state.js";
 
 /**
@@ -81,6 +80,5 @@ export function initHookProcess(transcriptPath: string): void {
   const sessionDir = getSessionDir(transcriptPath);
   initDenialSession(sessionDir);
   initRewindSession(sessionDir);
-  initCorrectionSession(sessionDir);
   initStatuslineSession(sessionDir);
 }
