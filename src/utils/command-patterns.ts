@@ -7,12 +7,14 @@
  */
 
 import { resolveCheckMessage } from "./check-target-context.js";
+import { redactPathTokens } from "./path-redaction.js";
 
 export interface BlacklistPattern {
   pattern: RegExp;
   name: string;
   alternative: string;
   bashOnly?: boolean;
+  redactPaths?: boolean;
 }
 
 /**
@@ -42,78 +44,96 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bgit\s+(?!commit|push|add)\w+/, name: 'git write op', alternative: 'Git write operation denied' },
 
   // Build/check commands - LLMs should NOT build, only verify with check tool
-  { pattern: /\bmake\s+check\b/, name: "make check", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bjust\s+check\b/, name: "just check", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bmake\s+build\b/, name: "make build", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bjust\s+build\b/, name: "just build", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bnpm\s+run\s+build\b/, name: "npm build", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bnpm\s+run\s+(check|typecheck)\b/, name: "npm check/typecheck", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bbun\s+run\s+build\b/, name: "bun build", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bbun\s+run\s+(check|typecheck)\b/, name: "bun check/typecheck", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bcargo\s+build\b/, name: "cargo build", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\b(tsc|npx\s+tsc)\b/, name: "tsc", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bmake\s+check\b/, name: "make check", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bjust\s+check\b/, name: "just check", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bmake\s+build\b/, name: "make build", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bjust\s+build\b/, name: "just build", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bnpm\s+run\s+build\b/, name: "npm build", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bnpm\s+run\s+(check|typecheck)\b/, name: "npm check/typecheck", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bbun\s+run\s+build\b/, name: "bun build", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bbun\s+run\s+(check|typecheck)\b/, name: "bun check/typecheck", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bcargo\s+build\b/, name: "cargo build", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\b(tsc|npx\s+tsc)\b/, name: "tsc", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
 
   // Package install commands - dependency-modifying, should not be run by AI
-  { pattern: /\bnpm\s+install\b/, name: "npm install", alternative: "LLMs should not modify project dependencies" },
-  { pattern: /\bbun\s+install\b/, name: "bun install", alternative: "LLMs should not modify project dependencies" },
-  { pattern: /\bpnpm\s+install\b/, name: "pnpm install", alternative: "LLMs should not modify project dependencies" },
+  { pattern: /\bnpm\s+install\b/, name: "npm install", alternative: "LLMs should not modify project dependencies", redactPaths: true },
+  { pattern: /\bbun\s+install\b/, name: "bun install", alternative: "LLMs should not modify project dependencies", redactPaths: true },
+  { pattern: /\bpnpm\s+install\b/, name: "pnpm install", alternative: "LLMs should not modify project dependencies", redactPaths: true },
 
   // Lint commands - should use check tool
-  { pattern: /\bnpm\s+run\s+lint\b/, name: "npm lint", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bbun\s+run\s+lint\b/, name: "bun lint", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bnpm\s+run\s+lint\b/, name: "npm lint", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bbun\s+run\s+lint\b/, name: "bun lint", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
 
   // Test commands - tests may not exist, use check for build verification
   // bashOnly: the bare word "test" matches prose like "test suite" — only check in Bash commands
-  { pattern: /\b(test|vitest|jest|mocha|pytest|ava)\b/, name: "test command", alternative: "You must run mcp__agent-framework__check", bashOnly: true },
+  { pattern: /\b(test|vitest|jest|mocha|pytest|ava)\b/, name: "test command", alternative: "You must run mcp__agent-framework__check", bashOnly: true, redactPaths: true },
 
   // Command chaining with cd - always deny
   { pattern: /\bcd\s+[^&]+&&/, name: 'cd && chain', alternative: 'Use --cwd flag or run from correct directory' },
 
   // Nix formatting - should use check tool
-  { pattern: /\balejandra\b/, name: "alejandra", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\balejandra\b/, name: "alejandra", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
 
   // SSH remote execution
   { pattern: /\bssh\s+/, name: 'ssh', alternative: 'Remote execution denied' },
 
   // Run commands - should not be in plans or CLAUDE.md verification sections
-  { pattern: /\bmake\s+run(-\w+)?\b/, name: "make run", alternative: "Run commands not allowed" },
-  { pattern: /\bjust\s+run(-\w+)?\b/, name: "just run", alternative: "Run commands not allowed" },
-  { pattern: /\bnpm\s+run\s+(start|dev)\b/, name: "npm start/dev", alternative: "Run commands not allowed" },
-  { pattern: /\bbun\s+run\s+(start|dev)\b/, name: "bun start/dev", alternative: "Run commands not allowed" },
-  { pattern: /\bcargo\s+run\b/, name: "cargo run", alternative: "Run commands not allowed" },
-  { pattern: /\bgo\s+run\b/, name: "go run", alternative: "Run commands not allowed" },
+  { pattern: /\bmake\s+run(-\w+)?\b/, name: "make run", alternative: "Run commands not allowed", redactPaths: true },
+  { pattern: /\bjust\s+run(-\w+)?\b/, name: "just run", alternative: "Run commands not allowed", redactPaths: true },
+  { pattern: /\bnpm\s+run\s+(start|dev)\b/, name: "npm start/dev", alternative: "Run commands not allowed", redactPaths: true },
+  { pattern: /\bbun\s+run\s+(start|dev)\b/, name: "bun start/dev", alternative: "Run commands not allowed", redactPaths: true },
+  { pattern: /\bcargo\s+run\b/, name: "cargo run", alternative: "Run commands not allowed", redactPaths: true },
+  { pattern: /\bgo\s+run\b/, name: "go run", alternative: "Run commands not allowed", redactPaths: true },
 
   // Code execution commands - should be added to Justfile/Makefile check target
-  { pattern: /\bpython\s+(-c\s+)?/, name: "python", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bpython3\s+(-c\s+)?/, name: "python3", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bnode\s+(-e\s+)?/, name: "node", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bruby\s+(-e\s+)?/, name: "ruby", alternative: "You must run mcp__agent-framework__check" },
-  { pattern: /\bperl\s+(-e\s+)?/, name: "perl", alternative: "You must run mcp__agent-framework__check" },
+  { pattern: /\bpython\s+(-c\s+)?/, name: "python", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bpython3\s+(-c\s+)?/, name: "python3", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bnode\s+(-e\s+)?/, name: "node", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bruby\s+(-e\s+)?/, name: "ruby", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bperl\s+(-e\s+)?/, name: "perl", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
 ];
 
 /**
  * Patterns for detecting workaround attempts (retrying denied commands).
  * Maps pattern category to command substrings that match.
  */
-export const WORKAROUND_PATTERNS: Record<string, string[]> = {
-  "type-check": [
-    "make check",
-    "just check",
-    "tsc",
-    "npx tsc",
-    "npm run check",
-    "npm run typecheck",
-    "bun run check",
-    "bun run typecheck",
-    "cargo check",
-  ],
-  build: ["make build", "just build", "npm run build", "bun run build", "cargo build"],
-  lint: ["eslint", "prettier", "npm run lint", "bun run lint", "alejandra"],
-  test: ["test", "vitest", "jest", "mocha", "pytest", "ava"],
-  "code-exec": ["python ", "python3 ", "node ", "ruby ", "perl "],
-  install: ["npm install", "bun install", "pnpm install"],
+export const WORKAROUND_PATTERNS: Record<string, { variants: string[]; redactPaths?: boolean }> = {
+  "type-check": {
+    variants: [
+      "make check",
+      "just check",
+      "tsc",
+      "npx tsc",
+      "npm run check",
+      "npm run typecheck",
+      "bun run check",
+      "bun run typecheck",
+      "cargo check",
+    ],
+    redactPaths: true,
+  },
+  build: {
+    variants: ["make build", "just build", "npm run build", "bun run build", "cargo build"],
+    redactPaths: true,
+  },
+  lint: {
+    variants: ["eslint", "prettier", "npm run lint", "bun run lint", "alejandra"],
+    redactPaths: true,
+  },
+  test: {
+    variants: ["test", "vitest", "jest", "mocha", "pytest", "ava"],
+    redactPaths: true,
+  },
+  "code-exec": {
+    variants: ["python ", "python3 ", "node ", "ruby ", "perl "],
+    redactPaths: true,
+  },
+  install: {
+    variants: ["npm install", "bun install", "pnpm install"],
+    redactPaths: true,
+  },
 };
 
 /**
@@ -177,10 +197,12 @@ export function getContentBlacklistHighlights(content: string): string[] {
       .replace(/`[^`]+`/g, "")                              // `just build`
       .replace(/"[^"]+"/g, "")                               // "just build"
       .replace(/\b\w+\s*\([^)]*\)/g, "");                    // execSync('just build'), spawn(cmd)
+    const redactedStrippedLine = redactPathTokens(strippedLine);
 
-    for (const { pattern, name, alternative, bashOnly } of BLACKLIST_PATTERNS) {
+    for (const { pattern, name, alternative, bashOnly, redactPaths: shouldRedact } of BLACKLIST_PATTERNS) {
       if (bashOnly) continue; // Skip patterns too broad for plan prose (e.g., bare "test")
-      if (pattern.test(strippedLine)) {
+      const target = shouldRedact ? redactedStrippedLine : strippedLine;
+      if (pattern.test(target)) {
         highlights.push(`[VIOLATION: ${name}] "${line.trim()}" → ${alternative}`);
         break; // One highlight per line
       }
@@ -216,10 +238,15 @@ export function getBlacklistHighlights(toolName: string, toolInput: unknown, wor
   // e.g. "ls | head -5" is output truncation, not file reading.
   const FILE_READING_PATTERN_NAMES = new Set(["cat", "head", "tail"]);
   const primaryCommand = command.split(/\s*\|\s*/)[0];
+  const redactedCommand = redactPathTokens(command);
+  const redactedPrimary = redactPathTokens(primaryCommand);
 
   return BLACKLIST_PATTERNS
-    .filter(({ pattern, name }) => {
-      const target = FILE_READING_PATTERN_NAMES.has(name) ? primaryCommand : command;
+    .filter(({ pattern, name, redactPaths: shouldRedact }) => {
+      const isFileReader = FILE_READING_PATTERN_NAMES.has(name);
+      const base = isFileReader ? primaryCommand : command;
+      const redacted = isFileReader ? redactedPrimary : redactedCommand;
+      const target = shouldRedact ? redacted : base;
       return pattern.test(target);
     })
     .map(({ name, alternative }) => {
@@ -239,13 +266,12 @@ export function detectWorkaroundPattern(
   toolName: string,
   toolInput: unknown
 ): string | null {
-  if (toolName !== 'Bash') return null;
-  const command = (toolInput as { command?: string }).command || '';
-
-  for (const [pattern, variants] of Object.entries(WORKAROUND_PATTERNS)) {
-    if (variants.some((v) => command.includes(v))) {
-      return pattern;
-    }
+  if (toolName !== "Bash") return null;
+  const command = (toolInput as { command?: string }).command ?? "";
+  const redacted = redactPathTokens(command);
+  for (const [category, { variants, redactPaths: shouldRedact }] of Object.entries(WORKAROUND_PATTERNS)) {
+    const target = shouldRedact ? redacted : command;
+    if (variants.some((v) => target.includes(v))) return category;
   }
   return null;
 }

@@ -6,6 +6,7 @@ import {
   getBlacklistHighlights,
   detectWorkaroundPattern,
 } from "../../src/utils/command-patterns.js";
+import { redactPathTokens } from "../../src/utils/path-redaction.js";
 
 describe("getBlacklistDescription", () => {
   it("returns a non-empty string", () => {
@@ -199,5 +200,96 @@ describe("detectWorkaroundPattern", () => {
 
   it("returns 'test' for 'jest' command", () => {
     expect(detectWorkaroundPattern("Bash", { command: "jest --coverage" })).toBe("test");
+  });
+});
+
+describe("getBlacklistHighlights path redaction regression", () => {
+  it("does not false-fire 'test command' on 'ls test-harness/'", () => {
+    expect(getBlacklistHighlights("Bash", { command: "ls test-harness/" })).toEqual([]);
+  });
+
+  it("does not false-fire on 'rm -rf test-harness/fixtures'", () => {
+    expect(getBlacklistHighlights("Bash", { command: "rm -rf test-harness/fixtures" })).toEqual([]);
+  });
+
+  it("does not false-fire on 'ls ./test-harness'", () => {
+    expect(getBlacklistHighlights("Bash", { command: "ls ./test-harness" })).toEqual([]);
+  });
+
+  it("does not false-fire on 'ls @test-harness/'", () => {
+    expect(getBlacklistHighlights("Bash", { command: "ls @test-harness/" })).toEqual([]);
+  });
+
+  it("does not false-fire on 'ls test-harness' (no trailing slash)", () => {
+    expect(getBlacklistHighlights("Bash", { command: "ls test-harness" })).toEqual([]);
+  });
+
+  it("does not false-fire on 'stat /home/tim/Coding/test-harness'", () => {
+    expect(getBlacklistHighlights("Bash", { command: "stat /home/tim/Coding/test-harness" })).toEqual([]);
+  });
+
+  it("does not false-fire 'cargo build' on 'ls ./build/'", () => {
+    expect(getBlacklistHighlights("Bash", { command: "ls ./build/" })).toEqual([]);
+  });
+
+  it("does not false-fire 'node' on 'ls node_modules/'", () => {
+    expect(getBlacklistHighlights("Bash", { command: "ls node_modules/" })).toEqual([]);
+  });
+
+  it("still fires 'test command' on 'cargo test'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "cargo test" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'npm test'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "npm test" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'npx vitest run'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "npx vitest run" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'pytest tests/unit/test_foo.py'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "pytest tests/unit/test_foo.py" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'cd' on 'cd test-harness/' (path-sensitive pattern)", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "cd test-harness/" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: cd]"))).toBe(true);
+  });
+
+  it("still fires 'cat' on 'cat test-harness/file.txt' (path-sensitive pattern)", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "cat test-harness/file.txt" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: cat]"))).toBe(true);
+  });
+
+  it("still fires 'echo redirect' on 'echo hi > test-harness/out.log'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "echo hi > test-harness/out.log" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: echo redirect]"))).toBe(true);
+  });
+});
+
+describe("getContentBlacklistHighlights path redaction", () => {
+  it("does not false-fire build pattern on './build/output.txt'", () => {
+    expect(getContentBlacklistHighlights("See ./build/output.txt")).toEqual([]);
+  });
+
+  it("does not false-fire node pattern on 'node_modules/foo.js'", () => {
+    expect(getContentBlacklistHighlights("Check node_modules/foo.js in the plan")).toEqual([]);
+  });
+});
+
+describe("BLACKLIST_PATTERNS invariant guard", () => {
+  it("no verb-only blacklist pattern has a path-like source string", () => {
+    // Guards against future hyphenated verbs (docker-compose, apt-get, etc.) silently
+    // becoming <PATH> under rule 6 and no longer firing.
+    for (const { name, redactPaths } of BLACKLIST_PATTERNS) {
+      if (!redactPaths) continue;
+      const verb = name.split(/\s+/)[0]; // e.g. "cargo build" → "cargo"
+      expect(redactPathTokens(verb), `verb '${verb}' from pattern '${name}'`).toBe(verb);
+    }
   });
 });
