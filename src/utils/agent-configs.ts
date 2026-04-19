@@ -604,7 +604,7 @@ If the blocked tool matches the slash command's allowed-tools list, OVERTURN imm
    - Inline string testing: testing regex against literal strings (not searching files)
    - Command output capture: capturing stdout for further processing
 
-   NEVER OVERTURN via this exception for:
+   NEVER OVERTURN via this exception for (UNLESS the user requested it -- explicit user request ALWAYS overrides this list):
    - cd commands: --cwd flags exist for most tools (bun --cwd, npm --prefix, cargo --manifest-path)
    - build/check/typecheck shell commands: use mcp__agent-framework__check instead
    - cat/grep/find on local files: AI tools CAN handle these

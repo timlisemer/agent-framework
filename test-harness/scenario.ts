@@ -598,6 +598,35 @@ async function main() {
     );
   }
 
+  // Seed cache/tool-log.jsonl from scenario.seed_state.toolLog BEFORE
+  // session-start fires so rules that read the tool log (drift-detect,
+  // force-check-required's denial cache) observe the prior-turn state.
+  // Defaults: ts = now - (reverse index * 1000ms) so older entries are older,
+  // ms = 0 when omitted.
+  if (scenario.seed_state.toolLog && scenario.seed_state.toolLog.length > 0) {
+    const seedLog = scenario.seed_state.toolLog;
+    const baseTs = Date.now();
+    const lines = seedLog
+      .map((entry, idx) => {
+        const row = {
+          ts: entry.ts ?? baseTs - (seedLog.length - idx) * 1000,
+          tool: entry.tool,
+          toolUseId: entry.toolUseId,
+          batchPosition: entry.batchPosition,
+          batchSize: entry.batchSize,
+          path: entry.path,
+          cmd: entry.cmd,
+          status: entry.status,
+          gate: entry.gate,
+          reason: entry.reason,
+          ms: entry.ms ?? 0,
+        };
+        return JSON.stringify(row);
+      })
+      .join("\n") + "\n";
+    fs.writeFileSync(path.join(cacheDir, "tool-log.jsonl"), lines);
+  }
+
   const cwd = scenario.env?.cwd ?? scenarioRoot;
   const sessionId = "scenario-" + scenario.name;
   const transcriptBasename = scenario.env?.subagent

@@ -220,6 +220,26 @@ export interface Scenario {
     forceCheckPending: boolean;
     frustrationStreak: number;
     currentWindowSize: number;
+    /**
+     * Optional prior tool-log entries written to cache/tool-log.jsonl BEFORE
+     * session-start fires. Use this to reproduce live behavior for rules that
+     * read the session tool log (e.g. drift-detect's repetition heuristic,
+     * force-check-required's denial cache). Each entry may omit `ts` and `ms`
+     * -- the harness supplies monotonic defaults so older entries are older.
+     */
+    toolLog?: Array<{
+      ts?: number;
+      tool: string;
+      toolUseId?: string;
+      batchPosition?: number;
+      batchSize?: number;
+      path?: string;
+      cmd?: string;
+      status: string;
+      gate: string;
+      reason?: string;
+      ms?: number;
+    }>;
   };
 }
 
@@ -860,17 +880,21 @@ function validateScenarioSeedState(r: Record<string, unknown>): void {
     "frustrationStreak",
     "currentWindowSize",
   ];
+  const optionalTopFields = ["toolLog"];
   for (const k of requiredTopFields) {
     if (s[k] === undefined) {
       throw new Error(`scenario.seed_state.${k} is required`);
     }
   }
   for (const k of Object.keys(s)) {
-    if (!requiredTopFields.includes(k)) {
+    if (!requiredTopFields.includes(k) && !optionalTopFields.includes(k)) {
       throw new Error(
-        `scenario.seed_state.${k} is not a recognized field (allowed: ${requiredTopFields.join(", ")})`,
+        `scenario.seed_state.${k} is not a recognized field (allowed: ${[...requiredTopFields, ...optionalTopFields].join(", ")})`,
       );
     }
+  }
+  if (s.toolLog !== undefined) {
+    validateSeedToolLog(s.toolLog);
   }
   if (typeof s.forceCheckPending !== "boolean") {
     throw new Error("scenario.seed_state.forceCheckPending must be a boolean");
@@ -1022,6 +1046,55 @@ function validateSeedCurrentPrediction(p: Record<string, unknown>): void {
       throw new Error(
         `scenario.seed_state.currentPrediction.${k} is not a recognized field`,
       );
+    }
+  }
+}
+
+/**
+ * Validate the optional `scenario.seed_state.toolLog` array. Each entry must
+ * match ToolLogEntry shape (see src/utils/session-store.ts) with `ts` and `ms`
+ * optional -- the harness fills monotonic defaults when missing.
+ */
+function validateSeedToolLog(value: unknown): void {
+  if (!Array.isArray(value)) {
+    throw new Error("scenario.seed_state.toolLog must be an array when set");
+  }
+  const stringFields = ["tool", "toolUseId", "path", "cmd", "status", "gate", "reason"];
+  const numberFields = ["ts", "ms", "batchPosition", "batchSize"];
+  const requiredFields = ["tool", "status", "gate"];
+  for (let i = 0; i < value.length; i++) {
+    const e = value[i];
+    if (typeof e !== "object" || e === null || Array.isArray(e)) {
+      throw new Error(`scenario.seed_state.toolLog[${i}] must be an object`);
+    }
+    const row = e as Record<string, unknown>;
+    for (const k of requiredFields) {
+      if (typeof row[k] !== "string" || (row[k] as string).length === 0) {
+        throw new Error(
+          `scenario.seed_state.toolLog[${i}].${k} must be a non-empty string`,
+        );
+      }
+    }
+    for (const k of stringFields) {
+      if (row[k] !== undefined && typeof row[k] !== "string") {
+        throw new Error(
+          `scenario.seed_state.toolLog[${i}].${k} must be a string when set`,
+        );
+      }
+    }
+    for (const k of numberFields) {
+      if (row[k] !== undefined && typeof row[k] !== "number") {
+        throw new Error(
+          `scenario.seed_state.toolLog[${i}].${k} must be a number when set`,
+        );
+      }
+    }
+    for (const k of Object.keys(row)) {
+      if (!stringFields.includes(k) && !numberFields.includes(k)) {
+        throw new Error(
+          `scenario.seed_state.toolLog[${i}].${k} is not a recognized ToolLogEntry field`,
+        );
+      }
     }
   }
 }

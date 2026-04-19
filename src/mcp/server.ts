@@ -532,6 +532,19 @@ const scenarioSchema = z.object({
     forceCheckPending: z.boolean(),
     frustrationStreak: z.number().int().nonnegative(),
     currentWindowSize: z.number().int().positive(),
+    toolLog: z.array(z.object({
+      ts: z.number().optional(),
+      tool: z.string(),
+      toolUseId: z.string().optional(),
+      batchPosition: z.number().int().nonnegative().optional(),
+      batchSize: z.number().int().positive().optional(),
+      path: z.string().optional(),
+      cmd: z.string().optional(),
+      status: z.string(),
+      gate: z.string(),
+      reason: z.string().optional(),
+      ms: z.number().optional(),
+    })).optional(),
   }),
 });
 
