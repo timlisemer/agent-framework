@@ -111,6 +111,21 @@ export function decidePrediction(
     prediction.trust === "low";
   if (restrictive) {
     if (isLowRiskTool(toolName)) return { decision: "allow" };
+
+    // Anger scoped to other tools via explicitlyBlockedSubstrings must not
+    // generalize to this tool. When the user has expressed explicit blocks
+    // AND none of them target the current tool, the sentiment is already
+    // encoded in the substring list -- step 2 above is the authoritative
+    // check for those tools. Falling into a blanket mood-deny here would
+    // punish unrelated tools for a scoped grievance.
+    const hasAnyExplicitBlock = prediction.explicitlyBlockedSubstrings.length > 0;
+    const anyBlockTargetsThisTool = prediction.explicitlyBlockedSubstrings.some(
+      (b) => b.tool === toolName,
+    );
+    if (hasAnyExplicitBlock && !anyBlockTargetsThisTool) {
+      return { decision: "allow" };
+    }
+
     return {
       decision: "deny",
       reason: `User appears ${prediction.mood} (trust: ${prediction.trust}). Blocking ${toolName} unless explicitly requested. User said: "${prediction.userMessageSnippet}". Intent: ${prediction.intent}`,

@@ -56,7 +56,8 @@
     "currentWindowSize": 2
   },
   "expect": {
-    "expected": "allow",
-    "notes": "Correct behavior: ExitPlanMode in plan mode after user explicitly asked for a plan must be allowed. Anger expressed about Bash is scoped (tool='Bash' in explicitlyBlockedSubstrings) and must not generalize to block the plan-exit action. Live currently denies via gate=prediction-block with reason 'User appears angry (trust: low). Blocking ExitPlanMode unless explicitly requested.' -- that fastDeny is the bug this scenario captures."
+    "expected": "deny",
+    "by": "tool-approve",
+    "notes": "Captures the Bash-scoped-anger regression: Bash is listed in explicitlyBlockedSubstrings, so prediction-block must NOT generalize the anger to ExitPlanMode. Post-fix (decidePrediction step 4 treats a non-empty explicitlyBlockedSubstrings that doesn't target the current tool as a scoped allow), prediction-block steps aside and the deny falls through to tool-approve's plan-file existence check. This expectation pins the correct post-fix gate: gate=tool-approve with reason 'Cannot exit plan mode without a plan.' If gate=prediction-block appears again the Bash-scope fix is broken. To exercise the full ExitPlanMode allow path end-to-end, the scenario harness would need to create a plan file at the slug-resolved path -- tracked as a harness extension, not part of this regression gate."
   }
 }

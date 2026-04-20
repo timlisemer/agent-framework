@@ -654,9 +654,19 @@ export async function readTranscriptExact(
     const { role, content: msgContent } = entry.message;
 
     if (role === 'user') {
-      // Detect whether the newest user-role entry is a slash-command
-      // invocation, regardless of filters. Callers (e.g. respond-first) use
-      // this to distinguish "no user message" from "newest was filtered."
+      // Skip system-injected meta messages (stop-hook feedback, slash command
+      // instruction bodies). These are not real user input and must not
+      // count as "the newest user entry" for any downstream flag.
+      if (excludeMetaMessages && entry.isMeta === true) {
+        continue;
+      }
+
+      // Detect whether the newest REAL user-role entry is a slash-command
+      // invocation. Callers (e.g. respond-first) use this to distinguish
+      // "no user message" from "newest was filtered by excludeSlashCommandPrompts."
+      // Computed after meta-skip so a slash-command body entry written by
+      // Claude Code with isMeta=true does not shadow the actual
+      // <command-name>/.../</command-name> invocation entry.
       if (collected.newestUserWasSlashCommand === undefined) {
         let probe: string | undefined;
         if (typeof msgContent === 'string') {
@@ -672,12 +682,6 @@ export async function readTranscriptExact(
         if (probe !== undefined) {
           collected.newestUserWasSlashCommand = isSlashCommandPrompt(probe);
         }
-      }
-
-      // Skip system-injected meta messages (stop-hook feedback, slash command
-      // instructions). These are not real user input and waste context slots.
-      if (excludeMetaMessages && entry.isMeta === true) {
-        continue;
       }
 
       // Check staleness: skip user messages beyond maxStale distance.

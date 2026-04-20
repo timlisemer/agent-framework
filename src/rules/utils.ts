@@ -46,18 +46,33 @@ export const LOW_RISK_TOOLS = [
 ];
 
 /**
+ * MCP tools excluded from the implicit `mcp__*` low-risk catch-all.
+ * These tools run potentially expensive operations (test suites, labeling
+ * sessions) and should go through full rule evaluation -- especially so
+ * that prediction-block can deny them when the user is angry/frustrated
+ * and has asked the assistant to stop. They are NOT slash-command-gated
+ * like RESTRICTED_MCP_TOOLS, just "not implicitly safe."
+ */
+const HEAVY_MCP_TOOLS: ReadonlySet<string> = new Set([
+  "mcp__agent-framework__test_harness_tester",
+  "mcp__agent-framework__test_harness_labeler",
+]);
+
+/**
  * True iff a tool is generally safe to allow without further checks.
  * Mirrors the predicate used by `low-risk-bypass` (priority 38) so the
  * sentiment prediction system aligns with the framework-wide allow set.
  *
  * Allows: anything in LOW_RISK_TOOLS, plus any `mcp__*` tool not in
- * `RESTRICTED_MCP_TOOLS` (commit/push/confirm -- intentional side-effect
- * gates that require explicit slash-command invocation).
+ * `RESTRICTED_MCP_TOOLS` (commit/push/confirm -- slash-command gated)
+ * and not in `HEAVY_MCP_TOOLS` (test-harness actions that run suites).
  */
 export function isLowRiskTool(toolName: string): boolean {
   return (
     LOW_RISK_TOOLS.includes(toolName) ||
-    (toolName.startsWith("mcp__") && !RESTRICTED_MCP_TOOLS.has(toolName))
+    (toolName.startsWith("mcp__")
+      && !RESTRICTED_MCP_TOOLS.has(toolName)
+      && !HEAVY_MCP_TOOLS.has(toolName))
   );
 }
 
