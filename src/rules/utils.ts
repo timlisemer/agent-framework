@@ -1,5 +1,6 @@
 import * as path from "path";
 import * as os from "os";
+import { RESTRICTED_MCP_TOOLS } from "../utils/slash-commands.js";
 
 // File tools that go through path-based risk classification (trusted/sensitive)
 // and write-specific gates (edit-intent, CLAUDE.md validation, plan-file validation,
@@ -49,13 +50,14 @@ export const LOW_RISK_TOOLS = [
  * Mirrors the predicate used by `low-risk-bypass` (priority 38) so the
  * sentiment prediction system aligns with the framework-wide allow set.
  *
- * Allows: anything in LOW_RISK_TOOLS, plus any `mcp__*` tool except those
- * ending in `commit|push|confirm` (which are intentional side-effect gates).
+ * Allows: anything in LOW_RISK_TOOLS, plus any `mcp__*` tool not in
+ * `RESTRICTED_MCP_TOOLS` (commit/push/confirm -- intentional side-effect
+ * gates that require explicit slash-command invocation).
  */
 export function isLowRiskTool(toolName: string): boolean {
   return (
     LOW_RISK_TOOLS.includes(toolName) ||
-    (toolName.startsWith("mcp__") && !/(commit|push|confirm)$/.test(toolName))
+    (toolName.startsWith("mcp__") && !RESTRICTED_MCP_TOOLS.has(toolName))
   );
 }
 

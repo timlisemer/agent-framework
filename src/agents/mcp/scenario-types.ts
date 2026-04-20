@@ -41,6 +41,26 @@ export type ScenarioBlock =
 export interface ScenarioUserEntry {
   role: "user";
   content: string | ScenarioBlock[];
+  /**
+   * When true the materialized jsonl line is marked `isMeta: true` --
+   * Claude Code's flag for system-injected user messages (slash-command
+   * bodies, stop-hook feedback, local-command-caveat). Required to
+   * reproduce live transcripts where the meta-skip filter changes which
+   * user message reaches rules like respond-first.
+   *
+   * TODO: make isMeta REQUIRED (remove the `?`). Every scenario author must
+   * declare true or false explicitly so the flag is never silently omitted.
+   * Same principle applies to every other currently-optional declaration on
+   * Scenario / ScenarioUserEntry / ScenarioAssistantEntry /
+   * ScenarioAssistantSplitEntry / ScenarioTarget / ScenarioEnv / seed_state:
+   * scenarios are a declarative contract, so every field the harness consults
+   * must be explicitly stated by the author (true/false, present/absent,
+   * value/[]). Optional-with-default hides intent and lets bugs slip in.
+   * Migration requires adding the field to every existing fixture under
+   * test-harness/fixtures/scenarios/ and to every stored copy under
+   * ~/.agent-framework/test-runs/scenarios/.
+   */
+  isMeta?: boolean;
 }
 
 export interface ScenarioAssistantEntry {
@@ -352,6 +372,11 @@ export function validateScenario(raw: unknown): Scenario {
       if (e.role === "assistant" && !Array.isArray(e.content)) {
         throw new Error(
           `scenario.transcript[${i}].content must be an array of blocks for assistant entries`,
+        );
+      }
+      if (e.role === "user" && e.isMeta !== undefined && typeof e.isMeta !== "boolean") {
+        throw new Error(
+          `scenario.transcript[${i}].isMeta must be a boolean when set`,
         );
       }
     } else {

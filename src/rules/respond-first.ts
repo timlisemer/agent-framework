@@ -50,15 +50,14 @@ export const respondFirstRule: PreToolRule = {
     await ctx.stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
 
     switch (state.kind) {
-      case "has-text":
+      case "responded":
         return {
           llmContext: `USER MESSAGE:\n${lastUser.content.slice(0, 500)}\n\nASSISTANT RESPONSE:\n${state.text.slice(0, 500)}`,
         };
-      case "no-text-definitive":
+      case "silent":
         return {
           fastDeny: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
         };
-      case "no-text-racing":
       case "no-current-turn":
         return null;
     }

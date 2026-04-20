@@ -22,16 +22,43 @@ How to turn an observed live hook output into a scenario that produces the same 
 
 The current turn's classification picks which rule gets first shot at the deny. The priority order is `respond-first` (5) → `plan-mode-block` (15) → `subagent` (20) → `prediction-question-judge` (28) → `question-validate` (30) → `force-check-required` (32) → `prediction-block` (35) → `low-risk` bypass path (38) → `drift-detect` (40) → `error-acknowledge` (50) → `trusted-path` (58) → `edit-intent` (60) → `style-drift` (65) → `gate` (70) → `tool-approve` (100).
 
-- **Single-line singleton, tool_use only** → `no-text-definitive` → `respond-first` fires fastDeny.
-- **Single-line singleton, text + tool_use** → `has-text` → `respond-first` contributes llmContext but does not fastDeny.
-- **Multi-line `assistant_split`, any shape without text in any line** → `no-text-racing` → `respond-first` returns null. Next priority rule wins.
-- **Single-line singleton with thinking + tool_use** → still `no-text-definitive` for a synthetic singleton (harness marks it). Different from real Claude Code flush behavior, which treats thinking+tool_use as racing unless the message id is a harness singleton marker.
+The classifier returns one of three states -- msg_id grouping is hidden inside the utility and NEVER leaks to rules:
 
-When the live bug was attributed to a non-`respond-first` rule, USE `assistant_split` with two or more `lines[]` sharing one `msg_id`. This forces `no-text-racing` and lets the real rule fire. Otherwise `respond-first` preempts and the scenario passes for the wrong reason.
+- **`responded`** -- the current-turn assistant group contains at least one text block (whether single-line or multi-line `assistant_split`). `respond-first` contributes llmContext but does not fastDeny.
+- **`silent`** -- the current-turn group has no text block at hook-fire time. Applies to both single-line singletons with tool_use only AND multi-line `assistant_split` without text in any sub-line. `respond-first` fastDenies.
+- **`no-current-turn`** -- no non-meta user entry precedes the firing tool_use (nothing to respond to). `respond-first` returns null.
+
+When authoring a scenario that should reach a NON-`respond-first` rule, include a text block in the assistant turn (put it in the same content array as the tool_use, or add a text sub-line in an `assistant_split`). A silent turn -- in any shape -- will always be taken by `respond-first` first.
+
+## Transcript user entries
+
+Every `user` entry in `scenario.transcript` has a required `isMeta: true | false` field (see `src/agents/mcp/scenario-types.ts :: ScenarioUserEntry`).
+
+- `isMeta: false` — a real user turn the person typed. Almost every entry is this.
+- `isMeta: true` — a system-injected user-role message Claude Code writes into the jsonl on your behalf. Examples from real transcripts: the body text attached to a slash command (`You MUST use the MCP tools ...`), `<local-command-caveat>` lines from `!`-prefixed bash, stop-hook feedback echoed back. `excludeMetaMessages` (default true in `readTranscriptExact`) skips these so system blurbs don't get mistaken for real instructions.
+
+The flag matters for rule behavior when the newest user-role entry is meta. `newestUserWasSlashCommand` in `src/utils/transcript.ts` is computed on the FIRST user-role entry encountered during backward iteration, which can be the meta entry that Claude Code wrote AFTER the real slash-command line. If that meta entry lacks the `<command-name>` tag, the flag becomes false and respond-first fails to skip — exactly the live bug captured in `respond-first-cites-plan-approved-after-slash-command-should-allow.json`. You cannot reproduce that bug class without setting `isMeta: true` on the right entry.
+
+When authoring a scenario that mirrors a `/slash` command live turn, the pattern is:
+
+```json
+{ "role": "user", "isMeta": false, "content": "<command-message>quickpush</command-message>\n<command-name>/quickpush</command-name>" },
+{ "role": "user", "isMeta": true, "content": [{ "type": "text", "text": "You MUST use the MCP tools ..." }] }
+```
+
+Two user entries per slash invocation, meta-flag on the body only.
+
+## MCP Zod vs on-disk scenario files
+
+The scenario JSON on disk is the declarative source of truth. The MCP `run_scenario` tool accepts an inline `scenario` parameter that goes through a Zod schema at the MCP boundary — Zod strips any field it doesn't know about. If a new scenario field has been added to `src/agents/mcp/scenario-types.ts` and the validator but NOT yet mirrored into the Zod schema in `src/mcp/server.ts`, inline-passed scenarios silently lose that field even though editing the on-disk scenario.json works fine.
+
+If inline passes behave differently from on-disk runs, verify the Zod schema in `src/mcp/server.ts` mirrors the authoritative type in `src/agents/mcp/scenario-types.ts`. The MCP server process also has to be restarted after rebuilding for the updated Zod to take effect.
 
 ## Seeding
 
 `seed_state` is REQUIRED — the harness rejects scenarios without it. Every field of `SessionState` must be declared; partials get merged with defaults.
+
+An optional `seed_state.toolLog: ToolLogEntry[]` pre-populates `cache/tool-log.jsonl` with prior tool-call entries before the target hook fires. Use this to reproduce live behavior for rules that read the session tool log (`drift-detect`'s repetition heuristic, `force-check-required`'s denial cache). Each entry requires `tool`, `status`, `gate`; `ts` and `ms` default to monotonic values (older entries older) when omitted. Without seeded entries those rules see an empty log and never fire.
 
 ```json
 "seed_state": {

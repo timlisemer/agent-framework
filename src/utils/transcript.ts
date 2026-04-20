@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import { stripQuotedAndPastedContent } from "./quote-detection.js";
+import { SLASH_COMMAND_ALLOWED_TOOLS } from "./slash-commands.js";
 
 /**
  * Claude Code Interruption Message Filter
@@ -303,6 +304,7 @@ function isSlashCommandPrompt(content: string): boolean {
   return /<command-name>\s*\//.test(content);
 }
 
+
 /**
  * Extract slash command metadata from a slash command system prompt.
  * Returns null if the content is not a slash command prompt.
@@ -314,6 +316,20 @@ function isSlashCommandPrompt(content: string): boolean {
  * Also attempts to infer the command name from the content or allowed-tools.
  */
 function extractSlashCommandMetadata(content: string): SlashCommandContext | null {
+  // Live path: Claude Code strips YAML frontmatter when materializing the
+  // slash-command body into the jsonl. The invocation tag
+  // <command-name>/NAME</command-name> appears on a separate user entry
+  // WITHOUT frontmatter. Detect the tag and resolve allowed-tools from
+  // the command file on disk.
+  const tagMatch = content.match(/<command-name>\s*\/([\w-]+)\s*<\/command-name>/);
+  if (tagMatch) {
+    const tagName = tagMatch[1];
+    const mapped = SLASH_COMMAND_ALLOWED_TOOLS[tagName];
+    if (mapped) {
+      return { commandName: tagName, allowedTools: [...mapped] };
+    }
+  }
+
   // Must have YAML frontmatter
   if (!content.startsWith("---")) {
     return null;
@@ -760,28 +776,27 @@ export async function readTranscriptExact(
 }
 
 export type CurrentTurnAssistantState =
-  | { kind: "has-text"; text: string; msgId?: string }
   | { kind: "no-current-turn" }
-  | { kind: "no-text-definitive"; msgId?: string; toolUseIds: string[] }
-  | { kind: "no-text-racing"; msgId: string; toolUseIds: string[] };
+  | { kind: "responded"; text: string; toolUseIds: string[] }
+  | { kind: "silent"; toolUseIds: string[] };
 
 /**
- * Classify the current turn's assistant state for a PreToolUse hook.
+ * Answer "has the current turn's assistant responded with text?" for a
+ * PreToolUse hook, collapsing all `message.id` grouping concerns inside
+ * this utility. Downstream rules MUST NOT reason about msg_id, multi-line
+ * flush, or sibling entry counts.
  *
- * Claude Code writes one logical assistant message as multiple jsonl lines
- * sharing a `message.id`, and those siblings can be flushed to disk out of
- * stream order. Consumers that want to know "has the assistant responded
- * with text on the current turn yet?" must reason about the whole msg_id
- * group, not the individual line that the hook happens to observe first.
+ * Internally, `buildAssistantGroups` collapses jsonl lines sharing a
+ * `message.id` into one logical group. The group's text is the
+ * concatenation of every text block across all sibling lines. Callers get
+ * one of three states:
  *
- * - `has-text`: at least one sibling line carries a text block. Safe to
- *   treat as "responded".
- * - `no-current-turn`: no user message follows the last assistant boundary.
- * - `no-text-definitive`: the current-turn group is a single jsonl line
- *   with no text and no thinking — a genuine "straight to tools" turn.
- * - `no-text-racing`: the group spans multiple jsonl lines OR has a
- *   thinking sibling but no text yet. Claude Code is mid-flush; callers
- *   MUST NOT deny on this state.
+ * - `no-current-turn`: no non-meta user entry precedes the firing
+ *   assistant turn (nothing to respond to).
+ * - `responded`: the current-turn group contains at least one text block.
+ * - `silent`: the current-turn group has no text block at hook-fire time.
+ *   This is the single "no-text" state, whether the group is a single
+ *   jsonl line or a multi-line `assistant_split`.
  */
 export async function currentTurnAssistantState(
   transcriptPath: string,
@@ -836,36 +851,9 @@ export async function currentTurnAssistantState(
   }
 
   if (current.text.length > 0) {
-    return { kind: "has-text", text: current.text, msgId: current.msgId };
+    return { kind: "responded", text: current.text, toolUseIds: current.toolUseIds };
   }
-
-  const isSingleton = current.msgId.startsWith("__singleton_");
-  // Multi-line group without text: Claude Code is splitting this message
-  // across jsonl lines and the text sibling hasn't flushed yet.
-  if (current.entryCount > 1) {
-    return {
-      kind: "no-text-racing",
-      msgId: current.msgId,
-      toolUseIds: current.toolUseIds,
-    };
-  }
-  // Same-line thinking without text on a group whose id is a real msg_id
-  // (not a singleton synthetic key) — treat as racing. A singleton with
-  // thinking and tool_use in the same content array is the scenario
-  // harness's genuine "straight to tools" test case.
-  if (current.hasThinking && !isSingleton) {
-    return {
-      kind: "no-text-racing",
-      msgId: current.msgId,
-      toolUseIds: current.toolUseIds,
-    };
-  }
-
-  return {
-    kind: "no-text-definitive",
-    msgId: isSingleton ? undefined : current.msgId,
-    toolUseIds: current.toolUseIds,
-  };
+  return { kind: "silent", toolUseIds: current.toolUseIds };
 }
 
 /**

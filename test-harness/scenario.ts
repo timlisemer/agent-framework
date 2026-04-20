@@ -209,6 +209,7 @@ function buildAllTranscriptLines(
         timestamp,
         permissionMode,
       };
+      if (entry.isMeta === true) line.isMeta = true;
       prevUuid = uuid;
       allLines.push(JSON.stringify(line));
     } else if (entry.role === "assistant") {

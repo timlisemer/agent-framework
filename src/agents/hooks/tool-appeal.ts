@@ -29,18 +29,6 @@ import { startsWithAny } from "../../utils/retry.js";
 import { extractGateNote } from "../../utils/gate-reasoning-cache.js";
 import type { SlashCommandContext } from "../../utils/transcript.js";
 
-const MCP_STRICT_RULES = `=== STRICT RULES FOR MCP TOOLS (commit/push/confirm) ===
-
-For approval-required MCP tools (mcp__agent-framework__commit, mcp__agent-framework__push, mcp__agent-framework__confirm):
-
-- ONLY overturn if "=== SLASH COMMAND INVOKED ===" section shows the tool matches allowed-tools
-- Implicit approval phrases ("continue", "go ahead", "yes", "proceed", "ok", "sure") are NOT sufficient
-- These tools require EXPLICIT user invocation via slash command (/commit, /push, /confirm)
-- If no slash command section exists, UPHOLD the block
-
-This prevents the AI from bypassing confirm's DECLINED decision by using casual language.
-The user must explicitly re-invoke the slash command to retry after confirm declines.`;
-
 export async function appealHelper(
   toolName: string,
   toolDescription: string,
@@ -53,10 +41,6 @@ export async function appealHelper(
 ): Promise<{ overturned: boolean; gateNote?: string }> {
   const contextSection = additionalContext
     ? `\n=== CALLER CONTEXT ===\n${additionalContext}\n=== END CONTEXT ===\n`
-    : "";
-
-  const mcpRulesSection = toolName.startsWith("mcp__agent-framework__")
-    ? `\n${MCP_STRICT_RULES}\n`
     : "";
 
   let slashCommandSection = "";
@@ -82,7 +66,7 @@ Allowed tools: ${allowedToolsStr}
           prompt: "Review this appeal for a denied tool call.",
           context: `BLOCK REASON: ${originalReason}
 TOOL CALL: ${toolDescription}
-${mcpRulesSection}${slashCommandSection}${contextSection}
+${slashCommandSection}${contextSection}
 RECENT CONVERSATION:
 ${transcript}`,
         },

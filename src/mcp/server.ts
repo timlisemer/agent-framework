@@ -459,6 +459,7 @@ const scenarioSchema = z.object({
       content: z.union([z.string(), z.array(scenarioBlockSchema)]),
       uuid: z.string().optional(),
       parentUuid: z.string().nullable().optional(),
+      isMeta: z.boolean().optional(),
     }),
     z.object({
       role: z.literal("assistant_split"),

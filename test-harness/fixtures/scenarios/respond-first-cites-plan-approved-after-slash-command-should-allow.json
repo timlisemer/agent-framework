@@ -1,0 +1,89 @@
+{
+  "name": "respond-first-cites-plan-approved-after-slash-command-should-allow",
+  "description": "Live repro from ~/.claude/projects/-home-tim-Coding-nixos-files-ags/1ce7bbee-3ab5-4eec-b834-602d4663c3db.jsonl (lines 260, 300, 301, 305-306). User approved a plan yesterday (synthetic 'Plan approved. Proceed with implementation.' user msg at line 260), then today invoked /quickpush. Claude Code wrote two user-role entries for the slash command: line 300 carries the `<command-name>/quickpush</command-name>` tag, line 301 carries the slash-command body text ('You MUST use the MCP tools...') WITH `isMeta: true`. Assistant called mcp__agent-framework__commit with no preceding text. PreToolUse hook fastDenied: 'You must respond to the user with text before calling tools. The user said: \"Plan approved. Proceed with implementation.\"'. Bug: in src/utils/transcript.ts readTranscriptExact (~line 644) the `newestUserWasSlashCommand` flag is set on the FIRST user-role entry encountered during backward iteration, BEFORE the `excludeMetaMessages` filter. Line 301 (meta) is hit before line 300 (slash). Line 301's content lacks the `<command-name>` tag, so the flag becomes false. The meta filter then skips line 301, the slash filter skips line 300, leaving line 260 ('Plan approved...') as `lastUser`, and respond-first fastDenies citing it. Expected: allow -- newest user turn IS a slash command and respond-first must skip. This scenario is EXPECTED TO FAIL against current code.",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Plan approved. Proceed with implementation."
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_prior_exitplanmode",
+          "name": "ExitPlanMode",
+          "input": { "plan": "# Plan (elided)" }
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        { "type": "tool_result", "tool_use_id": "toolu_prior_exitplanmode", "content": "[ExitPlanMode] Exiting plan mode." }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "<command-message>quickpush</command-message>\n<command-name>/quickpush</command-name>"
+    },
+    {
+      "role": "user",
+      "isMeta": true,
+      "content": [
+        {
+          "type": "text",
+          "text": "You MUST use the MCP tools listed in allowed-tools above. Under NO circumstances use raw git commands (git commit, git push, git add, etc.) directly.\n\n1. Call mcp__agent-framework__commit with:\n   - working_dir: current working directory\n   - model_tier: \"haiku\"\n   - skip_elicitation: true\n   - auto_push: true\n\n2. Report the commit and push results to the user.\n"
+        }
+      ]
+    },
+    {
+      "role": "assistant_split",
+      "msg_id": "msg_scenario_quickpush_commit",
+      "lines": [
+        {
+          "blocks": [
+            {
+              "type": "tool_use",
+              "id": "toolu_scenario_quickpush_commit",
+              "name": "mcp__agent-framework__commit",
+              "input": {
+                "working_dir": "/home/tim/Coding/nixos/files/ags",
+                "model_tier": "haiku",
+                "skip_elicitation": true,
+                "auto_push": true
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "toolu_scenario_quickpush_commit"
+  },
+  "env": {
+    "cwd": "/home/tim/Coding/nixos/files/ags",
+    "permission_mode": "default"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "User invoked /quickpush after approving a plan; assistant must commit and push.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "/quickpush"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
+  },
+  "expect": {
+    "expected": "allow",
+    "by": "all-rules",
+    "notes": "Newest non-meta user turn is a slash command; respond-first must skip. Fix: the `newestUserWasSlashCommand` detection in readTranscriptExact must skip meta messages when finding the 'newest' user entry -- or look across all non-meta user entries until it finds the slash-command tag."
+  }
+}
