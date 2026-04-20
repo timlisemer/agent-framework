@@ -529,6 +529,7 @@ const scenarioSchema = z.object({
       nextWindowSize: z.number().optional(),
       contextSwitch: z.enum(["yes", "no"]).optional(),
       questionIsStalling: z.enum(["yes", "no", "n/a"]).optional(),
+      actionAligned: z.enum(["yes", "no", "n/a"]).optional(),
     }),
     forceCheckPending: z.boolean(),
     frustrationStreak: z.number().int().nonnegative(),

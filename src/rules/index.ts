@@ -6,6 +6,7 @@ import { subagentRule } from "./subagent.js";
 import { questionValidateRule } from "./question-validate.js";
 import { forceCheckRequiredRule } from "./force-check-required.js";
 import { predictionQuestionJudgeRule } from "./prediction-question-judge.js";
+import { predictionActionJudgeRule } from "./prediction-action-judge.js";
 import { predictionBlockRule } from "./prediction-block.js";
 import { driftDetectRule } from "./drift-detect.js";
 import { errorAcknowledgeRule } from "./error-acknowledge.js";
@@ -26,6 +27,7 @@ export const ALL_RULES: PreToolRule[] = [
   questionValidateRule,
   forceCheckRequiredRule,
   predictionQuestionJudgeRule,
+  predictionActionJudgeRule,
   predictionBlockRule,
   driftDetectRule,
   errorAcknowledgeRule,

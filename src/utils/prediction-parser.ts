@@ -89,7 +89,7 @@ export function parseSentimentOutput(raw: string): ParsedPrediction | null {
   const nextWindowRaw = extractSection(raw, "---NEXT-WINDOW-SIZE---", "---CONTEXT-SWITCH---");
   const switchRaw = extractSection(raw, "---CONTEXT-SWITCH---", "---QUESTION-IS-STALLING---");
   const stallingRaw = extractSection(raw, "---QUESTION-IS-STALLING---", "---BLOCK-ALL-TOOLS---");
-  const blockAllRaw = extractSection(raw, "---BLOCK-ALL-TOOLS---");
+  const blockAllRaw = extractSection(raw, "---BLOCK-ALL-TOOLS---", "---ACTION-ALIGNED---");
   const nextWindowSize = nextWindowRaw ? parseInt(nextWindowRaw.trim(), 10) || 2 : 2;
   const contextSwitch: "yes" | "no" = switchRaw?.trim() === "yes" ? "yes" : "no";
   const questionIsStalling: "yes" | "no" | "n/a" =
@@ -99,6 +99,14 @@ export function parseSentimentOutput(raw: string): ParsedPrediction | null {
         ? "no"
         : "n/a";
   const blockAllTools = blockAllRaw?.trim().toLowerCase() === "yes";
+
+  const actionAlignedRaw = extractSection(raw, "---ACTION-ALIGNED---");
+  const actionAligned: "yes" | "no" | "n/a" =
+    actionAlignedRaw?.trim() === "yes"
+      ? "yes"
+      : actionAlignedRaw?.trim() === "no"
+        ? "no"
+        : "n/a";
 
   return {
     mood,
@@ -111,6 +119,7 @@ export function parseSentimentOutput(raw: string): ParsedPrediction | null {
     nextWindowSize,
     contextSwitch,
     questionIsStalling,
+    actionAligned,
   };
 }
 

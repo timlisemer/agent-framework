@@ -236,6 +236,7 @@ export interface Scenario {
       nextWindowSize?: number;
       contextSwitch?: ToolPrediction["contextSwitch"];
       questionIsStalling?: ToolPrediction["questionIsStalling"];
+      actionAligned?: ToolPrediction["actionAligned"];
     };
     forceCheckPending: boolean;
     frustrationStreak: number;
@@ -1052,6 +1053,12 @@ function validateSeedCurrentPrediction(p: Record<string, unknown>): void {
       'scenario.seed_state.currentPrediction.questionIsStalling must be "yes", "no", or "n/a" when set',
     );
   }
+  const aa = p.actionAligned;
+  if (aa !== undefined && aa !== "yes" && aa !== "no" && aa !== "n/a") {
+    throw new Error(
+      'scenario.seed_state.currentPrediction.actionAligned must be "yes", "no", or "n/a" when set',
+    );
+  }
   const knownFields = [
     "mood",
     "trust",
@@ -1065,6 +1072,7 @@ function validateSeedCurrentPrediction(p: Record<string, unknown>): void {
     "nextWindowSize",
     "contextSwitch",
     "questionIsStalling",
+    "actionAligned",
   ];
   for (const k of Object.keys(p)) {
     if (!knownFields.includes(k)) {

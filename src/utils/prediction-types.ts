@@ -55,6 +55,14 @@ export interface ToolPrediction {
    * Otherwise "n/a".
    */
   questionIsStalling?: "yes" | "no" | "n/a";
+  /**
+   * Only meaningful when SENTIMENT_AGENT was invoked with CANDIDATE-TOOL-CALL
+   * context by prediction-action-judge. Otherwise "n/a".
+   * "yes" = the candidate tool call serves the user's stated intent.
+   * "no"  = the candidate tool call does NOT serve the user's stated intent
+   *         (tangential file inspection, workflow-violating command, deflection).
+   */
+  actionAligned?: "yes" | "no" | "n/a";
 }
 
 export interface PredictionDecision {
