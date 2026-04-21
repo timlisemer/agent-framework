@@ -260,6 +260,18 @@ export interface Scenario {
       reason?: string;
       ms?: number;
     }>;
+    /**
+     * Optional graduated drift-block state keyed by absolute target path. Use
+     * this to reproduce `Final Warning:` / `Error:` transitions without
+     * replaying the whole prior-denial history — seed `level` directly.
+     */
+    driftState?: Record<
+      string,
+      {
+        level: 0 | 1 | 2 | 3;
+        allowedSinceLevelChange: number;
+      }
+    >;
   };
 }
 
@@ -905,7 +917,7 @@ function validateScenarioSeedState(r: Record<string, unknown>): void {
     "frustrationStreak",
     "currentWindowSize",
   ];
-  const optionalTopFields = ["toolLog"];
+  const optionalTopFields = ["toolLog", "driftState"];
   for (const k of requiredTopFields) {
     if (s[k] === undefined) {
       throw new Error(`scenario.seed_state.${k} is required`);
@@ -920,6 +932,9 @@ function validateScenarioSeedState(r: Record<string, unknown>): void {
   }
   if (s.toolLog !== undefined) {
     validateSeedToolLog(s.toolLog);
+  }
+  if (s.driftState !== undefined) {
+    validateSeedDriftState(s.driftState);
   }
   if (typeof s.forceCheckPending !== "boolean") {
     throw new Error("scenario.seed_state.forceCheckPending must be a boolean");
@@ -1118,6 +1133,53 @@ function validateSeedToolLog(value: unknown): void {
       if (!stringFields.includes(k) && !numberFields.includes(k)) {
         throw new Error(
           `scenario.seed_state.toolLog[${i}].${k} is not a recognized ToolLogEntry field`,
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Validate the optional `scenario.seed_state.driftState` map. Keys are target
+ * paths; values must carry `level` (0-3) and a non-negative
+ * `allowedSinceLevelChange` integer.
+ */
+function validateSeedDriftState(value: unknown): void {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(
+      "scenario.seed_state.driftState must be an object keyed by target path when set",
+    );
+  }
+  for (const [target, raw] of Object.entries(value)) {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      throw new Error(
+        `scenario.seed_state.driftState[${JSON.stringify(target)}] must be an object`,
+      );
+    }
+    const entry = raw as Record<string, unknown>;
+    if (
+      typeof entry.level !== "number" ||
+      !Number.isInteger(entry.level) ||
+      entry.level < 0 ||
+      entry.level > 3
+    ) {
+      throw new Error(
+        `scenario.seed_state.driftState[${JSON.stringify(target)}].level must be an integer 0-3`,
+      );
+    }
+    if (
+      typeof entry.allowedSinceLevelChange !== "number" ||
+      !Number.isInteger(entry.allowedSinceLevelChange) ||
+      entry.allowedSinceLevelChange < 0
+    ) {
+      throw new Error(
+        `scenario.seed_state.driftState[${JSON.stringify(target)}].allowedSinceLevelChange must be a non-negative integer`,
+      );
+    }
+    for (const k of Object.keys(entry)) {
+      if (k !== "level" && k !== "allowedSinceLevelChange") {
+        throw new Error(
+          `scenario.seed_state.driftState[${JSON.stringify(target)}].${k} is not a recognized field`,
         );
       }
     }

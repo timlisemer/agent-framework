@@ -592,6 +592,7 @@ async function main() {
       forceCheckPending: scenario.seed_state.forceCheckPending,
       frustrationStreak: scenario.seed_state.frustrationStreak,
       currentWindowSize: scenario.seed_state.currentWindowSize,
+      driftState: scenario.seed_state.driftState ?? {},
     };
     fs.writeFileSync(
       path.join(cacheDir, "state.json"),

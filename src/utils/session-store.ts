@@ -30,6 +30,18 @@ export interface ToolLogEntry {
   ms: number;
 }
 
+/**
+ * Per-target state for graduated drift-block repetition detection.
+ * level 0 = normal, 1 = post-Warning, 2 = post-Final-Warning, 3 = hard-errored.
+ * allowedSinceLevelChange counts allowed edits since the last level-up; the
+ * drift-detect rule uses it to enforce the "3 free then Final Warning" and
+ * "1 free then Error" bypass windows.
+ */
+export interface DriftTargetState {
+  level: 0 | 1 | 2 | 3;
+  allowedSinceLevelChange: number;
+}
+
 export interface SessionState {
   toolCallCount: number;
   currentEditIntent: boolean | null;
@@ -60,6 +72,11 @@ export interface SessionState {
    * Set by previous turn's agent via NEXT-WINDOW-SIZE output, clamped TS-side.
    */
   currentWindowSize: number;
+  /**
+   * Per-target drift-block escalation state, keyed by absolute file path.
+   * Written by drift-detect rule on allow-path increments and level-ups.
+   */
+  driftState: Record<string, DriftTargetState>;
 }
 
 /**
@@ -80,6 +97,7 @@ export function sessionStateDefaults(): SessionState {
     forceCheckPending: false,
     frustrationStreak: 0,
     currentWindowSize: 2,
+    driftState: {},
   };
 }
 

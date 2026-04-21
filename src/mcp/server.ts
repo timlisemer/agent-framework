@@ -554,6 +554,13 @@ const scenarioSchema = z.object({
       reason: z.string().optional(),
       ms: z.number().optional(),
     })).optional(),
+    driftState: z.record(
+      z.string(),
+      z.object({
+        level: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
+        allowedSinceLevelChange: z.number().int().nonnegative(),
+      }),
+    ).optional(),
   }),
 });
 
