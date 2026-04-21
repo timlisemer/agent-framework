@@ -7,8 +7,16 @@ import { runConfirmAgent } from "../agents/mcp/confirm.js";
 import { runCommitAgent } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
 import { runValidateIntentAgent } from "../agents/mcp/validate-intent.js";
-import { handleTestHarnessLabeler } from "../agents/mcp/test-harness-labeler.js";
-import { handleTestHarnessTester } from "../agents/mcp/test-harness-tester.js";
+import { handleTestHarnessLabeler, LABELER_HELP } from "../agents/mcp/test-harness-labeler.js";
+import { handleTestHarnessTester, TESTER_HELP } from "../agents/mcp/test-harness-tester.js";
+import {
+  CHECK_HELP,
+  CONFIRM_HELP,
+  COMMIT_HELP,
+  PUSH_HELP,
+  LIST_REPOS_HELP,
+  VALIDATE_INTENT_HELP,
+} from "./help-docs.js";
 import { getRepoInfo } from "../utils/git-utils.js";
 import { initializeTelemetry } from "../telemetry/index.js";
 import {
@@ -579,6 +587,49 @@ server.registerTool(
     return { content: [{ type: "text", text: result }] };
   }
 );
+
+// ─── Help Resources ────────────────────────────────────────────────────────
+// Each tool's help documentation is exposed as a resource so clients calling
+// resources/list (e.g. Claude Code's ListMcpResourcesTool) can discover them
+// and then fetch the body via resources/read.
+
+const HELP_RESOURCES: Array<{
+  tool: string;
+  title: string;
+  summary: string;
+  body: string;
+}> = [
+  { tool: "check", title: "check -- Help", summary: "Linter + type-check summarizer", body: CHECK_HELP },
+  { tool: "confirm", title: "confirm -- Help", summary: "Code quality gate", body: CONFIRM_HELP },
+  { tool: "commit", title: "commit -- Help", summary: "Quality-gated git commit", body: COMMIT_HELP },
+  { tool: "push", title: "push -- Help", summary: "Git push wrapper", body: PUSH_HELP },
+  { tool: "list_repos", title: "list_repos -- Help", summary: "Repo + submodule status", body: LIST_REPOS_HELP },
+  { tool: "validate_intent", title: "validate_intent -- Help", summary: "User intention alignment check", body: VALIDATE_INTENT_HELP },
+  { tool: "test_harness_tester", title: "test_harness_tester -- Help", summary: "Test harness tester (transcripts + scenarios)", body: TESTER_HELP },
+  { tool: "test_harness_labeler", title: "test_harness_labeler -- Help", summary: "Test harness transcript labeler", body: LABELER_HELP },
+];
+
+for (const { tool, title, summary, body } of HELP_RESOURCES) {
+  const uri = `help://${tool}`;
+  server.registerResource(
+    `${tool}-help`,
+    uri,
+    {
+      title,
+      description: summary,
+      mimeType: "text/markdown",
+    },
+    async (resourceUri) => ({
+      contents: [
+        {
+          uri: resourceUri.toString(),
+          mimeType: "text/markdown",
+          text: body,
+        },
+      ],
+    })
+  );
+}
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

@@ -444,7 +444,7 @@ export async function handleTestHarnessTester(input: TesterInput): Promise<strin
 
 // ─── Help Documentation ────────────────────────────────────────────────────
 
-const TESTER_HELP = `# Test Harness Tester -- Full Workflow Reference
+export const TESTER_HELP = `# Test Harness Tester -- Full Workflow Reference
 
 ## Two testing modes
 

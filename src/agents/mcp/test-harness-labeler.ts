@@ -891,7 +891,7 @@ export async function handleTestHarnessLabeler(input: LabelerInput): Promise<str
 
 // ─── Help Documentation ────────────────────────────────────────────────────
 
-const LABELER_HELP = `# Test Harness Labeler -- Complete Reference
+export const LABELER_HELP = `# Test Harness Labeler -- Complete Reference
 
 ## Purpose
 
