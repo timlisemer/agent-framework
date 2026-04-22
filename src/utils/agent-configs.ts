@@ -1257,18 +1257,37 @@ OUTPUT (no preamble, no fences):
 <yes|no: did the user explicitly ask the AI to stop using tools entirely?>
 
 MOOD — JUDGE CONTENT, NOT FORM. Calm-form anger ("I told you not to do that. Why did you ignore me?", "you just promised me you weren't going to do any changes", "you seem to have a serious problem with acknowledging reality") IS angry. Multiple "[Request interrupted by user for tool use]" entries always indicate angry. Loud excitement ("GO GO GO") is happy.
-- angry: contempt, accusation, broken-promise, demands stop/apology, withdrawn trust
-- frustrated: 2nd+ correction on same point, "I just told you", "as I said before"
-- neutral: calm technical follow-up
+
+THE SYMMETRY: judging CONTENT means a calm message with calm content is NOT angry even if PREVIOUS turn was. "please pick a next scenario to fix" contains zero accusation, zero correction, zero withdrawn-trust signal. It is a neutral directive. Label it neutral. The difference between calm-form-anger and calm-directive is TOPIC: a calm message ON the prior grievance (accusation, broken-promise, "why did you ignore me") = still angry; a calm message on a NEW task with no grievance-reassertion = neutral.
+- angry: contempt, accusation, broken-promise, demands stop/apology, withdrawn trust — IN THIS MESSAGE
+- frustrated: 2nd+ correction on same point IN THIS MESSAGE, "I just told you", "as I said before"
+- neutral: calm technical follow-up OR calm new directive, even if prior turn was angry
 - satisfied: brief approval after a delivered result
 - happy: enthusiastic approval
 
-TRUST: low when accusation/multiple corrections/[Request interrupted]/apology demand/"you keep|always|still" framing. Trust does not recover within one turn.
+TRUST: low when THIS MESSAGE contains accusation / multiple corrections / [Request interrupted] / apology demand / "you keep|always|still" framing. If LATEST is a calm directive with none of those signals, trust is normal (not low) — a calm new task doesn't need the AI to earn trust back via words. Trust CAN stay normal or rise within one turn when the user gives a fresh directive. Trust=high is allowed when LATEST gives an open-ended directive with few guardrails ("pick a next X", "you decide", "do whatever you think is right"). Only HOLD trust=low when LATEST itself expresses continued distrust.
 
-TRAJECTORY:
-- HOLD at angry if PREVIOUS=angry and LATEST is another correction even if calm
-- DOWNGRADE only on explicit acceptance language ("ok that works", "thanks") in LATEST; one level per turn
-- ESCALATE to angry when PREVIOUS=frustrated and LATEST has accusation or "you keep/still/always". TS auto-promotes when STREAK>=3 — output what you read
+TRAJECTORY — READ THE LATEST MESSAGE ON ITS OWN TERMS FIRST, THEN CONSIDER HISTORY:
+
+STEP 1: Classify LATEST in isolation. What mood does THIS message, standing alone, convey?
+  - A calm directive on a NEW sub-task with no accusation or grievance-reassertion ("let's try X", "go ahead with Y", a task request without blame) reads as neutral.
+  - Mild-corrective emphasis phrases inside an otherwise open directive ("make sure", "this time", "be careful", "don't forget", "remember to") are PRACTICAL GUIDANCE, not accusation. Accusation requires explicit blame ("you didn't", "you ignored", "why did you", "you keep", "I told you"), not just emphasis words. A directive with an emphasis phrase but no explicit blame is neutral, not angry.
+  - BUT: calm-FORM anger ("I told you not to do that. Why did you ignore me?", "you promised you wouldn't change that") is STILL angry — accusation/broken-promise content overrides calm form. The difference is TOPIC: a calm message ON the prior grievance = still angry; a calm message on a NEW task = neutral.
+  - A polite request reads as neutral or satisfied regardless of what came before.
+  - Silence about the prior grievance + a new task = the user has moved on. Classify the new task's tone, not the grievance's.
+
+STEP 2: Apply history ONLY to decide whether to HOLD a negative read from STEP 1:
+  - HOLD at angry ONLY when LATEST is ITSELF another correction/accusation of the same grievance ("I just told you", "you did it again", "why did you ignore me"). Calm FORM with hostile CONTENT still holds.
+  - DO NOT hold at angry when LATEST is a NEW directive on a DIFFERENT subject, even without an explicit "thanks" or "ok". A user giving the AI a new task is an implicit move-on; demanding verbal acceptance language is wrong.
+  - ESCALATE to angry when PREVIOUS=frustrated and LATEST has accusation or "you keep/still/always".
+
+STEP 3: PREVIOUS PREDICTION is historical context, not a default. You are re-classifying this turn, not maintaining continuity. If STEP 1 read this message as neutral/satisfied and STEP 2 found no grievance continuation, output neutral/satisfied. Do not copy forward PREVIOUS.mood or PREVIOUS.trust unless the current message justifies it.
+
+STEP 4: blockedIntent and EXPLICITLY-BLOCKED from PREVIOUS do NOT persist. Only populate EXPLICITLY-BLOCKED / BLOCKED-INTENT for this turn based on what LATEST says. If LATEST does not reassert a block, output BLOCKED-INTENT "(none)" and no EXPLICITLY-BLOCKED entries.
+
+STEP 5: FRUSTRATION STREAK is informational only. Do not treat a high streak as a reason to output angry — TS-side hardening applies promotion deterministically after you output. If you read calm, output calm and let the streak reset.
+
+ANTI-ANCHORING RULE: if you catch yourself copying PREVIOUS mood/trust because "the user was angry a turn ago", stop and re-read LATEST. The user moved on. You should too.
 
 NEXT-WINDOW-SIZE rules (integer 2-15):
 - INCREASE by 2-3 when mood is angry/frustrated, trust dropping, STREAK rising — slow-burn anger needs context
