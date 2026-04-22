@@ -63,7 +63,7 @@
   },
   "expect": {
     "expected": "deny",
-    "by": "prediction-action-judge",
+    "by": "tool-approve",
     "notes": "`npx tsc --noEmit` matches the blacklist pattern `/\\b(tsc|npx\\s+tsc)\\b/` in src/utils/command-patterns.ts (name: 'tsc', alternative: 'You must run mcp__agent-framework__check'). The deny must come from tool-approve's deterministic blacklist fastDeny path (gate=tool-approve in tool-log), with the reason citing `tsc` and pointing at `mcp__agent-framework__check`. In the live session it instead denied via a sentiment/trust message ('User appears frustrated') — that is the wrong reason for a typecheck invocation and shadows the actionable guidance (use the MCP check). Observed good reason: \"tsc covered by just check (via tsc). You must run mcp__agent-framework__check\"."
   },
   "seed_state": {

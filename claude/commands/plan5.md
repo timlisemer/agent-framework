@@ -8,6 +8,16 @@ $ARGUMENTS
 
 Follow these steps exactly. Do NOT skip any step.
 
+## CRITICAL: Subagents do NOT share your context
+
+Subagents start with ZERO knowledge of this conversation. They cannot see:
+- Prior messages between you and the user
+- Files you have already read
+- Analysis, theories, hypotheses, or decisions reached in this session
+- Anything the user refers to by reference ("your theory", "the bug we discussed", "that file", "the issue from earlier")
+
+If the user's task description is something like "validate your theory" or "fix the issue we found", YOU are the parent agent that knows what the theory or issue is -- the subagent does not. You MUST spell out the full context inside the subagent prompt: state the theory explicitly, describe the issue in full, paste the relevant code snippets and file paths, list the symptoms and the hypothesis, name the functions involved. Anywhere the prompt template below says `{paste $ARGUMENTS here}`, expand it into a self-contained briefing that a cold reader could act on. If you just forward a vague phrase, the subagent will invent its own interpretation and the run is wasted.
+
 ## Step 1: Launch 5 Plan agents in parallel
 
 You MUST call the Agent tool exactly 5 times in your SINGLE NEXT RESPONSE. All 5 Agent tool calls go in ONE message -- do NOT send one agent, wait for it, then send the next. You must emit all 5 tool_use blocks together so they run concurrently. If you only launch 1 agent, you have failed this step.
