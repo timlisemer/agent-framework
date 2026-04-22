@@ -40,5 +40,19 @@
   },
   "expect": {
     "expected": "allow"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "user asked why the sentiment system missed something; the assistant answered; the user then ran the /quickpush slash command",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "why didn't the sentiment system catch it?"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
   }
 }

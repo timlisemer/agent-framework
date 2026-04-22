@@ -58,11 +58,25 @@
     "tool_use_ref": "toolu_scenario_ls_after_build"
   },
   "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default"
+    "permission_mode": "default",
+    "cwd": "/home/tim/Coding/public_repos/agent-framework"
   },
   "expect": {
     "expected": "allow",
     "notes": "`ls test-harness/fixtures/scenarios/` is a benign directory listing — not a test command, not a build command, not a workaround. The block in the live session was caused by the workaround-pattern detector reading the PREVIOUS turn's tool_result OUTPUT (which legitimately contained the string 'npm run build' from the build script log) and treating it as if the current tool call was a banned npm-run invocation. The detection's input scope must be restricted to ctx.toolInput (current call) — never to prior tool_result content."
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "user wants just build run, then all scenarios run",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "please run \"just build\" then run all scenarios"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
   }
 }

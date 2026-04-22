@@ -38,7 +38,10 @@
       "explicitlyAllowedTools": [],
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "so did the labeler overrule the it or not. saying deny doesnt say anything what it denied in what fucking context. did it deny just like the original session denied it, or did the original session not"
-    }
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 1,
+    "currentWindowSize": 4
   },
   "expect": {
     "expected": "deny",

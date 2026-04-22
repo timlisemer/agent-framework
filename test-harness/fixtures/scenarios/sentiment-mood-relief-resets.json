@@ -39,7 +39,10 @@
       "explicitlyAllowedTools": ["Edit"],
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "previous angry message"
-    }
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 1,
+    "currentWindowSize": 4
   },
   "expect": {
     "expected": "allow"

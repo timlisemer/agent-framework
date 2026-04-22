@@ -17,7 +17,9 @@
           "type": "tool_use",
           "id": "toolu_scenario_read",
           "name": "Read",
-          "input": { "file_path": "src/foo.ts" }
+          "input": {
+            "file_path": "src/foo.ts"
+          }
         }
       ]
     }
@@ -26,18 +28,24 @@
     "hook": "PreToolUse",
     "tool_use_ref": "toolu_scenario_read"
   },
+  "expect": {
+    "expected": "allow"
+  },
   "seed_state": {
     "currentPrediction": {
       "mood": "angry",
       "trust": "normal",
       "intent": "user wants only the Read on src/foo.ts",
       "blockedIntent": "no edits or commands",
-      "explicitlyAllowedTools": ["Read"],
+      "explicitlyAllowedTools": [
+        "Read"
+      ],
       "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "stop everything except just READ src/foo.ts please."
-    }
-  },
-  "expect": {
-    "expected": "allow"
+      "userMessageSnippet": "stop everything except just READ src/foo.ts please.",
+      "blockAllTools": true
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 1,
+    "currentWindowSize": 4
   }
 }

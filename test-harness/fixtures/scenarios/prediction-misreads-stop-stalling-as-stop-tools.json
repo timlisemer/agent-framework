@@ -71,7 +71,10 @@
       "explicitlyBlockedSubstrings": [],
       "blockAllTools": true,
       "userMessageSnippet": "fuck you atop stLLING"
-    }
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 1,
+    "currentWindowSize": 4
   },
   "expect": {
     "expected": "allow",

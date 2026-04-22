@@ -30,6 +30,12 @@
     "hook": "PreToolUse",
     "tool_use_ref": "toolu_scenario_edit_happy"
   },
+  "expect": {
+    "expected": "allow"
+  },
+  "predictions": {
+    "must_have_mood": "happy"
+  },
   "seed_state": {
     "currentPrediction": {
       "mood": "happy",
@@ -39,12 +45,9 @@
       "explicitlyAllowedTools": [],
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "perfect, exactly what I wanted, please continue."
-    }
-  },
-  "expect": {
-    "expected": "allow"
-  },
-  "predictions": {
-    "must_have_mood": "happy"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
   }
 }
