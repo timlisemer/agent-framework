@@ -536,6 +536,7 @@ async function evaluateScenarioPredictions(
 
 async function main() {
   const scenarioPath = getArg("scenario", true)!;
+  const outputDirArg = getArg("output-dir", false);
   if (!fs.existsSync(scenarioPath)) {
     console.error(`scenario file not found: ${scenarioPath}`);
     process.exit(2);
@@ -553,8 +554,14 @@ async function main() {
   }
 
   const started = Date.now();
-  const scenarioRoot = path.dirname(scenarioPath);
-  const cacheDir = path.join(scenarioRoot, "cache");
+  // --output-dir wins when supplied; otherwise the scenario file's dirname
+  // (preserves in-place behavior for home-tree scenario.json files that sit
+  // alongside their cache/ and report-scenario.json).
+  const outputDir = outputDirArg
+    ? path.resolve(outputDirArg)
+    : path.dirname(scenarioPath);
+  fs.mkdirSync(outputDir, { recursive: true });
+  const cacheDir = path.join(outputDir, "cache");
   fs.rmSync(cacheDir, { recursive: true, force: true });
   fs.mkdirSync(cacheDir, { recursive: true });
 
@@ -629,7 +636,7 @@ async function main() {
     fs.writeFileSync(path.join(cacheDir, "tool-log.jsonl"), lines);
   }
 
-  const cwd = scenario.env?.cwd ?? scenarioRoot;
+  const cwd = scenario.env?.cwd ?? outputDir;
   const sessionId = "scenario-" + scenario.name;
   const transcriptBasename = scenario.env?.subagent
     ? `agent-${scenario.name}.jsonl`
@@ -742,7 +749,7 @@ async function main() {
       };
 
       fs.writeFileSync(
-        path.join(scenarioRoot, "report-scenario.json"),
+        path.join(outputDir, "report-scenario.json"),
         JSON.stringify(result, null, 2) + "\n",
       );
       console.log(JSON.stringify(result, null, 2));
@@ -909,7 +916,7 @@ async function main() {
     };
 
     fs.writeFileSync(
-      path.join(scenarioRoot, "report-scenario.json"),
+      path.join(outputDir, "report-scenario.json"),
       JSON.stringify(result, null, 2) + "\n",
     );
     console.log(JSON.stringify(result, null, 2));

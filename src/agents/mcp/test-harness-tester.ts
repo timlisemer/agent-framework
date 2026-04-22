@@ -38,7 +38,8 @@ import {
   scenarioDir,
   writeScenarioFile,
   readScenarioFile,
-  listScenarios,
+  listAllScenarios,
+  type ScenarioSource,
 } from "./test-harness-shared.js";
 
 // ─── Action Handlers ───────────────────────────────────────────────────────
@@ -161,66 +162,74 @@ function handleRunScenario(
       "run_scenario: scenario_name or scenario (inline) is required",
     );
   }
-  // If inline provided: validate, write, then run (by resolved name).
-  let resolvedName = scenarioName;
+
+  // Inline authoring always targets the home tree.
   if (inline !== undefined) {
     const scenario = validateScenario(inline);
-    resolvedName = scenarioName ?? scenario.name;
-    writeScenarioFile(resolvedName, scenario);
-  }
-  if (!resolvedName) {
-    throw new Error("run_scenario: scenario_name is required when no inline scenario is provided");
-  }
-  const scenarioPath = path.join(scenarioDir(resolvedName), "scenario.json");
-  if (!fs.existsSync(scenarioPath)) {
-    throw new Error(
-      `scenario "${resolvedName}" has no scenario.json. Pass the 'scenario' parameter inline to create one.`,
+    const name = scenarioName ?? scenario.name;
+    writeScenarioFile(name, scenario);
+    const outputDir = scenarioDir(name);
+    const inputPath = path.join(outputDir, "scenario.json");
+    return runScenarioCommand(
+      ["--scenario", inputPath, "--output-dir", outputDir],
+      300000,
+      rootOverride,
     );
   }
-  return runScenarioCommand(["--scenario", scenarioPath], 300000, rootOverride);
+
+  // By-name lookup across both trees (home + fixtures).
+  const all = listAllScenarios(rootOverride);
+  const target = all.find((s) => s.name === scenarioName);
+  if (!target) {
+    throw new Error(
+      `scenario "${scenarioName}" not found under ~/.agent-framework/test-runs/scenarios/ or test-harness/fixtures/scenarios/. Pass 'scenario' inline to author a new one.`,
+    );
+  }
+  if (target.error) {
+    throw new Error(
+      `scenario "${scenarioName}" is malformed: ${target.error}`,
+    );
+  }
+  fs.mkdirSync(target.outputDir, { recursive: true });
+  return runScenarioCommand(
+    ["--scenario", target.inputPath, "--output-dir", target.outputDir],
+    300000,
+    rootOverride,
+  );
 }
 
-function handleListScenarios(): string {
-  const items = listScenarios();
+function handleListScenarios(rootOverride?: string): string {
+  const items = listAllScenarios(rootOverride);
   if (items.length === 0) {
-    return "No scenarios. Use run_scenario with an inline 'scenario' object to create one.";
+    return (
+      "No scenarios. Use run_scenario with an inline 'scenario' object, " +
+      "or add a fixture at test-harness/fixtures/scenarios/<name>.json."
+    );
   }
   const lines = ["SCENARIOS:", ""];
   for (const s of items) {
-    lines.push(`  ${s.name}${s.hasReport ? "  (has report-scenario.json)" : ""}`);
+    const tags: string[] = [s.source];
+    if (s.hasReport) tags.push("has-report");
+    lines.push(`  ${s.name}  [${tags.join(", ")}]`);
   }
   return lines.join("\n");
 }
 
 /**
- * Run several stored scenarios in one MCP call. Iterates each name, executes
- * via the same `run_scenario`-by-name path, returns aggregated JSON. With no
- * names supplied, runs every scenario in
- * ~/.agent-framework/test-runs/scenarios/ (the static folder is the source
- * of truth — first-party support, no scripts required).
+ * Run several scenarios in one MCP call. Resolves names against the UNION
+ * of ~/.agent-framework/test-runs/scenarios/ (home) and the repo-tracked
+ * test-harness/fixtures/scenarios/ (fixtures), with slug collisions
+ * treated as a hard error. With no names supplied, runs every scenario
+ * across both trees alphabetically. Fixtures run IN PLACE from the repo;
+ * reports + cache always land under the home tree.
  */
 function handleRunScenarios(
   scenarioNames: string[] | undefined,
   rootOverride?: string,
 ): string {
-  const targetNames =
-    scenarioNames && scenarioNames.length > 0
-      ? scenarioNames
-      : listScenarios().map((s) => s.name);
-
-  if (targetNames.length === 0) {
-    return JSON.stringify({
-      total: 0,
-      passed: 0,
-      failed: 0,
-      results: [],
-      message:
-        "No scenarios on disk. Create one via run_scenario with an inline 'scenario' object.",
-    }, null, 2);
-  }
-
   type ScenarioResult = {
     name: string;
+    source?: "home" | "fixture";
     pass?: boolean;
     decision?: string;
     gate?: string;
@@ -230,15 +239,71 @@ function handleRunScenarios(
     error?: string;
   };
 
+  let all: ScenarioSource[];
+  try {
+    all = listAllScenarios(rootOverride);
+  } catch (err) {
+    return JSON.stringify(
+      {
+        total: 0,
+        passed: 0,
+        failed: 1,
+        results: [
+          {
+            name: "<discovery>",
+            error: err instanceof Error ? err.message : String(err),
+          },
+        ],
+      },
+      null,
+      2,
+    );
+  }
+
+  const byName = new Map(all.map((s) => [s.name, s]));
+  const targets: Array<ScenarioSource | { missing: string }> =
+    scenarioNames && scenarioNames.length > 0
+      ? scenarioNames.map((n) =>
+          byName.has(n) ? byName.get(n)! : { missing: n },
+        )
+      : all;
+
+  if (targets.length === 0) {
+    return JSON.stringify(
+      {
+        total: 0,
+        passed: 0,
+        failed: 0,
+        results: [],
+        message:
+          "No scenarios discoverable under ~/.agent-framework/test-runs/scenarios/ or test-harness/fixtures/scenarios/. " +
+          "Create one via run_scenario with an inline 'scenario' object, or add a fixture.",
+      },
+      null,
+      2,
+    );
+  }
+
   const results: ScenarioResult[] = [];
-  for (const name of targetNames) {
+  for (const t of targets) {
+    if ("missing" in t) {
+      results.push({
+        name: t.missing,
+        error: `scenario "${t.missing}" not found in home or fixtures`,
+      });
+      continue;
+    }
+    if (t.error) {
+      results.push({ name: t.name, source: t.source, error: t.error });
+      continue;
+    }
     try {
-      const scenarioPath = path.join(scenarioDir(name), "scenario.json");
-      if (!fs.existsSync(scenarioPath)) {
-        results.push({ name, error: `scenario.json missing at ${scenarioPath}` });
-        continue;
-      }
-      const raw = runScenarioCommand(["--scenario", scenarioPath], 300000, rootOverride);
+      fs.mkdirSync(t.outputDir, { recursive: true });
+      const raw = runScenarioCommand(
+        ["--scenario", t.inputPath, "--output-dir", t.outputDir],
+        300000,
+        rootOverride,
+      );
       try {
         const parsed = JSON.parse(raw) as {
           pass?: boolean;
@@ -249,7 +314,8 @@ function handleRunScenarios(
           ms?: number;
         };
         results.push({
-          name,
+          name: t.name,
+          source: t.source,
           pass: parsed.pass,
           decision: parsed.decision,
           gate: parsed.gate,
@@ -258,23 +324,27 @@ function handleRunScenarios(
           ms: parsed.ms,
         });
       } catch {
-        results.push({ name, error: `non-JSON output: ${raw.slice(0, 200)}` });
+        results.push({
+          name: t.name,
+          source: t.source,
+          error: `non-JSON output: ${raw.slice(0, 200)}`,
+        });
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      results.push({ name, error: message });
+      results.push({
+        name: t.name,
+        source: t.source,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
   const passed = results.filter((r) => r.pass === true).length;
-  const failed = results.filter((r) => r.pass === false || r.error !== undefined).length;
+  const failed = results.filter(
+    (r) => r.pass === false || r.error !== undefined,
+  ).length;
   return JSON.stringify(
-    {
-      total: results.length,
-      passed,
-      failed,
-      results,
-    },
+    { total: results.length, passed, failed, results },
     null,
     2,
   );
@@ -349,9 +419,13 @@ export interface TesterInput {
    */
   transcript_path?: string;
   /**
-   * For run_scenario / list_scenarios / read_scenario: slug identifying a
-   * scenario under ~/.agent-framework/test-runs/scenarios/<name>/. Must
-   * match [A-Za-z0-9._-]+.
+   * For run_scenario / read_scenario: slug identifying a scenario. For
+   * run_scenario the slug is resolved across the union of
+   * ~/.agent-framework/test-runs/scenarios/<name>/scenario.json (home)
+   * and <root>/test-harness/fixtures/scenarios/<name>.json (committed
+   * fixtures). A slug must be unique across sources. read_scenario still
+   * only reads home (reports + inline-authored scenario.json live there).
+   * Must match [A-Za-z0-9._-]+.
    */
   scenario_name?: string;
   /**
@@ -359,13 +433,16 @@ export interface TesterInput {
    * validates the object and writes it to
    * ~/.agent-framework/test-runs/scenarios/<name>/scenario.json
    * (overwriting) before executing. When omitted, the handler loads the
-   * previously stored scenario.json for `scenario_name`.
+   * previously stored scenario by name from home or fixtures.
    */
   scenario?: unknown;
   /**
    * For run_scenarios (batch action): explicit list of scenario slugs to
-   * run from ~/.agent-framework/test-runs/scenarios/. Omit or pass an
-   * empty array to run EVERY scenario in the folder.
+   * run. Slugs are resolved against the UNION of
+   * ~/.agent-framework/test-runs/scenarios/ (home) and the repo-tracked
+   * test-harness/fixtures/scenarios/ (fixtures). A slug that exists in
+   * both trees is a hard error. Omit or pass an empty array to run EVERY
+   * scenario across both sources, alphabetically by name.
    */
   scenario_names?: string[];
 }
@@ -417,7 +494,7 @@ export async function handleTestHarnessTester(input: TesterInput): Promise<strin
         return handleRunScenarios(input.scenario_names, input.working_dir);
 
       case "list_scenarios":
-        return handleListScenarios();
+        return handleListScenarios(input.working_dir);
 
       case "read_scenario":
         if (!input.scenario_name) throw new Error("scenario_name is required");
@@ -663,9 +740,11 @@ Step 4 -- Iterate. If the hook decides wrong, fix the rule, rebuild
   has no LLM cost and no run-limit.
 
 Step 5 -- Keep the scenario. Every scenario file under
-  ~/.agent-framework/test-runs/scenarios/ is a permanent regression test.
-  Re-run all of them in a single MCP call via run_scenarios (no script,
-  no iteration loop required).
+  ~/.agent-framework/test-runs/scenarios/ AND every committed fixture at
+  <repo>/test-harness/fixtures/scenarios/<name>.json is a permanent
+  regression test. run_scenarios (no names) runs the UNION of both
+  sources in one MCP call. Fixtures run in place from the repo; reports
+  + cache always land under ~/.agent-framework/test-runs/scenarios/<name>/.
 
 ### B.3 Scenario actions
 
@@ -674,29 +753,58 @@ Step 5 -- Keep the scenario. Every scenario file under
   Optional: working_dir
   Behavior:
     - If scenario (inline) is provided: validate it, write to
-      scenarios/<scenario_name or scenario.name>/scenario.json
-      (overwriting), then execute.
-    - If only scenario_name is provided: load the stored scenario.json
-      and execute.
+      ~/.agent-framework/test-runs/scenarios/<scenario_name or
+      scenario.name>/scenario.json (overwriting), then execute.
+    - If only scenario_name is provided: resolve the slug against the
+      UNION of home (~/.agent-framework/test-runs/scenarios/) and
+      fixtures (<repo>/test-harness/fixtures/scenarios/). Fixtures run
+      in place; --output-dir points at the home tree so cache/ and
+      report-scenario.json always land there.
     - Exit status: pass -> 0, fail -> 1, validation error -> 2.
 
-**run_scenarios** -- execute MULTIPLE stored scenarios in one MCP call
+**run_scenarios** -- execute MULTIPLE scenarios in one MCP call
   Optional: scenario_names (string[]), working_dir
+  Sources (unioned):
+    1. ~/.agent-framework/test-runs/scenarios/<name>/scenario.json
+       User-authored / inline-created originals.
+    2. <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/<name>.json
+       Committed read-only fixtures. Filename stem MUST equal
+       scenario.name; validateScenario enforced at load.
+  Slug collisions across trees are a HARD ERROR -- the whole batch fails
+  with a message listing both file paths. Delete one copy to proceed.
   Behavior:
-    - When scenario_names is provided and non-empty, runs only those
-      named scenarios (in order).
-    - When scenario_names is omitted or empty, runs EVERY scenario in
-      ~/.agent-framework/test-runs/scenarios/.
-    - Returns aggregated JSON: {total, passed, failed, results[]} where
-      each result has {name, pass, decision, gate, expected, reason, ms}.
-    - First-party folder support: never invoke a shell script to iterate.
-    - Writes scenarios/<name>/report-scenario.json.
+    - scenario_names provided and non-empty: runs only those names
+      (resolved against the union, in the given order). Unknown slugs
+      produce per-result error entries; batch continues.
+    - scenario_names omitted or empty: runs EVERY scenario in the union,
+      alphabetically by name.
+    - Fixtures run IN PLACE (no staging, no copy). scenario.ts is
+      invoked with --scenario <fixture-path> --output-dir
+      ~/.agent-framework/test-runs/scenarios/<name>/ so cache/ and
+      report-scenario.json always land under home, never next to the
+      repo fixture. Edits to a fixture are picked up on the next run.
+    - Returns aggregated JSON: {total, passed, failed, results[]}.
+      Each result: {name, source: "home"|"fixture", pass, decision,
+      gate, expected, reason, ms, error?}.
+    - First-party folder support: never invokes a shell script to iterate.
+    - Writes scenarios/<name>/report-scenario.json per scenario.
 
-**list_scenarios** -- list all stored scenarios (name + has-report flag)
+**list_scenarios** -- list all scenarios across home + fixtures
+  Optional: working_dir
+  Each row tagged [home] or [fixture], with "has-report" when a prior
+  run produced ~/.agent-framework/test-runs/scenarios/<name>/report-scenario.json.
+  Slug collisions across trees throw here as well -- fix them before
+  continuing.
 
-**read_scenario** -- read scenarios/<name>/scenario.json or
-  scenarios/<name>/report-scenario.json
+**read_scenario** -- read ~/.agent-framework/test-runs/scenarios/<name>/
+  scenario.json or report-scenario.json
   Required: scenario_name, filename
+  Reads only the home tree. For fixture-sourced scenarios there is no
+  home scenario.json (fixtures run in place), so
+  read_scenario <fixture-slug> filename=scenario.json returns an error
+  -- read the fixture file directly from
+  <repo>/test-harness/fixtures/scenarios/<name>.json instead. Reports
+  always land in home and can be read here.
 
 ### B.4 Scenario JSON schema
 
@@ -1098,13 +1206,33 @@ observes it.
 
 ### B.12 Scenario folder structure
 
-~/.agent-framework/test-runs/scenarios/{scenario-name}/
-  scenario.json             The scenario definition you wrote
-  report-scenario.json      Last run's decision, gate, pass flag
-  cache/                    Ephemeral hook runtime files
-    <name>.jsonl            Materialized transcript (may be agent-*.jsonl)
-    tool-log.jsonl          Rule decisions from the last hook run
-    active-subagents.json   Empty counter file for deterministic subagent detection
+Two sources feed list_scenarios / run_scenario / run_scenarios. Both use
+the same scenario JSON schema.
+
+1. Home (mutable, user-authored, output target for every run):
+   ~/.agent-framework/test-runs/scenarios/{scenario-name}/
+     scenario.json             Scenario definition (only when originally
+                               authored here; fixture-sourced runs do
+                               NOT place a scenario.json copy here).
+     report-scenario.json      Last run's decision, gate, pass flag.
+     cache/                    Ephemeral hook runtime files
+       <name>.jsonl            Materialized transcript (may be agent-*.jsonl)
+       tool-log.jsonl          Rule decisions from the last hook run
+       active-subagents.json   Empty counter file for deterministic subagent detection
+       state.json              Seeded prior-turn session state
+
+2. Fixtures (repo-tracked, read-only source):
+   <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/
+     {scenario-name}.json      Flat fixture. Filename stem MUST equal
+                               the inner scenario.name (enforced at
+                               load). validateScenario enforced too.
+     REPRODUCTION-NOTES.md     Authoring notes (not a scenario).
+
+Invariant: a given slug may live in EXACTLY ONE of the two trees. A
+collision throws with both file paths. Fixtures run IN PLACE from the
+repo; run_scenario / run_scenarios invoke scenario.ts with --output-dir
+pointed at tree (1) above so artifacts never pollute the repo. Edits
+to a fixture are picked up on the very next run.
 
 ---
 

@@ -16,7 +16,7 @@ How to turn an observed live hook output into a scenario that produces the same 
 
 6. **Set `expect.expected` to the correct behavior, not live behavior.** Scenarios that capture bugs MUST fail against current code. When live allows but should deny → `expected: "deny"`. When live passes a stop but should block → `expected: "block"`. Pair with `expect.by` when wrong-rule attribution is the bug.
 
-7. **Run the scenario inline on first execution.** `run_scenario` with only `scenario_name` errors when the test-runs cache is empty. Pass the full `scenario` object inline to populate `~/.agent-framework/test-runs/scenarios/<name>/scenario.json`; thereafter the name alone suffices. The on-disk fixture under `test-harness/fixtures/scenarios/` is NOT what the tester executes — it runs the test-runs cache copy. Keep them in sync manually or re-pass inline after each edit.
+7. **Commit the scenario as a fixture, or iterate locally inline.** To add a permanent regression scenario, write `test-harness/fixtures/scenarios/<name>.json` (filename stem == inner `scenario.name`). `run_scenarios`, `run_scenario`, and `list_scenarios` read fixtures directly from the repo — edits are picked up on the very next run, no cache sync step. For short-lived experiments, pass the full `scenario` object inline to `run_scenario`; it writes to `~/.agent-framework/test-runs/scenarios/<name>/scenario.json` and future by-name calls resolve it from there. A slug that exists in BOTH `~/.agent-framework/test-runs/scenarios/<name>/` AND `test-harness/fixtures/scenarios/<name>.json` is a hard error — delete one copy.
 
 ## Shapes (`src/utils/transcript.ts :: currentTurnAssistantState`)
 
@@ -127,6 +127,6 @@ Expect some scenario runs to flap. Run a failing-expected scenario 2–3 times t
 2. `~/.agent-framework/test-runs/scenarios/<name>/cache/tool-log.jsonl` — see which gate fired and its reason. `status: "allowed"` + `gate: "all-rules"` when you expected a fastDeny usually means the appeal overturned — trim transcript.
 3. Wrong rule fired → check priorities. Use `assistant_split` to neutralize `respond-first` if it preempts.
 4. `seed_state` ignored → must be at top level of scenario JSON, with `currentPrediction` nested inside (plus the three siblings `forceCheckPending`, `frustrationStreak`, `currentWindowSize`).
-5. The fixture on disk differs from what the cache ran → the cache wins. Re-pass scenario inline to refresh the cache.
+5. Fixture edits not reflected → fixtures are now read directly from `test-harness/fixtures/scenarios/<name>.json` on every run. If you see stale behavior, make sure you saved the file and that no shadow copy exists at `~/.agent-framework/test-runs/scenarios/<name>/scenario.json` (that would trigger a cross-tree collision error, not silent staleness).
 6. Gate field says `gate` vs `tool-approve` vs a specific rule name — `gate` means the aggregated rule-gate LLM denied (multiple rules contributed llmContext and the LLM decided); a specific name means that rule fastDenied directly.
 7. LLM variance suspected → re-run 2–3 times and check if the result is consistent.
