@@ -517,6 +517,8 @@ const scenarioSchema = z.object({
     must_be_empty: z.boolean().optional(),
     must_have_mood: z.enum(["angry", "frustrated", "neutral", "satisfied", "happy"]).optional(),
     must_have_trust: z.enum(["low", "normal", "high"]).optional(),
+    must_not_have_mood: z.array(z.enum(["angry", "frustrated", "neutral", "satisfied", "happy"])).min(1).optional(),
+    must_not_have_trust: z.array(z.enum(["low", "normal", "high"])).min(1).optional(),
     intent_must_contain: z.string().optional(),
   }).optional(),
   seed_state: z.object({

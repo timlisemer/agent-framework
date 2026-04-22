@@ -1,6 +1,8 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { readToolLogEntries } from "../utils/session-store.js";
 import { readTranscriptExact } from "../utils/transcript.js";
+import { stringifyToolInput } from "../utils/prediction-types.js";
+import { summarizeToolInputForLlm } from "../utils/tool-input-summary.js";
 
 export const errorAcknowledgeRule: PreToolRule = {
   name: "error-acknowledge",
@@ -37,7 +39,7 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
 
     // Check if this is a corrected retry (different parameters for same tool)
     if (recentDenial.tool === ctx.toolName) {
-      const currentInput = JSON.stringify(ctx.toolInput).slice(0, 200);
+      const currentInput = stringifyToolInput(ctx.toolInput);
       const denialPath = recentDenial.path || "";
       const denialCmd = recentDenial.cmd || "";
       // If the tool is the same but input differs, it's likely a corrected retry
@@ -69,7 +71,7 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
       if (!acknowledgesError) {
         // Ambiguous -- use LLM to decide
         return {
-          llmContext: `PREVIOUS DENIAL:\nTool: ${recentDenial.tool}\nReason: ${recentDenial.reason}\n\nASSISTANT TEXT AFTER DENIAL:\n${lastAssistant.content.slice(0, 300)}\n\nCURRENT TOOL CALL:\n${ctx.toolName} with ${JSON.stringify(ctx.toolInput).slice(0, 200)}`,
+          llmContext: `PREVIOUS DENIAL:\nTool: ${recentDenial.tool}\nReason: ${recentDenial.reason}\n\nASSISTANT TEXT AFTER DENIAL:\n${lastAssistant.content.slice(0, 300)}\n\nCURRENT TOOL CALL:\n${summarizeToolInputForLlm(ctx.toolName, ctx.toolInput)}`,
         };
       }
     }

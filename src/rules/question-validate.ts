@@ -3,6 +3,7 @@ import { checkQuestionValidity } from "../agents/hooks/question-validate.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
 import { QUESTION_VALIDATE_COUNTS } from "../utils/transcript-presets.js";
+import { summarizeToolInputForLlm } from "../utils/tool-input-summary.js";
 
 export const questionValidateRule: PreToolRule = {
   name: "question-validate",
@@ -31,7 +32,7 @@ export const questionValidateRule: PreToolRule = {
     if (!validation.approved) {
       const appeal = await appealHelper(
         ctx.toolName,
-        `AskUserQuestion: ${JSON.stringify(ctx.toolInput).slice(0, 200)}`,
+        summarizeToolInputForLlm(ctx.toolName, ctx.toolInput),
         questionContext,
         validation.reason || "Question validation failed",
         ctx.projectDir,

@@ -521,6 +521,28 @@ async function evaluateScenarioPredictions(
         : `must_have_trust: expected ${spec.must_have_trust}, got ${live ? live.trust : "(none)"}`,
     });
   }
+  if (spec.must_not_have_mood !== undefined) {
+    const forbidden = spec.must_not_have_mood;
+    const ok = live !== null && !forbidden.includes(live.mood);
+    results.push({
+      kind: "must_not_have_mood",
+      pass: ok,
+      reason: ok
+        ? undefined
+        : `must_not_have_mood: mood ${live ? live.mood : "(none)"} is forbidden (forbidden: [${forbidden.join(", ")}])`,
+    });
+  }
+  if (spec.must_not_have_trust !== undefined) {
+    const forbidden = spec.must_not_have_trust;
+    const ok = live !== null && !forbidden.includes(live.trust);
+    results.push({
+      kind: "must_not_have_trust",
+      pass: ok,
+      reason: ok
+        ? undefined
+        : `must_not_have_trust: trust ${live ? live.trust : "(none)"} is forbidden (forbidden: [${forbidden.join(", ")}])`,
+    });
+  }
   if (spec.intent_must_contain !== undefined) {
     const ok = live !== null && live.intent.includes(spec.intent_must_contain);
     results.push({

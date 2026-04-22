@@ -7,6 +7,7 @@ import { APPEAL_COUNTS } from "../utils/transcript-presets.js";
 import { logFastPathDeny, logFastPathApproval } from "../utils/logger.js";
 import { EXECUTION_TYPES } from "../types.js";
 import { startsWithAny } from "../utils/retry.js";
+import { summarizeToolInputForLlm } from "../utils/tool-input-summary.js";
 
 export interface EvaluatorResult {
   decision: "allow" | "deny";
@@ -54,7 +55,7 @@ export async function evaluateRules(
           includeSlashCommandContext: true,
         });
         const transcript = formatTranscriptResult(transcriptResult);
-        const toolDescription = `${ctx.toolName} with ${JSON.stringify(ctx.toolInput).slice(0, 200)}`;
+        const toolDescription = summarizeToolInputForLlm(ctx.toolName, ctx.toolInput);
 
         const appeal = await appealHelper(
           ctx.toolName,
@@ -107,7 +108,7 @@ export async function evaluateRules(
     `=== RULE: ${rule.name} ===\n${rule.promptSection}\n\nCONTEXT:\n${llmContext}`
   ).join("\n\n");
 
-  const toolDescription = `${ctx.toolName} with ${JSON.stringify(ctx.toolInput).slice(0, 200)}`;
+  const toolDescription = summarizeToolInputForLlm(ctx.toolName, ctx.toolInput);
 
   let llmOutput = "APPROVE";
   try {

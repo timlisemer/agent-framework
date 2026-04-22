@@ -154,6 +154,8 @@ export interface ScenarioPredictionExpectation {
   must_be_empty?: boolean;
   must_have_mood?: Mood;
   must_have_trust?: Trust;
+  must_not_have_mood?: Mood[];
+  must_not_have_trust?: Trust[];
   intent_must_contain?: string;
 }
 
@@ -1200,12 +1202,16 @@ function validateScenarioPredictions(r: Record<string, unknown>): void {
   const mustBeEmpty = predictions.must_be_empty as unknown;
   const mustHaveMood = predictions.must_have_mood as unknown;
   const mustHaveTrust = predictions.must_have_trust as unknown;
+  const mustNotHaveMood = predictions.must_not_have_mood as unknown;
+  const mustNotHaveTrust = predictions.must_not_have_trust as unknown;
   const intentMustContain = predictions.intent_must_contain as unknown;
   const hasMustBlock = mustBlock !== undefined;
   const hasMustNotBlock = mustNotBlock !== undefined;
   const hasMustBeEmpty = mustBeEmpty !== undefined;
   const hasMustHaveMood = mustHaveMood !== undefined;
   const hasMustHaveTrust = mustHaveTrust !== undefined;
+  const hasMustNotHaveMood = mustNotHaveMood !== undefined;
+  const hasMustNotHaveTrust = mustNotHaveTrust !== undefined;
   const hasIntentMustContain = intentMustContain !== undefined;
   if (
     !hasMustBlock &&
@@ -1213,15 +1219,17 @@ function validateScenarioPredictions(r: Record<string, unknown>): void {
     !hasMustBeEmpty &&
     !hasMustHaveMood &&
     !hasMustHaveTrust &&
+    !hasMustNotHaveMood &&
+    !hasMustNotHaveTrust &&
     !hasIntentMustContain
   ) {
     throw new Error(
-      "scenario.predictions block is set but contains no assertions (must_block / must_not_block / must_be_empty / must_have_mood / must_have_trust / intent_must_contain)",
+      "scenario.predictions block is set but contains no assertions (must_block / must_not_block / must_be_empty / must_have_mood / must_have_trust / must_not_have_mood / must_not_have_trust / intent_must_contain)",
     );
   }
   if (
     hasMustBeEmpty &&
-    (hasMustBlock || hasMustNotBlock || hasMustHaveMood || hasMustHaveTrust || hasIntentMustContain)
+    (hasMustBlock || hasMustNotBlock || hasMustHaveMood || hasMustHaveTrust || hasMustNotHaveMood || hasMustNotHaveTrust || hasIntentMustContain)
   ) {
     throw new Error(
       "scenario.predictions.must_be_empty is mutually exclusive with all other assertions",
@@ -1244,6 +1252,36 @@ function validateScenarioPredictions(r: Record<string, unknown>): void {
       throw new Error(
         `scenario.predictions.must_have_trust must be one of ${validTrusts.join(", ")}, got ${JSON.stringify(mustHaveTrust)}`,
       );
+    }
+  }
+  if (hasMustNotHaveMood) {
+    const validMoods = ["angry", "frustrated", "neutral", "satisfied", "happy"];
+    if (!Array.isArray(mustNotHaveMood) || (mustNotHaveMood as unknown[]).length === 0) {
+      throw new Error(
+        "scenario.predictions.must_not_have_mood must be a non-empty array when set",
+      );
+    }
+    for (const m of mustNotHaveMood as unknown[]) {
+      if (typeof m !== "string" || !validMoods.includes(m)) {
+        throw new Error(
+          `scenario.predictions.must_not_have_mood entries must each be one of ${validMoods.join(", ")}, got ${JSON.stringify(m)}`,
+        );
+      }
+    }
+  }
+  if (hasMustNotHaveTrust) {
+    const validTrusts = ["low", "normal", "high"];
+    if (!Array.isArray(mustNotHaveTrust) || (mustNotHaveTrust as unknown[]).length === 0) {
+      throw new Error(
+        "scenario.predictions.must_not_have_trust must be a non-empty array when set",
+      );
+    }
+    for (const t of mustNotHaveTrust as unknown[]) {
+      if (typeof t !== "string" || !validTrusts.includes(t)) {
+        throw new Error(
+          `scenario.predictions.must_not_have_trust entries must each be one of ${validTrusts.join(", ")}, got ${JSON.stringify(t)}`,
+        );
+      }
     }
   }
   if (hasIntentMustContain) {
