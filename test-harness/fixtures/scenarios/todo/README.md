@@ -1,0 +1,66 @@
+# todo/ — scenarios that codify UNIMPLEMENTED features
+
+A scenario lives here when it FAILS because the feature the scenario
+codifies is not yet implemented in code. Every scenario here currently
+fails against HEAD; each one's `description` explicitly states
+"EXPECTED TO FAIL against current code until <feature>".
+
+The scenario is the executable spec for a feature that has been
+identified but not yet built. Running `todo/` scenarios prints the
+current feature-TODO backlog with concrete reproductions.
+
+## Move policy
+
+When the missing feature lands and the scenario passes:
+
+1. Re-run the scenario 2-3 times to rule out LLM flap (REPRODUCTION-
+   NOTES.md section "Determinism" — several here use LLM-backed rules).
+2. Update `status: "todo"` markers / "EXPECTED TO FAIL" sentence in the
+   `description` field to remove the expected-to-fail framing.
+3. Move the JSON to ../working/.
+4. Update BOTH ../working/README.md (add the scenario) and this README
+   (remove the scenario).
+
+If a `todo/` fixture's failure turns out to be fixture-side (the
+assertion was wrong, not the code), move it to ../broken/ instead.
+
+## Maintenance rule
+
+Every time a scenario moves in or out of this folder, update this
+README's scenario list below AND the sibling folder's README in the
+same commit. Scenarios added here must include the literal phrase
+"EXPECTED TO FAIL against current code" in their description — that
+phrase is the signal the failure is intended pending code.
+
+## Current scenarios in todo/ (7)
+
+- `bash-npx-vitest-instead-of-mcp-tester-should-deny` — deny raw
+  `Bash npx vitest` when the user's established workflow is MCP-tester-
+  only. Needs sentiment/gate to learn workflow preferences.
+- `exit-plan-mode-instead-of-responding-should-deny` — deny
+  `ExitPlanMode` used as deflection from an angry user demanding action.
+- `force-check-required-over-denies-demanded-mcp-tester-should-allow` —
+  `force-check-required` must not over-deny when the user explicitly
+  re-authorizes the MCP test harness tester.
+- `prediction-misreads-stop-stalling-as-stop-tools` — SENTIMENT_AGENT
+  must not invert "stop stalling" (demand for action) into "stop
+  calling tools" (prohibition).
+- `read-unasked-file-instead-of-doing-task-should-deny` — low-risk
+  bypass must not allow tangential Read when the user demands concrete
+  action.
+- `respond-first-failed-to-block-tool-calls-without-response-should-deny`
+  — respond-first must semantic-match assistant text against the user's
+  concrete instruction, not just check that ANY text block exists.
+- `tester-third-retry-after-multiple-blocks-should-deny` — accumulated
+  explicit rejection must override low-risk-bypass for a third MCP
+  tester retry.
+
+## Verify
+
+    mcp__agent-framework__test_harness_tester \
+      action=run_scenarios \
+      scenario_source=todo \
+      working_dir=<repo>
+
+Expected: most/all fail. A consistent pass here means the feature
+landed — verify 2-3 re-runs, then promote per the policy above.

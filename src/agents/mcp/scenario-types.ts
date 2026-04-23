@@ -57,8 +57,8 @@ export interface ScenarioUserEntry {
    * must be explicitly stated by the author (true/false, present/absent,
    * value/[]). Optional-with-default hides intent and lets bugs slip in.
    * Migration requires adding the field to every existing fixture under
-   * test-harness/fixtures/scenarios/ and to every stored copy under
-   * ~/.agent-framework/test-runs/scenarios/.
+   * test-harness/fixtures/scenarios/{working,broken,todo}/ and to every
+   * stored copy under ~/.agent-framework/test-runs/scenarios/.
    */
   isMeta?: boolean;
 }

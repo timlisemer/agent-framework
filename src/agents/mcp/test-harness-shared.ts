@@ -754,6 +754,7 @@ const FIXTURES_SCENARIOS_SUBPATH = path.join(
   "fixtures",
   "scenarios",
 );
+const FIXTURE_SUBFOLDERS = ["working", "broken", "todo"] as const;
 
 /** Absolute path to the scenarios root under TEST_RUNS_DIR. */
 export function scenariosDir(): string {
@@ -819,19 +820,28 @@ export function readScenarioFile(name: string, filename: string): string {
 }
 
 /**
- * Describes one discoverable scenario across both trees. `inputPath` is
- * what the scenario runner reads (a home scenario.json or a repo fixture
- * .json); `outputDir` is where cache/ and report-scenario.json land —
- * always under ~/.agent-framework/test-runs/scenarios/<name>/ so the
- * repo-tracked fixture files never get polluted by per-run artifacts.
- * `error` is set when the fixture is malformed (filename stem does not
- * match scenario.name, or validateScenario rejects the JSON); such
- * entries must not be executed but are surfaced to the caller so the
- * user sees the broken fixture.
+ * Describes one discoverable scenario across the four sources: home
+ * (~/.agent-framework/test-runs/scenarios/<name>/scenario.json) and the
+ * three repo-tracked fixture subfolders (working/, broken/, todo/ under
+ * <root>/test-harness/fixtures/scenarios/). `inputPath` is what the
+ * scenario runner reads; `outputDir` is where cache/ and
+ * report-scenario.json land — always under
+ * ~/.agent-framework/test-runs/scenarios/<name>/ so the repo-tracked
+ * fixture files never get polluted by per-run artifacts. `error` is set
+ * when the fixture is malformed (filename stem does not match
+ * scenario.name, or validateScenario rejects the JSON); such entries
+ * must not be executed but are surfaced to the caller so the user sees
+ * the broken fixture.
  */
+export type ScenarioSourceTag =
+  | "home"
+  | "fixture-working"
+  | "fixture-broken"
+  | "fixture-todo";
+
 export interface ScenarioSource {
   name: string;
-  source: "home" | "fixture";
+  source: ScenarioSourceTag;
   inputPath: string;
   outputDir: string;
   hasReport: boolean;
@@ -839,19 +849,34 @@ export interface ScenarioSource {
 }
 
 /**
- * Enumerate every scenario discoverable across home
- * (~/.agent-framework/test-runs/scenarios/) and the repo-tracked fixtures
- * (<root>/test-harness/fixtures/scenarios/). Entries are sorted
- * alphabetically by name.
+ * Enumerate every scenario discoverable across four sources: home
+ * (~/.agent-framework/test-runs/scenarios/) and the three repo-tracked
+ * fixture subfolders (<root>/test-harness/fixtures/scenarios/working/,
+ * broken/, todo/). Entries are sorted alphabetically by name.
  *
  * Per-fixture validation errors (filename stem != scenario.name, or
  * validateScenario rejection) are attached to the entry as `error`
- * without aborting discovery. Cross-tree slug collisions are infrastructure
- * bugs and throw — the caller (run_scenarios) wraps the discovery call in
- * a try/catch and surfaces that as a single <discovery> result entry.
+ * without aborting discovery. Cross-source slug collisions (same slug
+ * present in two or more of the four sources) are infrastructure bugs
+ * and throw with both offending paths + source tags — the caller
+ * (run_scenarios) wraps the discovery call in a try/catch and surfaces
+ * that as a single <discovery> result entry.
  */
 export function listAllScenarios(rootOverride?: string): ScenarioSource[] {
   const out = new Map<string, ScenarioSource>();
+
+  const addOrCollide = (entry: ScenarioSource): void => {
+    const prior = out.get(entry.name);
+    if (prior) {
+      throw new Error(
+        `scenario slug "${entry.name}" exists in MORE THAN ONE source:\n` +
+          `  ${prior.source}:   ${prior.inputPath}\n` +
+          `  ${entry.source}:   ${entry.inputPath}\n` +
+          `Slugs must be unique across home and all fixture subfolders. Delete one copy.`,
+      );
+    }
+    out.set(entry.name, entry);
+  };
 
   if (fs.existsSync(SCENARIOS_DIR)) {
     for (const entry of fs.readdirSync(SCENARIOS_DIR)) {
@@ -859,7 +884,7 @@ export function listAllScenarios(rootOverride?: string): ScenarioSource[] {
       const inputPath = path.join(SCENARIOS_DIR, entry, "scenario.json");
       if (!fs.existsSync(inputPath)) continue;
       const outputDir = path.join(SCENARIOS_DIR, entry);
-      out.set(entry, {
+      addOrCollide({
         name: entry,
         source: "home",
         inputPath,
@@ -869,57 +894,68 @@ export function listAllScenarios(rootOverride?: string): ScenarioSource[] {
     }
   }
 
-  let fixDir: string;
+  let fixRoot: string;
   try {
-    fixDir = fixturesScenariosDir(rootOverride);
+    fixRoot = fixturesScenariosDir(rootOverride);
   } catch {
     return sortedScenarios(out);
   }
-  if (!fs.existsSync(fixDir)) return sortedScenarios(out);
 
-  for (const file of fs.readdirSync(fixDir)) {
-    if (!file.endsWith(".json")) continue;
-    const name = file.slice(0, -".json".length);
-    if (!/^[A-Za-z0-9._-]+$/.test(name)) continue;
+  for (const sub of FIXTURE_SUBFOLDERS) {
+    const subDir = path.join(fixRoot, sub);
+    if (!fs.existsSync(subDir)) continue;
+    const tag: ScenarioSourceTag = `fixture-${sub}` as ScenarioSourceTag;
 
-    const inputPath = path.join(fixDir, file);
-    const outputDir = path.join(SCENARIOS_DIR, name);
-    const hasReport = fs.existsSync(path.join(outputDir, "report-scenario.json"));
+    for (const file of fs.readdirSync(subDir)) {
+      if (!file.endsWith(".json")) continue;
+      const name = file.slice(0, -".json".length);
+      if (!/^[A-Za-z0-9._-]+$/.test(name)) continue;
 
-    let fixtureError: string | undefined;
-    try {
-      const parsed = JSON.parse(fs.readFileSync(inputPath, "utf-8")) as {
-        name?: unknown;
-      };
-      if (parsed.name !== name) {
-        fixtureError = `fixture ${inputPath}: scenario.name=${JSON.stringify(parsed.name)} must equal filename stem "${name}"`;
-      } else {
-        validateScenario(parsed);
-      }
-    } catch (err) {
-      fixtureError = err instanceof Error ? err.message : String(err);
-    }
-
-    if (out.has(name)) {
-      const homeInput = out.get(name)!.inputPath;
-      throw new Error(
-        `scenario slug "${name}" exists in BOTH trees:\n` +
-          `  home:    ${homeInput}\n` +
-          `  fixture: ${inputPath}\n` +
-          `Slugs must be unique across sources. Delete one of the two files.`,
+      const inputPath = path.join(subDir, file);
+      const outputDir = path.join(SCENARIOS_DIR, name);
+      const hasReport = fs.existsSync(
+        path.join(outputDir, "report-scenario.json"),
       );
-    }
 
-    out.set(name, {
-      name,
-      source: "fixture",
-      inputPath,
-      outputDir,
-      hasReport,
-      ...(fixtureError ? { error: fixtureError } : {}),
-    });
+      let fixtureError: string | undefined;
+      try {
+        const parsed = JSON.parse(fs.readFileSync(inputPath, "utf-8")) as {
+          name?: unknown;
+        };
+        if (parsed.name !== name) {
+          fixtureError = `fixture ${inputPath}: scenario.name=${JSON.stringify(parsed.name)} must equal filename stem "${name}"`;
+        } else {
+          validateScenario(parsed);
+        }
+      } catch (err) {
+        fixtureError = err instanceof Error ? err.message : String(err);
+      }
+
+      addOrCollide({
+        name,
+        source: tag,
+        inputPath,
+        outputDir,
+        hasReport,
+        ...(fixtureError ? { error: fixtureError } : {}),
+      });
+    }
   }
   return sortedScenarios(out);
+}
+
+/**
+ * Filter scenarios by a user-friendly source label. Accepts the short
+ * forms used in the MCP input enum (working|broken|todo|home) and maps
+ * them to the internal ScenarioSourceTag.
+ */
+export function filterScenariosBySource(
+  all: ScenarioSource[],
+  filter: "working" | "broken" | "todo" | "home",
+): ScenarioSource[] {
+  const target: ScenarioSourceTag =
+    filter === "home" ? "home" : (`fixture-${filter}` as ScenarioSourceTag);
+  return all.filter((s) => s.source === target);
 }
 
 function sortedScenarios(m: Map<string, ScenarioSource>): ScenarioSource[] {
