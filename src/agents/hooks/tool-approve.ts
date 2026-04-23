@@ -35,6 +35,23 @@ import { startsWithAny } from "../../utils/retry.js";
 import { extractGateNote, formatForPrompt } from "../../utils/gate-reasoning-cache.js";
 import { planModeEditBlock, planModeBashBlock } from "../../utils/edit-intent.js";
 
+const FABRICATED_DENY_FINGERPRINTS: RegExp[] = [
+  /without explicit user approval/i,
+  /subagents are denied/i,
+  /subagent escalation/i,
+  /bash\/glob workaround/i,
+  /workaround pattern/i,
+  /prior denials confirm/i,
+  /enforce core tools/i,
+  /#\s*\d+\+?\s*in sequence/i,
+  /\bnth in sequence\b/i,
+  /matches pattern of repeated [A-Za-z]+ attempts/i,
+];
+
+function isFabricatedDenyReason(reason: string): boolean {
+  return FABRICATED_DENY_FINGERPRINTS.some((re) => re.test(reason));
+}
+
 export interface ToolApprovalOptions {
   skipLlmOnClean?: boolean;
   sessionDir?: string;
@@ -155,6 +172,13 @@ Input: ${JSON.stringify(toolInput)}`,
       const reason = result.output.startsWith("DENY: ")
         ? result.output.replace("DENY: ", "")
         : `Malformed response: ${result.output}`;
+
+      if (isFabricatedDenyReason(reason)) {
+        console.error(
+          `[tool-approve] Discarded hallucinated deny reason for ${toolName}: ${reason.slice(0, 200)}`
+        );
+        return { approved: true, gateNote };
+      }
 
       return { approved: false, reason, gateNote };
     } catch (err) {

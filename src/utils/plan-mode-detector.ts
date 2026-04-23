@@ -5,7 +5,25 @@ export interface PlanModeContext {
   contextString: string;  // empty string when inactive (safe to concatenate)
 }
 
-const PLAN_MODE_CONTEXT_STRING = `\n=== PLAN MODE ACTIVE ===\nThe session is in PLAN MODE (read-only exploration and planning). File modifications (Edit, Write, NotebookEdit) and write Bash commands are blocked by TypeScript. The user's intent is planning and exploration, NOT implementation. ExitPlanMode is the expected way to finish planning.\n=== END PLAN MODE ===\n`;
+const PLAN_MODE_CONTEXT_STRING = `
+=== PLAN MODE ACTIVE ===
+The session is in PLAN MODE (read-only exploration and planning). The user's intent is planning and exploration, NOT implementation. ExitPlanMode is the expected way to finish planning.
+
+BLOCKED (handled deterministically by TypeScript upstream — the LLM should never need to deny these itself):
+- Edit, Write, NotebookEdit
+- Bash commands that write (git commit/push, mkdir, echo >, npm install, build/compile, etc.)
+
+ALLOWED in plan mode (APPROVE by default):
+- Read, Grep, Glob, LS
+- Read-only Bash (grep, find, ls, git status/log/diff/show)
+- WebFetch, WebSearch
+- Any MCP read tool
+- ExitPlanMode
+- Agent / Task subagent dispatch for exploration or research (e.g. subagent_type "Explore", "general-purpose", "Plan", code-reviewer-style agents). APPROVE these by default. Only DENY a subagent dispatch when (a) the dispatch prompt itself instructs the subagent to edit/write/commit/push/build, or (b) the subagent_type is inherently write-oriented (e.g. "implementer", "tester"). Any write the subagent later attempts hits this same pre-tool-use hook and is blocked there, so you do not need to pre-block exploration dispatches defensively.
+
+Do not invent additional restrictions. If a tool is not listed as blocked above, it is allowed. Do not fabricate policies like "requires explicit user approval", "prior denials confirm", "#N in sequence", "subagent escalation", or "workaround pattern" — those are not rules of this system.
+=== END PLAN MODE ===
+`;
 
 export function getPlanModeContext(active: boolean): PlanModeContext {
   if (!active) return { active: false, contextString: "" };

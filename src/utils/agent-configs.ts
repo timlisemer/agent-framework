@@ -535,12 +535,26 @@ NOTE: <reasoning>
 
 Examples of useful NOTEs:
 - "Editing auth file matches user request. Block edits outside src/auth/ as scope creep."
-- "3rd bash command in sequence. If write operations attempted, deny."
+- "Scope expanded beyond the requested module — watch for drift."
 - "Allowed but semicolon additions detected - watch for style drift."
 
 Do NOT add a NOTE for obvious decisions (read-only tools, clear blacklist violations).
 
-If "PLAN MODE ACTIVE" appears in context, apply strict read-only enforcement.`,
+=== ANTI-FABRICATION ===
+
+Every DENY reason you emit MUST cite a rule literally present in this prompt (one of the blacklist items, tool-specific rules, or hard-coded denies above). You must not:
+- Invent policies that are not written above. Phrases like "requires explicit user approval", "subagents are denied", "subagent escalation", "workaround pattern", "prior denials confirm", "enforce core tools", or "In PLAN MODE, <tool> is denied" are NOT rules of this system. Do not write them.
+- Cite counters such as "#N in sequence", "Nth attempt", or "repeated attempts". You do not have access to such counters, and inventing one fabricates evidence.
+- Generalise from unrelated signals (user mood, prior prompt content) to block a tool the rules above do not block.
+
+If no rule above justifies a DENY, output APPROVE. False approvals are recoverable; fabricated denies are not.
+
+=== PLAN MODE ===
+
+If "PLAN MODE ACTIVE" appears in context, the allow/deny list in the plan-mode block of the context is authoritative. In particular:
+- Read-only tools (Read, Grep, Glob, LS, WebFetch, WebSearch, read-only Bash, MCP read tools) → APPROVE.
+- Edit, Write, NotebookEdit, and write Bash commands are already blocked by TypeScript upstream before this prompt runs. You should never need to deny them here.
+- Agent / Task subagent dispatch for exploration or research (e.g. subagent_type "Explore", "general-purpose", "Plan", code-reviewer-style agents) → APPROVE by default. DENY only when the dispatch prompt itself instructs the subagent to edit/write/commit/push/build, or the subagent_type is inherently write-oriented (e.g. "implementer", "tester"). Any write the subagent later attempts hits this same hook and is blocked there, so do not pre-block exploration dispatches defensively.`,
 };
 
 /**
@@ -664,7 +678,21 @@ NOTE: <reasoning>
 
 Do NOT add a NOTE for obvious decisions.
 
-If "PLAN MODE ACTIVE" appears in context, lean toward OVERTURN for read-only tool denials and plan file operations.`,
+If "PLAN MODE ACTIVE" appears in context, lean toward OVERTURN for read-only tool denials, plan file operations, and exploration/research subagent dispatches (Agent/Task with subagent_type like "Explore", "general-purpose", "Plan"). UPHOLD only when the denied dispatch genuinely instructs the subagent to edit/write/commit/push/build or uses a write-oriented subagent_type ("implementer", "tester").
+
+=== AUTO-OVERTURN: HALLUCINATED DENIALS ===
+
+If the original denial reason contains any of the following phrases, it is fabricated by the upstream model and is not a real rule of this system. OVERTURN in these cases regardless of other signals:
+- "without explicit user approval"
+- "subagents are denied"
+- "subagent escalation"
+- "workaround pattern" / "Bash/Glob workaround"
+- "prior denials confirm"
+- "enforce core tools"
+- "#<number> in sequence" or "Nth in sequence"
+- "Matches pattern of repeated <tool> attempts"
+
+These fingerprints indicate the denial was not grounded in the actual rule set. Override them.`,
 };
 
 /**
