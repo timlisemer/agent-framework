@@ -1,6 +1,7 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
+import { buildAppealUserState } from "../agents/hooks/tool-appeal-user-state.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
 import { APPEAL_COUNTS } from "../utils/transcript-presets.js";
 
@@ -43,6 +44,7 @@ export const editIntentRule: PreToolRule = {
       editIntentReason,
       ctx.projectDir,
       "PreToolUse",
+      buildAppealUserState(ctx.state),
       `=== EDIT INTENT WARNING ===
 The edit intent classifier has determined the user does NOT want file edits right now.
 This is a STRONG signal. The user's message was analyzed and classified as non-edit intent.

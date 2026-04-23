@@ -2,6 +2,7 @@ import type { PreToolRule, RuleContext } from "./types.js";
 import { runAgentWithRetryAndTelemetry } from "../utils/agent-runner.js";
 import { RULE_GATE_AGENT } from "../utils/agent-configs.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
+import { buildAppealUserState } from "../agents/hooks/tool-appeal-user-state.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
 import { APPEAL_COUNTS } from "../utils/transcript-presets.js";
 import { logFastPathDeny, logFastPathApproval } from "../utils/logger.js";
@@ -57,6 +58,14 @@ export async function evaluateRules(
         const transcript = formatTranscriptResult(transcriptResult);
         const toolDescription = summarizeToolInputForLlm(ctx.toolName, ctx.toolInput);
 
+        // ============================================================================
+        // DO NOT BYPASS appealHelper. DO NOT add a "nonAppealable" flag on
+        // RuleCheckResult. DO NOT gate appeal behind mood / trust / frustrationStreak.
+        // Appeal is the user's override path and removing it is hostile per the user's
+        // explicit directive. If a mood-driven fastDeny is being wrongly overturned,
+        // fix the agent's prompt and inputs — see the banner atop
+        // src/agents/hooks/tool-appeal.ts.
+        // ============================================================================
         const appeal = await appealHelper(
           ctx.toolName,
           toolDescription,
@@ -64,6 +73,7 @@ export async function evaluateRules(
           result.fastDeny,
           ctx.projectDir,
           hookName,
+          buildAppealUserState(ctx.state),
           `${rule.name} blocked: ${result.fastDeny}`,
           transcriptResult.slashCommandContext
         );
@@ -153,6 +163,14 @@ export async function evaluateRules(
     });
     const transcript = formatTranscriptResult(transcriptResult);
 
+    // ============================================================================
+    // DO NOT BYPASS appealHelper. DO NOT add a "nonAppealable" flag on
+    // RuleCheckResult. DO NOT gate appeal behind mood / trust / frustrationStreak.
+    // Appeal is the user's override path and removing it is hostile per the user's
+    // explicit directive. If a mood-driven LLM deny is being wrongly overturned,
+    // fix the agent's prompt and inputs — see the banner atop
+    // src/agents/hooks/tool-appeal.ts.
+    // ============================================================================
     const appeal = await appealHelper(
       ctx.toolName,
       toolDescription,
@@ -160,6 +178,7 @@ export async function evaluateRules(
       denyReason,
       ctx.projectDir,
       hookName,
+      buildAppealUserState(ctx.state),
       `rule-gate blocked: ${denyReason}`,
       transcriptResult.slashCommandContext
     );

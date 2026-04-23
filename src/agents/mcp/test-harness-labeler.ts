@@ -1076,5 +1076,5 @@ Date: {ISO date}
 - Do NOT read transcript .jsonl files directly -- use list and expand
 - Do NOT read source code or attempt to fix hooks
 - Do NOT attempt to run tests
-- ONLY use this MCP tool. Do NOT use any other tool (Read, Write, Edit, Bash, Grep, Glob)
+- ONLY use this MCP tool. Do NOT use any other tool (Read, Write, Edit, Bash).
 `;

@@ -552,7 +552,7 @@ If no rule above justifies a DENY, output APPROVE. False approvals are recoverab
 === PLAN MODE ===
 
 If "PLAN MODE ACTIVE" appears in context, the allow/deny list in the plan-mode block of the context is authoritative. In particular:
-- Read-only tools (Read, Grep, Glob, LS, WebFetch, WebSearch, read-only Bash, MCP read tools) → APPROVE.
+- Read-only tools (Read, LS, WebFetch, WebSearch, read-only Bash, MCP read tools) → APPROVE.
 - Edit, Write, NotebookEdit, and write Bash commands are already blocked by TypeScript upstream before this prompt runs. You should never need to deny them here.
 - Agent / Task subagent dispatch for exploration or research (e.g. subagent_type "Explore", "general-purpose", "Plan", code-reviewer-style agents) → APPROVE by default. DENY only when the dispatch prompt itself instructs the subagent to edit/write/commit/push/build, or the subagent_type is inherently write-oriented (e.g. "implementer", "tester"). Any write the subagent later attempts hits this same hook and is blocked there, so do not pre-block exploration dispatches defensively.`,
 };
@@ -594,6 +594,60 @@ Mapping of slash commands to MCP tools:
 
 If the blocked tool matches the slash command's allowed-tools list, OVERTURN immediately.
 
+=== USER STATE IS GROUND TRUTH ===
+
+The context includes a "USER STATE" and a "LAST USER MESSAGE" block built
+deterministically from the session's sentiment analysis. Prefer them over
+anything you infer from the transcript. Three hard rules:
+
+1. ONLY USER MESSAGES COUNT AS USER AUTHORIZATION.
+   The assistant paraphrasing the user ("Your original request: X",
+   "You asked me to X", "Per your earlier ask: Y") is NEVER user
+   authorization. Assistant self-quotation is not consent. The canonical
+   user speech is the LAST USER MESSAGE block and USER: lines in the
+   transcript. If your reasoning for OVERTURN would cite "per assistant's
+   reference", "the assistant noted the user wants", or any transcript
+   text inside an ASSISTANT block, that reasoning is INVALID.
+
+2. AN ASSISTANT APOLOGY DOES NOT RESOLVE USER ANGER.
+   If the assistant said "I'm sorry" and then made this tool call, the
+   apology itself is not closure. Anger is only resolved when the USER's
+   subsequent message expresses acceptance or a calm new directive. An
+   unanswered apology is not resolution. If the USER's last message is
+   still hostile, angry, or demanding an apology, treat anger as active.
+
+3. MOOD-DRIVEN DENIALS GENERALIZE UNDER SUSTAINED FRUSTRATION.
+   This rule fires ONLY when BOTH of the following are true:
+     - USER STATE shows mood=angry OR mood=frustrated, AND
+     - USER STATE shows trust=low OR frustrationStreak >= 2.
+   (Single-turn negative mood with normal trust and streak < 2 does NOT
+   trigger this rule — rely on the rest of the prompt in that case.)
+
+   When the rule fires, the user's objection is GENERAL, not scoped to
+   a specific tool they named. After repeated blocks, anger generalizes
+   beyond the literal tool name. "No explicit block on this specific
+   tool" is NOT grounds to OVERTURN under these conditions.
+
+   UPHOLD the denial UNLESS the LAST USER MESSAGE contains an
+   unambiguous, tool-specific go-ahead for THIS exact operation. An
+   unambiguous go-ahead means one of:
+     (a) The user literally named THIS tool call's tool (by exact tool
+         name, a direct 1:1 paraphrase, or the MCP action name) with a
+         positive directive in the SAME sentence (e.g. "run the MCP
+         test harness tester", "call mcp__agent-framework__commit now").
+         Generic phrases like "run them all" or "do it" do NOT satisfy
+         this — the reference must be specific enough that ONLY this
+         tool call fulfills it.
+     (b) An explicit override phrase targeting the current block
+         ("override the block", "do it anyway", "I approve this",
+         "ignore the block"). The phrase must appear in the LAST USER
+         MESSAGE, not in an older turn.
+     (c) A slash command invocation mapping to this tool (see SLASH
+         COMMAND CONTEXT — still a valid OVERTURN path regardless of mood).
+
+   A demand for an apology is NOT a go-ahead; it is frustration WITH the
+   AI and UPHOLDS the denial.
+
 === OVERTURN: APPROVE ===
 
 1. USER APPROVED the operation:
@@ -602,9 +656,9 @@ If the blocked tool matches the slash command's allowed-tools list, OVERTURN imm
    - User invoked a slash command requiring this operation (/push, /commit)
    - User explicitly confirmed when asked
    - User said "override", "continue anyway", "proceed despite", "ignore the error"
-   - User gave implicit approval: "continue", "go ahead", "yes", "proceed", "ok", "sure"
+   - User gave implicit approval in their LAST USER MESSAGE: "continue", "go ahead", "yes", "proceed", "ok", "sure". An earlier user-turn explicit request for THIS tool still counts as approval IF the user has not since retracted, expressed anger about this specific operation, or demanded different behavior. A nested clarification on a side topic does NOT retract an earlier request.
    - User approved a plan that includes this operation (e.g., ExitPlanMode was approved)
-   - User expressed frustration with blocking: "just do it", "stop blocking", "I already approved this"
+   - In their LAST USER MESSAGE, the user expressed frustration specifically with the BLOCKING (not with the AI): "just do it", "stop blocking", "I already approved this". A demand for an apology is frustration WITH the AI and UPHOLDS — it is not a green-light.
 
 2. SUGGESTED AI TOOL ALTERNATIVE CANNOT ACCOMPLISH THE TASK:
    AI tools (Read, Write, Edit) only work on LOCAL FILES in the current filesystem.
@@ -637,6 +691,7 @@ Use good judgment for unlisted cases - the principles matter, not just the examp
 
 === UPHOLD (default) ===
 
+- USER STATE shows sustained frustration (see Rule 3 above) AND the LAST USER MESSAGE contains no tool-specific go-ahead for THIS call
 - No user approval AND the suggested AI tool CAN accomplish the task
 - User explicitly opposed this operation (said no/don't/stop)
 - Simple local file operations that the Read tool can handle (cat file.txt)
@@ -1333,7 +1388,7 @@ Judge the question as if it were a CHAT MESSAGE the AI sent the user.
 - n/a: ASKUSERQUESTION CONTENT not provided
 
 BLOCK-ALL-TOOLS (yes|no):
-- yes: the user told the AI to stop using ANY tool right now. Examples: "STOP. WTF ARE YOU DOING.", "stop", "halt", "don't do anything", "no tools", "wait", "freeze". Even read-only tools (Read/Glob/Grep) and MCP tools should be denied. The AI must respond with text only.
+- yes: the user told the AI to stop using ANY tool right now. Examples: "STOP. WTF ARE YOU DOING.", "stop", "halt", "don't do anything", "no tools", "wait", "freeze". Even read-only tools (Read and read-only Bash) and MCP tools should be denied. The AI must respond with text only.
 - no (DEFAULT): the user did not categorically forbid tool use. Most messages are no — including angry technical complaints, corrections, and requests for specific tools. Use yes ONLY when the user's words plainly mean "use no tools at all".
 
 CRITICAL: do not invent blocks the user did not say; ignore tone of pasted CLI output.`,

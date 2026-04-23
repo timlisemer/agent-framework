@@ -4,6 +4,7 @@ import { checkStyleDrift } from "../agents/hooks/style-drift.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
 import { STYLE_DRIFT_COUNTS } from "../utils/transcript-presets.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
+import { buildAppealUserState } from "../agents/hooks/tool-appeal-user-state.js";
 
 export const styleDriftRule: PreToolRule = {
   name: "style-drift",
@@ -49,6 +50,7 @@ export const styleDriftRule: PreToolRule = {
         styleDriftResult.reason || "Style drift detected",
         ctx.projectDir,
         "PreToolUse",
+        buildAppealUserState(ctx.state),
         `style-drift blocked: ${styleDriftResult.reason}`
       );
 

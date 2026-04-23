@@ -652,7 +652,7 @@ If a failure corresponds to an uncertain label, it may be acceptable.
 Add a note that the failure matches a known uncertainty.
 
 ### A.6 Investigate hook code
-Use Read, Grep, Glob tools (NOT this MCP tool) to examine hook source code.
+Use Read and read-only Bash (grep, rg, find, ls) -- NOT this MCP tool -- to examine hook source code.
 Key source files:
 - src/hooks/pre-tool-use.ts -- main safety gate (~400 lines)
 - src/hooks/stop-response-check.ts -- stop hook
@@ -725,7 +725,7 @@ Shows surrounding context for a specific hook point.
 - Do NOT modify labels.json -- only add notes
 - Do NOT call build commands -- the harness builds automatically
 - Do NOT label transcripts -- that is the labeler's job
-- Do NOT use Bash -- use Read/Grep/Glob/Write/Edit for code investigation
+- Use Read and read-only Bash (grep, rg, find, ls) for investigation; Write/Edit for fixes. Bash is gated to a read-only allowlist by the pre-tool-use hook -- mutation, execution, and network commands are denied.
 - Use this MCP tool ONLY for harness operations
 - Use run_single_hook for iterative development (cheap, does not count
   against run limit)

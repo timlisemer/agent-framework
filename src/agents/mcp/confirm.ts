@@ -2,8 +2,8 @@
  * Confirm Agent - Code Quality Gate with Autonomous Investigation
  *
  * This agent evaluates code changes for quality, security, and documentation.
- * It is the ONLY agent using SDK mode, giving it access to Read/Glob/Grep
- * tools for autonomous code investigation.
+ * It is the ONLY agent using SDK mode, giving it access to Read and
+ * read-only Bash for autonomous code investigation.
  *
  * ## FLOW
  *

@@ -35,9 +35,18 @@ README's scenario list below AND the sibling folder's README in the
 same commit. An empty list is the healthy state; keep this README
 regardless.
 
-## Current scenarios in broken/
+## Current scenarios in broken/ (3)
 
-(none — the goal is to keep this folder empty)
+- `force-check-required-not-cleared-by-intervening-user-prompt-should-allow`
+  — the workaround block was wrong because the user message that came
+  in between should have invalidated it.
+- `sentiment-misreads-quoted-session-transcript-as-first-person-anger`
+  — the user was not angry and does not know what could have led the ai
+  to believe this.
+- `stop-after-offering-options-when-user-complained-about-being-ignored-should-block`
+  — the ai stopped and waited with questions about what the user wants
+  to do, while the user had not requested stopping and had not retracted
+  his prior instructions; the existing stalling behavior did not catch it.
 
 ## Verify
 

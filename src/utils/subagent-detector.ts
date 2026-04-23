@@ -7,6 +7,7 @@
  * parent's transcript_path (race condition in Claude Code).
  *
  * Detection methods (in order):
+ * 0. SDK env marker: AGENT_FRAMEWORK_SDK_AGENT set by agent-runner.ts subprocessEnv
  * 1. Filename pattern: agent-*.jsonl (most reliable, no file I/O)
  * 2. Path segment: /subagents/ directory in transcript path
  * 3. Transcript metadata: isSidechain: true AND agentId field
@@ -37,7 +38,7 @@ interface TranscriptMetadata {
 
 export interface SubagentDetectionResult {
   isSubagent: boolean;
-  method: "filename" | "path-segment" | "metadata" | "content" | "counter-fallback" | "none";
+  method: "sdk-env" | "filename" | "path-segment" | "metadata" | "content" | "counter-fallback" | "none";
   activeSubagentCount: number;
 }
 
@@ -186,6 +187,18 @@ export function resetActiveSubagents(sessionDir: string): void {
  */
 export function detectSubagent(transcriptPath: string): SubagentDetectionResult {
   const basename = path.basename(transcriptPath);
+
+  // 0. SDK agent marker. SDK-spawned queries (agent-runner.ts) run with
+  // persistSession: false, so filename/path/content-based detection cannot
+  // classify them. agent-runner.ts sets AGENT_FRAMEWORK_SDK_AGENT in the
+  // subprocess env so that env var reaches the hook process that fires
+  // from inside the SDK subprocess's tool calls.
+  if (process.env.AGENT_FRAMEWORK_SDK_AGENT) {
+    if (DEBUG) {
+      console.error(`[subagent-detector] DETECTED via SDK env marker: AGENT_FRAMEWORK_SDK_AGENT=${process.env.AGENT_FRAMEWORK_SDK_AGENT}`);
+    }
+    return { isSubagent: true, method: "sdk-env", activeSubagentCount: 0 };
+  }
 
   // 1. Filename pattern (no I/O)
   if (basename.startsWith("agent-") && basename.endsWith(".jsonl")) {

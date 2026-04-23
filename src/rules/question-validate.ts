@@ -1,6 +1,7 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { checkQuestionValidity } from "../agents/hooks/question-validate.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
+import { buildAppealUserState } from "../agents/hooks/tool-appeal-user-state.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
 import { QUESTION_VALIDATE_COUNTS } from "../utils/transcript-presets.js";
 import { summarizeToolInputForLlm } from "../utils/tool-input-summary.js";
@@ -37,6 +38,7 @@ export const questionValidateRule: PreToolRule = {
         validation.reason || "Question validation failed",
         ctx.projectDir,
         "PreToolUse",
+        buildAppealUserState(ctx.state),
         `question-validate blocked: ${validation.reason}`
       );
 

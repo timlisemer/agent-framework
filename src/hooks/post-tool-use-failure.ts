@@ -5,7 +5,6 @@ initializeTelemetry();
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { getSessionDir, appendToolLog } from "../utils/session-store.js";
-import { withSessionLock } from "../utils/session-mutex.js";
 
 /**
  * PostToolUseFailure Hook
@@ -30,15 +29,13 @@ async function main() {
   }
 
   const sessionDir = getSessionDir(input.transcript_path);
-  await withSessionLock(sessionDir, async () => {
-    await appendToolLog(sessionDir, {
-      ts: Date.now(),
-      tool: input.tool_name,
-      status: "failed",
-      gate: "system",
-      reason: input.error?.slice(0, 200),
-      ms: 0,
-    });
+  await appendToolLog(sessionDir, {
+    ts: Date.now(),
+    tool: input.tool_name,
+    status: "failed",
+    gate: "system",
+    reason: input.error?.slice(0, 200),
+    ms: 0,
   });
 
   exitAfterFlush(0);

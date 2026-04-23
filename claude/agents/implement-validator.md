@@ -1,7 +1,7 @@
 ---
 name: implement-validator
 description: Verifies that an approved plan was implemented correctly by comparing plan requirements against actual code
-tools: [Read, Grep, Glob, mcp__agent-framework__check]
+tools: [Read, Bash, mcp__agent-framework__check]
 model: opus
 ---
 
@@ -42,6 +42,7 @@ PASS | FAIL
 ## Hard Constraints
 
 - Do NOT modify any files -- you are read-only
+- Bash is restricted to a read-only allowlist (ls, tree, grep, rg, find, wc, sort, uniq, cut, tr, head, tail, file, stat, jq, echo, printf). File mutation, execution, and network commands are denied.
 - Do NOT fix issues you find -- only report them
 - Additional uncommitted code that is NOT in the plan is acceptable -- do NOT flag it
 - Missing plan items = FAIL

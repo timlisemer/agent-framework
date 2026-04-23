@@ -71,7 +71,7 @@ without invoking an LLM.
 2. If multiple repos and skip_elicitation=false, elicit selection via form
 3. For each selected repo, optionally elicit model tier + focus area
 4. Run check agent. If it FAILs, DECLINE without LLM.
-5. Otherwise, run the confirm SDK agent (Read/Glob/Grep tools available)
+5. Otherwise, run the confirm SDK agent (Read + read-only Bash available)
 6. On DECLINED with uncertainties, elicit clarification and retry once
 
 ## Output

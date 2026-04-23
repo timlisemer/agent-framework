@@ -36,17 +36,21 @@
  * - Agents that benefit from exploring the codebase autonomously
  *
  * **Characteristics:**
- * - Has access to Read, Glob, Grep tools (read-only)
+ * - Has access to Read and read-only Bash (search/navigation)
  * - Can make multiple turns to investigate
  * - More expensive, but can explore codebase
  * - Uses bypassPermissions mode for autonomous execution
  *
  * ## SECURITY CONSIDERATIONS
  *
- * SDK mode is restricted to read-only tools (Read, Glob, Grep):
- * - No Bash access - prevents unintended command execution
+ * SDK mode is restricted to Read + read-only Bash. The pre-tool-use hook
+ * treats SDK agents as subagents (via AGENT_FRAMEWORK_SDK_AGENT env marker)
+ * and gates Bash through the same read-only allowlist applied to Task-spawned
+ * subagents in src/rules/subagent.ts:
+ * - Bash is allowed only for read-only search/navigation (ls, grep, rg, find, etc.)
+ * - Mutation, execution, and network commands are denied deterministically
  * - No Write/Edit access - prevents file modifications
- * - Git data is passed via prompt, not gathered by agent
+ * - Git data is passed via prompt rather than gathered via git commands
  *
  * This ensures the SDK agent can investigate but not modify anything.
  *
@@ -88,17 +92,21 @@ import { logAgentDecision, extractDecision, logAgentStarted } from "./logger.js"
 import type { DecisionType } from "../telemetry/types.js";
 
 /**
- * Read-only tools available to SDK mode agents.
+ * Tools available to SDK mode agents.
  *
  * These tools allow code investigation without modification:
  * - Read: Read file contents
- * - Glob: Find files by pattern
- * - Grep: Search file contents
+ * - Bash: Read-only search/navigation only. The pre-tool-use hook gates
+ *   Bash through the subagent read-only allowlist (ls, grep, rg, find,
+ *   wc, sort, uniq, cut, tr, head, tail, file, stat, jq, echo, printf).
+ *   Mutation, execution, and network commands are denied deterministically.
  *
- * Bash is explicitly NOT included to prevent command execution.
- * Git data should be passed via the prompt context instead.
+ * Glob/Grep were previously listed separately but were removed by
+ * Claude Code v2.1.117 on native macOS/Linux builds (search routes through
+ * Bash via bundled ugrep/bfs). Git data should be passed via the prompt
+ * context rather than gathered via git commands.
  */
-const SDK_TOOLS = ["Read", "Glob", "Grep"] as const;
+const SDK_TOOLS = ["Read", "Bash"] as const;
 
 /**
  * Internal result from agent execution functions.
@@ -149,7 +157,7 @@ export interface AgentConfig {
    * Execution mode for this agent.
    *
    * - 'direct': Single API call, no tools, fastest
-   * - 'sdk': Multi-turn with Read/Glob/Grep tools
+   * - 'sdk': Multi-turn with Read and read-only Bash tools
    */
   mode: "direct" | "sdk";
 
@@ -183,9 +191,9 @@ export interface AgentConfig {
   workingDir?: string;
 
   /**
-   * Additional tools beyond read-only for SDK mode.
+   * Additional tools beyond the SDK defaults.
    *
-   * By default, SDK mode only has Read/Glob/Grep (read-only).
+   * By default, SDK mode has Read and read-only Bash.
    * Use this to enable additional tools like:
    * - 'Task': Allow spawning built-in subagents (Explore, Plan, general-purpose)
    * - 'WebFetch': Fetch web content
@@ -488,7 +496,7 @@ async function runDirectAgent(
 /**
  * Execute an agent using Claude SDK for multi-turn interactions.
  *
- * This mode gives the agent access to read-only tools (Read, Glob, Grep)
+ * This mode gives the agent access to Read and read-only Bash (search/navigation)
  * for autonomous code investigation. Uses bypassPermissions mode for
  * unattended execution.
  *
@@ -496,11 +504,12 @@ async function runDirectAgent(
  *
  * The agent is intentionally limited to read-only tools:
  * - Read: View file contents
- * - Glob: Find files by pattern
- * - Grep: Search file contents
+ * - Bash: Read-only search/navigation only (ls, grep, rg, find, wc, sort,
+ *   uniq, cut, tr, head, tail, file, stat, jq, echo, printf). Gated by the
+ *   pre-tool-use hook via the subagent read-only allowlist.
  *
- * Bash is NOT available - any command data (git status, git diff, etc.)
- * must be passed via the prompt context.
+ * Git data (status/diff/log/show) must be passed via the prompt context
+ * rather than gathered via bash git commands -- those are denied by the hook.
  *
  * ## Output Collection
  *
@@ -526,8 +535,12 @@ async function runSdkAgent(
 
   // Prepare environment for subprocess
   // For subscription: pass OAuth token so Claude Code uses subscription auth
+  // AGENT_FRAMEWORK_SDK_AGENT: marker read by subagent-detector.ts (method 0)
+  // so SDK agents are treated as subagents by the pre-tool-use hook. Gates
+  // Bash through the subagent read-only allowlist in src/rules/subagent.ts.
   const subprocessEnv = {
     ...process.env,
+    AGENT_FRAMEWORK_SDK_AGENT: config.name,
     // Clear OpenRouter-specific vars for subscription mode
     ...(provider.type === PROVIDER_TYPES.CLAUDE_SUBSCRIPTION
       ? {
@@ -542,17 +555,16 @@ async function runSdkAgent(
 
 ## TOOLS AVAILABLE
 
-You have access to these read-only tools for investigating code:
-- **Read**: Read file contents to understand context
-- **Glob**: Find files by pattern (e.g., "src/**/*.ts")
-- **Grep**: Search file contents for patterns
+You have access to these tools for investigating code:
+- **Read**: View file contents.
+- **Bash**: Read-only search and navigation only. The pre-tool-use hook gates Bash through a read-only allowlist: ls, tree, grep, rg, find, fd, wc, sort, uniq, cut, tr, head, tail, file, stat, jq, echo, printf. Mutation, execution, installs, builds, network fetch, and git writes are denied.
 
 Use these tools when you need to:
 - Understand context around changed code
 - Verify patterns are followed consistently
 - Check if documentation matches implementation
 
-Do NOT use Bash - git data is already provided in the prompt.
+Git data (status/diff/log/show) is already provided in the prompt context -- do not invoke git from Bash.
 Your final response should be your complete analysis in the required format.`;
 
   try {

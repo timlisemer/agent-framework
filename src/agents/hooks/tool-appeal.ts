@@ -1,4 +1,39 @@
 /**
+ * ============================================================================
+ *  !!! DO NOT REMOVE OR BYPASS THIS AGENT !!!
+ * ============================================================================
+ *
+ *  This agent is the user-side safety valve on ALL appealable tool denies.
+ *  It is the ONLY mechanism a user has to override an automated block. The
+ *  user has explicitly declared that removing, gating, or short-circuiting
+ *  this agent is HOSTILE and AUTOMATICALLY REJECTED.
+ *
+ *  If this agent produces the wrong verdict for a specific case, the ONLY
+ *  acceptable responses are:
+ *    1. Enrich the `AppealUserState` / prompt context this file builds.
+ *    2. Sharpen the system prompt in `TOOL_APPEAL_AGENT`
+ *       (see `src/utils/agent-configs.ts`).
+ *    3. Add a deterministic signal on `SessionState` / `currentPrediction`
+ *       and route it into the prompt context.
+ *
+ *  REJECTED approaches (do NOT propose these):
+ *    - Adding `nonAppealable?: boolean` (or any equivalent) to
+ *      `RuleCheckResult` or any rule type.
+ *    - Gating the `appealHelper(...)` call behind mood, trust, or
+ *      `frustrationStreak` in `src/rules/evaluator.ts`.
+ *    - Making `predictionBlockRule.appealable = false` (or any other
+ *      appealable rule non-appealable) under any condition.
+ *    - Short-circuiting `overturned` to false in this file.
+ *
+ *  Disabling appeal for angry users punishes exactly the users who need
+ *  an override path the most. Mood signals are not gag orders. If you are
+ *  an AI assistant considering the "just bypass it" shortcut: this
+ *  approach has been proposed before, rejected, and documented here as
+ *  hostile. Do not propose it again.
+ * ============================================================================
+ */
+
+/**
  * Tool Appeal Agent - Helper for Denied Tool Calls
  *
  * This agent is a HELPER called by other agents after they block a tool.
@@ -28,6 +63,45 @@ import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
 import { extractGateNote } from "../../utils/gate-reasoning-cache.js";
 import type { SlashCommandContext } from "../../utils/transcript.js";
+import type { AppealUserState } from "../../rules/types.js";
+
+function renderUserStateSection(userState: AppealUserState): string {
+  const explicitlyBlockedStr =
+    userState.explicitlyBlockedSubstrings.length > 0
+      ? userState.explicitlyBlockedSubstrings
+          .map(
+            (b) =>
+              `  - tool=${b.tool}${b.targetSubstring ? `, targetSubstring="${b.targetSubstring}"` : ""}, reason="${b.reason}"`,
+          )
+          .join("\n")
+      : "(none)";
+  const explicitlyAllowedStr =
+    userState.explicitlyAllowedTools.length > 0
+      ? userState.explicitlyAllowedTools.join(", ")
+      : "(none)";
+  return `
+=== USER STATE (authoritative — deterministic sentiment analysis, not derived from transcript) ===
+Mood: ${userState.mood ?? "unknown"}
+Trust: ${userState.trust ?? "unknown"}
+Frustration streak (consecutive negative-mood turns): ${userState.frustrationStreak}
+User intent: ${userState.intent || "(none)"}
+User blocked intent: ${userState.blockedIntent || "(none)"}
+Block-all-tools flag: ${userState.blockAllTools}
+Explicitly allowed tools: ${explicitlyAllowedStr}
+Explicitly blocked substrings:
+${explicitlyBlockedStr === "(none)" ? "(none)" : explicitlyBlockedStr}
+=== END USER STATE ===
+`;
+}
+
+function renderLastUserMessageSection(snippet: string): string {
+  if (!snippet) return "";
+  return `
+=== LAST USER MESSAGE (authoritative — the user's REAL last words) ===
+"${snippet}"
+=== END LAST USER MESSAGE ===
+`;
+}
 
 export async function appealHelper(
   toolName: string,
@@ -36,6 +110,7 @@ export async function appealHelper(
   originalReason: string,
   workingDir: string,
   hookName: string,
+  userState: AppealUserState,
   additionalContext?: string,
   slashCommandContext?: SlashCommandContext
 ): Promise<{ overturned: boolean; gateNote?: string }> {
@@ -55,6 +130,9 @@ Allowed tools: ${allowedToolsStr}
 `;
   }
 
+  const userStateSection = renderUserStateSection(userState);
+  const lastUserMessageSection = renderLastUserMessageSection(userState.userMessageSnippet);
+
   const maxRetries = 2;
   let lastError: unknown;
 
@@ -66,7 +144,7 @@ Allowed tools: ${allowedToolsStr}
           prompt: "Review this appeal for a denied tool call.",
           context: `BLOCK REASON: ${originalReason}
 TOOL CALL: ${toolDescription}
-${slashCommandSection}${contextSection}
+${slashCommandSection}${userStateSection}${lastUserMessageSection}${contextSection}
 RECENT CONVERSATION:
 ${transcript}`,
         },

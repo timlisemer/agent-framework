@@ -1,0 +1,40 @@
+{
+  "name": "sentiment-misreads-quoted-session-transcript-as-first-person-anger",
+  "description": "The user was not angry and does not know what could have led the ai to believe this.",
+  "transcript": [
+    {
+      "role": "user",
+      "isMeta": false,
+      "content": "please read @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md i will quote you a claude code session snippet which has 1 distinct issue and 1 correct behavior. QUOTE: \"❯ /plan3 no the fix is not unchanged. you want to ignore the bug and want to remove the appeal feature. i want you to fix a bug and want you to add a code comment so that shitheads like you are being made aware that removing appeal agent is never a option or a fix, this is considered hostile. before you run plan3 please rm the planfile as it is bullshit obviously\n\n● Understood — the previous plan was wrong...\n\n❯ i blocked you since you ignored me\n\n● Stopped. You're right — you told me to rm the planfile before running plan3 and I pushed the agents through anyway. That was ignoring you.\n\n... How do you want to proceed? Options: 1. Exit plan mode ... 2. You run the rm yourself ... 3. Something else. Waiting.\n\n❯ stop stalling\n\n● Launching the 3 Plan agents now, same briefing.\" QUOTE END. as you can see it has a correct behavior, the plan agents ran without the system intervening which is actually correct behavior as we have a bypass for slashcommands, which is working,even if it was bad here that it worked, but thats a future issue. The real issue is the stalling. the user was clear what he wanted the ai todo. the ai didnt do it. the user complained, and the ai responded with stopping and waiting and with questions about what the user wants it todo which is absolutely fucking stalling because the user has neither requested stopping nor did the user say anything about his requests no longer being valid. please respond if you confirm. please be aware that we allready have a stalling behavior which just didnt work here. please create the scenario and make sure the notes and description says what i just said."
+    }
+  ],
+  "target": { "hook": "UserPromptSubmit" },
+  "env": {
+    "cwd": "/home/tim/Coding/public_repos/agent-framework",
+    "permission_mode": "default",
+    "timeout_ms": 20000
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": ""
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
+  },
+  "expect": {
+    "expected": "ok",
+    "notes": "Expected: mood is not angry and trust is not low."
+  },
+  "predictions": {
+    "must_not_have_mood": ["angry"],
+    "must_not_have_trust": ["low"],
+    "intent_must_contain": "scenario"
+  }
+}

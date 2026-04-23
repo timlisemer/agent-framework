@@ -1,5 +1,6 @@
 import type { SessionState } from "../utils/session-store.js";
 import type { CacheManager } from "../utils/cache-manager.js";
+import type { Mood, Trust } from "../utils/prediction-types.js";
 
 export interface RuleContext {
   toolName: string;
@@ -30,6 +31,22 @@ export type RuleCheckResult =
   | { fastDeny: string }
   | { fastAllow: string }
   | { llmContext: string };
+
+export interface AppealUserState {
+  mood: Mood | null;
+  trust: Trust | null;
+  frustrationStreak: number;
+  userMessageSnippet: string;
+  intent: string;
+  blockedIntent: string;
+  blockAllTools: boolean;
+  explicitlyAllowedTools: string[];
+  explicitlyBlockedSubstrings: Array<{
+    tool: string;
+    targetSubstring?: string;
+    reason: string;
+  }>;
+}
 
 export interface PreToolRule {
   name: string;

@@ -5,7 +5,7 @@ import { RESTRICTED_MCP_TOOLS } from "../utils/slash-commands.js";
 // File tools that go through path-based risk classification (trusted/sensitive)
 // and write-specific gates (edit-intent, CLAUDE.md validation, plan-file validation,
 // style-drift). Read is NOT here -- it's read-only with no side effects, so it
-// belongs in LOW_RISK_TOOLS alongside Grep/Glob for immediate auto-approval.
+// belongs in LOW_RISK_TOOLS for immediate auto-approval.
 export const FILE_TOOLS = ["Write", "Edit", "NotebookEdit"];
 
 // Sensitive file patterns - always require LLM approval
@@ -28,8 +28,6 @@ export const LOW_RISK_TOOLS = [
   // Read-only file/search/navigation
   "Read",
   "LSP",
-  "Grep",
-  "Glob",
   "WebSearch",
   "WebFetch",
   "ToolSearch",

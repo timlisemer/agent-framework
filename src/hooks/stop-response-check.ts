@@ -9,7 +9,6 @@ import { setTranscriptPath } from "../utils/execution-context.js";
 import { writeTool } from "../utils/synthetic.js";
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
-import { withSessionLock } from "../utils/session-mutex.js";
 import { isPlanModeActive, isPlanModeFromInput } from "../utils/plan-mode-detector.js";
 
 /**
@@ -55,9 +54,7 @@ async function main() {
   );
 
   if (!result.approved && result.systemMessage) {
-    await withSessionLock(sessionDir, async () => {
-      await writeTool(input.transcript_path, input.session_id, "stop-hook", result.systemMessage!);
-    });
+    await writeTool(input.transcript_path, input.session_id, "stop-hook", result.systemMessage!);
 
     const output = JSON.stringify({
       decision: "block",
