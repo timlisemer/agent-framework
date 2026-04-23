@@ -29,7 +29,6 @@ import {
   getSessionDir,
   getSessionState,
   appendToolLog,
-  readToolLogEntries,
   formatToolDetail,
 } from "../utils/session-store.js";
 import {
@@ -37,6 +36,8 @@ import {
   addPatternWarnings,
   clearGateReasoning,
 } from "../utils/gate-reasoning-cache.js";
+import { withSessionLock } from "../utils/session-mutex.js";
+import { findBatchDecision } from "../utils/batch-decision-cache.js";
 import { writeTool, writeUser } from "../utils/synthetic.js";
 import {
   FILE_TOOLS,
@@ -85,31 +86,7 @@ interface PipelineExit {
   agent: string;
   reason: string;
   usesLlm?: boolean;
-}
-
-async function waitForBatchLeader(
-  sessionDir: string,
-  leaderId: string,
-): Promise<{ decision: "allow" | "deny"; reason: string }> {
-  // Poll tool-log.jsonl for the leader's entry.
-  // In production, hooks fire as separate parallel processes — the leader
-  // may still be running when siblings start. Siblings poll until the
-  // leader writes its result. In the test harness, hooks fire sequentially
-  // so the leader always finishes first.
-  const maxAttempts = 600; // 600 * 100ms = 60s max (leader may run multiple LLM calls)
-  for (let i = 0; i < maxAttempts; i++) {
-    const entries = readToolLogEntries(sessionDir, 50);
-    const leader = entries.find((e) => e.toolUseId === leaderId);
-    if (leader) {
-      return {
-        decision: leader.status === "allowed" ? "allow" : "deny",
-        reason: leader.reason ?? "Batch leader decision",
-      };
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  // Timeout: fail open
-  return { decision: "allow", reason: "Batch leader timed out — fail open" };
+  mirroredFromLeader?: boolean;
 }
 
 async function main() {
@@ -120,349 +97,339 @@ async function main() {
   initHookProcess(input.transcript_path);
 
   const sessionDir = getSessionDir(input.transcript_path);
-  const stateManager = getSessionState(sessionDir);
-  const state = await stateManager.load();
-  const toolCallCount = state.toolCallCount;
 
-  // Module-scoped variables for exitPipeline
-  const toolName = input.tool_name;
-  const toolInput = input.tool_input;
-  let currentGateNote: string | undefined;
-  const startTime = Date.now();
+  await withSessionLock(sessionDir, async () => {
+    const stateManager = getSessionState(sessionDir);
+    const state = await stateManager.load();
 
-  const planMode = input.permission_mode !== undefined
-    ? isPlanModeFromInput(input)
-    : isPlanModeActive(input.transcript_path);
-  const planModeCtx = getPlanModeContext(planMode);
-  const subagent = isSubagent(input.transcript_path);
+    // Module-scoped variables for exitPipeline
+    const toolName = input.tool_name;
+    const toolInput = input.tool_input;
+    let currentGateNote: string | undefined;
+    const startTime = Date.now();
 
-  // Fail open on any detection error — falls through to normal single-tool pipeline
-  let batchInfo: ParallelBatchInfo | null = null;
-  try {
-    batchInfo = await detectParallelBatch(input.transcript_path, input.tool_use_id);
-  } catch {
-    // Detection failed — treat as solo tool (safe fallback)
-  }
+    const planMode = input.permission_mode !== undefined
+      ? isPlanModeFromInput(input)
+      : isPlanModeActive(input.transcript_path);
+    const planModeCtx = getPlanModeContext(planMode);
+    const subagent = isSubagent(input.transcript_path);
 
-  /**
-   * Sole exit function - replaces all direct outputAllow()/outputDeny() calls.
-   * Handles telemetry, tool log, gate reasoning, and output.
-   */
-  async function exitPipeline(exit: PipelineExit): Promise<never> {
-    // 1. JSONL TOOL LOG: Always written
-    appendToolLog(sessionDir, {
-      ts: Date.now(),
-      tool: toolName,
-      toolUseId: input.tool_use_id,
-      batchPosition: batchInfo?.position,
-      batchSize: batchInfo?.batchSize,
-      path: extractPathOrCmd(toolInput).path,
-      cmd: extractPathOrCmd(toolInput).cmd,
-      status: exit.decision === "allow" ? "allowed" : "denied",
-      gate: exit.agent,
-      reason: exit.reason,
-      ms: Date.now() - startTime,
-    });
+    // Fail open on any detection error — falls through to normal single-tool pipeline
+    let batchInfo: ParallelBatchInfo | null = null;
+    try {
+      batchInfo = await detectParallelBatch(input.transcript_path, input.tool_use_id);
+    } catch {
+      // Detection failed — treat as solo tool (safe fallback)
+    }
 
-    // 3. GATE REASONING: Write entry for LLM agent decisions and denials
-    const usesLlm = exit.usesLlm ?? false;
-    if (!subagent && (exit.decision === "deny" || currentGateNote || usesLlm)) {
-      const warnings = await addPatternWarnings(toolName, toolInput, sessionDir);
-      await addEntry(sessionDir, {
-        toolCallIndex: toolCallCount,
-        timestamp: Date.now(),
-        toolName,
-        toolTarget: formatToolDetail(toolName, toolInput),
-        decision: exit.decision === "allow" ? "ALLOWED" : "DENIED",
-        note: currentGateNote,
-        warnings,
-        priority: (currentGateNote || warnings.length > 0 || exit.decision === "deny") ? "high" : "normal",
+    /**
+     * Sole exit function - replaces all direct outputAllow()/outputDeny() calls.
+     * Handles telemetry, tool log, gate reasoning, and output.
+     */
+    async function exitPipeline(exit: PipelineExit): Promise<never> {
+      let assignedToolCallIndex = -1;
+      if (!exit.mirroredFromLeader) {
+        await stateManager.update((s) => {
+          const next = { ...s, toolCallCount: s.toolCallCount + 1 };
+          assignedToolCallIndex = s.toolCallCount;
+          if (exit.decision === "allow" && toolName === "ExitPlanMode") {
+            next.currentEditIntent = true as const;
+            next.previousEditIntent = s.currentEditIntent ?? null;
+            next.editIntentTimestamp = Date.now();
+          }
+          return next;
+        });
+
+        if (!subagent && assignedToolCallIndex >= 0) {
+          // assignedToolCallIndex === -1 indicates stateManager.update threw inside
+          // its closure (CacheManager.update silently swallows errors per
+          // cache-manager.ts:351-358). Writing an entry with toolCallIndex: -1
+          // would collide with every other failed-update entry and corrupt
+          // updateAppealOutcome's by-index lookup. Skip the addEntry in that case.
+          const usesLlm = exit.usesLlm ?? false;
+          if (exit.decision === "deny" || currentGateNote || usesLlm) {
+            const warnings = await addPatternWarnings(toolName, toolInput, sessionDir);
+            await addEntry(sessionDir, {
+              toolCallIndex: assignedToolCallIndex,
+              timestamp: Date.now(),
+              toolName,
+              toolTarget: formatToolDetail(toolName, toolInput),
+              decision: exit.decision === "allow" ? "ALLOWED" : "DENIED",
+              note: currentGateNote,
+              warnings,
+              priority: (currentGateNote || warnings.length > 0 || exit.decision === "deny") ? "high" : "normal",
+            });
+          }
+        }
+
+        if (exit.decision === "allow" && toolName === "ExitPlanMode") {
+          await clearGateReasoning(sessionDir);
+          if (!subagent) {
+            await writeTool(input.transcript_path, input.session_id, "ExitPlanMode", "Exiting plan mode.");
+            await writeUser(input.transcript_path, input.session_id, "ExitPlanMode", "Plan approved. Proceed with implementation.");
+          }
+        }
+      }
+
+      // forceCheckPending clear: keyed on THIS hook's toolName, not the leader's.
+      // Applies to both leader and mirrored siblings — if THIS hook is an MCP
+      // commit/push/confirm/check that was allowed (directly or mirrored), it
+      // satisfies the force-check lockout. Keeping this outside the
+      // `!mirroredFromLeader` guard preserves today's semantics where every
+      // allowed MCP-matching tool clears the flag.
+      if (exit.decision === "allow" && /^mcp__.*(commit|push|confirm|check)$/.test(toolName)) {
+        await stateManager.update((s) => ({ ...s, forceCheckPending: false }));
+      }
+
+      await appendToolLog(sessionDir, {
+        ts: Date.now(),
+        tool: toolName,
+        toolUseId: input.tool_use_id,
+        batchPosition: batchInfo?.position,
+        batchSize: batchInfo?.batchSize,
+        path: extractPathOrCmd(toolInput).path,
+        cmd: extractPathOrCmd(toolInput).cmd,
+        status: exit.decision === "allow" ? "allowed" : "denied",
+        gate: exit.agent,
+        reason: exit.reason,
+        ms: Date.now() - startTime,
       });
+
+      if (exit.decision === "allow") return outputAllow();
+      return outputDeny(exit.reason);
     }
 
-    // 4. Clear the workaround force-check lockout when allowing any MCP
-    // commit/push/confirm/check tool. The currentPrediction is intentionally
-    // NOT cleared here — single clear point is the next UserPromptSubmit.
-    if (exit.decision === "allow" && /^mcp__.*(commit|push|confirm|check)$/.test(toolName)) {
-      await stateManager.update((s) => ({
-        ...s,
-        forceCheckPending: false,
-      }));
+    /**
+     * Shared plan-validate helper: reads plan content + transcript, calls checkPlanIntent,
+     * and returns the validation result. Does NOT call exitPipeline -- caller decides.
+     */
+    async function runPlanValidation(
+      mode: "edit" | "exit",
+      overrideToolName?: string,
+      overrideToolInput?: unknown
+    ): Promise<{ approved: boolean; reason?: string }> {
+      const planContent = await readPlanContent(input.transcript_path);
+      const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
+      const conversationContext = formatTranscriptResult(planResult);
+      return checkPlanIntent(
+        planContent,
+        (overrideToolName ?? toolName) as "Write" | "Edit",
+        (overrideToolInput ?? toolInput) as { content?: string; old_string?: string; new_string?: string },
+        conversationContext,
+        input.transcript_path,
+        projectDir,
+        "PreToolUse",
+        mode
+      );
     }
 
-    // 5. OUTPUT
-    if (exit.decision === "allow") {
-      return outputAllow();
+    if (batchInfo) {
+      const cached = findBatchDecision(sessionDir, batchInfo.allIds);
+      if (cached) {
+        const reason = cached.decision === "deny"
+          ? `Error in parallel tool call: ${cached.reason}`
+          : cached.reason;
+        await exitPipeline({
+          decision: cached.decision,
+          agent: "batch-sibling",
+          reason,
+          mirroredFromLeader: true,
+        });
+        return;
+      }
+      // No cached decision — this hook runs the full pipeline.
     }
-    return outputDeny(exit.reason);
-  }
 
-  /**
-   * Shared plan-validate helper: reads plan content + transcript, calls checkPlanIntent,
-   * and returns the validation result. Does NOT call exitPipeline -- caller decides.
-   */
-  async function runPlanValidation(
-    mode: "edit" | "exit",
-    overrideToolName?: string,
-    overrideToolInput?: unknown
-  ): Promise<{ approved: boolean; reason?: string }> {
-    const planContent = await readPlanContent(input.transcript_path);
-    const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
-    const conversationContext = formatTranscriptResult(planResult);
-    return checkPlanIntent(
-      planContent,
-      (overrideToolName ?? toolName) as "Write" | "Edit",
-      (overrideToolInput ?? toolInput) as { content?: string; old_string?: string; new_string?: string },
-      conversationContext,
-      input.transcript_path,
-      projectDir,
-      "PreToolUse",
-      mode
-    );
-  }
-
-  if (batchInfo && batchInfo.position > 0) {
-    // Sibling in a parallel batch. The leader (position 0) runs the full
-    // pipeline. Wait for the leader's result and propagate it.
-    const leaderResult = await waitForBatchLeader(sessionDir, batchInfo.leaderId);
-
-    // Route through exitPipeline for consistent telemetry (tool log, gate
-    // reasoning for denials, prediction deactivation). Gate reasoning is
-    // naturally skipped for allowed siblings because "batch-sibling" is not
-    // an LLM agent and currentGateNote is unset.
-    const reason = leaderResult.decision === "deny"
-      ? `Error in parallel tool call: ${leaderResult.reason}`
-      : leaderResult.reason;
-    await exitPipeline({
-      decision: leaderResult.decision,
-      agent: "batch-sibling",
-      reason,
-    });
-    return; // exitPipeline calls process.exit
-  }
-
-  // Deterministic outside-project-root classification.
-  // - Plan files (~/.claude/plans/*.md): handled by the existing plan-validate
-  //   block below; NOT flagged here.
-  // - In-project files: normal flow.
-  // - Otherwise (true outside-project, e.g. /etc/hosts): flag the context so
-  //   downstream LLM gates inject a harsh "be extra conservative" warning.
-  //   NEVER a hard block — the task explicitly requires soft LLM review.
-  let outsideRootPath: string | undefined;
-  if (FILE_TOOLS.includes(toolName)) {
-    const raw = extractFilePath(toolName, toolInput);
-    if (raw) {
-      const abs = path.isAbsolute(raw) ? raw : path.resolve(projectDir, raw);
-      if (!isPathInDirectory(abs, projectDir) && !isPlanFile(abs)) {
-        outsideRootPath = abs;
+    // Deterministic outside-project-root classification.
+    // - Plan files (~/.claude/plans/*.md): handled by the existing plan-validate
+    //   block below; NOT flagged here.
+    // - In-project files: normal flow.
+    // - Otherwise (true outside-project, e.g. /etc/hosts): flag the context so
+    //   downstream LLM gates inject a harsh "be extra conservative" warning.
+    //   NEVER a hard block — the task explicitly requires soft LLM review.
+    let outsideRootPath: string | undefined;
+    if (FILE_TOOLS.includes(toolName)) {
+      const raw = extractFilePath(toolName, toolInput);
+      if (raw) {
+        const abs = path.isAbsolute(raw) ? raw : path.resolve(projectDir, raw);
+        if (!isPathInDirectory(abs, projectDir) && !isPlanFile(abs)) {
+          outsideRootPath = abs;
+        }
       }
     }
-  }
 
-  // Build rule context
-  const ctx: RuleContext = {
-    toolName,
-    toolInput,
-    toolUseId: input.tool_use_id,
-    projectDir,
-    transcriptPath: input.transcript_path,
-    sessionDir,
-    sessionId: input.session_id,
-    state,
-    stateManager,
-    planMode,
-    planModeCtx,
-    subagent,
-    toolCallCount,
-    outsideRootPath,
-  };
+    // Build rule context
+    const ctx: RuleContext = {
+      toolName,
+      toolInput,
+      toolUseId: input.tool_use_id,
+      projectDir,
+      transcriptPath: input.transcript_path,
+      sessionDir,
+      sessionId: input.session_id,
+      state,
+      stateManager,
+      planMode,
+      planModeCtx,
+      subagent,
+      outsideRootPath,
+    };
 
-  // Run all rules (respond-first, low-risk, plan-mode-block, subagent,
-  // question-validate, prediction-block, drift-detect,
-  // error-acknowledge, sensitive-path-block, edit-intent, style-drift, gate, tool-approve)
-  const ruleResult = await evaluateRules(ALL_RULES, ctx, "PreToolUse");
+    // Run all rules (respond-first, low-risk, plan-mode-block, subagent,
+    // question-validate, prediction-block, drift-detect,
+    // error-acknowledge, sensitive-path-block, edit-intent, style-drift, gate, tool-approve)
+    const ruleResult = await evaluateRules(ALL_RULES, ctx, "PreToolUse");
 
-  if (ruleResult) {
-    // Rule produced a decision (allow or deny)
-    currentGateNote = ruleResult.gateNote;
-    await exitPipeline({
-      decision: ruleResult.decision,
-      agent: ruleResult.agent,
-      reason: ruleResult.reason,
-      usesLlm: ruleResult.usesLlm,
-    });
-    return;
-  }
+    if (ruleResult) {
+      // Rule produced a decision (allow or deny)
+      currentGateNote = ruleResult.gateNote;
+      await exitPipeline({
+        decision: ruleResult.decision,
+        agent: ruleResult.agent,
+        reason: ruleResult.reason,
+        usesLlm: ruleResult.usesLlm,
+      });
+      return;
+    }
 
-  // Rewind detection -- runs AFTER evaluateRules, preserving current position
-  await detectRewind(input.transcript_path);
+    // Rewind detection -- runs AFTER evaluateRules, preserving current position
+    await detectRewind(input.transcript_path);
 
-  // EXCEPTIONS: plan-validate and claude-md-validate run AFTER all rules pass.
-  // sensitive-path-block rule (priority 58) does not apply to plan/CLAUDE.md
-  // files so they always reach this point.
-  if (FILE_TOOLS.includes(toolName)) {
-    const filePath =
-      (toolInput as { file_path?: string }).file_path ||
-      (toolInput as { path?: string }).path;
+    // EXCEPTIONS: plan-validate and claude-md-validate run AFTER all rules pass.
+    // sensitive-path-block rule (priority 58) does not apply to plan/CLAUDE.md
+    // files so they always reach this point.
+    if (FILE_TOOLS.includes(toolName)) {
+      const filePath =
+        (toolInput as { file_path?: string }).file_path ||
+        (toolInput as { path?: string }).path;
 
-    if (filePath) {
-      // Plan-validate: Write/Edit to ~/.claude/plans/
-      const plansDir = path.join(os.homedir(), ".claude", "plans");
-      if (
-        (toolName === "Write" || toolName === "Edit") &&
-        isPathInDirectory(filePath, plansDir)
-      ) {
-        // Skip validation if ExitPlanMode was recently approved
-        const recentContext = await readTranscriptExact(
-          input.transcript_path,
-          APPEAL_COUNTS
-        );
-        const hasExitPlanModeApproval = recentContext.tool.some(
-          (r) => r.content.startsWith("[ExitPlanMode]")
-        );
-        if (hasExitPlanModeApproval) {
-          logFastPathApproval("exit-plan-mode", "PreToolUse", toolName, projectDir, "ExitPlanMode previously approved");
+      if (filePath) {
+        // Plan-validate: Write/Edit to ~/.claude/plans/
+        const plansDir = path.join(os.homedir(), ".claude", "plans");
+        if (
+          (toolName === "Write" || toolName === "Edit") &&
+          isPathInDirectory(filePath, plansDir)
+        ) {
+          // Skip validation if ExitPlanMode was recently approved
+          const recentContext = await readTranscriptExact(
+            input.transcript_path,
+            APPEAL_COUNTS
+          );
+          const hasExitPlanModeApproval = recentContext.tool.some(
+            (r) => r.content.startsWith("[ExitPlanMode]")
+          );
+          if (hasExitPlanModeApproval) {
+            logFastPathApproval("exit-plan-mode", "PreToolUse", toolName, projectDir, "ExitPlanMode previously approved");
+            await exitPipeline({
+              decision: "allow",
+              agent: "exit-plan-mode",
+              reason: "ExitPlanMode previously approved",
+            });
+            return;
+          }
+
+          const validation = await runPlanValidation("edit");
+
+          if (!validation.approved) {
+            // IMPORTANT: Do NOT remove this appeal call. Without it, user overrides
+            // are ignored and plan writes get stuck in an infinite deny loop.
+            const planTranscript = formatTranscriptResult(recentContext);
+
+            const appeal = await appealHelper(
+              toolName,
+              `${toolName} to plan file ${filePath}`,
+              planTranscript,
+              validation.reason || "Plan validation failed",
+              projectDir,
+              "PreToolUse",
+              `plan-validate blocked: ${validation.reason}`
+            );
+
+            if (!appeal.overturned) {
+              await exitPipeline({
+                decision: "deny",
+                agent: "plan-validate",
+                reason: `Plan drift detected: ${validation.reason}`,
+                usesLlm: true,
+              });
+              return;
+            }
+            currentGateNote = appeal.gateNote;
+          }
+
           await exitPipeline({
             decision: "allow",
-            agent: "exit-plan-mode",
-            reason: "ExitPlanMode previously approved",
+            agent: "plan-validate",
+            reason: "Plan validation passed",
+            usesLlm: true,
           });
           return;
         }
 
-        const validation = await runPlanValidation("edit");
+        // Claude-MD-validate: Write/Edit to CLAUDE.md
+        if (
+          (toolName === "Write" || toolName === "Edit") &&
+          filePath.endsWith("CLAUDE.md")
+        ) {
+          let currentContent: string | null = null;
+          try {
+            currentContent = await fs.promises.readFile(filePath, "utf-8");
+          } catch {
+            // File doesn't exist - that's OK for new files
+          }
 
-        if (!validation.approved) {
-          // IMPORTANT: Do NOT remove this appeal call. Without it, user overrides
-          // are ignored and plan writes get stuck in an infinite deny loop.
-          const planTranscript = formatTranscriptResult(recentContext);
-
-          const appeal = await appealHelper(
-            toolName,
-            `${toolName} to plan file ${filePath}`,
-            planTranscript,
-            validation.reason || "Plan validation failed",
+          const validation = await validateClaudeMd(
+            currentContent,
+            toolName as "Write" | "Edit",
+            toolInput as { content?: string; old_string?: string; new_string?: string },
+            input.transcript_path,
             projectDir,
-            "PreToolUse",
-            `plan-validate blocked: ${validation.reason}`
+            "PreToolUse"
           );
 
-          if (!appeal.overturned) {
-            await exitPipeline({
-              decision: "deny",
-              agent: "plan-validate",
-              reason: `Plan drift detected: ${validation.reason}`,
-              usesLlm: true,
-            });
-            return;
+          if (!validation.approved) {
+            const mdTranscriptResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
+            const mdTranscript = formatTranscriptResult(mdTranscriptResult);
+
+            const appeal = await appealHelper(
+              toolName,
+              `CLAUDE.md ${toolName.toLowerCase()} to ${filePath}`,
+              mdTranscript,
+              validation.reason || "CLAUDE.md validation failed",
+              projectDir,
+              "PreToolUse",
+              `claude-md-validate blocked: ${validation.reason}`
+            );
+
+            if (!appeal.overturned) {
+              await exitPipeline({
+                decision: "deny",
+                agent: "claude-md-validate",
+                reason: `CLAUDE.md validation failed: ${validation.reason}`,
+                usesLlm: true,
+              });
+              return;
+            }
+            currentGateNote = appeal.gateNote;
           }
-          currentGateNote = appeal.gateNote;
+
+          await exitPipeline({
+            decision: "allow",
+            agent: "claude-md-validate",
+            reason: "CLAUDE.md validation passed",
+            usesLlm: true,
+          });
+          return;
         }
-
-        await exitPipeline({
-          decision: "allow",
-          agent: "plan-validate",
-          reason: "Plan validation passed",
-          usesLlm: true,
-        });
-        return;
-      }
-
-      // Claude-MD-validate: Write/Edit to CLAUDE.md
-      if (
-        (toolName === "Write" || toolName === "Edit") &&
-        filePath.endsWith("CLAUDE.md")
-      ) {
-        let currentContent: string | null = null;
-        try {
-          currentContent = await fs.promises.readFile(filePath, "utf-8");
-        } catch {
-          // File doesn't exist - that's OK for new files
-        }
-
-        const validation = await validateClaudeMd(
-          currentContent,
-          toolName as "Write" | "Edit",
-          toolInput as { content?: string; old_string?: string; new_string?: string },
-          input.transcript_path,
-          projectDir,
-          "PreToolUse"
-        );
-
-        if (!validation.approved) {
-          const mdTranscriptResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
-          const mdTranscript = formatTranscriptResult(mdTranscriptResult);
-
-          const appeal = await appealHelper(
-            toolName,
-            `CLAUDE.md ${toolName.toLowerCase()} to ${filePath}`,
-            mdTranscript,
-            validation.reason || "CLAUDE.md validation failed",
-            projectDir,
-            "PreToolUse",
-            `claude-md-validate blocked: ${validation.reason}`
-          );
-
-          if (!appeal.overturned) {
-            await exitPipeline({
-              decision: "deny",
-              agent: "claude-md-validate",
-              reason: `CLAUDE.md validation failed: ${validation.reason}`,
-              usesLlm: true,
-            });
-            return;
-          }
-          currentGateNote = appeal.gateNote;
-        }
-
-        await exitPipeline({
-          decision: "allow",
-          agent: "claude-md-validate",
-          reason: "CLAUDE.md validation passed",
-          usesLlm: true,
-        });
-        return;
       }
     }
-  }
 
-  // Post-allow bookkeeping (tool count, ExitPlanMode cleanup)
-  await stateManager.update((s) => ({
-    ...s,
-    toolCallCount: s.toolCallCount + 1,
-  }));
-
-  // Clear gate reasoning on plan approval - gives implementation phase a clean slate
-  if (toolName === "ExitPlanMode") {
-    await clearGateReasoning(sessionDir);
-    await stateManager.update((s) => ({
-      ...s,
-      currentEditIntent: true as const,
-      previousEditIntent: s.currentEditIntent ?? null,
-      editIntentTimestamp: Date.now(),
-    }));
-
-    if (!subagent) {
-      await writeTool(
-        input.transcript_path,
-        input.session_id,
-        "ExitPlanMode",
-        "Exiting plan mode."
-      );
-      await writeUser(
-        input.transcript_path,
-        input.session_id,
-        "ExitPlanMode",
-        "Plan approved. Proceed with implementation."
-      );
-    }
-  }
-
-  logFastPathApproval("all-rules", "PreToolUse", toolName, projectDir, "All checks passed");
-  await exitPipeline({
-    decision: "allow",
-    agent: "all-rules",
-    reason: "All checks passed",
+    logFastPathApproval("all-rules", "PreToolUse", toolName, projectDir, "All checks passed");
+    await exitPipeline({
+      decision: "allow",
+      agent: "all-rules",
+      reason: "All checks passed",
+    });
   });
 }
 

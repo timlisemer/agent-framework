@@ -12,6 +12,7 @@ import {
   resetActiveSubagents,
   sessionStateDefaults,
 } from "../utils/session-store.js";
+import { withSessionLock } from "../utils/session-mutex.js";
 
 /**
  * SessionStart Hook
@@ -51,10 +52,12 @@ async function main() {
   const statePath = path.join(sessionDir, "state.json");
 
   if (source === "startup") {
-    await fs.promises.mkdir(sessionDir, { recursive: true });
-    if (!fs.existsSync(statePath)) {
-      await getSessionState(sessionDir).save(sessionStateDefaults());
-    }
+    await withSessionLock(sessionDir, async () => {
+      await fs.promises.mkdir(sessionDir, { recursive: true });
+      if (!fs.existsSync(statePath)) {
+        await getSessionState(sessionDir).save(sessionStateDefaults());
+      }
+    });
     exitAfterFlush(0);
     return;
   }

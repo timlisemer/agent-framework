@@ -73,7 +73,7 @@ async function writeSynthetic(
   if (isSubagent(transcriptPath)) return;
 
   const sessionDir = getSessionDir(transcriptPath);
-  appendToolLog(sessionDir, {
+  await appendToolLog(sessionDir, {
     ts: Date.now(),
     tool: "Synthetic",
     status: "allowed",

@@ -5,6 +5,7 @@ initializeTelemetry();
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
+import { withSessionLock } from "../utils/session-mutex.js";
 import { isPlanModeActive, isPlanModeFromInput } from "../utils/plan-mode-detector.js";
 import { deriveEditIntentFromPrediction } from "../utils/edit-intent.js";
 import { clearGateReasoning } from "../utils/gate-reasoning-cache.js";
@@ -137,7 +138,6 @@ async function main() {
       // Context-switch cap LAST — overrides any growth above.
       if (parsed.contextSwitch === "yes") {
         nextWindow = Math.min(nextWindow, 3);
-        await clearGateReasoning(sessionDir);
       }
       nextWindow = Math.max(2, Math.min(15, nextWindow));
 
@@ -149,23 +149,28 @@ async function main() {
       const derivedEditIntent = deriveEditIntentFromPrediction(predictionForDerivation);
       const finalEditIntent = planMode ? false : derivedEditIntent;
 
-      await stateManager.update((s) => ({
-        ...s,
-        previousEditIntent: s.currentEditIntent ?? null,
-        currentEditIntent: finalEditIntent,
-        editIntentTimestamp: Date.now(),
-        editIntentOverturnCount: 0,
-        respondFirstChecked: false,
-        frustrationStreak: newStreak,
-        currentWindowSize: nextWindow,
-        currentPrediction: {
-          ...parsed,
-          mood: effectiveMood,
-          trust: effectiveTrust,
-          userMessageSnippet: input.prompt.slice(0, 200),
-          timestamp: Date.now(),
-        },
-      }));
+      await withSessionLock(sessionDir, async () => {
+        if (parsed.contextSwitch === "yes") {
+          await clearGateReasoning(sessionDir);
+        }
+        await stateManager.update((s) => ({
+          ...s,
+          previousEditIntent: s.currentEditIntent ?? null,
+          currentEditIntent: finalEditIntent,
+          editIntentTimestamp: Date.now(),
+          editIntentOverturnCount: 0,
+          respondFirstChecked: false,
+          frustrationStreak: newStreak,
+          currentWindowSize: nextWindow,
+          currentPrediction: {
+            ...parsed,
+            mood: effectiveMood,
+            trust: effectiveTrust,
+            userMessageSnippet: input.prompt.slice(0, 200),
+            timestamp: Date.now(),
+          },
+        }));
+      });
     } else {
       // Parse failed AFTER runAgent's format-validation retry chain ran (or
       // timed out). This is the honest failure mode: we could not classify
@@ -200,14 +205,16 @@ async function main() {
       // Clear only edit-intent bookkeeping so stale edit-intent doesn't
       // linger across a classification-failed turn. currentPrediction,
       // frustrationStreak, currentWindowSize stay exactly as they were.
-      await stateManager.update((s) => ({
-        ...s,
-        previousEditIntent: s.currentEditIntent ?? null,
-        currentEditIntent: null,
-        editIntentTimestamp: Date.now(),
-        editIntentOverturnCount: 0,
-        respondFirstChecked: false,
-      }));
+      await withSessionLock(sessionDir, async () => {
+        await stateManager.update((s) => ({
+          ...s,
+          previousEditIntent: s.currentEditIntent ?? null,
+          currentEditIntent: null,
+          editIntentTimestamp: Date.now(),
+          editIntentOverturnCount: 0,
+          respondFirstChecked: false,
+        }));
+      });
     }
   } catch (err) {
     console.error("[user-prompt-submit] sentiment agent failed:", err);

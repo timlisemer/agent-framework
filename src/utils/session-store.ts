@@ -114,8 +114,9 @@ export function getSessionDir(transcriptPath: string): string {
 /**
  * Append a tool log entry to the session's JSONL tool log.
  */
-export function appendToolLog(sessionDir: string, entry: ToolLogEntry): void {
-  fs.appendFileSync(path.join(sessionDir, "tool-log.jsonl"), JSON.stringify(entry) + "\n");
+export async function appendToolLog(sessionDir: string, entry: ToolLogEntry): Promise<void> {
+  const logPath = path.join(sessionDir, "tool-log.jsonl");
+  await fs.promises.appendFile(logPath, JSON.stringify(entry) + "\n");
 }
 
 /**

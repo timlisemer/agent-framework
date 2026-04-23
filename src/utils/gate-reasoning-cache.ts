@@ -203,15 +203,18 @@ interface ToolLogEntry {
 
 function readToolLog(sessionDir: string): ToolLogEntry[] {
   const logPath = path.join(sessionDir, "tool-log.jsonl");
+  let content: string;
   try {
-    const content = fs.readFileSync(logPath, "utf-8");
-    return content
-      .split("\n")
-      .filter((line) => line.trim())
-      .map((line) => JSON.parse(line) as ToolLogEntry);
+    content = fs.readFileSync(logPath, "utf-8");
   } catch {
     return [];
   }
+  const entries: ToolLogEntry[] = [];
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try { entries.push(JSON.parse(line) as ToolLogEntry); } catch { /* skip malformed */ }
+  }
+  return entries;
 }
 
 /**

@@ -786,7 +786,7 @@ async function main() {
     // cacheDir — cache/ is NOT wiped between fires (the rmSync at the
     // start of main() runs once per scenario run, preserving the clean
     // slate invariant per run). Siblings inherit the leader's decision
-    // via waitForBatchLeader reading the leader's on-disk tool-log
+    // via findBatchDecision reading the leader's on-disk tool-log
     // entry that the prior fire appended.
     const finalSplitSubLines = built.finalSplitSubLines;
     // Determine firstToolUseIdx from the materialized sub-lines (F5
