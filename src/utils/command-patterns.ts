@@ -27,11 +27,9 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bhead\s+/, name: 'head', alternative: 'Use Read tool with limit' },
   { pattern: /\btail\s+/, name: 'tail', alternative: 'Use Read tool with offset' },
 
-  // Search - should use Grep tool
-  { pattern: /\b(grep|rg)\s+/, name: 'grep/rg', alternative: 'Use Grep tool' },
-
-  // File finding - should use Glob tool
-  { pattern: /\bfind\s+/, name: 'find', alternative: 'Use Glob tool', bashOnly: true },
+  // grep/rg/find intentionally NOT blacklisted: native macOS/Linux Claude Code
+  // builds removed the Grep/Glob tools in v2.1.117 and route search through
+  // bash (bundled ugrep/bfs), so blocking them leaves no search mechanism.
 
   // File writing - should use Write tool
   { pattern: /\becho\s+.*>/, name: 'echo redirect', alternative: 'Use Write tool' },

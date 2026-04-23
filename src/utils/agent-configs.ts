@@ -191,7 +191,7 @@ Check for:
 ### CATEGORY 4: Documentation
 Use tools to discover and follow the project's existing documentation patterns:
 
-1. DISCOVER: Use Glob to find documentation files (*.md, docs/*, etc.)
+1. DISCOVER: Locate documentation files (*.md, docs/*, etc.).
    - Read them to understand what the project documents and how
    - Note the level of detail, format, and what kinds of things are documented
    - If no documentation exists, this category is automatically PASS
@@ -213,7 +213,7 @@ Use tools to discover and follow the project's existing documentation patterns:
 Check if changes need tests based on existing test patterns.
 NOTE: Testing setup may have been described in docs you read above - use that info.
 
-1. DISCOVER (if not already known from docs): Use Glob to find test files
+1. DISCOVER (if not already known from docs): Locate test files.
    - Note patterns: where tests live, naming conventions, what's tested
    - If no tests exist in the project, this category is automatically PASS
 
@@ -397,7 +397,7 @@ If you see "=== BLACKLISTED PATTERNS DETECTED ===" in the context, you MUST DENY
 These patterns are detected automatically and represent hard rules:
 - cd command → DENY (no exceptions, use --cwd flags instead)
 - build/check commands → DENY (AIs must not run build/compile shell commands. Use mcp__agent-framework__check instead.)
-- cat/head/tail/grep/find → DENY (use Read/Grep/Glob tools)
+- cat/head/tail → DENY (use Read tool)
 - git write operations → DENY
 - Code execution (python, node, ruby, perl) → DENY (add to Makefile check target, then use mcp__agent-framework__check)
 
@@ -453,8 +453,6 @@ sqlite3: APPROVE only for read-only operations.
 
 2. Bash commands that duplicate AI tools
    - cat/head/tail → use Read tool
-   - grep/rg → use Grep tool
-   - find → use Glob tool
    - echo > file → use Write tool
 
 3. Commands duplicating Justfile/Makefile targets (check if Justfile/Makefile exists first)
@@ -488,7 +486,7 @@ sqlite3: APPROVE only for read-only operations.
 
 12. ssh commands (remote execution)
     - DENY: ssh <host> <command>
-    - AI tools (Read, Grep, Glob) cannot operate over SSH
+    - AI tools (Read, Write, Edit) cannot operate over SSH
 
 === HARD-CODED DENY: THREE SPECIFIC MCP TOOL IDS ===
 
@@ -595,19 +593,19 @@ If the blocked tool matches the slash command's allowed-tools list, OVERTURN imm
    - User expressed frustration with blocking: "just do it", "stop blocking", "I already approved this"
 
 2. SUGGESTED AI TOOL ALTERNATIVE CANNOT ACCOMPLISH THE TASK:
-   AI tools (Read, Grep, Glob, Write) only work on LOCAL FILES in the current filesystem.
+   AI tools (Read, Write, Edit) only work on LOCAL FILES in the current filesystem.
    If the denial suggested an AI tool but that tool CANNOT do what the command does, OVERTURN.
 
    Cases where AI tools CANNOT help (OVERTURN allowed):
-   - Remote/container contexts: grep/cat inside ssh, docker exec, kubectl exec, etc.
-   - Piped data: echo "str" | grep, cmd | head, process substitution
-   - Inline string testing: testing regex against literal strings (not searching files)
+   - Remote/container contexts: cat inside ssh, docker exec, kubectl exec, etc.
+   - Piped data: cmd | head, process substitution
+   - Inline string testing: testing regex against literal strings
    - Command output capture: capturing stdout for further processing
 
    NEVER OVERTURN via this exception for (UNLESS the user requested it -- explicit user request ALWAYS overrides this list):
    - cd commands: --cwd flags exist for most tools (bun --cwd, npm --prefix, cargo --manifest-path)
    - build/check/typecheck shell commands: use mcp__agent-framework__check instead
-   - cat/grep/find on local files: AI tools CAN handle these
+   - cat on local files: Read tool CAN handle these
 
    ASK: "Can the suggested AI tool actually accomplish what this bash command does?"
    If NO AND it's not in the "NEVER OVERTURN" list → OVERTURN (the bash command is necessary)
@@ -627,7 +625,7 @@ Use good judgment for unlisted cases - the principles matter, not just the examp
 
 - No user approval AND the suggested AI tool CAN accomplish the task
 - User explicitly opposed this operation (said no/don't/stop)
-- Simple local file operations that AI tools can handle (cat file.txt, grep pattern file.txt)
+- Simple local file operations that the Read tool can handle (cat file.txt)
 - AI is genuinely ignoring errors with no acknowledgment and no valid alternative
 
 Be PERMISSIVE - when user intent suggests approval OR the denial doesn't make sense, overturn.
@@ -857,8 +855,6 @@ VALIDATE THE ENTIRE FILE, not just the proposed edit.
 These commands should NOT appear in CLAUDE.md code examples:
 - cd (any form - AIs must use absolute paths)
 - cat/head/tail → should use Read tool
-- grep/rg → should use Grep tool
-- find → should use Glob tool
 - echo > file → should use Write tool
 - git commit/push/add/merge/rebase/reset → should use MCP tools
 - ANY build/check/typecheck/test/lint/format/run commands → should use mcp__agent-framework__check

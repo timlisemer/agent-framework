@@ -33,10 +33,12 @@ describe("getContentBlacklistHighlights", () => {
     expect(highlights[0]).toContain("VIOLATION");
   });
 
-  it("detects 'grep pattern' in content", () => {
-    const highlights = getContentBlacklistHighlights("grep -r 'foo' .");
-    expect(highlights.length).toBe(1);
-    expect(highlights[0]).toContain("grep");
+  it("does NOT flag 'grep pattern' in content (bash grep is allowed post-v2.1.117)", () => {
+    expect(getContentBlacklistHighlights("grep -r 'foo' .")).toEqual([]);
+  });
+
+  it("does NOT flag 'find' in content (bash find is allowed post-v2.1.117)", () => {
+    expect(getContentBlacklistHighlights("find . -name '*.ts'")).toEqual([]);
   });
 
   it("detects 'git commit' in content", () => {
@@ -52,8 +54,7 @@ describe("getContentBlacklistHighlights", () => {
   });
 
   it("returns one highlight per line (not per pattern)", () => {
-    // "cat somefile" matches both 'cat' pattern; one highlight per line
-    const highlights = getContentBlacklistHighlights("cat somefile\ngrep pattern");
+    const highlights = getContentBlacklistHighlights("cat somefile\ngit commit -m 'x'");
     expect(highlights).toHaveLength(2);
   });
 
