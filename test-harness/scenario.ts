@@ -556,6 +556,34 @@ async function evaluateScenarioPredictions(
   return results;
 }
 
+/**
+ * Persist `expectation_reality` + `expectation_reality_last_run_at` back to
+ * the scenario source file at `scenarioPath`. Uses `JSON.stringify(..., 2) + "\n"`
+ * to match the existing fixture formatting (see `writeScenarioFile` in
+ * `test-harness-shared.ts`). Writeback failures (permission denied, file
+ * moved mid-run, etc.) must NOT fail the run — log a warning to stderr and
+ * continue. The output JSON is the authoritative return value; the file
+ * writeback is convenience persistence for diffability.
+ */
+function writeExpectationRealityBack(
+  scenarioPath: string,
+  expectation_reality: "working" | "broken",
+  expectation_reality_last_run_at: string,
+): void {
+  try {
+    const raw = fs.readFileSync(scenarioPath, "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    parsed.expectation_reality = expectation_reality;
+    parsed.expectation_reality_last_run_at = expectation_reality_last_run_at;
+    fs.writeFileSync(scenarioPath, JSON.stringify(parsed, null, 2) + "\n");
+  } catch (err) {
+    console.error(
+      `warning: failed to write expectation_reality back to ${scenarioPath}: ` +
+        (err instanceof Error ? err.message : String(err)),
+    );
+  }
+}
+
 async function main() {
   const scenarioPath = getArg("scenario", true)!;
   const outputDirArg = getArg("output-dir", false);
@@ -752,6 +780,11 @@ async function main() {
         predictionsPass = predictionAssertions.every((a) => a.pass);
       }
 
+      const pass = scored.pass && predictionsPass;
+      const expectation_reality: "working" | "broken" =
+        pass === true ? "working" : "broken";
+      const expectation_reality_last_run_at = new Date().toISOString();
+
       const result: ScenarioResult = {
         mode: "single",
         scenario: scenario.name,
@@ -761,14 +794,22 @@ async function main() {
         gate_expected: singleExpect.by,
         reason: scored.reason ?? tlReason ?? gateReason,
         expected: singleExpect.expected,
-        pass: scored.pass && predictionsPass,
+        pass,
         ms: Date.now() - started,
         error: parseError,
         transcript_path: transcriptPath,
         commit: getVersion(),
         batch_visible_through: scenario.target.batch_visible_through,
         ...(predictionAssertions ? { prediction_assertions: predictionAssertions } : {}),
+        expectation_reality,
+        expectation_reality_last_run_at,
       };
+
+      writeExpectationRealityBack(
+        scenarioPath,
+        expectation_reality,
+        expectation_reality_last_run_at,
+      );
 
       fs.writeFileSync(
         path.join(outputDir, "report-scenario.json"),
@@ -925,6 +966,9 @@ async function main() {
     }
 
     const aggregatePass = fires.every((f) => f.pass) && predictionsPass;
+    const expectation_reality: "working" | "broken" =
+      aggregatePass === true ? "working" : "broken";
+    const expectation_reality_last_run_at = new Date().toISOString();
     const result: ScenarioResult = {
       mode: "fanout",
       scenario: scenario.name,
@@ -935,7 +979,15 @@ async function main() {
       transcript_path: transcriptPath,
       commit: getVersion(),
       ...(predictionAssertions ? { prediction_assertions: predictionAssertions } : {}),
+      expectation_reality,
+      expectation_reality_last_run_at,
     };
+
+    writeExpectationRealityBack(
+      scenarioPath,
+      expectation_reality,
+      expectation_reality_last_run_at,
+    );
 
     fs.writeFileSync(
       path.join(outputDir, "report-scenario.json"),

@@ -179,6 +179,25 @@ export interface Scenario {
   name: string;
   /** Optional human description. Not scored. */
   description?: string;
+  /**
+   * Reflection of the most recent run against this scenario's declared
+   * expectations. `"working"` when `pass === true` (hook decision matched
+   * `expect`, and every `predictions` assertion passed); `"broken"`
+   * otherwise (including crash, malformed output, runner error). Absent
+   * on a brand-new scenario that has never executed; always populated by
+   * the runner afterwards. A `"broken"` reflection on a fixture in
+   * `working/` is a regression; a `"working"` reflection on a fixture in
+   * `broken/` or `todo/` is a promotion candidate.
+   */
+  expectation_reality?: "working" | "broken";
+  /**
+   * ISO-8601 UTC timestamp of the most recent run's reflection. Kept in
+   * the fixture (rather than relying on `report-scenario.json` mtime) so
+   * the record travels with the fixture file under version control and
+   * is human-legible in the JSON itself. Absent on brand-new scenarios;
+   * always populated by the runner afterwards.
+   */
+  expectation_reality_last_run_at?: string;
   /** Transcript entries in order, oldest first. Must be non-empty. */
   transcript: ScenarioEntry[];
   /** Target hook + tool_use / prompt. */
@@ -335,6 +354,15 @@ export type ScenarioResult =
       batch_visible_through?: number;
       /** Per-assertion results when scenario.predictions was set. */
       prediction_assertions?: PredictionAssertionResult[];
+      /**
+       * Reflection of this run: `"working"` iff `pass === true`, else
+       * `"broken"`. Always populated — the runner sets it on every run
+       * (including crashes and malformed-output cases, which surface as
+       * `"broken"`). Persisted back to the scenario source file too.
+       */
+      expectation_reality: "working" | "broken";
+      /** ISO-8601 UTC timestamp of this run's reflection. */
+      expectation_reality_last_run_at: string;
     }
   | {
       mode: "fanout";
@@ -348,6 +376,15 @@ export type ScenarioResult =
       commit: string;
       /** Per-assertion results when scenario.predictions was set. */
       prediction_assertions?: PredictionAssertionResult[];
+      /**
+       * Reflection of this run: `"working"` iff `pass === true`, else
+       * `"broken"`. Always populated — the runner sets it on every run
+       * (including crashes and malformed-output cases, which surface as
+       * `"broken"`). Persisted back to the scenario source file too.
+       */
+      expectation_reality: "working" | "broken";
+      /** ISO-8601 UTC timestamp of this run's reflection. */
+      expectation_reality_last_run_at: string;
     };
 
 /**

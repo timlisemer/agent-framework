@@ -14,3 +14,10 @@ Two Claude Code subagents automate the workflow via MCP tools:
 - **`@tester`** (`mcp__agent-framework__test_harness_tester`) -- finds labeled transcripts, runs the harness, analyzes failures, fixes hook code, re-runs until passing.
 
 Each MCP tool has a `help` action with complete documentation for its role.
+
+## Scenario expectation reality
+
+Each run updates `expectation_reality` and
+`expectation_reality_last_run_at` on the scenario file. A `broken/`
+fixture reporting `reality=working` is a promotion candidate; a
+`working/` fixture reporting `reality=broken` is a regression.

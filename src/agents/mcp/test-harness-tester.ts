@@ -255,6 +255,8 @@ function handleRunScenarios(
     reason?: string;
     ms?: number;
     error?: string;
+    expectation_reality?: "working" | "broken";
+    expectation_reality_last_run_at?: string;
   };
 
   let all: ScenarioSource[];
@@ -339,6 +341,8 @@ function handleRunScenarios(
           expected?: string;
           reason?: string;
           ms?: number;
+          expectation_reality?: "working" | "broken";
+          expectation_reality_last_run_at?: string;
         };
         results.push({
           name: t.name,
@@ -349,6 +353,8 @@ function handleRunScenarios(
           expected: parsed.expected,
           reason: parsed.reason,
           ms: parsed.ms,
+          expectation_reality: parsed.expectation_reality,
+          expectation_reality_last_run_at: parsed.expectation_reality_last_run_at,
         });
       } catch {
         results.push({
@@ -802,6 +808,13 @@ Step 5 -- Keep the scenario. Every scenario file under
       broken,todo}/). Fixtures run in place; --output-dir points at the
       home tree so cache/ and report-scenario.json always land there.
     - Exit status: pass -> 0, fail -> 1, validation error -> 2.
+    - Returned JSON (both single and fanout modes) carries
+      \`expectation_reality: "working" | "broken"\` and
+      \`expectation_reality_last_run_at: ISO-8601\` at the top level —
+      the reflection of this run's pass state, also written back to the
+      scenario source file. A \`broken/\` fixture reporting
+      reality=working is a promotion candidate; a \`working/\` fixture
+      reporting reality=broken is a regression.
 
 **run_scenarios** -- execute MULTIPLE scenarios in one MCP call
   Optional: scenario_names (string[]), working_dir, scenario_source
@@ -838,8 +851,18 @@ Step 5 -- Keep the scenario. Every scenario file under
       repo fixture. Edits to a fixture are picked up on the next run.
     - Returns aggregated JSON: {total, passed, failed, results[]}.
       Each result: {name, source: "home"|"fixture-working"|"fixture-broken"
-      |"fixture-todo", pass, decision, gate, expected, reason, ms, error?}.
-    - Writes scenarios/<name>/report-scenario.json per scenario.
+      |"fixture-todo", pass, decision, gate, expected, reason, ms,
+      expectation_reality: "working"|"broken",
+      expectation_reality_last_run_at: ISO-8601, error?}. A \`broken/\`
+      fixture whose result has expectation_reality="working" is a
+      promotion candidate; a \`working/\` fixture whose result has
+      expectation_reality="broken" is a regression. The aggregate
+      response does NOT summarize mismatches; callers inspect results[]
+      directly.
+    - Writes scenarios/<name>/report-scenario.json per scenario. Each
+      run also writes \`expectation_reality\` and
+      \`expectation_reality_last_run_at\` back to the scenario source
+      file so the reflection travels with the fixture under git.
 
 **list_scenarios** -- list all scenarios across home + fixture subfolders
   Optional: working_dir, scenario_source
