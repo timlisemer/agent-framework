@@ -35,7 +35,7 @@ import { startsWithAny } from "../../utils/retry.js";
 import { extractGateNote, formatForPrompt } from "../../utils/gate-reasoning-cache.js";
 import { planModeEditBlock, planModeBashBlock } from "../../utils/edit-intent.js";
 
-const FABRICATED_DENY_FINGERPRINTS: RegExp[] = [
+export const FABRICATED_DENY_FINGERPRINTS: RegExp[] = [
   /without explicit user approval/i,
   /subagents are denied/i,
   /subagent escalation/i,
@@ -46,9 +46,16 @@ const FABRICATED_DENY_FINGERPRINTS: RegExp[] = [
   /#\s*\d+\+?\s*in sequence/i,
   /\bnth in sequence\b/i,
   /matches pattern of repeated [A-Za-z]+ attempts/i,
+  /duplicates?\s+Read(\s*\/\s*LS)?\s+tools?/i,
+  /duplicat\w*\s+(of\s+)?Read/i,
+  /duplicates?\s+LS\s+tool/i,
+  /use\s+Read(\s+or\s+LS)?\s+tool\s+instead/i,
+  /Read\s+(tool\s+)?(can\s+)?fetch(es)?[^.]*\b(equivalent|analysis|pattern\s+search)/i,
+  /(rg|grep|ugrep|find|fd|bfs|awk|sed|ls|jq|wc)\b[^.]*\bduplicat\w+\s+(Read|LS)/i,
+  /^cat\/head\/tail\s*→\s*DENY/im,
 ];
 
-function isFabricatedDenyReason(reason: string): boolean {
+export function isFabricatedDenyReason(reason: string): boolean {
   return FABRICATED_DENY_FINGERPRINTS.some((re) => re.test(reason));
 }
 
@@ -177,7 +184,7 @@ Input: ${JSON.stringify(toolInput)}`,
         console.error(
           `[tool-approve] Discarded hallucinated deny reason for ${toolName}: ${reason.slice(0, 200)}`
         );
-        return { approved: true, gateNote };
+        return { approved: true, gateNote: undefined };
       }
 
       return { approved: false, reason, gateNote };

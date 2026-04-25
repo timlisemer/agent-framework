@@ -30,11 +30,17 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (30)
+## Current scenarios in working/ (33)
 
+- `bash-grep-pipe-head-output-truncation-should-allow` — `grep ... | head -N`
+  is output truncation, not a duplicate of the Read tool; tool-approve must
+  not hallucinate a `duplicates Read tool` rule.
 - `bash-ls-blocked-after-just-build-output` — false-positive workaround
   block: `Bash ls` must not be denied because the previous tool's stdout
   echoed "npm run build".
+- `bash-ls-non-project-cache-dir-should-allow` — `ls` of a non-project
+  cache directory is benign discovery; tool-approve must not hallucinate
+  a `duplicates Read/LS tools` rule.
 - `bash-npx-tsc-blocked-wrong-reason` — `npx tsc --noEmit` must deny via
   the tool-approve blacklist citing `tsc` and `mcp__agent-framework__check`,
   not via a sentiment/frustration message.
@@ -43,6 +49,9 @@ commit.
   `mcp__agent-framework__check` as the correct path (promoted from todo).
 - `bash-npx-vitest-retry-after-user-blocked-should-deny` — retrying a
   Bash vitest command after the user just blocked it must deny.
+- `bash-rg-pattern-search-on-project-file-should-allow` — post-v2.1.117
+  `rg PATTERN path/` is the canonical search workflow; tool-approve must
+  approve and not hallucinate a `duplicates Read tool` rule.
 - `drift-free-edit-post-warning` — a single allowed edit post-warning
   flows through without drift-block.
 - `exit-plan-mode-after-angry-bash-rejection-should-allow` — ExitPlanMode
