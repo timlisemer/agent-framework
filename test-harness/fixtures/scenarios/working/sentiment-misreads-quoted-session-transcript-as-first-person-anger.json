@@ -43,6 +43,6 @@
     ],
     "intent_must_contain": "scenario"
   },
-  "expectation_reality": "broken",
-  "expectation_reality_last_run_at": "2026-04-25T09:50:16.839Z"
+  "expectation_reality": "working",
+  "expectation_reality_last_run_at": "2026-04-25T20:35:48.073Z"
 }

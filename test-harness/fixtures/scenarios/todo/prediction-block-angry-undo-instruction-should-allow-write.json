@@ -53,5 +53,5 @@
     "notes": "An angry imperative to 'undo' file changes the AI made REQUIRES Edit/Write to obey. The pre-fix SENTIMENT_AGENT prompt did not list 'undo / revert / restore / roll back / put back / rewrite / redo' in its verb mapping, so explicitlyAllowedTools came back empty and prediction-block fastDeny fired with a message citing the user's own undo instruction. Post-fix, SENTIMENT_AGENT populates explicitlyAllowedTools=['Edit','Write'] and decidePrediction short-circuits at explicit-allow. This scenario seeds the pre-fix state and is expected to FAIL until SENTIMENT_AGENT is rerun on a fresh prompt OR the harness gains a way to replay UserPromptSubmit before PreToolUse."
   },
   "expectation_reality": "broken",
-  "expectation_reality_last_run_at": "2026-04-25T19:38:37.624Z"
+  "expectation_reality_last_run_at": "2026-04-25T20:35:44.180Z"
 }

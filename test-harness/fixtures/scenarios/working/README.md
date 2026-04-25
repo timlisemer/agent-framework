@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (34)
+## Current scenarios in working/ (35)
 
 - `bash-grep-pipe-head-output-truncation-should-allow` — `grep ... | head -N`
   is output truncation, not a duplicate of the Read tool; tool-approve must
@@ -89,6 +89,12 @@ commit.
 - `sentiment-explicit-forbid-push` — seeded literal substring block on
   `Bash git push` denies the push.
 - `sentiment-happy-allows` — happy mood seed allows the next Edit.
+- `sentiment-misreads-quoted-session-transcript-as-first-person-anger` —
+  SENTIMENT_AGENT must judge the LIVE sender's mood, not the tone of a
+  quoted Claude Code session transcript or the user's 3rd-person recap of
+  past AI behavior; mood must not be angry and trust must not be low for a
+  calm scenario-authoring request that contains a hostile QUOTE block
+  (promoted from broken).
 - `sentiment-mood-relief-resets` — seed_state plumbing verified end-to-end.
 - `stop-after-apology-for-exit-plan-mode-should-block` — stop hook
   blocks an apology-only stop after ExitPlanMode.

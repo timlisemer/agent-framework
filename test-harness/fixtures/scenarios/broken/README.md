@@ -35,14 +35,11 @@ README's scenario list below AND the sibling folder's README in the
 same commit. An empty list is the healthy state; keep this README
 regardless.
 
-## Current scenarios in broken/ (2)
+## Current scenarios in broken/ (1)
 
 - `force-check-required-not-cleared-by-intervening-user-prompt-should-allow`
   — the workaround block was wrong because the user message that came
   in between should have invalidated it.
-- `sentiment-misreads-quoted-session-transcript-as-first-person-anger`
-  — the user was not angry and does not know what could have led the ai
-  to believe this.
 
 ## Verify
 

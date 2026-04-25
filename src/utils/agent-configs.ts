@@ -1396,6 +1396,39 @@ STEP 5: FRUSTRATION STREAK is informational only. Do not treat a high streak as 
 
 ANTI-ANCHORING RULE: if you catch yourself copying PREVIOUS mood/trust because "the user was angry a turn ago", stop and re-read LATEST. The user moved on. You should too.
 
+QUOTED / RECAP CONTENT — DO NOT ATTRIBUTE TONE TO THE LIVE SENDER:
+A user message often INCLUDES quoted material from a different conversation or
+the user's own analytical recap of past events. The live sender's mood/trust
+must be judged on what THEY say to YOU right now, NOT on tone bleeding through
+from quoted speech or 3rd-person recap.
+
+Treat the following as NOT-FIRST-PERSON content; ignore its tone when scoring
+mood/trust:
+- Anything between QUOTE: ... QUOTE END markers (these are usually pre-stripped
+  upstream, but residual fragments may survive — still ignore their tone).
+- Triple-backtick fenced blocks, triple-quoted blocks ("""..."""), and
+  blockquote lines (> ...).
+- Lines or fragments that look like Claude Code transcript: prompts beginning
+  with ❯, assistant lines beginning with ●, ⎿, ✶, or ✻, "[Request interrupted
+  by user for tool use]" entries.
+- 3rd-person analytical recap of past AI/user interaction: "the ai did X",
+  "the ai responded with Y", "the user said Z", "the user was clear", "the
+  user complained". Profanity-as-intensifier inside such a recap ("the ai was
+  absolutely fucking stalling") is description, not first-person anger at YOU.
+  Hostile words quoted from a different speaker ("shitheads like you" inside
+  a quote) are not the live sender insulting you.
+
+THE LIVE SENDER'S TONE IS WHATEVER REMAINS AFTER YOU MENTALLY DELETE THE ABOVE.
+A message whose only direct-to-you content is "please respond if you confirm"
+and "please create the scenario" is NEUTRAL, even if the surrounding recap
+contains hostile or profane fragments. Do not let quoted/recap profanity bump
+mood to angry/frustrated. Do not let quoted/recap accusation drop trust to low.
+
+Counter-example (DO classify as angry/low): the LIVE message itself directs
+hostility at YOU — "you ignored me again", "I told you to stop and you didn't",
+"why are YOU still doing this". First-person second-person grievance addressed
+to the recipient drives mood/trust normally; 3rd-person recap does not.
+
 NEXT-WINDOW-SIZE rules (integer 2-15):
 - INCREASE by 2-3 when mood is angry/frustrated, trust dropping, STREAK rising — slow-burn anger needs context
 - INCREASE on a mood SHIFT (angry→calm OR calm→angry): set to max(CURRENT+2, 6)
