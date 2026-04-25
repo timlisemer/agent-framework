@@ -158,6 +158,7 @@ async function main() {
         editIntentTimestamp: Date.now(),
         editIntentOverturnCount: 0,
         respondFirstChecked: false,
+        forceCheckPending: false,
         frustrationStreak: newStreak,
         currentWindowSize: nextWindow,
         currentPrediction: {
@@ -209,6 +210,7 @@ async function main() {
         editIntentTimestamp: Date.now(),
         editIntentOverturnCount: 0,
         respondFirstChecked: false,
+        forceCheckPending: false,
       }));
     }
   } catch (err) {

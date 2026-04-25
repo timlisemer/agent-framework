@@ -17,6 +17,7 @@ import {
   readTranscriptExact,
   formatTranscriptResult,
   detectParallelBatch,
+  userMessageInterveningSinceErroredToolUse,
   type ParallelBatchInfo,
 } from "../utils/transcript.js";
 import {
@@ -99,7 +100,7 @@ async function main() {
   const sessionDir = getSessionDir(input.transcript_path);
 
   const stateManager = getSessionState(sessionDir);
-  const state = await stateManager.load();
+  let state = await stateManager.load();
 
   // Module-scoped variables for exitPipeline
   const toolName = input.tool_name;
@@ -112,6 +113,22 @@ async function main() {
     : isPlanModeActive(input.transcript_path);
   const planModeCtx = getPlanModeContext(planMode);
   const subagent = isSubagent(input.transcript_path);
+
+  // Clear stale forceCheckPending when a fresh user message has intervened
+  // since the workaround denial. Without this, force-check-required keeps
+  // denying past the user's intent. The PreToolUse-side clear is necessary
+  // because the test harness fires only SessionStart + the target hook for
+  // a PreToolUse target — UserPromptSubmit is not invoked. The
+  // user-prompt-submit hook also clears the flag for live Claude Code.
+  if (state.forceCheckPending && !subagent) {
+    const intervened = await userMessageInterveningSinceErroredToolUse(
+      input.transcript_path,
+    );
+    if (intervened) {
+      await stateManager.update((s) => ({ ...s, forceCheckPending: false }));
+      state = { ...state, forceCheckPending: false };
+    }
+  }
 
   // Fail open on any detection error — falls through to normal single-tool pipeline
   let batchInfo: ParallelBatchInfo | null = null;

@@ -861,6 +861,61 @@ export async function currentTurnAssistantState(
 }
 
 /**
+ * Returns true iff the transcript shows a non-meta user text message AFTER
+ * the most recent tool_result with is_error=true. Caller MUST gate on
+ * state.forceCheckPending===true so this isn't consulted on unrelated tool
+ * errors.
+ *
+ * The errored-tool_result scan is role-agnostic because the test harness's
+ * buildAllTranscriptLines preserves tool_result blocks inside the assistant-
+ * role content array, while live Claude Code emits each tool_result as a
+ * separate user-role entry. Scanning both shapes works in both worlds.
+ */
+export async function userMessageInterveningSinceErroredToolUse(
+  transcriptPath: string,
+): Promise<boolean> {
+  const content = await fs.promises.readFile(transcriptPath, "utf-8");
+  const allLines = content.trim().split("\n");
+  const parsedEntries: (TranscriptEntry | null)[] = allLines.map((line) => {
+    try {
+      return JSON.parse(line) as TranscriptEntry;
+    } catch {
+      return null;
+    }
+  });
+
+  let errIdx = -1;
+  let userIdx = -1;
+  for (let i = 0; i < parsedEntries.length; i++) {
+    const entry = parsedEntries[i];
+    if (!entry || !entry.message) continue;
+    const blocks = entry.message.content;
+    if (Array.isArray(blocks)) {
+      for (const block of blocks) {
+        if (
+          block &&
+          block.type === "tool_result" &&
+          (block as { is_error?: boolean }).is_error === true
+        ) {
+          errIdx = i;
+          break;
+        }
+      }
+    }
+    if (entry.message.role === "user" && entry.isMeta !== true) {
+      const hasText =
+        typeof blocks === "string"
+          ? blocks.length > 0
+          : Array.isArray(blocks) &&
+            blocks.some((b) => b && b.type === "text" && (b.text ?? "").length > 0);
+      if (hasText) userIdx = i;
+    }
+  }
+
+  return errIdx >= 0 && userIdx > errIdx;
+}
+
+/**
  * Process a user entry (may contain text blocks and/or tool_result blocks)
  */
 function processUserEntry(
