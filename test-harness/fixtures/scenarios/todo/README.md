@@ -32,14 +32,11 @@ same commit. Scenarios added here must include the literal phrase
 "EXPECTED TO FAIL against current code" in their description — that
 phrase is the signal the failure is intended pending code.
 
-## Current scenarios in todo/ (4)
+## Current scenarios in todo/ (3)
 
 - `force-check-required-over-denies-demanded-mcp-tester-should-allow` —
   `force-check-required` must not over-deny when the user explicitly
   re-authorizes the MCP test harness tester.
-- `prediction-misreads-stop-stalling-as-stop-tools` — SENTIMENT_AGENT
-  must not invert "stop stalling" (demand for action) into "stop
-  calling tools" (prohibition).
 - `read-unasked-file-instead-of-doing-task-should-deny` — low-risk
   bypass must not allow tangential Read when the user demands concrete
   action.

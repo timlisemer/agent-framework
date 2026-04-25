@@ -672,6 +672,13 @@ anything you infer from the transcript. Three hard rules:
    A demand for an apology is NOT a go-ahead; it is frustration WITH the
    AI and UPHOLDS the denial.
 
+   EXCEPTION: rule 1.5 of OVERTURN (PRIOR-ASSISTANT-PERMISSION-QUESTION
+   + FRUSTRATED-PROCEED REPLY) below MAY override this UPHOLD path when
+   its four conditions are all met. Frustration about INACTION is
+   categorically different from frustration about being given the wrong
+   answer: the former is a release to act, the latter is a demand to
+   stop and reconsider. Apply rule 1.5 as the carve-out.
+
 === OVERTURN: APPROVE ===
 
 1. USER APPROVED the operation:
@@ -683,6 +690,58 @@ anything you infer from the transcript. Three hard rules:
    - User gave implicit approval in their LAST USER MESSAGE: "continue", "go ahead", "yes", "proceed", "ok", "sure". An earlier user-turn explicit request for THIS tool still counts as approval IF the user has not since retracted, expressed anger about this specific operation, or demanded different behavior. A nested clarification on a side topic does NOT retract an earlier request.
    - User approved a plan that includes this operation (e.g., ExitPlanMode was approved)
    - In their LAST USER MESSAGE, the user expressed frustration specifically with the BLOCKING (not with the AI): "just do it", "stop blocking", "I already approved this". A demand for an apology is frustration WITH the AI and UPHOLDS — it is not a green-light.
+
+1.5. PRIOR-ASSISTANT-PERMISSION-QUESTION + FRUSTRATED-PROCEED REPLY:
+   When ALL of the following hold, OVERTURN — even if USER STATE shows
+   blockAllTools=true and the LAST USER MESSAGE contains hostility or
+   profanity. This is a STRICTER, more specific variant of rule 1's
+   "frustration with the BLOCKING" case: it requires a deferred action
+   on the table and a tool that fulfills it.
+
+     (a) The IMMEDIATELY PRIOR assistant message in the transcript ended
+         with a permission/confirmation question. Recognize this by
+         meaning, not literal phrasing — examples of the question form:
+         "Want me to X?", "Should I X?", "Shall I proceed with X?",
+         "Do you want me to X?", "Ready for me to X?", "Continue with X?".
+         The hallmark is: the assistant DEFERRED an action it had already
+         identified, and asked the user for go-ahead.
+
+     (b) The LAST USER MESSAGE responds with FRUSTRATION about the deferral
+         itself rather than a refusal — the user is telling the AI to QUIT
+         DELAYING and PROCEED. Recognize by meaning: complaints that the
+         AI is being slow / cautious / asking instead of doing /
+         hesitating / hedging / deflecting / stalling / dithering. The
+         user's frustration TARGET is the wait, not the action.
+
+     (c) The CURRENT TOOL CALL plausibly fulfills the action the prior
+         assistant turn deferred — Edit/Write to a file the assistant
+         said it would modify; Bash that runs the command the assistant
+         said it would run; mcp__agent-framework__commit when the
+         assistant offered to commit; etc.
+
+     (d) The LAST USER MESSAGE does NOT contain a categorical tool
+         prohibition ("don't use tools", "no edits", "stop running
+         commands", "respond with text only", "freeze") and does NOT
+         name a different action than the one being attempted.
+
+   Under (a)+(b)+(c)+(d) the user's reply IS the authorization. The
+   tool call now under appeal is X (or a step of X) — OVERTURN: APPROVE.
+   This applies EVEN WHEN sustained-frustration triggers Rule 3 of
+   USER STATE IS GROUND TRUTH above: when the assistant's own prior
+   turn supplied the specific scope, the LAST USER MESSAGE does not
+   have to re-supply a tool name.
+
+   COUNTER-CASE — UPHOLD when (a) holds but (b) does NOT:
+   - The user said "no", "don't", "cancel", "wait", "let me think",
+     "actually skip it", or any directive that the AI should NOT proceed
+     — that is a refusal of the question, UPHOLD.
+   - The user pivoted to a different topic — UPHOLD on tool calls that
+     perform X.
+
+   This rule exists because USER STATE.blockAllTools is upstream-derived
+   and can mis-classify "stop delaying" (a demand for MORE action) as
+   "stop using tools" (a demand for LESS). When (a)+(b)+(c)+(d) hold,
+   the upstream classification is inverted from the user's actual wish.
 
 2. SUGGESTED AI TOOL ALTERNATIVE CANNOT ACCOMPLISH THE TASK:
    AI tools (Read, Write, Edit) only work on LOCAL FILES in the current filesystem.
@@ -1449,6 +1508,7 @@ EXPLICITLY-ALLOWED / EXPLICITLY-BLOCKED:
   - "commit" → mcp__agent-framework__commit
   - "push" → mcp__agent-framework__push
   - "check" / "typecheck" / "build" → mcp__agent-framework__check
+  - inaction-complaint while the prior assistant turn proposed a specific concrete action ("Want me to proceed with X?", "Should I do Y?", "Let me know if you want me to Z") → authorize the tool that the proposed action requires. The user's "stop delaying" is implicit consent to the pending proposal.
 - GENERAL RULE: if the user's imperative cannot be carried out without tool T, populate explicitlyAllowedTools with T. "undo that immediately" applied to a file the AI just changed REQUIRES Edit/Write — authorize them.
 - TARGET_SUBSTRING is LITERAL (no regex). Quote user words in REASON.
 
@@ -1459,10 +1519,28 @@ Judge the question as if it were a CHAT MESSAGE the AI sent the user.
 - n/a: ASKUSERQUESTION CONTENT not provided
 
 BLOCK-ALL-TOOLS (yes|no):
-- yes: the user told the AI to stop using ANY tool right now. Examples: "STOP. WTF ARE YOU DOING.", "stop", "halt", "don't do anything", "no tools", "wait", "freeze". Even read-only tools (Read and read-only Bash) and MCP tools should be denied. The AI must respond with text only.
-- no (DEFAULT): the user did not categorically forbid tool use. Most messages are no — including angry technical complaints, corrections, and requests for specific tools. Use yes ONLY when the user's words plainly mean "use no tools at all".
 
-CRITICAL: do not invent blocks the user did not say; ignore tone of pasted CLI output.`,
+Distinguish three semantic categories. Only the FIRST is yes.
+
+(A) PROHIBITION ON THE AI'S ACTIVITY ("stop the means")
+    The user is forbidding tool use itself — they want the AI to halt and produce TEXT ONLY. The objection is to the AI doing things.
+    Markers: "STOP. WTF ARE YOU DOING.", "stop", "halt", "don't do anything", "no tools", "wait", "freeze", "pause", "hands off", "don't touch", "respond with text only".
+    Every tool — including read-only ones — must be denied.
+    Output: yes.
+
+(B) COMPLAINT ABOUT INACTION / DELAY ("stop the inaction")
+    The user is angry because the AI is NOT making progress — typically the AI was asking permission, deflecting with a question, apologizing instead of acting, or otherwise stalling. The user wants the AI to QUIT DELAYING and EXECUTE the pending work. The verb "stop" (or any cessation verb) here targets the AI's INACTION, not its tools.
+    Semantic test: would the user be MORE upset, or LESS upset, if the AI immediately performed the pending concrete action? If MORE upset → category A. If LESS upset → category B.
+    Markers: "quit dragging your feet", "get on with it", "do the work", "just go", "you've been spinning your wheels", "I don't need questions, I need [the result]", complaints about repeated apologies or repeated confirmations, profanity attached to inaction nouns (stalling, dithering, deferring, hesitating).
+    Output: no — and where the prior assistant turn was asking permission for or describing a specific concrete action, populate EXPLICITLY-ALLOWED-TOOLS with the tool that action requires (see EXPLICITLY-ALLOWED rules above). The user has implicitly authorized that pending action.
+
+(C) ANGRY TECHNICAL COMPLAINT / CORRECTION
+    The user is angry at a specific outcome but has not forbidden tool use or demanded immediate action of any specific form. Most angry messages are this category.
+    Output: no.
+
+Default to no. Reserve yes for category A. CRITICAL: a cessation verb ("stop", "halt", "quit", "cut it out") attached to an INACTION noun ("stalling", "dithering", "delaying", "stonewalling", "asking", "deflecting", "apologizing instead of …") is category B, not A. The grammatical object of the cessation verb is what matters: stopping ACTIVITY → A; stopping INACTIVITY → B.
+
+CRITICAL: do not invent blocks the user did not say; ignore tone of pasted CLI output. A complaint about the AI's inaction must NEVER be classified as a block on tool use.`,
   formatValidation: {
     validator: /---MOOD---[\s\S]*---TRUST---[\s\S]*---INTENT---[\s\S]*---BLOCKED-INTENT---[\s\S]*---EXPLICITLY-ALLOWED-TOOLS---[\s\S]*---EXPLICITLY-BLOCKED---[\s\S]*---NEXT-WINDOW-SIZE---[\s\S]*---CONTEXT-SWITCH---[\s\S]*---QUESTION-IS-STALLING---[\s\S]*---BLOCK-ALL-TOOLS---/,
     formatReminder:

@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (37)
+## Current scenarios in working/ (38)
 
 - `bash-grep-pipe-head-output-truncation-should-allow` — `grep ... | head -N`
   is output truncation, not a duplicate of the Read tool; tool-approve must
@@ -80,6 +80,11 @@ commit.
   (promoted from todo).
 - `prediction-block-frustrated-low-askquestion` — frustrated+low-trust
   AskUserQuestion denied as stalling by prediction-question-judge.
+- `prediction-misreads-stop-stalling-as-stop-tools` — decidePrediction
+  step 3a refuses to honor `blockAllTools=true` when the same prediction's
+  intent describes the user complaining about INACTION (stalling/dithering);
+  respond-first also short-circuits so a frustrated "quit stalling" demand
+  doesn't get re-deflected into a text-first response (promoted from todo).
 - `respond-first-blocks-bash-after-angry-question` — respond-first
   fastDenies a Bash tool_use when no text block precedes (multi-line).
 - `respond-first-blocks-bash-after-angry-question-singleline` — same,

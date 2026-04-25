@@ -80,6 +80,33 @@ const UNDO_INTENT_RE =
   /\b(undo\w*|revert\w*|restor\w*|rollback\w*|roll\s+back|put\s+back|rewrit\w*|redo\w*)\b/i;
 
 /**
+ * Cessation-verb + inactivity-noun morphology that semantically inverts
+ * "stop X" from "prohibit activity X" to "demand the user's underlying
+ * action proceed". Mirrors UNDO_INTENT_RE; keep in sync with the
+ * SENTIMENT_AGENT prompt's BLOCK-ALL-TOOLS guidance in
+ * src/utils/agent-configs.ts.
+ *
+ * Noun list is intentionally narrow: only UNAMBIGUOUS inactivity nouns.
+ * Verbs like "wait" / "freeze" are reserved for category-A prohibitions
+ * (see SENTIMENT_AGENT BLOCK-ALL-TOOLS markers) and MUST NOT appear here.
+ * Phrase-anchored idioms ("dragging your feet", "spinning your wheels")
+ * are spelled out so a bare "drag" / "spin" (which can read as activity
+ * verbs) doesn't over-fire.
+ */
+export const INACTION_COMPLAINT_RE =
+  /\b(stop|stops|stopped|stopping|quit|quits|quitting|halt|halts|halting|cease|ceases|ceased|ceasing|cut\s+out|no\s+more|enough\s+of)\b[^.!?]{0,40}\b(stall\w*|dither\w*|stonewall\w*|hesitat\w*|deflect\w*|dawdl\w*|procrastinat\w*|dragging\s+(your|its|the|my)\s+feet|spinning\s+(your|its|the|my)\s+wheels|foot[-\s]?dragging)\b/i;
+
+/**
+ * Categorical tool-prohibition shapes drawn directly from SENTIMENT_AGENT's
+ * category-A markers. When any of these are in the userMessageSnippet, the
+ * user IS explicitly forbidding tool use — even if the same prediction's
+ * intent ALSO mentions inaction. In that case, honor the prohibition (don't
+ * short-circuit to allow on the basis of intent morphology alone).
+ */
+export const EXPLICIT_PROHIBITION_RE =
+  /\b(no\s+tools|don'?t\s+do\s+anything|hands?\s+off|don'?t\s+touch|respond\s+with\s+text\s+only|just\s+talk|freeze|halt\s+everything)\b/i;
+
+/**
  * Pure decision function: given the current prediction (or null) and a tool
  * call, return allow/deny. Order: explicit allow > explicit block > mood
  * policy.
@@ -108,10 +135,36 @@ export function decidePrediction(
     };
   }
 
-  // 3. blockAllTools override: user explicitly asked for no tools at all.
-  // Overrides the low-risk allowance below — only explicitlyAllowedTools
-  // bypass (already handled in step 1).
+  // 3. blockAllTools handling.
   if (prediction.blockAllTools) {
+    // 3a. Internal-consistency check: blockAllTools=true asserts "user
+    // forbade tool use entirely". When the prediction's own intent describes
+    // the user complaining about INACTION (stalling, dithering, dragging
+    // your feet), AND the userMessageSnippet does NOT independently contain
+    // a categorical tool-prohibition, the flag contradicts its own prose —
+    // the user demanded MORE action, not less. Allow.
+    //
+    // The userMessageSnippet guard prevents over-firing: a user who says
+    // "stop. no tools. halt the stalling." has BOTH an explicit prohibition
+    // AND incidental inaction language. The prohibition wins.
+    const userSaidProhibition = EXPLICIT_PROHIBITION_RE.test(
+      prediction.userMessageSnippet,
+    );
+    const blockedForThisTool = prediction.explicitlyBlockedSubstrings.some(
+      (b) => b.tool === toolName,
+    );
+    if (
+      !userSaidProhibition &&
+      !blockedForThisTool &&
+      INACTION_COMPLAINT_RE.test(prediction.intent)
+    ) {
+      return {
+        decision: "allow",
+        reason: `User intent expresses a complaint about inaction/stalling, not a prohibition on tools; ${toolName} proceeds.`,
+      };
+    }
+    // 3b. Otherwise honor the flag: deny anything not on the allow-list
+    // (step 1 already cleared explicitlyAllowedTools).
     return {
       decision: "deny",
       reason: `User explicitly asked for no tools right now. User said: "${prediction.userMessageSnippet}". Intent: ${prediction.intent}`,

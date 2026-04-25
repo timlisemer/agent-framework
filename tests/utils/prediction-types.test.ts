@@ -163,6 +163,43 @@ describe("decidePrediction", () => {
     expect(result.decision).toBe("deny");
   });
 
+  it("step 3a: blockAllTools=true is overridden when intent describes inaction-complaint and userMessageSnippet has no categorical prohibition", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent:
+        "The user wants the AI to immediately stop stalling and whatever tool calls it is making, and respond directly without any further delays.",
+      blockedIntent: "calling tools of any kind before responding",
+      blockAllTools: true,
+      userMessageSnippet: "fuck you atop stLLING",
+    });
+    const result = decidePrediction(pred, "Edit", {
+      file_path: "/tmp/x.json",
+      old_string: "a",
+      new_string: "b",
+    });
+    expect(result.decision).toBe("allow");
+    expect(result.reason ?? "").toContain("inaction/stalling");
+  });
+
+  it("step 3a: blockAllTools=true is honored when userMessageSnippet contains an explicit prohibition even alongside inaction language", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User wants the AI to stop stalling and freeze.",
+      blockedIntent: "all tool use",
+      blockAllTools: true,
+      userMessageSnippet: "freeze. no tools.",
+    });
+    const result = decidePrediction(pred, "Edit", {
+      file_path: "/tmp/x.json",
+      old_string: "a",
+      new_string: "b",
+    });
+    expect(result.decision).toBe("deny");
+    expect(result.reason ?? "").toContain("no tools right now");
+  });
+
   it("undo-intent fallback matches morphological variants (reverted, restoring, rewriting)", () => {
     for (const intent of [
       "The user wants the AI to revert the change.",
