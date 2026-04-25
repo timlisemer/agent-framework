@@ -235,11 +235,19 @@ export async function findActivePredictionMatching(
   try {
     const raw = await fs.promises.readFile(statePath, "utf-8");
     const parsed = JSON.parse(raw) as {
-      data?: { currentPrediction?: ToolPrediction | null };
+      data?: {
+        currentPrediction?: ToolPrediction | null;
+        frustrationStreak?: number;
+      };
     };
     const pred = parsed.data?.currentPrediction;
     if (!pred) return null;
-    const decision = decidePrediction(pred, toolName, toolInput);
+    const decision = decidePrediction(
+      pred,
+      toolName,
+      toolInput,
+      parsed.data?.frustrationStreak ?? 0,
+    );
     return { prediction: pred, decision };
   } catch {
     return null;
@@ -259,11 +267,19 @@ export function findActivePredictionMatchingSync(
   try {
     const raw = fs.readFileSync(statePath, "utf-8");
     const parsed = JSON.parse(raw) as {
-      data?: { currentPrediction?: ToolPrediction | null };
+      data?: {
+        currentPrediction?: ToolPrediction | null;
+        frustrationStreak?: number;
+      };
     };
     const pred = parsed.data?.currentPrediction;
     if (!pred) return null;
-    const decision = decidePrediction(pred, toolName, toolInput);
+    const decision = decidePrediction(
+      pred,
+      toolName,
+      toolInput,
+      parsed.data?.frustrationStreak ?? 0,
+    );
     return { prediction: pred, decision };
   } catch {
     return null;

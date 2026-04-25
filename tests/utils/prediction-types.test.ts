@@ -21,26 +21,26 @@ function makePrediction(overrides: Partial<ToolPrediction> = {}): ToolPrediction
 
 describe("decidePrediction", () => {
   it("allows when prediction is null", () => {
-    const result = decidePrediction(null, "Edit", { file_path: "src/foo.ts" });
+    const result = decidePrediction(null, "Edit", { file_path: "src/foo.ts" }, 0);
     expect(result.decision).toBe("allow");
   });
 
   it("happy/no lists/Edit -> allow", () => {
     const pred = makePrediction({ mood: "happy", trust: "normal" });
-    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" });
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 0);
     expect(result.decision).toBe("allow");
   });
 
   it("angry/no lists/Edit -> deny", () => {
     const pred = makePrediction({ mood: "angry", trust: "normal" });
-    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" });
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 0);
     expect(result.decision).toBe("deny");
     expect(result.reason).toContain("angry");
   });
 
   it("angry/no lists/Read -> allow", () => {
     const pred = makePrediction({ mood: "angry", trust: "normal" });
-    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 0);
     expect(result.decision).toBe("allow");
   });
 
@@ -50,7 +50,7 @@ describe("decidePrediction", () => {
       trust: "normal",
       explicitlyAllowedTools: ["Edit"],
     });
-    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" });
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 0);
     expect(result.decision).toBe("allow");
   });
 
@@ -64,24 +64,24 @@ describe("decidePrediction", () => {
     });
     const denyResult = decidePrediction(pred, "Bash", {
       command: "git push origin main",
-    });
+    }, 0);
     expect(denyResult.decision).toBe("deny");
     expect(denyResult.matchedExplicit?.tool).toBe("Bash");
 
-    const allowResult = decidePrediction(pred, "Bash", { command: "ls" });
+    const allowResult = decidePrediction(pred, "Bash", { command: "ls" }, 0);
     expect(allowResult.decision).toBe("allow");
   });
 
   it("low trust/Edit -> deny", () => {
     const pred = makePrediction({ mood: "neutral", trust: "low" });
-    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" });
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 0);
     expect(result.decision).toBe("deny");
     expect(result.reason).toContain("trust: low");
   });
 
   it("low trust/Read -> allow", () => {
     const pred = makePrediction({ mood: "neutral", trust: "low" });
-    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 0);
     expect(result.decision).toBe("allow");
   });
 
@@ -93,7 +93,7 @@ describe("decidePrediction", () => {
         { tool: "Bash", reason: "user said no bash" },
       ],
     });
-    const result = decidePrediction(pred, "Bash", { command: "anything" });
+    const result = decidePrediction(pred, "Bash", { command: "anything" }, 0);
     expect(result.decision).toBe("deny");
   });
 
@@ -103,19 +103,19 @@ describe("decidePrediction", () => {
       trust: "low",
       explicitlyAllowedTools: ["Bash"],
     });
-    const result = decidePrediction(pred, "Bash", { command: "ls" });
+    const result = decidePrediction(pred, "Bash", { command: "ls" }, 0);
     expect(result.decision).toBe("allow");
   });
 
   it("frustrated mood is restrictive", () => {
     const pred = makePrediction({ mood: "frustrated", trust: "normal" });
-    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" });
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 0);
     expect(result.decision).toBe("deny");
   });
 
   it("satisfied mood with normal trust -> allow Edit", () => {
     const pred = makePrediction({ mood: "satisfied", trust: "normal" });
-    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" });
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 0);
     expect(result.decision).toBe("allow");
   });
 
@@ -132,7 +132,7 @@ describe("decidePrediction", () => {
     const result = decidePrediction(pred, "Write", {
       file_path: "/home/tim/Coding/public_repos/agent-framework/some.json",
       content: "...",
-    });
+    }, 0);
     expect(result.decision).toBe("allow");
     expect(result.reason).toContain("undo/revert");
   });
@@ -147,7 +147,7 @@ describe("decidePrediction", () => {
       ],
       userMessageSnippet: "undo that but DO NOT TOUCH foo.ts",
     });
-    const result = decidePrediction(pred, "Write", { file_path: "src/foo.ts", content: "..." });
+    const result = decidePrediction(pred, "Write", { file_path: "src/foo.ts", content: "..." }, 0);
     expect(result.decision).toBe("deny");
   });
 
@@ -159,7 +159,7 @@ describe("decidePrediction", () => {
       blockAllTools: true,
       userMessageSnippet: "STOP EVERYTHING. undo it.",
     });
-    const result = decidePrediction(pred, "Write", { file_path: "src/foo.ts", content: "..." });
+    const result = decidePrediction(pred, "Write", { file_path: "src/foo.ts", content: "..." }, 0);
     expect(result.decision).toBe("deny");
   });
 
@@ -177,7 +177,7 @@ describe("decidePrediction", () => {
       file_path: "/tmp/x.json",
       old_string: "a",
       new_string: "b",
-    });
+    }, 0);
     expect(result.decision).toBe("allow");
     expect(result.reason ?? "").toContain("inaction/stalling");
   });
@@ -195,7 +195,7 @@ describe("decidePrediction", () => {
       file_path: "/tmp/x.json",
       old_string: "a",
       new_string: "b",
-    });
+    }, 0);
     expect(result.decision).toBe("deny");
     expect(result.reason ?? "").toContain("no tools right now");
   });
@@ -207,7 +207,7 @@ describe("decidePrediction", () => {
       "Rewriting the file is requested.",
     ]) {
       const pred = makePrediction({ mood: "angry", trust: "low", intent, userMessageSnippet: "fix it" });
-      const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" });
+      const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 0);
       expect(result.decision).toBe("allow");
     }
   });
@@ -219,7 +219,7 @@ describe("decidePrediction", () => {
       intent: "The user wants the AI to undo the changes.",
       userMessageSnippet: "undo it",
     });
-    const result = decidePrediction(pred, "Bash", { command: "rm -rf foo" });
+    const result = decidePrediction(pred, "Bash", { command: "rm -rf foo" }, 0);
     expect(result.decision).toBe("deny");
   });
 
@@ -230,7 +230,7 @@ describe("decidePrediction", () => {
       intent: "The user wants the AI to fix the broken parser.",
       userMessageSnippet: "fix this stupid parser",
     });
-    const result = decidePrediction(pred, "Write", { file_path: "src/parser.ts", content: "..." });
+    const result = decidePrediction(pred, "Write", { file_path: "src/parser.ts", content: "..." }, 0);
     expect(result.decision).toBe("deny");
   });
 
@@ -247,8 +247,89 @@ describe("decidePrediction", () => {
     const result = decidePrediction(pred, "Write", {
       file_path: "/home/tim/Coding/public_repos/agent-framework/some.json",
       content: "...",
-    });
+    }, 0);
     expect(result.decision).toBe("allow");
+  });
+
+  it("sustained frustration (angry+low-trust+streak=5) revokes low-risk Read bypass — denies as deflection", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User wants concrete action on the primary task, not tangential inspection.",
+      userMessageSnippet: "WHY ARE YOU REFUSING TO DO YOUR WORK",
+    });
+    const result = decidePrediction(pred, "Read", { file_path: "src/anything.ts" }, 5);
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toContain("angry");
+    expect(result.reason).toContain("frustrationStreak: 5");
+  });
+
+  it("sustained frustration via streak alone (angry+normal-trust+streak=2) denies low-risk Read", () => {
+    const pred = makePrediction({ mood: "angry", trust: "normal" });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 2);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("sustained frustration via low-trust alone (frustrated+low-trust+streak=0) denies low-risk Read", () => {
+    const pred = makePrediction({ mood: "frustrated", trust: "low" });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 0);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("sustained frustration revokes the low-risk bypass for ToolSearch/WebFetch/WebSearch too (generic across LOW_RISK_TOOLS)", () => {
+    const pred = makePrediction({ mood: "angry", trust: "low" });
+    for (const tool of ["WebSearch", "WebFetch", "ToolSearch"]) {
+      const result = decidePrediction(pred, tool, {}, 5);
+      expect(result.decision).toBe("deny");
+    }
+  });
+
+  it("sustained frustration does NOT override explicit allow (step 1 still wins)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      explicitlyAllowedTools: ["Read"],
+    });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 5);
+    expect(result.decision).toBe("allow");
+  });
+
+  it("single-turn anger (angry+normal-trust+streak<2) preserves the low-risk Read allowance", () => {
+    const pred = makePrediction({ mood: "angry", trust: "normal" });
+    for (const streak of [0, 1]) {
+      const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, streak);
+      expect(result.decision).toBe("allow");
+    }
+  });
+
+  it("low-trust with neutral mood (not angry/frustrated) preserves the low-risk bypass even at high streak", () => {
+    const pred = makePrediction({ mood: "neutral", trust: "low" });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 5);
+    expect(result.decision).toBe("allow");
+  });
+
+  it("sustained frustration with scoped explicit block on OTHER tool still allows unrelated low-risk tool", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      explicitlyBlockedSubstrings: [
+        { tool: "Bash", targetSubstring: "git push", reason: "no pushing" },
+      ],
+    });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 5);
+    expect(result.decision).toBe("allow");
+  });
+
+  it("undo-intent fallback (step 3.5) still wins over the new gate for edit tools", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "The user wants the AI to undo the changes.",
+      userMessageSnippet: "undo it now",
+    });
+    const result = decidePrediction(pred, "Write", { file_path: "src/foo.ts", content: "..." }, 5);
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("undo/revert");
   });
 });
 

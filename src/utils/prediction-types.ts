@@ -115,6 +115,7 @@ export function decidePrediction(
   prediction: ToolPrediction | null,
   toolName: string,
   toolInput: unknown,
+  frustrationStreak: number,
 ): PredictionDecision {
   if (!prediction) return { decision: "allow" };
 
@@ -189,13 +190,27 @@ export function decidePrediction(
 
   // 4. Mood-driven default policy. Allow set mirrors `low-risk-bypass`
   // (single source of truth via isLowRiskTool) so the prediction system
-  // doesn't artificially block tools the framework treats as always-safe.
+  // doesn't artificially block tools the framework treats as always-safe
+  // — UNLESS the user is in SUSTAINED FRUSTRATION (mood angry/frustrated
+  // AND trust=low OR frustrationStreak >= 2). Mirrors the TOOL_APPEAL_AGENT
+  // prompt's "MOOD-DRIVEN DENIALS GENERALIZE UNDER SUSTAINED FRUSTRATION"
+  // rule (src/utils/agent-configs.ts:643-646) so the deterministic policy
+  // and the LLM appeal judge agree on the same threshold. Under sustained
+  // frustration, low-risk tool calls without explicit authorization are
+  // tangential inspection / deflection, not benign discovery — fall
+  // through to the mood-deny path.
   const restrictive =
     prediction.mood === "angry" ||
     prediction.mood === "frustrated" ||
     prediction.trust === "low";
   if (restrictive) {
-    if (isLowRiskTool(toolName)) return { decision: "allow" };
+    const sustainedFrustration =
+      (prediction.mood === "angry" || prediction.mood === "frustrated") &&
+      (prediction.trust === "low" || frustrationStreak >= 2);
+
+    if (isLowRiskTool(toolName) && !sustainedFrustration) {
+      return { decision: "allow" };
+    }
 
     // Anger scoped to other tools via explicitlyBlockedSubstrings must not
     // generalize to this tool. When the user has expressed explicit blocks
@@ -213,7 +228,7 @@ export function decidePrediction(
 
     return {
       decision: "deny",
-      reason: `User appears ${prediction.mood} (trust: ${prediction.trust}). Blocking ${toolName} unless explicitly requested. User said: "${prediction.userMessageSnippet}". Intent: ${prediction.intent}`,
+      reason: `User appears ${prediction.mood} (trust: ${prediction.trust}, frustrationStreak: ${frustrationStreak}). Blocking ${toolName} unless explicitly requested. User said: "${prediction.userMessageSnippet}". Intent: ${prediction.intent}`,
     };
   }
 

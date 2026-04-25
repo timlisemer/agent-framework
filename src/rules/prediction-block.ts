@@ -23,7 +23,12 @@ export const predictionBlockRule: PreToolRule = {
       return null;
     }
 
-    const decision = decidePrediction(prediction, ctx.toolName, ctx.toolInput);
+    const decision = decidePrediction(
+      prediction,
+      ctx.toolName,
+      ctx.toolInput,
+      ctx.state.frustrationStreak ?? 0,
+    );
     if (decision.decision === "deny") {
       // Mood-driven denies defer to tool-approve's blacklist fastDeny so the
       // user sees the actionable alternative (e.g. "use mcp__agent-framework__check")
