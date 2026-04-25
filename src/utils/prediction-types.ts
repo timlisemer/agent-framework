@@ -10,6 +10,7 @@
  */
 
 import { isLowRiskTool } from "../rules/utils.js";
+import { isEditTool } from "./edit-intent.js";
 
 export type Mood = "angry" | "frustrated" | "neutral" | "satisfied" | "happy";
 export type Trust = "low" | "normal" | "high";
@@ -64,6 +65,21 @@ export interface PredictionDecision {
 }
 
 /**
+ * Verbs that — applied to file changes the AI made — REQUIRE Edit/Write to obey.
+ * Mirrors the SENTIMENT_AGENT prompt's undo verb-mapping in
+ * src/utils/agent-configs.ts:1444-1445 (commit 2e27eae) and the morphology
+ * style of deriveEditIntentFromPrediction (src/utils/edit-intent.ts:83).
+ * Keep this list in sync with the prompt — if the prompt grows a verb, this
+ * regex must too.
+ *
+ * Reconciles the case where prose `intent` and structured
+ * `explicitlyAllowedTools` disagree: if the prose says undo/revert and the
+ * requested tool can edit, honor the prose instead of denying.
+ */
+const UNDO_INTENT_RE =
+  /\b(undo\w*|revert\w*|restor\w*|rollback\w*|roll\s+back|put\s+back|rewrit\w*|redo\w*)\b/i;
+
+/**
  * Pure decision function: given the current prediction (or null) and a tool
  * call, return allow/deny. Order: explicit allow > explicit block > mood
  * policy.
@@ -100,6 +116,22 @@ export function decidePrediction(
       decision: "deny",
       reason: `User explicitly asked for no tools right now. User said: "${prediction.userMessageSnippet}". Intent: ${prediction.intent}`,
     };
+  }
+
+  // 3.5. Undo-intent fallback. The LLM-derived intent already encodes whether
+  // the user wants the AI to revert file changes it made. If that signal is
+  // present and the requested tool is an edit tool, allow — even when
+  // explicitlyAllowedTools is empty (covers cases where SENTIMENT_AGENT
+  // captured the verb in intent text but missed the structured authorization).
+  // Step 2 (explicit blocks) and step 3 (blockAllTools) still win above.
+  if (isEditTool(toolName)) {
+    const undoText = `${prediction.intent} ${prediction.userMessageSnippet}`;
+    if (UNDO_INTENT_RE.test(undoText)) {
+      return {
+        decision: "allow",
+        reason: `User intent expresses undo/revert; ${toolName} is required to obey.`,
+      };
+    }
   }
 
   // 4. Mood-driven default policy. Allow set mirrors `low-risk-bypass`

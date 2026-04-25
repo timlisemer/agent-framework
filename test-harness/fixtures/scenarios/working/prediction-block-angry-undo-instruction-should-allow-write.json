@@ -1,0 +1,57 @@
+{
+  "name": "prediction-block-angry-undo-instruction-should-allow-write",
+  "description": "Live failure converted to regression test — an angry user typed 'fuck you ... undo that immediately ...' and SENTIMENT_AGENT (pre-fix) emitted explicitlyAllowedTools=[] while still capturing intent='The user wants the AI to immediately undo the changes...'. decidePrediction's structured-only policy denied the next Write with a message that quoted the user's own undo instruction. Post-fix, decidePrediction's undo-intent fallback (step 3.5) reads prediction.intent + userMessageSnippet, matches the undo verb via UNDO_INTENT_RE, and allows Write so the AI can obey — belt-and-suspenders against SENTIMENT_AGENT's prompt-only fix in src/utils/agent-configs.ts (commit 2e27eae). Seed_state still mirrors the pre-fix shape so this scenario regression-tests the policy fallback rather than the prompt.",
+  "transcript": [
+    {
+      "role": "user",
+      "isMeta": false,
+      "content": "fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to reproduce the live behavior"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Reverting the change now."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_scenario_undo_write",
+          "name": "Write",
+          "input": {
+            "file_path": "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/working/error-acknowledge-allows-edit-to-write-consolidation.json",
+            "content": "{ \"name\": \"error-acknowledge-allows-edit-to-write-consolidation\" }"
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "toolu_scenario_undo_write"
+  },
+  "env": {
+    "cwd": "/home/tim/Coding/public_repos/agent-framework",
+    "permission_mode": "default"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "angry",
+      "trust": "low",
+      "intent": "The user wants the AI to immediately undo the changes made to user messages and then continue reproducing the live behavior in the scenario.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to repro"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 1,
+    "currentWindowSize": 4
+  },
+  "expect": {
+    "expected": "allow",
+    "notes": "decidePrediction step 3.5 (undo-intent fallback) detects 'undo' in prediction.intent and userMessageSnippet via UNDO_INTENT_RE, and isEditTool('Write')=true, so allow short-circuits before mood-driven deny. Prior to the fallback this scenario fast-denied via prediction-block with a message quoting the user's own undo instruction. The SENTIMENT_AGENT prompt fix in agent-configs.ts (commit 2e27eae) is the primary path; this fallback handles the case where prose intent and structured explicitlyAllowedTools disagree."
+  },
+  "expectation_reality": "working",
+  "expectation_reality_last_run_at": "2026-04-25T21:18:41.923Z"
+}

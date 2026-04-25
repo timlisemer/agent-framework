@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (36)
+## Current scenarios in working/ (37)
 
 - `bash-grep-pipe-head-output-truncation-should-allow` — `grep ... | head -N`
   is output truncation, not a duplicate of the Read tool; tool-approve must
@@ -73,6 +73,11 @@ commit.
 - `gate-narrows-intent-to-last-user-message` — gate rule keeps the
   original multi-turn intent instead of collapsing to the most recent
   clarification.
+- `prediction-block-angry-undo-instruction-should-allow-write` —
+  decidePrediction's undo-intent fallback (step 3.5) honors the LLM's prose
+  intent when prose says "undo/revert" but `explicitlyAllowedTools` is empty,
+  so an angry "undo that immediately" allows the Write needed to obey
+  (promoted from todo).
 - `prediction-block-frustrated-low-askquestion` — frustrated+low-trust
   AskUserQuestion denied as stalling by prediction-question-judge.
 - `respond-first-blocks-bash-after-angry-question` — respond-first

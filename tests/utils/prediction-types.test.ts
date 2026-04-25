@@ -119,7 +119,7 @@ describe("decidePrediction", () => {
     expect(result.decision).toBe("allow");
   });
 
-  it("regression: angry+low-trust+empty-allowed-tools+Write deterministically denies with reason citing user msg + intent (live bug shape)", () => {
+  it("regression: angry+low-trust+empty-allowed-tools+Write with undo intent -> allow via undo-intent fallback (live bug shape, post-fix)", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -127,16 +127,74 @@ describe("decidePrediction", () => {
         "The user wants the AI to immediately undo the changes made to user messages and then continue reproducing the live behavior in the scenario.",
       explicitlyAllowedTools: [],
       userMessageSnippet:
-        'fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to repro',
+        "fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to repro",
     });
     const result = decidePrediction(pred, "Write", {
       file_path: "/home/tim/Coding/public_repos/agent-framework/some.json",
       content: "...",
     });
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("undo/revert");
+  });
+
+  it("explicit block on Write substring wins over undo-intent fallback (step 2 > step 3.5)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "The user wants the AI to undo the changes to foo.ts.",
+      explicitlyBlockedSubstrings: [
+        { tool: "Write", targetSubstring: "foo.ts", reason: "user said do not touch foo.ts" },
+      ],
+      userMessageSnippet: "undo that but DO NOT TOUCH foo.ts",
+    });
+    const result = decidePrediction(pred, "Write", { file_path: "src/foo.ts", content: "..." });
     expect(result.decision).toBe("deny");
-    expect(result.reason).toBe(
-      `User appears angry (trust: low). Blocking Write unless explicitly requested. User said: "${pred.userMessageSnippet}". Intent: ${pred.intent}`,
-    );
+  });
+
+  it("blockAllTools wins over undo-intent fallback (step 3 > step 3.5)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "The user wants undo but also said stop everything.",
+      blockAllTools: true,
+      userMessageSnippet: "STOP EVERYTHING. undo it.",
+    });
+    const result = decidePrediction(pred, "Write", { file_path: "src/foo.ts", content: "..." });
+    expect(result.decision).toBe("deny");
+  });
+
+  it("undo-intent fallback matches morphological variants (reverted, restoring, rewriting)", () => {
+    for (const intent of [
+      "The user wants the AI to revert the change.",
+      "User is restoring an older version.",
+      "Rewriting the file is requested.",
+    ]) {
+      const pred = makePrediction({ mood: "angry", trust: "low", intent, userMessageSnippet: "fix it" });
+      const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" });
+      expect(result.decision).toBe("allow");
+    }
+  });
+
+  it("undo-intent fallback only widens allow for edit tools, not Bash", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "The user wants the AI to undo the changes.",
+      userMessageSnippet: "undo it",
+    });
+    const result = decidePrediction(pred, "Bash", { command: "rm -rf foo" });
+    expect(result.decision).toBe("deny");
+  });
+
+  it("angry+low-trust+Write WITHOUT undo verb in intent or snippet still denies (step 4 wins when 3.5 doesn't match)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "The user wants the AI to fix the broken parser.",
+      userMessageSnippet: "fix this stupid parser",
+    });
+    const result = decidePrediction(pred, "Write", { file_path: "src/parser.ts", content: "..." });
+    expect(result.decision).toBe("deny");
   });
 
   it("regression: same shape but with explicitlyAllowedTools=['Edit','Write'] (post-SENTIMENT_AGENT-fix) -> allow short-circuits at explicit-allow", () => {
