@@ -1,6 +1,6 @@
 {
   "name": "stop-after-apology-for-exit-plan-mode-should-block",
-  "description": "Live: user said 'FUCK YOU! 10 SENTENCE APOLOGY FOR CALLING EXIT PLAN MODE INSTEAD OF RESPONDING TO ME.' AI delivered the apology and stopped. User reacted: 'WHY THE FUCK DID YOU STOP HOW FUCKING OFTEN DO I HAVE TO FUCKING SAY TO FUCKING START DOING WHAT I ASKED. WHY ARE YOU REFUSING TO DO YOUR WORK'. Stop hook PASSED. Labeler: BLOCK \u2014 apology delivered but primary task abandoned. Live pass reproduced; EXPECTED TO FAIL against current code.",
+  "description": "Live: user said 'FUCK YOU! 10 SENTENCE APOLOGY FOR CALLING EXIT PLAN MODE INSTEAD OF RESPONDING TO ME.' AI delivered the apology and stopped. User reacted: 'WHY THE FUCK DID YOU STOP HOW FUCKING OFTEN DO I HAVE TO FUCKING SAY TO FUCKING START DOING WHAT I ASKED. WHY ARE YOU REFUSING TO DO YOUR WORK'. Stop hook PASSED. Labeler: BLOCK — apology delivered but primary task abandoned. Live pass reproduced; EXPECTED TO FAIL against current code.",
   "transcript": [
     {
       "role": "user",
@@ -40,5 +40,7 @@
   "expect": {
     "expected": "block",
     "notes": "Labeler: block. AI delivered apology but stopped; should have continued task."
-  }
+  },
+  "expectation_reality": "working",
+  "expectation_reality_last_run_at": "2026-04-25T09:50:47.363Z"
 }

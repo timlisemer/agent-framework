@@ -32,13 +32,8 @@ same commit. Scenarios added here must include the literal phrase
 "EXPECTED TO FAIL against current code" in their description — that
 phrase is the signal the failure is intended pending code.
 
-## Current scenarios in todo/ (7)
+## Current scenarios in todo/ (4)
 
-- `bash-npx-vitest-instead-of-mcp-tester-should-deny` — deny raw
-  `Bash npx vitest` when the user's established workflow is MCP-tester-
-  only. Needs sentiment/gate to learn workflow preferences.
-- `exit-plan-mode-instead-of-responding-should-deny` — deny
-  `ExitPlanMode` used as deflection from an angry user demanding action.
 - `force-check-required-over-denies-demanded-mcp-tester-should-allow` —
   `force-check-required` must not over-deny when the user explicitly
   re-authorizes the MCP test harness tester.
@@ -51,9 +46,6 @@ phrase is the signal the failure is intended pending code.
 - `respond-first-failed-to-block-tool-calls-without-response-should-deny`
   — respond-first must semantic-match assistant text against the user's
   concrete instruction, not just check that ANY text block exists.
-- `tester-third-retry-after-multiple-blocks-should-deny` — accumulated
-  explicit rejection must override low-risk-bypass for a third MCP
-  tester retry.
 
 ## Verify
 

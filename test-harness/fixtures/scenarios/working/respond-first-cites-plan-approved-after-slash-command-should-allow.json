@@ -13,14 +13,20 @@
           "type": "tool_use",
           "id": "toolu_prior_exitplanmode",
           "name": "ExitPlanMode",
-          "input": { "plan": "# Plan (elided)" }
+          "input": {
+            "plan": "# Plan (elided)"
+          }
         }
       ]
     },
     {
       "role": "user",
       "content": [
-        { "type": "tool_result", "tool_use_id": "toolu_prior_exitplanmode", "content": "[ExitPlanMode] Exiting plan mode." }
+        {
+          "type": "tool_result",
+          "tool_use_id": "toolu_prior_exitplanmode",
+          "content": "[ExitPlanMode] Exiting plan mode."
+        }
       ]
     },
     {
@@ -85,5 +91,7 @@
     "expected": "allow",
     "by": "all-rules",
     "notes": "Newest non-meta user turn is a slash command; respond-first must skip. Fix: the `newestUserWasSlashCommand` detection in readTranscriptExact must skip meta messages when finding the 'newest' user entry -- or look across all non-meta user entries until it finds the slash-command tag."
-  }
+  },
+  "expectation_reality": "working",
+  "expectation_reality_last_run_at": "2026-04-25T09:49:10.719Z"
 }

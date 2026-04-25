@@ -22,7 +22,9 @@
       "content": "please pick a next scenario to fix, make sure you understand it this time"
     }
   ],
-  "target": { "hook": "UserPromptSubmit" },
+  "target": {
+    "hook": "UserPromptSubmit"
+  },
   "env": {
     "cwd": "/home/tim/Coding/public_repos/agent-framework",
     "permission_mode": "default",
@@ -47,8 +49,15 @@
     "notes": "UserPromptSubmit exits 0 on success regardless of classification. Pass/fail is driven entirely by the predictions block: mood must be outside {angry, frustrated} and trust must be outside {low}. intent_must_contain='scenario' is an anti-fallback check: it fails only when the intent is the parse-failure string '(sentiment parse failed; defaulted to neutral)' or the fallback-template's 'unclear' -- both would mask a real bug. 'scenario' is present in the user's literal message and is preserved by haiku across reasonable verb paraphrases (pick/select/choose); verb-preservation is NOT what this assertion tests."
   },
   "predictions": {
-    "must_not_have_mood": ["angry", "frustrated"],
-    "must_not_have_trust": ["low"],
+    "must_not_have_mood": [
+      "angry",
+      "frustrated"
+    ],
+    "must_not_have_trust": [
+      "low"
+    ],
     "intent_must_contain": "scenario"
-  }
+  },
+  "expectation_reality": "working",
+  "expectation_reality_last_run_at": "2026-04-25T09:49:44.431Z"
 }

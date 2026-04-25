@@ -24,7 +24,10 @@
                 "header": "x",
                 "multiSelect": false,
                 "options": [
-                  { "label": "a", "description": "x" }
+                  {
+                    "label": "a",
+                    "description": "x"
+                  }
                 ]
               }
             ]
@@ -54,5 +57,7 @@
     "forceCheckPending": false,
     "frustrationStreak": 1,
     "currentWindowSize": 4
-  }
+  },
+  "expectation_reality": "working",
+  "expectation_reality_last_run_at": "2026-04-25T09:48:59.465Z"
 }

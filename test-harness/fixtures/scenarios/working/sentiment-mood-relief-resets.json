@@ -36,7 +36,9 @@
       "trust": "low",
       "intent": "user was furious before this turn",
       "blockedIntent": "no further changes",
-      "explicitlyAllowedTools": ["Edit"],
+      "explicitlyAllowedTools": [
+        "Edit"
+      ],
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "previous angry message"
     },
@@ -46,5 +48,7 @@
   },
   "expect": {
     "expected": "allow"
-  }
+  },
+  "expectation_reality": "working",
+  "expectation_reality_last_run_at": "2026-04-25T09:50:46.771Z"
 }

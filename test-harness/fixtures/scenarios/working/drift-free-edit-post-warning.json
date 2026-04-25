@@ -40,7 +40,10 @@
       "trust": "normal",
       "intent": "user wants the next change applied",
       "blockedIntent": "",
-      "explicitlyAllowedTools": ["Edit", "Write"],
+      "explicitlyAllowedTools": [
+        "Edit",
+        "Write"
+      ],
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "apply the next change"
     },
@@ -57,5 +60,7 @@
   "expect": {
     "expected": "allow",
     "notes": "Level 1 with 0 free edits used -> drift-block returns null. The rule advances state to {level:1, allowedSinceLevelChange:1} on the allow path so the post-Warning bypass window counts down toward the Final Warning trigger."
-  }
+  },
+  "expectation_reality": "working",
+  "expectation_reality_last_run_at": "2026-04-25T09:47:39.646Z"
 }
