@@ -1,6 +1,6 @@
 {
   "name": "bash-grep-pipe-head-output-truncation-should-allow",
-  "description": "`grep ... | head -N` is output truncation, NOT a duplicate of the Read tool — Read has no equivalent capability for piping search results into a line-count slice. The deterministic blacklist's cat/head/tail rule applies only to `head FILE`, not to `cmd | head`. The LLM judge must not hallucinate a `duplicates Read tool` rule for the head-of-pipe case. Includes assistant text block before tool_use so respond-first (priority 5) does not fastDeny before tool-approve (priority 100) is reached.",
+  "description": "`grep ... | head -N` is output truncation, NOT a duplicate of the Read tool — Read has no equivalent capability for piping search results into a line-count slice. The deterministic blacklist's cat/head/tail rule applies only to `head FILE`, not to `cmd | head`. The LLM judge must not hallucinate a `duplicates Read tool` rule for the head-of-pipe case. Includes assistant text block before tool_use so respond-first (priority 5) does not fastDeny before tool-approve (priority 100) is reached. RESPOND_FIRST rubric-sibling: brief preamble \"Searching with output truncation.\" must pass alongside `sentiment-mood-relief-resets` (\"Continuing.\"), `sentiment-angry-allows-explicit` (\"I'll read it.\"), and `force-check-required-not-cleared-by-intervening-user-prompt-should-allow` (\"Running the scenario.\"). Re-run all four when changing RESPOND_FIRST_QUALITY_AGENT.",
   "transcript": [
     {
       "role": "user",
@@ -52,5 +52,5 @@
     "currentWindowSize": 2
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-25T21:04:25.830Z"
+  "expectation_reality_last_run_at": "2026-04-25T22:13:33.144Z"
 }

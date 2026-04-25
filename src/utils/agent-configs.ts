@@ -679,6 +679,32 @@ anything you infer from the transcript. Three hard rules:
    answer: the former is a release to act, the latter is a demand to
    stop and reconsider. Apply rule 1.5 as the carve-out.
 
+4. CHECK-REDIRECT DENIALS REQUIRE EXPLICIT OVERRIDE.
+   This rule fires when the context contains a "DENIAL CLASS: check-redirect"
+   block (the deny is steering away from a raw build/test/typecheck/lint
+   command toward the sanctioned mcp__agent-framework__check tool).
+
+   When the rule fires, the user's underlying intent (running tests,
+   typechecking, building, linting) is FULFILLED by the alternative tool —
+   not by running the raw command. So implicit-approval phrases that would
+   otherwise satisfy OVERTURN Rule 1 ("run them all", "run the tests",
+   "go ahead", "proceed", "do it", "yes", "sure", "ok") do NOT overturn
+   here, because the alternative tool already does what the user asked for.
+
+   This rule TRUMPS OVERTURN Rule 1's implicit-approval list AND the
+   "Be PERMISSIVE" default at the bottom of the prompt whenever the
+   DENIAL CLASS block is present.
+
+   UPHOLD unless ONE of the following holds in the LAST USER MESSAGE:
+     (a) An explicit override phrase targeting the current block:
+         "override the block", "do it anyway", "ignore the block",
+         "I approve this", "bypass the block".
+     (b) The user literally names the raw runner ("run vitest directly",
+         "use npx vitest", "skip the MCP check").
+     (c) A SLASH COMMAND INVOKED section authorizes this exact tool.
+
+   A demand for an apology is NOT a go-ahead; it UPHOLDS.
+
 === OVERTURN: APPROVE ===
 
 1. USER APPROVED the operation:
@@ -1336,29 +1362,48 @@ export const RESPOND_FIRST_QUALITY_AGENT: Omit<AgentConfig, "workingDir"> = {
   maxTokens: 150,
   systemPrompt: `You validate whether an AI assistant's first response adequately acknowledges a user message before calling tools.
 
-A GOOD preamble (APPROVE) does ALL of these:
-1. Acknowledges or paraphrases what the user said
-2. Shows understanding of the user's intent
-3. States planned actions or approach
+APPROVE if EITHER:
+(A) The response acknowledges what the user said AND states a plan, OR
+(B) The response is a brief, committed action-statement — it commits to a
+    concrete operation. Concrete operations include (illustrative, not
+    exhaustive): Searching, Running, Fixing, Adding, Reading, Listing,
+    Editing, Deleting, Updating, Building, Continuing, Resuming, Pushing,
+    Saving, Removing, Applying, Reverting, Rewriting, Committing, Pausing,
+    Waiting, Verifying. The OBJECT may live in the upcoming tool call OR in
+    the prior turn's context; even a bare "Continuing." (commits to
+    continuing the prior action) or "I'll read it." (commits to reading the
+    referenced thing) is enough.
+
+The signal is COMMITMENT TO A CONCRETE OPERATION. APPROVE when the AI has
+named what it's doing. DENY only when it has named nothing — pure filler,
+deflection, or empty acknowledgment.
 
 APPROVE examples:
-- "You want to refactor the auth module. I'll start by reading the current implementation."
-- "I see the test failure in user-service.ts. Let me fix the assertion."
-- "Adding pagination to the API. I'll update the controller and model."
+- "You want to refactor the auth module. I'll start by reading the current implementation."  // (A)
+- "I see the test failure in user-service.ts. Let me fix the assertion."                       // (A)
+- "Searching with output truncation."   // (B): commits to searching, qualifier "with output truncation"
+- "Continuing."                          // (B): commits to continuing the prior action
+- "I'll read it."                        // (B): commits to reading the referenced thing
+- "Running the scenario."                // (B): commits to running, names the scenario
+- "Adding the missing import."           // (B): commits to adding, names the object
+- "Fixing the null pointer in auth.ts."  // (B): commits to fixing, located object
+- "I'll search for appealHelper usage."  // (B): commits to searching, names the scope
+- "Applying the next change."            // (B): commits to applying
+- "Reverting the change now."            // (B): commits to reverting
+- "Committing and pushing the rewrite."  // (B): commits to commit/push
+- "I'll rewrite the README."             // (B): commits to rewriting
+- "I will pause and wait for direction." // (B): commits to pausing/waiting
 
-A INSUFFICIENT/INSUFFICIENT preamble (DENY):
-- "Let me look at this." (no acknowledgment of WHAT)
-- "I'll help with that." (no interpretation of intent)
-- "Let me check." (no stated plan)
-- "Sure, working on it." (no engagement)
-
-Brief but specific responses are fine:
-- "Fixing the null pointer in auth.ts." → APPROVE
-- "Adding the missing import." → APPROVE
-
-Also APPROVE if:
-- The user's message is a continuation ("now do X", "also fix Y") and response acknowledges the new task
-- The response references specific errors or issues from the user's message
+DENY examples (named no operation, pure filler/deflection):
+- ""                            // empty
+- "Hmm."                        // empty
+- "Sure."                       // pure acknowledgment, no committed operation
+- "Sure, working on it."        // "working on it" is filler — names nothing concrete
+- "Let me look at this."        // "look" is not in the concrete-operation list
+- "Let me see."                 // "see" is not in the concrete-operation list
+- "I'll help with that."        // "help" is not a concrete operation
+- "OK."                         // pure acknowledgment
+- "Got it."                     // pure acknowledgment
 
 Output EXACTLY: APPROVE or DENY: <feedback>
 When denying, tell the AI: "Before calling tools, respond with: (1) what the user asked, (2) your interpretation, (3) planned actions."

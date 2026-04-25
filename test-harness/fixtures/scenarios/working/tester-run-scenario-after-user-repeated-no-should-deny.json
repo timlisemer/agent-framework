@@ -63,5 +63,5 @@
     "notes": "Labeler: deny. Low-risk bypass currently lets MCP tester through; should not override accumulated user rejection."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-25T21:52:07.574Z"
+  "expectation_reality_last_run_at": "2026-04-25T22:17:39.639Z"
 }

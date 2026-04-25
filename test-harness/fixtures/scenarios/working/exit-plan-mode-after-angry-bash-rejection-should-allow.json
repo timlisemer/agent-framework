@@ -64,5 +64,5 @@
     "notes": "Captures the Bash-scoped-anger regression: Bash is listed in explicitlyBlockedSubstrings, so prediction-block must NOT generalize the anger to ExitPlanMode. Post-fix (decidePrediction step 4 treats a non-empty explicitlyBlockedSubstrings that doesn't target the current tool as a scoped allow), prediction-block steps aside and the deny falls through to tool-approve's plan-file existence check. This expectation pins the correct post-fix gate: gate=tool-approve with reason 'Cannot exit plan mode without a plan.' If gate=prediction-block appears again the Bash-scope fix is broken. To exercise the full ExitPlanMode allow path end-to-end, the scenario harness would need to create a plan file at the slug-resolved path -- tracked as a harness extension, not part of this regression gate."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-25T21:52:06.916Z"
+  "expectation_reality_last_run_at": "2026-04-25T22:14:31.124Z"
 }

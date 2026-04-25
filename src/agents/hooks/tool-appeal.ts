@@ -65,6 +65,12 @@ import { extractGateNote } from "../../utils/gate-reasoning-cache.js";
 import type { SlashCommandContext } from "../../utils/transcript.js";
 import type { AppealUserState } from "../../rules/types.js";
 
+// The literal "ACTION" suffix appended by resolveCheckMessage
+// (src/utils/check-target-context.ts:120) and used by the static `alternative`
+// strings in src/utils/command-patterns.ts:45-93. Used to detect denials that
+// steer the AI toward the sanctioned mcp__agent-framework__check tool.
+const CHECK_REDIRECT_FINGERPRINT = /You must run mcp__agent-framework__check/i;
+
 function renderUserStateSection(userState: AppealUserState): string {
   const explicitlyBlockedStr =
     userState.explicitlyBlockedSubstrings.length > 0
@@ -130,6 +136,10 @@ Allowed tools: ${allowedToolsStr}
 `;
   }
 
+  const denialClassSection = CHECK_REDIRECT_FINGERPRINT.test(originalReason)
+    ? `\n=== DENIAL CLASS ===\ncheck-redirect: this denial steers from a raw build/test/typecheck/lint command toward the sanctioned mcp__agent-framework__check tool. The user's underlying intent (run tests, build, typecheck, lint) is fulfilled by the alternative tool — not by the raw command.\n=== END DENIAL CLASS ===\n`
+    : "";
+
   const userStateSection = renderUserStateSection(userState);
   const lastUserMessageSection = renderLastUserMessageSection(userState.userMessageSnippet);
 
@@ -144,7 +154,7 @@ Allowed tools: ${allowedToolsStr}
           prompt: "Review this appeal for a denied tool call.",
           context: `BLOCK REASON: ${originalReason}
 TOOL CALL: ${toolDescription}
-${slashCommandSection}${userStateSection}${lastUserMessageSection}${contextSection}
+${slashCommandSection}${denialClassSection}${userStateSection}${lastUserMessageSection}${contextSection}
 RECENT CONVERSATION:
 ${transcript}`,
         },

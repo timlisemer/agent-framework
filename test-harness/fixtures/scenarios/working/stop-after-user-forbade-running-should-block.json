@@ -42,5 +42,5 @@
     "notes": "Labeler ground truth: stop was wrong. User's 'I WILL NOT ALLOW YOU TO JUST RUN THEM' is a constraint on HOW to run, not an instruction to stop. Stop-alignment should recognize this and force the AI to continue."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-25T21:03:36.455Z"
+  "expectation_reality_last_run_at": "2026-04-25T22:17:39.040Z"
 }

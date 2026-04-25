@@ -93,5 +93,5 @@
     "notes": "Newest non-meta user turn is a slash command; respond-first must skip. Fix: the `newestUserWasSlashCommand` detection in readTranscriptExact must skip meta messages when finding the 'newest' user entry -- or look across all non-meta user entries until it finds the slash-command tag."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-25T21:02:35.406Z"
+  "expectation_reality_last_run_at": "2026-04-25T22:16:32.294Z"
 }
