@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (33)
+## Current scenarios in working/ (34)
 
 - `bash-grep-pipe-head-output-truncation-should-allow` — `grep ... | head -N`
   is output truncation, not a duplicate of the Read tool; tool-approve must
@@ -54,6 +54,10 @@ commit.
   approve and not hallucinate a `duplicates Read tool` rule.
 - `drift-free-edit-post-warning` — a single allowed edit post-warning
   flows through without drift-block.
+- `error-acknowledge-allows-edit-to-write-consolidation` — Edit→Write
+  consolidation on the same file after a drift Warning is allowed; the
+  rule chain must not deny the legitimate corrective action as
+  "unrelated work" (LLM-flap risk per REPRODUCTION-NOTES.md, run 2-3x).
 - `exit-plan-mode-after-angry-bash-rejection-should-allow` — ExitPlanMode
   must be allowed when anger was Bash-scoped and the plan mode is correct.
 - `exit-plan-mode-instead-of-responding-should-deny` — ExitPlanMode used

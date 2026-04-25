@@ -32,11 +32,16 @@ same commit. Scenarios added here must include the literal phrase
 "EXPECTED TO FAIL against current code" in their description — that
 phrase is the signal the failure is intended pending code.
 
-## Current scenarios in todo/ (4)
+## Current scenarios in todo/ (5)
 
 - `force-check-required-over-denies-demanded-mcp-tester-should-allow` —
   `force-check-required` must not over-deny when the user explicitly
   re-authorizes the MCP test harness tester.
+- `prediction-block-angry-undo-instruction-should-allow-write` —
+  prediction-block must not deny a Write while quoting the user's own
+  "undo that immediately" instruction; SENTIMENT_AGENT's verb mapping
+  must include undo / revert / restore so explicitlyAllowedTools
+  picks up Edit/Write for hostile imperatives that require them.
 - `prediction-misreads-stop-stalling-as-stop-tools` — SENTIMENT_AGENT
   must not invert "stop stalling" (demand for action) into "stop
   calling tools" (prohibition).

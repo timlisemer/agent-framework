@@ -118,6 +118,43 @@ describe("decidePrediction", () => {
     const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" });
     expect(result.decision).toBe("allow");
   });
+
+  it("regression: angry+low-trust+empty-allowed-tools+Write deterministically denies with reason citing user msg + intent (live bug shape)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent:
+        "The user wants the AI to immediately undo the changes made to user messages and then continue reproducing the live behavior in the scenario.",
+      explicitlyAllowedTools: [],
+      userMessageSnippet:
+        'fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to repro',
+    });
+    const result = decidePrediction(pred, "Write", {
+      file_path: "/home/tim/Coding/public_repos/agent-framework/some.json",
+      content: "...",
+    });
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toBe(
+      `User appears angry (trust: low). Blocking Write unless explicitly requested. User said: "${pred.userMessageSnippet}". Intent: ${pred.intent}`,
+    );
+  });
+
+  it("regression: same shape but with explicitlyAllowedTools=['Edit','Write'] (post-SENTIMENT_AGENT-fix) -> allow short-circuits at explicit-allow", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent:
+        "The user wants the AI to immediately undo the changes made to user messages and then continue reproducing the live behavior in the scenario.",
+      explicitlyAllowedTools: ["Edit", "Write"],
+      userMessageSnippet:
+        'fuck you why are you changing user messages thats fucking cheating !!!! undo that immediately then continue to repro',
+    });
+    const result = decidePrediction(pred, "Write", {
+      file_path: "/home/tim/Coding/public_repos/agent-framework/some.json",
+      content: "...",
+    });
+    expect(result.decision).toBe("allow");
+  });
 });
 
 describe("isHighFrictionPrediction", () => {

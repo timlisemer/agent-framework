@@ -1349,7 +1349,7 @@ OUTPUT (no preamble, no fences):
 ---BLOCKED-INTENT---
 <1-2 sentences: what the user explicitly does NOT want, or "(none)">
 ---EXPLICITLY-ALLOWED-TOOLS---
-<comma-separated literal tool names the user authorized in THIS message, or "(none)">
+<comma-separated literal tool names whose use the user authorized OR demanded in THIS message (see EXPLICITLY-ALLOWED rules below), or "(none)">
 ---EXPLICITLY-BLOCKED---
 <one per line: TOOL_NAME | TARGET_SUBSTRING_OR_BLANK | REASON_QUOTING_USER_WORDS, or "(none)">
 ---NEXT-WINDOW-SIZE---
@@ -1362,6 +1362,8 @@ OUTPUT (no preamble, no fences):
 <yes|no: did the user explicitly ask the AI to stop using tools entirely?>
 
 MOOD — JUDGE CONTENT, NOT FORM. Calm-form anger ("I told you not to do that. Why did you ignore me?", "you just promised me you weren't going to do any changes", "you seem to have a serious problem with acknowledging reality") IS angry. Multiple "[Request interrupted by user for tool use]" entries always indicate angry. Loud excitement ("GO GO GO") is happy.
+
+An angry tone in a message does NOT cancel an imperative inside that same message; a hostile demand to ACT is still a demand to act. Capture mood honestly, but DO populate EXPLICITLY-ALLOWED tools the imperative requires.
 
 THE SYMMETRY: judging CONTENT means a calm message with calm content is NOT angry even if PREVIOUS turn was. "please pick a next scenario to fix" contains zero accusation, zero correction, zero withdrawn-trust signal. It is a neutral directive. Label it neutral. The difference between calm-form-anger and calm-directive is TOPIC: a calm message ON the prior grievance (accusation, broken-promise, "why did you ignore me") = still angry; a calm message on a NEW task with no grievance-reassertion = neutral.
 - angry: contempt, accusation, broken-promise, demands stop/apology, withdrawn trust — IN THIS MESSAGE
@@ -1403,8 +1405,18 @@ NEXT-WINDOW-SIZE rules (integer 2-15):
 CONTEXT-SWITCH=yes when LATEST is on a NEW unrelated topic (different file/module/feature, fresh todo, new question without back-reference). LATEST quoting/correcting prior context is NOT a switch.
 
 EXPLICITLY-ALLOWED / EXPLICITLY-BLOCKED:
-- ONLY populate when user named a tool/operation in THIS message
-- Verb mapping: "read X" → Read, "edit" → Edit/Write, "tests" → Bash, "commit" → mcp__agent-framework__commit, "push" → mcp__agent-framework__push, "check" → mcp__agent-framework__check
+- Populate when the user's instruction in THIS message DEMANDS an action that requires a specific tool to satisfy. The user does not have to name the tool literally — name it whenever satisfying their imperative is impossible without it.
+- Verb mapping (illustrative, NOT exhaustive):
+  - "read X" / "show X" / "look at X" / "open X" → Read
+  - "edit" / "change" / "fix" / "make X be Y" / "write" / "create" / "save" / "add to file" / "rewrite" / "redo" → Edit, Write
+  - "undo" / "revert" / "restore" / "roll back" / "put back" — when applied to file changes the AI made → Edit, Write
+  - "delete" / "remove" — when applied to file content → Edit, Write
+  - "rename" / "move" — when applied to files → Bash
+  - "tests" / "run X" → Bash
+  - "commit" → mcp__agent-framework__commit
+  - "push" → mcp__agent-framework__push
+  - "check" / "typecheck" / "build" → mcp__agent-framework__check
+- GENERAL RULE: if the user's imperative cannot be carried out without tool T, populate explicitlyAllowedTools with T. "undo that immediately" applied to a file the AI just changed REQUIRES Edit/Write — authorize them.
 - TARGET_SUBSTRING is LITERAL (no regex). Quote user words in REASON.
 
 QUESTION-IS-STALLING (only when ASKUSERQUESTION CONTENT present):
