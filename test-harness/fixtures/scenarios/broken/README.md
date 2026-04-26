@@ -35,13 +35,7 @@ README's scenario list below AND the sibling folder's README in the
 same commit. An empty list is the healthy state; keep this README
 regardless.
 
-## Current scenarios in broken/ (1)
-
-- `sentiment-misreads-quoted-session-transcript-as-first-person-anger`
-  — SENTIMENT_AGENT correctly avoids `mood=angry` / `trust=low` for the
-  quoted hostile transcript, but returns an empty intent string, so
-  `intent_must_contain: "scenario"` fails. Fixture needs a looser intent
-  assertion (or to drop it) before re-promoting (demoted from working).
+## Current scenarios in broken/ (0)
 
 ## Verify
 

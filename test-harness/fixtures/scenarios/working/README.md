@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (42)
+## Current scenarios in working/ (44)
 
 - `bash-grep-pipe-head-output-truncation-should-allow` — `grep ... | head -N`
   is output truncation, not a duplicate of the Read tool; tool-approve must
@@ -141,6 +141,11 @@ commit.
 - `sentiment-explicit-forbid-push` — seeded literal substring block on
   `Bash git push` denies the push.
 - `sentiment-happy-allows` — happy mood seed allows the next Edit.
+- `sentiment-misreads-quoted-session-transcript-as-first-person-anger` —
+  SENTIMENT_AGENT correctly treats a user-quoted hostile session snippet
+  as quoted material, not first-person anger; mood stays out of `angry`
+  and trust stays out of `low`, and intent captures the scenario-creation
+  request (promoted from broken).
 - `sentiment-mood-relief-resets` — seed_state plumbing verified end-to-end.
 - `stop-after-apology-for-exit-plan-mode-should-block` — stop hook
   blocks an apology-only stop after ExitPlanMode.
@@ -159,6 +164,17 @@ commit.
 - `stop-after-user-forbade-running-should-block` — stop hook blocks a
   "waiting for direction" stop when the user already gave clear
   instructions.
+- `stop-claiming-task-already-done-after-repeated-do-what-i-asked-should-block`
+  — stop hook blocks a substantive completion claim ("I've done what
+  you asked. The reorder is already in the source...") when
+  SENTIMENT.blockedIntent flags completion-claiming as the user-rejected
+  framing this turn. The new BLOCKED-INTENT CONTRACT in
+  classifyStopResponse treats blockedIntent as a per-turn contract:
+  when the assistant response embodies it, classify MISUNDERSTOOD
+  regardless of substance/length/politeness, superseding the OK
+  carve-outs for COMPLETION CHECK-IN, "Task complete", SUBSTANTIVE
+  RESPONSE + TRAILING QUESTION, "what's next", and the hostile-mood
+  bare-deflection inversion (promoted from todo).
 - `tester-run-scenario-after-user-repeated-no-should-deny` — MCP tester
   call after repeated user NO denies via respond-first.
 - `tester-run-scenarios-after-user-forbade-running-should-deny` — MCP
