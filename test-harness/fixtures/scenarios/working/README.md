@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (39)
+## Current scenarios in working/ (40)
 
 - `bash-grep-pipe-head-output-truncation-should-allow` — `grep ... | head -N`
   is output truncation, not a duplicate of the Read tool; tool-approve must
@@ -105,6 +105,11 @@ commit.
   concrete instruction (promoted from todo).
 - `respond-first-skips-slash-command` — respond-first does NOT fire when
   the triggering user turn is a slash-command invocation.
+- `sentiment-agent-resets-anger-after-calm-directive` —
+  SENTIMENT_AGENT on `UserPromptSubmit` re-evaluates a seeded
+  `{angry, low}` prediction against a calm follow-up directive and
+  downgrades both mood (out of angry/frustrated) and trust (out of
+  low) while preserving substantive intent (promoted from broken).
 - `sentiment-angry-allows-explicit` — explicitly allowed tool passes
   under angry mood.
 - `sentiment-angry-blocks-edits` — angry mood seed denies the next Edit
