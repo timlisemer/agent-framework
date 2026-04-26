@@ -39,6 +39,7 @@ export const respondFirstRule: PreToolRule = {
     const rfResult = await readTranscriptExact(ctx.transcriptPath, {
       counts: { user: 1 },
       excludeSlashCommandPrompts: true,
+      includeSlashCommandContext: true,
     });
     const lastUser = rfResult.user.length > 0 ? rfResult.user[0] : null;
 
@@ -81,6 +82,23 @@ export const respondFirstRule: PreToolRule = {
 
     switch (state.kind) {
       case "responded": {
+        // Slash-command authorization: when the active slash command's
+        // allowed-tools list includes the current tool, fast-allow before
+        // any LLM-bearing rule runs. This deterministic short-circuit
+        // replaces LLM prose authorization (the source of "hard-coded
+        // denied tool" hallucinations). Placed AFTER the silent-state
+        // check so respond-first's "no text before tool" invariant is
+        // preserved -- a slash command does not bypass the text
+        // requirement.
+        if (rfResult.newestUserWasSlashCommand && rfResult.slashCommandContext) {
+          const allowed = rfResult.slashCommandContext.allowedTools ?? [];
+          if (allowed.includes(ctx.toolName)) {
+            return {
+              fastAllow: `/${rfResult.slashCommandContext.commandName} authorizes ${ctx.toolName}`,
+            };
+          }
+        }
+
         const intent = ctx.state.currentPrediction?.intent || "(none)";
         const recent = await readRecentUserMessages(
           ctx.transcriptPath,

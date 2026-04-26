@@ -34,6 +34,7 @@ import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
 import { extractGateNote, formatForPrompt } from "../../utils/gate-reasoning-cache.js";
 import { planModeEditBlock, planModeBashBlock } from "../../utils/edit-intent.js";
+import { RESTRICTED_MCP_TOOLS } from "../../utils/slash-commands.js";
 
 export const FABRICATED_DENY_FINGERPRINTS: RegExp[] = [
   /without explicit user approval/i,
@@ -92,6 +93,20 @@ export async function checkToolApproval(
   if (highlights.length > 0) {
     const reason = highlights.map(h => h.replace(/^\[BLACKLIST: [^\]]+\]\s*/, "")).join(". ");
     return { approved: false, reason };
+  }
+
+  // Deterministic deny for slash-command-gated MCP tools when no slash
+  // command authorized this call. RESTRICTED_MCP_TOOLS is the single source
+  // of truth (see src/utils/slash-commands.ts). Slash-authorized cases are
+  // fast-allowed earlier in the pipeline at respond-first (priority 5),
+  // so reaching here means no slash command authorizes the call. Replaces
+  // the prior LLM-prose-mediated deny that produced "hard-coded denied
+  // tool" hallucinations. Appeal helper remains as the user's escape hatch.
+  if (RESTRICTED_MCP_TOOLS.has(toolName)) {
+    return {
+      approved: false,
+      reason: `${toolName} requires explicit slash-command authorization (/commit, /push, /confirm, or /quickpush).`,
+    };
   }
 
   // Skip LLM on clean: skip LLM if no blacklist violations (subagent fast path)

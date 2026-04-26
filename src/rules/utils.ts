@@ -44,12 +44,17 @@ export const LOW_RISK_TOOLS = [
 ];
 
 /**
- * MCP tools excluded from the implicit `mcp__*` low-risk catch-all.
- * These tools run potentially expensive operations (test suites, labeling
- * sessions) and should go through full rule evaluation -- especially so
- * that prediction-block can deny them when the user is angry/frustrated
- * and has asked the assistant to stop. They are NOT slash-command-gated
- * like RESTRICTED_MCP_TOOLS, just "not implicitly safe."
+ * MCP tools that should NEVER auto-approve via low-risk-bypass even when
+ * the user is calm. These run heavyweight side effects (multi-minute test
+ * suites, label rewrites). Cost-gated, not user-state-gated. Compare with
+ * RESTRICTED_MCP_TOOLS, which is auth-gated via slash commands.
+ *
+ * Distinct concept from cross-turn rejection memory: that lives in mood/
+ * trust/frustrationStreak signals consumed by decidePrediction. When the
+ * user has asked the assistant to stop, prediction-block (priority 35)
+ * denies via the sustained-frustration mood path BEFORE low-risk-bypass
+ * (priority 38) runs -- so this constant is purely a cost gate, not a
+ * substitute for cross-turn rejection memory.
  */
 const HEAVY_MCP_TOOLS: ReadonlySet<string> = new Set([
   "mcp__agent-framework__test_harness_tester",

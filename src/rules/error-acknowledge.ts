@@ -1,8 +1,17 @@
+import * as path from "path";
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { readToolLogEntries } from "../utils/session-store.js";
 import { readTranscriptExact } from "../utils/transcript.js";
 import { stringifyToolInput } from "../utils/prediction-types.js";
 import { summarizeToolInputForLlm } from "../utils/tool-input-summary.js";
+import { extractFilePath } from "./utils.js";
+
+const EDIT_CLASS_TOOLS: ReadonlySet<string> = new Set([
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit",
+]);
 
 export const errorAcknowledgeRule: PreToolRule = {
   name: "error-acknowledge",
@@ -35,6 +44,27 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
 
     if (!recentDenial) {
       return null;
+    }
+
+    // Same-target Edit-class consolidation. When a prior denial was on file F
+    // using an Edit-class tool AND the current call is also an Edit-class
+    // tool on file F, this is by construction a corrective action -- drift
+    // Warnings teach "consolidate to one Write," and same-tool retries on
+    // the same path are the canonical recovery from edit failures. drift-detect
+    // independently governs the bypass-window count, so error-acknowledge
+    // must not double-block.
+    if (
+      EDIT_CLASS_TOOLS.has(recentDenial.tool) &&
+      EDIT_CLASS_TOOLS.has(ctx.toolName) &&
+      recentDenial.path
+    ) {
+      const currentPath = extractFilePath(ctx.toolName, ctx.toolInput);
+      if (
+        currentPath &&
+        path.resolve(currentPath) === path.resolve(recentDenial.path)
+      ) {
+        return null;
+      }
     }
 
     // Check if this is a corrected retry (different parameters for same tool)
