@@ -36,29 +36,13 @@ import { extractGateNote, formatForPrompt } from "../../utils/gate-reasoning-cac
 import { planModeEditBlock, planModeBashBlock } from "../../utils/edit-intent.js";
 import { RESTRICTED_MCP_TOOLS } from "../../utils/slash-commands.js";
 
-export const FABRICATED_DENY_FINGERPRINTS: RegExp[] = [
-  /without explicit user approval/i,
-  /subagents are denied/i,
-  /subagent escalation/i,
-  /bash\/glob workaround/i,
-  /workaround pattern/i,
-  /prior denials confirm/i,
-  /enforce core tools/i,
-  /#\s*\d+\+?\s*in sequence/i,
-  /\bnth in sequence\b/i,
-  /matches pattern of repeated [A-Za-z]+ attempts/i,
-  /duplicates?\s+Read(\s*\/\s*LS)?\s+tools?/i,
-  /duplicat\w*\s+(of\s+)?Read/i,
-  /duplicates?\s+LS\s+tool/i,
-  /use\s+Read(\s+or\s+LS)?\s+tool\s+instead/i,
-  /Read\s+(tool\s+)?(can\s+)?fetch(es)?[^.]*\b(equivalent|analysis|pattern\s+search)/i,
-  /(rg|grep|ugrep|find|fd|bfs|awk|sed|ls|jq|wc)\b[^.]*\bduplicat\w+\s+(Read|LS)/i,
-  /^cat\/head\/tail\s*→\s*DENY/im,
-];
-
-export function isFabricatedDenyReason(reason: string): boolean {
-  return FABRICATED_DENY_FINGERPRINTS.some((re) => re.test(reason));
-}
+export {
+  FORBIDDEN_DENY_PATTERNS,
+  FABRICATED_DENY_FINGERPRINTS,
+  FORBIDDEN_DENY_PROMPT_LIST,
+  isFabricatedDenyReason,
+} from "../../utils/fabricated-deny-patterns.js";
+import { isFabricatedDenyReason } from "../../utils/fabricated-deny-patterns.js";
 
 export interface ToolApprovalOptions {
   skipLlmOnClean?: boolean;
@@ -142,6 +126,14 @@ export async function checkToolApproval(
     }
   }
 
+  // TODO(Finding 11, deferred): a deterministic outside-root hard-deny was
+  // proposed but defers parity. Today's LLM may approve outside-root edits in
+  // legitimate cases the substring/basename test doesn't cover (e.g., user
+  // says "fix the dotfile thing" → ~/.config/foo). Implement only with
+  // explicit user approval. If implemented, consume
+  // `state.currentPrediction.hasExplicitOverride` (already populated, see
+  // EXPLICIT_OVERRIDE_RE in prediction-types.ts) and tighten the heuristic
+  // to require the FULL absolute path or basenames >= ~10 chars.
   const outsideRootSection = options?.outsideRootPath
     ? `\n!!! WARNING: THIS TOOL CALL TARGETS A FILE OUTSIDE THE PROJECT ROOT\n` +
       `  target: ${options.outsideRootPath}\n` +

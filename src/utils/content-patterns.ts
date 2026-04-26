@@ -56,6 +56,60 @@ const ASSISTANT_VERIFICATION_REGEX = /assistant\s+verification/i;
 const MANUAL_VERIFICATION_REGEX = /manual\s+(user\s+)?verification/i;
 
 /**
+ * Heading-anchored "Manual (User) Verification" regex. Used to delimit the
+ * carve-out section where blacklisted commands are allowed (the user runs
+ * them, not the AI). Matches headings of any depth; the section ends at the
+ * next heading of equal-or-shallower depth, or end-of-file.
+ */
+export const MANUAL_VERIFICATION_HEADING_RE =
+  /^(#{1,6})\s+.*manual\s+(user\s+)?verification.*$/im;
+
+/**
+ * Find the byte range [start, end) of the Manual (User) Verification section
+ * in `content`. Returns null when no such heading exists.
+ */
+export function findManualVerificationRange(
+  content: string,
+): { start: number; end: number } | null {
+  const m = content.match(MANUAL_VERIFICATION_HEADING_RE);
+  if (!m) return null;
+  const headingLevel = m[1].length;
+  const start = content.indexOf(m[0]);
+  // Section ends at next heading of same-or-shallower depth, or EOF.
+  const after = content.slice(start + m[0].length);
+  const nextHeadingRe = new RegExp(`^#{1,${headingLevel}}\\s`, "m");
+  const next = after.match(nextHeadingRe);
+  const end =
+    next?.index !== undefined
+      ? start + m[0].length + next.index
+      : content.length;
+  return { start, end };
+}
+
+/**
+ * Filter out blacklist hits whose source line lies inside the Manual (User)
+ * Verification section. Used by plan validation to honor the existing carve-
+ * out (blacklisted commands are allowed in the user-runs-it section). The
+ * input `hits` are the BlacklistHighlight objects returned by
+ * `getContentBlacklistHighlights`.
+ */
+export function filterBlacklistOutsideManualVerification<
+  T extends { lineIndex: number },
+>(hits: T[], content: string): T[] {
+  const range = findManualVerificationRange(content);
+  if (!range) return hits;
+  // Convert lineIndex to byte offset by walking lines.
+  const lineStarts: number[] = [0];
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === "\n") lineStarts.push(i + 1);
+  }
+  return hits.filter((h) => {
+    const offset = lineStarts[h.lineIndex] ?? content.length;
+    return offset < range.start || offset >= range.end;
+  });
+}
+
+/**
  * Detect plan clearing: Write that replaces the plan with placeholder/stub content.
  * A plan Write must contain substantive content (5+ non-empty lines).
  * Plans shorter than 5 lines or containing only a title with no body are violations.

@@ -642,7 +642,6 @@ async function main() {
         blockAllTools: seedPrediction.blockAllTools,
         userMessageSnippet: seedPrediction.userMessageSnippet,
         timestamp: seedPrediction.timestamp ?? Date.now(),
-        nextWindowSize: seedPrediction.nextWindowSize,
         contextSwitch: seedPrediction.contextSwitch,
         questionIsStalling: seedPrediction.questionIsStalling,
       },

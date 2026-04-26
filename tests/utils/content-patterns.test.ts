@@ -189,6 +189,24 @@ describe("getRuleViolationHighlights", () => {
     const result = getRuleViolationHighlights(content);
     expect(result).toHaveLength(2);
   });
+
+  it("detects 'Week 2:' timeline marker (low N)", () => {
+    const result = getRuleViolationHighlights("Week 2: implementation");
+    expect(result.length).toBe(1);
+    expect(result[0]).toContain("timeline marker");
+  });
+
+  it("detects 'Day 1:' timeline marker", () => {
+    const result = getRuleViolationHighlights("Day 1: setup");
+    expect(result.length).toBe(1);
+    expect(result[0]).toContain("timeline marker");
+  });
+
+  it("detects 'Month 3:' timeline marker", () => {
+    const result = getRuleViolationHighlights("Month 3: rollout");
+    expect(result.length).toBe(1);
+    expect(result[0]).toContain("timeline marker");
+  });
 });
 
 describe("detectStyleChanges", () => {

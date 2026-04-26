@@ -46,6 +46,19 @@ export interface AppealUserState {
     targetSubstring?: string;
     reason: string;
   }>;
+  /**
+   * True when (mood is angry/frustrated) AND (trust=low OR
+   * frustrationStreak >= 2). Mirrors `isSustainedFrustration` in
+   * `prediction-types.ts` so the appeal LLM reads the same predicate the
+   * deterministic policy uses.
+   */
+  sustainedFrustration: boolean;
+  /**
+   * True when the user's full prompt contained an explicit override phrase
+   * ("override the block", "do it anyway", etc.). Mirrors
+   * `currentPrediction.hasExplicitOverride`.
+   */
+  hasExplicitOverride: boolean;
 }
 
 export interface PreToolRule {

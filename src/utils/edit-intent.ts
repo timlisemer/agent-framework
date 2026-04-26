@@ -137,3 +137,38 @@ export function planModeBashBlock(
   }
   return null;
 }
+
+// --- Verb → tool morphology used by SENTIMENT_AGENT-side enrichment ---
+// Mirrors the SENTIMENT_AGENT prompt's verb-mapping bullets. Kept narrow on
+// purpose: regex catches unambiguous cases, the LLM still adds tools the
+// regex misses (union semantics in user-prompt-submit.ts).
+
+const READ_VERB_RE = /\b(read|show|look\s+at|open|view|inspect|examin\w*)\b/i;
+const EDIT_VERB_RE =
+  /\b(edit|chang\w*|fix\w*|writ\w*|creat\w*|sav\w*|add\s+to\s+(?:file|the\s+file)|rewrit\w*|redo|undo|revert\w*|restor\w*|rollback|roll\s+back|put\s+back|delet\w*|remov\w*)\b/i;
+// Bounded distance so unrelated mentions of "file" don't pull in Bash.
+const RENAME_MOVE_VERB_RE = /\b(renam\w*|mov\w*)\b[^.!?]{0,50}\b(file|files)\b/i;
+const TEST_RUN_VERB_RE = /\b(test|tests|run\s+\w+)\b/i;
+const COMMIT_VERB_RE = /\bcommit\b/i;
+const PUSH_VERB_RE = /\bpush\b/i;
+const CHECK_VERB_RE = /\b(typecheck|build|check|lint)\b/i;
+
+/**
+ * Derive the set of tool names whose use the user's imperative verb morphology
+ * unambiguously requires. Returned set is unioned (not overridden) with the
+ * SENTIMENT_AGENT's own `explicitlyAllowedTools` output by user-prompt-submit.
+ */
+export function deriveAllowedToolsFromIntent(message: string): string[] {
+  const tools = new Set<string>();
+  if (READ_VERB_RE.test(message)) tools.add("Read");
+  if (EDIT_VERB_RE.test(message)) {
+    tools.add("Edit");
+    tools.add("Write");
+  }
+  if (RENAME_MOVE_VERB_RE.test(message)) tools.add("Bash");
+  if (TEST_RUN_VERB_RE.test(message)) tools.add("Bash");
+  if (COMMIT_VERB_RE.test(message)) tools.add("mcp__agent-framework__commit");
+  if (PUSH_VERB_RE.test(message)) tools.add("mcp__agent-framework__push");
+  if (CHECK_VERB_RE.test(message)) tools.add("mcp__agent-framework__check");
+  return [...tools];
+}

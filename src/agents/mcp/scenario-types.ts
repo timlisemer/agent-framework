@@ -254,7 +254,6 @@ export interface Scenario {
       userMessageSnippet: string;
       blockAllTools?: boolean;
       timestamp?: number;
-      nextWindowSize?: number;
       contextSwitch?: ToolPrediction["contextSwitch"];
       questionIsStalling?: ToolPrediction["questionIsStalling"];
     };
@@ -1089,11 +1088,6 @@ function validateSeedCurrentPrediction(p: Record<string, unknown>): void {
       "scenario.seed_state.currentPrediction.timestamp must be a number when set",
     );
   }
-  if (p.nextWindowSize !== undefined && typeof p.nextWindowSize !== "number") {
-    throw new Error(
-      "scenario.seed_state.currentPrediction.nextWindowSize must be a number when set",
-    );
-  }
   const cs = p.contextSwitch;
   if (cs !== undefined && cs !== "yes" && cs !== "no") {
     throw new Error(
@@ -1116,7 +1110,6 @@ function validateSeedCurrentPrediction(p: Record<string, unknown>): void {
     "userMessageSnippet",
     "blockAllTools",
     "timestamp",
-    "nextWindowSize",
     "contextSwitch",
     "questionIsStalling",
   ];

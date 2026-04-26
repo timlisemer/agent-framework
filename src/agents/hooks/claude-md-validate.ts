@@ -20,7 +20,7 @@ import { CLAUDE_MD_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
-import { getBlacklistDescription, getContentBlacklistHighlights } from "../../utils/command-patterns.js";
+import { getContentBlacklistHighlights } from "../../utils/command-patterns.js";
 import { getRuleViolationHighlights } from "../../utils/content-patterns.js";
 
 /**
@@ -69,8 +69,26 @@ export async function validateClaudeMd(
   }
 
   try {
-    // Check for violations in proposed edit
-    const blacklistHighlights = getContentBlacklistHighlights(proposedEdit);
+    // Check for violations in proposed edit. CLAUDE.md uses inverseCodeBlocks
+    // mode: blacklisted commands inside fenced ```...``` blocks are the
+    // violation (CLAUDE.md should not document them as runnable). Any such
+    // hit is a hard deny — there is no Manual User Verification carve-out
+    // in CLAUDE.md.
+    const codeBlockHits = getContentBlacklistHighlights(proposedEdit, {
+      inverseCodeBlocks: true,
+    });
+    if (codeBlockHits.length > 0) {
+      const feedback = codeBlockHits
+        .map((h) => h.rendered.replace(/^\[VIOLATION: [^\]]+\]\s*/, ""))
+        .join(". ");
+      return {
+        approved: false,
+        reason: `${feedback}\nRemember: these rules apply to ALL content in the CLAUDE.md, not just the current edit.`,
+      };
+    }
+
+    const proseBlacklistHits = getContentBlacklistHighlights(proposedEdit);
+    const blacklistHighlights = proseBlacklistHits.map((h) => h.rendered);
     const ruleViolations = getRuleViolationHighlights(proposedEdit);
     const allViolations = [...blacklistHighlights, ...ruleViolations];
     const violationSection = allViolations.length > 0
@@ -82,7 +100,7 @@ export async function validateClaudeMd(
       { ...CLAUDE_MD_VALIDATE_AGENT, workingDir },
       {
         prompt: "Validate this CLAUDE.md content.",
-        context: `CURRENT FILE:\n${currentContent ?? "(new file)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n${violationSection}=== BLACKLISTED COMMANDS ===\n${getBlacklistDescription()}\n=== END BLACKLIST ===`,
+        context: `CURRENT FILE:\n${currentContent ?? "(new file)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n${violationSection}`,
       },
       {
         formatValidator: (text) => startsWithAny(text, ["OK", "DRIFT:"]),

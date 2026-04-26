@@ -90,6 +90,8 @@ function renderUserStateSection(userState: AppealUserState): string {
 Mood: ${userState.mood ?? "unknown"}
 Trust: ${userState.trust ?? "unknown"}
 Frustration streak (consecutive negative-mood turns): ${userState.frustrationStreak}
+Sustained frustration: ${userState.sustainedFrustration ? "YES" : "NO"} (mood=${userState.mood ?? "unknown"}, trust=${userState.trust ?? "unknown"}, frustrationStreak=${userState.frustrationStreak})
+Explicit override phrase: ${userState.hasExplicitOverride ? "YES" : "NO"}
 User intent: ${userState.intent || "(none)"}
 User blocked intent: ${userState.blockedIntent || "(none)"}
 Block-all-tools flag: ${userState.blockAllTools}

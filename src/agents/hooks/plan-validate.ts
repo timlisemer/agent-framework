@@ -33,8 +33,21 @@ import { PLAN_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
 import { isSubagent } from "../../utils/subagent-detector.js";
-import { getBlacklistDescription, getContentBlacklistHighlights } from "../../utils/command-patterns.js";
-import { getPlanClearingHighlights, getRuleViolationHighlights, getVerificationStructureHighlights } from "../../utils/content-patterns.js";
+import { getContentBlacklistHighlights } from "../../utils/command-patterns.js";
+import {
+  filterBlacklistOutsideManualVerification,
+  getPlanClearingHighlights,
+  getRuleViolationHighlights,
+  getVerificationStructureHighlights,
+} from "../../utils/content-patterns.js";
+
+/**
+ * Categories from `RULE_VIOLATION_PATTERNS` that ALWAYS hard-deny without
+ * waiting for the LLM. Schedule-bucket and solution-branching drift are
+ * fully detectable by regex; the LLM cannot add nuance.
+ */
+const RULE_VIOLATION_CATEGORY_RE =
+  /^\[VIOLATION:\s*(timeline marker|solution branching)\]/i;
 
 /**
  * Validate that a plan aligns with user intent.
@@ -98,12 +111,41 @@ export async function checkPlanIntent(
       : toolInput.new_string ?? "";
 
   try {
-    // Check for violations in the full resulting plan
+    // Check for violations in the full resulting plan.
+    // Blacklisted commands inside the "Manual User Verification" section are
+    // intentionally allowed (the user runs them, not the AI).
     const planClearingViolations = getPlanClearingHighlights(resultingPlan);
-    const blacklistHighlights = getContentBlacklistHighlights(resultingPlan);
+    const rawBlacklistHits = getContentBlacklistHighlights(resultingPlan);
+    const filteredBlacklistHits = filterBlacklistOutsideManualVerification(
+      rawBlacklistHits,
+      resultingPlan,
+    );
+    const blacklistHighlights = filteredBlacklistHits.map((h) => h.rendered);
     const ruleViolations = getRuleViolationHighlights(resultingPlan);
     const verificationViolations = getVerificationStructureHighlights(resultingPlan);
     const allViolations = [...planClearingViolations, ...blacklistHighlights, ...ruleViolations, ...verificationViolations];
+
+    // Hard-deny for schedule-bucket and solution-branching categories from
+    // RULE_VIOLATION_PATTERNS — these are fully captured by regex and need
+    // no LLM nuance.
+    const hardRuleViolations = ruleViolations.filter((v) =>
+      RULE_VIOLATION_CATEGORY_RE.test(v),
+    );
+    if (hardRuleViolations.length > 0) {
+      const feedback = hardRuleViolations
+        .map((v) => v.replace(/^\[VIOLATION: [^\]]+\]\s*/, ""))
+        .join(". ");
+      return { approved: false, reason: feedback };
+    }
+
+    // Deterministic deny: blacklisted commands outside Manual User
+    // Verification, in any mode (Edit or Write). LLM cannot improve on this.
+    if (filteredBlacklistHits.length > 0) {
+      const feedback = blacklistHighlights
+        .map((v) => v.replace(/^\[VIOLATION: [^\]]+\]\s*/, ""))
+        .join(". ");
+      return { approved: false, reason: feedback };
+    }
 
     // Deterministic deny for exit mode when regex violations exist — LLM unreliably ignores them
     if (mode === "exit" && allViolations.length > 0) {
@@ -138,7 +180,7 @@ export async function checkPlanIntent(
       { ...PLAN_VALIDATE_AGENT },
       {
         prompt: "Check if this plan aligns with the user request.",
-        context: `${violationSection}CONVERSATION:\n${conversationContext}\n\nCURRENT PLAN:\n${resultingPlan}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n=== BLACKLISTED COMMANDS ===\n${getBlacklistDescription()}\n=== END BLACKLIST ===`,
+        context: `${violationSection}CONVERSATION:\n${conversationContext}\n\nCURRENT PLAN:\n${resultingPlan}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}`,
       },
       {
         formatValidator: (text) => startsWithAny(text, ["OK", "DRIFT:"]),

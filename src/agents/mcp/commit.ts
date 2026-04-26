@@ -27,7 +27,7 @@ import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { COMMIT_AGENT } from "../../utils/agent-configs.js";
 import { runCommand } from "../../utils/command.js";
-import { getUncommittedChanges } from "../../utils/git-utils.js";
+import { getUncommittedChanges, classifyCommitSize } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { runConfirmAgent } from "./confirm.js";
@@ -78,7 +78,7 @@ export async function runCommitAgent(
   }
   logAgentStarted("commit", HOOK_NAME);
 
-  const { status, diff, diffStat } = getUncommittedChanges(workingDir);
+  const { status, diff, diffStat, untrackedDiff } = getUncommittedChanges(workingDir);
 
   if (!status.trim()) {
     return "SKIPPED: nothing to commit";
@@ -90,6 +90,11 @@ export async function runCommitAgent(
     return confirmResult;
   }
 
+  // TS-side size classification (folds in untracked-file accounting). The LLM
+  // still emits a SIZE: line per its prompt format; we override the parsed
+  // value with the TS-authoritative classification before returning.
+  const tsSize = classifyCommitSize(diffStat, untrackedDiff, status);
+
   // Generate commit message
   const result = await runAgent(
     { ...COMMIT_AGENT, workingDir },
@@ -99,6 +104,8 @@ export async function runCommitAgent(
 ${confirmResult}
 
 ---
+
+PRECOMPUTED SIZE: ${tsSize.size} (${tsSize.filesChanged} files, ${tsSize.linesChanged} lines)
 
 DIFF STATS:
 ${diffStat}
@@ -122,6 +129,9 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
     });
     return `ERROR: Failed to parse commit message from LLM response: ${result.output}`;
   }
+
+  // TS authoritative on size — override whatever the LLM emitted.
+  parsed.size = tsSize.size;
 
   // Execute the commit
   const commitCmd = `git add -A && git commit -m ${JSON.stringify(parsed.message)}`;

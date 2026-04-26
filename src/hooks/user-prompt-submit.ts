@@ -6,7 +6,10 @@ import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
 import { isPlanModeActive, isPlanModeFromInput } from "../utils/plan-mode-detector.js";
-import { deriveEditIntentFromPrediction } from "../utils/edit-intent.js";
+import {
+  deriveEditIntentFromPrediction,
+  deriveAllowedToolsFromIntent,
+} from "../utils/edit-intent.js";
 import { clearGateReasoning } from "../utils/gate-reasoning-cache.js";
 import { runAgent } from "../utils/agent-runner.js";
 import { SENTIMENT_AGENT } from "../utils/agent-configs.js";
@@ -15,6 +18,12 @@ import { readRecentUserMessages } from "../utils/transcript.js";
 import { stripQuotedAndPastedContent } from "../utils/quote-detection.js";
 import { logError } from "../utils/logger.js";
 import { MODEL_TIERS, EXECUTION_TYPES, getModelId } from "../types.js";
+import {
+  EXPLICIT_OVERRIDE_RE,
+  classifyBlockAllTools,
+  decideNextWindowSize,
+} from "../utils/prediction-types.js";
+import { preClassifyMood } from "../utils/sentiment-prefilter.js";
 
 /**
  * UserPromptSubmit Hook
@@ -77,6 +86,18 @@ async function main() {
   const previousSummary = previousPrediction
     ? `User mood: ${previousPrediction.mood}\nUser trust: ${previousPrediction.trust}\nIntent: ${previousPrediction.intent}`
     : "(none)";
+
+  // Pre-classify mood from the stripped message — surfaced to the prompt as
+  // a MOOD HINT block. The LLM remains primary for mood quality; only the
+  // ">=2 interrupts" hint is hard-overridden TS-side after the parse.
+  const moodPrefilter = preClassifyMood(stripped);
+  const moodHintSection =
+    moodPrefilter.hint || moodPrefilter.interruptCount > 0
+      ? `MOOD HINT (regex pre-classifier — judge LATEST yourself; honor only when its first-person hostility is directed at you):\n` +
+        `  hint: ${moodPrefilter.hint ?? "none"}\n` +
+        `  interruptCount: ${moodPrefilter.interruptCount}\n\n`
+      : "";
+
   const sentimentPromise = runAgent(
     { ...SENTIMENT_AGENT, workingDir: projectDir },
     {
@@ -85,6 +106,7 @@ async function main() {
         `PREVIOUS PREDICTION (historical context -- re-evaluate LATEST on its own terms, do NOT copy forward):\n${previousSummary}\n\n` +
         `FRUSTRATION STREAK (informational -- TS applies promotion deterministically after you output): ${reloadedState.frustrationStreak ?? 0}\n` +
         `CURRENT WINDOW SIZE: ${reloadedState.currentWindowSize ?? 2}\n\n` +
+        moodHintSection +
         `RECENT USER MESSAGES (with [Tn] indices, T0 = newest):\n${recent}\n\n` +
         `LATEST USER MESSAGE:\n${stripped}`,
     }
@@ -101,6 +123,34 @@ async function main() {
     // failure even though parsed is non-null -- don't write "unclear" over a
     // real prior classification.
     if (parsed && sentimentResult?.success) {
+      // TS-side overrides on parsed fields (Findings 6, 7, 14).
+      // Finding 6: union the parsed allowed-tools list with the deterministic
+      // verb-derived list. Safe because per-target explicit-block now precedes
+      // explicit-allow in decidePrediction.
+      parsed.explicitlyAllowedTools = [
+        ...new Set([
+          ...parsed.explicitlyAllowedTools,
+          ...deriveAllowedToolsFromIntent(stripped),
+        ]),
+      ];
+
+      // Finding 7: classifyBlockAllTools overrides the LLM when the morphology
+      // is unambiguous; ambiguous cases trust the LLM.
+      const blockClass = classifyBlockAllTools(stripped);
+      if (blockClass === "yes") parsed.blockAllTools = true;
+      else if (blockClass === "no") parsed.blockAllTools = false;
+
+      // Finding 14: the SENTIMENT_AGENT prompt mandates angry classification
+      // when there are >=2 [Request interrupted by user] entries. Honor that
+      // hard rule TS-side; other hints log only.
+      if (moodPrefilter.interruptCount >= 2) {
+        parsed.mood = "angry";
+      } else if (moodPrefilter.hint && parsed.mood !== moodPrefilter.hint) {
+        console.error(
+          `[user-prompt-submit] mood-hint disagreement: regex says ${moodPrefilter.hint}, LLM says ${parsed.mood} (no override)`,
+        );
+      }
+
       const oldStreak = reloadedState.frustrationStreak ?? 0;
       const oldWindow = reloadedState.currentWindowSize ?? 2;
       const negativeMood = parsed.mood === "angry" || parsed.mood === "frustrated";
@@ -114,31 +164,21 @@ async function main() {
       }
       const effectiveTrust = newStreak >= 5 ? "low" : parsed.trust;
 
-      // Window size: ORDER MATTERS. Apply growth guards FIRST, then
-      // context-switch cap LAST, so context-switch always wins (per user
-      // intent: "should reduce the window" on topic change).
-      let nextWindow = Number.isFinite(parsed.nextWindowSize)
-        ? Math.round(parsed.nextWindowSize as number)
-        : oldWindow;
-
-      // Growth guard 1: streak rising forces growth even if LLM didn't propose it.
-      if (newStreak > oldStreak && nextWindow < oldWindow + 2) {
-        nextWindow = Math.min(15, oldWindow + 2);
-      }
-      // Growth guard 2: mood SHIFT forces growth. Compare effectiveMood
-      // (post-streak promotion) against previous so TS-promoted shifts also
-      // trigger growth.
+      // Finding 13: window size is now decided entirely TS-side from the
+      // parsed contextSwitch + previous/effective mood + streak deltas.
       const prevMood = previousPrediction?.mood;
-      const shifted = prevMood && prevMood !== effectiveMood;
-      const oneIsHostile = (m?: string) => m === "angry" || m === "frustrated";
-      if (shifted && (oneIsHostile(prevMood) || oneIsHostile(effectiveMood))) {
-        nextWindow = Math.min(15, Math.max(nextWindow, oldWindow + 3));
-      }
-      // Context-switch cap LAST — overrides any growth above.
-      if (parsed.contextSwitch === "yes") {
-        nextWindow = Math.min(nextWindow, 3);
-      }
-      nextWindow = Math.max(2, Math.min(15, nextWindow));
+      const nextWindow = decideNextWindowSize({
+        oldWindow,
+        oldStreak,
+        newStreak,
+        prevMood,
+        effectiveMood,
+        contextSwitch: parsed.contextSwitch ?? "no",
+      });
+
+      // Finding 9: compute hasExplicitOverride against the FULL prompt (not
+      // the 200-char snippet) so late-appearing override phrases are caught.
+      const hasExplicitOverride = EXPLICIT_OVERRIDE_RE.test(input.prompt);
 
       const predictionForDerivation = {
         ...parsed,
@@ -167,6 +207,7 @@ async function main() {
           trust: effectiveTrust,
           userMessageSnippet: input.prompt.slice(0, 200),
           timestamp: Date.now(),
+          hasExplicitOverride,
         },
       }));
     } else {

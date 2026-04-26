@@ -22,6 +22,7 @@ import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
 import { getUncommittedChanges } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
+import { runConfirmPrefilter, formatConfirmPrefilter } from "../../utils/confirm-prefilter.js";
 import { runCheckAgent } from "./check.js";
 
 const HOOK_NAME = "mcp__agent-framework__confirm";
@@ -75,12 +76,15 @@ DECLINED: ${declineReason}`;
   // Step 3: Get git data
   const { status, diff } = getUncommittedChanges(workingDir);
 
+  // Step 3.5: Pre-filter deterministic violations (file/extension-aware)
+  const prefilterSection = formatConfirmPrefilter(runConfirmPrefilter(status, diff));
+
   // Step 4: Run SDK agent with dynamic tier
   const result = await runAgent(
     { ...CONFIRM_AGENT, tier, workingDir },
     {
       prompt: "Evaluate these code changes:",
-      context: `GIT STATUS (files changed):
+      context: `${prefilterSection}GIT STATUS (files changed):
 ${status || "(no changes)"}
 
 GIT DIFF (all uncommitted changes):

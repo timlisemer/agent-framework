@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
+  EXPLICIT_OVERRIDE_RE,
+  classifyBlockAllTools,
   decidePrediction,
   isHighFrictionPrediction,
+  isSustainedFrustration,
   type ToolPrediction,
 } from "../../src/utils/prediction-types.js";
 
@@ -509,6 +512,151 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     );
     expect(result.decision).toBe("allow");
     expect(result.reason ?? "").toMatch(/explicit re-authorization/);
+  });
+});
+
+describe("Finding 6 mitigation: per-target explicit-block precedes explicit-allow", () => {
+  it("explicit allow=[Edit] + explicit block=[{Edit, 'logic.ts'}] -> Edit on logic.ts is DENIED", () => {
+    const pred = makePrediction({
+      mood: "neutral",
+      trust: "normal",
+      explicitlyAllowedTools: ["Edit"],
+      explicitlyBlockedSubstrings: [
+        { tool: "Edit", targetSubstring: "logic.ts", reason: "user said don't touch logic.ts" },
+      ],
+    });
+    const result = decidePrediction(
+      pred,
+      "Edit",
+      { file_path: "src/logic.ts" },
+      0,
+    );
+    expect(result.decision).toBe("deny");
+    expect(result.matchedExplicit?.tool).toBe("Edit");
+  });
+
+  it("same allow + block -> Edit on a DIFFERENT path is still allowed by explicit allow", () => {
+    const pred = makePrediction({
+      mood: "neutral",
+      trust: "normal",
+      explicitlyAllowedTools: ["Edit"],
+      explicitlyBlockedSubstrings: [
+        { tool: "Edit", targetSubstring: "logic.ts", reason: "no logic.ts" },
+      ],
+    });
+    const result = decidePrediction(
+      pred,
+      "Edit",
+      { file_path: "src/util.ts" },
+      0,
+    );
+    expect(result.decision).toBe("allow");
+  });
+});
+
+describe("classifyBlockAllTools", () => {
+  it("'STOP. WTF ARE YOU DOING.' classifies to yes (no inaction match)", () => {
+    // EXPLICIT_PROHIBITION_RE matches "stop" only when in tools-prohibition phrasing.
+    // Bare "STOP." alone may not match prohibition; but with category-A markers like
+    // "no tools" / "freeze" / "halt everything" it does. The plan's example is
+    // category A; verify our regex behaviour with the documented markers.
+    expect(classifyBlockAllTools("freeze. no tools.")).toBe("yes");
+    expect(classifyBlockAllTools("halt everything")).toBe("yes");
+    expect(classifyBlockAllTools("respond with text only")).toBe("yes");
+  });
+
+  it("'quit dragging your feet' classifies to no (inaction-complaint)", () => {
+    expect(classifyBlockAllTools("quit dragging your feet")).toBe("no");
+  });
+
+  it("'stop the stalling' classifies to no (inaction-complaint)", () => {
+    expect(classifyBlockAllTools("stop the stalling")).toBe("no");
+  });
+
+  it("'stop the edits' classifies to ambiguous (no prohibition marker, no inaction noun)", () => {
+    expect(classifyBlockAllTools("stop the edits")).toBe("ambiguous");
+  });
+
+  it("both prohibition + inaction = yes (prohibition wins)", () => {
+    expect(classifyBlockAllTools("freeze. no tools. stop dithering.")).toBe("yes");
+  });
+
+  it("plain neutral message classifies to ambiguous", () => {
+    expect(classifyBlockAllTools("please pick a next scenario")).toBe("ambiguous");
+  });
+});
+
+describe("EXPLICIT_OVERRIDE_RE", () => {
+  it("matches each canonical phrase", () => {
+    const positives = [
+      "override the block",
+      "override block",
+      "do it anyway",
+      "I approve this",
+      "ignore the block",
+      "ignore block",
+      "bypass the block",
+      "just do it",
+    ];
+    for (const p of positives) {
+      expect(EXPLICIT_OVERRIDE_RE.test(p)).toBe(true);
+    }
+  });
+
+  it("does NOT match paraphrases that aren't explicit overrides", () => {
+    const negatives = [
+      "I want this",
+      "go ahead",
+      "yes",
+      "continue",
+      "ok",
+      "proceed",
+    ];
+    for (const n of negatives) {
+      expect(EXPLICIT_OVERRIDE_RE.test(n)).toBe(false);
+    }
+  });
+
+  it("matches even when the phrase appears past character 200 (long prompt)", () => {
+    const filler = "a".repeat(220);
+    const long = `${filler} please override the block now`;
+    expect(EXPLICIT_OVERRIDE_RE.test(long)).toBe(true);
+    // The 200-char snippet would NOT contain the phrase:
+    expect(EXPLICIT_OVERRIDE_RE.test(long.slice(0, 200))).toBe(false);
+  });
+});
+
+describe("isSustainedFrustration", () => {
+  it("null prediction returns false", () => {
+    expect(isSustainedFrustration(null, 5)).toBe(false);
+  });
+
+  it("angry + low trust -> true (regardless of streak)", () => {
+    const p = makePrediction({ mood: "angry", trust: "low" });
+    expect(isSustainedFrustration(p, 0)).toBe(true);
+    expect(isSustainedFrustration(p, 5)).toBe(true);
+  });
+
+  it("frustrated + normal trust + streak >= 2 -> true", () => {
+    const p = makePrediction({ mood: "frustrated", trust: "normal" });
+    expect(isSustainedFrustration(p, 2)).toBe(true);
+    expect(isSustainedFrustration(p, 1)).toBe(false);
+  });
+
+  it("angry + normal trust + streak < 2 -> false (single-turn anger)", () => {
+    const p = makePrediction({ mood: "angry", trust: "normal" });
+    expect(isSustainedFrustration(p, 0)).toBe(false);
+    expect(isSustainedFrustration(p, 1)).toBe(false);
+  });
+
+  it("neutral + low trust -> false (mood gate fails)", () => {
+    const p = makePrediction({ mood: "neutral", trust: "low" });
+    expect(isSustainedFrustration(p, 5)).toBe(false);
+  });
+
+  it("happy + low trust -> false", () => {
+    const p = makePrediction({ mood: "happy", trust: "low" });
+    expect(isSustainedFrustration(p, 5)).toBe(false);
   });
 });
 

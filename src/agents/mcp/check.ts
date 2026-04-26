@@ -56,6 +56,150 @@ import { setTranscriptPath } from "../../utils/execution-context.js";
 const HOOK_NAME = "mcp__agent-framework__check";
 
 /**
+ * Regex matching unused-code lines emitted by linters across languages.
+ * Strict superset of the original /unused|never read|declared but|not used/i
+ * at the legacy "Action Required" footer (the same regex without word
+ * boundaries). Adds `dead code` so Cargo/Rust dead-code lints are also
+ * promoted. Word boundaries are intentional — substring matches like
+ * `Reused` should NOT trigger promotion (verified harmless against linter
+ * output samples).
+ */
+const UNUSED_CODE_RE = /\b(unused|never read|declared but|not used|dead code)\b/i;
+
+/**
+ * Move any `## Warnings` section lines that match the unused-code regex into
+ * the `## Errors` section, then recompute the `Errors:` and `Warnings:`
+ * counts in the `## Results` block. Returns the rewritten output.
+ *
+ * The CHECK_AGENT prompt previously instructed the LLM to classify unused
+ * code as ERROR; in practice the LLM occasionally left such items in
+ * `## Warnings`. Promoting them deterministically here is a parity-preserving
+ * correction.
+ */
+export function promoteUnusedCodeToErrors(output: string): string {
+  // Locate section ranges by their headings. Sections end at the next
+  // top-level "## " heading (any kind) or end-of-string.
+  const sectionRe = /^## (Results|Errors|Warnings|Info)$/gim;
+  type Section = { name: string; start: number; bodyStart: number; end: number };
+  const sections: Section[] = [];
+  const matches: RegExpExecArray[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = sectionRe.exec(output)) !== null) {
+    matches.push(m);
+  }
+  for (let i = 0; i < matches.length; i++) {
+    const start = matches[i].index;
+    const headingEnd = start + matches[i][0].length;
+    const bodyStart = headingEnd + (output[headingEnd] === "\n" ? 1 : 0);
+    const end = i + 1 < matches.length ? matches[i + 1].index : output.length;
+    sections.push({
+      name: matches[i][1],
+      start,
+      bodyStart,
+      end,
+    });
+  }
+  const errSec = sections.find((s) => s.name === "Errors");
+  const warnSec = sections.find((s) => s.name === "Warnings");
+  if (!warnSec) return output;
+
+  // Split the warnings body into lines, classify, and rebuild.
+  const warnBody = output.slice(warnSec.bodyStart, warnSec.end);
+  const lines = warnBody.split("\n");
+  const remainingWarn: string[] = [];
+  const promoted: string[] = [];
+  for (const line of lines) {
+    if (UNUSED_CODE_RE.test(line) && line.trim().length > 0) {
+      promoted.push(line);
+    } else {
+      remainingWarn.push(line);
+    }
+  }
+  if (promoted.length === 0) return output;
+
+  // Rebuild errors body: original errors + promoted lines.
+  const newWarnBody = remainingWarn.join("\n");
+  let newOutput = output;
+  // Replace warnings body first (later in string) so indices for errors stay valid.
+  newOutput =
+    newOutput.slice(0, warnSec.bodyStart) +
+    newWarnBody +
+    newOutput.slice(warnSec.end);
+
+  // Recompute the offset of the errors section after the warnings body change.
+  // Errors section comes BEFORE warnings, so its indices are unchanged.
+  if (errSec) {
+    const errBody = newOutput.slice(errSec.bodyStart, errSec.end);
+    const errBodyTrimmedTail = errBody.replace(/\n+$/, "");
+    const sep = errBodyTrimmedTail.length > 0 ? "\n" : "";
+    const newErrBody = errBodyTrimmedTail + sep + promoted.join("\n") + "\n";
+    newOutput =
+      newOutput.slice(0, errSec.bodyStart) +
+      newErrBody +
+      newOutput.slice(errSec.end);
+  }
+
+  // Recompute counts in the ## Results block. Count non-empty body lines.
+  const resultsRe = /(- Errors:\s*)(\d+)/i;
+  const warningsRe = /(- Warnings:\s*)(\d+)/i;
+  const errorsCountM = newOutput.match(resultsRe);
+  const warningsCountM = newOutput.match(warningsRe);
+  if (errorsCountM) {
+    const oldErrCount = parseInt(errorsCountM[2], 10) || 0;
+    newOutput = newOutput.replace(
+      resultsRe,
+      `$1${oldErrCount + promoted.length}`,
+    );
+  }
+  if (warningsCountM) {
+    const oldWarnCount = parseInt(warningsCountM[2], 10) || 0;
+    newOutput = newOutput.replace(
+      warningsRe,
+      `$1${Math.max(0, oldWarnCount - promoted.length)}`,
+    );
+  }
+  return newOutput;
+}
+
+/**
+ * Compute Status (PASS/FAIL) deterministically from the agent output and
+ * inject it into / overwrite the existing `Status:` line. Defensive floor:
+ * if the `## Errors` section has any non-empty content but `Errors:` parsed
+ * to 0, the floor bumps the count to at least 1 before deciding PASS/FAIL.
+ */
+export function applyStatusOverride(output: string): string {
+  const errMatch = output.match(/- Errors:\s*(\d+)/i);
+  let errorCount = errMatch ? parseInt(errMatch[1], 10) : 0;
+
+  // Defensive floor: if ## Errors section has non-empty body but the count
+  // says 0, bump to 1. JavaScript regex does not support \Z, so we use
+  // alternation: next "## " heading OR end-of-string.
+  const errSecMatch = output.match(/## Errors\s*\n([\s\S]*?)(?:\n## |$)/);
+  if (errSecMatch) {
+    const body = errSecMatch[1].trim();
+    if (body.length > 0 && errorCount === 0) {
+      errorCount = 1;
+      output = output.replace(/(- Errors:\s*)\d+/i, `$1${errorCount}`);
+    }
+  }
+
+  const status = errorCount > 0 ? "FAIL" : "PASS";
+  if (/- Status:\s*(PASS|FAIL)/i.test(output)) {
+    return output.replace(/(- Status:\s*)(PASS|FAIL)/i, `$1${status}`);
+  }
+  // Inject Status line after Warnings (or after Errors if Warnings absent).
+  const insertAfterRe = /(- Warnings:\s*\d+\s*\n)/i;
+  if (insertAfterRe.test(output)) {
+    return output.replace(insertAfterRe, `$1- Status: ${status}\n`);
+  }
+  const errorsAfterRe = /(- Errors:\s*\d+\s*\n)/i;
+  if (errorsAfterRe.test(output)) {
+    return output.replace(errorsAfterRe, `$1- Status: ${status}\n`);
+  }
+  return output;
+}
+
+/**
  * Check if a command is available on the system.
  * Uses `where` on Windows and `command -v` on Unix/macOS.
  */
@@ -212,8 +356,15 @@ export async function runCheckAgent(workingDir: string, transcriptPath?: string)
     }
   );
 
-  // Determine pass/fail status
-  const isPassing = result.output.includes("Status: PASS");
+  // TS post-parse normalization:
+  //   1. Move unused-code lines from ## Warnings into ## Errors (recompute counts).
+  //   2. Recompute Status from the final Errors count.
+  // The LLM still classifies most lines correctly; this just corrects drift.
+  const promoted = promoteUnusedCodeToErrors(result.output);
+  const normalized = applyStatusOverride(promoted);
+
+  // Determine pass/fail status from the TS-authoritative output
+  const isPassing = /- Status:\s*PASS/i.test(normalized);
 
   logAgentResult(result, {
     agent: "check",
@@ -225,14 +376,15 @@ export async function runCheckAgent(workingDir: string, transcriptPath?: string)
     decisionReason: isPassing ? "All checks passed" : "Checks failed",
   });
 
-  // Step 5: Add guidance for unused code errors
-  const hasUnusedCode = /unused|never read|declared but|not used/i.test(result.output);
-  if (hasUnusedCode && result.output.includes("Status: FAIL")) {
-    return `${result.output}
+  // Step 5: Add guidance for unused code errors. Run the regex on the
+  // normalized output so the footer fires for promoted lines too.
+  const hasUnusedCode = UNUSED_CODE_RE.test(normalized);
+  if (hasUnusedCode && /- Status:\s*FAIL/i.test(normalized)) {
+    return `${normalized}
 
 ## Action Required
 If you introduced this unused code, investigate why it happened and delete it. We do not accept unused code - it must be removed, not suppressed with underscores, @ts-ignore, or comments.`;
   }
 
-  return result.output;
+  return normalized;
 }

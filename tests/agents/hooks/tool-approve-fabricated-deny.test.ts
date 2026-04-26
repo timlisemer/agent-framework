@@ -1,8 +1,18 @@
 import { describe, it, expect } from "vitest";
 import {
   FABRICATED_DENY_FINGERPRINTS,
+  FORBIDDEN_DENY_PATTERNS,
   isFabricatedDenyReason,
 } from "../../../src/agents/hooks/tool-approve.js";
+
+describe("FORBIDDEN_DENY_PATTERNS shape invariant", () => {
+  it("each entry has a non-empty humanReadable AND a valid regex", () => {
+    for (const { humanReadable, regex } of FORBIDDEN_DENY_PATTERNS) {
+      expect(humanReadable.length).toBeGreaterThan(0);
+      expect(regex).toBeInstanceOf(RegExp);
+    }
+  });
+});
 
 describe("FABRICATED_DENY_FINGERPRINTS", () => {
   it("is a non-empty array of RegExp", () => {

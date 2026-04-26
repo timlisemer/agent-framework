@@ -6,6 +6,7 @@ import {
   planModeEditBlock,
   planModeBashBlock,
   deriveEditIntentFromPrediction,
+  deriveAllowedToolsFromIntent,
 } from "../../src/utils/edit-intent.js";
 import type { ToolPrediction } from "../../src/utils/prediction-types.js";
 
@@ -253,5 +254,50 @@ describe("deriveEditIntentFromPrediction", () => {
       intent: "hmm interesting",
     });
     expect(deriveEditIntentFromPrediction(p)).toBeNull();
+  });
+});
+
+describe("deriveAllowedToolsFromIntent", () => {
+  const cases: Array<{ msg: string; expected: string[] }> = [
+    { msg: "read foo.ts", expected: ["Read"] },
+    { msg: "show me bar.ts", expected: ["Read"] },
+    { msg: "look at src/main.ts", expected: ["Read"] },
+    { msg: "open the config", expected: ["Read"] },
+    { msg: "view the tests", expected: ["Read"] },
+    { msg: "edit foo.ts", expected: ["Edit", "Write"] },
+    { msg: "change the variable name", expected: ["Edit", "Write"] },
+    { msg: "fix the typo", expected: ["Edit", "Write"] },
+    { msg: "write a new file", expected: ["Edit", "Write"] },
+    { msg: "create config.json", expected: ["Edit", "Write"] },
+    { msg: "delete the old file", expected: ["Edit", "Write"] },
+    { msg: "remove the dead code", expected: ["Edit", "Write"] },
+    { msg: "rewrite the function", expected: ["Edit", "Write"] },
+    { msg: "rollback the change", expected: ["Edit", "Write"] },
+    { msg: "rename this file please", expected: ["Bash"] },
+    { msg: "move that file to src/", expected: ["Bash"] },
+    { msg: "run the tests", expected: ["Bash"] },
+    { msg: "tests are failing", expected: ["Bash"] },
+    { msg: "commit the changes", expected: ["mcp__agent-framework__commit"] },
+    { msg: "push to origin", expected: ["mcp__agent-framework__push"] },
+    { msg: "typecheck the project", expected: ["mcp__agent-framework__check"] },
+    { msg: "run the build", expected: ["Bash", "mcp__agent-framework__check"] },
+    { msg: "lint everything", expected: ["mcp__agent-framework__check"] },
+  ];
+
+  for (const { msg, expected } of cases) {
+    it(`'${msg}' => ${expected.join(", ")}`, () => {
+      const result = deriveAllowedToolsFromIntent(msg);
+      for (const tool of expected) {
+        expect(result).toContain(tool);
+      }
+    });
+  }
+
+  it("returns empty for purely informational message", () => {
+    expect(deriveAllowedToolsFromIntent("hmm")).toEqual([]);
+  });
+
+  it("does NOT match 'rename' without 'file' nearby (bounded distance)", () => {
+    expect(deriveAllowedToolsFromIntent("renaming variables in the function body is fine")).not.toContain("Bash");
   });
 });

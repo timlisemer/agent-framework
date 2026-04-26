@@ -69,7 +69,7 @@ export interface SessionState {
   frustrationStreak: number;
   /**
    * Window size for NEXT UserPromptSubmit's SENTIMENT_AGENT call. Bounded [2, 15].
-   * Set by previous turn's agent via NEXT-WINDOW-SIZE output, clamped TS-side.
+   * Computed TS-side by `decideNextWindowSize` from previous mood/streak/context-switch.
    */
   currentWindowSize: number;
   /**

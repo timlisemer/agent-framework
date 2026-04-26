@@ -10,6 +10,10 @@ import {
   INACTION_COMPLAINT_RE,
   EXPLICIT_PROHIBITION_RE,
 } from "../utils/prediction-types.js";
+import {
+  detectRespondFirstHints,
+  formatRespondFirstHints,
+} from "../utils/respond-first-hints.js";
 
 // UNIFIED PATTERN: This rule uses { llmContext } to contribute to the shared
 // RULE_GATE_AGENT call, matching error-acknowledge/gate/tool-approve.
@@ -105,8 +109,16 @@ export const respondFirstRule: PreToolRule = {
           ctx.state.currentWindowSize ?? 2,
           true,
         ).catch(() => "");
+        // Deterministic TS hints — mirrors `getBlacklistHighlights` /
+        // tool-approve's `=== BLACKLISTED PATTERNS DETECTED ===` block.
+        // Bare acks, bare investigator preambles, and very-short texts are
+        // detected by regex; the hint section is prepended to llmContext so
+        // the rule-gate LLM has structured input to bias its judgment.
+        const hints = detectRespondFirstHints(state.text, lastUser.content);
+        const hintSection = formatRespondFirstHints(hints);
         return {
           llmContext:
+            hintSection +
             `USER MESSAGE:\n${lastUser.content.slice(0, 1000)}\n\n` +
             `USER INTENT:\n${intent}\n\n` +
             `RECENT USER MESSAGES (newest first, [Tn] indices):\n${recent}\n\n` +

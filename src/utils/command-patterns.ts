@@ -171,38 +171,87 @@ export function getBlacklistDescription(): string {
   return BLACKLIST_PATTERNS.map(({ name, alternative }) => `- ${name} → ${alternative}`).join("\n");
 }
 
+export interface BlacklistHighlight {
+  /** 0-based line index in the original content. */
+  lineIndex: number;
+  /** Raw line text, untrimmed. */
+  line: string;
+  /** Short message describing the alternative (no severity tag). */
+  message: string;
+  /** Pre-rendered `[VIOLATION: name] "line" → alternative` string. */
+  rendered: string;
+}
+
+export interface ContentBlacklistOptions {
+  /**
+   * When true, scan ONLY inside fenced code blocks. Default false (scan
+   * OUTSIDE code blocks — original behavior). CLAUDE.md uses true; plans
+   * use the default.
+   */
+  inverseCodeBlocks?: boolean;
+}
+
 /**
  * Scan content for blacklisted commands.
  * Returns highlighted violations for injection into agent prompts.
  * Used by plan-validate and claude-md-validate.
+ *
+ * The default mode scans OUTSIDE fenced code blocks (commands buried in
+ * prose). When `inverseCodeBlocks: true`, scans only INSIDE code blocks
+ * (so a `\`\`\`bash\nmake build\n\`\`\`` example in CLAUDE.md is detected).
  */
-export function getContentBlacklistHighlights(content: string): string[] {
-  const highlights: string[] = [];
+export function getContentBlacklistHighlights(
+  content: string,
+  opts: ContentBlacklistOptions = {},
+): BlacklistHighlight[] {
+  const highlights: BlacklistHighlight[] = [];
   const lines = content.split("\n");
   let inCodeBlock = false;
+  const insideOnly = opts.inverseCodeBlocks === true;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     if (line.trimStart().startsWith("```")) {
       inCodeBlock = !inCodeBlock;
       continue;
     }
-    if (inCodeBlock) continue;
 
-    // Strip references to commands in prose — backticks, double quotes, and
-    // function-call expressions like execSync('just build') or spawn("npm run build").
-    // Single quotes alone are NOT stripped (too many false interactions with apostrophes).
-    const strippedLine = line
-      .replace(/`[^`]+`/g, "")                              // `just build`
-      .replace(/"[^"]+"/g, "")                               // "just build"
-      .replace(/\b\w+\s*\([^)]*\)/g, "");                    // execSync('just build'), spawn(cmd)
-    const redactedStrippedLine = redactPathTokens(strippedLine);
+    // Skip lines whose containment doesn't match the requested mode.
+    if (insideOnly && !inCodeBlock) continue;
+    if (!insideOnly && inCodeBlock) continue;
+
+    let target: string;
+    let redactedTarget: string;
+    if (insideOnly) {
+      // Inside code blocks, the line IS code — don't strip apparent string
+      // literals or function calls (those would mask real commands).
+      target = line;
+      redactedTarget = redactPathTokens(line);
+    } else {
+      // Outside code blocks, strip references to commands in prose:
+      // backticks, double quotes, and function-call expressions like
+      // execSync('just build') or spawn("npm run build"). Single quotes
+      // alone are NOT stripped (too many false interactions with apostrophes).
+      const stripped = line
+        .replace(/`[^`]+`/g, "")
+        .replace(/"[^"]+"/g, "")
+        .replace(/\b\w+\s*\([^)]*\)/g, "");
+      target = stripped;
+      redactedTarget = redactPathTokens(stripped);
+    }
 
     for (const { pattern, name, alternative, bashOnly, redactPaths: shouldRedact } of BLACKLIST_PATTERNS) {
-      if (bashOnly) continue; // Skip patterns too broad for plan prose (e.g., bare "test")
-      const target = shouldRedact ? redactedStrippedLine : strippedLine;
-      if (pattern.test(target)) {
-        highlights.push(`[VIOLATION: ${name}] "${line.trim()}" → ${alternative}`);
-        break; // One highlight per line
+      if (bashOnly) continue;
+      const t = shouldRedact ? redactedTarget : target;
+      if (pattern.test(t)) {
+        const rendered = `[VIOLATION: ${name}] "${line.trim()}" → ${alternative}`;
+        highlights.push({
+          lineIndex: i,
+          line,
+          message: alternative,
+          rendered,
+        });
+        break;
       }
     }
   }

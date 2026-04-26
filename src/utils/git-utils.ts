@@ -58,6 +58,60 @@ export interface GitChanges {
 
   /** Summary statistics: files changed, insertions, deletions */
   diffStat: string;
+
+  /**
+   * Synthesized unified diff for untracked files only. This is the same content
+   * appended to `diff` for tracked changes; exposed separately so size
+   * classification can count untracked-only commits accurately.
+   */
+  untrackedDiff: string;
+}
+
+export type CommitSize = "SMALL" | "MEDIUM" | "LARGE";
+
+/**
+ * Classify commit size from git diff stats and untracked-file accounting.
+ *
+ * `diffStat` (output of `git diff --stat HEAD`) only covers tracked changes.
+ * Untracked files appear as `??` lines in porcelain status; their content
+ * comes from `untrackedDiff` (synthesized in `getUncommittedChanges`). Both
+ * sources are folded into the file/line totals before bucketing.
+ *
+ * Buckets:
+ * - LARGE:  >= 10 files OR >= 200 lines changed
+ * - MEDIUM: >= 4 files OR >= 50 lines changed
+ * - SMALL:  otherwise
+ */
+export function classifyCommitSize(
+  diffStat: string,
+  untrackedDiff: string,
+  status: string,
+): { size: CommitSize; filesChanged: number; linesChanged: number } {
+  const last = diffStat.trim().split("\n").pop() ?? "";
+  const filesM = last.match(/(\d+)\s+files?\s+changed/);
+  const insM = last.match(/(\d+)\s+insertions?\(\+\)/);
+  const delM = last.match(/(\d+)\s+deletions?\(-\)/);
+  let filesChanged = filesM ? parseInt(filesM[1], 10) : 0;
+  let linesChanged =
+    (insM ? parseInt(insM[1], 10) : 0) + (delM ? parseInt(delM[1], 10) : 0);
+
+  // Add untracked files: count `??` lines in porcelain status, count their
+  // added lines from the synthesized untracked diff.
+  const untrackedPaths = status
+    .split("\n")
+    .filter((l) => l.startsWith("??"))
+    .map((l) => l.slice(3).trim())
+    .filter(Boolean);
+  filesChanged += untrackedPaths.length;
+  linesChanged += untrackedDiff
+    .split("\n")
+    .filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
+
+  let size: CommitSize;
+  if (filesChanged >= 10 || linesChanged >= 200) size = "LARGE";
+  else if (filesChanged >= 4 || linesChanged >= 50) size = "MEDIUM";
+  else size = "SMALL";
+  return { size, filesChanged, linesChanged };
 }
 
 export interface SubmoduleInfo {
@@ -175,6 +229,7 @@ export function getUncommittedChanges(workingDir: string): GitChanges {
     status: status.output || "",
     diff: (trackedDiff.output || "") + untrackedDiff,
     diffStat: diffStat.output || "",
+    untrackedDiff,
   };
 }
 

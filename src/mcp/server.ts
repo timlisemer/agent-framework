@@ -536,7 +536,6 @@ const scenarioSchema = z.object({
       userMessageSnippet: z.string(),
       blockAllTools: z.boolean().optional(),
       timestamp: z.number().optional(),
-      nextWindowSize: z.number().optional(),
       contextSwitch: z.enum(["yes", "no"]).optional(),
       questionIsStalling: z.enum(["yes", "no", "n/a"]).optional(),
     }),

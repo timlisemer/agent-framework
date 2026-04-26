@@ -47,8 +47,6 @@ export interface ToolPrediction {
   userMessageSnippet: string;
   timestamp: number;
 
-  /** Window size proposal for the NEXT UserPromptSubmit (raw, unclamped). */
-  nextWindowSize?: number;
   /** Whether the user just changed topic / opened a new unrelated task. */
   contextSwitch?: "yes" | "no";
   /**
@@ -56,6 +54,15 @@ export interface ToolPrediction {
    * Otherwise "n/a".
    */
   questionIsStalling?: "yes" | "no" | "n/a";
+
+  /**
+   * True when the user's full prompt (NOT the 200-char snippet) contains an
+   * explicit override phrase ("override the block", "do it anyway", etc.).
+   * Computed once at prediction-population time against the full prompt so
+   * downstream consumers (tool-appeal user-state, future outside-root rules)
+   * read a single source of truth.
+   */
+  hasExplicitOverride?: boolean;
 }
 
 export interface PredictionDecision {
@@ -129,6 +136,103 @@ export const RE_AUTHORIZATION_INTENT_RE =
   /\b(re[-\s]?authoriz\w+|reauthoriz\w+|explicitly\s+(re[-\s]?authoriz\w+|authoriz\w+))\b/i;
 
 /**
+ * Explicit override phrases — the literal strings the TOOL_APPEAL_AGENT
+ * prompt previously enumerated. Computed once on `ToolPrediction`
+ * (`hasExplicitOverride`) against the FULL user prompt — not the 200-char
+ * snippet — so late-appearing phrases in long prompts are still caught.
+ *
+ * Mirrors the prompt's "(b) An explicit override phrase targeting the
+ * current block" list and rule 4(a) check-redirect override list.
+ */
+export const EXPLICIT_OVERRIDE_RE =
+  /\b(override\s+(the\s+)?block|do\s+it\s+anyway|i\s+approve\s+this|ignore\s+(the\s+)?block|bypass\s+(the\s+)?block|just\s+do\s+it)\b/i;
+
+/**
+ * Sustained-frustration predicate. Mirrors the TOOL_APPEAL_AGENT prompt's
+ * "ONLY when BOTH" rule (mood is angry/frustrated AND trust=low OR
+ * frustrationStreak >= 2). Single source of truth used by the decision
+ * table here AND surfaced through AppealUserState into the appeal prompt.
+ */
+export function isSustainedFrustration(
+  p: ToolPrediction | null,
+  frustrationStreak: number,
+): boolean {
+  if (!p) return false;
+  const negativeMood = p.mood === "angry" || p.mood === "frustrated";
+  return negativeMood && (p.trust === "low" || frustrationStreak >= 2);
+}
+
+/**
+ * Categorical block-all-tools classification from the user message alone.
+ * Mirrors the SENTIMENT_AGENT prompt's category-A vs category-B
+ * disambiguation: explicit prohibition wins; pure inaction-complaint maps
+ * to "no"; ambiguous cases fall through to the LLM.
+ */
+export function classifyBlockAllTools(
+  message: string,
+): "yes" | "no" | "ambiguous" {
+  const prohibition = EXPLICIT_PROHIBITION_RE.test(message);
+  const inaction = INACTION_COMPLAINT_RE.test(message);
+  if (prohibition && !inaction) return "yes";
+  if (inaction && !prohibition) return "no";
+  // Both present → prohibition wins (matches decidePrediction:3a resolution
+  // where userMessageSnippet's prohibition overrides incidental inaction).
+  if (prohibition && inaction) return "yes";
+  return "ambiguous";
+}
+
+/**
+ * Compute the next sentiment window size from prior state and the current
+ * turn's mood/streak/context-switch signals. Mirrors the SENTIMENT_AGENT
+ * prompt's NEXT-WINDOW-SIZE rules exactly. Output is clamped to [2, 15].
+ *
+ * Order: base mood step → streak-rising guard → mood-shift guard →
+ * context-switch cap → final clamp.
+ */
+export function decideNextWindowSize(args: {
+  oldWindow: number;
+  oldStreak: number;
+  newStreak: number;
+  prevMood: Mood | undefined;
+  effectiveMood: Mood;
+  contextSwitch: "yes" | "no";
+}): number {
+  const { oldWindow, oldStreak, newStreak, prevMood, effectiveMood, contextSwitch } =
+    args;
+  let next = oldWindow;
+  // Base step from mood (prompt rule)
+  if (effectiveMood === "angry" || effectiveMood === "frustrated") {
+    next = Math.min(15, oldWindow + 2);
+  } else if (
+    newStreak === 0 &&
+    (effectiveMood === "neutral" ||
+      effectiveMood === "satisfied" ||
+      effectiveMood === "happy")
+  ) {
+    // Prompt says "decrease by 2-3"; pick 2 (conservative, matches existing TS bias).
+    next = Math.max(2, oldWindow - 2);
+  }
+  // Streak rising
+  if (newStreak > oldStreak) {
+    next = Math.max(next, Math.min(15, oldWindow + 2));
+  }
+  // Mood SHIFT — prompt says max(CURRENT+2, 6).
+  const hostile = (m?: Mood) => m === "angry" || m === "frustrated";
+  if (
+    prevMood &&
+    prevMood !== effectiveMood &&
+    (hostile(prevMood) || hostile(effectiveMood))
+  ) {
+    next = Math.max(next, Math.min(15, Math.max(oldWindow + 2, 6)));
+  }
+  // Context-switch cap LAST
+  if (contextSwitch === "yes") {
+    next = Math.min(next, 3);
+  }
+  return Math.max(2, Math.min(15, next));
+}
+
+/**
  * Pure decision function: given the current prediction (or null) and a tool
  * call, return allow/deny. Order: explicit allow > explicit block > mood
  * policy.
@@ -141,13 +245,14 @@ export function decidePrediction(
 ): PredictionDecision {
   if (!prediction) return { decision: "allow" };
 
-  // 1. Explicit allow wins.
-  if (prediction.explicitlyAllowedTools.includes(toolName)) {
-    return { decision: "allow" };
-  }
-
-  // 2. Explicit block wins.
   const inputStr = stringifyToolInput(toolInput);
+
+  // 1. Per-target explicit-block precedes explicit-allow. When the user
+  // says "change the typo, but don't touch logic.ts" the LLM correctly
+  // populates BOTH explicitlyAllowedTools=[Edit] and
+  // explicitlyBlockedSubstrings=[{Edit, "logic.ts"}]. Without this
+  // reordering, the explicit-allow short-circuit at step 2 would let an
+  // Edit on logic.ts through, silently bypassing the explicit block.
   for (const blk of prediction.explicitlyBlockedSubstrings) {
     if (blk.tool !== toolName) continue;
     if (blk.targetSubstring && !inputStr.includes(blk.targetSubstring)) continue;
@@ -156,6 +261,11 @@ export function decidePrediction(
       reason: `User explicitly forbade this in their last message: "${prediction.userMessageSnippet}". ${blk.reason}`,
       matchedExplicit: blk,
     };
+  }
+
+  // 2. Explicit allow wins for tools without a matching per-target block.
+  if (prediction.explicitlyAllowedTools.includes(toolName)) {
+    return { decision: "allow" };
   }
 
   // 3. blockAllTools handling.
@@ -249,9 +359,10 @@ export function decidePrediction(
     prediction.mood === "frustrated" ||
     prediction.trust === "low";
   if (restrictive) {
-    const sustainedFrustration =
-      (prediction.mood === "angry" || prediction.mood === "frustrated") &&
-      (prediction.trust === "low" || frustrationStreak >= 2);
+    const sustainedFrustration = isSustainedFrustration(
+      prediction,
+      frustrationStreak,
+    );
 
     if (isLowRiskTool(toolName) && !sustainedFrustration) {
       return { decision: "allow" };

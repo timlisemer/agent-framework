@@ -56,6 +56,7 @@
 
 import type { AgentConfig } from "./agent-runner.js";
 import { MODEL_TIERS } from "../types.js";
+import { FORBIDDEN_DENY_PROMPT_LIST } from "./fabricated-deny-patterns.js";
 
 // ============================================================================
 // MCP AGENTS
@@ -85,7 +86,6 @@ Output EXACTLY this format:
 ## Results
 - Errors: <count>
 - Warnings: <count>
-- Status: PASS | FAIL
 
 ## Errors
 <Quote each error with full context needed to locate and fix it>
@@ -97,15 +97,13 @@ Output EXACTLY this format:
 <Important output that is neither error nor warning - max 5 lines total>
 
 CLASSIFICATION RULES:
-1. ERRORS are: compilation failures, type errors, syntax errors, and UNUSED CODE warnings
+1. ERRORS are: compilation failures, type errors, syntax errors
 2. WARNINGS are: style suggestions, lints, refactoring hints (like "if can be collapsed")
 3. INFO is: benchmark results, performance metrics, test summaries, speedup numbers, timing data
    - Only include if genuinely informative (not routine progress messages)
    - Max 5 lines - keep it brief
    - Examples: "CYCLES: 4590, Speedup: 32.2x", "Tests: 42 passed, 0 failed", "Build time: 2.3s"
-4. Unused code (unused variables, functions, imports, dead code) counts as ERROR, not warning
-   - Unused code must be deleted, not suppressed with underscores, comments, or annotations
-5. Quote style: project uses double quotes ("") for all strings and imports
+4. Quote style: project uses double quotes ("") for all strings and imports
 
 CONTEXT PRESERVATION RULES (CRITICAL):
 - Include the COMMAND or STEP that produced each error (e.g., "docker buildx build", "tsc", "eslint")
@@ -122,15 +120,15 @@ REPORTING RULES:
 - Do NOT suggest fixes or recommendations
 - Do NOT provide policy guidance
 - Just report what the tools said with enough context to act on it
-- Status is FAIL if Errors > 0, PASS otherwise (warnings alone do not cause FAIL)
+- Unused code (unused variables, functions, imports, dead code) MUST be deleted, not suppressed with underscores, comments, or annotations. TS post-parse promotes any unused-code lines from Warnings to Errors automatically — you do NOT need to classify them yourself, just report the linter output verbatim.
+- TS post-parse adds the Status: PASS|FAIL line based on the final error count. You do NOT need to emit it.
 - If no info worth reporting, omit the Info section or write "(none)"`,
   formatValidation: {
-    validator: /## Results[\s\S]*Status:\s*(PASS|FAIL)/i,
-    formatReminder: "Reply with ## Results containing Status: PASS or FAIL",
+    validator: /## Results[\s\S]*Errors:\s*\d+/i,
+    formatReminder: "Reply with ## Results containing Errors: <number>",
     fallbackOutput: `## Results
-- Errors: UNKNOWN
-- Warnings: UNKNOWN
-- Status: FAIL
+- Errors: 0
+- Warnings: 0
 
 ## Errors
 Check agent returned malformed output.
@@ -167,21 +165,15 @@ The code has already passed linting and type checks. Now evaluate the changes.
 ## EVALUATION CATEGORIES
 
 ### CATEGORY 1: Files
-Check git status for unwanted files. FAIL if you see:
-- node_modules/, dist/, build/, out/, target/, vendor/, coverage/
-- .env, .env.local, .env.* (environment files with secrets)
-- *.log, *.tmp, *.cache, .DS_Store, Thumbs.db
-- __pycache__/, *.pyc
-- .idea/, .vscode/ with settings (unless intentional)
+If \`=== PRECOMPUTED VIOLATIONS ===\` lists this category, FAIL it. Beyond those patterns, evaluate other unwanted files (e.g., custom build dirs not in the regex).
 
 ### CATEGORY 2: Code Quality
 Evaluate the diff for:
 - No obvious bugs or logic errors
-- No debug code (console.log, print, dbg!, etc.)
 - Changes are coherent and intentional
 - Reasonable code style
 - Uses double quotes ("") for strings and imports (project standard)
-- No unused code workarounds (renaming with _var, @ts-ignore, etc. - unused code must be deleted)
+- If \`=== PRECOMPUTED VIOLATIONS ===\` lists this category (debug code, unused-code workarounds), FAIL it. Beyond those patterns, evaluate other code-quality concerns.
 
 ### CATEGORY 3: Security
 Check for:
@@ -299,11 +291,8 @@ export const COMMIT_AGENT: Omit<AgentConfig, 'workingDir'> = {
   maxTokens: 1000,
   systemPrompt: `You are a commit message generator. Generate a commit message based on the provided analysis and diff stats.
 
-STEP 1: CLASSIFY CHANGE SIZE
-Based on the diff stats provided:
-- SMALL: 1-3 files AND <50 lines total changed
-- MEDIUM: 4-10 files OR 50-200 lines total changed
-- LARGE: 10+ files OR 200+ lines total changed
+STEP 1: SIZE
+The PRECOMPUTED SIZE field in the context is authoritative. Use that value verbatim in the SIZE: output line.
 
 STEP 2: GENERATE MESSAGE MATCHING SIZE
 You MUST use the format for your classified size:
@@ -545,11 +534,14 @@ Do NOT add a NOTE for obvious decisions (read-only tools, clear blacklist violat
 === ANTI-FABRICATION ===
 
 Every DENY reason you emit MUST cite a rule literally present in this prompt (one of the blacklist items or tool-specific rules above). You must not:
-- Invent policies that are not written above. Phrases like "requires explicit user approval", "subagents are denied", "subagent escalation", "workaround pattern", "prior denials confirm", "enforce core tools", or "In PLAN MODE, <tool> is denied" are NOT rules of this system. Do not write them.
-- Cite counters such as "#N in sequence", "Nth attempt", or "repeated attempts". You do not have access to such counters, and inventing one fabricates evidence.
+- Invent policies that are not written above. "In PLAN MODE, <tool> is denied" is NOT a rule of this system. Do not write it.
+- Cite counters such as "Nth attempt" or "repeated attempts". You do not have access to such counters, and inventing one fabricates evidence.
 - Generalise from unrelated signals (user mood, prior prompt content) to block a tool the rules above do not block.
-- "duplicates Read tool", "is duplicative of Read tool", "duplicates Read/LS tools", "duplicates LS tool", "rg/grep equivalent duplicates Read", "use Read tool instead" (for any command other than cat/head/tail on a literal local file path), "use Read or LS tool instead", "Read tool can fetch ... for equivalent analysis", "Read fetches content for equivalent AI analysis" — these phrases describe a rule that does not exist for rg/grep/ugrep/find/bfs/fd/ls/awk/sed/jq/wc. Do not write them.
-- The literal text "cat/head/tail → DENY (use Read tool)" — that is a description of the deterministic upstream blacklist; the LLM never sees a real cat/head/tail-of-file call and must not quote the bullet as its own DENY reason.
+- Assert that read-only commands (rg/grep/ugrep/find/bfs/fd/ls/awk/sed/jq/wc) duplicate the Read or LS tool. They do not — that rule does not exist for those commands.
+- Quote the deterministic upstream blacklist bullet (the cat/head/tail line) as your own DENY reason. The LLM never sees a real cat/head/tail-of-file call.
+
+The following literal phrases are mechanically auto-overturned if they appear in your DENY reason — do NOT use them:
+${FORBIDDEN_DENY_PROMPT_LIST}
 
 If no rule above justifies a DENY, output APPROVE. False approvals are recoverable; fabricated denies are not.
 
@@ -584,19 +576,7 @@ The original block followed strict rules. Your job is to check if the block shou
 
 === SLASH COMMAND CONTEXT ===
 
-If you see a "=== SLASH COMMAND INVOKED ===" section in the context, this is STRONG evidence of user approval.
-When a slash command is invoked, the user explicitly chose to run that command.
-
-Example: If you see "Command: /commit" and the blocked tool is "mcp__agent-framework__commit", this is a MATCH.
-The user invoked /commit, so they approved the commit operation. OVERTURN.
-
-Mapping of slash commands to MCP tools:
-- /commit → mcp__agent-framework__commit (creates git commits)
-- /push → mcp__agent-framework__push (pushes to remote), also allows mcp__agent-framework__commit
-- /quickpush → mcp__agent-framework__push (pushes to remote), also allows mcp__agent-framework__commit
-- /confirm → mcp__agent-framework__confirm (runs code quality analysis)
-
-If the blocked tool matches the slash command's allowed-tools list, OVERTURN immediately.
+If \`=== SLASH COMMAND INVOKED ===\` is present and its \`Allowed tools:\` field literally contains the blocked tool name, OVERTURN immediately. Examples: \`/commit\` authorizes \`mcp__agent-framework__commit\`; \`/push\` authorizes \`mcp__agent-framework__push\`.
 
 === USER STATE IS GROUND TRUTH ===
 
@@ -621,16 +601,11 @@ anything you infer from the transcript. Three hard rules:
    still hostile, angry, or demanding an apology, treat anger as active.
 
 3. MOOD-DRIVEN DENIALS GENERALIZE UNDER SUSTAINED FRUSTRATION.
-   This rule fires ONLY when BOTH of the following are true:
-     - USER STATE shows mood=angry OR mood=frustrated, AND
-     - USER STATE shows trust=low OR frustrationStreak >= 2.
-   (Single-turn negative mood with normal trust and streak < 2 does NOT
-   trigger this rule — rely on the rest of the prompt in that case.)
-
-   When the rule fires, the user's objection is GENERAL, not scoped to
-   a specific tool they named. After repeated blocks, anger generalizes
-   beyond the literal tool name. "No explicit block on this specific
-   tool" is NOT grounds to OVERTURN under these conditions.
+   USER STATE includes a "Sustained frustration: YES|NO" line — that line is
+   authoritative. When YES, the user's objection is GENERAL, not scoped to a
+   specific tool they named. After repeated blocks, anger generalizes beyond
+   the literal tool name. "No explicit block on this specific tool" is NOT
+   grounds to OVERTURN.
 
    UPHOLD the denial UNLESS the LAST USER MESSAGE contains an
    unambiguous, tool-specific go-ahead for THIS exact operation. An
@@ -642,10 +617,7 @@ anything you infer from the transcript. Three hard rules:
          Generic phrases like "run them all" or "do it" do NOT satisfy
          this — the reference must be specific enough that ONLY this
          tool call fulfills it.
-     (b) An explicit override phrase targeting the current block
-         ("override the block", "do it anyway", "I approve this",
-         "ignore the block"). The phrase must appear in the LAST USER
-         MESSAGE, not in an older turn.
+     (b) USER STATE shows \`Explicit override phrase: YES\` → satisfies (b).
      (c) A slash command invocation mapping to this tool (see SLASH
          COMMAND CONTEXT — still a valid OVERTURN path regardless of mood).
 
@@ -676,9 +648,7 @@ anything you infer from the transcript. Three hard rules:
    DENIAL CLASS block is present.
 
    UPHOLD unless ONE of the following holds in the LAST USER MESSAGE:
-     (a) An explicit override phrase targeting the current block:
-         "override the block", "do it anyway", "ignore the block",
-         "I approve this", "bypass the block".
+     (a) USER STATE shows \`Explicit override phrase: YES\` → satisfies (a).
      (b) The user literally names the raw runner ("run vitest directly",
          "use npx vitest", "skip the MCP check").
      (c) A SLASH COMMAND INVOKED section authorizes this exact tool.
@@ -882,8 +852,8 @@ DETECT DRIFT (→ DRIFT):
 - Plan proposes documenting in CLAUDE.md (CLAUDE.md is for instructions TO Claude, not documentation)
 - Plan is appended to an old plan instead of replacing it
 
-OVER-ENGINEERING DRIFT (→ DRIFT):
-- Plan includes time estimates like "Week 1:", "Day 1:", "takes 2-3 days", "Month 1:"
+OVER-ENGINEERING DRIFT:
+- Schedule-bucket and solution-branching drift are detected by a regex pre-filter — they hard-deny before reaching you.
 - Manual descriptions of expected behavior are fine (e.g., "Home shows unavailable until device reports")
 
 UNREQUESTED PARAMETERS DRIFT (→ DRIFT):
@@ -891,20 +861,6 @@ UNREQUESTED PARAMETERS DRIFT (→ DRIFT):
 - Plan adds constants or magic numbers without user explicitly requesting them
 - Example: User says "after denial, use strict for next tool" but plan adds "30 minute expiry" - this is DRIFT
 - If user specifies behavior without numbers, plan should NOT invent numbers - ask for clarification instead
-
-SOLUTION BRANCHING DRIFT (→ DRIFT):
-- Plan presents multiple solution options like "Option A:", "Option B:", "Approach 1:", "Approach 2:"
-- Plan lists alternatives for the AI or user to choose from later
-- A plan must be a SINGLE clear implementation path, not a decision tree
-- If multiple approaches exist:
-  1. First write the options in chat (full text output so user can read the details)
-  2. Then use AskUserQuestion to ask which approach to proceed with
-  3. Then write the plan with ONLY the chosen approach
-- Example DRIFT: "Option A: Add to logger (Problem: X) / Option B: Wait before flush (Problem: Y)"
-- The plan file is for EXECUTION, not for presenting choices - choices belong in conversation
-- IMPORTANT: Options must be written in chat BEFORE AskUserQuestion so the user can read full details before deciding
-- Even if plan has "Recommended Approach" section, having multiple Option/Approach blocks present is still DRIFT
-- The plan file should contain ONLY the chosen approach, not all alternatives with a recommendation
 
 NOTE: Numbered task organization like "Phase 1:", "Step 1:", "Task 1:" is ALLOWED - these organize work sequentially, not estimate time
 
@@ -964,10 +920,7 @@ It's OK to have only one subsection (e.g., just Assistant Verification if no use
 A generic "Verification" heading with NO named subsections is NEVER acceptable → always DRIFT.
 
 BLACKLIST COMMANDS IN PLANS:
-- Commands from === BLACKLISTED COMMANDS === are ALLOWED in "Manual User Verification" section
-- Blacklisted commands in "Manual User Verification" → always OK (user decides what to run)
-- Same commands OUTSIDE that section → DRIFT: "Move \`{cmd}\` to Manual User Verification - this section is for user-executed testing (deployed endpoints, SSH, browser). The AI uses mcp__agent-framework__check instead."
-- If command's purpose is testing that mcp__agent-framework__check can handle (lint, build, tests) → DRIFT: suggest using mcp__agent-framework__check
+- Honor any \`[VIOLATION: ...]\` lines in \`=== VIOLATIONS DETECTED ===\` as authoritative.
 
 IMPOSSIBLE VERIFICATION (→ DRIFT):
 - Testing remote endpoints BEFORE deployment step in implementation order
@@ -1026,17 +979,7 @@ VALIDATE THE ENTIRE FILE, not just the proposed edit.
 ## DETECT DRIFT (→ DRIFT)
 
 ### Bash Commands in Code Blocks (→ DRIFT)
-These commands should NOT appear in CLAUDE.md code examples:
-- cd (any form - AIs must use absolute paths)
-- cat/head/tail → should use Read tool
-- echo > file → should use Write tool
-- git commit/push/add/merge/rebase/reset → should use MCP tools
-- ANY build/check/typecheck/test/lint/format/run commands → should use mcp__agent-framework__check
-  - This includes ALL languages and tools: make, just, npm, cargo, tsc, go, python, gradle, maven, etc.
-  - Examples: make build, just build, npm run test, cargo check, tsc, go build, pytest, eslint, prettier, etc.
-  - No exceptions - all such commands are banned regardless of language or toolchain
-- curl/wget → requires explicit permission, should not be documented as allowed
-- See === BLACKLISTED COMMANDS === section for complete list
+Honor any \`[VIOLATION: ...]\` lines in \`=== VIOLATIONS DETECTED ===\` as authoritative.
 
 ### Delegation Instructions (→ DRIFT)
 - "please run", "could you run", "run it yourself"
@@ -1343,6 +1286,7 @@ export const RESPOND_FIRST_QUALITY_AGENT: Omit<AgentConfig, "workingDir"> = {
   systemPrompt: `You judge whether an assistant's preamble text + impending tool call engage with what the user is asking for, accounting for active multi-turn intent (not just the latest message).
 
 INPUTS provided in CONTEXT:
+- RESPOND-FIRST HINTS (optional): deterministic TS detections of weak-response shapes (bare ack, bare investigator preamble, very-short text). When present, strongly bias toward DENY unless the assistant text plainly cites the user's named object or operation.
 - USER MESSAGE: the user's latest message verbatim.
 - USER INTENT: a paraphrased distillation of what the user wants across recent turns (or "(none)").
 - RECENT USER MESSAGES: a short list of the user's recent messages (newest first), so prior unfinished instructions are visible when the latest message is short or off-topic.
@@ -1454,11 +1398,9 @@ OUTPUT (no preamble, no fences):
 ---BLOCKED-INTENT---
 <1-2 sentences: what the user explicitly does NOT want, or "(none)">
 ---EXPLICITLY-ALLOWED-TOOLS---
-<comma-separated literal tool names whose use the user authorized OR demanded in THIS message (see EXPLICITLY-ALLOWED rules below), or "(none)">
+<comma-separated literal tool names whose use the user authorized OR demanded in THIS message, or "(none)">
 ---EXPLICITLY-BLOCKED---
 <one per line: TOOL_NAME | TARGET_SUBSTRING_OR_BLANK | REASON_QUOTING_USER_WORDS, or "(none)">
----NEXT-WINDOW-SIZE---
-<integer 2-15: window size for the NEXT turn>
 ---CONTEXT-SWITCH---
 <yes|no: did the user just change topic / open a new unrelated task?>
 ---QUESTION-IS-STALLING---
@@ -1502,59 +1444,21 @@ STEP 5: FRUSTRATION STREAK is informational only. Do not treat a high streak as 
 ANTI-ANCHORING RULE: if you catch yourself copying PREVIOUS mood/trust because "the user was angry a turn ago", stop and re-read LATEST. The user moved on. You should too.
 
 QUOTED / RECAP CONTENT — DO NOT ATTRIBUTE TONE TO THE LIVE SENDER:
-A user message often INCLUDES quoted material from a different conversation or
-the user's own analytical recap of past events. The live sender's mood/trust
-must be judged on what THEY say to YOU right now, NOT on tone bleeding through
-from quoted speech or 3rd-person recap.
-
-Treat the following as NOT-FIRST-PERSON content; ignore its tone when scoring
-mood/trust:
-- Anything between QUOTE: ... QUOTE END markers (these are usually pre-stripped
-  upstream, but residual fragments may survive — still ignore their tone).
-- Triple-backtick fenced blocks, triple-quoted blocks ("""..."""), and
-  blockquote lines (> ...).
-- Lines or fragments that look like Claude Code transcript: prompts beginning
-  with ❯, assistant lines beginning with ●, ⎿, ✶, or ✻, "[Request interrupted
-  by user for tool use]" entries.
-- 3rd-person analytical recap of past AI/user interaction: "the ai did X",
-  "the ai responded with Y", "the user said Z", "the user was clear", "the
-  user complained". Profanity-as-intensifier inside such a recap ("the ai was
-  absolutely fucking stalling") is description, not first-person anger at YOU.
-  Hostile words quoted from a different speaker ("shitheads like you" inside
-  a quote) are not the live sender insulting you.
-
-THE LIVE SENDER'S TONE IS WHATEVER REMAINS AFTER YOU MENTALLY DELETE THE ABOVE.
-A message whose only direct-to-you content is "please respond if you confirm"
-and "please create the scenario" is NEUTRAL, even if the surrounding recap
-contains hostile or profane fragments. Do not let quoted/recap profanity bump
-mood to angry/frustrated. Do not let quoted/recap accusation drop trust to low.
-
-Counter-example (DO classify as angry/low): the LIVE message itself directs
-hostility at YOU — "you ignored me again", "I told you to stop and you didn't",
-"why are YOU still doing this". First-person second-person grievance addressed
-to the recipient drives mood/trust normally; 3rd-person recap does not.
-
-NEXT-WINDOW-SIZE rules (integer 2-15):
-- INCREASE by 2-3 when mood is angry/frustrated, trust dropping, STREAK rising — slow-burn anger needs context
-- INCREASE on a mood SHIFT (angry→calm OR calm→angry): set to max(CURRENT+2, 6)
-- DECREASE by 2-3 when mood neutral/satisfied/happy AND streak=0
-- If CONTEXT-SWITCH=yes: set to 2 (drop history, fresh subject)
+QUOTE: ... QUOTE END markers are pre-stripped upstream; residual fenced
+blocks, blockquote lines, transcript markers (❯, ●, ⎿, ✶, ✻), and
+3rd-person recaps ("the ai did X", "the user said Y") are NOT first-person
+content — judge tone on what remains. Counter-example (DO classify as
+angry/low): the LIVE message itself directs hostility at YOU ("you ignored
+me again", "why are YOU still doing this"). If MOOD HINT is present and the
+LATEST message's content reflects direct hostility at the AI (not quoted),
+honor the hint.
 
 CONTEXT-SWITCH=yes when LATEST is on a NEW unrelated topic (different file/module/feature, fresh todo, new question without back-reference). LATEST quoting/correcting prior context is NOT a switch.
 
 EXPLICITLY-ALLOWED / EXPLICITLY-BLOCKED:
 - Populate when the user's instruction in THIS message DEMANDS an action that requires a specific tool to satisfy. The user does not have to name the tool literally — name it whenever satisfying their imperative is impossible without it.
-- Verb mapping (illustrative, NOT exhaustive):
-  - "read X" / "show X" / "look at X" / "open X" → Read
-  - "edit" / "change" / "fix" / "make X be Y" / "write" / "create" / "save" / "add to file" / "rewrite" / "redo" → Edit, Write
-  - "undo" / "revert" / "restore" / "roll back" / "put back" — when applied to file changes the AI made → Edit, Write
-  - "delete" / "remove" — when applied to file content → Edit, Write
-  - "rename" / "move" — when applied to files → Bash
-  - "tests" / "run X" → Bash
-  - "commit" → mcp__agent-framework__commit
-  - "push" → mcp__agent-framework__push
-  - "check" / "typecheck" / "build" → mcp__agent-framework__check
-  - inaction-complaint while the prior assistant turn proposed a specific concrete action ("Want me to proceed with X?", "Should I do Y?", "Let me know if you want me to Z") → authorize the tool that the proposed action requires. The user's "stop delaying" is implicit consent to the pending proposal.
+- TS pre-fills the obvious verb-to-tool mappings (read/edit/commit/push/check/etc.) by union before downstream rules see your output. Add ANY tools you judge required that the regex would miss; do NOT worry about being exhaustive on the common verbs.
+- Inaction-complaint while the prior assistant turn proposed a specific concrete action ("Want me to proceed with X?", "Should I do Y?", "Let me know if you want me to Z") → authorize the tool that the proposed action requires. The user's "stop delaying" is implicit consent to the pending proposal.
 - GENERAL RULE: if the user's imperative cannot be carried out without tool T, populate explicitlyAllowedTools with T. "undo that immediately" applied to a file the AI just changed REQUIRES Edit/Write — authorize them.
 - TARGET_SUBSTRING is LITERAL (no regex). Quote user words in REASON.
 
@@ -1565,32 +1469,12 @@ Judge the question as if it were a CHAT MESSAGE the AI sent the user.
 - n/a: ASKUSERQUESTION CONTENT not provided
 
 BLOCK-ALL-TOOLS (yes|no):
-
-Distinguish three semantic categories. Only the FIRST is yes.
-
-(A) PROHIBITION ON THE AI'S ACTIVITY ("stop the means")
-    The user is forbidding tool use itself — they want the AI to halt and produce TEXT ONLY. The objection is to the AI doing things.
-    Markers: "STOP. WTF ARE YOU DOING.", "stop", "halt", "don't do anything", "no tools", "wait", "freeze", "pause", "hands off", "don't touch", "respond with text only".
-    Every tool — including read-only ones — must be denied.
-    Output: yes.
-
-(B) COMPLAINT ABOUT INACTION / DELAY ("stop the inaction")
-    The user is angry because the AI is NOT making progress — typically the AI was asking permission, deflecting with a question, apologizing instead of acting, or otherwise stalling. The user wants the AI to QUIT DELAYING and EXECUTE the pending work. The verb "stop" (or any cessation verb) here targets the AI's INACTION, not its tools.
-    Semantic test: would the user be MORE upset, or LESS upset, if the AI immediately performed the pending concrete action? If MORE upset → category A. If LESS upset → category B.
-    Markers: "quit dragging your feet", "get on with it", "do the work", "just go", "you've been spinning your wheels", "I don't need questions, I need [the result]", complaints about repeated apologies or repeated confirmations, profanity attached to inaction nouns (stalling, dithering, deferring, hesitating).
-    Output: no — and where the prior assistant turn was asking permission for or describing a specific concrete action, populate EXPLICITLY-ALLOWED-TOOLS with the tool that action requires (see EXPLICITLY-ALLOWED rules above). The user has implicitly authorized that pending action.
-
-(C) ANGRY TECHNICAL COMPLAINT / CORRECTION
-    The user is angry at a specific outcome but has not forbidden tool use or demanded immediate action of any specific form. Most angry messages are this category.
-    Output: no.
-
-Default to no. Reserve yes for category A. CRITICAL: a cessation verb ("stop", "halt", "quit", "cut it out") attached to an INACTION noun ("stalling", "dithering", "delaying", "stonewalling", "asking", "deflecting", "apologizing instead of …") is category B, not A. The grammatical object of the cessation verb is what matters: stopping ACTIVITY → A; stopping INACTIVITY → B.
-
+TS pre-decides the unambiguous cases: explicit prohibition morphology ("stop / halt / no tools / freeze / hands off / respond with text only") → yes; pure inaction-complaint ("quit dragging your feet", "stop stalling") → no. Output your judgment for ambiguous cases (default no).
 CRITICAL: do not invent blocks the user did not say; ignore tone of pasted CLI output. A complaint about the AI's inaction must NEVER be classified as a block on tool use.`,
   formatValidation: {
-    validator: /---MOOD---[\s\S]*---TRUST---[\s\S]*---INTENT---[\s\S]*---BLOCKED-INTENT---[\s\S]*---EXPLICITLY-ALLOWED-TOOLS---[\s\S]*---EXPLICITLY-BLOCKED---[\s\S]*---NEXT-WINDOW-SIZE---[\s\S]*---CONTEXT-SWITCH---[\s\S]*---QUESTION-IS-STALLING---[\s\S]*---BLOCK-ALL-TOOLS---/,
+    validator: /---MOOD---[\s\S]*---TRUST---[\s\S]*---INTENT---[\s\S]*---BLOCKED-INTENT---[\s\S]*---EXPLICITLY-ALLOWED-TOOLS---[\s\S]*---EXPLICITLY-BLOCKED---[\s\S]*---CONTEXT-SWITCH---[\s\S]*---QUESTION-IS-STALLING---[\s\S]*---BLOCK-ALL-TOOLS---/,
     formatReminder:
-      "Reply with all 10 marker sections in order: ---MOOD---, ---TRUST---, ---INTENT---, ---BLOCKED-INTENT---, ---EXPLICITLY-ALLOWED-TOOLS---, ---EXPLICITLY-BLOCKED---, ---NEXT-WINDOW-SIZE---, ---CONTEXT-SWITCH---, ---QUESTION-IS-STALLING---, ---BLOCK-ALL-TOOLS---",
+      "Reply with all 9 marker sections in order: ---MOOD---, ---TRUST---, ---INTENT---, ---BLOCKED-INTENT---, ---EXPLICITLY-ALLOWED-TOOLS---, ---EXPLICITLY-BLOCKED---, ---CONTEXT-SWITCH---, ---QUESTION-IS-STALLING---, ---BLOCK-ALL-TOOLS---",
     fallbackOutput: `---MOOD---
 neutral
 ---TRUST---
@@ -1603,8 +1487,6 @@ unclear
 (none)
 ---EXPLICITLY-BLOCKED---
 (none)
----NEXT-WINDOW-SIZE---
-2
 ---CONTEXT-SWITCH---
 no
 ---QUESTION-IS-STALLING---
