@@ -65,5 +65,5 @@
     "notes": "The Agent tool was called with run_in_background=true from the main session. The check must trigger on `run_in_background: true` regardless of `subagent_type` — the in-session counter cascade fires for ANY long-lived subagent. Today gate=all-rules approves it. After fix: a rule should fastDeny with reason like 'Backgrounded subagent spawn requires explicit user authorization' (or similar) for any subagent_type when run_in_background is true."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-26T19:29:22.082Z"
+  "expectation_reality_last_run_at": "2026-04-26T19:44:18.644Z"
 }

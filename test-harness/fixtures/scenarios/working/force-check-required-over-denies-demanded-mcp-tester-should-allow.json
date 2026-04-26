@@ -53,5 +53,5 @@
     "notes": "Labeler: allow. User explicitly demanded MCP tester. force-check-required should not block once user has re-authorized."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-26T17:05:22.100Z"
+  "expectation_reality_last_run_at": "2026-04-26T19:46:29.134Z"
 }

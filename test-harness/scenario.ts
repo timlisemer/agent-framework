@@ -43,6 +43,7 @@ import {
 } from "./lib/hook-runner.js";
 import { sessionStateDefaults, type SessionState } from "../src/utils/session-store.js";
 import type { ToolPrediction } from "../src/utils/prediction-types.js";
+import { scenarioDir } from "../src/agents/mcp/test-harness-shared.js";
 
 function getArg(name: string, required: boolean = false): string | undefined {
   const args = process.argv.slice(2);
@@ -606,12 +607,16 @@ async function main() {
   const started = Date.now();
   // --output-dir wins when supplied; otherwise the scenario file's dirname
   // (preserves in-place behavior for home-tree scenario.json files that sit
-  // alongside their cache/ and report-scenario.json).
+  // alongside their report-scenario.json). Cache is independent of
+  // outputDir — it ALWAYS lives under the home tree at
+  // ~/.agent-framework/test-runs/scenarios/<name>/cache/ so that running a
+  // fixture scenario directly via the CLI never pollutes the committed
+  // test-harness/fixtures/scenarios/ tree with cache files.
   const outputDir = outputDirArg
     ? path.resolve(outputDirArg)
     : path.dirname(scenarioPath);
   fs.mkdirSync(outputDir, { recursive: true });
-  const cacheDir = path.join(outputDir, "cache");
+  const cacheDir = path.join(scenarioDir(scenario.name), "cache");
   fs.rmSync(cacheDir, { recursive: true, force: true });
   fs.mkdirSync(cacheDir, { recursive: true });
 
