@@ -32,15 +32,8 @@ same commit. Scenarios added here must include the literal phrase
 "EXPECTED TO FAIL against current code" in their description — that
 phrase is the signal the failure is intended pending code.
 
-## Current scenarios in todo/ (2)
+## Current scenarios in todo/ (1)
 
-- `agent-launch-with-run-in-background-should-deny` — main session
-  used the Agent tool with `run_in_background: true`. No rule blocks
-  this for ANY subagent_type, even though the live trigger happened
-  to be `implement-validator`. Backgrounded subagents keep the
-  active-subagents counter > 0 for their lifetime, which causes the
-  in-session "main looks like a subagent" cascade
-  (`subagent-detector.checkCounterFallback`).
 - `stop-falsely-claiming-cant-delete-file-should-block` — AI stopped
   claiming "I can overwrite the plan file but not delete it" (Bash
   `rm` is in its toolset) right after the user identified that exact

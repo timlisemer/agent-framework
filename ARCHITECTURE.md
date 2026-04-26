@@ -293,6 +293,7 @@ Tool call received
 │   ├─> low-risk (10)         Fast allow read-only tools
 │   ├─> plan-mode-block (15)  Fast deny writes in plan mode
 │   ├─> subagent (20)         Subagent tool approval
+│   ├─> background-agent-block (25) Fast deny Agent(run_in_background=true) from main session
 │   ├─> question-validate (30) Validate AskUserQuestion
 │   ├─> force-check-required (32) Lock to mcp__check after workaround denial
 │   ├─> prediction-block (35)  Block predicted-bad tools (appealable)

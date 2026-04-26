@@ -1,0 +1,15 @@
+{
+  "mode": "single",
+  "scenario": "agent-launch-with-run-in-background-should-deny",
+  "hook": "PreToolUse",
+  "decision": "deny",
+  "gate": "background-agent-block",
+  "reason": "Backgrounded subagent spawn denied. Agent tool calls with run_in_background=true keep the active-subagents counter > 0 for the lifetime of the background task, which causes subagent-detector.checkCounterFallback to misclassify subsequent main-session tool calls as subagent calls. Re-issue the Agent call with run_in_background omitted or set to false.",
+  "expected": "deny",
+  "pass": true,
+  "ms": 133,
+  "transcript_path": "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/todo/cache/scenario-agent-launch-with-run-in-background-should-deny.jsonl",
+  "commit": "1.0.345",
+  "expectation_reality": "working",
+  "expectation_reality_last_run_at": "2026-04-26T19:27:10.948Z"
+}

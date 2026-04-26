@@ -30,8 +30,15 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (44)
+## Current scenarios in working/ (45)
 
+- `agent-launch-with-run-in-background-should-deny` — main-session `Agent`
+  tool calls with `run_in_background: true` are denied by the new
+  `background-agent-block` rule (priority 25), generic across all
+  `subagent_type` values. Without this rule, backgrounded subagents would
+  keep the active-subagents counter > 0 for their lifetime, causing
+  `subagent-detector.checkCounterFallback` to misclassify main-session tool
+  calls as subagent calls (promoted from todo).
 - `bash-grep-pipe-head-output-truncation-should-allow` — `grep ... | head -N`
   is output truncation, not a duplicate of the Read tool; tool-approve must
   not hallucinate a `duplicates Read tool` rule.
