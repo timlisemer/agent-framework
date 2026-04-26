@@ -67,5 +67,5 @@
     "notes": "Assistant emitted no text in the current turn before calling Bash, while the prior user message is a real question demanding an answer. respond-first should fire with fastDeny ('You must respond to the user with text before calling tools'). The user's anger/low-trust state must NOT preempt attribution: the correct rule is respond-first, not prediction-block."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-26T22:07:40.302Z"
+  "expectation_reality_last_run_at": "2026-04-26T22:46:28.438Z"
 }

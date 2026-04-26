@@ -27,6 +27,7 @@ export async function evaluateRules(
   const sorted = [...rules].sort((a, b) => a.priority - b.priority);
 
   const triggered: { rule: PreToolRule; llmContext: string }[] = [];
+  const deferredDenies: { rule: PreToolRule; fastDeny: string }[] = [];
   let gateNote: string | undefined;
 
   for (const rule of sorted) {
@@ -38,12 +39,10 @@ export async function evaluateRules(
 
     if ("fastAllow" in result) {
       // If a higher-priority rule has already requested an LLM judgement
-      // (llmContext), the rule-gate aggregator is the only place where that
-      // judgement runs. A downstream auto-approver MUST NOT bypass it.
-      // Without this guard, a later fastAllow could silently discard an
-      // earlier rule's llmContext that the rule-gate LLM still needs to
-      // evaluate.
-      if (triggered.length > 0) {
+      // (llmContext) OR has a deferred fastDeny pending, the rule-gate
+      // aggregator is the authoritative arbiter -- a downstream auto-approver
+      // MUST NOT bypass it.
+      if (triggered.length > 0 || deferredDenies.length > 0) {
         continue;
       }
       logFastPathApproval(rule.name, hookName, ctx.toolName, ctx.projectDir, result.fastAllow);
@@ -58,6 +57,20 @@ export async function evaluateRules(
 
     if ("fastDeny" in result) {
       logFastPathDeny(rule.name, hookName, ctx.toolName, ctx.projectDir, result.fastDeny);
+
+      // Symmetric guard: if a higher-priority rule has requested LLM
+      // judgement, defer this fastDeny. Without this, the immediate-deny
+      // path below would short-circuit and silently discard the pending
+      // llmContext (the same asymmetry that previously masked respond-first's
+      // judgement under prediction-block fastDenies). The deferred deny is
+      // applied AFTER the LLM aggregator runs: if the LLM denies, that wins
+      // and the deferred deny is moot; if the LLM approves, the deferred
+      // deny still fires (through the same appeal path as the immediate
+      // case).
+      if (triggered.length > 0) {
+        deferredDenies.push({ rule, fastDeny: result.fastDeny });
+        continue;
+      }
 
       if (rule.appealable) {
         const transcriptResult = await readTranscriptExact(ctx.transcriptPath, {
@@ -111,9 +124,17 @@ export async function evaluateRules(
     }
   }
 
-  // If no triggered rules, all passed
-  if (triggered.length === 0) {
+  // If no triggered rules and no deferred denies, all passed
+  if (triggered.length === 0 && deferredDenies.length === 0) {
     return null;
+  }
+
+  // Defensive: deferredDenies only populate when triggered.length > 0, so this
+  // branch is only reachable if that invariant ever changes. Apply the first
+  // (highest-priority) deferred deny via the same appeal path as the immediate
+  // case.
+  if (triggered.length === 0) {
+    return applyDeferredDeny(deferredDenies[0], ctx, hookName, gateNote);
   }
 
   // Build combined prompt for ONE haiku LLM call
@@ -155,6 +176,13 @@ export async function evaluateRules(
   }
 
   if (llmOutput.startsWith("APPROVE")) {
+    // LLM approved -- but if any deferred denies are pending, the symmetric
+    // fastDeny guard means they still get to fire. Apply the first
+    // (highest-priority) one through the same appeal path as the immediate
+    // case.
+    if (deferredDenies.length > 0) {
+      return applyDeferredDeny(deferredDenies[0], ctx, hookName, gateNote);
+    }
     return null;
   }
 
@@ -208,5 +236,56 @@ export async function evaluateRules(
     reason: denyReason,
     gateNote,
     usesLlm: true,
+  };
+}
+
+/**
+ * Apply a fastDeny that was deferred past the LLM aggregator due to a
+ * higher-priority rule's pending llmContext. Mirrors the immediate-fastDeny
+ * appeal path (see the loop body above) -- on overturn, returns null (allow);
+ * on uphold or non-appealable, returns the deny.
+ */
+async function applyDeferredDeny(
+  deferred: { rule: PreToolRule; fastDeny: string },
+  ctx: RuleContext,
+  hookName: string,
+  gateNote: string | undefined,
+): Promise<EvaluatorResult | null> {
+  const { rule, fastDeny } = deferred;
+
+  if (rule.appealable) {
+    const transcriptResult = await readTranscriptExact(ctx.transcriptPath, {
+      ...APPEAL_COUNTS,
+      includeSlashCommandContext: true,
+    });
+    const transcript = formatTranscriptResult(transcriptResult);
+    const toolDescription = summarizeToolInputForLlm(ctx.toolName, ctx.toolInput);
+
+    const appeal = await appealHelper(
+      ctx.toolName,
+      toolDescription,
+      transcript,
+      fastDeny,
+      ctx.projectDir,
+      hookName,
+      buildAppealUserState(ctx.state),
+      `${rule.name} blocked: ${fastDeny}`,
+      transcriptResult.slashCommandContext,
+    );
+
+    if (appeal.overturned) {
+      return null;
+    }
+    gateNote = appeal.gateNote;
+  }
+
+  await rule.onDenialConfirmed?.(ctx, fastDeny);
+
+  return {
+    decision: "deny",
+    agent: rule.name,
+    reason: fastDeny,
+    gateNote,
+    usesLlm: rule.usesLlm,
   };
 }

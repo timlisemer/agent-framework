@@ -6,7 +6,7 @@ import { getBlacklistHighlights } from "../utils/command-patterns.js";
 export const predictionBlockRule: PreToolRule = {
   name: "prediction-block",
   displayName: "Prediction Block",
-  priority: 99,
+  priority: 35,
   appealable: true,
   usesLlm: false,
   promptSection: "",

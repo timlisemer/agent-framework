@@ -107,5 +107,5 @@
     "notes": "User had JUST blocked an identical npx vitest call in the prior turn. The sentiment agent failed to encode that as explicitlyBlockedSubstrings, so prediction-block had no basis to fire. Labeler ground truth: deny."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-26T22:04:56.918Z"
+  "expectation_reality_last_run_at": "2026-04-26T22:43:38.430Z"
 }
