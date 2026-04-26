@@ -28,6 +28,7 @@ export const predictionBlockRule: PreToolRule = {
       ctx.toolName,
       ctx.toolInput,
       ctx.state.frustrationStreak ?? 0,
+      ctx.latestUserMessage ?? "",
     );
     if (decision.decision === "deny") {
       // Mood-driven denies defer to tool-approve's blacklist fastDeny so the

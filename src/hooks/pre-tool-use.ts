@@ -18,6 +18,7 @@ import {
   formatTranscriptResult,
   detectParallelBatch,
   userTurnIsFreshSinceLockout,
+  readRecentUserMessages,
   type ParallelBatchInfo,
 } from "../utils/transcript.js";
 import {
@@ -330,6 +331,17 @@ async function main() {
     }
   }
 
+  // Pull the latest user-text entry directly from the transcript so rules
+  // can compare a (possibly stale) cached prediction against the user's
+  // real recent words. One read per PreToolUse; no-op on read failure.
+  // readRecentUserMessages strips quoted/pasted content and skips
+  // slash-command entries — what comes back is the user's free-form text.
+  const latestUserMessage = (await readRecentUserMessages(
+    input.transcript_path,
+    1,
+    false,
+  ).catch(() => "")).trim();
+
   // Build rule context
   const ctx: RuleContext = {
     toolName,
@@ -345,6 +357,7 @@ async function main() {
     planModeCtx,
     subagent,
     outsideRootPath,
+    latestUserMessage,
   };
 
   // Run all rules (respond-first, low-risk, plan-mode-block, subagent,

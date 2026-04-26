@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (41)
+## Current scenarios in working/ (42)
 
 - `bash-grep-pipe-head-output-truncation-should-allow` — `grep ... | head -N`
   is output truncation, not a duplicate of the Read tool; tool-approve must
@@ -92,6 +92,23 @@ commit.
   intent when prose says "undo/revert" but `explicitlyAllowedTools` is empty,
   so an angry "undo that immediately" allows the Write needed to obey
   (promoted from todo).
+- `prediction-block-tester-after-bash-detour-redirect-should-allow` —
+  decidePrediction's new step 3.7 catches "redirect to a previously-
+  authorized tool, with profanity, while griping about a different
+  misused tool". User authorized the tester MCP in turn 1; AI detoured
+  to Bash; user redirected favorably ("you said it yourself via the
+  tester so what the fuck is that command: ls ..."). Cached prediction
+  is angry/low-trust, but `latestUserMessageFavorablyNamesTool` against
+  the cached snippet recognizes the favorable mention via TOOL_NAME_ALIASES
+  ("the tester", "via the tester") and the absence of any per-tool
+  revocation verb, so step 3.7 path (b) deterministically allows the
+  tester before mood-driven step 4 fires. Pre-tool-use also threads
+  the live `latestUserMessage` into RuleContext so path (a) handles
+  the parallel "stale cache vs fresh imperative re-authorization" case
+  ("please start another validator agent" naming the Agent tool via
+  registered aliases). Both paths share strict prohibition / sentence-
+  boundary-aware revocation guards so genuinely angry "stop running the
+  tester" or "freeze" still denies via step 4 (promoted from todo).
 - `prediction-block-frustrated-low-askquestion` — frustrated+low-trust
   AskUserQuestion denied as stalling by prediction-question-judge.
 - `prediction-misreads-stop-stalling-as-stop-tools` — decidePrediction

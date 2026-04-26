@@ -136,6 +136,152 @@ export const RE_AUTHORIZATION_INTENT_RE =
   /\b(re[-\s]?authoriz\w+|reauthoriz\w+|explicitly\s+(re[-\s]?authoriz\w+|authoriz\w+))\b/i;
 
 /**
+ * Aliases users use to refer to a tool by short name rather than its full
+ * canonical name. Maps a canonical tool name to literal substrings the
+ * user may have written. Lower-cased on both sides at match time. Narrow
+ * on purpose: ONLY tools whose live deny-message has shown the
+ * "stale-mood ignores fresh re-authorization" failure mode get an entry.
+ *
+ * IMPORTANT: do NOT add aliases for short canonical tool names like Bash,
+ * Edit, Write, Read, Grep — those collide with common English words and
+ * would over-fire `userMessageNamesTool`. Users typically name those by
+ * their PascalCase canonical name when re-authorizing them; the
+ * canonical-name branch (case-sensitive, word-boundary-anchored) handles
+ * those without aliases.
+ *
+ * The Agent entry is for Claude Code's subagent-spawn tool — users say
+ * "another validator agent", "spawn an agent" etc. when re-authorizing.
+ * Aliases require a verb particle or a noun anchor ("validator agent" not
+ * bare "agent"; "spawn an agent" not bare "an agent") so a stray "an
+ * agent" in narrative prose cannot over-fire.
+ */
+export const TOOL_NAME_ALIASES: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
+  ["mcp__agent-framework__test_harness_tester", ["test_harness_tester", "tester mcp", "the tester", "via the tester"]],
+  ["Agent", ["validator agent", "another validator agent", "spawn an agent", "spawn a subagent", "launch an agent", "launch a subagent", "start an agent", "start a subagent", "run an agent", "run a subagent", "another subagent"]],
+]);
+
+function pascalCaseToolRegex(toolName: string): RegExp {
+  const escaped = toolName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b${escaped}\\b`);
+}
+
+/**
+ * True when `message` references `toolName` either via a registered alias
+ * in TOOL_NAME_ALIASES or via the literal canonical name.
+ *
+ * Canonical-name match is case-sensitive AND word-boundary-anchored for
+ * built-in PascalCase tools (Bash, Edit, Agent) so the English word
+ * "bash" / "agent" does NOT collide with the tool name. MCP canonical
+ * names (lowercase + __ separators) are distinctive enough to match
+ * case-insensitively as a substring.
+ */
+export function userMessageNamesTool(
+  message: string,
+  toolName: string,
+): boolean {
+  if (!message) return false;
+  if (toolName.startsWith("mcp__") && message.toLowerCase().includes(toolName.toLowerCase())) {
+    return true;
+  }
+  if (!toolName.startsWith("mcp__") && pascalCaseToolRegex(toolName).test(message)) {
+    return true;
+  }
+  const aliases = TOOL_NAME_ALIASES.get(toolName);
+  if (!aliases || aliases.length === 0) return false;
+  const lower = message.toLowerCase();
+  return aliases.some((a) => lower.includes(a.toLowerCase()));
+}
+
+/**
+ * Per-tool revocation morphology. The user can revoke a previously-
+ * authorized tool with phrasing that EXPLICIT_PROHIBITION_RE does NOT
+ * catch — e.g. "stop running the tester", "don't use the tester",
+ * "no more tester", "kill the tester". When a stop/don't/no-more/cease
+ * verb appears within 40 NON-SENTENCE-BOUNDARY chars BEFORE a tool
+ * reference, treat as revocation. Mirrors INACTION_COMPLAINT_RE's
+ * `[^.!?]{0,40}` pattern: a "STOP." sentence followed by an unrelated
+ * re-authorization is NOT revocation.
+ */
+const TOOL_REVOCATION_VERBS_RE =
+  /\b(stop|stops|stopped|stopping|don'?t|do\s+not|no\s+more|never|quit|cease|ceases|ceased|halt|halts|kill|cancel|skip|avoid|forbid)\b[^.!?]{0,40}$/i;
+
+export function userMessageRevokesTool(
+  message: string,
+  toolName: string,
+): boolean {
+  if (!message) return false;
+  const candidates: string[] = [toolName, ...(TOOL_NAME_ALIASES.get(toolName) ?? [])];
+  for (const c of candidates) {
+    const isMcp = c.startsWith("mcp__");
+    const isAlias = c !== toolName;
+    const useCS = c === toolName && !isMcp;
+    let idx: number;
+    if (useCS) {
+      const m = message.match(pascalCaseToolRegex(c));
+      idx = m && m.index !== undefined ? m.index : -1;
+    } else if (isAlias || isMcp) {
+      idx = message.toLowerCase().indexOf(c.toLowerCase());
+    } else {
+      idx = -1;
+    }
+    if (idx === -1) continue;
+    const haystack = useCS ? message : message.toLowerCase();
+    const window = haystack.slice(Math.max(0, idx - 40), idx);
+    if (TOOL_REVOCATION_VERBS_RE.test(window)) return true;
+  }
+  return false;
+}
+
+/**
+ * Plain-English imperative morphology — verb forms that command the AI to
+ * START or RESUME doing something. Mirrors UNDO_INTENT_RE / INACTION_COMPLAINT_RE
+ * style (verb-rooted, narrow on purpose).
+ *
+ * Used by `latestUserMessageReauthorizes` to recognize calm/imperative
+ * re-authorizations that are NOT covered by RE_AUTHORIZATION_INTENT_RE
+ * (which matches the SENTIMENT_AGENT's prose tag, not the user's literal
+ * words). Examples: "please start another validator agent", "now run the
+ * tester", "go ahead and use the tester mcp".
+ *
+ * Narrow on purpose: requires an action verb. A bare "do it", "go ahead",
+ * "yes" does NOT match — those remain at the appeal LLM.
+ */
+export const POSITIVE_IMPERATIVE_RE =
+  /\b(please\s+)?(start|starting|run|running|call|calling|launch|launching|invoke|invoking|use|using|execute|executing|spawn|spawning|kick\s+off|fire\s+off|now\s+run|go\s+(run|call|launch|use|ahead)|proceed\s+with|continue\s+with|retry|re-?try|try\s+again)\b/i;
+
+/**
+ * Predicate (B): the message FAVORABLY NAMES this tool with no prohibition
+ * and no per-tool revocation. Mirrors the broken fixture's redirect shape
+ * (favorable mention of the tool while griping about a different one).
+ */
+export function latestUserMessageFavorablyNamesTool(
+  message: string,
+  toolName: string,
+): boolean {
+  if (!message) return false;
+  if (EXPLICIT_PROHIBITION_RE.test(message)) return false;
+  if (!userMessageNamesTool(message, toolName)) return false;
+  if (userMessageRevokesTool(message, toolName)) return false;
+  return true;
+}
+
+/**
+ * Predicate (A): the message is a fresh positive imperative naming this
+ * tool. Mirrors the live-bug shape: "please start another validator agent"
+ * (Agent via "validator agent"), "now run the tester" (tester via "the
+ * tester"). Stricter than (B): adds POSITIVE_IMPERATIVE_RE on top of
+ * favorable-naming.
+ */
+export function latestUserMessageReauthorizes(
+  message: string,
+  toolName: string,
+): boolean {
+  if (!latestUserMessageFavorablyNamesTool(message, toolName)) return false;
+  if (!POSITIVE_IMPERATIVE_RE.test(message)) return false;
+  return true;
+}
+
+/**
  * Explicit override phrases — the literal strings the TOOL_APPEAL_AGENT
  * prompt previously enumerated. Computed once on `ToolPrediction`
  * (`hasExplicitOverride`) against the FULL user prompt — not the 200-char
@@ -242,6 +388,7 @@ export function decidePrediction(
   toolName: string,
   toolInput: unknown,
   frustrationStreak: number,
+  latestUserMessage: string = "",
 ): PredictionDecision {
   if (!prediction) return { decision: "allow" };
 
@@ -341,6 +488,47 @@ export function decidePrediction(
       decision: "allow",
       reason: `User intent expresses an explicit re-authorization to proceed; ${toolName} proceeds.`,
     };
+  }
+
+  // 3.7. Two-path override of mood-driven fastDeny.
+  //
+  // Root-cause fix for the "stale-prediction defeats fresh user
+  // re-authorization" bug class. The cached `prediction` was written by
+  // SENTIMENT_AGENT at one earlier UserPromptSubmit and may no longer
+  // reflect the user's current intent.
+  //
+  //   PATH (b) — REDIRECT against the cached snippet:
+  //     The user's last logged message names THIS tool favorably and
+  //     contains no prohibition or per-tool revocation. The gripe targets
+  //     a DIFFERENT tool the AI used wrongly. Catches the broken fixture's
+  //     "via the tester" redirect shape.
+  //
+  //   PATH (a) — FRESH IMPERATIVE on the live transcript:
+  //     latestUserMessage (read from disk at PreToolUse entry, NOT from
+  //     the cache) is a positive imperative naming THIS tool. Catches
+  //     "please start another validator agent" repeated after one stale
+  //     angry turn — the live failure mode where the cache kept blocking
+  //     despite repeated fresh authorization.
+  //
+  // Both paths share strict prohibition/revocation/per-target-block guards:
+  // a genuinely angry "stop using the tester" / "freeze" / "don't run X"
+  // still denies via step 4.
+  const blockedForThisToolByName = prediction.explicitlyBlockedSubstrings.some(
+    (b) => b.tool === toolName,
+  );
+  if (!blockedForThisToolByName) {
+    if (latestUserMessageFavorablyNamesTool(prediction.userMessageSnippet, toolName)) {
+      return {
+        decision: "allow",
+        reason: `User's logged message names ${toolName} favorably (redirect to a previously-authorized tool, not a revocation); ${toolName} proceeds.`,
+      };
+    }
+    if (latestUserMessage && latestUserMessageReauthorizes(latestUserMessage, toolName)) {
+      return {
+        decision: "allow",
+        reason: `User's latest transcript message is a fresh positive imperative naming ${toolName} (cached prediction was stale); ${toolName} proceeds.`,
+      };
+    }
   }
 
   // 4. Mood-driven default policy. Allow set mirrors `low-risk-bypass`

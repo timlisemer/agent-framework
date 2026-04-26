@@ -24,6 +24,20 @@ export interface RuleContext {
    * file-tool call.
    */
   outsideRootPath?: string;
+  /**
+   * The user's latest non-meta text message from the live transcript at
+   * PreToolUse entry, with quoted/pasted content stripped. Independent of
+   * `state.currentPrediction.userMessageSnippet`, which can be stale when
+   * sentiment refresh failed/timed out/anchored on a prior negative read,
+   * and is also capped at 200 chars by user-prompt-submit. Optional so
+   * unit-test ctx mocks don't have to populate it; consumers must treat
+   * undefined/empty as "no fresh information available".
+   *
+   * Rules that need to recognize a fresh explicit user signal (e.g.
+   * prediction-block's redirect/re-authorization fallback) read this
+   * instead of `state.currentPrediction.userMessageSnippet`.
+   */
+  latestUserMessage?: string;
 }
 
 export type RuleCheckResult =
