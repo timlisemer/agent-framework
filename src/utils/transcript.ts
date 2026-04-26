@@ -1218,8 +1218,6 @@ export async function detectParallelBatch(
 
   // Find the line containing the target toolUseId
   const targetEntry = toolUseEntries.find((e) => e.toolUseId === toolUseId);
-  if (!targetEntry) return null;
-  const targetLineIndex = targetEntry.lineIndex;
 
   // Helper: check if a line is an assistant tool_use line
   function isAssistantToolUseLine(lineIdx: number): boolean {
@@ -1248,28 +1246,49 @@ export async function detectParallelBatch(
     return hasThinking;
   }
 
-  // Collect batch line indices (including target)
+  // Collect batch line indices.
   const batchLineIndices = new Set<number>();
-  batchLineIndices.add(targetLineIndex);
 
-  // Walk backward from target
-  for (let i = targetLineIndex - 1; i >= 0; i--) {
-    if (isNonMessageLine(i) || isThinkingOnlyLine(i)) continue;
-    if (isAssistantToolUseLine(i)) {
-      batchLineIndices.add(i);
-      continue;
-    }
-    break; // user/tool_result or text-only assistant
-  }
+  if (targetEntry) {
+    // Standard path: the firing tool_use_id is on disk. Walk backward and
+    // forward from its line, collecting consecutive assistant tool_use lines.
+    batchLineIndices.add(targetEntry.lineIndex);
 
-  // Walk forward from target
-  for (let i = targetLineIndex + 1; i < parsed.length; i++) {
-    if (isNonMessageLine(i) || isThinkingOnlyLine(i)) continue;
-    if (isAssistantToolUseLine(i)) {
-      batchLineIndices.add(i);
-      continue;
+    for (let i = targetEntry.lineIndex - 1; i >= 0; i--) {
+      if (isNonMessageLine(i) || isThinkingOnlyLine(i)) continue;
+      if (isAssistantToolUseLine(i)) {
+        batchLineIndices.add(i);
+        continue;
+      }
+      break; // user/tool_result or text-only assistant
     }
-    break;
+
+    for (let i = targetEntry.lineIndex + 1; i < parsed.length; i++) {
+      if (isNonMessageLine(i) || isThinkingOnlyLine(i)) continue;
+      if (isAssistantToolUseLine(i)) {
+        batchLineIndices.add(i);
+        continue;
+      }
+      break;
+    }
+  } else {
+    // Live race fallback: the firing tool_use_id has not been flushed to
+    // jsonl yet. Real Claude Code can fire a sibling's PreToolUse hook
+    // before that sibling's line lands on disk, so the standard lookup
+    // returns no match. Detect retroactively by collecting the trailing
+    // run of consecutive assistant tool_use lines at the very end of the
+    // transcript — if such a run exists with no user/tool_result entry
+    // following it, treat the firing call as the next sibling of that
+    // in-flight batch. The firing id is appended to allIds below.
+    for (let i = parsed.length - 1; i >= 0; i--) {
+      if (isNonMessageLine(i) || isThinkingOnlyLine(i)) continue;
+      if (isAssistantToolUseLine(i)) {
+        batchLineIndices.add(i);
+        continue;
+      }
+      break;
+    }
+    if (batchLineIndices.size === 0) return null;
   }
 
   // Collect all tool_use_ids from batch lines, sorted by line index
@@ -1281,6 +1300,13 @@ export async function detectParallelBatch(
         batchIds.push(entry.toolUseId);
       }
     }
+  }
+
+  // Race fallback: append the firing id as the trailing sibling so that
+  // findBatchDecision's allIds set covers it and pre-tool-use.ts treats it
+  // as a sibling (position > 0) rather than the leader.
+  if (!targetEntry) {
+    batchIds.push(toolUseId);
   }
 
   if (batchIds.length < 2) return null;

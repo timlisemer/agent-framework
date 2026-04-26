@@ -30,3 +30,47 @@ export function preClassifyMood(
   if (SECOND_CORRECTION_RE.test(message)) return { hint: "frustrated", interruptCount };
   return { hint: null, interruptCount };
 }
+
+/**
+ * Directive verbs the user typically uses to command an action.
+ * Narrow on purpose - these are imperative-action verbs, not generic
+ * communication verbs.
+ */
+const DIRECTIVE_VERB_RE =
+  /\b(create|make|fix|update|remove|delete|add|change|edit|write|build|run|check|test|deploy|implement|review|continue|proceed|start|stop|push|pull|merge|rebase|split|extract|refactor|rename|move|copy|read|show|list|find|search|investigate|analyze|verify|confirm|cancel|undo|redo|retry|restart|kill|launch|spawn|invoke|use|consider|ensure|ignore|skip|give|provide|tell|explain|describe|clarify|simplify|generalize|harden|untether|untie|wire|hook|expose|publish|surface|land|ship|approve|reject|accept|abandon|drop|keep|preserve|restore|generate|emit|print|log|trace|debug|profile|measure|benchmark|optimize|fix|repair|clean|tidy|prune|gc|vacuum|reset|reload|reboot|sync|fetch|grab|attach|detach|link|unlink|connect|disconnect|enable|disable|toggle|flip|swap|replace|substitute|inject|patch|backport|forwardport|cherry-pick|squash|amend|revert|rollback)\b/i;
+
+/**
+ * Extract the most likely user directive from a stripped message. Used as
+ * a HINT for SENTIMENT_AGENT's INTENT field when the message contains
+ * heavy 3rd-person recap or quoted content that risks confusing the LLM.
+ *
+ * Strategy: split on sentence boundaries, find sentences that contain a
+ * directive verb in 1st-person/2nd-person framing ("please X", "now X",
+ * "go X", "i want you to X", or a bare imperative). Return the LAST
+ * matching sentence (often the actual ask after preamble/recap), trimmed
+ * to a reasonable length. Returns "" when no directive sentence is found.
+ *
+ * Used as a HINT to the LLM (not as a hard intent override) - the LLM
+ * remains primary for intent quality. The hint just surfaces the relevant
+ * substring so the LLM doesn't miss it inside heavy recap text.
+ */
+export function extractDirectiveHint(stripped: string): string {
+  if (!stripped) return "";
+  const sentences = stripped
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const directives: string[] = [];
+  for (const s of sentences) {
+    const lower = s.toLowerCase();
+    const startsImperative =
+      /^(please\b|now\s+|go\s+|just\s+|i\s+want\s+you\s+to\b|i\s+want\s+to\b|can\s+you\b|could\s+you\b|would\s+you\b|let'?s\b|let\s+me\b)/i.test(s) ||
+      /^(create|make|fix|update|remove|delete|add|change|edit|write|build|run|check|test|deploy|implement|review|continue|start|stop|push|pull|merge|read|show|find|search|investigate|verify|generate|land|ship|enable|disable|toggle|replace|patch|undo|redo|retry|restart|launch|spawn|use|ignore|skip|give|provide|tell|explain|describe|clarify|consider|ensure)\b/i.test(s);
+    if (startsImperative && DIRECTIVE_VERB_RE.test(lower)) {
+      directives.push(s);
+    }
+  }
+  if (directives.length === 0) return "";
+  const picked = directives[directives.length - 1];
+  return picked.length > 240 ? picked.slice(0, 240).trim() + "..." : picked;
+}

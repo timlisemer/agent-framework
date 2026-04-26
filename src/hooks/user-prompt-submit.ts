@@ -23,7 +23,7 @@ import {
   classifyBlockAllTools,
   decideNextWindowSize,
 } from "../utils/prediction-types.js";
-import { preClassifyMood } from "../utils/sentiment-prefilter.js";
+import { preClassifyMood, extractDirectiveHint } from "../utils/sentiment-prefilter.js";
 
 /**
  * UserPromptSubmit Hook
@@ -98,6 +98,28 @@ async function main() {
         `  interruptCount: ${moodPrefilter.interruptCount}\n\n`
       : "";
 
+  // DIRECTIVE HINT: regex-extracted last imperative sentence from the stripped
+  // user text. Surfaced to SENTIMENT_AGENT so heavy recap/quoted prose does not
+  // bury the actual ask. The LLM remains primary for INTENT quality - this
+  // is a hint, not an override.
+  const directiveHint = extractDirectiveHint(stripped);
+  const directiveHintSection = directiveHint
+    ? `DIRECTIVE HINT (regex pre-extractor — last imperative sentence in stripped LATEST; the user's directive should be reflected in INTENT):\n  ${JSON.stringify(directiveHint)}\n\n`
+    : "";
+
+  // SENTIMENT_AGENT runs under a hard 12s wall-clock. Haiku latency scales
+  // with input size; long prompts routinely time out at >=1000 chars per
+  // section. Truncate both LATEST and RECENT to keep the call within budget.
+  // First N + last N preserves opening mood signals and trailing directive.
+  // The DIRECTIVE HINT above already surfaces the imperative sentence; this
+  // just keeps the LLM's combined input within latency budget.
+  const truncForSentiment = (s: string, cap: number, head: number, tail: number): string =>
+    s.length > cap
+      ? `${s.slice(0, head)}\n...[truncated for sentiment latency budget]...\n${s.slice(-tail)}`
+      : s;
+  const strippedForLLM = truncForSentiment(stripped, 400, 200, 200);
+  const recentForLLM = truncForSentiment(recent, 400, 200, 200);
+
   const sentimentPromise = runAgent(
     { ...SENTIMENT_AGENT, workingDir: projectDir },
     {
@@ -107,8 +129,9 @@ async function main() {
         `FRUSTRATION STREAK (informational -- TS applies promotion deterministically after you output): ${reloadedState.frustrationStreak ?? 0}\n` +
         `CURRENT WINDOW SIZE: ${reloadedState.currentWindowSize ?? 2}\n\n` +
         moodHintSection +
-        `RECENT USER MESSAGES (with [Tn] indices, T0 = newest):\n${recent}\n\n` +
-        `LATEST USER MESSAGE:\n${stripped}`,
+        directiveHintSection +
+        `RECENT USER MESSAGES (with [Tn] indices, T0 = newest):\n${recentForLLM}\n\n` +
+        `LATEST USER MESSAGE:\n${strippedForLLM}`,
     }
   );
   const timeoutPromise = new Promise<null>((resolve) =>

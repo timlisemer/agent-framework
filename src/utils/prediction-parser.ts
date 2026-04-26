@@ -77,6 +77,10 @@ export function parseSentimentOutput(raw: string): ParsedPrediction | null {
   if (!VALID_TRUSTS.has(trust)) return null;
 
   const intent = intentRaw.trim();
+  const intentLower = intent.toLowerCase();
+  if (intent.length === 0 || intentLower === "(none)" || intentLower === "unclear") {
+    return null;
+  }
   const blockedIntent =
     blockedIntentRaw.trim().toLowerCase() === "(none)" ? "" : blockedIntentRaw.trim();
 

@@ -1394,7 +1394,7 @@ OUTPUT (no preamble, no fences):
 ---TRUST---
 <low|normal|high>
 ---INTENT---
-<1-2 sentences: what the user wants now>
+<1-2 sentences: what the user wants now. REQUIRED, never blank, never "(none)", never "unclear". If the message contains a directive ("please do X", "fix Y", "create Z"), extract it. If LATEST is purely conversational with no directive, summarize what the user is communicating ("user is acknowledging X", "user is reporting bug Y").>
 ---BLOCKED-INTENT---
 <1-2 sentences: what the user explicitly does NOT want, or "(none)">
 ---EXPLICITLY-ALLOWED-TOOLS---
@@ -1453,6 +1453,14 @@ me again", "why are YOU still doing this"). If MOOD HINT is present and the
 LATEST message's content reflects direct hostility at the AI (not quoted),
 honor the hint.
 
+INTENT EXTRACTION OVER QUOTED CONTENT: even when most of LATEST is a
+quoted/recapped session, the live first-person tail ("please do X",
+"please create Y", "as you can see... fix Z") IS a directive from the live
+sender. Extract that directive into INTENT. The QUOTED/RECAP guidance
+above governs MOOD ONLY. It never excuses an empty INTENT. If the live
+tail is analytical commentary plus a directive ("...please create the
+scenario..."), the directive is the intent.
+
 CONTEXT-SWITCH=yes when LATEST is on a NEW unrelated topic (different file/module/feature, fresh todo, new question without back-reference). LATEST quoting/correcting prior context is NOT a switch.
 
 EXPLICITLY-ALLOWED / EXPLICITLY-BLOCKED:
@@ -1474,7 +1482,7 @@ CRITICAL: do not invent blocks the user did not say; ignore tone of pasted CLI o
   formatValidation: {
     validator: /---MOOD---[\s\S]*---TRUST---[\s\S]*---INTENT---[\s\S]*---BLOCKED-INTENT---[\s\S]*---EXPLICITLY-ALLOWED-TOOLS---[\s\S]*---EXPLICITLY-BLOCKED---[\s\S]*---CONTEXT-SWITCH---[\s\S]*---QUESTION-IS-STALLING---[\s\S]*---BLOCK-ALL-TOOLS---/,
     formatReminder:
-      "Reply with all 9 marker sections in order: ---MOOD---, ---TRUST---, ---INTENT---, ---BLOCKED-INTENT---, ---EXPLICITLY-ALLOWED-TOOLS---, ---EXPLICITLY-BLOCKED---, ---CONTEXT-SWITCH---, ---QUESTION-IS-STALLING---, ---BLOCK-ALL-TOOLS---",
+      "Reply with all 9 marker sections in order: ---MOOD---, ---TRUST---, ---INTENT---, ---BLOCKED-INTENT---, ---EXPLICITLY-ALLOWED-TOOLS---, ---EXPLICITLY-BLOCKED---, ---CONTEXT-SWITCH---, ---QUESTION-IS-STALLING---, ---BLOCK-ALL-TOOLS---. INTENT must contain a 1-2 sentence description of what the user wants. Never empty, never '(none)', never 'unclear'. Extract the user's live directive from LATEST USER MESSAGE.",
     fallbackOutput: `---MOOD---
 neutral
 ---TRUST---
