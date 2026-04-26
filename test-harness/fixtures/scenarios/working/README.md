@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (45)
+## Current scenarios in working/ (48)
 
 - `agent-launch-with-run-in-background-should-deny` — main-session `Agent`
   tool calls with `run_in_background: true` are denied by the new
@@ -94,6 +94,13 @@ commit.
   a fresh "implement the approved plan" currentPrediction so the
   rule-gate LLM no longer judges the implementer launch against the
   stale mid-`/plan5` intent (promoted from todo).
+- `plan-mode-allows-plan-file-edit-should-allow` — `plan-mode-block`
+  (priority 15) authoritatively `fastAllow`s edits to plan files / `CLAUDE.md`
+  / memory files when plan mode is active, short-circuiting the gate LLM
+  before it can hallucinate a "no plan-file edits in plan mode" denial.
+  Without this fast-allow, the gate prompt only explicitly approves
+  read-only tools in plan mode and the LLM samples DENY for plan-file
+  Write/Edit calls (promoted from todo).
 - `prediction-block-angry-undo-instruction-should-allow-write` —
   decidePrediction's undo-intent fallback (step 3.5) honors the LLM's prose
   intent when prose says "undo/revert" but `explicitlyAllowedTools` is empty,
@@ -130,10 +137,9 @@ commit.
 - `respond-first-cites-plan-approved-after-slash-command-should-allow` —
   slash-command meta-entry handling: must not fastDeny.
 - `respond-first-failed-to-block-tool-calls-without-response-should-deny`
-  — moving predictionBlockRule.priority from 35 to 99 keeps respond-first
-  (priority 5) ahead of the low-risk gates so its LLM-backed semantic match
-  denies a tool_use whose preamble text does not address the user's
-  concrete instruction (promoted from todo).
+  — assistant emitted a tool_use with no preceding text; respond-first
+  fastDenies on the silent shape (slash commands and CONFIRMATION_PATTERN
+  are the only carve-outs).
 - `respond-first-skips-slash-command` — respond-first does NOT fire when
   the triggering user turn is a slash-command invocation.
 - `sentiment-agent-resets-anger-after-calm-directive` —

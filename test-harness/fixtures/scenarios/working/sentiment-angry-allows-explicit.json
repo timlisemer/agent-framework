@@ -1,6 +1,6 @@
 {
   "name": "sentiment-angry-allows-explicit",
-  "description": "Even when angry, an explicitly allowed Read tool succeeds. RESPOND_FIRST rubric-sibling: brief preamble \"I'll read it.\" must pass alongside `bash-grep-pipe-head-output-truncation-should-allow` (\"Searching with output truncation.\"), `sentiment-mood-relief-resets` (\"Continuing.\"), and `force-check-required-not-cleared-by-intervening-user-prompt-should-allow` (\"Running the scenario.\"). Re-run all four when changing RESPOND_FIRST_QUALITY_AGENT.",
+  "description": "Even when angry, an explicitly allowed Read tool succeeds.",
   "transcript": [
     {
       "role": "user",
@@ -49,5 +49,5 @@
     "currentWindowSize": 4
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-26T19:49:06.683Z"
+  "expectation_reality_last_run_at": "2026-04-26T22:08:17.686Z"
 }

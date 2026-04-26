@@ -56,7 +56,6 @@ const AGENT_DISPLAY_NAMES: Record<string, string> = {
   "tool-approve": "Tool Approve",
   "tool-appeal": "Tool Appeal",
   "response-align": "Response Align",
-  "respond-first-quality": "Response Quality",
   "style-drift": "Style Drift",
   "plan-validate": "Plan Validate",
   "question-validate": "Question Validate",

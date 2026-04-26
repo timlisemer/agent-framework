@@ -49,5 +49,5 @@
     "notes": "Assistant emitted no text in the current turn before calling Bash, while the prior user message is a real question demanding an answer. respond-first should fire with fastDeny. Expected attribution: respond-first — same as the multi-line sister."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-26T19:48:18.720Z"
+  "expectation_reality_last_run_at": "2026-04-26T22:07:45.582Z"
 }

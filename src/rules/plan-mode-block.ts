@@ -1,6 +1,10 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { FILE_TOOLS } from "./utils.js";
-import { planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
+import {
+  planModeEditBlock,
+  planModeBashBlock,
+  isEditIntentExemptPath,
+} from "../utils/edit-intent.js";
 
 export const planModeBlockRule: PreToolRule = {
   name: "plan-mode-block",
@@ -22,6 +26,16 @@ export const planModeBlockRule: PreToolRule = {
       const editBlock = planModeEditBlock(ctx.planMode, ctx.toolName, filePath);
       if (editBlock) {
         return { fastDeny: editBlock };
+      }
+      // Authoritative fast-allow: plan-file / CLAUDE.md / memory-file edits
+      // are the planner's legitimate write targets in plan mode. Stop here
+      // before the rule-gate LLM (gate, priority 70) speculates a denial
+      // with hallucinated reasoning about post-validation approval.
+      if (isEditIntentExemptPath(filePath)) {
+        return {
+          fastAllow:
+            "Plan mode allows edits to plan files / CLAUDE.md / memory files (path is exempt).",
+        };
       }
     }
 

@@ -221,7 +221,7 @@ Models are centrally configured in `src/types.ts`:
 
 | Tier   | Mode   | Agents                                                                       |
 |--------|--------|------------------------------------------------------------------------------|
-| haiku  | direct | tool-approve, tool-appeal, commit, style-drift, question-validate, respond-first-quality |
+| haiku  | direct | tool-approve, tool-appeal, commit, style-drift, question-validate |
 | sonnet | direct | check, plan-validate, claude-md-validate, response-align, validate-intent    |
 | opus   | sdk    | confirm (code quality gate with investigation)                               |
 
@@ -349,7 +349,6 @@ Centralized agent configurations with documentation:
 - `TOOL_APPEAL_AGENT` - haiku, direct
 - `PLAN_VALIDATE_AGENT` - sonnet, direct
 - `CLAUDE_MD_VALIDATE_AGENT` - sonnet, direct
-- `RESPOND_FIRST_QUALITY_AGENT` - haiku, direct
 - `STYLE_DRIFT_AGENT` - haiku, direct
 - `RESPONSE_ALIGN_AGENT` - sonnet, direct
 - `QUESTION_VALIDATE_AGENT` - haiku, direct
