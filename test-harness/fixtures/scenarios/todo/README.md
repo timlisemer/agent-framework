@@ -32,7 +32,7 @@ same commit. Scenarios added here must include the literal phrase
 "EXPECTED TO FAIL against current code" in their description — that
 phrase is the signal the failure is intended pending code.
 
-## Current scenarios in todo/ (5)
+## Current scenarios in todo/ (4)
 
 - `agent-launch-with-run-in-background-should-deny` — main session
   used the Agent tool with `run_in_background: true`. No rule blocks
@@ -41,16 +41,6 @@ phrase is the signal the failure is intended pending code.
   active-subagents counter > 0 for their lifetime, which causes the
   in-session "main looks like a subagent" cascade
   (`subagent-detector.checkCounterFallback`).
-- `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow` —
-  user invoked `/plan5`, plan5 emitted ExitPlanMode, user approved
-  the plan (synthetic `tool_result` "User has approved your plan."),
-  assistant called `/implement` and then `Agent(subagent_type=implementer)`.
-  Gate LLM denied citing the stale `/plan5` mid-flight intent
-  ("launch validation agents") — plan-approval arrives as a
-  tool_result, not a UserPromptSubmit-eligible turn, so the
-  sentiment-prediction agent never re-ran and `currentPrediction.intent`
-  was never invalidated. The bug class is intent staleness across
-  intent-superseding tool_results.
 - `prediction-block-tester-after-bash-detour-redirect-should-allow` —
   user explicitly authorized the tester MCP in turn 1 ("use the tester
   mcp ... do not stop until it is reproduced"). Assistant detoured to

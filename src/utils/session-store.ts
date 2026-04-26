@@ -77,6 +77,14 @@ export interface SessionState {
    * Written by drift-detect rule on allow-path increments and level-ups.
    */
   driftState: Record<string, DriftTargetState>;
+  /**
+   * tool_use_id of the most recently processed plan-approval tool_result.
+   * Set when the PreToolUse plan-approval detector synthesizes a fresh
+   * prediction; reset to null on UserPromptSubmit (since the next user
+   * turn supersedes any prior approval). Prevents the detector from
+   * re-firing on every subsequent PreToolUse during the same approval.
+   */
+  lastProcessedPlanApprovalToolUseId: string | null;
 }
 
 /**
@@ -98,6 +106,7 @@ export function sessionStateDefaults(): SessionState {
     frustrationStreak: 0,
     currentWindowSize: 2,
     driftState: {},
+    lastProcessedPlanApprovalToolUseId: null,
   };
 }
 

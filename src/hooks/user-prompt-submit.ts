@@ -209,6 +209,7 @@ async function main() {
           timestamp: Date.now(),
           hasExplicitOverride,
         },
+        lastProcessedPlanApprovalToolUseId: null,
       }));
     } else {
       // Parse failed AFTER runAgent's format-validation retry chain ran (or

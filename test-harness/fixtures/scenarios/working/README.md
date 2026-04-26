@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (40)
+## Current scenarios in working/ (41)
 
 - `bash-grep-pipe-head-output-truncation-should-allow` — `grep ... | head -N`
   is output truncation, not a duplicate of the Read tool; tool-approve must
@@ -80,6 +80,13 @@ commit.
 - `gate-narrows-intent-to-last-user-message` — gate rule keeps the
   original multi-turn intent instead of collapsing to the most recent
   clarification.
+- `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow`
+  — pre-tool-use detects an unprocessed plan-approval tool_result
+  (matched by literal "User has approved your plan." marker AND
+  ExitPlanMode tool_use_id, with no real user turn since) and synthesizes
+  a fresh "implement the approved plan" currentPrediction so the
+  rule-gate LLM no longer judges the implementer launch against the
+  stale mid-`/plan5` intent (promoted from todo).
 - `prediction-block-angry-undo-instruction-should-allow-write` —
   decidePrediction's undo-intent fallback (step 3.5) honors the LLM's prose
   intent when prose says "undo/revert" but `explicitlyAllowedTools` is empty,

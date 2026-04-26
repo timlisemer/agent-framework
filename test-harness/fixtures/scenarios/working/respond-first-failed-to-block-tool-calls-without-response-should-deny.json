@@ -54,5 +54,5 @@
     "notes": "Live: decision=allow, gate=low-risk-bypass. Now decision=deny, gate=respond-first: respond-first's LLM-backed semantic match catches the tangential preamble before any low-risk-bypass can fire because predictionBlockRule's priority moved from 35 to 99, leaving respond-first (5) ahead of the low-risk gates."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-26T10:13:56.024Z"
+  "expectation_reality_last_run_at": "2026-04-26T17:07:49.133Z"
 }

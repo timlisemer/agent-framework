@@ -25,6 +25,10 @@ import {
   PLAN_VALIDATE_COUNTS,
 } from "../utils/transcript-presets.js";
 import { getPlanModeContext, isPlanModeFromInput, isPlanModeActive } from "../utils/plan-mode-detector.js";
+import {
+  findUnprocessedPlanApproval,
+  synthesizePostApprovalPrediction,
+} from "../utils/plan-approval-detector.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { logFastPathApproval } from "../utils/logger.js";
 import {
@@ -126,6 +130,45 @@ async function main() {
     if (freshTurn) {
       await stateManager.update((s) => ({ ...s, forceCheckPending: false }));
       state = { ...state, forceCheckPending: false };
+    }
+  }
+
+  // Plan-approval intent supersession. The synthetic "User has approved your
+  // plan." tool_result is wrapped in a user-role entry but is NOT a
+  // UserPromptSubmit-eligible turn, so SENTIMENT_AGENT never re-runs and
+  // currentPrediction.intent stays anchored to the pre-approval task.
+  // Detect at PreToolUse entry, synthesize a fresh prediction, clear gate
+  // reasoning so prior rule decisions (made under the stale intent) do not
+  // replay. The sentinel `lastProcessedPlanApprovalToolUseId` ensures the
+  // synthesis fires at most once per approval; the next UserPromptSubmit
+  // resets it to null so future approvals re-fire.
+  if (!subagent) {
+    const approval = await findUnprocessedPlanApproval(input.transcript_path)
+      .catch(() => null);
+    if (approval && approval.toolUseId !== state.lastProcessedPlanApprovalToolUseId) {
+      const fresh = synthesizePostApprovalPrediction(approval.approvalContent);
+      await stateManager.update((s) => ({
+        ...s,
+        currentPrediction: fresh,
+        lastProcessedPlanApprovalToolUseId: approval.toolUseId,
+        frustrationStreak: 0,
+        // Reset edit-intent bookkeeping the same way user-prompt-submit does
+        // on a fresh prediction. We deliberately set currentEditIntent to
+        // null (not true): the prior session's ExitPlanMode-allow path may
+        // have set it true, but the gate LLM will re-evaluate edits against
+        // the NEW synthesized intent. The edit-intent rule only fires on
+        // `=== false`, so null cleanly skips it; null vs true is a minor
+        // signal-strength downgrade in the gate context, not a correctness
+        // issue. Choosing null over true keeps the system honest about what
+        // it actually knows post-approval.
+        previousEditIntent: s.currentEditIntent ?? null,
+        currentEditIntent: null,
+        editIntentTimestamp: Date.now(),
+        editIntentOverturnCount: 0,
+        respondFirstChecked: false,
+      }));
+      state = await stateManager.load();
+      await clearGateReasoning(sessionDir);
     }
   }
 
