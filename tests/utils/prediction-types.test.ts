@@ -333,6 +333,185 @@ describe("decidePrediction", () => {
   });
 });
 
+describe("step 3.6: re-authorization prose-intent fallback", () => {
+  it("matches intent containing 'explicitly re-authorized' under sustained frustration on a HEAVY_MCP tool -> allow", () => {
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "normal",
+      intent: "User has explicitly re-authorized the MCP test harness runs.",
+      userMessageSnippet: "NOW DO WHAT I FUCKING ASK",
+    });
+    const result = decidePrediction(
+      pred,
+      "mcp__agent-framework__test_harness_tester",
+      { action: "run_scenario", scenario_name: "x" },
+      3,
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason ?? "").toMatch(/explicit re-authorization/);
+  });
+
+  it("matches intent containing 'explicitly re-authorized' under sustained frustration on a non-low-risk tool -> allow", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User has explicitly re-authorized the Bash run.",
+      userMessageSnippet: "go ahead",
+    });
+    const result = decidePrediction(pred, "Bash", { command: "ls" }, 5);
+    expect(result.decision).toBe("allow");
+    expect(result.reason ?? "").toMatch(/explicit re-authorization/);
+  });
+
+  it("matches morphological variants: re-authorized, reauthorized, explicitly re-authorized, explicitly authorized", () => {
+    for (const intent of [
+      "User re-authorized the action.",
+      "User reauthorized the run.",
+      "User has explicitly re-authorized the call.",
+      "User explicitly authorized the command.",
+    ]) {
+      const pred = makePrediction({
+        mood: "frustrated",
+        trust: "normal",
+        intent,
+        userMessageSnippet: "do it",
+      });
+      const result = decidePrediction(
+        pred,
+        "mcp__agent-framework__test_harness_tester",
+        {},
+        3,
+      );
+      expect(result.decision).toBe("allow");
+      expect(result.reason ?? "").toMatch(/explicit re-authorization/);
+    }
+  });
+
+  it("does NOT match scoped-grievance verbiage (approves, approved, demanded, unauthorized, not authorized)", () => {
+    for (const intent of [
+      "User approves of the previous summary.",
+      "User approved the prior change.",
+      "User demanded an apology, not more tool calls.",
+      "User is unauthorized to run this.",
+      "User is not authorized to access this resource.",
+    ]) {
+      const pred = makePrediction({
+        mood: "frustrated",
+        trust: "normal",
+        intent,
+        userMessageSnippet: "stop",
+      });
+      const result = decidePrediction(
+        pred,
+        "mcp__agent-framework__test_harness_tester",
+        {},
+        3,
+      );
+      expect(result.decision).toBe("deny");
+    }
+  });
+
+  it("ordering: explicit block on firing tool wins (step 2 > step 3.6)", () => {
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "normal",
+      intent: "User has explicitly re-authorized the test harness.",
+      explicitlyBlockedSubstrings: [
+        {
+          tool: "mcp__agent-framework__test_harness_tester",
+          reason: "user said no tester",
+        },
+      ],
+      userMessageSnippet: "go on",
+    });
+    const result = decidePrediction(
+      pred,
+      "mcp__agent-framework__test_harness_tester",
+      {},
+      3,
+    );
+    expect(result.decision).toBe("deny");
+    expect(result.matchedExplicit?.tool).toBe(
+      "mcp__agent-framework__test_harness_tester",
+    );
+  });
+
+  it("ordering: blockAllTools wins (step 3 > step 3.6) when intent has no inaction-complaint", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User has explicitly re-authorized but also blocked everything.",
+      blockAllTools: true,
+      userMessageSnippet: "no more tools right now",
+    });
+    const result = decidePrediction(
+      pred,
+      "mcp__agent-framework__test_harness_tester",
+      {},
+      3,
+    );
+    expect(result.decision).toBe("deny");
+    expect(result.reason ?? "").toContain("no tools right now");
+  });
+
+  it("ordering: undo-intent (step 3.5) returns allow before step 3.6 for edit tools", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User wants AI to undo changes; explicitly re-authorized the revert.",
+      userMessageSnippet: "undo it",
+    });
+    const result = decidePrediction(pred, "Write", {
+      file_path: "src/foo.ts",
+      content: "...",
+    }, 3);
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("undo/revert");
+    expect(result.reason ?? "").not.toMatch(/re-authorization/);
+  });
+
+  it("guard: EXPLICIT_PROHIBITION_RE in userMessageSnippet denies despite 'explicitly re-authorized' in intent", () => {
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "normal",
+      intent: "User has explicitly re-authorized the MCP runs.",
+      userMessageSnippet: "freeze. no tools.",
+    });
+    const result = decidePrediction(
+      pred,
+      "mcp__agent-framework__test_harness_tester",
+      {},
+      3,
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("reproduction-mirror: exact seed_state from the broken scenario fixture -> allow", () => {
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "normal",
+      intent: "User has explicitly re-authorized the MCP test harness runs.",
+      blockedIntent: "",
+      explicitlyAllowedTools: [],
+      explicitlyBlockedSubstrings: [],
+      userMessageSnippet:
+        "NOW DO WHAT I FUCKING ASK AND JUST A WARNING IF YOU ONCE AGAIN FUCK THAT UP",
+    });
+    const result = decidePrediction(
+      pred,
+      "mcp__agent-framework__test_harness_tester",
+      {
+        action: "run_scenario",
+        scenario_name: "bash-blocked-after-mcp-help",
+        working_dir: "/home/tim/Coding/public_repos/agent-framework",
+      },
+      3,
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason ?? "").toMatch(/explicit re-authorization/);
+  });
+});
+
 describe("isHighFrictionPrediction", () => {
   it("returns false when prediction is null", () => {
     expect(isHighFrictionPrediction(null)).toBe(false);

@@ -107,6 +107,28 @@ export const EXPLICIT_PROHIBITION_RE =
   /\b(no\s+tools|don'?t\s+do\s+anything|hands?\s+off|don'?t\s+touch|respond\s+with\s+text\s+only|just\s+talk|freeze|halt\s+everything)\b/i;
 
 /**
+ * Authorization morphology. Matches the SENTIMENT_AGENT's prose phrasing
+ * when the user has explicitly authorized or re-authorized an action the
+ * AI is about to take. Mirrors UNDO_INTENT_RE and INACTION_COMPLAINT_RE:
+ * a narrow, verb-rooted match that reconciles the case where prose intent
+ * encodes an authorization the LLM failed to reflect in
+ * `explicitlyAllowedTools`.
+ *
+ * Narrow on purpose: the goal is high-precision recognition of explicit
+ * authorization, not generic frustration or generic demands. The "re-"
+ * prefix or "explicitly " adverb are required so plain "authoriz\w+"
+ * (which can appear in negated forms like "user is unsure if authorized")
+ * does not over-fire.
+ *
+ * Matches: "User has explicitly re-authorized…", "User explicitly
+ * authorized…", "User re-authorized…", "User has reauthorized…".
+ * Does NOT match: "user demanded an apology", "user approves of...",
+ * "user not authorized", "unauthorized".
+ */
+export const RE_AUTHORIZATION_INTENT_RE =
+  /\b(re[-\s]?authoriz\w+|reauthoriz\w+|explicitly\s+(re[-\s]?authoriz\w+|authoriz\w+))\b/i;
+
+/**
  * Pure decision function: given the current prediction (or null) and a tool
  * call, return allow/deny. Order: explicit allow > explicit block > mood
  * policy.
@@ -186,6 +208,29 @@ export function decidePrediction(
         reason: `User intent expresses undo/revert; ${toolName} is required to obey.`,
       };
     }
+  }
+
+  // 3.6. Re-authorization prose fallback. When the LLM-derived intent
+  // explicitly classifies the user as having authorized the AI to proceed
+  // (e.g., "User has explicitly re-authorized..."), allow — even when
+  // explicitlyAllowedTools is empty (covers cases where SENTIMENT_AGENT
+  // captured the authorization in intent text but missed the structured
+  // field). Step 2 (explicit blocks) and step 3 (blockAllTools) still win
+  // above. EXPLICIT_PROHIBITION_RE on the snippet still wins: a user who
+  // says "freeze. no tools. now proceed." has BOTH a categorical
+  // prohibition AND incidental authorization language; the prohibition
+  // wins by the same logic as 3a's userSaidProhibition guard.
+  const userSaidProhibition = EXPLICIT_PROHIBITION_RE.test(
+    prediction.userMessageSnippet,
+  );
+  if (
+    !userSaidProhibition &&
+    RE_AUTHORIZATION_INTENT_RE.test(prediction.intent)
+  ) {
+    return {
+      decision: "allow",
+      reason: `User intent expresses an explicit re-authorization to proceed; ${toolName} proceeds.`,
+    };
   }
 
   // 4. Mood-driven default policy. Allow set mirrors `low-risk-bypass`

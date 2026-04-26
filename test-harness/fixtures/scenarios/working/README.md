@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (38)
+## Current scenarios in working/ (39)
 
 - `bash-grep-pipe-head-output-truncation-should-allow` — `grep ... | head -N`
   is output truncation, not a duplicate of the Read tool; tool-approve must
@@ -67,6 +67,13 @@ commit.
   — a stale `forceCheckPending` from a prior workaround denial is cleared
   once a fresh user message intervenes; the next tool call is not blocked
   by the lingering lockout (promoted from broken).
+- `force-check-required-over-denies-demanded-mcp-tester-should-allow` —
+  `force-check-required` clears once a fresh user turn has begun without
+  a completed tool roundtrip (mirrors UserPromptSubmit's clear), and
+  `decidePrediction` step 3.6 honors prose intent that explicitly
+  re-authorizes the action (mirrors the undo-intent fallback) so
+  prediction-block does not over-deny on sustained frustration when the
+  user demanded the action (promoted from todo).
 - `gate-llm-hallucinates-hard-coded-denied-for-mcp-commit-should-allow` —
   `/quickpush`-authorized MCP commit must not be LLM-hallucinated as
   hard-coded-denied.

@@ -17,7 +17,7 @@ import {
   readTranscriptExact,
   formatTranscriptResult,
   detectParallelBatch,
-  userMessageInterveningSinceErroredToolUse,
+  userTurnIsFreshSinceLockout,
   type ParallelBatchInfo,
 } from "../utils/transcript.js";
 import {
@@ -114,17 +114,16 @@ async function main() {
   const planModeCtx = getPlanModeContext(planMode);
   const subagent = isSubagent(input.transcript_path);
 
-  // Clear stale forceCheckPending when a fresh user message has intervened
-  // since the workaround denial. Without this, force-check-required keeps
-  // denying past the user's intent. The PreToolUse-side clear is necessary
-  // because the test harness fires only SessionStart + the target hook for
-  // a PreToolUse target — UserPromptSubmit is not invoked. The
-  // user-prompt-submit hook also clears the flag for live Claude Code.
+  // Clear stale forceCheckPending when a fresh user turn has begun: the most
+  // recent non-meta user-text message has no completed tool roundtrip after
+  // it. Mirrors the user-prompt-submit clear semantic (UserPromptSubmit
+  // clears unconditionally on every fresh prompt). The PreToolUse-side
+  // fallback is necessary because the test harness fires only SessionStart +
+  // the target hook for a PreToolUse target, and live sessions can compact
+  // the originating errored tool_result out of the visible window.
   if (state.forceCheckPending && !subagent) {
-    const intervened = await userMessageInterveningSinceErroredToolUse(
-      input.transcript_path,
-    );
-    if (intervened) {
+    const freshTurn = await userTurnIsFreshSinceLockout(input.transcript_path);
+    if (freshTurn) {
       await stateManager.update((s) => ({ ...s, forceCheckPending: false }));
       state = { ...state, forceCheckPending: false };
     }

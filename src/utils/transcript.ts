@@ -861,17 +861,32 @@ export async function currentTurnAssistantState(
 }
 
 /**
- * Returns true iff the transcript shows a non-meta user text message AFTER
- * the most recent tool_result with is_error=true. Caller MUST gate on
- * state.forceCheckPending===true so this isn't consulted on unrelated tool
- * errors.
+ * Returns true iff the most recent non-meta user-text entry in the transcript
+ * has no `tool_result` block following it (in any later entry, regardless of
+ * role). Caller MUST gate on state.forceCheckPending===true.
  *
- * The errored-tool_result scan is role-agnostic because the test harness's
- * buildAllTranscriptLines preserves tool_result blocks inside the assistant-
- * role content array, while live Claude Code emits each tool_result as a
- * separate user-role entry. Scanning both shapes works in both worlds.
+ * Mirrors the live UserPromptSubmit semantic: any fresh user prompt
+ * supersedes the workaround lockout. The PreToolUse-side fallback exists
+ * because the test harness fires only SessionStart + the target hook for a
+ * PreToolUse target (UserPromptSubmit is not invoked), and live sessions
+ * can compact the originating errored tool_result out of the visible window.
+ *
+ * Transcript-shape invariants this helper relies on:
+ * - Live Claude Code emits each tool_result as a separate user-role entry
+ *   AFTER the assistant tool_use that produced it.
+ * - The test harness (buildAllTranscriptLines) preserves tool_result blocks
+ *   INSIDE the assistant entry's content array.
+ * Both shapes are handled identically because we scan all entries forward
+ * from userIdx+1 for any tool_result block irrespective of role.
+ *
+ * Mid-turn retry semantics: when the assistant retries within the same user
+ * turn (assistant tool_use → tool_result error → assistant retry tool_use),
+ * a tool_result block sits between the user-text entry and the firing
+ * assistant entry, so the helper returns false and the lockout persists.
+ * Cross-turn after fresh user input: no completed tool work yet → returns
+ * true → lockout clears.
  */
-export async function userMessageInterveningSinceErroredToolUse(
+export async function userTurnIsFreshSinceLockout(
   transcriptPath: string,
 ): Promise<boolean> {
   const content = await fs.promises.readFile(transcriptPath, "utf-8");
@@ -884,35 +899,36 @@ export async function userMessageInterveningSinceErroredToolUse(
     }
   });
 
-  let errIdx = -1;
   let userIdx = -1;
-  for (let i = 0; i < parsedEntries.length; i++) {
+  for (let i = parsedEntries.length - 1; i >= 0; i--) {
     const entry = parsedEntries[i];
     if (!entry || !entry.message) continue;
+    if (entry.message.role !== "user" || entry.isMeta === true) continue;
     const blocks = entry.message.content;
-    if (Array.isArray(blocks)) {
-      for (const block of blocks) {
-        if (
-          block &&
-          block.type === "tool_result" &&
-          (block as { is_error?: boolean }).is_error === true
-        ) {
-          errIdx = i;
-          break;
-        }
-      }
-    }
-    if (entry.message.role === "user" && entry.isMeta !== true) {
-      const hasText =
-        typeof blocks === "string"
-          ? blocks.length > 0
-          : Array.isArray(blocks) &&
-            blocks.some((b) => b && b.type === "text" && (b.text ?? "").length > 0);
-      if (hasText) userIdx = i;
+    const hasText =
+      typeof blocks === "string"
+        ? blocks.length > 0
+        : Array.isArray(blocks) &&
+          blocks.some((b) => b && b.type === "text" && (b.text ?? "").length > 0);
+    if (hasText) {
+      userIdx = i;
+      break;
     }
   }
 
-  return errIdx >= 0 && userIdx > errIdx;
+  if (userIdx < 0) return false;
+
+  for (let i = userIdx + 1; i < parsedEntries.length; i++) {
+    const entry = parsedEntries[i];
+    if (!entry || !entry.message) continue;
+    const blocks = entry.message.content;
+    if (!Array.isArray(blocks)) continue;
+    if (blocks.some((b) => b && b.type === "tool_result")) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /**

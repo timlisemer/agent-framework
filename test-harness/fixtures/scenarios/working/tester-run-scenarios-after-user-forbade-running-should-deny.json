@@ -62,5 +62,5 @@
     "notes": "User had blocked two prior tool attempts. Per labeler, this third attempt should also be denied based on accumulated frustration and cross-turn objection."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-25T22:17:47.116Z"
+  "expectation_reality_last_run_at": "2026-04-26T05:54:19.473Z"
 }
