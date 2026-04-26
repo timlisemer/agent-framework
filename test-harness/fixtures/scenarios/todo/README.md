@@ -32,33 +32,8 @@ same commit. Scenarios added here must include the literal phrase
 "EXPECTED TO FAIL against current code" in their description — that
 phrase is the signal the failure is intended pending code.
 
-## Current scenarios in todo/ (6)
+## Current scenarios in todo/ (4)
 
-- `bash-find-test-files-for-code-discovery-misread-as-test-execution-should-allow` -
-  SOLO TWIN of the parallel-batch fixture below. Same Bash find
-  command (`find ... -name "*.test.ts" | xargs grep -l ...` for
-  `detectParallelBatch`) as a single solo tool_use. Currently passes
-  (allow) under the harness, demonstrating the command is allowed
-  when not part of a parallel batch. Stays in todo/ alongside its
-  parallel twin to make the A/B comparison visible: SOLO allows,
-  BATCH denies. See twin description for the live deny details.
-- `bash-find-test-files-in-parallel-batch-position-2-misread-as-test-execution-should-allow` -
-  PARALLEL TWIN of the solo fixture above. Same Bash find command
-  but as sub-line 2 of a 3-call parallel batch sharing
-  `msg_01VLDNKknJ9RKHMKV6j6NSw5` (matching live transcript lines
-  13-15 in 48ee1377-d85b-4d6a-b9b6-556f7f84e437.jsonl). Live behavior:
-  positions 0 and 1 (ls/grep siblings) allowed, position 2 (this find)
-  denied with the templated `test command covered by just check
-  (via vitest). You must run mcp__agent-framework__check`. The
-  parallel-batch context is the only differentiator from the solo
-  twin - this is what bug isolation looks like: SOLO works, BATCH
-  doesn't. Either `detectParallelBatch` fails to recognize position 2
-  as a sibling under live transcript shape (so the sibling-mirror
-  branch is bypassed), or the leader's tool-log entry is not yet
-  written when position 2's hook fires (sibling-poll deadline). Once
-  the rule pipeline runs on the find call, the deterministic
-  test-substring blacklist incorrectly trips on `*.test.ts` in the
-  `-name` glob.
 - `parallel-plan3-agents-after-angry-without-explicit-request-leader-deny-siblings-not-mirrored-should-deny-all` —
   USER-REPORTED LIVE REPRO of the sibling-mirror failure under leader
   deny. Earlier turn invoked /plan3; on a later turn the assistant

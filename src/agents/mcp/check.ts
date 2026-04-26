@@ -174,10 +174,14 @@ export function applyStatusOverride(output: string): string {
   // Defensive floor: if ## Errors section has non-empty body but the count
   // says 0, bump to 1. JavaScript regex does not support \Z, so we use
   // alternation: next "## " heading OR end-of-string.
+  // The literal sentinel `(none)` is treated as empty -- the LLM writes it
+  // when it has nothing to report; counting it as "non-empty content" would
+  // flip Status to FAIL on every clean run.
   const errSecMatch = output.match(/## Errors\s*\n([\s\S]*?)(?:\n## |$)/);
   if (errSecMatch) {
     const body = errSecMatch[1].trim();
-    if (body.length > 0 && errorCount === 0) {
+    const isEmpty = body.length === 0 || body === "(none)";
+    if (!isEmpty && errorCount === 0) {
       errorCount = 1;
       output = output.replace(/(- Errors:\s*)\d+/i, `$1${errorCount}`);
     }

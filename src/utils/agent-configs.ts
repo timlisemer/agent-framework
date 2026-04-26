@@ -78,7 +78,7 @@ export const CHECK_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'check',
   tier: MODEL_TIERS.SONNET,
   mode: 'direct',
-  maxTokens: 2000,
+  maxTokens: 4000,
   systemPrompt: `You are a check tool runner. Your ONLY job is to summarize check results.
 
 Output EXACTLY this format:
