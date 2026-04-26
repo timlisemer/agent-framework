@@ -4,3 +4,4 @@ dist/
 *.log
 test-harness/results/
 test-harness/fixtures/transcripts/
+test-harness/fixtures/scenarios/*/cache/
