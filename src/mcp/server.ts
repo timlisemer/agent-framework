@@ -223,8 +223,13 @@ server.registerTool(
 
       const result = await runCommitAgent(repo.path, prefs.tier, extraContext, args.transcript_path);
 
-      const commitFailed = result.includes("DECLINED") || result.includes("ERROR") || result.includes("FAILED");
-      if (!commitFailed) {
+      // runCommitAgent emits "HASH: <sha>" on its last line only on successful
+      // commits (commit.ts:166). All failure paths omit it. Substring-matching
+      // the entire output is unsafe because confirm verdicts and commit
+      // messages can legitimately contain the words ERROR / FAILED / DECLINED
+      // in their analysis text.
+      const commitSucceeded = /\nHASH: [0-9a-f]+$/.test(result);
+      if (commitSucceeded) {
         committedRepos.push(repo);
       }
 

@@ -351,30 +351,39 @@ export async function runAgent(
     }
 
     // Format validation (if configured)
-    if (config.formatValidation && success) {
+    // Run validation even when success===false from a sentinel error so that
+    // [SDK ERROR] / [DIRECT ERROR] outputs are translated into the agent's
+    // configured fallbackOutput (e.g. confirm's "## Verdict\nDECLINED:").
+    // Without this, sentinel errors leak upward as if they were valid verdicts.
+    if (config.formatValidation) {
       const { validator, formatReminder, fallbackOutput } = config.formatValidation;
 
       if (!validator.test(result.text)) {
-        // Tiered retry: try progressively cheaper models
-        // opus → sonnet → haiku → haiku (final attempt)
-        const client = getAnthropicClient();
-        const retryTiers = getRetryTiers(config.tier);
+        // Skip the retry-tier loop when the input is already a sentinel —
+        // a cheaper model cannot reformat "no output received" into a verdict.
+        const isSentinelError =
+          result.text.startsWith("[DIRECT ERROR]") ||
+          result.text.startsWith("[SDK ERROR]");
 
-        for (const retryTier of retryTiers) {
-          const retryResponse = await client.messages.create({
-            model: getModelId(retryTier),
-            max_tokens: 500,
-            messages: [{
-              role: "user",
-              content: `Invalid format. ${formatReminder}\n\nOriginal output:\n${result.text.slice(0, 2000)}`,
-            }],
-          });
-          result.text = extractTextFromResponse(retryResponse);
+        if (!isSentinelError) {
+          const client = getAnthropicClient();
+          const retryTiers = getRetryTiers(config.tier);
 
-          if (validator.test(result.text)) break;
+          for (const retryTier of retryTiers) {
+            const retryResponse = await client.messages.create({
+              model: getModelId(retryTier),
+              max_tokens: 500,
+              messages: [{
+                role: "user",
+                content: `Invalid format. ${formatReminder}\n\nOriginal output:\n${result.text.slice(0, 2000)}`,
+              }],
+            });
+            result.text = extractTextFromResponse(retryResponse);
+
+            if (validator.test(result.text)) break;
+          }
         }
 
-        // Check if all retries failed
         if (!validator.test(result.text)) {
           result.text = fallbackOutput.replace("$RAW", result.text.slice(0, 500));
           success = false;

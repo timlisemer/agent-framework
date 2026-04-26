@@ -335,6 +335,8 @@ Agents can define `formatValidation` in their config to ensure LLM output matche
 - **Direct mode**: Retries with format reminder, falls back if still invalid
 - **SDK mode**: Returns fallback immediately (cannot retry multi-turn)
 
+When the underlying call returns an `[SDK ERROR]` / `[DIRECT ERROR]` sentinel, the retry-tier loop is skipped and the agent's `fallbackOutput` is applied directly so callers receive a structured verdict (e.g. `DECLINED`) instead of the raw sentinel.
+
 Validation rules are defined alongside system prompts in `agent-configs.ts`.
 
 ### `agent-configs.ts`
