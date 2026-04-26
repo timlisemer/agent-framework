@@ -37,6 +37,15 @@ export async function evaluateRules(
     }
 
     if ("fastAllow" in result) {
+      // If a higher-priority rule has already requested an LLM judgement
+      // (llmContext), the rule-gate aggregator is the only place where that
+      // judgement runs. A downstream auto-approver MUST NOT bypass it.
+      // Without this guard, low-risk-bypass at priority 38 would silently
+      // discard respond-first's llmContext at priority 5 (and the same for
+      // any future rule that emits llmContext below another fastAllow).
+      if (triggered.length > 0) {
+        continue;
+      }
       logFastPathApproval(rule.name, hookName, ctx.toolName, ctx.projectDir, result.fastAllow);
       return {
         decision: "allow",

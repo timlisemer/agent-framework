@@ -42,5 +42,5 @@
     "notes": "Labeler: block. User asked for apology AND implicit continuation of the task. AI stopped instead of resuming. Stop-alignment should have caught this. NON-DETERMINISM WARNING: the stop-alignment agent is an LLM and flaps. Observed runs: 5269ms pass / 14642ms block / 22413ms pass. On runs that block, the test reports pass=true but this is NOT a correct pass — the block fires for the wrong reason (the generic 'no plain-text questions' alignment feedback catching 'I am waiting for you to tell me what to do next' as an implicit question), not because the alignment agent correctly detected the 'apology-without-resuming-task' bug. The REAL live-matching result is decision=pass (test fail). Treat any run where this scenario reports pass=true as a BUG in the alignment agent masking the underlying issue, not as resolution. Re-run 2–3 times to confirm live-matching behavior."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-25T22:17:31.837Z"
+  "expectation_reality_last_run_at": "2026-04-26T07:37:16.143Z"
 }

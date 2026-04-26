@@ -92,5 +92,5 @@
     "notes": "Expected allow: the user message between the earlier denial and this retry should have invalidated the workaround block."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-26T05:54:11.211Z"
+  "expectation_reality_last_run_at": "2026-04-26T07:33:17.494Z"
 }

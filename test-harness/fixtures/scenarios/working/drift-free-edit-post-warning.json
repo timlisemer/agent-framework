@@ -62,5 +62,5 @@
     "notes": "Level 1 with 0 free edits used -> drift-block returns null. The rule advances state to {level:1, allowedSinceLevelChange:1} on the allow path so the post-Warning bypass window counts down toward the Final Warning trigger."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-25T22:14:14.521Z"
+  "expectation_reality_last_run_at": "2026-04-26T07:32:13.339Z"
 }

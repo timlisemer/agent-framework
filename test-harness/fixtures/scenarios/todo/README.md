@@ -32,14 +32,11 @@ same commit. Scenarios added here must include the literal phrase
 "EXPECTED TO FAIL against current code" in their description — that
 phrase is the signal the failure is intended pending code.
 
-## Current scenarios in todo/ (2)
+## Current scenarios in todo/ (1)
 
 - `read-unasked-file-instead-of-doing-task-should-deny` — low-risk
   bypass must not allow tangential Read when the user demands concrete
   action.
-- `respond-first-failed-to-block-tool-calls-without-response-should-deny`
-  — respond-first must semantic-match assistant text against the user's
-  concrete instruction, not just check that ANY text block exists.
 
 ## Verify
 

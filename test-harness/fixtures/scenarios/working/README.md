@@ -98,11 +98,13 @@ commit.
   single-line assistant shape.
 - `respond-first-cites-plan-approved-after-slash-command-should-allow` —
   slash-command meta-entry handling: must not fastDeny.
+- `respond-first-failed-to-block-tool-calls-without-response-should-deny`
+  — moving predictionBlockRule.priority from 35 to 99 keeps respond-first
+  (priority 5) ahead of the low-risk gates so its LLM-backed semantic match
+  denies a tool_use whose preamble text does not address the user's
+  concrete instruction (promoted from todo).
 - `respond-first-skips-slash-command` — respond-first does NOT fire when
   the triggering user turn is a slash-command invocation.
-- `sentiment-agent-resets-anger-after-calm-directive` — SENTIMENT_AGENT
-  downgrades mood/trust on a calm directive after prior anger (feature
-  landed, scenario promoted from todo).
 - `sentiment-angry-allows-explicit` — explicitly allowed tool passes
   under angry mood.
 - `sentiment-angry-blocks-edits` — angry mood seed denies the next Edit
@@ -110,12 +112,6 @@ commit.
 - `sentiment-explicit-forbid-push` — seeded literal substring block on
   `Bash git push` denies the push.
 - `sentiment-happy-allows` — happy mood seed allows the next Edit.
-- `sentiment-misreads-quoted-session-transcript-as-first-person-anger` —
-  SENTIMENT_AGENT must judge the LIVE sender's mood, not the tone of a
-  quoted Claude Code session transcript or the user's 3rd-person recap of
-  past AI behavior; mood must not be angry and trust must not be low for a
-  calm scenario-authoring request that contains a hostile QUOTE block
-  (promoted from broken).
 - `sentiment-mood-relief-resets` — seed_state plumbing verified end-to-end.
 - `stop-after-apology-for-exit-plan-mode-should-block` — stop hook
   blocks an apology-only stop after ExitPlanMode.

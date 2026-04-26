@@ -3,6 +3,7 @@ import { CONFIRMATION_PATTERN } from "./utils.js";
 import {
   readTranscriptExact,
   currentTurnAssistantState,
+  readRecentUserMessages,
 } from "../utils/transcript.js";
 import { RESPOND_FIRST_QUALITY_AGENT } from "../utils/agent-configs.js";
 import {
@@ -21,7 +22,7 @@ export const respondFirstRule: PreToolRule = {
   name: "respond-first",
   displayName: "Respond First",
   priority: 5,
-  appealable: false,
+  appealable: true,
   usesLlm: true,
   promptSection: RESPOND_FIRST_QUALITY_AGENT.systemPrompt,
 
@@ -79,10 +80,21 @@ export const respondFirstRule: PreToolRule = {
     await ctx.stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
 
     switch (state.kind) {
-      case "responded":
+      case "responded": {
+        const intent = ctx.state.currentPrediction?.intent || "(none)";
+        const recent = await readRecentUserMessages(
+          ctx.transcriptPath,
+          ctx.state.currentWindowSize ?? 2,
+          true,
+        ).catch(() => "");
         return {
-          llmContext: `USER MESSAGE:\n${lastUser.content.slice(0, 500)}\n\nASSISTANT RESPONSE:\n${state.text.slice(0, 500)}`,
+          llmContext:
+            `USER MESSAGE:\n${lastUser.content.slice(0, 1000)}\n\n` +
+            `USER INTENT:\n${intent}\n\n` +
+            `RECENT USER MESSAGES (newest first, [Tn] indices):\n${recent}\n\n` +
+            `ASSISTANT TEXT:\n${state.text.slice(0, 1000)}`,
         };
+      }
       case "silent":
         return {
           fastDeny: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
