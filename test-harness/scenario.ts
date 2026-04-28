@@ -16,6 +16,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 import * as crypto from "crypto";
 import {
   type FanoutFireResult,
@@ -27,6 +28,8 @@ import {
 } from "./lib/types.js";
 import type {
   PredictionAssertionResult,
+  ReasonMustExpectation,
+  ReasonMustResult,
   ScenarioPredictionExpectation,
 } from "../src/agents/mcp/scenario-types.js";
 import { runHook } from "./lib/harness.js";
@@ -282,6 +285,18 @@ function buildAllTranscriptLines(
   if (finalSplitStart === -1) {
     finalSplitStart = allLines.length;
   }
+
+  // When seed_state.planFile is set, stamp `slug` onto the first synthesized
+  // JSONL line so extractSlugFromSession (src/utils/session-utils.ts:30) finds
+  // it. The function reads `entry.slug` from any line, returning the first
+  // hit — picking the first line keeps the placement uniform regardless of
+  // which role it carries.
+  if (scenario.seed_state?.planFile && allLines.length > 0) {
+    const first = JSON.parse(allLines[0]) as Record<string, unknown>;
+    first.slug = scenario.seed_state.planFile.slug;
+    allLines[0] = JSON.stringify(first);
+  }
+
   return { allLines, finalSplitStart, finalSplitSubLines, finalToolUses };
 }
 
@@ -690,6 +705,24 @@ async function main() {
     fs.writeFileSync(path.join(cacheDir, "tool-log.jsonl"), lines);
   }
 
+  // Materialize ~/.claude/plans/<slug>.md when seed_state.planFile is set.
+  // The transcript's first synthesized JSONL line carries `slug: <slug>` (see
+  // buildAllTranscriptLines) so resolvePlanPath -> extractSlugFromSession
+  // finds it. Refuse to clobber an existing file at the same path —
+  // concurrent runs against the same slug must fail loudly. The cleanup
+  // unlink runs in the main `finally` block below.
+  let planFileCleanupPath: string | null = null;
+  if (scenario.seed_state.planFile) {
+    const planDir = path.join(os.homedir(), ".claude", "plans");
+    fs.mkdirSync(planDir, { recursive: true });
+    const planPath = path.join(planDir, `${scenario.seed_state.planFile.slug}.md`);
+    if (fs.existsSync(planPath)) {
+      throw new Error(`refusing to clobber existing plan file at ${planPath}`);
+    }
+    fs.writeFileSync(planPath, scenario.seed_state.planFile.content);
+    planFileCleanupPath = planPath;
+  }
+
   const cwd = scenario.env?.cwd ?? outputDir;
   const sessionId = "scenario-" + scenario.name;
   const transcriptBasename = scenario.env?.subagent
@@ -706,6 +739,17 @@ async function main() {
   process.env.AGENT_FRAMEWORK_SESSION_DIR = cacheDir;
   const timeoutMs = scenario.env?.timeout_ms ?? 60000;
   const fanout = scenario.target.fanout === true;
+
+  // Build the optional env extras passed into hook subprocesses. Only set
+  // AGENT_FRAMEWORK_LLM_STUBS when the scenario declared the field.
+  const envExtras = scenario.env?.llm_stubs
+    ? { AGENT_FRAMEWORK_LLM_STUBS: JSON.stringify(scenario.env.llm_stubs) }
+    : undefined;
+
+  // exitCode is mutated below by the body's success/failure paths and the
+  // catch handler. process.exit is invoked exactly once after the finally
+  // block, ensuring planFile cleanup runs regardless of how the run ended.
+  let exitCode = 0;
 
   try {
     if (!fanout) {
@@ -725,7 +769,7 @@ async function main() {
             cwd,
             permission_mode: scenario.env?.permission_mode ?? "default",
           }),
-          env: buildEnv(cacheDir, cwd),
+          env: buildEnv(cacheDir, cwd, envExtras),
           timeoutMs,
         });
       }
@@ -748,7 +792,7 @@ async function main() {
       const hookResult = await runHook({
         hookScript: hookScript(hookScriptName(scenario.target.hook)),
         inputJson: JSON.stringify(stdin),
-        env: buildEnv(cacheDir, cwd),
+        env: buildEnv(cacheDir, cwd, envExtras),
         timeoutMs,
       });
 
@@ -769,9 +813,10 @@ async function main() {
         scenario.target.hook === "PreToolUse" || scenario.target.hook === "PostToolUse"
           ? resolveToolUseBlock(scenario, built.finalToolUses)
           : null;
+      const actualReason = tlReason ?? gateReason;
       const scoreCtx = targetTool
-        ? { sessionDir: cacheDir, toolName: targetTool.name, toolInput: targetTool.input }
-        : undefined;
+        ? { sessionDir: cacheDir, toolName: targetTool.name, toolInput: targetTool.input, actualReason }
+        : { actualReason };
       const scored = scoreRichExpectation(decision, gate, singleExpect, scoreCtx);
 
       let predictionAssertions: PredictionAssertionResult[] | undefined;
@@ -805,6 +850,9 @@ async function main() {
         commit: getVersion(),
         batch_visible_through: scenario.target.batch_visible_through,
         ...(predictionAssertions ? { prediction_assertions: predictionAssertions } : {}),
+        ...(scored.reason_must_results ? { reason_must_results: scored.reason_must_results } : {}),
+        ...(actualReason !== undefined ? { actual_reason: actualReason } : {}),
+        ...(scenario.env?.llm_stubs ? { llm_stubs_used: scenario.env.llm_stubs } : {}),
         expectation_reality,
         expectation_reality_last_run_at,
       };
@@ -819,194 +867,212 @@ async function main() {
         path.join(outputDir, "report-scenario.json"),
         JSON.stringify(result, null, 2) + "\n",
       );
-      console.log(JSON.stringify(result, null, 2));
 
-      process.exit(result.pass ? 0 : 1);
-    }
-
-    // ── Fan-out mode ───────────────────────────────────────────────────
-    // Fire one PreToolUse hook per tool_use sub-line in the final
-    // assistant_split, in order. Shared state (tool-log.jsonl, state.json,
-    // gate reasoning) accumulates across fires in one
-    // cacheDir — cache/ is NOT wiped between fires (the rmSync at the
-    // start of main() runs once per scenario run, preserving the clean
-    // slate invariant per run). Siblings inherit the leader's decision
-    // via findBatchDecision reading the leader's on-disk tool-log
-    // entry that the prior fire appended.
-    const finalSplitSubLines = built.finalSplitSubLines;
-    // Determine firstToolUseIdx from the materialized sub-lines (F5
-    // already validated the shape).
-    let firstToolUseIdx = -1;
-    for (let j = 0; j < finalSplitSubLines.length; j++) {
-      if (finalSplitSubLines[j].toolUse) {
-        firstToolUseIdx = j;
-        break;
+      exitCode = result.pass ? 0 : 1;
+    } else {
+      // ── Fan-out mode ───────────────────────────────────────────────────
+      // Fire one PreToolUse hook per tool_use sub-line in the final
+      // assistant_split, in order. Shared state (tool-log.jsonl, state.json,
+      // gate reasoning) accumulates across fires in one
+      // cacheDir — cache/ is NOT wiped between fires (the rmSync at the
+      // start of main() runs once per scenario run, preserving the clean
+      // slate invariant per run). Siblings inherit the leader's decision
+      // via findBatchDecision reading the leader's on-disk tool-log
+      // entry that the prior fire appended.
+      const finalSplitSubLines = built.finalSplitSubLines;
+      // Determine firstToolUseIdx from the materialized sub-lines (F5
+      // already validated the shape).
+      let firstToolUseIdx = -1;
+      for (let j = 0; j < finalSplitSubLines.length; j++) {
+        if (finalSplitSubLines[j].toolUse) {
+          firstToolUseIdx = j;
+          break;
+        }
       }
-    }
-    if (firstToolUseIdx === -1) {
-      throw new Error(
-        "internal: fan-out mode found no tool_use sub-line in the final assistant_split after validation",
-      );
-    }
-
-    // Write every entry strictly before the final assistant_split to disk.
-    writeTranscriptSlice(transcriptPath, built.allLines, built.finalSplitStart);
-
-    // Fire session-start preamble once.
-    await runHook({
-      hookScript: hookScript("session-start"),
-      inputJson: JSON.stringify({
-        hook_event_name: "SessionStart",
-        source: "startup",
-        session_id: sessionId,
-        transcript_path: transcriptPath,
-        cwd,
-        permission_mode: scenario.env?.permission_mode ?? "default",
-      }),
-      env: buildEnv(cacheDir, cwd),
-      timeoutMs,
-    });
-
-    const toolLogPath = path.join(cacheDir, "tool-log.jsonl");
-    const expectArray = scenario.expect as Array<{
-      position: number;
-      expected: string;
-      by?: string;
-      notes?: string;
-    }>;
-
-    const fires: FanoutFireResult[] = [];
-    for (let k = firstToolUseIdx; k < finalSplitSubLines.length; k++) {
-      const sub = finalSplitSubLines[k];
-      if (!sub.toolUse) {
-        // F5 guarantees no text/thinking sub-lines at or after
-        // firstToolUseIdx; this is defensive.
+      if (firstToolUseIdx === -1) {
         throw new Error(
-          `internal: fan-out sub-line ${k} has no tool_use after validation`,
+          "internal: fan-out mode found no tool_use sub-line in the final assistant_split after validation",
         );
       }
-      // Grow the on-disk file to include sub-lines [0..k].
-      writeTranscriptSlice(
-        transcriptPath,
-        built.allLines,
-        sub.absoluteIndex + 1,
-      );
 
-      const fireStart = Date.now();
-      const toolLogOffsetForFire = fs.existsSync(toolLogPath)
-        ? fs.statSync(toolLogPath).size
-        : 0;
+      // Write every entry strictly before the final assistant_split to disk.
+      writeTranscriptSlice(transcriptPath, built.allLines, built.finalSplitStart);
 
-      const stdin = {
-        hook_event_name: "PreToolUse",
-        session_id: sessionId,
-        transcript_path: transcriptPath,
-        cwd,
-        permission_mode: scenario.env?.permission_mode ?? "default",
-        tool_name: sub.toolUse.name,
-        tool_input: sub.toolUse.input,
-        tool_use_id: sub.toolUse.id,
-      };
-      const hookResult = await runHook({
-        hookScript: hookScript("pre-tool-use"),
-        inputJson: JSON.stringify(stdin),
-        env: buildEnv(cacheDir, cwd),
+      // Fire session-start preamble once.
+      await runHook({
+        hookScript: hookScript("session-start"),
+        inputJson: JSON.stringify({
+          hook_event_name: "SessionStart",
+          source: "startup",
+          session_id: sessionId,
+          transcript_path: transcriptPath,
+          cwd,
+          permission_mode: scenario.env?.permission_mode ?? "default",
+        }),
+        env: buildEnv(cacheDir, cwd, envExtras),
         timeoutMs,
       });
-      const parsed = parsePreToolUseDecision(hookResult, timeoutMs);
-      const { gate, reason: gateReason } = readToolLogEntriesAfterOffset(
-        cacheDir,
-        toolLogOffsetForFire,
-      );
 
-      const expectEntry = expectArray.find((e) => e.position === k);
-      let pass = true;
-      let scoredReason: string | undefined;
-      let expected: string | undefined;
-      let gateExpected: string | undefined;
-      if (expectEntry) {
-        expected = expectEntry.expected;
-        gateExpected = expectEntry.by;
-        const scored = scoreRichExpectation(
-          parsed.decision,
-          gate,
-          {
-            expected: expectEntry.expected,
-            by: expectEntry.by,
-          },
-          {
-            sessionDir: cacheDir,
-            toolName: sub.toolUse.name,
-            toolInput: sub.toolUse.input,
-          },
+      const toolLogPath = path.join(cacheDir, "tool-log.jsonl");
+      const expectArray = scenario.expect as Array<{
+        position: number;
+        expected: string;
+        by?: string;
+        notes?: string;
+        reason_must?: ReasonMustExpectation;
+      }>;
+
+      const fires: FanoutFireResult[] = [];
+      for (let k = firstToolUseIdx; k < finalSplitSubLines.length; k++) {
+        const sub = finalSplitSubLines[k];
+        if (!sub.toolUse) {
+          // F5 guarantees no text/thinking sub-lines at or after
+          // firstToolUseIdx; this is defensive.
+          throw new Error(
+            `internal: fan-out sub-line ${k} has no tool_use after validation`,
+          );
+        }
+        // Grow the on-disk file to include sub-lines [0..k].
+        writeTranscriptSlice(
+          transcriptPath,
+          built.allLines,
+          sub.absoluteIndex + 1,
         );
-        pass = scored.pass;
-        scoredReason = scored.reason;
+
+        const fireStart = Date.now();
+        const toolLogOffsetForFire = fs.existsSync(toolLogPath)
+          ? fs.statSync(toolLogPath).size
+          : 0;
+
+        const stdin = {
+          hook_event_name: "PreToolUse",
+          session_id: sessionId,
+          transcript_path: transcriptPath,
+          cwd,
+          permission_mode: scenario.env?.permission_mode ?? "default",
+          tool_name: sub.toolUse.name,
+          tool_input: sub.toolUse.input,
+          tool_use_id: sub.toolUse.id,
+        };
+        const hookResult = await runHook({
+          hookScript: hookScript("pre-tool-use"),
+          inputJson: JSON.stringify(stdin),
+          env: buildEnv(cacheDir, cwd, envExtras),
+          timeoutMs,
+        });
+        const parsed = parsePreToolUseDecision(hookResult, timeoutMs);
+        const { gate, reason: gateReason } = readToolLogEntriesAfterOffset(
+          cacheDir,
+          toolLogOffsetForFire,
+        );
+
+        const expectEntry = expectArray.find((e) => e.position === k);
+        let pass = true;
+        let scoredReason: string | undefined;
+        let scoredReasonMustResults: ReasonMustResult[] | undefined;
+        let expected: string | undefined;
+        let gateExpected: string | undefined;
+        const fireActualReason = parsed.reason ?? gateReason;
+        if (expectEntry) {
+          expected = expectEntry.expected;
+          gateExpected = expectEntry.by;
+          const scored = scoreRichExpectation(
+            parsed.decision,
+            gate,
+            {
+              expected: expectEntry.expected,
+              by: expectEntry.by,
+              reason_must: expectEntry.reason_must,
+            },
+            {
+              sessionDir: cacheDir,
+              toolName: sub.toolUse.name,
+              toolInput: sub.toolUse.input,
+              actualReason: fireActualReason,
+            },
+          );
+          pass = scored.pass;
+          scoredReason = scored.reason;
+          scoredReasonMustResults = scored.reason_must_results;
+        }
+
+        fires.push({
+          position: k,
+          tool_use_id: sub.toolUse.id,
+          decision: parsed.decision,
+          gate,
+          reason: scoredReason ?? gateReason ?? parsed.error,
+          ms: Date.now() - fireStart,
+          expected,
+          gate_expected: gateExpected,
+          pass,
+          asserted: expectEntry !== undefined,
+          ...(scoredReasonMustResults ? { reason_must_results: scoredReasonMustResults } : {}),
+          ...(fireActualReason !== undefined ? { actual_reason: fireActualReason } : {}),
+          ...(scenario.env?.llm_stubs ? { llm_stubs_used: scenario.env.llm_stubs } : {}),
+        });
       }
 
-      fires.push({
-        position: k,
-        tool_use_id: sub.toolUse.id,
-        decision: parsed.decision,
-        gate,
-        reason: scoredReason ?? gateReason ?? parsed.error,
-        ms: Date.now() - fireStart,
-        expected,
-        gate_expected: gateExpected,
-        pass,
-        asserted: expectEntry !== undefined,
-      });
-    }
+      // Predictions are session-scoped; check once at end of fan-out.
+      let predictionAssertions: PredictionAssertionResult[] | undefined;
+      let predictionsPass = true;
+      if (scenario.predictions) {
+        predictionAssertions = await evaluateScenarioPredictions(
+          cacheDir,
+          scenario.predictions,
+        );
+        predictionsPass = predictionAssertions.every((a) => a.pass);
+      }
 
-    // Predictions are session-scoped; check once at end of fan-out.
-    let predictionAssertions: PredictionAssertionResult[] | undefined;
-    let predictionsPass = true;
-    if (scenario.predictions) {
-      predictionAssertions = await evaluateScenarioPredictions(
-        cacheDir,
-        scenario.predictions,
+      const aggregatePass = fires.every((f) => f.pass) && predictionsPass;
+      const expectation_reality: "working" | "broken" =
+        aggregatePass === true ? "working" : "broken";
+      const expectation_reality_last_run_at = new Date().toISOString();
+      const result: ScenarioResult = {
+        mode: "fanout",
+        scenario: scenario.name,
+        hook: scenario.target.hook,
+        fires,
+        pass: aggregatePass,
+        ms: Date.now() - started,
+        transcript_path: transcriptPath,
+        commit: getVersion(),
+        ...(predictionAssertions ? { prediction_assertions: predictionAssertions } : {}),
+        ...(scenario.env?.llm_stubs ? { llm_stubs_used: scenario.env.llm_stubs } : {}),
+        expectation_reality,
+        expectation_reality_last_run_at,
+      };
+
+      writeExpectationRealityBack(
+        scenarioPath,
+        expectation_reality,
+        expectation_reality_last_run_at,
       );
-      predictionsPass = predictionAssertions.every((a) => a.pass);
+
+      fs.writeFileSync(
+        path.join(outputDir, "report-scenario.json"),
+        JSON.stringify(result, null, 2) + "\n",
+      );
+      exitCode = aggregatePass ? 0 : 1;
     }
-
-    const aggregatePass = fires.every((f) => f.pass) && predictionsPass;
-    const expectation_reality: "working" | "broken" =
-      aggregatePass === true ? "working" : "broken";
-    const expectation_reality_last_run_at = new Date().toISOString();
-    const result: ScenarioResult = {
-      mode: "fanout",
-      scenario: scenario.name,
-      hook: scenario.target.hook,
-      fires,
-      pass: aggregatePass,
-      ms: Date.now() - started,
-      transcript_path: transcriptPath,
-      commit: getVersion(),
-      ...(predictionAssertions ? { prediction_assertions: predictionAssertions } : {}),
-      expectation_reality,
-      expectation_reality_last_run_at,
-    };
-
-    writeExpectationRealityBack(
-      scenarioPath,
-      expectation_reality,
-      expectation_reality_last_run_at,
-    );
-
-    fs.writeFileSync(
-      path.join(outputDir, "report-scenario.json"),
-      JSON.stringify(result, null, 2) + "\n",
-    );
-    console.log(JSON.stringify(result, null, 2));
-
-    process.exit(aggregatePass ? 0 : 1);
   } catch (err) {
     console.error(
       "scenario run failed: " +
         (err instanceof Error ? err.message : String(err)),
     );
-    process.exit(2);
+    exitCode = 2;
+  } finally {
+    if (planFileCleanupPath) {
+      try {
+        fs.unlinkSync(planFileCleanupPath);
+      } catch {
+        // Ignore cleanup errors — best-effort. The seed_state guard refuses
+        // to clobber an existing file at the same path on the next run.
+      }
+    }
   }
+
+  process.exit(exitCode);
 }
 
 main().catch((err) => {

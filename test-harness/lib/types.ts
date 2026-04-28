@@ -5,6 +5,10 @@
  */
 
 import type { Mood, Trust } from "../../src/utils/prediction-types.js";
+import type {
+  ReasonMustExpectation,
+  ReasonMustResult,
+} from "../../src/agents/mcp/scenario-types.js";
 
 /**
  * Snapshot of the live active prediction at fire-time, captured during the
@@ -51,6 +55,16 @@ export interface ReplayEvent {
    * `prediction-block`). Consumed by --generate-labels post-loop write.
    */
   livePrediction?: LivePredictionSnapshot;
+  /** Per-clause results when the label's `reason_must` was scored. */
+  reason_must_results?: ReasonMustResult[];
+  /**
+   * Hook's raw reason string verbatim. PreToolUse/PostToolUse: the
+   * gate-attributed reason from `tool-log.jsonl`. Stop hook: the reason from
+   * the hook's stdout JSON. Differs from the overloaded `reason` field
+   * (which carries scoring-failure messages OR hook reason) because
+   * per-hook-kind dispatch is non-obvious.
+   */
+  actual_reason?: string;
 }
 
 /**
@@ -119,6 +133,12 @@ export interface RichExpectation {
   at?: number | "full";
   notes?: string;
   prediction?: PredictionAnnotation;
+  /**
+   * Optional reason-text assertion clauses. Only valid when
+   * `expected ∈ {deny, block}`. See ReasonMustExpectation in
+   * src/agents/mcp/scenario-types.ts.
+   */
+  reason_must?: ReasonMustExpectation;
 }
 
 export type ExpectationEntry = string | RichExpectation | RichExpectation[];
@@ -194,5 +214,7 @@ export type {
   Scenario,
   ScenarioResult,
   FanoutFireResult,
+  ReasonMustExpectation,
+  ReasonMustResult,
 } from "../../src/agents/mcp/scenario-types.js";
 export { validateScenario } from "../../src/agents/mcp/scenario-types.js";

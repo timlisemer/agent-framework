@@ -394,12 +394,20 @@ const predictionAnnotationSchema = z.object({
   notes: z.string().optional(),
 });
 
+const reasonMustSchema = z.object({
+  contains: z.array(z.string().min(1)).min(1).optional(),
+  not_contains: z.array(z.string().min(1)).min(1).optional(),
+  matches: z.array(z.string().min(1)).min(1).optional(),
+  not_matches: z.array(z.string().min(1)).min(1).optional(),
+}).optional();
+
 const richExpectationSchema = z.object({
   expected: z.string().describe("The decision the hook must produce: allow/deny/pass/block (or INVESTIGATE placeholder)."),
   by: z.string().optional().describe("Rule/gate name the denial must come from (matches tool-log gate field)."),
   at: z.union([z.number(), z.literal("full")]).optional().describe("1-based line cap this expectation scores under. Omit or 'full' for the default post-flush run."),
   notes: z.string().optional().describe("Free-text explanation of why this expectation exists."),
   prediction: predictionAnnotationSchema.optional().describe("Set ONLY when expected='deny' AND by ∈ {prediction-block, batch-sibling}."),
+  reason_must: reasonMustSchema.describe("Reason-text assertion clauses. Only valid when expected ∈ {deny, block}."),
 });
 
 server.registerTool(
@@ -494,6 +502,7 @@ const scenarioSchema = z.object({
     subagent: z.boolean().optional(),
     cwd: z.string().optional(),
     timeout_ms: z.number().optional(),
+    llm_stubs: z.record(z.string().min(1), z.string().min(1)).optional(),
   }).optional(),
   expect: z.union([
     z.object({
@@ -501,6 +510,7 @@ const scenarioSchema = z.object({
       by: z.string().optional(),
       notes: z.string().optional(),
       prediction: predictionAnnotationSchema.optional(),
+      reason_must: reasonMustSchema,
     }),
     z.array(z.object({
       position: z.number().int().nonnegative(),
@@ -508,6 +518,7 @@ const scenarioSchema = z.object({
       by: z.string().optional(),
       notes: z.string().optional(),
       prediction: predictionAnnotationSchema.optional(),
+      reason_must: reasonMustSchema,
     })).min(1),
   ]),
   predictions: z.object({
@@ -567,6 +578,10 @@ const scenarioSchema = z.object({
         allowedSinceLevelChange: z.number().int().nonnegative(),
       }),
     ).optional(),
+    planFile: z.object({
+      slug: z.string().min(1).regex(/^[A-Za-z0-9._-]+$/),
+      content: z.string(),
+    }).optional(),
   }),
 });
 

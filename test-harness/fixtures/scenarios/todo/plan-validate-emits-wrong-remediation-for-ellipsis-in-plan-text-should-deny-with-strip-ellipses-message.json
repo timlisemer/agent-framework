@@ -53,8 +53,16 @@
   "expect": {
     "expected": "deny",
     "by": "tool-approve",
-    "notes": "Reproduction path: tool-approve.ts:67-77 calls checkToolApproval, which calls getBlacklistHighlights at command-patterns.ts:270. For Bash with command `node -e 'console.log(\"Capture the tail in the enriched sentinel\")'`, the regex /\\btail\\s+/ at command-patterns.ts:28 matches the word 'tail' inside the JS string literal (the regex scans the WHOLE primaryCommand, including embedded strings). Plus regex matches for `node` (workingDir-aware via resolveCheckMessage in agent-framework cwd which has a Justfile) compose the full live reason. Live block reproduced verbatim by the harness: 'Use Read tool with offset. node not covered by just check. You must run mcp__agent-framework__check'. Decision-check passes (deny=deny). The BUG IS IN THE REASON TEXT, not in the decision: 'Use Read tool with offset' is the bash `tail` alternative -- nonsense remediation for a `node` command head, and equally nonsense for plan PROSE containing the word 'tail'. The harness has no built-in reason-substring assertion, so this scenario currently passes the standard expected-decision compare. The scenario remains in todo/ as the executable spec for the fix: when the regex is scoped to bash-context signals (flag/path required) OR the scan inspects only the command head, the reason text will no longer contain 'Use Read tool with offset' for this command. Until reason-substring assertions exist in the harness, the spec lives in this notes field. SAME BUG ON BOTH PATHS: (1) ExitPlanMode plan validation at line 161 of source transcript (plan PROSE containing 'tail' triggered the same wrong remediation), and (2) Write/Edit to ~/.claude/plans/<x>.md via pre-tool-use.ts:386-449 (plan PROSE containing 'tail' triggers the same wrong remediation in edit mode), and (3) Bash commands incidentally containing 'tail' in string literals (this scenario's path). All three surface from the same getContentBlacklistHighlights / BLACKLIST_PATTERNS code -- one upstream fix resolves all three."
+    "reason_must": {
+      "not_contains": [
+        "Use Read tool with offset"
+      ],
+      "contains": [
+        "node not covered by just check"
+      ]
+    },
+    "notes": "tail-blacklist regex matches incidentally inside JS string literals. The reason must explain the real block (node uncovered by just check) and must not propose the nonsense Read-with-offset remediation."
   },
-  "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-28T10:40:06.543Z"
+  "expectation_reality": "broken",
+  "expectation_reality_last_run_at": "2026-04-28T12:42:49.148Z"
 }

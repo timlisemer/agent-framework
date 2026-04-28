@@ -18,6 +18,30 @@ export type HookEventName =
   | "UserPromptSubmit"
   | "SessionStart";
 
+/**
+ * Reason-text assertion clauses. All present clauses must hold (AND); multiple
+ * entries inside one array are also AND-ed (use multiple entries to require
+ * multiple substrings; collapse to `|`-alternation if you need OR). Only valid
+ * when `expected ∈ {deny, block}`.
+ */
+export interface ReasonMustExpectation {
+  contains?: string[];
+  not_contains?: string[];
+  matches?: string[];
+  not_matches?: string[];
+}
+
+/**
+ * One result entry per reason_must clause checked. Returned by
+ * `evaluateReasonMust` and surfaced through ScoreContext / ScenarioResult so
+ * failure reports can pinpoint the violating clause.
+ */
+export interface ReasonMustResult {
+  kind: "contains" | "not_contains" | "matches" | "not_matches";
+  pattern: string;
+  pass: boolean;
+}
+
 /** Claude Code native plan-mode permission values. */
 export type PermissionMode =
   | "default"
@@ -171,6 +195,17 @@ export interface ScenarioEnv {
   cwd?: string;
   /** Hook timeout in milliseconds. Defaults to 60000. */
   timeout_ms?: number;
+  /**
+   * Per-agent LLM stub map: agent name (matching `telemetry.agent`) → exact
+   * stubbed output text. Plumbed into the hook process via the
+   * `AGENT_FRAMEWORK_LLM_STUBS` env var (JSON-encoded). Stubbing happens at
+   * `runAgentWithRetryAndTelemetry`, so every agent that flows through the
+   * agent-runner LLM transport boundary (tool-appeal, rule-gate, style-drift,
+   * question-validate, edit-intent, plan-validate, etc.) can be made
+   * deterministic. Authors write what the LLM would have returned, e.g.
+   * `{ "tool-appeal": "UPHOLD" }` or `{ "rule-gate": "DENY: tool-approve: nope" }`.
+   */
+  llm_stubs?: Record<string, string>;
 }
 
 /** A complete synthetic test scenario for unit-testing a single hook rule. */
@@ -218,6 +253,7 @@ export interface Scenario {
         by?: string;
         notes?: string;
         prediction?: PredictionAnnotation;
+        reason_must?: ReasonMustExpectation;
       }
     | Array<{
         position: number;
@@ -225,6 +261,7 @@ export interface Scenario {
         by?: string;
         notes?: string;
         prediction?: PredictionAnnotation;
+        reason_must?: ReasonMustExpectation;
       }>;
   /**
    * Optional structural assertions on the live prediction-cache state AFTER
@@ -292,6 +329,16 @@ export interface Scenario {
         allowedSinceLevelChange: number;
       }
     >;
+    /**
+     * Optional plan-file materialization. When set, the harness writes
+     * `~/.claude/plans/<slug>.md` with `content` BEFORE session-start fires,
+     * stamps `slug: <slug>` onto the first synthesized JSONL transcript line so
+     * `extractSlugFromSession` finds it, and unlinks the file in the run's
+     * `finally` block. Slug uniqueness is the scenario author's
+     * responsibility — convention is to include the scenario fixture's
+     * filename root.
+     */
+    planFile?: { slug: string; content: string };
   };
 }
 
@@ -311,6 +358,18 @@ export interface FanoutFireResult {
   gate_expected?: string;
   pass: boolean;
   asserted: boolean;
+  /** Per-clause results when `expect[k].reason_must` was scored on this fire. */
+  reason_must_results?: ReasonMustResult[];
+  /**
+   * Hook's raw reason string verbatim. For PreToolUse/PostToolUse this is the
+   * gate-attributed `gateReason` from `tool-log.jsonl`; for Stop hooks it is
+   * `tlReason` from the hook's stdout JSON. Differs from the existing
+   * overloaded `reason` (which carries scoring-failure messages OR hook
+   * reason) because per-hook-kind dispatch is non-obvious.
+   */
+  actual_reason?: string;
+  /** Echoed env.llm_stubs for reproducibility. */
+  llm_stubs_used?: Record<string, string>;
 }
 
 /**
@@ -353,6 +412,17 @@ export type ScenarioResult =
       batch_visible_through?: number;
       /** Per-assertion results when scenario.predictions was set. */
       prediction_assertions?: PredictionAssertionResult[];
+      /** Per-clause results when scenario.expect.reason_must was scored. */
+      reason_must_results?: ReasonMustResult[];
+      /**
+       * Hook's raw reason string verbatim. PreToolUse/PostToolUse: the
+       * gate-attributed `gateReason` from `tool-log.jsonl`. Stop hook:
+       * `tlReason` from the hook's stdout JSON. Per-hook-kind divergence is
+       * the WHY this is a separate field from the overloaded `reason`.
+       */
+      actual_reason?: string;
+      /** Echoed scenario.env.llm_stubs for reproducibility. */
+      llm_stubs_used?: Record<string, string>;
       /**
        * Reflection of this run: `"working"` iff `pass === true`, else
        * `"broken"`. Always populated — the runner sets it on every run
@@ -375,6 +445,8 @@ export type ScenarioResult =
       commit: string;
       /** Per-assertion results when scenario.predictions was set. */
       prediction_assertions?: PredictionAssertionResult[];
+      /** Echoed scenario.env.llm_stubs for reproducibility. */
+      llm_stubs_used?: Record<string, string>;
       /**
        * Reflection of this run: `"working"` iff `pass === true`, else
        * `"broken"`. Always populated — the runner sets it on every run
@@ -635,6 +707,14 @@ export function validateScenario(raw: unknown): Scenario {
           e.prediction,
         );
       }
+      if (e.reason_must !== undefined) {
+        if (e.expected !== "deny" && e.expected !== "block") {
+          throw new Error(
+            `scenario.expect[${k}].reason_must requires expected ∈ {"deny","block"}, got ${JSON.stringify(e.expected)}`,
+          );
+        }
+        validateReasonMustExpectation(`scenario.expect[${k}]`, e.reason_must);
+      }
     }
 
     // env block still validates below via the shared code path.
@@ -804,6 +884,9 @@ export function validateScenario(raw: unknown): Scenario {
     if (env.timeout_ms !== undefined && typeof env.timeout_ms !== "number") {
       throw new Error("scenario.env.timeout_ms must be a number");
     }
+    if (env.llm_stubs !== undefined) {
+      validateLlmStubs(env.llm_stubs);
+    }
   }
 
   validateScenarioSeedState(r);
@@ -859,6 +942,14 @@ export function validateScenario(raw: unknown): Scenario {
       expect.by as string | undefined,
       expect.prediction,
     );
+  }
+  if (expect.reason_must !== undefined) {
+    if (expect.expected !== "deny" && expect.expected !== "block") {
+      throw new Error(
+        `scenario.expect.reason_must requires expected ∈ {"deny","block"}, got ${JSON.stringify(expect.expected)}`,
+      );
+    }
+    validateReasonMustExpectation("scenario.expect", expect.reason_must);
   }
 
   validateScenarioPredictions(r);
@@ -955,7 +1046,7 @@ function validateScenarioSeedState(r: Record<string, unknown>): void {
     "frustrationStreak",
     "currentWindowSize",
   ];
-  const optionalTopFields = ["toolLog", "driftState"];
+  const optionalTopFields = ["toolLog", "driftState", "planFile"];
   for (const k of requiredTopFields) {
     if (s[k] === undefined) {
       throw new Error(`scenario.seed_state.${k} is required`);
@@ -973,6 +1064,9 @@ function validateScenarioSeedState(r: Record<string, unknown>): void {
   }
   if (s.driftState !== undefined) {
     validateSeedDriftState(s.driftState);
+  }
+  if (s.planFile !== undefined) {
+    validateSeedPlanFile(s.planFile);
   }
   if (typeof s.forceCheckPending !== "boolean") {
     throw new Error("scenario.seed_state.forceCheckPending must be a boolean");
@@ -1214,6 +1308,116 @@ function validateSeedDriftState(value: unknown): void {
           `scenario.seed_state.driftState[${JSON.stringify(target)}].${k} is not a recognized field`,
         );
       }
+    }
+  }
+}
+
+/**
+ * Validate a `reason_must` block on a single-form or fanout-form expect entry.
+ * Each present sub-array (`contains`, `not_contains`, `matches`, `not_matches`)
+ * must be a non-empty `string[]` whose entries are non-empty strings;
+ * `matches`/`not_matches` strings must compile via `new RegExp`. Empty-shape
+ * (every sub-array missing) and unknown sub-fields are rejected.
+ */
+export function validateReasonMustExpectation(ctx: string, value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${ctx}.reason_must must be a non-null object`);
+  }
+  const v = value as Record<string, unknown>;
+  const knownFields = ["contains", "not_contains", "matches", "not_matches"];
+  for (const k of Object.keys(v)) {
+    if (!knownFields.includes(k)) {
+      throw new Error(
+        `${ctx}.reason_must.${k} is not a recognized field (allowed: ${knownFields.join(", ")})`,
+      );
+    }
+  }
+  let anyPresent = false;
+  for (const field of knownFields) {
+    const arr = v[field];
+    if (arr === undefined) continue;
+    anyPresent = true;
+    if (!Array.isArray(arr) || arr.length === 0) {
+      throw new Error(
+        `${ctx}.reason_must.${field} must be a non-empty array of strings when set`,
+      );
+    }
+    for (let i = 0; i < arr.length; i++) {
+      const entry = arr[i];
+      if (typeof entry !== "string" || entry.length === 0) {
+        throw new Error(
+          `${ctx}.reason_must.${field}[${i}] must be a non-empty string`,
+        );
+      }
+      if (field === "matches" || field === "not_matches") {
+        try {
+          new RegExp(entry);
+        } catch (err) {
+          throw new Error(
+            `${ctx}.reason_must.${field}[${i}] is not a valid regex: ${err instanceof Error ? err.message : String(err)} (note: regex source is unanchored — re.test(reason) is substring-match-like)`,
+          );
+        }
+      }
+    }
+  }
+  if (!anyPresent) {
+    throw new Error(
+      `${ctx}.reason_must is set but every sub-array is missing — provide at least one of ${knownFields.join(", ")}`,
+    );
+  }
+}
+
+/**
+ * Validate the optional `scenario.env.llm_stubs` map. Keys are agent names
+ * matching `telemetry.agent`; values are exact stubbed output strings the
+ * agent-runner returns in lieu of an LLM call. Both keys and values must be
+ * non-empty strings.
+ */
+function validateLlmStubs(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("scenario.env.llm_stubs must be a non-null object when set");
+  }
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    if (key.length === 0) {
+      throw new Error(
+        "scenario.env.llm_stubs keys must be non-empty strings (agent names)",
+      );
+    }
+    if (typeof val !== "string" || val.length === 0) {
+      throw new Error(
+        `scenario.env.llm_stubs[${JSON.stringify(key)}] must be a non-empty string (the exact stubbed output)`,
+      );
+    }
+  }
+}
+
+/**
+ * Validate the optional `scenario.seed_state.planFile` block. `slug` must
+ * match `[A-Za-z0-9._-]+`; `content` is a string (may be empty); unknown
+ * sub-fields are rejected.
+ */
+function validateSeedPlanFile(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(
+      "scenario.seed_state.planFile must be a non-null object when set",
+    );
+  }
+  const p = value as Record<string, unknown>;
+  if (typeof p.slug !== "string" || !/^[A-Za-z0-9._-]+$/.test(p.slug)) {
+    throw new Error(
+      `scenario.seed_state.planFile.slug must match [A-Za-z0-9._-]+, got ${JSON.stringify(p.slug)}`,
+    );
+  }
+  if (typeof p.content !== "string") {
+    throw new Error(
+      "scenario.seed_state.planFile.content must be a string (may be empty)",
+    );
+  }
+  for (const k of Object.keys(p)) {
+    if (k !== "slug" && k !== "content") {
+      throw new Error(
+        `scenario.seed_state.planFile.${k} is not a recognized field (allowed: slug, content)`,
+      );
     }
   }
 }

@@ -14,7 +14,11 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { execFileSync, spawnSync } from "child_process";
-import { validateScenario } from "./scenario-types.js";
+import {
+  validateScenario,
+  validateReasonMustExpectation,
+  type ReasonMustExpectation,
+} from "./scenario-types.js";
 
 const TEST_RUNS_DIR = path.join(os.homedir(), ".agent-framework", "test-runs");
 
@@ -218,6 +222,13 @@ export interface RichExpectation {
   at?: number | "full";
   notes?: string;
   prediction?: PredictionAnnotation;
+  /**
+   * Optional reason-text assertion clauses. Only valid when
+   * `expected ∈ {deny, block}`. The labeler's `--generate-labels` path does
+   * NOT auto-populate this — it remains hand-authored, since the labeler
+   * can't know which message-text invariants the human cares about.
+   */
+  reason_must?: ReasonMustExpectation;
 }
 
 /**
@@ -331,6 +342,14 @@ export function setRichLabel(
       throw new Error(
         `"at" must be a positive integer or "full" when set, got ${JSON.stringify(e.at)}`,
       );
+    }
+    if (e.reason_must !== undefined) {
+      if (e.expected !== "deny" && e.expected !== "block") {
+        throw new Error(
+          `reason_must on key "${key}" requires expected ∈ {"deny","block"}, got ${JSON.stringify(e.expected)}`,
+        );
+      }
+      validateReasonMustExpectation(`label "${key}"`, e.reason_must);
     }
     validatePredictionAnnotation(key, e);
   }

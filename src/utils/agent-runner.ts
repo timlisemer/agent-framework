@@ -1207,6 +1207,42 @@ export async function runAgentWithRetryAndTelemetry(
   retryOptions: AgentRetryOptions,
   telemetry: TelemetryContext
 ): Promise<AgentExecutionResult> {
+  // Test-harness LLM stub: when AGENT_FRAMEWORK_LLM_STUBS is set and contains
+  // a key matching telemetry.agent, synthesize an AgentExecutionResult from
+  // the mapped string and skip runAgentWithRetry entirely. This is the
+  // LLM-transport boundary — stubbing here covers tool-appeal, rule-gate,
+  // style-drift, question-validate, edit-intent, plan-validate, and every
+  // other LLM verdict path with a single mechanism. The anti-bypass banner
+  // in src/agents/hooks/tool-appeal.ts:1-34 is preserved because tool-appeal
+  // itself is untouched.
+  const stubs = readLlmStubsFromEnv();
+  const stubbedOutput = stubs[telemetry.agent];
+  if (typeof stubbedOutput === "string") {
+    logAgentStarted(telemetry.agent, telemetry.toolName);
+    const decision = telemetry.decisionOverride ?? extractDecision(stubbedOutput) ?? "DENY";
+    logAgentDecision({
+      agent: telemetry.agent,
+      hookName: telemetry.hookName,
+      decision,
+      executionType: telemetry.executionType,
+      toolName: telemetry.toolName,
+      workingDir: telemetry.workingDir,
+      latencyMs: 0,
+      modelTier: MODEL_TIERS.HAIKU,
+      success: true,
+      errorCount: 0,
+      decisionReason: telemetry.decisionReason ?? stubbedOutput.slice(0, 1000),
+    });
+    return {
+      output: stubbedOutput,
+      latencyMs: 0,
+      modelTier: MODEL_TIERS.HAIKU,
+      modelName: "stub",
+      success: true,
+      errorCount: 0,
+    };
+  }
+
   // Mark agent as running in statusline before execution
   logAgentStarted(telemetry.agent, telemetry.toolName);
 
@@ -1230,6 +1266,46 @@ export async function runAgentWithRetryAndTelemetry(
   });
 
   return result;
+}
+
+/**
+ * Module-private memoized reader for the AGENT_FRAMEWORK_LLM_STUBS env var.
+ * Parses once per process; subsequent calls return the cached map. Throws a
+ * descriptive error on malformed JSON so a typo cannot silently no-op into
+ * the LLM path. Returns an empty map when the env var is unset.
+ */
+let llmStubsCache: Record<string, string> | null = null;
+function readLlmStubsFromEnv(): Record<string, string> {
+  if (llmStubsCache !== null) return llmStubsCache;
+  const raw = process.env.AGENT_FRAMEWORK_LLM_STUBS;
+  if (!raw) {
+    llmStubsCache = {};
+    return llmStubsCache;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `AGENT_FRAMEWORK_LLM_STUBS is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(
+      "AGENT_FRAMEWORK_LLM_STUBS must be a JSON object mapping agent names to stubbed output strings",
+    );
+  }
+  const map: Record<string, string> = {};
+  for (const [key, val] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof val !== "string") {
+      throw new Error(
+        `AGENT_FRAMEWORK_LLM_STUBS[${JSON.stringify(key)}] must be a string, got ${typeof val}`,
+      );
+    }
+    map[key] = val;
+  }
+  llmStubsCache = map;
+  return llmStubsCache;
 }
 
 /**

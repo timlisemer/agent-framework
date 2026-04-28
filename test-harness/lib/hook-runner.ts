@@ -15,7 +15,11 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import type { RichExpectation } from "./types.js";
+import type {
+  ReasonMustExpectation,
+  ReasonMustResult,
+  RichExpectation,
+} from "./types.js";
 import type { HookRunResult } from "./harness.js";
 import {
   decidePrediction,
@@ -64,15 +68,21 @@ export function hookScript(name: string): string {
 
 /**
  * Build the environment Claude Code hooks expect when spawned by the harness.
+ *
+ * `extra` merges additional env vars on top of the defaults — used by
+ * scenario.ts to plumb `AGENT_FRAMEWORK_LLM_STUBS` into the hook process so
+ * agent-runner can stub LLM calls deterministically.
  */
 export function buildEnv(
   sessionDir: string,
   cwd: string,
+  extra?: Record<string, string>,
 ): Record<string, string> {
   return {
     AGENT_FRAMEWORK_ROOT: REPO_ROOT,
     CLAUDE_PROJECT_DIR: cwd,
     AGENT_FRAMEWORK_SESSION_DIR: sessionDir,
+    ...(extra ?? {}),
   };
 }
 
@@ -307,14 +317,89 @@ export function explicitlyBlockedContainsForbidden(
 // ─── Scoring ───────────────────────────────────────────────────────────────
 
 /**
- * Optional context passed into scoreRichExpectation when the caller has
- * tool-name and input information. When omitted, prediction-verdict scoring
- * is skipped (Stop hooks have no tool info, so this degrades gracefully).
+ * Optional context passed into scoreRichExpectation. The prediction-verdict
+ * branch already gates on `ctx?` truthiness, so making sessionDir/toolName/
+ * toolInput optional keeps that branch's behavior unchanged while allowing
+ * Stop-hook scoring to pass `actualReason` alone (no tool info available).
  */
 export interface ScoreContext {
-  sessionDir: string;
-  toolName: string;
-  toolInput: unknown;
+  sessionDir?: string;
+  toolName?: string;
+  toolInput?: unknown;
+  /**
+   * Hook's raw reason string verbatim, used by the `reason_must` scoring
+   * branch. PreToolUse/PostToolUse callers pass the gate-attributed reason
+   * from `tool-log.jsonl`; Stop callers pass the reason from the hook's
+   * stdout JSON.
+   */
+  actualReason?: string;
+}
+
+/**
+ * Evaluate a `reason_must` block against the hook's raw reason text. Iterates
+ * clauses in fixed order: contains, not_contains, matches, not_matches.
+ * Within each array, iterates entries left-to-right. Returns one
+ * ReasonMustResult per clause checked, stopping on the first failure (so the
+ * array contains all-passed clauses up to and including the failing entry).
+ * On full success, returns one entry per clause checked, all `pass: true`.
+ *
+ * `undefined` reason is treated as the empty string for matching purposes.
+ * `matches` / `not_matches` regex sources are unanchored — `re.test(reason)`
+ * is substring-match-like.
+ */
+export function evaluateReasonMust(
+  reason: string | undefined,
+  exp: ReasonMustExpectation,
+): ReasonMustResult[] {
+  const text = reason ?? "";
+  const out: ReasonMustResult[] = [];
+  if (exp.contains) {
+    for (const pattern of exp.contains) {
+      const pass = text.includes(pattern);
+      out.push({ kind: "contains", pattern, pass });
+      if (!pass) return out;
+    }
+  }
+  if (exp.not_contains) {
+    for (const pattern of exp.not_contains) {
+      const pass = !text.includes(pattern);
+      out.push({ kind: "not_contains", pattern, pass });
+      if (!pass) return out;
+    }
+  }
+  if (exp.matches) {
+    for (const pattern of exp.matches) {
+      const pass = new RegExp(pattern).test(text);
+      out.push({ kind: "matches", pattern, pass });
+      if (!pass) return out;
+    }
+  }
+  if (exp.not_matches) {
+    for (const pattern of exp.not_matches) {
+      const pass = !new RegExp(pattern).test(text);
+      out.push({ kind: "not_matches", pattern, pass });
+      if (!pass) return out;
+    }
+  }
+  return out;
+}
+
+/**
+ * Format a single failed ReasonMustResult into a human-readable scoring
+ * message. Matches the strings called out in the plan so failure reports
+ * unambiguously identify which clause violated.
+ */
+export function formatReasonMustFailure(result: ReasonMustResult): string {
+  switch (result.kind) {
+    case "contains":
+      return `reason missing required substring "${result.pattern}"`;
+    case "not_contains":
+      return `reason contains forbidden substring "${result.pattern}"`;
+    case "matches":
+      return `reason did not match required regex /${result.pattern}/`;
+    case "not_matches":
+      return `reason matched forbidden regex /${result.pattern}/`;
+  }
 }
 
 /**
@@ -331,12 +416,41 @@ export function scoreRichExpectation(
   gate: string | undefined,
   exp: RichExpectation,
   ctx?: ScoreContext,
-): { pass: boolean; reason?: string } {
+): { pass: boolean; reason?: string; reason_must_results?: ReasonMustResult[] } {
   const decisionOk = decision === exp.expected;
   const gateOk = !exp.by || exp.by === gate;
   if (decisionOk && gateOk) {
+    // Decision + gate matched. Reason-text scoring runs strictly inside this
+    // branch, so a wrong rule or wrong decision is reported by the existing
+    // checks below first — reason_must never conflates "wrong rule" with
+    // "right rule, wrong message".
+    if (exp.reason_must) {
+      const reasonMustResults = evaluateReasonMust(
+        ctx?.actualReason,
+        exp.reason_must,
+      );
+      const firstFailure = reasonMustResults.find((r) => !r.pass);
+      if (firstFailure) {
+        return {
+          pass: false,
+          reason: formatReasonMustFailure(firstFailure),
+          reason_must_results: reasonMustResults,
+        };
+      }
+    }
     // Decision and gate matched. Now apply prediction-verdict scoring.
-    if (exp.prediction && ctx) {
+    // Prediction-verdict scoring requires sessionDir/toolName/toolInput;
+    // when any are missing (Stop-hook callers, or callers that pass only
+    // actualReason for reason_must) the prediction branch is skipped.
+    if (
+      exp.prediction &&
+      ctx &&
+      ctx.sessionDir !== undefined &&
+      ctx.toolName !== undefined
+    ) {
+      const sessionDir = ctx.sessionDir;
+      const toolName = ctx.toolName;
+      const toolInput = ctx.toolInput;
       const pred = exp.prediction;
       const verdict = pred.verdict;
 
@@ -357,9 +471,9 @@ export function scoreRichExpectation(
 
       if (verdict === "too_broad" && pred.forbidden_blocks?.length) {
         const livePred = findActivePredictionMatchingSync(
-          ctx.sessionDir,
-          ctx.toolName,
-          ctx.toolInput,
+          sessionDir,
+          toolName,
+          toolInput,
         );
         if (livePred) {
           for (const forbidden of pred.forbidden_blocks) {
@@ -379,9 +493,9 @@ export function scoreRichExpectation(
 
       if (verdict === "correct" && pred.intent_must_contain) {
         const livePred = findActivePredictionMatchingSync(
-          ctx.sessionDir,
-          ctx.toolName,
-          ctx.toolInput,
+          sessionDir,
+          toolName,
+          toolInput,
         );
         if (
           !livePred ||
@@ -396,9 +510,9 @@ export function scoreRichExpectation(
 
       if (pred.expected_mood !== undefined) {
         const livePred = findActivePredictionMatchingSync(
-          ctx.sessionDir,
-          ctx.toolName,
-          ctx.toolInput,
+          sessionDir,
+          toolName,
+          toolInput,
         );
         if (!livePred || livePred.prediction.mood !== pred.expected_mood) {
           return {
@@ -410,9 +524,9 @@ export function scoreRichExpectation(
 
       if (pred.expected_trust !== undefined) {
         const livePred = findActivePredictionMatchingSync(
-          ctx.sessionDir,
-          ctx.toolName,
-          ctx.toolInput,
+          sessionDir,
+          toolName,
+          toolInput,
         );
         if (!livePred || livePred.prediction.trust !== pred.expected_trust) {
           return {

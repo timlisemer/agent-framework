@@ -899,6 +899,8 @@ function formatReport(
       if (f.gate_expected) entry.gate_expected = f.gate_expected;
       if (f.at !== undefined) entry.at = f.at;
       if (f.reason) entry.reason = f.reason;
+      if (f.reason_must_results) entry.reason_must_results = f.reason_must_results;
+      if (f.actual_reason !== undefined) entry.actual_reason = f.actual_reason;
       return entry;
     });
   }
@@ -1315,10 +1317,17 @@ async function main(): Promise<void> {
                   sessionDir,
                   toolName: block.name,
                   toolInput: block.input,
+                  actualReason: reason,
                 });
                 event.pass = scored.pass;
                 if (scored.reason) {
                   event.reason = scored.reason;
+                }
+                if (scored.reason_must_results) {
+                  event.reason_must_results = scored.reason_must_results;
+                }
+                if (reason !== undefined) {
+                  event.actual_reason = reason;
                 }
                 results.push(event);
               }
@@ -1458,9 +1467,17 @@ async function main(): Promise<void> {
             const event: ReplayEvent = { ...baseStopEvent };
             event.expected = exp.expected;
             event.at = exp.at ?? "full";
-            const scored = scoreRichExpectation(decision, undefined, exp);
+            const scored = scoreRichExpectation(decision, undefined, exp, {
+              actualReason: reason,
+            });
             event.pass = scored.pass;
             if (scored.reason) event.reason = scored.reason;
+            if (scored.reason_must_results) {
+              event.reason_must_results = scored.reason_must_results;
+            }
+            if (reason !== undefined) {
+              event.actual_reason = reason;
+            }
             results.push(event);
           }
         }

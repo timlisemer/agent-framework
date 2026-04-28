@@ -1,0 +1,253 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// Spy that should NEVER be called when AGENT_FRAMEWORK_LLM_STUBS targets the
+// telemetry agent. The stub must short-circuit at runAgentWithRetryAndTelemetry
+// before reaching runAgent / runAgentWithRetry.
+const queryMock = vi.fn();
+
+vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
+  query: queryMock,
+}));
+
+const messagesCreateSpy = vi.fn();
+
+vi.mock("../../src/utils/anthropic-client.js", () => ({
+  getAnthropicClient: vi.fn(() => ({
+    messages: { create: messagesCreateSpy },
+  })),
+}));
+
+const logAgentStartedSpy = vi.fn();
+const logAgentDecisionSpy = vi.fn();
+
+vi.mock("../../src/utils/logger.js", () => ({
+  logAgentDecision: (...args: unknown[]) => logAgentDecisionSpy(...args),
+  logAgentStarted: (...args: unknown[]) => logAgentStartedSpy(...args),
+  extractDecision: (output: string) => {
+    const t = output.trim();
+    if (t.startsWith("APPROVE") || t === "OVERTURN: APPROVE") return "APPROVE";
+    if (t.startsWith("DENY") || t === "UPHOLD") return "DENY";
+    return null;
+  },
+}));
+
+import { MODEL_TIERS, EXECUTION_TYPES } from "../../src/types.js";
+import type { AgentConfig } from "../../src/utils/agent-runner.js";
+
+function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
+  return {
+    name: "tool-appeal",
+    tier: MODEL_TIERS.HAIKU,
+    mode: "direct",
+    systemPrompt: "Test",
+    maxTokens: 100,
+    ...overrides,
+  };
+}
+
+const baseTelemetry = {
+  agent: "tool-appeal",
+  hookName: "PreToolUse",
+  toolName: "Bash",
+  workingDir: "/tmp",
+  executionType: EXECUTION_TYPES.LLM,
+};
+
+describe("runAgentWithRetryAndTelemetry — env-keyed LLM stub", () => {
+  beforeEach(() => {
+    queryMock.mockReset();
+    messagesCreateSpy.mockReset();
+    logAgentStartedSpy.mockReset();
+    logAgentDecisionSpy.mockReset();
+    delete process.env.AGENT_FRAMEWORK_LLM_STUBS;
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    delete process.env.AGENT_FRAMEWORK_LLM_STUBS;
+  });
+
+  it("stubs tool-appeal output, never calls runAgent / runAgentWithRetry", async () => {
+    process.env.AGENT_FRAMEWORK_LLM_STUBS = JSON.stringify({
+      "tool-appeal": "UPHOLD",
+    });
+
+    const { runAgentWithRetryAndTelemetry } = await import(
+      "../../src/utils/agent-runner.js"
+    );
+
+    const result = await runAgentWithRetryAndTelemetry(
+      makeConfig(),
+      { prompt: "Evaluate:" },
+      {
+        formatValidator: () => true,
+        formatReminder: "Reply UPHOLD or OVERTURN.",
+        context: "tool-appeal",
+      },
+      baseTelemetry,
+    );
+
+    expect(result.output).toBe("UPHOLD");
+    expect(result.success).toBe(true);
+    expect(result.errorCount).toBe(0);
+    expect(result.modelName).toBe("stub");
+    expect(queryMock).not.toHaveBeenCalled();
+    expect(messagesCreateSpy).not.toHaveBeenCalled();
+  });
+
+  it("stubs rule-gate DENY output and synthesizes correct shape", async () => {
+    process.env.AGENT_FRAMEWORK_LLM_STUBS = JSON.stringify({
+      "rule-gate": "DENY: tool-approve: nope",
+    });
+
+    const { runAgentWithRetryAndTelemetry } = await import(
+      "../../src/utils/agent-runner.js"
+    );
+
+    const result = await runAgentWithRetryAndTelemetry(
+      makeConfig({ name: "rule-gate" }),
+      { prompt: "Evaluate:" },
+      {
+        formatValidator: () => true,
+        formatReminder: "Reply APPROVE or DENY.",
+        context: "rule-gate",
+      },
+      { ...baseTelemetry, agent: "rule-gate" },
+    );
+
+    expect(result.output).toBe("DENY: tool-approve: nope");
+    expect(result.success).toBe(true);
+    expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it("control: env unset reaches runAgent path (queryMock called)", async () => {
+    delete process.env.AGENT_FRAMEWORK_LLM_STUBS;
+
+    queryMock.mockImplementation(async function* () {
+      yield {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "UPHOLD",
+      };
+    });
+
+    const { runAgentWithRetryAndTelemetry } = await import(
+      "../../src/utils/agent-runner.js"
+    );
+
+    const result = await runAgentWithRetryAndTelemetry(
+      makeConfig({ mode: "sdk", workingDir: "/tmp" }),
+      { prompt: "Evaluate:" },
+      {
+        formatValidator: () => true,
+        formatReminder: "Reply UPHOLD or OVERTURN.",
+        context: "tool-appeal",
+      },
+      baseTelemetry,
+    );
+
+    expect(queryMock).toHaveBeenCalled();
+    expect(result.modelName).not.toBe("stub");
+  });
+
+  it("malformed JSON in env throws descriptive error", async () => {
+    process.env.AGENT_FRAMEWORK_LLM_STUBS = "{not valid json";
+
+    const { runAgentWithRetryAndTelemetry } = await import(
+      "../../src/utils/agent-runner.js"
+    );
+
+    await expect(
+      runAgentWithRetryAndTelemetry(
+        makeConfig(),
+        { prompt: "Evaluate:" },
+        {
+          formatValidator: () => true,
+          formatReminder: "Reply UPHOLD or OVERTURN.",
+          context: "tool-appeal",
+        },
+        baseTelemetry,
+      ),
+    ).rejects.toThrow(/AGENT_FRAMEWORK_LLM_STUBS is not valid JSON/);
+  });
+
+  it("stub key not matching telemetry.agent falls through to LLM call", async () => {
+    process.env.AGENT_FRAMEWORK_LLM_STUBS = JSON.stringify({
+      "different-agent": "UPHOLD",
+    });
+
+    queryMock.mockImplementation(async function* () {
+      yield {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "UPHOLD",
+      };
+    });
+
+    const { runAgentWithRetryAndTelemetry } = await import(
+      "../../src/utils/agent-runner.js"
+    );
+
+    const result = await runAgentWithRetryAndTelemetry(
+      makeConfig({ mode: "sdk", workingDir: "/tmp" }),
+      { prompt: "Evaluate:" },
+      {
+        formatValidator: () => true,
+        formatReminder: "Reply UPHOLD or OVERTURN.",
+        context: "tool-appeal",
+      },
+      baseTelemetry,
+    );
+
+    expect(queryMock).toHaveBeenCalled();
+    expect(result.modelName).not.toBe("stub");
+  });
+
+  it("telemetry side effects fire on the stub path", async () => {
+    process.env.AGENT_FRAMEWORK_LLM_STUBS = JSON.stringify({
+      "tool-appeal": "UPHOLD",
+    });
+
+    const { runAgentWithRetryAndTelemetry } = await import(
+      "../../src/utils/agent-runner.js"
+    );
+
+    await runAgentWithRetryAndTelemetry(
+      makeConfig(),
+      { prompt: "Evaluate:" },
+      {
+        formatValidator: () => true,
+        formatReminder: "Reply UPHOLD or OVERTURN.",
+        context: "tool-appeal",
+      },
+      baseTelemetry,
+    );
+
+    expect(logAgentStartedSpy).toHaveBeenCalled();
+    expect(logAgentDecisionSpy).toHaveBeenCalled();
+  });
+
+  it("rejects array-shaped JSON in env (must be object)", async () => {
+    process.env.AGENT_FRAMEWORK_LLM_STUBS = "[\"UPHOLD\"]";
+
+    const { runAgentWithRetryAndTelemetry } = await import(
+      "../../src/utils/agent-runner.js"
+    );
+
+    await expect(
+      runAgentWithRetryAndTelemetry(
+        makeConfig(),
+        { prompt: "Evaluate:" },
+        {
+          formatValidator: () => true,
+          formatReminder: "Reply UPHOLD or OVERTURN.",
+          context: "tool-appeal",
+        },
+        baseTelemetry,
+      ),
+    ).rejects.toThrow(/must be a JSON object/);
+  });
+});
