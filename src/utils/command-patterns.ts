@@ -281,19 +281,37 @@ export function getBlacklistHighlights(toolName: string, toolInput: unknown, wor
   const command = (toolInput as { command?: string }).command;
   if (!command) return [];
 
-  // File-reading patterns should only match the primary command (before any pipe).
-  // e.g. "ls | head -5" is output truncation, not file reading.
+  // File-reading patterns (cat/head/tail) match only when one of those
+  // binaries is the EXECUTABLE HEAD of a sequence segment — never an
+  // incidental occurrence inside an argument or string literal (e.g.
+  // `node -e 'console.log("the tail value")'`). Sequence separators
+  // that spawn a fresh executable: ;, &&, ||, & (background). The
+  // `&(?!\d)` lookahead avoids splitting on shell redirection like
+  // `2>&1`. Pipe `|` is NOT a separator: `ls | head -5` is output
+  // truncation, not file reading. Quoted spans are stripped before
+  // splitting so separators inside string literals don't fragment the
+  // command. Accepted trade-off: wrapper prefixes (`sudo tail`,
+  // `nohup tail`, `time cat`), backtick / $(…) substitutions, and
+  // `bash -c "tail …"` shell-escapes are no longer caught here — none
+  // had a test or scenario depending on the previous incidental match.
   const FILE_READING_PATTERN_NAMES = new Set(["cat", "head", "tail"]);
-  const primaryCommand = command.split(/\s*\|\s*/)[0];
+  const segmentHeads = command
+    .replace(/'[^']*'/g, "")
+    .replace(/"[^"]*"/g, "")
+    .split(/&&|\|\||;|&(?!\d)/)
+    .map((seg) => seg.trim().split(/\s+/)[0])
+    .filter((head) => head.length > 0);
   const redactedCommand = redactPathTokens(command);
-  const redactedPrimary = redactPathTokens(primaryCommand);
 
   return BLACKLIST_PATTERNS
     .filter(({ pattern, name, redactPaths: shouldRedact }) => {
-      const isFileReader = FILE_READING_PATTERN_NAMES.has(name);
-      const base = isFileReader ? primaryCommand : command;
-      const redacted = isFileReader ? redactedPrimary : redactedCommand;
-      const target = shouldRedact ? redacted : base;
+      if (FILE_READING_PATTERN_NAMES.has(name)) {
+        // Append a trailing space so the pattern's required `\s+`
+        // matches a bare-word head. The verb itself has no path tokens,
+        // so redactPaths is a no-op for these patterns.
+        return segmentHeads.some((head) => pattern.test(head + " "));
+      }
+      const target = shouldRedact ? redactedCommand : command;
       return pattern.test(target);
     })
     .map(({ name, alternative }) => {

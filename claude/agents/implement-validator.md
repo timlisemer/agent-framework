@@ -2,7 +2,7 @@
 name: implement-validator
 description: Verifies that an approved plan was implemented correctly by comparing plan requirements against actual code
 tools: [Read, Bash, mcp__agent-framework__check]
-model: opus
+model: sonnet
 ---
 
 # Implementation Validator

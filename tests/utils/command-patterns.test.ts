@@ -160,6 +160,62 @@ describe("getBlacklistHighlights", () => {
     expect(highlights.length).toBeGreaterThan(0);
     expect(highlights[0]).toContain("test command");
   });
+
+  it("does not false-fire 'tail' on word inside string literal in node -e", () => {
+    const cmd = `node -e 'console.log("Capture the tail in the enriched sentinel")'`;
+    const highlights = getBlacklistHighlights("Bash", { command: cmd });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: tail]"))).toBe(false);
+    expect(highlights.some((h) => h.includes("Use Read tool with offset"))).toBe(false);
+    expect(highlights.some((h) => h.includes("[BLACKLIST: node]"))).toBe(true);
+  });
+
+  it("does not false-fire 'cat' on word inside double-quoted argument", () => {
+    expect(
+      getBlacklistHighlights("Bash", { command: `echo "the cat sat on the mat"` })
+    ).toEqual([]);
+  });
+
+  it("does not false-fire 'head' on word inside python -c argument", () => {
+    const highlights = getBlacklistHighlights("Bash", {
+      command: `python3 -c "print('head of list')"`,
+    });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: head]"))).toBe(false);
+    expect(highlights.some((h) => h.includes("[BLACKLIST: python3]"))).toBe(true);
+  });
+
+  it("still fires 'tail' when invoked as the executable", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "tail -n 10 server.log" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: tail]"))).toBe(true);
+  });
+
+  it("still fires 'head' on bare 'head -n 50 file.log'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "head -n 50 file.log" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: head]"))).toBe(true);
+  });
+
+  it("still treats 'ls | head -5' as output truncation (pipe is not a segment separator)", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "ls | head -5" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: head]"))).toBe(false);
+  });
+
+  it("fires 'cat' on the second segment of a sequence command", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "ls /tmp; cat /etc/hosts" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: cat]"))).toBe(true);
+  });
+
+  it("does not get fragmented by separators inside string literals", () => {
+    const highlights = getBlacklistHighlights("Bash", {
+      command: `python3 -c "import os; tail = 5"`,
+    });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: tail]"))).toBe(false);
+  });
+
+  it("preserves 2>&1 redirection semantics: `cmd 2>&1 | tail -80` does not fire 'tail'", () => {
+    const highlights = getBlacklistHighlights("Bash", {
+      command: "ls dist/mcp/server.js 2>&1 | tail -80",
+    });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: tail]"))).toBe(false);
+  });
 });
 
 describe("getBlacklistHighlights - Agent background blocking", () => {

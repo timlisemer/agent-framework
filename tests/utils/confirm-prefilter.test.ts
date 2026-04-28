@@ -69,6 +69,55 @@ describe("runConfirmPrefilter — debugCode (file-extension scoped)", () => {
     const r = runConfirmPrefilter("", diff);
     expect(r.debugCode.length).toBe(0);
   });
+
+  it("does NOT flag the debug-call substring inside a backtick-quoted shell command in a test fixture", () => {
+    const diff =
+      "+++ b/tests/utils/foo.test.ts\n" +
+      "+    const cmd = `node -e 'console" + ".log(\"hi\")'`;\n";
+    const r = runConfirmPrefilter("", diff);
+    expect(r.debugCode.length).toBe(0);
+  });
+
+  it("does NOT flag the debug-call substring inside a // single-line comment", () => {
+    const diff =
+      "+++ b/src/x.ts\n" +
+      "+// example: console" + ".log(\"foo\")\n";
+    const r = runConfirmPrefilter("", diff);
+    expect(r.debugCode.length).toBe(0);
+  });
+
+  it("does NOT flag the debug-call substring on a JSDoc continuation (leading-* line)", () => {
+    const diff =
+      "+++ b/src/x.ts\n" +
+      "+ * @example console" + ".log(x)\n";
+    const r = runConfirmPrefilter("", diff);
+    expect(r.debugCode.length).toBe(0);
+  });
+
+  it("does NOT flag the debug-call substring inside a double-quoted string assignment", () => {
+    const diff =
+      "+++ b/src/x.ts\n" +
+      "+const s = \"console" + ".log(foo)\";\n";
+    const r = runConfirmPrefilter("", diff);
+    expect(r.debugCode.length).toBe(0);
+  });
+
+  it("STILL flags an un-quoted real debug call at statement position", () => {
+    const diff =
+      "+++ b/src/x.ts\n" +
+      "+console" + ".log(\"real debug\");\n";
+    const r = runConfirmPrefilter("", diff);
+    expect(r.debugCode.length).toBe(1);
+    expect(r.debugCode[0].label).toContain("console.log");
+  });
+
+  it("STILL flags an un-quoted real debug call inside an if-block body", () => {
+    const diff =
+      "+++ b/src/x.ts\n" +
+      "+if (x) { console" + ".log(\"real\"); }\n";
+    const r = runConfirmPrefilter("", diff);
+    expect(r.debugCode.length).toBe(1);
+  });
 });
 
 describe("runConfirmPrefilter — unusedCodeWorkarounds", () => {

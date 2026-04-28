@@ -80,20 +80,6 @@ phrase is the signal the failure is intended pending code.
   substantive — pure declaration with no payload. LLM-flap risk for
   the alignment agent per REPRODUCTION-NOTES.md.
 
-- `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message`
-  — live ExitPlanMode was denied with 'Plan validation failed:
-  "...{ … }..." → Use Read tool with offset'. The deny itself is
-  correct (elided code is the antipattern plan-validate guards
-  against), but the remediation suffix '→ Use Read tool with offset'
-  is borrowed from `command-patterns.ts:28` (the bash `tail -n`
-  remediation) and has nothing to do with stripping ellipses from
-  plan text. Following the live remediation literally would not have
-  fixed anything; the actual fix the AI had to discover
-  independently was to strip the '…' characters. The harness can't
-  fail-test the wrong-text-only condition directly (decision is
-  correct), but the scenario currently fails because the harness
-  ALLOWS where live denied — both expose the spec gap.
-
 - `gate-cites-stale-plan3-intent-after-skill-was-already-loaded-and-plan-consolidated-should-allow`
   — live denied a workflow-prescribed ExitPlanMode after /plan3 had
   been loaded, validators run, plan consolidated, and ellipses
@@ -105,6 +91,20 @@ phrase is the signal the failure is intended pending code.
   conflating an early step that was already fulfilled with the
   current call. Sibling to the stale-intent fixtures elsewhere in
   this folder.
+
+- `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message`
+  — exercises the new `reason_must` harness assertion: the deny for
+  `node -e 'console.log("…tail…")'` must NOT contain the bash `tail`
+  remediation "Use Read tool with offset" and MUST contain the
+  legitimate "node not covered by just check" message. The upstream
+  `command-patterns.ts` fix scoping cat/head/tail to executable
+  segment heads has landed, but the appeal LLM (tool-approve is
+  appealable) consistently overturns the deterministic fastDeny in
+  this scenario's transcript — 3/3 runs return all-rules allow with
+  no flap, so the `reason_must` assertion is never reached. Promotion
+  blocker: add `env.llm_stubs = { "tool-appeal": "UPHOLD" }` using
+  the new harness stubbing mechanism to pin the appeal verdict
+  deterministically.
 
 ## Verify
 

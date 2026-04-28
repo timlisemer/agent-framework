@@ -2,7 +2,7 @@
 name: implementer
 description: Implements an approved plan by making all code changes specified in the plan file
 tools: [Read, Bash, Write, Edit, mcp__agent-framework__check]
-model: opus
+model: sonnet
 ---
 
 # Plan Implementer

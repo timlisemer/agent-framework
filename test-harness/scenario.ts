@@ -867,6 +867,7 @@ async function main() {
         path.join(outputDir, "report-scenario.json"),
         JSON.stringify(result, null, 2) + "\n",
       );
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
 
       exitCode = result.pass ? 0 : 1;
     } else {
@@ -1053,6 +1054,8 @@ async function main() {
         path.join(outputDir, "report-scenario.json"),
         JSON.stringify(result, null, 2) + "\n",
       );
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+
       exitCode = aggregatePass ? 0 : 1;
     }
   } catch (err) {

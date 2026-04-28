@@ -108,11 +108,28 @@ export function runConfirmPrefilter(
     const content = rawLine.slice(1);
 
     if (activeFile) {
-      for (const { matchFile, patterns } of DEBUG_CODE_PATTERNS) {
-        if (!matchFile(activeFile)) continue;
-        for (const { re, label } of patterns) {
-          if (re.test(content)) {
-            debugCode.push({ file: activeFile, line: content.trim(), label });
+      // Strip string literals (single, double, backtick) and skip pure
+      // comment lines before debug-code matching. The DEBUG_CODE_PATTERNS
+      // regexes are deliberately substring matchers; without this guard a
+      // backtick-quoted shell command in a test fixture or a `//` comment
+      // quoting a code example produces a false positive. Mirrors the same
+      // strip-then-test pattern used in src/utils/command-patterns.ts and
+      // src/rules/subagent.ts. Greedy non-nested replace is sufficient for
+      // the false-positive classes seen in practice; full parser-grade
+      // quote handling is out of scope.
+      const codeOnly = content
+        .replace(/`[^`]*`/g, "")
+        .replace(/"[^"]*"/g, "")
+        .replace(/'[^']*'/g, "");
+      const trimmed = codeOnly.trimStart();
+      const isComment = trimmed.startsWith("//") || trimmed.startsWith("*");
+      if (!isComment) {
+        for (const { matchFile, patterns } of DEBUG_CODE_PATTERNS) {
+          if (!matchFile(activeFile)) continue;
+          for (const { re, label } of patterns) {
+            if (re.test(codeOnly)) {
+              debugCode.push({ file: activeFile, line: content.trim(), label });
+            }
           }
         }
       }
