@@ -576,28 +576,28 @@ Use these tools when you need to:
 Git data (status/diff/log/show) is already provided in the prompt context -- do not invoke git from Bash.
 Your final response should be your complete analysis in the required format.`;
 
-  try {
-    // Build tool list: base read-only tools + any extra tools
-    const tools = [...SDK_TOOLS, ...(config.extraTools ?? [])];
+  // Build tool list: base read-only tools + any extra tools
+  const tools = [...SDK_TOOLS, ...(config.extraTools ?? [])];
 
-    // Create SDK query with configured tools
-    const q = query({
-      prompt,
-      options: {
-        model: provider.modelId,
-        cwd: config.workingDir,
-        systemPrompt: enhancedSystemPrompt,
-        tools,
-        allowedTools: tools, // Auto-approve these tools
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
-        maxTurns: config.maxTurns ?? 10,
-        env: subprocessEnv, // Pass env to subprocess (cleared for subscription)
-        persistSession: false, // Don't create transcript files for SDK agents
-      },
-    });
+  // Run a single SDK attempt, returning either a successful result text or
+  // the captured diagnostics needed to compose an enriched sentinel.
+  const runOnce = async (): Promise<SdkAttemptOutcome> => {
+    let stderrBuffer = "";
 
-    // Collect output from streaming response
+    // Diagnostics tracked across the for-await loop. These let us produce an
+    // enriched "[SDK ERROR] No output received (...)" sentinel when the stream
+    // ends without a usable result, and let the retry helper decide whether
+    // re-attempting is warranted.
+    let messageCount = 0;
+    let lastMessageType: string | undefined;
+    let lastResultSubtype: string | undefined;
+    let lastResultIsError: boolean | undefined;
+    let lastResultErrors: string[] | undefined;
+    let lastResultTerminalReason: string | undefined;
+    let lastAssistantError: string | undefined;
+    let apiRetryCount = 0;
+    let lastApiRetryStatus: string | undefined;
+
     let finalResult = "";
     let lastAssistantContent = "";
 
@@ -606,69 +606,147 @@ Your final response should be your complete analysis in the required format.`;
     let totalCompletionTokens = 0;
     let totalCachedTokens = 0;
 
-    for await (const message of q) {
-      const msgAny = message as Record<string, unknown>;
+    try {
+      // Create SDK query with configured tools
+      const q = query({
+        prompt,
+        options: {
+          model: provider.modelId,
+          cwd: config.workingDir,
+          systemPrompt: enhancedSystemPrompt,
+          tools,
+          allowedTools: tools, // Auto-approve these tools
+          permissionMode: "bypassPermissions",
+          allowDangerouslySkipPermissions: true,
+          maxTurns: config.maxTurns ?? 10,
+          env: subprocessEnv, // Pass env to subprocess (cleared for subscription)
+          persistSession: false, // Don't create transcript files for SDK agents
+          stderr: (data: string) => {
+            // Cap to last 2 KiB so a chatty subprocess can't blow memory.
+            stderrBuffer = (stderrBuffer + data).slice(-2048);
+          },
+        },
+      });
 
-      // Prefer 'result' message type - this is the final output with aggregated data
-      if (message.type === "result") {
-        // Extract usage from result message (aggregated token counts)
-        const resultUsage = msgAny.usage as Record<string, unknown> | undefined;
-        if (resultUsage) {
-          totalPromptTokens = (resultUsage.input_tokens ?? 0) as number;
-          totalCompletionTokens = (resultUsage.output_tokens ?? 0) as number;
-          // cache_read_input_tokens from BetaUsage
-          totalCachedTokens = (resultUsage.cache_read_input_tokens ?? 0) as number;
-        }
+      for await (const message of q) {
+        messageCount++;
+        lastMessageType = message.type;
+        const msgAny = message as Record<string, unknown>;
 
-        // Extract cached tokens from modelUsage (per-model breakdown)
-        // This has cacheReadInputTokens which we sum across all models
-        const modelUsage = msgAny.modelUsage as Record<string, Record<string, unknown>> | undefined;
-        if (modelUsage && totalCachedTokens === 0) {
-          // Sum cacheReadInputTokens across all models
-          for (const modelData of Object.values(modelUsage)) {
-            if (typeof modelData.cacheReadInputTokens === "number") {
-              totalCachedTokens += modelData.cacheReadInputTokens;
-            }
+        // api_retry system messages expose transient API retries (added in
+        // SDK v0.2.77). Surface counts so the enriched sentinel can show
+        // "apiRetries=N/last=<error>".
+        if (
+          message.type === "system" &&
+          "subtype" in message &&
+          message.subtype === "api_retry"
+        ) {
+          apiRetryCount++;
+          if ("error" in message && typeof message.error === "string") {
+            lastApiRetryStatus = message.error;
           }
         }
 
-        if ("result" in message && typeof message.result === "string") {
-          finalResult = message.result;
-        }
-        break;
-      }
+        // Prefer 'result' message type - this is the final output with aggregated data
+        if (message.type === "result") {
+          lastResultSubtype = (message as { subtype?: string }).subtype;
+          if ("is_error" in message && typeof message.is_error === "boolean") {
+            lastResultIsError = message.is_error;
+          }
+          if (
+            "terminal_reason" in message &&
+            typeof (message as { terminal_reason?: unknown }).terminal_reason === "string"
+          ) {
+            lastResultTerminalReason = (message as { terminal_reason: string }).terminal_reason;
+          }
+          if ("errors" in message && Array.isArray((message as { errors?: unknown }).errors)) {
+            lastResultErrors = (message as { errors: string[] }).errors;
+          }
 
-      // Track assistant messages as fallback
-      if (message.type === "assistant") {
-        if ("message" in message) {
-          // Handle message object with content
-          const msg = message.message;
-          if (msg && typeof msg === "object" && "content" in msg) {
-            const content = msg.content;
-            if (typeof content === "string") {
-              lastAssistantContent = content;
-            } else if (Array.isArray(content)) {
-              // Extract text from content blocks
-              const textBlocks: string[] = [];
-              for (const block of content) {
-                if (
-                  block &&
-                  typeof block === "object" &&
-                  "type" in block &&
-                  block.type === "text" &&
-                  "text" in block &&
-                  typeof block.text === "string"
-                ) {
-                  textBlocks.push(block.text);
+          // Extract usage from result message (aggregated token counts)
+          const resultUsage = msgAny.usage as Record<string, unknown> | undefined;
+          if (resultUsage) {
+            totalPromptTokens = (resultUsage.input_tokens ?? 0) as number;
+            totalCompletionTokens = (resultUsage.output_tokens ?? 0) as number;
+            // cache_read_input_tokens from BetaUsage
+            totalCachedTokens = (resultUsage.cache_read_input_tokens ?? 0) as number;
+          }
+
+          // Extract cached tokens from modelUsage (per-model breakdown)
+          // This has cacheReadInputTokens which we sum across all models
+          const modelUsage = msgAny.modelUsage as Record<string, Record<string, unknown>> | undefined;
+          if (modelUsage && totalCachedTokens === 0) {
+            // Sum cacheReadInputTokens across all models
+            for (const modelData of Object.values(modelUsage)) {
+              if (typeof modelData.cacheReadInputTokens === "number") {
+                totalCachedTokens += modelData.cacheReadInputTokens;
+              }
+            }
+          }
+
+          // Only treat the SDKResultSuccess subtype with is_error=false as a
+          // real result. Any error subtype (or success+is_error=true) leaves
+          // finalResult empty so the enriched sentinel fires.
+          if (
+            lastResultSubtype === "success" &&
+            lastResultIsError !== true &&
+            "result" in message &&
+            typeof message.result === "string"
+          ) {
+            finalResult = message.result;
+          }
+          break;
+        }
+
+        // Track assistant messages as fallback - but only if the assistant
+        // message itself is not flagged as errored. Per agentSdkTypes.d.ts,
+        // SDKAssistantMessage.error is set on rate_limit / server_error /
+        // billing_error / etc. Using error-tagged content as fallback would
+        // poison lastAssistantContent with partial garbage.
+        if (message.type === "assistant") {
+          const assistantError = (message as { error?: string }).error;
+          if (typeof assistantError === "string" && assistantError.length > 0) {
+            lastAssistantError = assistantError;
+            continue;
+          }
+
+          if ("message" in message) {
+            // Handle message object with content
+            const msg = message.message;
+            if (msg && typeof msg === "object" && "content" in msg) {
+              const content = msg.content;
+              if (typeof content === "string") {
+                lastAssistantContent = content;
+              } else if (Array.isArray(content)) {
+                // Extract text from content blocks
+                const textBlocks: string[] = [];
+                for (const block of content) {
+                  if (
+                    block &&
+                    typeof block === "object" &&
+                    "type" in block &&
+                    block.type === "text" &&
+                    "text" in block &&
+                    typeof block.text === "string"
+                  ) {
+                    textBlocks.push(block.text);
+                  }
+                }
+                if (textBlocks.length > 0) {
+                  lastAssistantContent = textBlocks.join("\n");
                 }
               }
-              if (textBlocks.length > 0) {
-                lastAssistantContent = textBlocks.join("\n");
-              }
             }
           }
         }
       }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+      return {
+        kind: "thrown",
+        text: `[SDK ERROR] ${errorMessage}`,
+      };
     }
 
     // Build usage object - include all available token data
@@ -681,21 +759,187 @@ Your final response should be your complete analysis in the required format.`;
       cachedTokens: totalCachedTokens || undefined,
     } : undefined;
 
-    // Return result, falling back to last assistant content
-    // SDK mode: no generationId (SDK doesn't expose OpenRouter IDs)
+    if (finalResult || lastAssistantContent) {
+      return {
+        kind: "ok",
+        text: finalResult || lastAssistantContent,
+        usage,
+      };
+    }
+
+    // No usable text. Compose enriched sentinel preserving the literal
+    // "[SDK ERROR] No output received" prefix so the upstream
+    // `startsWith("[SDK ERROR]")` checks (agent-runner.ts:348, :364-366)
+    // and the existing test assertion keep working.
     return {
-      text: finalResult || lastAssistantContent || "[SDK ERROR] No output received",
+      kind: "noOutput",
+      text: composeNoOutputSentinel({
+        messageCount,
+        lastMessageType,
+        lastResultSubtype,
+        lastResultIsError,
+        lastResultErrors,
+        lastResultTerminalReason,
+        lastAssistantError,
+        apiRetryCount,
+        lastApiRetryStatus,
+        stderrBuffer,
+      }),
       usage,
+      diagnostics: {
+        messageCount,
+        lastResultSubtype,
+        lastResultIsError,
+      },
+    };
+  };
+
+  // First attempt
+  const first = await runOnce();
+  if (first.kind === "ok") {
+    return {
+      text: first.text,
+      usage: first.usage,
       generationId: undefined,
       provider: provider.type,
     };
-  } catch (error) {
-    // Return error as string rather than throwing
-    // This allows the caller to handle it gracefully
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
-    return { text: `[SDK ERROR] ${errorMessage}`, provider: provider.type };
   }
+
+  // Decide whether a single in-process retry is warranted. Conditions per the
+  // implementation plan:
+  //  (a) zero result messages — stream ended without any 'result' frame
+  //  (b) lastResultSubtype === "error_during_execution"
+  //  (c) lastResultIsError === true on a 'success' subtype
+  // Do NOT retry deterministic limits (error_max_turns / error_max_budget_usd /
+  // error_max_structured_output_retries) or thrown exceptions.
+  let shouldRetry = false;
+  if (first.kind === "noOutput") {
+    const d = first.diagnostics;
+    const sawNoResult = d.lastResultSubtype === undefined;
+    const transientErrorSubtype = d.lastResultSubtype === "error_during_execution";
+    const isErrorOnSuccess =
+      d.lastResultSubtype === "success" && d.lastResultIsError === true;
+    shouldRetry = sawNoResult || transientErrorSubtype || isErrorOnSuccess;
+  }
+
+  if (!shouldRetry) {
+    return {
+      text: first.text,
+      usage: first.kind === "noOutput" ? first.usage : undefined,
+      generationId: undefined,
+      provider: provider.type,
+    };
+  }
+
+  // 250 ms cool-off so any underlying HTTP/2 / TLS state has a chance to tear
+  // down — same-tick retries don't fix connection-pool failures.
+  await new Promise<void>((resolve) => setTimeout(resolve, 250));
+
+  const second = await runOnce();
+  if (second.kind === "ok") {
+    return {
+      text: second.text,
+      usage: second.usage,
+      generationId: undefined,
+      provider: provider.type,
+    };
+  }
+
+  // Retry also failed — return the enriched sentinel from the second attempt
+  // (or the thrown-error sentinel if the second attempt threw).
+  return {
+    text: second.text,
+    usage: second.kind === "noOutput" ? second.usage : undefined,
+    generationId: undefined,
+    provider: provider.type,
+  };
+}
+
+/**
+ * Outcome of a single `runOnce` attempt inside `runSdkAgent`.
+ *
+ * - `ok`: stream produced usable text (either a successful result or a
+ *   non-errored assistant fallback).
+ * - `noOutput`: stream finished without usable text. Includes the enriched
+ *   sentinel and the diagnostics needed by the retry decision.
+ * - `thrown`: the SDK call threw. Wraps the error message in the
+ *   `[SDK ERROR]` prefix; not eligible for retry.
+ */
+type SdkAttemptOutcome =
+  | {
+      kind: "ok";
+      text: string;
+      usage?: InternalAgentResult["usage"];
+    }
+  | {
+      kind: "noOutput";
+      text: string;
+      usage?: InternalAgentResult["usage"];
+      diagnostics: {
+        messageCount: number;
+        lastResultSubtype: string | undefined;
+        lastResultIsError: boolean | undefined;
+      };
+    }
+  | {
+      kind: "thrown";
+      text: string;
+    };
+
+/**
+ * Compose the enriched "[SDK ERROR] No output received" sentinel.
+ *
+ * The literal prefix MUST be preserved so the upstream sentinel detection at
+ * `runAgent` (the `startsWith("[SDK ERROR]")` checks) and the existing test
+ * assertion in `tests/utils/agent-runner-sdk-error-fallback.test.ts` continue
+ * to work. The parenthetical contains whichever diagnostics are populated,
+ * each capped so the line stays scannable.
+ */
+function composeNoOutputSentinel(diag: {
+  messageCount: number;
+  lastMessageType: string | undefined;
+  lastResultSubtype: string | undefined;
+  lastResultIsError: boolean | undefined;
+  lastResultErrors: string[] | undefined;
+  lastResultTerminalReason: string | undefined;
+  lastAssistantError: string | undefined;
+  apiRetryCount: number;
+  lastApiRetryStatus: string | undefined;
+  stderrBuffer: string;
+}): string {
+  const parts: string[] = [];
+
+  parts.push(`messages=${diag.messageCount}`);
+  parts.push(`lastType=${diag.lastMessageType ?? "none"}`);
+
+  if (diag.lastResultSubtype !== undefined) {
+    parts.push(`subtype=${diag.lastResultSubtype}`);
+  }
+  if (diag.lastResultIsError !== undefined) {
+    parts.push(`isError=${diag.lastResultIsError}`);
+  }
+  if (diag.lastResultErrors && diag.lastResultErrors.length > 0) {
+    const joined = diag.lastResultErrors.slice(0, 3).join(" | ").slice(0, 300);
+    parts.push(`errors="${joined}"`);
+  }
+  if (diag.lastResultTerminalReason !== undefined) {
+    parts.push(`terminalReason=${diag.lastResultTerminalReason}`);
+  }
+  if (diag.apiRetryCount > 0) {
+    const status = diag.lastApiRetryStatus ?? "unknown";
+    parts.push(`apiRetries=${diag.apiRetryCount}/last=${status}`);
+  }
+  if (diag.lastAssistantError !== undefined) {
+    parts.push(`assistantError=${diag.lastAssistantError}`);
+  }
+  if (diag.stderrBuffer.length > 0) {
+    const tail = diag.stderrBuffer.slice(-200).replace(/\s+/g, " ").trim();
+    if (tail.length > 0) {
+      parts.push(`stderrTail=${tail}`);
+    }
+  }
+
+  return `[SDK ERROR] No output received (${parts.join(", ")})`;
 }
 
 /**

@@ -461,7 +461,7 @@ server.registerTool(
   }
 );
 
-const scenarioBlockSchema = z.record(z.unknown());
+const scenarioBlockSchema = z.record(z.string(), z.unknown());
 
 const scenarioSchema = z.object({
   name: z.string().describe("Slug for the scenario. Must match [A-Za-z0-9._-]+."),

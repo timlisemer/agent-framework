@@ -1,0 +1,60 @@
+{
+  "name": "plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message",
+  "description": "Live repro from ~/.claude/projects/-home-tim-Coding-nixos/e05c9f83-d2ae-4b48-84d9-6296f5e5905d.jsonl (2026-04-28, line 161 firing tool toolu_01GZ9fW5pyv1ud43y4pbFy4S). And ALSO directly reproduced live in the very session that authored this scenario: when running `node -e \"...\"` to debug plan-validate, the Bash hook blocked the command with reason 'Use Read tool with offset. node not covered by just check. You must run mcp__agent-framework__check'. The 'Use Read tool with offset' suffix has nothing to do with `node -e` -- it was concatenated in because the JavaScript string-literal inside the Bash command happened to contain the word 'tail' (a fixture string). The bash-command blacklist regex /\\btail\\s+/ in src/utils/command-patterns.ts:28 was authored to block bash `tail -n` invocations, but the same regex matches the word 'tail' followed by whitespace ANYWHERE -- inside string literals embedded in shell commands AND inside English prose in plan files. The deny format from command-patterns.ts:247 is `[VIOLATION: <name>] \"<line>\" → <alternative>` and the alternative for `tail` is hard-coded to 'Use Read tool with offset'. So the AI sees a deny saying `\"<some line containing the word tail>\" → Use Read tool with offset` -- a remediation that makes sense for `tail file.log` but is nonsense advice when the actual command is `node` or the trigger is prose. Following it literally leads to a useless Read-with-offset call. The actual fix is to rephrase prose / inspect the bash head separately. The bug: getContentBlacklistHighlights concatenates the per-pattern `alternative` suffix verbatim even when the matched word is incidental (inside a string literal or English prose) rather than the actual command head being executed. EXPECTED TO FAIL against current code until either (a) /\\btail\\s+/ requires bash-context signals (flag, path) before firing, (b) the scan only inspects the command head not embedded string literals, or (c) the rendered violation drops the `alternative` suffix when the match is in non-bash content.",
+  "transcript": [
+    {
+      "role": "user",
+      "isMeta": false,
+      "content": "please print the captured tail in the enriched sentinel for verification"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Running the verification script now."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_scenario_bash_with_tail_word_in_string",
+          "name": "Bash",
+          "input": {
+            "command": "node -e 'console.log(\"Capture the tail in the enriched sentinel\")'",
+            "description": "Print captured tail in enriched sentinel"
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "toolu_scenario_bash_with_tail_word_in_string"
+  },
+  "env": {
+    "cwd": "/home/tim/Coding/public_repos/agent-framework",
+    "permission_mode": "default",
+    "subagent": false
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "User wants a quick verification print of a captured tail value via node.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "please print the captured tail in the enriched sentinel for verification",
+      "blockAllTools": false
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 4
+  },
+  "expect": {
+    "expected": "deny",
+    "by": "tool-approve",
+    "notes": "Reproduction path: tool-approve.ts:67-77 calls checkToolApproval, which calls getBlacklistHighlights at command-patterns.ts:270. For Bash with command `node -e 'console.log(\"Capture the tail in the enriched sentinel\")'`, the regex /\\btail\\s+/ at command-patterns.ts:28 matches the word 'tail' inside the JS string literal (the regex scans the WHOLE primaryCommand, including embedded strings). Plus regex matches for `node` (workingDir-aware via resolveCheckMessage in agent-framework cwd which has a Justfile) compose the full live reason. Live block reproduced verbatim by the harness: 'Use Read tool with offset. node not covered by just check. You must run mcp__agent-framework__check'. Decision-check passes (deny=deny). The BUG IS IN THE REASON TEXT, not in the decision: 'Use Read tool with offset' is the bash `tail` alternative -- nonsense remediation for a `node` command head, and equally nonsense for plan PROSE containing the word 'tail'. The harness has no built-in reason-substring assertion, so this scenario currently passes the standard expected-decision compare. The scenario remains in todo/ as the executable spec for the fix: when the regex is scoped to bash-context signals (flag/path required) OR the scan inspects only the command head, the reason text will no longer contain 'Use Read tool with offset' for this command. Until reason-substring assertions exist in the harness, the spec lives in this notes field. SAME BUG ON BOTH PATHS: (1) ExitPlanMode plan validation at line 161 of source transcript (plan PROSE containing 'tail' triggered the same wrong remediation), and (2) Write/Edit to ~/.claude/plans/<x>.md via pre-tool-use.ts:386-449 (plan PROSE containing 'tail' triggers the same wrong remediation in edit mode), and (3) Bash commands incidentally containing 'tail' in string literals (this scenario's path). All three surface from the same getContentBlacklistHighlights / BLACKLIST_PATTERNS code -- one upstream fix resolves all three."
+  },
+  "expectation_reality": "working",
+  "expectation_reality_last_run_at": "2026-04-28T10:40:06.543Z"
+}
