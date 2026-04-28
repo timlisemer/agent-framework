@@ -41,19 +41,21 @@ src/                                # TypeScript source
     evaluator.ts                    # Rule evaluation engine (sequential + combined LLM)
     utils.ts                        # Shared constants (FILE_TOOLS, LOW_RISK_TOOLS, etc.)
     index.ts                        # ALL_RULES barrel export
-    respond-first.ts                # Priority 5: AI must respond before tools
-    low-risk.ts                     # Priority 10: Auto-approve read-only tools
-    plan-mode-block.ts              # Priority 15: Block writes in plan mode
-    subagent.ts                     # Priority 20: Subagent tool approval
-    question-validate.ts            # Priority 30: Validate AskUserQuestion
-    force-check-required.ts         # Priority 32: Lock to mcp__check after workaround denial
-    prediction-block.ts             # Priority 35: Block predicted-bad tools
-    drift-detect.ts                 # Priority 40: Detect drift from intent
-    error-acknowledge.ts            # Priority 50: Require error acknowledgment
-    trusted-path.ts                 # Priority 58: Deny sensitive-path writes
-    edit-intent.ts                  # Priority 60: Block edits without intent
-    style-drift.ts                  # Priority 65: Detect style changes
-    gate.ts                         # Priority 70: Gate agent (rule-gate LLM contribution)
+    respond-first.ts                # Priority 5:   AI must respond before tools (deterministic)
+    plan-mode-block.ts              # Priority 15:  Block writes in plan mode; fast-allow plan files
+    subagent.ts                     # Priority 20:  Subagent tool approval
+    background-agent-block.ts       # Priority 25:  Deny Agent(run_in_background=true) from main session
+    prediction-question-judge.ts    # Priority 28:  Block stalling AskUserQuestion under frustration
+    question-validate.ts            # Priority 30:  Validate AskUserQuestion
+    force-check-required.ts         # Priority 32:  Lock to mcp__check after workaround denial
+    prediction-block.ts             # Priority 35:  Block predicted-bad tools (appealable)
+    low-risk.ts                     # Priority 38:  Auto-approve read-only tools
+    drift-detect.ts                 # Priority 40:  Detect drift from intent
+    error-acknowledge.ts            # Priority 50:  Require error acknowledgment
+    trusted-path.ts                 # Priority 58:  Deny sensitive-path writes
+    edit-intent.ts                  # Priority 60:  Block edits without intent
+    style-drift.ts                  # Priority 65:  Detect style changes
+    gate.ts                         # Priority 70:  Gate agent (rule-gate LLM contribution)
     tool-approve.ts                 # Priority 100: Final tool approval
 
   hooks/                            # Claude Code hook entry points
@@ -289,14 +291,15 @@ or `null` (skip). Triggered `llmContext` rules are combined into one haiku LLM c
 ```
 Tool call received
 ├─> Rule pipeline (evaluateRules):
-│   ├─> respond-first (5)     Fast deny if no text before tools
-│   ├─> low-risk (10)         Fast allow read-only tools
-│   ├─> plan-mode-block (15)  Fast deny writes in plan mode
+│   ├─> respond-first (5)     Fast deny if no text before tools (deterministic)
+│   ├─> plan-mode-block (15)  Fast deny writes in plan mode; fast-allow plan files
 │   ├─> subagent (20)         Subagent tool approval
 │   ├─> background-agent-block (25) Fast deny Agent(run_in_background=true) from main session
+│   ├─> prediction-question-judge (28) Block stalling AskUserQuestion under frustration
 │   ├─> question-validate (30) Validate AskUserQuestion
 │   ├─> force-check-required (32) Lock to mcp__check after workaround denial
 │   ├─> prediction-block (35)  Block predicted-bad tools (appealable)
+│   ├─> low-risk (38)          Fast allow read-only tools (sentiment-aware via prediction-block running first)
 │   ├─> drift-detect (40)      Detect drift from user intent (appealable)
 │   ├─> error-acknowledge (50) Require error acknowledgment (appealable, LLM)
 │   ├─> trusted-path (58)      Fast deny sensitive paths
@@ -304,6 +307,14 @@ Tool call received
 │   ├─> style-drift (65)       Detect style changes (appealable, LLM)
 │   ├─> gate (70)              Gate agent contribution to rule-gate LLM
 │   └─> tool-approve (100)     Final tool approval (appealable, LLM)
+│
+│   Symmetric short-circuit guards (`evaluator.ts`): a later fastAllow OR
+│   fastDeny is deferred whenever a higher-priority rule has emitted
+│   llmContext. Deferred denies fire after the rule-gate LLM aggregator only
+│   if the LLM approves; deferred allows are dropped if any deny is pending.
+│   Without this symmetry, a low-priority deterministic deny (e.g.
+│   prediction-block) could silently discard a high-priority rule's pending
+│   LLM judgment.
 │
 ├─> Rewind detection (after rules, before validators)
 │

@@ -10,7 +10,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
 
 ## Agents
 
-The framework implements 17 specialized agents organized into three categories:
+The framework implements 16 specialized agents organized into three categories:
 
 ### MCP Tools (User-Facing)
 
@@ -33,7 +33,6 @@ The framework implements 17 specialized agents organized into three categories:
 | Agent            | Model  | Hook        | Purpose                                        |
 | ---------------- | ------ | ----------- | ---------------------------------------------- |
 | rule-gate        | haiku  | PreToolUse  | Combined evaluator for triggered rule contexts |
-| respond-first-quality | haiku | PreToolUse | Validate AI's first response acknowledges user message |
 | error-acknowledge| haiku  | PreToolUse  | Require error acknowledgment before proceeding |
 | plan-validate    | sonnet | PreToolUse  | Detect plan drift from user intent             |
 | gate             | haiku  | PreToolUse  | Validate tool calls against user intent/errors |
@@ -67,21 +66,27 @@ The `commit` agent enforces the complete verification chain before committing.
 ┌─ Tool Call Received
 │
 ├─ Rule Pipeline (evaluateRules, sequential by priority):
-│  ├─ respond-first (5): AI must respond before tools
-│  ├─ low-risk (10): Auto-approve read-only tools
-│  ├─ plan-mode-block (15): Block writes in plan mode
+│  ├─ respond-first (5): AI must respond before tools (deterministic)
+│  ├─ plan-mode-block (15): Block writes in plan mode; fast-allow plan files
 │  ├─ subagent (20): Subagent tool approval
+│  ├─ background-agent-block (25): Deny Agent(run_in_background=true) from main session
+│  ├─ prediction-question-judge (28): Block stalling AskUserQuestion under frustration
 │  ├─ question-validate (30): Validate AskUserQuestion
 │  ├─ force-check-required (32): Lock to mcp__check after workaround denial
-│  ├─ prediction-block (35): Block predicted-bad tools
-│  ├─ drift-detect (40): Detect drift from intent
-│  ├─ error-acknowledge (50): Require error acknowledgment
-│  ├─ sensitive-path-block (58): Deny sensitive-path writes
-│  ├─ edit-intent (60): Block edits without intent
-│  ├─ style-drift (65): Detect style changes
+│  ├─ prediction-block (35): Block predicted-bad tools (appealable)
+│  ├─ low-risk (38): Auto-approve read-only tools
+│  ├─ drift-detect (40): Detect drift from intent (appealable)
+│  ├─ error-acknowledge (50): Require error acknowledgment (appealable, LLM)
+│  ├─ trusted-path (58): Deny sensitive-path writes
+│  ├─ edit-intent (60): Block edits without intent (appealable)
+│  ├─ style-drift (65): Detect style changes (appealable, LLM)
 │  ├─ gate (70): Gate agent contribution to rule-gate LLM
-│  └─ tool-approve (100): Final tool approval
+│  └─ tool-approve (100): Final tool approval (appealable, LLM)
 │     └─ fastDeny with appealable → tool-appeal with transcript
+│
+│  Symmetric short-circuit guards: a later fastAllow OR fastDeny is deferred
+│  whenever a higher-priority rule has emitted llmContext, so the rule-gate
+│  aggregator's judgment is always authoritative.
 │
 ├─ plan-validate: Check for plan drift on ~/.claude/plans writes
 ├─ claude-md-validate: Validate CLAUDE.md edits
@@ -325,7 +330,7 @@ a1b2c3d
 
 The tool-approve hook runs automatically on every tool call Claude tries to execute.
 
-The respond-first-quality agent runs on the first tool call after a user message. It verifies the AI's text response adequately acknowledges, interprets, and states planned actions before proceeding with tools.
+The respond-first rule (priority 5) is purely deterministic: it fastDenies whenever the assistant calls a tool without first emitting any text in the current turn, with narrow carve-outs for slash commands, confirmation patterns, and inaction-complaint sentiment. Semantic alignment between text and user intent is left to prediction-block / gate / tool-approve.
 
 ### Programmatic Usage
 
