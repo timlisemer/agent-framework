@@ -18,6 +18,41 @@ const SECOND_CORRECTION_RE =
 const APOLOGY_DEMAND_RE = /\b(apologi[sz]e|say\s+sorry|admit\s+(it|that))\b/i;
 const REQUEST_INTERRUPTED_RE = /\[Request\s+interrupted\s+by\s+user/g;
 
+// ALL-CAPS shouting: at least 4 consecutive ALL-CAPS tokens of >=3 letters
+// each, separated by non-word characters, AND at least 85% of letters in
+// the message are uppercase. The token-pattern alone false-positives on
+// calm tech-acronym sentences ("Use HTTPS API REST JSON YAML XML
+// responses." has 6 consecutive caps tokens but 66% uppercase ratio); the
+// letter-ratio guard rejects those.
+//
+// Catches: "STOP. WTF ARE YOU DOING.", "WHY THE FUCK DID YOU STOP HOW
+// FUCKING OFTEN", "OH MY FUCKING GOD WHY ARE YOU CALLING VITETEST",
+// "NO I DID NOT ASK THAT. FUCKING REPEAT WHAT I ASKED." (all 100% caps).
+// Rejects: "Use HTTPS API REST JSON responses.", "Set FOO BAR BAZ env
+// vars.", "Check the JSON HTTP API endpoint." (calm tech-acronym sentences
+// dominated by lowercase context).
+const SHOUTING_TOKEN_RE = /(?:\b[A-Z]{3,}\b[^\w]+){3,}\b[A-Z]{3,}\b/;
+function isAllCapsShouting(message: string): boolean {
+  const m = SHOUTING_TOKEN_RE.exec(message);
+  if (!m) return false;
+  const letters = message.replace(/[^A-Za-z]/g, "");
+  if (letters.length < 12) return false;
+  const uppers = letters.replace(/[^A-Z]/g, "").length;
+  // Two conditions can satisfy shouting:
+  // 1. High ratio (>=85%) of uppercase letters across the full message —
+  //    catches messages that are entirely uppercase ("NO I DID NOT ASK THAT
+  //    FUCKING REPEAT WHAT I ASKED").
+  // 2. The all-caps token run starts at or within the first 3 characters of
+  //    the message — catches messages that START with all-caps shouting but
+  //    have a calm suffix appended ("STOP. WTF ARE YOU DOING. now fix this.").
+  //    The "starts near beginning" guard is absent from tech-acronym sentences
+  //    like "Use HTTPS API REST JSON YAML XML responses." where the acronym
+  //    run begins after a lowercase word (position 4).
+  const highRatio = uppers / letters.length >= 0.85;
+  const startsNearBeginning = m.index <= 3;
+  return highRatio || startsNearBeginning;
+}
+
 export type MoodHint = "angry" | "frustrated" | null;
 
 export function preClassifyMood(
@@ -27,6 +62,7 @@ export function preClassifyMood(
   if (interruptCount >= 2) return { hint: "angry", interruptCount };
   if (ACCUSATION_RE.test(message)) return { hint: "angry", interruptCount };
   if (APOLOGY_DEMAND_RE.test(message)) return { hint: "angry", interruptCount };
+  if (isAllCapsShouting(message)) return { hint: "angry", interruptCount };
   if (SECOND_CORRECTION_RE.test(message)) return { hint: "frustrated", interruptCount };
   return { hint: null, interruptCount };
 }
@@ -73,4 +109,58 @@ export function extractDirectiveHint(stripped: string): string {
   if (directives.length === 0) return "";
   const picked = directives[directives.length - 1];
   return picked.length > 240 ? picked.slice(0, 240).trim() + "..." : picked;
+}
+
+/**
+ * AI-directed insult / contempt vocabulary. Narrow on purpose: only words
+ * that unambiguously address the AI as the target of contempt. Adjective-
+ * form profanity ("absolutely fucking stalling") and adjective-form
+ * descriptors ("useless", "pathetic", "incompetent", "lying") are NOT in
+ * this set — those routinely appear in calm-but-frustrated bug reports
+ * describing broken code or output ("this output is useless, please
+ * regenerate") and would over-block the calm-override.
+ *
+ * Kept on purpose: noun-form insults (`idiot`, `moron`, `fool`,
+ * `imbecile`, `jerk`, `asshole`, `asshat`, `shithead(s)`, `dumbass`,
+ * `stupid`, `liar`) and the literal phrase `fuck you`.
+ */
+const AI_INSULT_RE =
+  /\b(idiot|moron|fool|imbecile|jerk|asshole|asshat|shithead|shitheads|dumbass|stupid|liar|fuck\s+you)\b/i;
+
+/**
+ * Pure-morphology calm-directive detector. Returns true when the stripped
+ * LATEST message is unambiguously a calm first-person directive with no
+ * first-person hostility aimed at the live AI.
+ *
+ * Used as a HARD post-parse override in user-prompt-submit (Finding 15):
+ * when this fires, SENTIMENT_AGENT's output is demoted angry/frustrated ->
+ * neutral and low -> normal. Same pattern as Findings 6/7/14 — a TS-side
+ * deterministic classifier overrides Haiku's non-deterministic output for
+ * the unambiguous case.
+ *
+ * ALL of the following must hold:
+ *   a. preClassifyMood returned hint=null     (no first-person hostility)
+ *   b. interruptCount === 0                    (no [Request interrupted])
+ *   c. directiveHint is non-empty              (a live imperative exists)
+ *   d. AI_INSULT_RE does not match             (no AI-directed insults)
+ *
+ * Note: predicate (b) is INTENTIONALLY tighter than (a). preClassifyMood
+ * already returns hint=angry when interruptCount>=2 (so >=2 is caught by
+ * predicate (a)). Predicate (b) blocks the additional case interruptCount
+ * === 1 — a single [Request interrupted by user] is a strong signal that
+ * the user just halted something the AI did, and a calm-looking
+ * follow-on directive ("please retry") should not be treated as a fresh
+ * calm context that resets mood/trust to neutral. Either drop (b) only
+ * if you decide single interrupts are noise; otherwise keep as-is.
+ */
+export function preClassifyCalm(
+  stripped: string,
+  directiveHint: string,
+): boolean {
+  if (!stripped || !directiveHint) return false;
+  const m = preClassifyMood(stripped);
+  if (m.hint !== null) return false;
+  if (m.interruptCount !== 0) return false;
+  if (AI_INSULT_RE.test(stripped)) return false;
+  return true;
 }

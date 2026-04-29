@@ -23,7 +23,7 @@ import {
   classifyBlockAllTools,
   decideNextWindowSize,
 } from "../utils/prediction-types.js";
-import { preClassifyMood, extractDirectiveHint } from "../utils/sentiment-prefilter.js";
+import { preClassifyMood, extractDirectiveHint, preClassifyCalm } from "../utils/sentiment-prefilter.js";
 
 /**
  * UserPromptSubmit Hook
@@ -172,6 +172,29 @@ async function main() {
         console.error(
           `[user-prompt-submit] mood-hint disagreement: regex says ${moodPrefilter.hint}, LLM says ${parsed.mood} (no override)`,
         );
+      }
+
+      // Finding 15: calm-directive hard-override. When the stripped LATEST
+      // is unambiguously a calm directive with no first-person hostility
+      // (no accusation morphology, no apology demand, no second-correction
+      // shape, no >=2 interrupts, no ALL-CAPS shouting, no AI-directed
+      // insults) AND it carries a live first-person imperative, demote
+      // Haiku's mood/trust. Mirrors Findings 6/7/14 — a TS-side
+      // deterministic classifier overrides Haiku's non-deterministic
+      // output for the unambiguous case. Catches the
+      // long-recap-of-quoted-anger-with-calm-tail flap mode where Haiku
+      // misattributes quoted hostility to the live sender.
+      //
+      // The directiveHint and moodPrefilter were already computed above
+      // for the prompt-section construction; preClassifyCalm reuses them
+      // (it composes preClassifyMood internally).
+      if (preClassifyCalm(stripped, directiveHint)) {
+        if (parsed.mood === "angry" || parsed.mood === "frustrated") {
+          parsed.mood = "neutral";
+        }
+        if (parsed.trust === "low") {
+          parsed.trust = "normal";
+        }
       }
 
       const oldStreak = reloadedState.frustrationStreak ?? 0;
