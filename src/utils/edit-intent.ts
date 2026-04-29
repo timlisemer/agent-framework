@@ -143,15 +143,15 @@ export function planModeBashBlock(
 // purpose: regex catches unambiguous cases, the LLM still adds tools the
 // regex misses (union semantics in user-prompt-submit.ts).
 
-const READ_VERB_RE = /\b(read|show|look\s+at|open|view|inspect|examin\w*)\b/i;
-const EDIT_VERB_RE =
-  /\b(edit|chang\w*|fix\w*|writ\w*|creat\w*|sav\w*|add\s+to\s+(?:file|the\s+file)|rewrit\w*|redo|undo|revert\w*|restor\w*|rollback|roll\s+back|put\s+back|delet\w*|remov\w*)\b/i;
+export const READ_VERB_RE = /\b(read|show|look\s+at|open|view|inspect|examin\w*)\b/i;
+export const EDIT_VERB_RE =
+  /\b(edit|chang\w*|fix\w*|implement(?:s|ing|ed)?|modif(?:y|ies|ying|ied)|refactor(?:s|ing|ed)?|patch(?:es|ing|ed)?|writ\w*|creat\w*|sav\w*|add\s+to\s+(?:file|the\s+file)|rewrit\w*|redo|undo|revert\w*|restor\w*|rollback|roll\s+back|put\s+back|delet\w*|remov\w*)\b/i;
 // Bounded distance so unrelated mentions of "file" don't pull in Bash.
-const RENAME_MOVE_VERB_RE = /\b(renam\w*|mov\w*)\b[^.!?]{0,50}\b(file|files)\b/i;
-const TEST_RUN_VERB_RE = /\b(test|tests|run\s+\w+)\b/i;
-const COMMIT_VERB_RE = /\bcommit\b/i;
-const PUSH_VERB_RE = /\bpush\b/i;
-const CHECK_VERB_RE = /\b(typecheck|build|check|lint)\b/i;
+export const RENAME_MOVE_VERB_RE = /\b(renam\w*|mov\w*)\b[^.!?]{0,50}\b(file|files)\b/i;
+export const TEST_RUN_VERB_RE = /\b(test|tests|run\s+\w+)\b/i;
+export const COMMIT_VERB_RE = /\bcommit\b/i;
+export const PUSH_VERB_RE = /\bpush\b/i;
+export const CHECK_VERB_RE = /\b(typecheck|build|check|lint)\b/i;
 
 /**
  * Derive the set of tool names whose use the user's imperative verb morphology

@@ -282,6 +282,14 @@ describe("deriveAllowedToolsFromIntent", () => {
     { msg: "typecheck the project", expected: ["mcp__agent-framework__check"] },
     { msg: "run the build", expected: ["Bash", "mcp__agent-framework__check"] },
     { msg: "lint everything", expected: ["mcp__agent-framework__check"] },
+    { msg: "now implement", expected: ["Edit", "Write"] },
+    { msg: "go ahead and implement it", expected: ["Edit", "Write"] },
+    { msg: "implement the plan", expected: ["Edit", "Write"] },
+    { msg: "implementing the plan now", expected: ["Edit", "Write"] },
+    { msg: "refactor the auth module", expected: ["Edit", "Write"] },
+    { msg: "modify the config", expected: ["Edit", "Write"] },
+    { msg: "modifies the parser", expected: ["Edit", "Write"] },
+    { msg: "patch the bug", expected: ["Edit", "Write"] },
   ];
 
   for (const { msg, expected } of cases) {
@@ -299,5 +307,18 @@ describe("deriveAllowedToolsFromIntent", () => {
 
   it("does NOT match 'rename' without 'file' nearby (bounded distance)", () => {
     expect(deriveAllowedToolsFromIntent("renaming variables in the function body is fine")).not.toContain("Bash");
+  });
+
+  it("does NOT match 'implementation' (noun) as edit verb", () => {
+    expect(deriveAllowedToolsFromIntent("the implementation is broken")).not.toContain("Edit");
+  });
+
+  it("does NOT match 'modification' (noun) as edit verb", () => {
+    expect(deriveAllowedToolsFromIntent("what about that modification?")).not.toContain("Edit");
+  });
+
+  it("does NOT include Edit/Write for 'build' (build is a CHECK/Bash verb only)", () => {
+    expect(deriveAllowedToolsFromIntent("build the feature")).not.toContain("Edit");
+    expect(deriveAllowedToolsFromIntent("build the feature")).not.toContain("Write");
   });
 });

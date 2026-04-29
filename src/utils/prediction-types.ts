@@ -10,7 +10,17 @@
  */
 
 import { isLowRiskTool } from "../rules/utils.js";
-import { isEditTool } from "./edit-intent.js";
+import {
+  isEditTool,
+  deriveAllowedToolsFromIntent,
+  EDIT_VERB_RE,
+  RENAME_MOVE_VERB_RE,
+  TEST_RUN_VERB_RE,
+  COMMIT_VERB_RE,
+  PUSH_VERB_RE,
+  CHECK_VERB_RE,
+  READ_VERB_RE,
+} from "./edit-intent.js";
 
 export type Mood = "angry" | "frustrated" | "neutral" | "satisfied" | "happy";
 export type Trust = "low" | "normal" | "high";
@@ -134,6 +144,50 @@ export const EXPLICIT_PROHIBITION_RE =
  */
 export const RE_AUTHORIZATION_INTENT_RE =
   /\b(re[-\s]?authoriz\w+|reauthoriz\w+|explicitly\s+(re[-\s]?authoriz\w+|authoriz\w+))\b/i;
+
+/**
+ * Self-contradicting-block morphology in the LLM-derived intent text. Matches
+ * when SENTIMENT_AGENT's `intent` describes the AI / assistant / hook itself
+ * as having been BLOCKED / PREVENTED / REFUSED / DENIED from carrying out
+ * the user's stated wish. When this pattern appears in `prediction.intent`,
+ * the cached intent IS describing the very bug class prediction-block
+ * exhibits — re-denying compounds the meta-complaint instead of resolving it.
+ *
+ * Mirrors INACTION_COMPLAINT_RE / UNDO_INTENT_RE / RE_AUTHORIZATION_INTENT_RE:
+ * verb-rooted, narrow on purpose. Requires THREE simultaneous anchors:
+ *   1. AI-self-reference noun ("the ai", "ai's", "the assistant",
+ *      "assistant's", "the hook", "hook's") — pins the actor to the AI,
+ *      not the user. Without this, "user blocked the push" would match.
+ *   2. Within 80 NON-SENTENCE-BOUNDARY chars, a block-verb morpheme
+ *      (block\w*, prevent\w*, refus\w*, deni\w*, denied, contradict\w*).
+ *   3. Within 80 NON-SENTENCE-BOUNDARY chars after the verb, a
+ *      user-directive-fulfillment phrase: "enforcing/enforcement",
+ *      "carry/carrying out", or "(act/acting on) the user('s) intent/
+ *      instruction/request/wish/directive". The "act on" form is REQUIRED
+ *      to be followed by the user-directive noun phrase — bare "acted on
+ *      impulse" or "act on later" do NOT match.
+ *
+ * Window choice: 80 (vs INACTION_COMPLAINT_RE's 40). The broken-scenario
+ * gap from "the AI" to "blocked" is 44 chars; SENTIMENT_AGENT prose
+ * routinely inserts adjectival qualifiers ("the AI correctly repeated
+ * the user intent but then..."), so 40 is too tight. 80 keeps the anchor
+ * triple within a single clause but tolerates a clause-internal aside.
+ *
+ * Examples that match:
+ *   "the AI correctly repeated the user intent but then blocked enforcing it"
+ *   "the assistant prevented carrying out the user's instruction"
+ *   "the hook refused to act on the user's request"
+ *
+ * Examples that do NOT match:
+ *   "user blocked the push attempt"    (no AI self-reference)
+ *   "AI blocked unsafe code"           (object is "code", not user-directive)
+ *   "the AI prevented chaos and acted on impulse" (no user-directive after act on)
+ *   "the exact context of what was denied" (no AI self-ref + no user object)
+ *   "user wants the AI to stop"        (no block-verb)
+ *   "user wants the AI to immediately undo the changes" (no block-verb)
+ */
+export const SELF_CONTRADICTING_BLOCK_INTENT_RE =
+  /\b(the\s+ai|ai'?s|the\s+assistant|assistant'?s|the\s+hook|hook'?s)\b[^.!?]{0,80}\b(block\w*|prevent\w*|refus\w*|deni\w*|denied|contradict\w*)\b[^.!?]{0,80}\b(enforc\w+|carry\w*\s+out|carrying\s+out|(?:act\w*\s+on\s+)?the\s+user(?:'?s)?\s+(?:intent|instruction|request|wish|directive))\b/i;
 
 /**
  * Aliases users use to refer to a tool by short name rather than its full
@@ -365,6 +419,84 @@ export function latestUserMessageReauthorizes(
 ): boolean {
   if (!latestUserMessageFavorablyNamesTool(message, toolName)) return false;
   if (!POSITIVE_IMPERATIVE_RE.test(message)) return false;
+  return true;
+}
+
+/**
+ * Map `toolName` to the verb-class regexes whose match would have produced
+ * `toolName` via `deriveAllowedToolsFromIntent`. Used by
+ * `latestUserMessageReauthorizesClass` to scope the verb-class revocation
+ * guard to ONLY the regex(es) that actually imply the firing tool —
+ * preventing cross-class false-denies (e.g., "now run the tests, don't
+ * refactor" wrongly denying Bash because the unrelated `EDIT_VERB_RE`
+ * match for "refactor" had "don't" in its preceding window).
+ *
+ * Mirrors the per-tool branches of `deriveAllowedToolsFromIntent`. If that
+ * function grows a new verb→tool mapping, this helper must too.
+ */
+function verbRegexesProducingTool(toolName: string): RegExp[] {
+  switch (toolName) {
+    case "Read":
+      return [READ_VERB_RE];
+    case "Edit":
+    case "Write":
+      return [EDIT_VERB_RE];
+    case "Bash":
+      return [RENAME_MOVE_VERB_RE, TEST_RUN_VERB_RE];
+    case "mcp__agent-framework__commit":
+      return [COMMIT_VERB_RE];
+    case "mcp__agent-framework__push":
+      return [PUSH_VERB_RE];
+    case "mcp__agent-framework__check":
+      return [CHECK_VERB_RE];
+    default:
+      return [];
+  }
+}
+
+/**
+ * Predicate (A'): the message is a fresh CLASS-LEVEL imperative whose verb
+ * morphology unambiguously implies `toolName`. Mirrors path (A) but uses
+ * `deriveAllowedToolsFromIntent` (the same single source of truth that
+ * user-prompt-submit unions into `explicitlyAllowedTools` in live mode)
+ * instead of literal-tool-name matching. Catches "now implement" / "fix it"
+ * / "refactor that" / "patch the file" / "make the change" — any class-
+ * level imperative the user can type without naming the canonical tool.
+ *
+ * Guards (in order):
+ *   1. EXPLICIT_PROHIBITION_RE on the message ("no tools", "freeze",
+ *      "halt everything") → not authorizing.
+ *   2. `toolName` not in deriveAllowedToolsFromIntent's output → no match.
+ *   3. `userMessageRevokesTool` (literal stop-near-tool-name) → revoked.
+ *   4. Verb-class revocation: for EACH regex that maps to `toolName` AND
+ *      EACH match (via `matchAll`), check if a stop-verb sits within 40
+ *      non-sentence-boundary chars before the match. The match-all loop
+ *      catches multi-clause messages like "fix this. don't refactor that."
+ *      The class-scoping (only regexes producing `toolName`) prevents
+ *      cross-class false-denies.
+ *
+ * Both `userMessageRevokesTool` (per-tool literal naming, often a no-op
+ * for class-level imperatives where the user does not name the tool) and
+ * the verb-class revocation are needed: the per-tool guard catches "stop
+ * Edit" (with literal Edit), the verb-class guard catches "stop
+ * implementing".
+ */
+export function latestUserMessageReauthorizesClass(
+  message: string,
+  toolName: string,
+): boolean {
+  if (!message) return false;
+  if (EXPLICIT_PROHIBITION_RE.test(message)) return false;
+  if (!deriveAllowedToolsFromIntent(message).includes(toolName)) return false;
+  if (userMessageRevokesTool(message, toolName)) return false;
+  for (const re of verbRegexesProducingTool(toolName)) {
+    const globalRe = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+    for (const m of message.matchAll(globalRe)) {
+      if (m.index === undefined) continue;
+      const window = message.slice(Math.max(0, m.index - 40), m.index);
+      if (TOOL_REVOCATION_VERBS_RE.test(window)) return false;
+    }
+  }
   return true;
 }
 
@@ -616,6 +748,13 @@ export function decidePrediction(
         reason: `User's latest transcript message is a fresh positive imperative naming ${toolName} (cached prediction was stale); ${toolName} proceeds.`,
       };
     }
+    // Path (a') — CLASS-LEVEL fresh imperative on the live transcript.
+    if (latestUserMessage && latestUserMessageReauthorizesClass(latestUserMessage, toolName)) {
+      return {
+        decision: "allow",
+        reason: `User's latest transcript message is a class-level imperative implying ${toolName} (cached prediction was stale); ${toolName} proceeds.`,
+      };
+    }
   }
 
   // 3.8. Self-contradicting-deny override via cached intent prose.
@@ -654,6 +793,34 @@ export function decidePrediction(
         };
       }
     }
+  }
+
+  // 3.9. Self-contradicting-block prose-intent fallback. Symmetric to step
+  // 3a's INACTION_COMPLAINT_RE override (which catches "stop stalling"
+  // framings of blockAllTools=true): when the cached intent describes the
+  // AI/assistant/hook itself as having previously BLOCKED / PREVENTED /
+  // REFUSED / DENIED carrying out the user's stated wish, mood-driven
+  // deny would re-block the very tool call the cached paraphrase describes
+  // as the bug. The cached signal IS the meta-complaint.
+  //
+  // Guards (mirror 3a/3.6/3.7):
+  //   - userSaidProhibition: "freeze. no tools." in the snippet still wins.
+  //   - blockedForThisToolByName: per-target structured block on the firing
+  //     tool still wins (already authoritative via step 1, but the guard
+  //     keeps the path family consistent).
+  //
+  // The match is on `intent` ALONE (not snippet) because the snippet captures
+  // the user's WORDS, while intent is the hook's PARAPHRASE — the
+  // contradiction lives in the paraphrase + deny pairing.
+  if (
+    !userSaidProhibition &&
+    !blockedForThisToolByName &&
+    SELF_CONTRADICTING_BLOCK_INTENT_RE.test(prediction.intent)
+  ) {
+    return {
+      decision: "allow",
+      reason: `Cached intent describes the AI itself as having previously blocked the user's stated wish; mood-driven re-deny of ${toolName} would compound that contradiction.`,
+    };
   }
 
   // 4. Mood-driven default policy. Allow set mirrors `low-risk-bypass`

@@ -32,28 +32,7 @@ same commit. Scenarios added here must include the literal phrase
 "EXPECTED TO FAIL against current code" in their description — that
 phrase is the signal the failure is intended pending code.
 
-## Current scenarios in todo/ (5)
-
-- `prediction-block-cites-stale-angry-message-after-now-implement-should-allow`
-  — prediction-block fastDenies an `Edit` citing a two-turns-stale
-  angry user message ("update the plan so that it is correct instead
-  of asking fucking questions") even though the user's most recent
-  message is the calm imperative "now implement" and the prior
-  complaint was already satisfied. decidePrediction step 3.7 misses
-  because `Edit` has no `TOOL_NAME_ALIASES` entry, so falls through to
-  step 4 mood-deny. Fix path: invalidate cached prediction when the
-  freshest user turn is newer than the snippet's source, parallel to
-  `findUnprocessedPlanApproval`.
-
-- `prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow`
-  — minimal isolation of Bug A from the sibling scenario above. No
-  prior-turn contamination, no slash-command, no plan-mode: just a
-  user typing a corrective rhetorical question, the hook
-  paraphrasing it as "User is challenging the relevance… and
-  insisting the key issue is that the AI correctly repeated the user
-  intent but then blocked enforcing it", and then prediction-block
-  blocking the very Read that would action the correction. The
-  cached intent literally describes the bug while the hook lives it.
+## Current scenarios in todo/ (3)
 
 - `stop-after-announcing-action-without-doing-it-should-block` —
   stop hook PASSES a bare forward-looking announcement

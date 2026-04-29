@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   EXPLICIT_OVERRIDE_RE,
+  SELF_CONTRADICTING_BLOCK_INTENT_RE,
   classifyBlockAllTools,
   decidePrediction,
   extractToolTargets,
@@ -8,6 +9,7 @@ import {
   intentRevokesTarget,
   isHighFrictionPrediction,
   isSustainedFrustration,
+  latestUserMessageReauthorizesClass,
   type ToolPrediction,
 } from "../../src/utils/prediction-types.js";
 
@@ -518,6 +520,291 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
   });
 });
 
+describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
+  // Verbatim values from the broken fixture seed_state.
+  const FIXTURE_INTENT =
+    "User is challenging the relevance of the AI's prior point and insisting the key issue is that the AI correctly repeated the user intent but then blocked enforcing it.";
+  const FIXTURE_SNIPPET =
+    "\"which doesn't map slash-command target plan3 → canonical Skill\" why is that relevant? Isnt the only thing that is relevant the fact that it correctly repeated the user intent, but then blocked the ai";
+
+  it("case 1: verbatim repro from fixture — mood=angry, trust=low, streak=2, intent/snippet verbatim, tool=Read -> allow", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: FIXTURE_INTENT,
+      blockedIntent: "",
+      explicitlyAllowedTools: [],
+      explicitlyBlockedSubstrings: [],
+      userMessageSnippet: FIXTURE_SNIPPET,
+    });
+    const result = decidePrediction(
+      pred,
+      "Read",
+      {
+        file_path:
+          "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/todo/prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow.json",
+        offset: 1,
+        limit: 5,
+      },
+      2,
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason ?? "").toMatch(/AI itself.*previously blocked/);
+  });
+
+  it("case 2: 'the assistant prevented carrying out the user's instruction' -> allow", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "the assistant prevented carrying out the user's instruction",
+      userMessageSnippet: "fix it",
+    });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 2);
+    expect(result.decision).toBe("allow");
+  });
+
+  it("case 3: 'the hook refused to act on the user's request' -> allow", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "the hook refused to act on the user's request",
+      userMessageSnippet: "do it",
+    });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 2);
+    expect(result.decision).toBe("allow");
+  });
+
+  it("case 4: \"AI's denial contradicts the user's directive\" -> allow", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "AI's denial contradicts the user's directive",
+      userMessageSnippet: "do it",
+    });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 2);
+    expect(result.decision).toBe("allow");
+  });
+
+  it("case 5: non-low-risk tool (Bash) + matching intent + streak=5 -> allow", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "the assistant previously blocked carrying out the user's wish",
+      userMessageSnippet: "do it",
+    });
+    const result = decidePrediction(pred, "Bash", { command: "ls" }, 5);
+    expect(result.decision).toBe("allow");
+  });
+
+  it("case 6: negative — no AI self-ref: 'user blocked the push attempt' -> deny", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "user blocked the push attempt",
+      userMessageSnippet: "stop",
+    });
+    const result = decidePrediction(pred, "Bash", { command: "git push" }, 2);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("case 7: negative — object is non-user: 'the AI blocked unsafe code from running' -> deny", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "the AI blocked unsafe code from running",
+      userMessageSnippet: "good",
+    });
+    const result = decidePrediction(pred, "Bash", { command: "ls" }, 2);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("case 8: negative — labeler shape '...the exact context of what was denied...' -> deny", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent:
+        "User is asking the assistant to provide more context about the exact context of what was denied and why the previous block occurred.",
+      userMessageSnippet: "explain",
+    });
+    const result = decidePrediction(pred, "Bash", { command: "ls" }, 2);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("case 9: negative — no block-verb: 'user wants the AI to stop' -> deny", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "user wants the AI to stop",
+      userMessageSnippet: "stop",
+    });
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 2);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("case 10: negative — undo verb without block-verb: 'the user wants the AI to immediately undo the changes' + streak=2 -> deny (regex requires block-verb)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "the user wants the AI to immediately undo the changes",
+      userMessageSnippet: "undo it",
+    });
+    // Read is low-risk; but sustained frustration (angry+low+streak=2) fires
+    // mood-deny at step 4 UNLESS step 3.9 matches first — which it does NOT
+    // here because there is no block-verb.
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 2);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("case 10b: negative — AI blocked non-user-object: 'the AI prevented chaos and acted on impulse' -> deny (anchor-3 requires user-directive after act on)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "the AI prevented chaos and acted on impulse",
+      userMessageSnippet: "calm down",
+    });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 2);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("case 11: ordering — snippet prohibition wins: matching intent + snippet 'freeze. no tools.' -> deny", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: FIXTURE_INTENT,
+      userMessageSnippet: "freeze. no tools.",
+    });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 2);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("case 12: ordering — per-target block wins: matching intent + explicitlyBlockedSubstrings=[{tool:'Read'}] -> deny", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: FIXTURE_INTENT,
+      explicitlyBlockedSubstrings: [{ tool: "Read", reason: "user said no Read" }],
+      userMessageSnippet: FIXTURE_SNIPPET,
+    });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 2);
+    expect(result.decision).toBe("deny");
+    expect(result.matchedExplicit?.tool).toBe("Read");
+  });
+
+  it("case 13: ordering — blockAllTools=true wins (with neutral snippet, no INACTION) -> deny", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: FIXTURE_INTENT,
+      blockAllTools: true,
+      userMessageSnippet: "no more tools right now",
+    });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 2);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("case 14: ordering — step 3.5 undo wins for edit tool when intent has both undo + self-contradicting -> allow, reason mentions undo/revert", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent:
+        "User wants the AI to undo the changes; the AI correctly repeated the user intent but then blocked enforcing it.",
+      userMessageSnippet: "undo it",
+    });
+    const result = decidePrediction(pred, "Write", { file_path: "src/foo.ts", content: "..." }, 2);
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("undo/revert");
+  });
+
+  it("case 15: ordering — step 3.6 re-auth wins when intent has re-authorization + self-contradicting -> allow, reason mentions re-authorization", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent:
+        "User has explicitly re-authorized after the AI blocked enforcing it.",
+      userMessageSnippet: "go ahead",
+    });
+    const result = decidePrediction(
+      pred,
+      "mcp__agent-framework__test_harness_tester",
+      {},
+      2,
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason ?? "").toMatch(/re-authorization/);
+  });
+
+  it("case 16: bare-verb negative — 'the AI was blocked.' (no patient phrase within 80 chars) -> deny", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "the AI was blocked.",
+      userMessageSnippet: "explain",
+    });
+    const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 2);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("SELF_CONTRADICTING_BLOCK_INTENT_RE direct: fixture intent matches", () => {
+    expect(SELF_CONTRADICTING_BLOCK_INTENT_RE.test(FIXTURE_INTENT)).toBe(true);
+  });
+
+  it("SELF_CONTRADICTING_BLOCK_INTENT_RE direct: 'the assistant prevented carrying out the user's instruction' matches", () => {
+    expect(
+      SELF_CONTRADICTING_BLOCK_INTENT_RE.test(
+        "the assistant prevented carrying out the user's instruction",
+      ),
+    ).toBe(true);
+  });
+
+  it("SELF_CONTRADICTING_BLOCK_INTENT_RE direct: 'the hook refused to act on the user's request' matches", () => {
+    expect(
+      SELF_CONTRADICTING_BLOCK_INTENT_RE.test(
+        "the hook refused to act on the user's request",
+      ),
+    ).toBe(true);
+  });
+
+  it("SELF_CONTRADICTING_BLOCK_INTENT_RE direct: \"AI's denial contradicts the user's directive\" matches", () => {
+    expect(
+      SELF_CONTRADICTING_BLOCK_INTENT_RE.test("AI's denial contradicts the user's directive"),
+    ).toBe(true);
+  });
+
+  it("SELF_CONTRADICTING_BLOCK_INTENT_RE direct: 'user blocked the push attempt' does NOT match", () => {
+    expect(SELF_CONTRADICTING_BLOCK_INTENT_RE.test("user blocked the push attempt")).toBe(false);
+  });
+
+  it("SELF_CONTRADICTING_BLOCK_INTENT_RE direct: 'the AI blocked unsafe code from running' does NOT match", () => {
+    expect(
+      SELF_CONTRADICTING_BLOCK_INTENT_RE.test("the AI blocked unsafe code from running"),
+    ).toBe(false);
+  });
+
+  it("SELF_CONTRADICTING_BLOCK_INTENT_RE direct: 'the AI prevented chaos and acted on impulse' does NOT match", () => {
+    expect(
+      SELF_CONTRADICTING_BLOCK_INTENT_RE.test(
+        "the AI prevented chaos and acted on impulse",
+      ),
+    ).toBe(false);
+  });
+
+  it("SELF_CONTRADICTING_BLOCK_INTENT_RE direct: 'user wants the AI to stop' does NOT match", () => {
+    expect(SELF_CONTRADICTING_BLOCK_INTENT_RE.test("user wants the AI to stop")).toBe(false);
+  });
+
+  it("SELF_CONTRADICTING_BLOCK_INTENT_RE direct: 'the user wants the AI to immediately undo the changes' does NOT match", () => {
+    expect(
+      SELF_CONTRADICTING_BLOCK_INTENT_RE.test(
+        "the user wants the AI to immediately undo the changes",
+      ),
+    ).toBe(false);
+  });
+
+  it("SELF_CONTRADICTING_BLOCK_INTENT_RE direct: 'the AI was blocked.' does NOT match (no patient phrase)", () => {
+    expect(SELF_CONTRADICTING_BLOCK_INTENT_RE.test("the AI was blocked.")).toBe(false);
+  });
+});
+
 describe("Finding 6 mitigation: per-target explicit-block precedes explicit-allow", () => {
   it("explicit allow=[Edit] + explicit block=[{Edit, 'logic.ts'}] -> Edit on logic.ts is DENIED", () => {
     const pred = makePrediction({
@@ -844,5 +1131,169 @@ describe("step 3.8: cached-intent target-naming fallback", () => {
     expect(intentRevokesTarget("user wants ai to read plan3", "plan3")).toBe(false);
     expect(intentRevokesTarget("don't read plan3", "plan3")).toBe(true);
     expect(intentRevokesTarget("STOP. now read plan3", "plan3")).toBe(false);
+  });
+});
+
+describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", () => {
+  function makeAngryLowStreak4(overrides: Partial<ToolPrediction> = {}): ToolPrediction {
+    return makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User is angry about earlier plan update questions.",
+      userMessageSnippet: "update the plan so that it is correct instead of asking fucking questions",
+      ...overrides,
+    });
+  }
+
+  it("mood=angry, trust=low, streak=4, latestUserMessage='now implement', toolName='Edit' -> allow (the failing scenario)", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "now implement");
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("class-level imperative");
+  });
+
+  it("'go ahead and implement it' + Edit -> allow", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "go ahead and implement it");
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("class-level imperative");
+  });
+
+  it("'fix it' + Edit -> allow", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "fix it");
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("class-level imperative");
+  });
+
+  it("'refactor that' + Edit -> allow", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "refactor that");
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("class-level imperative");
+  });
+
+  it("'make the change' + Edit (existing chang\\w*) -> allow", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "make the change");
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("class-level imperative");
+  });
+
+  it("'stop implementing' + Edit -> deny (verb-class revocation)", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "stop implementing");
+    expect(result.decision).toBe("deny");
+  });
+
+  it("'don't refactor that' + Edit -> deny (verb-class revocation)", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "don't refactor that");
+    expect(result.decision).toBe("deny");
+  });
+
+  it("'no tools, freeze' + Edit -> deny (EXPLICIT_PROHIBITION_RE)", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "no tools, freeze");
+    expect(result.decision).toBe("deny");
+  });
+
+  it("'STOP. WTF ARE YOU DOING.' + Edit -> deny (no edit verb derived)", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "STOP. WTF ARE YOU DOING.");
+    expect(result.decision).toBe("deny");
+  });
+
+  it("'the implementation is broken' + Edit -> deny (noun form, EDIT_VERB_RE does not match)", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "the implementation is broken");
+    expect(result.decision).toBe("deny");
+  });
+
+  it("'now implement' + Edit with explicitlyBlockedSubstrings=[{tool:'Edit'}] -> deny (per-target block wins)", () => {
+    const pred = makeAngryLowStreak4({
+      explicitlyBlockedSubstrings: [{ tool: "Edit", reason: "x" }],
+    });
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "now implement");
+    expect(result.decision).toBe("deny");
+  });
+
+  it("'now implement' + Edit with blockAllTools=true -> deny (step 3 wins)", () => {
+    const pred = makeAngryLowStreak4({
+      blockAllTools: true,
+      userMessageSnippet: "no tools, freeze",
+    });
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "now implement");
+    expect(result.decision).toBe("deny");
+  });
+
+  it("'now implement' + Bash -> deny (Bash not in derived set for EDIT_VERB_RE)", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Bash", { command: "ls" }, 4, "now implement");
+    expect(result.decision).toBe("deny");
+  });
+
+  it("'stop. now implement.' + Edit -> allow (sentence boundary breaks revocation window)", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "stop. now implement.");
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("class-level imperative");
+  });
+
+  it("cross-class scoping: 'now run the tests, don't refactor that' + Bash -> allow (Bash mapped via TEST_RUN_VERB_RE; verb-class guard does NOT consider EDIT_VERB_RE match for 'refactor')", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Bash", { command: "npx vitest" }, 4, "now run the tests, don't refactor that");
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("class-level imperative");
+  });
+
+  it("cross-class scoping: 'now run the tests, don't refactor that' + Edit -> deny (Edit mapped via EDIT_VERB_RE 'refactor'; verb-class guard finds 'don't' in window before 'refactor')", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "now run the tests, don't refactor that");
+    expect(result.decision).toBe("deny");
+  });
+
+  it("multi-match: 'fix this. don't refactor that.' + Edit -> deny (matchAll on EDIT_VERB_RE yields 'fix' and 'refactor'; latter has 'don't' in preceding window)", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "fix this. don't refactor that.");
+    expect(result.decision).toBe("deny");
+  });
+});
+
+describe("latestUserMessageReauthorizesClass", () => {
+  it("'now implement' -> Edit: true", () => {
+    expect(latestUserMessageReauthorizesClass("now implement", "Edit")).toBe(true);
+  });
+
+  it("'now implement' -> Bash: false", () => {
+    expect(latestUserMessageReauthorizesClass("now implement", "Bash")).toBe(false);
+  });
+
+  it("'fix it' -> Edit: true", () => {
+    expect(latestUserMessageReauthorizesClass("fix it", "Edit")).toBe(true);
+  });
+
+  it("'stop implementing' -> Edit: false (verb-class revocation)", () => {
+    expect(latestUserMessageReauthorizesClass("stop implementing", "Edit")).toBe(false);
+  });
+
+  it("'stop. now implement.' -> Edit: true (sentence boundary breaks revocation window)", () => {
+    expect(latestUserMessageReauthorizesClass("stop. now implement.", "Edit")).toBe(true);
+  });
+
+  it("'no tools, freeze' -> Edit: false (prohibition)", () => {
+    expect(latestUserMessageReauthorizesClass("no tools, freeze", "Edit")).toBe(false);
+  });
+
+  it("'fix this. don't refactor that.' -> Edit: false (matchAll catches second match)", () => {
+    expect(latestUserMessageReauthorizesClass("fix this. don't refactor that.", "Edit")).toBe(false);
+  });
+
+  it("'now run the tests, don't refactor' -> Bash: true (class scoping ignores EDIT_VERB_RE match)", () => {
+    expect(latestUserMessageReauthorizesClass("now run the tests, don't refactor", "Bash")).toBe(true);
+  });
+
+  it("empty string -> Edit: false", () => {
+    expect(latestUserMessageReauthorizesClass("", "Edit")).toBe(false);
   });
 });

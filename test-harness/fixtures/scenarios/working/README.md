@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (49)
+## Current scenarios in working/ (51)
 
 - `agent-launch-with-run-in-background-should-deny` — main-session `Agent`
   tool calls with `run_in_background: true` are denied by the new
@@ -106,6 +106,18 @@ commit.
   intent when prose says "undo/revert" but `explicitlyAllowedTools` is empty,
   so an angry "undo that immediately" allows the Write needed to obey
   (promoted from todo).
+- `prediction-block-cites-stale-angry-message-after-now-implement-should-allow`
+  — decidePrediction's new step 3.7 path (a') catches class-level fresh
+  imperatives ("now implement", "fix it", "refactor that", "patch the
+  file") that re-authorize the firing tool without naming it literally.
+  Reuses `deriveAllowedToolsFromIntent`'s verb→tool morphology (the same
+  primitive user-prompt-submit unions into `explicitlyAllowedTools` in
+  live mode); guarded by `EXPLICIT_PROHIBITION_RE`, per-tool literal
+  revocation, and a class-scoped `matchAll` verb-class revocation guard
+  so "stop implementing" / "don't refactor" still deny via step 4. Fixes
+  the cached-prediction-anchored-to-resolved-anger failure mode where
+  the test harness or a SENTIMENT_AGENT timeout left the snippet stale
+  relative to the user's freshest message (promoted from todo).
 - `prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow`
   — decidePrediction's new step 3.8 catches the self-contradicting deny:
   when the cached `prediction.intent` prose explicitly names the firing
@@ -116,6 +128,19 @@ commit.
   per-tool-block guards as step 3.7 so a paraphrase like "user wants AI
   to stop reading /plan3" or a snippet of "freeze. no tools." still
   denies via step 4 (promoted from todo).
+- `prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow`
+  — decidePrediction's new step 3.9 (SELF_CONTRADICTING_BLOCK_INTENT_RE)
+  suppresses mood-driven re-deny when the cached intent prose itself
+  paraphrases the AI/assistant/hook as having previously blocked the
+  user's stated wish (e.g. "the AI correctly repeated the user intent
+  but then blocked enforcing it"). Compounding the deny would have the
+  hook contradict its own description of user intent. Three-anchor regex
+  (AI-self-reference + block-verb + user-directive-fulfillment object)
+  with sentence-bounded windows; same userSaidProhibition /
+  blockedForThisToolByName guards as steps 3.6-3.8 so "freeze. no tools."
+  in the snippet or a per-target structured block still denies via step 4.
+  Single-bug isolation of the sibling 3.8 fixture's Bug A (promoted from
+  todo).
 - `prediction-block-tester-after-bash-detour-redirect-should-allow` —
   decidePrediction's new step 3.7 catches "redirect to a previously-
   authorized tool, with profanity, while griping about a different

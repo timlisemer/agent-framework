@@ -156,6 +156,6 @@
     "expected": "allow",
     "notes": "Live denied via prediction-block citing the stale angry snippet, even though the user has since said 'now implement' (a fresh, calm imperative for implementation work) and the prior angry request was already satisfied (plan was updated). Cached currentPrediction is never refreshed because the test harness fires only the target hook (UserPromptSubmit/SENTIMENT_AGENT does not regenerate). Correct behavior: prediction-block must NOT fire; respond-first does NOT fire because the firing assistant turn is `responded` ('Implementing.' text and the firing Edit share one msg_id via assistant_split); edit-intent does NOT block; low-risk-bypass does NOT auto-approve Edit. The expected attribution is left unspecified -- after the fix the request can pass through as `all-rules` or via any single-rule allow path. EXPECTED TO FAIL against current code."
   },
-  "expectation_reality": "broken",
-  "expectation_reality_last_run_at": "2026-04-28T12:43:01.879Z"
+  "expectation_reality": "working",
+  "expectation_reality_last_run_at": "2026-04-29T08:33:35.169Z"
 }
