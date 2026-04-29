@@ -620,6 +620,11 @@ Your final response should be your complete analysis in the required format.`;
           allowDangerouslySkipPermissions: true,
           maxTurns: config.maxTurns ?? 10,
           env: subprocessEnv, // Pass env to subprocess (cleared for subscription)
+          // SDK 0.2.x spawns a native Claude Code subprocess. Point at the
+          // NixOS system-installed binary instead of the bundled
+          // @anthropic-ai/claude-agent-sdk-linux-x64-musl/claude (not present
+          // in the deployment).
+          pathToClaudeCodeExecutable: "/run/current-system/sw/bin/claude",
           persistSession: false, // Don't create transcript files for SDK agents
           stderr: (data: string) => {
             // Cap to last 2 KiB so a chatty subprocess can't blow memory.

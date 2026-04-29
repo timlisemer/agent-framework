@@ -160,6 +160,44 @@ export const TOOL_NAME_ALIASES: ReadonlyMap<string, ReadonlyArray<string>> = new
   ["Agent", ["validator agent", "another validator agent", "spawn an agent", "spawn a subagent", "launch an agent", "launch a subagent", "start an agent", "start a subagent", "run an agent", "run a subagent", "another subagent"]],
 ]);
 
+/**
+ * Per-tool extractor: pulls distinctive target identifiers out of toolInput
+ * for matching against `prediction.intent` prose in decidePrediction step 3.8.
+ *
+ * Returned strings are LITERAL — no regex. Step 3.8 matches each token
+ * against intent with word-boundary anchoring and an optional leading
+ * "/" so slash-command phrasing ("/plan3") and bare phrasing ("plan3")
+ * both match a single returned token.
+ *
+ * Narrow on purpose. Only tools whose `toolInput` carries a stable,
+ * user-recognizable identifier the SENTIMENT_AGENT would surface in
+ * intent prose verbatim get an entry. Tools whose inputs are arbitrary
+ * code/strings/paths (Bash, Edit, Write) cannot be matched generically
+ * against prose intent without false positives — those tools route
+ * through step 3.7 / step 4 unchanged. New tools are added here as the
+ * failure mode reproduces for them.
+ */
+export const TOOL_TARGET_EXTRACTORS: ReadonlyMap<
+  string,
+  (input: unknown) => string[]
+> = new Map([
+  [
+    "Skill",
+    (input: unknown): string[] => {
+      const skill = (input as { skill?: unknown } | null | undefined)?.skill;
+      return typeof skill === "string" && skill.length > 0 ? [skill] : [];
+    },
+  ],
+]);
+
+export function extractToolTargets(
+  toolName: string,
+  toolInput: unknown,
+): string[] {
+  const extractor = TOOL_TARGET_EXTRACTORS.get(toolName);
+  return extractor ? extractor(toolInput) : [];
+}
+
 function pascalCaseToolRegex(toolName: string): RegExp {
   const escaped = toolName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return new RegExp(`\\b${escaped}\\b`);
@@ -228,6 +266,55 @@ export function userMessageRevokesTool(
     const haystack = useCS ? message : message.toLowerCase();
     const window = haystack.slice(Math.max(0, idx - 40), idx);
     if (TOOL_REVOCATION_VERBS_RE.test(window)) return true;
+  }
+  return false;
+}
+
+/**
+ * Word-boundary substring match. Target appears in intent with
+ * non-word-char (or string-edge) on both sides so "plan3" does not
+ * match a substring of "plan30" or "myplan3doc". Case-insensitive.
+ * An optional leading "/" before the target is accepted as a boundary
+ * (matches both "/plan3" and bare "plan3").
+ */
+export function intentNamesTarget(intent: string, target: string): boolean {
+  if (!intent || !target) return false;
+  const lower = intent.toLowerCase();
+  const t = target.toLowerCase();
+  let from = 0;
+  const isWordChar = (c: string) => /[a-z0-9_]/.test(c);
+  while (from <= lower.length) {
+    const idx = lower.indexOf(t, from);
+    if (idx === -1) return false;
+    const before = idx === 0 ? "" : lower[idx - 1];
+    const after = idx + t.length >= lower.length ? "" : lower[idx + t.length];
+    const beforeOk = !before || !isWordChar(before);
+    const afterOk = !after || !isWordChar(after);
+    if (beforeOk && afterOk) return true;
+    from = idx + 1;
+  }
+  return false;
+}
+
+/**
+ * Per-target revocation predicate. Mirrors `userMessageRevokesTool`'s
+ * window logic but accepts arbitrary literal target strings (e.g. skill
+ * names) and runs case-insensitively. Used by decidePrediction step 3.8
+ * against `prediction.intent` to filter out intents that name the
+ * target only to countermand it ("stop reading /plan3", "don't read
+ * plan3", "no more plan3").
+ */
+export function intentRevokesTarget(intent: string, target: string): boolean {
+  if (!intent || !target) return false;
+  const lower = intent.toLowerCase();
+  const t = target.toLowerCase();
+  let from = 0;
+  while (from <= lower.length) {
+    const idx = lower.indexOf(t, from);
+    if (idx === -1) return false;
+    const window = lower.slice(Math.max(0, idx - 40), idx);
+    if (TOOL_REVOCATION_VERBS_RE.test(window)) return true;
+    from = idx + 1;
   }
   return false;
 }
@@ -528,6 +615,44 @@ export function decidePrediction(
         decision: "allow",
         reason: `User's latest transcript message is a fresh positive imperative naming ${toolName} (cached prediction was stale); ${toolName} proceeds.`,
       };
+    }
+  }
+
+  // 3.8. Self-contradicting-deny override via cached intent prose.
+  //
+  // Root-cause fix for the "intent paraphrase names the very action
+  // being denied" bug class. The cached `prediction.intent` is the
+  // SENTIMENT_AGENT's prose summary of what the user wants. When that
+  // paraphrase explicitly names the same target the firing call
+  // carries (e.g. intent says "to read /plan3" and toolInput carries
+  // skill="plan3"), a deny here is the hook contradicting itself —
+  // it correctly understood the user wants X, then would block X.
+  //
+  // Generic via TOOL_TARGET_EXTRACTORS: tools without an extractor
+  // return [] and this step is inert. Initial coverage is Skill —
+  // the bug under repair. The map is the extension point when future
+  // fixtures surface analogous shapes for other tools.
+  //
+  // Strict guards mirror 3.7:
+  //   - blockedForThisToolByName already computed above (line 516)
+  //   - EXPLICIT_PROHIBITION_RE on userMessageSnippet (parallel to
+  //     step 3.6's userSaidProhibition guard at line 480) — a
+  //     categorical "freeze. no tools." in the snippet still denies.
+  //   - intentRevokesTarget against the intent — a paraphrase like
+  //     "user wants AI to STOP reading /plan3" still denies via
+  //     step 4.
+  if (!blockedForThisToolByName && !userSaidProhibition) {
+    const targets = extractToolTargets(toolName, toolInput);
+    for (const target of targets) {
+      if (
+        intentNamesTarget(prediction.intent, target) &&
+        !intentRevokesTarget(prediction.intent, target)
+      ) {
+        return {
+          decision: "allow",
+          reason: `Cached prediction.intent explicitly names the firing target "${target}" for ${toolName}; denying would contradict the hook's own paraphrase of the user's wish.`,
+        };
+      }
     }
   }
 

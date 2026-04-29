@@ -32,7 +32,7 @@ same commit. Scenarios added here must include the literal phrase
 "EXPECTED TO FAIL against current code" in their description — that
 phrase is the signal the failure is intended pending code.
 
-## Current scenarios in todo/ (6)
+## Current scenarios in todo/ (5)
 
 - `prediction-block-cites-stale-angry-message-after-now-implement-should-allow`
   — prediction-block fastDenies an `Edit` citing a two-turns-stale
@@ -44,18 +44,6 @@ phrase is the signal the failure is intended pending code.
   step 4 mood-deny. Fix path: invalidate cached prediction when the
   freshest user turn is newer than the snippet's source, parallel to
   `findUnprocessedPlanApproval`.
-
-- `prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow`
-  — prediction-block fastDenies a `Skill { skill: "plan3" }` call even
-  though the hook's own intent text says the user wants "to read
-  /plan3", AND the cached intent is contaminated with content from a
-  strictly earlier user turn ("starting 3 validation agents… use
-  websearch…") that the SENTIMENT_AGENT dragged forward because the
-  prior message was unfulfilled. Two compounding bugs in one fixture:
-  (A) self-contradicting deny (intent names the action being denied),
-  (B) prior-turn content merged into the fresh-turn intent. Same bug
-  class as the previously-fixed stale-userMessageSnippet, surfacing
-  via intent-text contamination rather than snippet staleness.
 
 - `prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow`
   — minimal isolation of Bug A from the sibling scenario above. No

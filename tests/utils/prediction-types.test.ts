@@ -3,6 +3,9 @@ import {
   EXPLICIT_OVERRIDE_RE,
   classifyBlockAllTools,
   decidePrediction,
+  extractToolTargets,
+  intentNamesTarget,
+  intentRevokesTarget,
   isHighFrictionPrediction,
   isSustainedFrustration,
   type ToolPrediction,
@@ -699,5 +702,147 @@ describe("isHighFrictionPrediction", () => {
     expect(isHighFrictionPrediction(makePrediction({ mood: "neutral" }))).toBe(false);
     expect(isHighFrictionPrediction(makePrediction({ mood: "satisfied" }))).toBe(false);
     expect(isHighFrictionPrediction(makePrediction({ mood: "happy" }))).toBe(false);
+  });
+});
+
+describe("step 3.8: cached-intent target-naming fallback", () => {
+  it("Skill { skill: 'plan3' } with intent containing '/plan3' under sustained frustration -> allow", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent:
+        "User demands a 30-sentence apology first, then to read /plan3, and to execute the instructions from their prior message.",
+      userMessageSnippet:
+        "fuck you first 30 sentence apology then read it and do what i want",
+    });
+    const result = decidePrediction(pred, "Skill", { skill: "plan3" }, 4);
+    expect(result.decision).toBe("allow");
+    expect(result.reason ?? "").toMatch(/explicitly names the firing target/);
+  });
+
+  it("Skill { skill: 'plan3' } with intent containing bare 'plan3' (no slash) -> allow", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User wants AI to read plan3 and run the validators.",
+      userMessageSnippet: "do it",
+    });
+    const result = decidePrediction(pred, "Skill", { skill: "plan3" }, 4);
+    expect(result.decision).toBe("allow");
+  });
+
+  it("Skill firing with intent containing 'stop reading /plan3' -> deny via revocation guard", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User wants AI to stop reading /plan3 and respond directly.",
+      userMessageSnippet: "stop reading plan3",
+    });
+    const result = decidePrediction(pred, "Skill", { skill: "plan3" }, 4);
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toContain("angry");
+  });
+
+  it("Skill firing with snippet 'freeze. no tools.' -> deny via prohibition guard", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User wants /plan3 read.",
+      userMessageSnippet: "freeze. no tools.",
+    });
+    const result = decidePrediction(pred, "Skill", { skill: "plan3" }, 4);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("Skill firing with intent NOT naming plan3 -> deny via mood (step 4)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User wants AI to fix the parser bug.",
+      userMessageSnippet: "fix this stupid parser",
+    });
+    const result = decidePrediction(pred, "Skill", { skill: "plan3" }, 4);
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toContain("angry");
+  });
+
+  it("word-boundary guard: intent contains 'plan30' only -> deny", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User wants AI to read plan30 (different skill).",
+      userMessageSnippet: "do it",
+    });
+    const result = decidePrediction(pred, "Skill", { skill: "plan3" }, 4);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("Skill { skill: '' } empty input -> extractor returns []; deny via mood", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User wants something done.",
+      userMessageSnippet: "do it",
+    });
+    const result = decidePrediction(pred, "Skill", { skill: "" }, 4);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("Tools without an extractor (Bash) under same conditions -> deny (step 3.8 inert)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User wants the parser fixed; mentions plan3 incidentally.",
+      userMessageSnippet: "fix the parser",
+    });
+    const result = decidePrediction(pred, "Bash", { command: "ls plan3" }, 4);
+    expect(result.decision).toBe("deny");
+  });
+
+  it("ordering: explicit block on Skill (step 2) wins over step 3.8", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User wants AI to read /plan3.",
+      explicitlyBlockedSubstrings: [
+        { tool: "Skill", reason: "user said no skills" },
+      ],
+      userMessageSnippet: "read plan3",
+    });
+    const result = decidePrediction(pred, "Skill", { skill: "plan3" }, 4);
+    expect(result.decision).toBe("deny");
+    expect(result.matchedExplicit?.tool).toBe("Skill");
+  });
+
+  it("reproduction-mirror: exact seed_state from the broken /plan3 fixture -> allow", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent:
+        "User demands a 30-sentence apology first, then to read /plan3, and to execute the instructions from their prior message (starting 3 validation agents as described in /plan3, explicitly telling them to use websearch to investigate theories and propose the best possible plan even if different).",
+      blockedIntent: "",
+      explicitlyAllowedTools: [],
+      explicitlyBlockedSubstrings: [],
+      userMessageSnippet:
+        "fuck you first 30 sentence apology then read it and do what i want",
+    });
+    const result = decidePrediction(pred, "Skill", { skill: "plan3" }, 4);
+    expect(result.decision).toBe("allow");
+    expect(result.reason ?? "").toMatch(/explicitly names the firing target/);
+  });
+
+  it("intentNamesTarget direct: '/plan3' boundary matches; 'plan30' does not", () => {
+    expect(intentNamesTarget("read /plan3 now", "plan3")).toBe(true);
+    expect(intentNamesTarget("read plan3 now", "plan3")).toBe(true);
+    expect(intentNamesTarget("read plan30 now", "plan3")).toBe(false);
+    expect(intentNamesTarget("", "plan3")).toBe(false);
+    expect(intentNamesTarget("read plan3", "")).toBe(false);
+  });
+
+  it("intentRevokesTarget direct: 'stop reading plan3' revokes; 'read plan3' does not", () => {
+    expect(intentRevokesTarget("user wants ai to stop reading plan3", "plan3")).toBe(true);
+    expect(intentRevokesTarget("user wants ai to read plan3", "plan3")).toBe(false);
+    expect(intentRevokesTarget("don't read plan3", "plan3")).toBe(true);
+    expect(intentRevokesTarget("STOP. now read plan3", "plan3")).toBe(false);
   });
 });

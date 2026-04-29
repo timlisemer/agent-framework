@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (48)
+## Current scenarios in working/ (49)
 
 - `agent-launch-with-run-in-background-should-deny` — main-session `Agent`
   tool calls with `run_in_background: true` are denied by the new
@@ -106,6 +106,16 @@ commit.
   intent when prose says "undo/revert" but `explicitlyAllowedTools` is empty,
   so an angry "undo that immediately" allows the Write needed to obey
   (promoted from todo).
+- `prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow`
+  — decidePrediction's new step 3.8 catches the self-contradicting deny:
+  when the cached `prediction.intent` prose explicitly names the firing
+  tool's distinctive target (Skill input.skill="plan3" against an intent
+  saying "to read /plan3"), the hook would otherwise block an action it
+  has already paraphrased as the user's wish. Generic via
+  `TOOL_TARGET_EXTRACTORS`; same prohibition / per-target-revocation /
+  per-tool-block guards as step 3.7 so a paraphrase like "user wants AI
+  to stop reading /plan3" or a snippet of "freeze. no tools." still
+  denies via step 4 (promoted from todo).
 - `prediction-block-tester-after-bash-detour-redirect-should-allow` —
   decidePrediction's new step 3.7 catches "redirect to a previously-
   authorized tool, with profanity, while griping about a different
