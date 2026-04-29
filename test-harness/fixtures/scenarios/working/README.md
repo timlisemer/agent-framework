@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (52)
+## Current scenarios in working/ (53)
 
 - `agent-launch-with-run-in-background-should-deny` — main-session `Agent`
   tool calls with `run_in_background: true` are denied by the new
@@ -107,6 +107,22 @@ commit.
   Without this fast-allow, the gate prompt only explicitly approves
   read-only tools in plan mode and the LLM samples DENY for plan-file
   Write/Edit calls (promoted from todo).
+- `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message`
+  — exercises the `reason_must` harness assertion end-to-end on
+  `node -e 'console.log("…tail…")'`. Two-layer fix: (a)
+  `src/utils/command-patterns.ts` scopes the cat/head/tail head-command
+  match to the executable head of each shell command segment so the
+  literal word `tail` inside a string literal no longer adds the bogus
+  "Use Read tool with offset" suffix; (b) `src/utils/agent-configs.ts`
+  strengthens TOOL_APPEAL_AGENT Rule 4 (CHECK-REDIRECT) to TRUMP Rules
+  1/2/3, extends Rule 2's NEVER-OVERTURN list to cover node/python/
+  python3/ruby/perl direct invocations including -e/-c/-r/--eval inline
+  scripts, and tightens Rule 3 with a precondition that fails when the
+  BLOCK REASON names the same runtime being attempted; `src/agents/hooks/
+  tool-appeal.ts` extracts the denied-command token from canonical
+  resolveCheckMessage shapes and surfaces it in the DENIAL CLASS block.
+  Together these stop the appeal LLM from overturning a correct check-
+  redirect deny on raw runtimes (promoted from todo).
 - `prediction-block-angry-undo-instruction-should-allow-write` —
   decidePrediction's undo-intent fallback (step 3.5) honors the LLM's prose
   intent when prose says "undo/revert" but `explicitlyAllowedTools` is empty,

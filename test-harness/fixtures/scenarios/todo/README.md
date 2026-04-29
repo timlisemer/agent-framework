@@ -32,21 +32,9 @@ same commit. Scenarios added here must include the literal phrase
 "EXPECTED TO FAIL against current code" in their description — that
 phrase is the signal the failure is intended pending code.
 
-## Current scenarios in todo/ (1)
+## Current scenarios in todo/ (0)
 
-- `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message`
-  — exercises the new `reason_must` harness assertion: the deny for
-  `node -e 'console.log("…tail…")'` must NOT contain the bash `tail`
-  remediation "Use Read tool with offset" and MUST contain the
-  legitimate "node not covered by just check" message. The upstream
-  `command-patterns.ts` fix scoping cat/head/tail to executable
-  segment heads has landed, but the appeal LLM (tool-approve is
-  appealable) consistently overturns the deterministic fastDeny in
-  this scenario's transcript — 3/3 runs return all-rules allow with
-  no flap, so the `reason_must` assertion is never reached. Promotion
-  blocker: add `env.llm_stubs = { "tool-appeal": "UPHOLD" }` using
-  the new harness stubbing mechanism to pin the appeal verdict
-  deterministically.
+(none — `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message` was promoted to working/ on 2026-04-29 after the appeal-LLM tightening in `src/utils/agent-configs.ts` and the denied-command-token surfacing in `src/agents/hooks/tool-appeal.ts` made the deterministic fastDeny stick on real LLM calls.)
 
 ## Verify
 

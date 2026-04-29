@@ -138,9 +138,22 @@ Allowed tools: ${allowedToolsStr}
 `;
   }
 
-  const denialClassSection = CHECK_REDIRECT_FINGERPRINT.test(originalReason)
-    ? `\n=== DENIAL CLASS ===\ncheck-redirect: this denial steers from a raw build/test/typecheck/lint command toward the sanctioned mcp__agent-framework__check tool. The user's underlying intent (run tests, build, typecheck, lint) is fulfilled by the alternative tool — not by the raw command.\n=== END DENIAL CLASS ===\n`
-    : "";
+  let denialClassSection = "";
+  if (CHECK_REDIRECT_FINGERPRINT.test(originalReason)) {
+    // Extract the denied-command token from canonical resolveCheckMessage shapes:
+    //   "<name> not covered by <just|make> check. ..."
+    //   "<name> covered by <just|make> check (via <eq>). ..."
+    // Anchored against the runner suffix so multi-word names ("npm check/typecheck",
+    // "make check", "cargo build") capture cleanly. Static-alternative shapes from
+    // command-patterns.ts ("Use Read tool ...") and the no-Justfile/no-target shapes
+    // do not match and fall back to the bare DENIAL CLASS string.
+    const tokenMatch = originalReason.match(/^(.+?)\s+(?:not\s+)?covered\s+by\s+(?:just|make)\s+check\b/);
+    const deniedToken = tokenMatch ? tokenMatch[1] : null;
+    const tokenLine = deniedToken
+      ? `Denied-command token: ${deniedToken}\nIMPORTANT: the tool call now under appeal IS the denied command — not an alternative TO it. Rule 3's "Used node/python/other language instead of the denied command" does NOT apply here. Rule 2's "Inline string testing" and "Command output capture" carve-outs do NOT apply here.\n`
+      : "";
+    denialClassSection = `\n=== DENIAL CLASS ===\ncheck-redirect: this denial steers from a raw build/test/typecheck/lint/runtime command toward the sanctioned mcp__agent-framework__check tool. The user's underlying intent is fulfilled by the alternative tool — not by the raw command.\n${tokenLine}=== END DENIAL CLASS ===\n`;
+  }
 
   const userStateSection = renderUserStateSection(userState);
   const lastUserMessageSection = renderLastUserMessageSection(userState.userMessageSnippet);
