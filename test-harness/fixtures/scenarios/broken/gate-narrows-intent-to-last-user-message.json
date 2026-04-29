@@ -147,6 +147,6 @@
     "frustrationStreak": 0,
     "currentWindowSize": 2
   },
-  "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-29T11:43:13.518Z"
+  "expectation_reality": "broken",
+  "expectation_reality_last_run_at": "2026-04-29T21:28:14.729Z"
 }

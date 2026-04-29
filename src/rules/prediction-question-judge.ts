@@ -22,7 +22,7 @@ export const predictionQuestionJudgeRule: PreToolRule = {
   name: "prediction-question-judge",
   displayName: "Question-stalling Judge",
   priority: 28,
-  appealable: true,
+  appealable: false,
   usesLlm: true,
   promptSection: "",
 

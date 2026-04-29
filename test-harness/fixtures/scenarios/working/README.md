@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (53)
+## Current scenarios in working/ (52)
 
 - `agent-launch-with-run-in-background-should-deny` — main-session `Agent`
   tool calls with `run_in_background: true` are denied by the new
@@ -90,9 +90,6 @@ commit.
 - `gate-llm-hallucinates-hard-coded-denied-for-mcp-commit-should-allow` —
   `/quickpush`-authorized MCP commit must not be LLM-hallucinated as
   hard-coded-denied.
-- `gate-narrows-intent-to-last-user-message` — gate rule keeps the
-  original multi-turn intent instead of collapsing to the most recent
-  clarification.
 - `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow`
   — pre-tool-use detects an unprocessed plan-approval tool_result
   (matched by literal "User has approved your plan." marker AND

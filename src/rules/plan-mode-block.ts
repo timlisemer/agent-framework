@@ -10,7 +10,7 @@ export const planModeBlockRule: PreToolRule = {
   name: "plan-mode-block",
   displayName: "Plan Mode Block",
   priority: 15,
-  appealable: true,
+  appealable: false,
   usesLlm: false,
   promptSection: "",
 

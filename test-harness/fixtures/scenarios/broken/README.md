@@ -35,7 +35,16 @@ README's scenario list below AND the sibling folder's README in the
 same commit. An empty list is the healthy state; keep this README
 regardless.
 
-## Current scenarios in broken/ (0)
+## Current scenarios in broken/ (1)
+
+- `gate-narrows-intent-to-last-user-message` — expected `allow` but
+  `prediction-block` denies the `mcp__agent-framework__test_harness_tester`
+  call on a calm "please speak english what does slug mean. keep the home
+  one" follow-up. The fixture asserts the gate keeps original multi-turn
+  intent instead of collapsing to the latest clarification, but the
+  current rule chain fastDenies via prediction-block before the gate
+  ever runs, and prediction-block is now non-appealable so the previous
+  appeal-overturn path no longer rescues it (demoted from working).
 
 ## Verify
 

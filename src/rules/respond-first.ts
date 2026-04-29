@@ -19,7 +19,7 @@ export const respondFirstRule: PreToolRule = {
   name: "respond-first",
   displayName: "Respond First",
   priority: 5,
-  appealable: true,
+  appealable: false,
   usesLlm: false,
   promptSection: "",
 

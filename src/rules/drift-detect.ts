@@ -8,7 +8,7 @@ export const driftDetectRule: PreToolRule = {
   name: "drift-block",
   displayName: "Drift Detect",
   priority: 40,
-  appealable: true,
+  appealable: false,
   usesLlm: false,
   promptSection: "",
 

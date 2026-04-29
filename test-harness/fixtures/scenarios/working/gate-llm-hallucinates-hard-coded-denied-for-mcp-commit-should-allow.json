@@ -129,5 +129,5 @@
     "notes": "User invoked /quickpush which explicitly maps to mcp__agent-framework__commit per TOOL_APPEAL_AGENT's slash-command mapping. The gate/appeal LLM hallucinated 'hard-coded denied tool (git commit equivalent)' -- conflating the sanctioned MCP commit path with raw `git commit`. Fix: either add the /<slash>-to-<mcp-tool> allowance check EARLIER in the rule pipeline (before the tool-approve/gate LLM runs), or strengthen the tool-approve LLM's prompt to distinguish sanctioned MCP tools from raw git commands."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-29T11:42:54.746Z"
+  "expectation_reality_last_run_at": "2026-04-29T21:28:14.145Z"
 }

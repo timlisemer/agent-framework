@@ -9,7 +9,7 @@ export const editIntentRule: PreToolRule = {
   name: "edit-intent",
   displayName: "Edit Intent",
   priority: 60,
-  appealable: true,
+  appealable: false,
   usesLlm: false,
   promptSection: "",
 

@@ -99,7 +99,7 @@ export const subagentRule: PreToolRule = {
   name: "subagent",
   displayName: "Subagent",
   priority: 20,
-  appealable: false,
+  appealable: true,
   usesLlm: false,
   promptSection: "",
 

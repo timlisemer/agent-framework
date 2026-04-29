@@ -7,7 +7,7 @@ export const predictionBlockRule: PreToolRule = {
   name: "prediction-block",
   displayName: "Prediction Block",
   priority: 35,
-  appealable: true,
+  appealable: false,
   usesLlm: false,
   promptSection: "",
 
