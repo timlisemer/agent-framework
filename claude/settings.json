@@ -1,6 +1,6 @@
 {
   "model": "opus[1m]",
-  "alwaysThinkingEnabled": true,
+  "effortLevel": "medium",
   "voiceEnabled": true,
   "autoMemoryEnabled": false,
   "enabledPlugins": {

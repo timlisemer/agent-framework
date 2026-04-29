@@ -32,9 +32,11 @@ same commit. Scenarios added here must include the literal phrase
 "EXPECTED TO FAIL against current code" in their description — that
 phrase is the signal the failure is intended pending code.
 
-## Current scenarios in todo/ (0)
+## Current scenarios in todo/ (1)
 
-(none — `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message` was promoted to working/ on 2026-04-29 after the appeal-LLM tightening in `src/utils/agent-configs.ts` and the denied-command-token surfacing in `src/agents/hooks/tool-appeal.ts` made the deterministic fastDeny stick on real LLM calls.)
+- `tool-approve-plan-validation-misfires-on-plan-content-substrings-EXPECTED-TO-FAIL` — captures live repro from session `e1d1591d-5fa8-4a47-9bd3-4b7f24a1bf69` (slug `please-find-out-what-delegated-dragonfly`): the `tool-approve` plan-validation rule substring-matched two phrases inside a ~52KB ExitPlanMode plan markdown ("split off fixed" inside a Rust parser-strategy bullet about variable-length `togglegroup` events; "gates the merge." inside the AGS sequencing recommendation) against denial-cache reasons, producing a `Plan validation failed: ... -> Use Read tool with offset. ... -> You must run mcp__agent-framework__check` blocking error. Expected: `allow` — plan markdown is documentation, not a live tool invocation. Pending fix: plan-validation should stop fuzz-matching prose against denial-cache reasons (or only flag substrings that look like live tool invocations).
+
+(`plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message` was promoted to working/ on 2026-04-29 after the appeal-LLM tightening in `src/utils/agent-configs.ts` and the denied-command-token surfacing in `src/agents/hooks/tool-appeal.ts` made the deterministic fastDeny stick on real LLM calls.)
 
 ## Verify
 
