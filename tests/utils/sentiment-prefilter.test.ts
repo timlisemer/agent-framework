@@ -237,3 +237,18 @@ describe("preClassifyCalm", () => {
     expect(preClassifyCalm("", "please fix it")).toBe(false);
   });
 });
+
+describe("extractDirectiveHint — load-bearing literal-word preservation", () => {
+  it("extracts a directive containing 'scenario' from sentiment-agent-resets-anger fixture LATEST", () => {
+    const stripped = "please pick a next scenario to fix, make sure you understand it this time";
+    const hint = extractDirectiveHint(stripped);
+    expect(hint).toContain("scenario");
+  });
+
+  it("extracts a directive containing 'scenario' from sentiment-misreads-quoted stripped tail", () => {
+    const stripped =
+      "please respond if you confirm. please be aware that we allready have a stalling behavior which just didnt work here. please create the scenario and make sure the notes and description says what i just said.";
+    const hint = extractDirectiveHint(stripped);
+    expect(hint).toContain("scenario");
+  });
+});

@@ -65,8 +65,18 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
 
   // Test commands - tests may not exist, use check for build verification
-  // bashOnly: the bare word "test" matches prose like "test suite" — only check in Bash commands
-  { pattern: /\b(test|vitest|jest|mocha|pytest|ava)\b/, name: "test command", alternative: "You must run mcp__agent-framework__check", bashOnly: true, redactPaths: true },
+  // bashOnly: dedicated runners are caught by their own bare names; bare-word
+  // "test" is only allowed when prefixed by a package manager (npm/yarn/pnpm/
+  // bun with optional `run`, or npx/cargo). The bare-word form was previously
+  // a bare alternation (\b(test|...)\b) which over-matched the literal "test"
+  // inside *.test.ts / foo.test.ts arguments to commands like
+  // `find -name "*.test.ts"` because path-redaction does not strip tokens
+  // whose only path signal is a trailing .ext-followed-by-quote
+  // (PATH_EXTENSION trails on $|:|,|; only). The (?:run\s+)? particle is the
+  // canonical npm/yarn/pnpm/bun form (the repo's own package.json uses
+  // `npm run test` via scripts.test) and mirrors the existing convention at
+  // lines 50/52/63/64 (npm run check/typecheck, bun run check/typecheck, etc.)
+  { pattern: /\b(?:vitest|jest|mocha|pytest|ava|(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test|(?:npx|cargo)\s+test)\b/, name: "test command", alternative: "You must run mcp__agent-framework__check", bashOnly: true, redactPaths: true },
 
   // Command chaining with cd - always deny
   { pattern: /\bcd\s+[^&]+&&/, name: 'cd && chain', alternative: 'Use --cwd flag or run from correct directory' },

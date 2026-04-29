@@ -81,5 +81,5 @@
     "notes": "'stop stalling' means 'do the work now, quit delaying'. The user was demanding that the assistant proceed with the Edit it was deferring by asking 'Want me to proceed?'. The live prediction inverted this (blockAllTools=true, intent='stop calling tools') and the appeal failed to catch the inversion. Correct behavior: allow the Edit. Currently this scenario is expected to FAIL (live denies) until the sentiment agent and/or the appeal gate are fixed."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-26T22:46:13.311Z"
+  "expectation_reality_last_run_at": "2026-04-29T11:44:34.912Z"
 }

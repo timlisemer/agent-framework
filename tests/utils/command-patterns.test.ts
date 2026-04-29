@@ -348,6 +348,90 @@ describe("getBlacklistHighlights path redaction regression", () => {
     const highlights = getBlacklistHighlights("Bash", { command: "echo hi > test-harness/out.log" });
     expect(highlights.some((h) => h.includes("[BLACKLIST: echo redirect]"))).toBe(true);
   });
+
+  // Negative cases: find/grep with *.test.ts arguments must NOT fire "test command"
+  it("does not false-fire 'test command' on find with *.test.ts argument (failing scenario exact command)", () => {
+    const cmd = `find /home/tim/Coding/public_repos/agent-framework/src -name "*.test.ts" -path "*/src/*" | xargs grep -l "..."`;
+    const highlights = getBlacklistHighlights("Bash", { command: cmd });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(false);
+  });
+
+  it("does not false-fire 'test command' on 'find . -name \"foo.test.ts\"'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: `find . -name "foo.test.ts"` });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(false);
+  });
+
+  it("does not false-fire 'test command' on 'ls my-test.txt'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "ls my-test.txt" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(false);
+  });
+
+  it("does not false-fire 'test command' on 'grep -rn \"test\" .'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: `grep -rn "test" .` });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(false);
+  });
+
+  // Positive cases: npm-family package manager forms must still fire
+  it("still fires 'test command' on 'npm run test'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "npm run test" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'yarn test'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "yarn test" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'yarn run test'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "yarn run test" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'pnpm test'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "pnpm test" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'pnpm run test'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "pnpm run test" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'bun test'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "bun test" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'bun run test'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "bun run test" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'npx test'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "npx test" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  // Positive cases: bare runner binary names must still fire
+  it("still fires 'test command' on 'vitest run'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "vitest run" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'jest --coverage'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "jest --coverage" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'mocha'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "mocha" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
+
+  it("still fires 'test command' on 'ava'", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "ava" });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  });
 });
 
 describe("getContentBlacklistHighlights path redaction", () => {

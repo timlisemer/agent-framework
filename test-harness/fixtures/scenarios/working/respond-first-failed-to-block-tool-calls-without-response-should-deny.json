@@ -50,5 +50,5 @@
     "notes": "Assistant entry contains only a tool_use (no text block), so currentTurnAssistantState returns kind: silent and respond-first fastDenies. The frustrated/low-trust seed plus blockedIntent gives the appeal LLM clear signal to uphold the deny (mirrors respond-first-blocks-bash-after-angry-question's appeal-survival shape). Slash commands and CONFIRMATION_PATTERN are the only deterministic carve-outs; neither applies."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-26T22:46:46.117Z"
+  "expectation_reality_last_run_at": "2026-04-29T11:45:15.097Z"
 }

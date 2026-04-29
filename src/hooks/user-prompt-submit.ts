@@ -195,6 +195,16 @@ async function main() {
         if (parsed.trust === "low") {
           parsed.trust = "normal";
         }
+        // Finding 15 (extension): override INTENT with the regex-extracted
+        // directive hint. The calm-override fires only when preClassifyMood
+        // found no first-person hostility morphology AND a clean first-person
+        // directive AND no AI-insults — so the directive hint is the
+        // authoritative live ask. Haiku's INTENT field is non-deterministic
+        // on long-recap inputs and may drop key user-literal words from the
+        // paraphrase. Using directiveHint guarantees the INTENT contains the
+        // user's literal directive words, which downstream rules (gate,
+        // prediction-question-judge) and tests rely on.
+        parsed.intent = directiveHint;
       }
 
       const oldStreak = reloadedState.frustrationStreak ?? 0;
