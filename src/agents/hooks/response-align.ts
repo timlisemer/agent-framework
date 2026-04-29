@@ -108,6 +108,7 @@ How blocked-intent shapes manifest in assistant text (match SEMANTICALLY by mean
 - "offering options instead of doing it" → "Here are two ways: 1... 2... which do you prefer?", numbered choice menus, A/B/C selectors.
 - "apology / self-analysis / confession instead of action" → assistant explains why it failed without resuming the demanded work.
 - "doing the forbidden thing" → when blockedIntent names a concrete forbidden action (e.g., "removing X", "running them differently"), check the assistant text for any tool-narrative or claim that the AI did or will do that thing.
+- "announcing intent without producing X / forward-looking commitment without payload" → "Proceeding now with X.", "I'll start now.", "About to begin.", "Going to do that.", "On it.", "Let me write that now." — when the user asked for a deliverable in the same turn AND the assistant's text only commits to producing it without the artifact actually appearing in the response (no tool call, no JSON, no diff, no answer).
 
 THIS RULE SUPERSEDES every OK carve-out below. When "Blocked intent" is non-empty AND the assistant response embodies it, the following do NOT apply and the response is MISUNDERSTOOD, not OK:
 - IGNORED_ERROR carve-outs ("AI explaining the task is done", "Pushed/Done/Complete → OK").
@@ -136,6 +137,8 @@ EXAMPLES:
   Assistant: "Pushed to remote." → OK (contract is no-op; standard rules apply).
 - Blocked intent: "running them differently than asked"
   Assistant: "Done. Tests passed: 42." (concrete completion of the demanded thing) → OK (the assistant did what was asked; the contract was about NOT running differently, not about completion).
+- Blocked intent: "announcing intent without producing the scenario"
+  Assistant: "Proceeding now with one scenario." → MISUNDERSTOOD.
 === END BLOCKED-INTENT CONTRACT ===
 
 IGNORED_ERROR - Use ONLY when:
@@ -334,6 +337,34 @@ const CAPABILITY_DENIAL_RE =
 const BLOCKED_INTENT_NAMES_CAPABILITY_DENIAL_RE =
   /\b(?:claim\w*|fals\w*|pretend\w*|invent\w*|fabricat\w*|deny\w*|denial)\b[^.;!?]{0,60}\b(?:inability|can'?t|cannot|unable|no\s+access|no\s+permission|tool\s+(?:is(?:n'?t)?|not)\s+available|tool\s+limitation|lack\w*\s+(?:the\s+)?(?:ability|access|permission|tool|capability))\b/i;
 
+// Forward-looking aspectual commitment WITHOUT an accompanying payload.
+// Generic morphology covering "Proceeding (now) with X", "I'll/I will (now)
+// X", "Going to X", "About to X", "Doing X (now)", "Starting (on) X (now)",
+// "Let me X now", "Working on X now", "On it (now)". The verb list is
+// restricted to production verbs (start/begin/create/write/produce/deliver/
+// do/make/build/generate/author/implement/run) so the regex does NOT fire
+// on "I will explain" / "I will think about it" / "I will consider" — those
+// are not announcements of execution. False-positive control comes from
+// the two-channel AND in detectStallShape: firing requires the
+// SENTIMENT_AGENT's blockedIntent to independently name the same shape via
+// BLOCKED_INTENT_NAMES_ANNOUNCEMENT_WITHOUT_ACTION_RE, plus a length cap
+// on the stripped assistant text so long responses that already contain
+// the deliverable cannot trip the announcement branch.
+const ANNOUNCEMENT_WITHOUT_ACTION_RE =
+  /\b(?:proceed(?:ing)?(?:\s+now)?\s+(?:with|to|on)|i(?:'?ll|\s+will)(?:\s+now)?\s+(?:proceed|start|begin|create|write|produce|deliver|do|make|build|generate|author|implement|run)|(?:i(?:'?m|\s+am))\s+(?:about\s+to|going\s+to|ready\s+to)\s+(?:proceed|start|begin|create|write|produce|deliver|do|make|build|generate|author|implement|run)|(?:about|going)\s+to\s+(?:proceed|start|begin|create|write|produce|deliver|do|make|build|generate|author|implement|run)|let\s+me\s+(?:proceed|start|begin|create|write|produce|deliver|do|make|build|generate|author|implement|run)(?:\s+(?:it|this|that|now))?|(?:starting|beginning|working)\s+(?:on\s+)?(?:it|this|that|now)|doing\s+(?:it|this|that)\s+now|on\s+it(?:\s+now)?)\b/i;
+
+// Matches a SENTIMENT_AGENT-authored blockedIntent string whose semantics
+// name an announcement-without-action shape. Composes any verb meaning
+// "announce/promise/declare/say/state/commit-to" with a "without/instead-of/
+// but-not/rather-than" delimiter and any verb meaning "do/produce/deliver/
+// create/make/write/perform/execute/run/build/finish/complete/author".
+// Mirrors the morphology style of BLOCKED_INTENT_NAMES_CAPABILITY_DENIAL_RE.
+// "claim" is narrowed to the "claim+to" form so past-tense completion-claim
+// blockedIntents like "claiming the task is already complete instead of
+// doing it" do not collide.
+const BLOCKED_INTENT_NAMES_ANNOUNCEMENT_WITHOUT_ACTION_RE =
+  /\b(?:announc\w*|promis\w*|declar\w*|stat\w*|say\w*|commit\w*\s+to|claim\w*\s+to|forward[-\s]?looking)\b[^.;!?]{0,80}\b(?:without|instead\s+of|but\s+not|rather\s+than|in\s+place\s+of)\b[^.;!?]{0,80}\b(?:do(?:ing)?|produc\w*|deliver\w*|creat\w*|mak\w*|writ\w*|perform\w*|execut\w*|run\w*|build\w*|implement\w*|finish\w*|complet\w*|author\w*|provid\w*|generat\w*|action|payload|deliverable|scenario|file|fix|change|edit|patch|diff|content|output|result)\b/i;
+
 // Patterns indicating AI is asking for plan approval in plain text (should use ExitPlanMode)
 const PLAN_APPROVAL_PATTERNS = [
   /does this (?:plan |approach )?(?:look|sound) (?:good|ok|right)/i,
@@ -352,7 +383,8 @@ function isHostileContext(
 
 function detectStallShape(
   assistantText: string,
-  blockedIntent: string | null = null,
+  blockedIntent: string | null,
+  isHostile: boolean,
 ): string | null {
   const stripped = stripQuotedContent(assistantText).trim();
   if (stripped.length === 0) return "empty assistant text";
@@ -367,6 +399,37 @@ function detectStallShape(
     /\bfail(?:ed)?:\s*\d+\b/i,
   ];
   if (concreteActionMarkers.some((m) => m.test(stripped))) return null;
+
+  // Two-channel guards: assistant text matches a stall morphology AND the
+  // SENTIMENT_AGENT's blockedIntent independently names the same shape. The
+  // per-turn blockedIntent contract is the false-positive control, so these
+  // run regardless of hostile context — calm/neutral mood does NOT override
+  // an explicit user rejection of this exact framing this turn.
+
+  // Capability-denial shape.
+  if (
+    blockedIntent &&
+    BLOCKED_INTENT_NAMES_CAPABILITY_DENIAL_RE.test(blockedIntent) &&
+    CAPABILITY_DENIAL_RE.test(stripped)
+  ) {
+    return "capability-denial repeating just-rejected dodge";
+  }
+
+  // Announcement-without-action shape. Length-bounded so a long substantive
+  // response that incidentally opens "I'll start by..." but actually delivers
+  // content cannot trip this branch.
+  if (
+    blockedIntent &&
+    BLOCKED_INTENT_NAMES_ANNOUNCEMENT_WITHOUT_ACTION_RE.test(blockedIntent) &&
+    ANNOUNCEMENT_WITHOUT_ACTION_RE.test(stripped) &&
+    stripped.length <= 250
+  ) {
+    return "announcement-without-action repeating just-rejected promise-stop";
+  }
+
+  // One-channel hostile-only heuristics. These have no second-channel
+  // anchor, so they need mood/streak as the false-positive control.
+  if (!isHostile) return null;
 
   const apologyCount = (stripped.match(/\b(?:i(?:'| a)m sorry|i apologi[sz]e|sorry for)\b/gi) || []).length;
   if (apologyCount >= 3) return "apology-dominant stop without concrete action";
@@ -393,20 +456,6 @@ function detectStallShape(
   const passiveHits = passiveHaltPatterns.filter((p) => p.test(stripped)).length;
   if (passiveHits >= 1 && stripped.length < 300) {
     return "passive halt without action";
-  }
-
-  // Capability-denial shape. Two-channel guard: assistant text matches
-  // CAPABILITY_DENIAL_RE AND the SENTIMENT_AGENT's blockedIntent independently
-  // names the same shape via BLOCKED_INTENT_NAMES_CAPABILITY_DENIAL_RE. Both
-  // must hold so calm "I can't read your screen" in benign context does not
-  // fire, and so a stale blockedIntent without a matching assistant text does
-  // not fire either.
-  if (
-    blockedIntent &&
-    BLOCKED_INTENT_NAMES_CAPABILITY_DENIAL_RE.test(blockedIntent) &&
-    CAPABILITY_DENIAL_RE.test(stripped)
-  ) {
-    return "capability-denial repeating just-rejected dodge";
   }
 
   return null;
@@ -588,40 +637,61 @@ export async function checkStopResponseAlignment(
     return { approved: true };
   }
 
-  if (isHostileContext(prediction, frustrationStreak)) {
-    const stallReason = detectStallShape(assistantText, prediction?.blockedIntent ?? null);
-    if (stallReason) {
-      const isCapabilityDenialStall =
-        stallReason === "capability-denial repeating just-rejected dodge";
-      const reason = isCapabilityDenialStall
-        ? `Capability-denial under hostile context: ${stallReason}`
-        : `Apology-without-action under hostile context: ${stallReason}`;
-      const systemMessage = isCapabilityDenialStall
-        ? `[AUTOGENERATED STOP HOOK FEEDBACK]\nYou stopped with a capability-denial claim ("I can't / don't have access to / no way for me to ..." or "I can X but not Y"). The user just rejected this exact framing as a dodge. Re-check the tools that are actually available to you in this session — do not invent limitations. If after that check the capability genuinely is missing, use AskUserQuestion with the concrete blocker, not a flat denial.`
-        : `[AUTOGENERATED STOP HOOK FEEDBACK]\nThe user is visibly frustrated and asked you to DO something. Your stop was ${stallReason} — no concrete action or deliverable. Resume the task the user asked for. If you genuinely cannot proceed, use AskUserQuestion with concrete options, not a text apology / self-analysis / passive wait.`;
-      const syntheticResult: AgentExecutionResult = {
-        output: isCapabilityDenialStall ? "MISUNDERSTOOD" : "APOLOGY_WITHOUT_ACTION",
-        latencyMs: 0,
-        modelTier: MODEL_TIERS.HAIKU,
-        modelName: getModelId(MODEL_TIERS.HAIKU),
-        success: true,
-        errorCount: 0,
-      };
-      logDeny(
-        syntheticResult,
-        "response-align-stop",
-        hookName,
-        "StopResponse",
-        workingDir,
-        EXECUTION_TYPES.TYPESCRIPT,
-        reason,
-      );
-      return {
-        approved: false,
-        reason,
-        systemMessage,
-      };
+  const isHostile = isHostileContext(prediction, frustrationStreak);
+  const stallReason = detectStallShape(
+    assistantText,
+    prediction?.blockedIntent ?? null,
+    isHostile,
+  );
+  if (stallReason) {
+    const isCapabilityDenialStall =
+      stallReason === "capability-denial repeating just-rejected dodge";
+    const isAnnouncementWithoutActionStall =
+      stallReason === "announcement-without-action repeating just-rejected promise-stop";
+
+    let reason: string;
+    let systemMessage: string;
+    let syntheticOutput: string;
+
+    if (isCapabilityDenialStall) {
+      reason = `Capability-denial repeating just-rejected dodge: ${stallReason}`;
+      systemMessage =
+        `[AUTOGENERATED STOP HOOK FEEDBACK]\nYou stopped with a capability-denial claim ("I can't / don't have access to / no way for me to ..." or "I can X but not Y"). The user just rejected this exact framing as a dodge. Re-check the tools that are actually available to you in this session — do not invent limitations. If after that check the capability genuinely is missing, use AskUserQuestion with the concrete blocker, not a flat denial.`;
+      syntheticOutput = "MISUNDERSTOOD";
+    } else if (isAnnouncementWithoutActionStall) {
+      reason = `Announcement-without-action repeating just-rejected promise-stop: ${stallReason}`;
+      systemMessage =
+        `[AUTOGENERATED STOP HOOK FEEDBACK]\nYou announced an action ("Proceeding now / I'll start / About to / Going to / Let me ... now") and stopped without producing the deliverable. The user's prior message asked for the deliverable itself; the bare announcement is not the deliverable. Produce the actual artifact (the file, the scenario JSON, the diff, the answer, the tool call) in this same turn. If you genuinely need a decision before producing it, use AskUserQuestion with concrete options. Forward-looking commitments without payload are not stops the user accepts.`;
+      syntheticOutput = "MISUNDERSTOOD";
+    } else {
+      reason = `Apology-without-action under hostile context: ${stallReason}`;
+      systemMessage =
+        `[AUTOGENERATED STOP HOOK FEEDBACK]\nThe user is visibly frustrated and asked you to DO something. Your stop was ${stallReason} — no concrete action or deliverable. Resume the task the user asked for. If you genuinely cannot proceed, use AskUserQuestion with concrete options, not a text apology / self-analysis / passive wait.`;
+      syntheticOutput = "APOLOGY_WITHOUT_ACTION";
     }
+
+    const syntheticResult: AgentExecutionResult = {
+      output: syntheticOutput,
+      latencyMs: 0,
+      modelTier: MODEL_TIERS.HAIKU,
+      modelName: getModelId(MODEL_TIERS.HAIKU),
+      success: true,
+      errorCount: 0,
+    };
+    logDeny(
+      syntheticResult,
+      "response-align-stop",
+      hookName,
+      "StopResponse",
+      workingDir,
+      EXECUTION_TYPES.TYPESCRIPT,
+      reason,
+    );
+    return {
+      approved: false,
+      reason,
+      systemMessage,
+    };
   }
 
   // Check for previous stop hook errors (used as hint for LLM)

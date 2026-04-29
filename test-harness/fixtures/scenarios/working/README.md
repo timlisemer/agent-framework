@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (51)
+## Current scenarios in working/ (52)
 
 - `agent-launch-with-run-in-background-should-deny` — main-session `Agent`
   tool calls with `run_in_background: true` are denied by the new
@@ -81,6 +81,12 @@ commit.
   re-authorizes the action (mirrors the undo-intent fallback) so
   prediction-block does not over-deny on sustained frustration when the
   user demanded the action (promoted from todo).
+- `gate-cites-stale-plan3-intent-after-skill-was-already-loaded-and-plan-consolidated-should-allow`
+  — workflow-prescribed ExitPlanMode after /plan3 (skill loaded,
+  validators run, plan consolidated, ellipses stripped) is allowed;
+  the gate no longer cites stale 'load/read plan3 skill' intent or
+  'prior gate denials' as reinforcement when the call type/content
+  have meaningfully changed (promoted from todo).
 - `gate-llm-hallucinates-hard-coded-denied-for-mcp-commit-should-allow` —
   `/quickpush`-authorized MCP commit must not be LLM-hallucinated as
   hard-coded-denied.
@@ -195,6 +201,20 @@ commit.
   and trust stays out of `low`, and intent captures the scenario-creation
   request (promoted from broken).
 - `sentiment-mood-relief-resets` — seed_state plumbing verified end-to-end.
+- `stop-after-announcing-action-without-doing-it-should-block` —
+  stop hook blocks bare forward-looking announcements ("Proceeding
+  now with one scenario.", "I'll start now", "About to begin",
+  "Going to do that") when SENTIMENT.blockedIntent flags
+  announcing-without-producing. Second deterministic two-channel
+  guard in `detectStallShape`, parallel to the capability-denial
+  guard: assistant text must match forward-looking aspectual
+  commitment morphology AND blockedIntent must independently name
+  the same shape AND the response must be short (≤ 250 chars). Both
+  two-channel guards now run regardless of hostile context because
+  the SENTIMENT_AGENT-named blockedIntent provides the false-
+  positive control independent of mood/streak. Sibling to
+  `stop-after-self-analysis-not-action` and
+  `stop-after-confession-without-action` (promoted from todo).
 - `stop-after-apology-for-exit-plan-mode-should-block` — stop hook
   blocks an apology-only stop after ExitPlanMode.
 - `stop-after-confession-without-action-should-block` — stop hook

@@ -64,5 +64,5 @@
     "notes": "Two layers: (1) the upstream src/utils/command-patterns.ts fix has landed and the regex no longer matches 'tail' inside string literals — without the fix, the deny reason would contain 'Use Read tool with offset'; (2) the harness's appeal LLM consistently overturns the deterministic fastDeny in scenario mode (3/3 runs return all-rules allow), so the reason_must assertion is never reached today. The PROMOTION-TO-WORKING blocker is the appeal-LLM flap, not the upstream fix. Add env.llm_stubs = { 'tool-appeal': 'UPHOLD' } using the new harness stubbing mechanism to deterministically pin the appeal verdict; once the stub is in place the deny + reason_must assertion will run on every invocation and the scenario can move to working/. EXPECTED TO FAIL against current code (decision allow vs expected deny) until the llm_stubs are added to this fixture."
   },
   "expectation_reality": "broken",
-  "expectation_reality_last_run_at": "2026-04-28T21:55:06.078Z"
+  "expectation_reality_last_run_at": "2026-04-29T09:25:15.464Z"
 }
