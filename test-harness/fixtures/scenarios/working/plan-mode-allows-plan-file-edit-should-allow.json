@@ -54,5 +54,5 @@
     "notes": "After Part B1, plan-mode-block fastAllows the plan-file Write before gate runs. Before the fix the scenario fails — gate LLM samples DENY with hallucinated reasoning."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-29T21:28:32.679Z"
+  "expectation_reality_last_run_at": "2026-04-29T22:21:12.383Z"
 }

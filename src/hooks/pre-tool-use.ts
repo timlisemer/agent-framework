@@ -18,7 +18,8 @@ import {
   formatTranscriptResult,
   detectParallelBatch,
   userTurnIsFreshSinceLockout,
-  readRecentUserMessages,
+  readRecentUserMessagesArray,
+  userTurnFollowedByCompletedToolRoundtrip,
   type ParallelBatchInfo,
 } from "../utils/transcript.js";
 import {
@@ -331,16 +332,34 @@ async function main() {
     }
   }
 
-  // Pull the latest user-text entry directly from the transcript so rules
-  // can compare a (possibly stale) cached prediction against the user's
-  // real recent words. One read per PreToolUse; no-op on read failure.
-  // readRecentUserMessages strips quoted/pasted content and skips
-  // slash-command entries — what comes back is the user's free-form text.
-  const latestUserMessage = (await readRecentUserMessages(
+  // Pull the latest 5 user-text entries directly from the transcript. The
+  // freshest is the same `latestUserMessage` the existing 3.7-path-(a)
+  // re-authorization fallbacks read; the older four feed step 3.10's
+  // look-back over a discharged side-clarification. Use the array helper
+  // so a literal "---" inside a user message doesn't fragment.
+  const recentUserMessages = await readRecentUserMessagesArray(
     input.transcript_path,
-    1,
-    false,
-  ).catch(() => "")).trim();
+    5,
+  ).catch(() => []);
+  const latestUserMessage =
+    recentUserMessages.length > 0
+      ? recentUserMessages[recentUserMessages.length - 1]
+      : "";
+
+  // Discharge probe: was the user-text turn that produced the cached
+  // prediction's snippet followed by a completed non-error tool roundtrip?
+  // If yes, the cached snippet's imperative has been obeyed and step 3.10
+  // may suppress the mood-driven step-4 deny when an older outer user
+  // turn favorably names the firing tool.
+  let cachedSnippetSideTaskDischarged = false;
+  const cachedSnippet = state.currentPrediction?.userMessageSnippet ?? "";
+  if (cachedSnippet) {
+    cachedSnippetSideTaskDischarged =
+      await userTurnFollowedByCompletedToolRoundtrip(
+        input.transcript_path,
+        cachedSnippet,
+      ).catch(() => false);
+  }
 
   // Build rule context
   const ctx: RuleContext = {
@@ -358,6 +377,8 @@ async function main() {
     subagent,
     outsideRootPath,
     latestUserMessage,
+    recentUserMessages,
+    cachedSnippetSideTaskDischarged,
   };
 
   // Run all rules (respond-first, low-risk, plan-mode-block, subagent,

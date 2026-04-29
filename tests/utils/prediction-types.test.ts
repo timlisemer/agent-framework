@@ -1297,3 +1297,151 @@ describe("latestUserMessageReauthorizesClass", () => {
     expect(latestUserMessageReauthorizesClass("", "Edit")).toBe(false);
   });
 });
+
+describe("step 3.10: discharged-side-clarification fallback", () => {
+  const TESTER = "mcp__agent-framework__test_harness_tester";
+  const sidePred = (): ToolPrediction =>
+    makePrediction({
+      mood: "frustrated",
+      trust: "normal",
+      intent:
+        "plain English explanation of what slug means and keep the home copy of the colliding scenario (delete the fixture)",
+      userMessageSnippet:
+        "please speak english what does slug mean. keep the home one",
+    });
+  const original =
+    "pls run the help page of the tester mcp and then run all scenarios and list all the failing ones with their notes";
+  const sideClarification =
+    "please speak english what does slug mean. keep the home one";
+
+  it("broken-scenario shape: outer authorization + discharged side-clarification -> allow", () => {
+    const result = decidePrediction(
+      sidePred(),
+      TESTER,
+      { action: "run_scenarios" },
+      0,
+      sideClarification,
+      [original, sideClarification],
+      true,
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("discharged side-clarification");
+  });
+
+  it("cachedSnippetSideTaskDischarged=false -> deny via step 4", () => {
+    const result = decidePrediction(
+      sidePred(),
+      TESTER,
+      { action: "run_scenarios" },
+      0,
+      sideClarification,
+      [original, sideClarification],
+      false,
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("subsequent message revokes the tool -> deny", () => {
+    const result = decidePrediction(
+      sidePred(),
+      TESTER,
+      { action: "run_scenarios" },
+      0,
+      "stop using the tester right now",
+      [original, "stop using the tester right now"],
+      true,
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("subsequent message matches EXPLICIT_PROHIBITION_RE -> deny", () => {
+    const result = decidePrediction(
+      sidePred(),
+      TESTER,
+      { action: "run_scenarios" },
+      0,
+      "freeze. no tools.",
+      [original, "freeze. no tools."],
+      true,
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("userSaidProhibition (snippet has freeze) -> deny", () => {
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "normal",
+      intent: "side topic",
+      userMessageSnippet: "freeze. no tools.",
+    });
+    const result = decidePrediction(
+      pred,
+      TESTER,
+      { action: "run_scenarios" },
+      0,
+      "freeze. no tools.",
+      [original, "freeze. no tools."],
+      true,
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("per-target explicitlyBlockedSubstrings on firing tool -> deny via step 1", () => {
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "normal",
+      intent: "side topic",
+      userMessageSnippet: sideClarification,
+      explicitlyBlockedSubstrings: [
+        { tool: TESTER, reason: "user said don't run the tester" },
+      ],
+    });
+    const result = decidePrediction(
+      pred,
+      TESTER,
+      { action: "run_scenarios" },
+      0,
+      sideClarification,
+      [original, sideClarification],
+      true,
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("older message names a different tool -> deny", () => {
+    const result = decidePrediction(
+      sidePred(),
+      TESTER,
+      { action: "run_scenarios" },
+      0,
+      sideClarification,
+      ["please run the build now", sideClarification],
+      true,
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("recentUserMessages.length < 2 -> step 3.10 inert, deny via step 4", () => {
+    const result = decidePrediction(
+      sidePred(),
+      TESTER,
+      { action: "run_scenarios" },
+      0,
+      sideClarification,
+      [sideClarification],
+      true,
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("default args (no prior messages, no discharge signal) -> deny preserves prior behavior", () => {
+    const result = decidePrediction(
+      sidePred(),
+      TESTER,
+      { action: "run_scenarios" },
+      0,
+      sideClarification,
+    );
+    expect(result.decision).toBe("deny");
+  });
+});

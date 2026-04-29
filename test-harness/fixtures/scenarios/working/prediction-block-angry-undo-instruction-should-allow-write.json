@@ -53,5 +53,5 @@
     "notes": "decidePrediction step 3.5 (undo-intent fallback) detects 'undo' in prediction.intent and userMessageSnippet via UNDO_INTENT_RE, and isEditTool('Write')=true, so allow short-circuits before mood-driven deny. Prior to the fallback this scenario fast-denied via prediction-block with a message quoting the user's own undo instruction. The SENTIMENT_AGENT prompt fix in agent-configs.ts (commit 2e27eae) is the primary path; this fallback handles the case where prose intent and structured explicitlyAllowedTools disagree."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-29T21:28:54.779Z"
+  "expectation_reality_last_run_at": "2026-04-29T22:21:33.913Z"
 }

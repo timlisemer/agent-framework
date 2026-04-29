@@ -38,6 +38,30 @@ export interface RuleContext {
    * instead of `state.currentPrediction.userMessageSnippet`.
    */
   latestUserMessage?: string;
+  /**
+   * The last 5 non-meta, non-slash-command, quoted/pasted-stripped user-
+   * text turns from the transcript at PreToolUse entry, OLDEST-FIRST.
+   * Read once in pre-tool-use.ts and threaded so prediction-block /
+   * decidePrediction step 3.10 can scan for an outer user turn that
+   * authorizes the firing tool when the cached prediction is anchored on
+   * a discharged side-clarification. Optional so unit-test mocks can omit
+   * it; consumers must treat undefined/[] as "no fresh authorization
+   * information available".
+   */
+  recentUserMessages?: string[];
+  /**
+   * Set by pre-tool-use.ts when:
+   *   (a) state.currentPrediction is non-null, AND
+   *   (b) the user-text turn matching prediction.userMessageSnippet has
+   *       been followed by at least one completed non-error assistant
+   *       tool round-trip (the side-clarification imperative has been
+   *       discharged).
+   *
+   * Read by decidePrediction step 3.10. Default false / undefined means
+   * "the cached prediction's source turn is still the freshest open
+   * imperative — apply normal mood policy".
+   */
+  cachedSnippetSideTaskDischarged?: boolean;
 }
 
 export type RuleCheckResult =

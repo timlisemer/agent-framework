@@ -649,5 +649,5 @@
     "notes": "Live denied via prediction-block. Two compounding bugs both reach the same deny outcome. Bug A (self-contradicting deny): the hook's stated intent already names 'to read /plan3' and the firing tool call IS the read of /plan3, yet the hook blocks it. The cached intent and the denied action directly contradict each other. Bug B (stale prior-turn contamination): the cached intent is a MERGE of the current user turn ('30-sentence apology + read /plan3 + do what i want') with content from a strictly EARLIER user turn ('starting 3 validation agents... use websearch...') -- live SENTIMENT_AGENT dragged forward instructions from the prior message because that prior content was unfulfilled, contaminating the fresh-turn intent. Same bug class as the previously-fixed stale-userMessageSnippet, surfacing again two messages later via intent-text contamination rather than snippet staleness. The expected attribution is left unspecified -- after the fix the request can pass through as `all-rules` or via any single-rule allow path, but prediction-block must NOT fastDeny."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-29T21:28:55.977Z"
+  "expectation_reality_last_run_at": "2026-04-29T22:21:35.081Z"
 }

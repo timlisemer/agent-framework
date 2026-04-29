@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (52)
+## Current scenarios in working/ (53)
 
 - `agent-launch-with-run-in-background-should-deny` — main-session `Agent`
   tool calls with `run_in_background: true` are denied by the new
@@ -90,6 +90,19 @@ commit.
 - `gate-llm-hallucinates-hard-coded-denied-for-mcp-commit-should-allow` —
   `/quickpush`-authorized MCP commit must not be LLM-hallucinated as
   hard-coded-denied.
+- `gate-narrows-intent-to-last-user-message` — decidePrediction's new
+  step 3.10 (discharged-side-clarification fallback) recognizes that the
+  cached prediction's userMessageSnippet was a nested side-clarification
+  whose imperative has been discharged by an intervening completed
+  non-error assistant tool round-trip; an earlier still-active outer
+  user turn favorably names the firing tool via TOOL_NAME_ALIASES, so
+  mood-driven step 4 deny is suppressed. New transcript helper
+  `userTurnFollowedByCompletedToolRoundtrip` carries the structural
+  signal; pre-tool-use threads `recentUserMessages` and
+  `cachedSnippetSideTaskDischarged` into RuleContext. Fix matters
+  because prediction-block is appealable: false — the previous
+  tool-appeal escape hatch is dead and the deterministic policy must
+  catch the case on its own (promoted from broken).
 - `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow`
   — pre-tool-use detects an unprocessed plan-approval tool_result
   (matched by literal "User has approved your plan." marker AND

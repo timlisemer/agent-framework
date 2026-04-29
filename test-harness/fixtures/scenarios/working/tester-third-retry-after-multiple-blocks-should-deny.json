@@ -53,5 +53,5 @@
     "notes": "Labeler: deny. Third retry after explicit rejections; low-risk bypass lets it through."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-29T21:30:37.256Z"
+  "expectation_reality_last_run_at": "2026-04-29T22:23:22.191Z"
 }

@@ -31,7 +31,7 @@ import { SLASH_COMMAND_ALLOWED_TOOLS } from "./slash-commands.js";
  * messages to prevent this misattribution. Legitimate user content in tool
  * results (like AskUserQuestion answers) is preserved.
  */
-const CLAUDE_CODE_INTERRUPTION_PATTERNS = [
+export const CLAUDE_CODE_INTERRUPTION_PATTERNS = [
   // Message injected when user presses Escape during tool execution
   /The user doesn't want to take this action right now/i,
   // The "STOP" directive that gets misattributed as user speech
@@ -181,6 +181,7 @@ interface ContentBlock {
   tool_use_id?: string;
   name?: string; // Tool name for tool_use blocks
   id?: string; // Tool use ID for tool_use blocks
+  is_error?: boolean; // tool_result error flag
 }
 
 interface TranscriptEntry {
@@ -1153,6 +1154,189 @@ export async function readRecentUserMessages(
   return withIndices
     ? reversed.map((msg, i) => `[T${total - 1 - i}] ${msg}`).join("\n---\n")
     : reversed.join("\n---\n");
+}
+
+/**
+ * Array-returning sibling of `readRecentUserMessages`. Returns up to `n` real
+ * user-text messages from the transcript, OLDEST-FIRST, with the same
+ * filtering rules: skips meta entries, slash-command prompts,
+ * `<system-reminder>` prefixes, and pure tool_result entries; applies
+ * `stripQuotedAndPastedContent` to each. Used by callers (e.g.
+ * pre-tool-use's RuleContext build) that need a structural array and would
+ * otherwise have to roundtrip through `\n---\n` string-split — which would
+ * fragment user messages containing literal `---` separators.
+ *
+ * Returns `[]` on read error.
+ */
+export async function readRecentUserMessagesArray(
+  transcriptPath: string,
+  n: number,
+): Promise<string[]> {
+  let raw: string;
+  try {
+    raw = await fs.promises.readFile(transcriptPath, "utf-8");
+  } catch {
+    return [];
+  }
+  const lines = raw.trim().split("\n");
+  const collected: string[] = [];
+  for (let i = lines.length - 1; i >= 0 && collected.length < n; i--) {
+    let entry: TranscriptEntry | null = null;
+    try {
+      entry = JSON.parse(lines[i]) as TranscriptEntry;
+    } catch {
+      continue;
+    }
+    if (!entry || !entry.message || entry.message.role !== "user") continue;
+    if (entry.isMeta === true) continue;
+
+    const content = entry.message.content;
+    let text: string | undefined;
+    if (typeof content === "string") {
+      if (content.startsWith("<system-reminder>")) continue;
+      if (isSlashCommandPrompt(content)) continue;
+      text = content;
+    } else if (Array.isArray(content)) {
+      let foundText: string | undefined;
+      let onlyToolResults = true;
+      for (const block of content) {
+        if (block.type === "text" && block.text) {
+          if (block.text.startsWith("<system-reminder>")) continue;
+          if (isSlashCommandPrompt(block.text)) continue;
+          foundText = block.text;
+          onlyToolResults = false;
+          break;
+        }
+        if (block.type !== "tool_result") onlyToolResults = false;
+      }
+      if (onlyToolResults) continue;
+      text = foundText;
+    }
+    if (!text) continue;
+    const stripped = stripQuotedAndPastedContent(text);
+    if (!stripped.trim()) continue;
+    collected.push(stripped);
+  }
+  return collected.reverse();
+}
+
+/**
+ * Determine whether the user-text turn whose RAW (un-stripped) first text
+ * block startsWith `snippet.trim()` has been followed in the transcript by
+ * at least one COMPLETED non-error assistant tool round-trip (assistant
+ * `tool_use` followed by a user `tool_result` whose `is_error !== true`
+ * and whose content is not a Claude Code interruption marker).
+ *
+ * Used by decidePrediction step 3.10 (discharged-side-clarification
+ * fallback) to recognize when the cached prediction's source user turn
+ * has effectively been "consumed" by an intervening tool round-trip
+ * obeying its imperative.
+ *
+ * The cached `userMessageSnippet` is stored RAW by user-prompt-submit
+ * (`input.prompt.slice(0, 200)` — no stripQuotedAndPastedContent pass), so
+ * we compare against the raw transcript text here. Anchors on the LAST
+ * occurrence so a coincidentally repeating phrase doesn't trigger on a
+ * stale earlier match.
+ *
+ * Returns false on read error or when no anchor / no completed roundtrip
+ * found after the anchor.
+ */
+export async function userTurnFollowedByCompletedToolRoundtrip(
+  transcriptPath: string,
+  snippet: string,
+): Promise<boolean> {
+  const trimmed = snippet.trim();
+  if (!trimmed) return false;
+  let raw: string;
+  try {
+    raw = await fs.promises.readFile(transcriptPath, "utf-8");
+  } catch {
+    return false;
+  }
+  const lines = raw.trim().split("\n");
+  const parsed: (TranscriptEntry | null)[] = lines.map((l) => {
+    try {
+      return JSON.parse(l) as TranscriptEntry;
+    } catch {
+      return null;
+    }
+  });
+
+  // Locate the LAST non-meta user-text entry whose RAW first text block
+  // startsWith `trimmed`.
+  let anchorIndex = -1;
+  for (let i = parsed.length - 1; i >= 0; i--) {
+    const entry = parsed[i];
+    if (!entry || !entry.message || entry.message.role !== "user") continue;
+    if (entry.isMeta === true) continue;
+    const content = entry.message.content;
+    let firstText: string | undefined;
+    if (typeof content === "string") {
+      if (content.startsWith("<system-reminder>")) continue;
+      if (isSlashCommandPrompt(content)) continue;
+      firstText = content;
+    } else if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === "text" && block.text) {
+          if (block.text.startsWith("<system-reminder>")) continue;
+          if (isSlashCommandPrompt(block.text)) continue;
+          firstText = block.text;
+          break;
+        }
+      }
+    }
+    if (!firstText) continue;
+    if (firstText.startsWith(trimmed)) {
+      anchorIndex = i;
+      break;
+    }
+  }
+  if (anchorIndex < 0) return false;
+
+  // Build a map from assistant tool_use_id to its line index, for tool_use
+  // entries that appear strictly AFTER the anchor.
+  const toolUseIndex = new Map<string, number>();
+  for (let i = anchorIndex + 1; i < parsed.length; i++) {
+    const entry = parsed[i];
+    if (!entry || !entry.message || entry.message.role !== "assistant") continue;
+    const content = entry.message.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block.type === "tool_use" && block.id) {
+        toolUseIndex.set(block.id, i);
+      }
+    }
+  }
+
+  // Scan forward of anchor for any user entry containing a non-error,
+  // non-interruption tool_result whose tool_use_id resolves to an
+  // assistant tool_use strictly between anchor and this entry.
+  for (let i = anchorIndex + 1; i < parsed.length; i++) {
+    const entry = parsed[i];
+    if (!entry || !entry.message || entry.message.role !== "user") continue;
+    if (entry.isMeta === true) continue;
+    const content = entry.message.content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block.type !== "tool_result") continue;
+      if (block.is_error === true) continue;
+      const useId = block.tool_use_id;
+      if (!useId) continue;
+      const useLine = toolUseIndex.get(useId);
+      if (useLine === undefined || useLine <= anchorIndex || useLine >= i) continue;
+      // Stringify content for interruption check.
+      let text = "";
+      if (typeof block.content === "string") text = block.content;
+      else if (Array.isArray(block.content)) {
+        for (const inner of block.content) {
+          if (inner.type === "text" && inner.text) text += inner.text;
+        }
+      }
+      if (text && isClaudeCodeInterruption(text)) continue;
+      return true;
+    }
+  }
+  return false;
 }
 
 export interface ParallelBatchInfo {

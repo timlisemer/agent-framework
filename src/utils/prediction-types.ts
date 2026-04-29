@@ -608,6 +608,8 @@ export function decidePrediction(
   toolInput: unknown,
   frustrationStreak: number,
   latestUserMessage: string = "",
+  recentUserMessages: string[] = [],
+  cachedSnippetSideTaskDischarged: boolean = false,
 ): PredictionDecision {
   if (!prediction) return { decision: "allow" };
 
@@ -821,6 +823,54 @@ export function decidePrediction(
       decision: "allow",
       reason: `Cached intent describes the AI itself as having previously blocked the user's stated wish; mood-driven re-deny of ${toolName} would compound that contradiction.`,
     };
+  }
+
+  // 3.10. Discharged-side-clarification fallback.
+  //
+  // Root-cause fix for the "cached prediction is anchored to a NESTED
+  // side-clarification whose imperative was discharged by an intervening
+  // completed tool round-trip; the still-active OUTER user turn favorably
+  // authorizes the firing tool" bug class. The user's nested clarification
+  // on a side topic does NOT retract their earlier request (mirrors
+  // TOOL_APPEAL_AGENT rule 1's "nested clarification on a side topic"
+  // carve-out brought into the deterministic policy because prediction-
+  // block is appealable: false — no LLM appeal can rescue this).
+  //
+  // Strict guards mirror 3.6-3.9:
+  //   - userSaidProhibition: "freeze. no tools." in the snippet still wins.
+  //   - blockedForThisToolByName: per-target structured block on this tool
+  //     still wins.
+  //   - cachedSnippetSideTaskDischarged: pre-tool-use observed a completed
+  //     non-error tool round-trip after the snippet's anchor turn. Without
+  //     it the cached prediction is the freshest open imperative — fall
+  //     through to normal mood policy.
+  //   - recentUserMessages.length >= 2: at least one OLDER user-text turn
+  //     exists (the freshest IS the discharged side-clarification anchor).
+  //   - An older user-text turn favorably names the firing tool AND no
+  //     subsequent message revokes the tool or matches
+  //     EXPLICIT_PROHIBITION_RE.
+  //
+  // Generic over tool: piggybacks on TOOL_NAME_ALIASES + canonical-name
+  // matching via latestUserMessageFavorablyNamesTool, so any tool whose
+  // outer authorization the user phrased favorably is covered.
+  if (
+    cachedSnippetSideTaskDischarged &&
+    !userSaidProhibition &&
+    !blockedForThisToolByName &&
+    recentUserMessages.length >= 2
+  ) {
+    const olderMessages = recentUserMessages.slice(0, -1);
+    for (let i = olderMessages.length - 1; i >= 0; i--) {
+      const candidate = olderMessages[i];
+      if (!latestUserMessageFavorablyNamesTool(candidate, toolName)) continue;
+      const subsequent = recentUserMessages.slice(i + 1);
+      if (subsequent.some((m) => userMessageRevokesTool(m, toolName))) continue;
+      if (subsequent.some((m) => EXPLICIT_PROHIBITION_RE.test(m))) continue;
+      return {
+        decision: "allow",
+        reason: `Cached prediction is anchored to a discharged side-clarification (intervening tool round-trip obeyed it); an earlier still-active user turn favorably names ${toolName}; mood-driven re-deny would treat the nested clarification as a replacement intent.`,
+      };
+    }
   }
 
   // 4. Mood-driven default policy. Allow set mirrors `low-risk-bypass`
