@@ -18,7 +18,7 @@
  * Single request/response pattern using the Anthropic API directly.
  *
  * **Use for:**
- * - Hook agents (tool-approve, tool-appeal, error-acknowledge, etc.)
+ * - Hook agents (rule-gate, tool-appeal, error-acknowledge, etc.)
  * - Simple MCP agents that don't need to investigate code
  * - Any agent where speed is critical (<100ms)
  *
@@ -449,7 +449,7 @@ async function runDirectAgent(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...({ usage: { include: true } } as any),
     }, {
-      // Disable SDK-level retries — framework's own retry loops (tool-approve,
+      // Disable SDK-level retries — framework's own retry loops (rule-gate,
       // tool-appeal) handle retries with exponential backoff and fresh attempts.
       // SDK retrying internally reuses the same connection pool, which just
       // delays failure surfacing if the connection is broken.
@@ -993,7 +993,7 @@ export interface AgentRetryOptions {
  * @example
  * ```typescript
  * const result = await runAgentWithRetry(
- *   { ...TOOL_APPROVE_AGENT, workingDir: cwd },
+ *   { ...RULE_GATE_AGENT, workingDir: cwd },
  *   { prompt: 'Evaluate:', context: toolCall },
  *   {
  *     formatValidator: (text) => text.startsWith('APPROVE') || text.startsWith('DENY:'),
@@ -1144,10 +1144,10 @@ export interface TelemetryContext {
  * @example
  * ```typescript
  * const result = await runAgentWithTelemetry(
- *   { ...TOOL_APPROVE_AGENT, workingDir: cwd },
+ *   { ...RULE_GATE_AGENT, workingDir: cwd },
  *   { prompt: 'Evaluate:', context: toolCall },
  *   {
- *     agent: "tool-approve",
+ *     agent: "rule-gate",
  *     hookName: "PreToolUse",
  *     toolName: "Bash",
  *     workingDir: cwd,

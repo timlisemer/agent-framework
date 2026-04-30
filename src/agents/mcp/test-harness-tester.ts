@@ -675,9 +675,9 @@ Use Read and read-only Bash (grep, rg, find, ls) -- NOT this MCP tool -- to exam
 Key source files:
 - src/hooks/pre-tool-use.ts -- main safety gate (~400 lines)
 - src/hooks/stop-response-check.ts -- stop hook
-- src/agents/hooks/tool-approve.ts -- tool approval agent
+- src/rules/tool-approve.ts -- tool approval rule (deterministic + llmContext contributor)
 - src/agents/hooks/tool-appeal.ts -- appeal agent
-- src/agents/hooks/gate.ts -- gate agent
+- src/rules/evaluator.ts -- rule-gate LLM aggregator
 - src/utils/agent-configs.ts -- agent system prompts (includes SENTIMENT_AGENT)
 - src/utils/prediction-types.ts -- sentiment-prediction shape + decidePrediction
 - src/rules/force-check-required.ts -- workaround-denial lockout

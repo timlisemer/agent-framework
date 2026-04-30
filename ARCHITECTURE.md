@@ -27,7 +27,6 @@ src/                                # TypeScript source
       index.ts                      # Barrel export
 
     hooks/                          # Hook-triggered agents
-      tool-approve.ts               # Policy enforcement
       tool-appeal.ts                # Reviews denials with user context
       plan-validate.ts              # Checks plan drift
       style-drift.ts                # Detects unrequested style changes
@@ -55,8 +54,12 @@ src/                                # TypeScript source
     trusted-path.ts                 # Priority 58:  Deny sensitive-path writes
     edit-intent.ts                  # Priority 60:  Block edits without intent
     style-drift.ts                  # Priority 65:  Detect style changes
-    gate.ts                         # Priority 70:  Gate agent (rule-gate LLM contribution)
-    tool-approve.ts                 # Priority 100: Final tool approval
+    prediction-context.ts           # Priority 68:  Prediction context for rule-gate LLM
+    recent-messages.ts              # Priority 70:  Recent user messages context
+    reasoning-history.ts            # Priority 72:  Gate reasoning history context
+    edit-intent-context.ts          # Priority 74:  Edit intent context signal
+    plan-mode-context.ts            # Priority 76:  Plan mode context signal
+    tool-approve.ts                 # Priority 100: Final tool approval (deterministic + llmContext)
 
   hooks/                            # Claude Code hook entry points
     pre-tool-use.ts                 # PreToolUse hook (orchestrator for rule pipeline)
@@ -223,7 +226,7 @@ Models are centrally configured in `src/types.ts`:
 
 | Tier   | Mode   | Agents                                                                       |
 |--------|--------|------------------------------------------------------------------------------|
-| haiku  | direct | tool-approve, tool-appeal, commit, style-drift, question-validate |
+| haiku  | direct | rule-gate, tool-appeal, commit, style-drift, question-validate |
 | sonnet | direct | check, plan-validate, claude-md-validate, response-align, validate-intent    |
 | opus   | sdk    | confirm (code quality gate with investigation)                               |
 
@@ -305,8 +308,12 @@ Tool call received
 │   ├─> trusted-path (58)      Fast deny sensitive paths
 │   ├─> edit-intent (60)       Block edits without intent (appealable)
 │   ├─> style-drift (65)       Detect style changes (appealable, LLM)
-│   ├─> gate (70)              Gate agent contribution to rule-gate LLM
-│   └─> tool-approve (100)     Final tool approval (appealable, LLM)
+│   ├─> prediction-context (68) Prediction context for rule-gate LLM
+│   ├─> recent-messages (70)   Recent user messages context
+│   ├─> reasoning-history (72) Gate reasoning history context
+│   ├─> edit-intent-context (74) Edit intent context signal
+│   ├─> plan-mode-context (76) Plan mode context signal
+│   └─> tool-approve (100)     Final tool approval (deterministic + llmContext, appealable)
 │
 │   Symmetric short-circuit guards (`evaluator.ts`): a later fastAllow OR
 │   fastDeny is deferred whenever a higher-priority rule has emitted
@@ -356,7 +363,8 @@ Centralized agent configurations with documentation:
 - `CONFIRM_AGENT` - opus, SDK
 - `COMMIT_AGENT` - haiku, direct
 - `VALIDATE_INTENT_AGENT` - sonnet, direct (MCP tool)
-- `TOOL_APPROVE_AGENT` - haiku, direct
+- `TOOL_APPROVE_PROMPT_SECTION` - prompt body for tool-approve rule
+- `RULE_GATE_AGENT` - haiku, direct (aggregated rule evaluation)
 - `TOOL_APPEAL_AGENT` - haiku, direct
 - `PLAN_VALIDATE_AGENT` - sonnet, direct
 - `CLAUDE_MD_VALIDATE_AGENT` - sonnet, direct
@@ -447,8 +455,7 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 | `confirm.ts` | 1 | `CONFIRM` | `direct` |
 | `commit.ts` | 3 | `CONFIRM`, `ERROR` | `direct` |
 | `validate-intent.ts` | 1 | `CONFIRM` | `direct` |
-| `gate.ts` | 1 | `APPROVE`, `DENY` | `direct` or `async-gate` |
-| `tool-approve.ts` | 1 | `APPROVE`, `DENY` | `direct` |
+| `evaluator.ts` (rule-gate) | 1 | `APPROVE`, `DENY` | `direct` |
 | `tool-appeal.ts` | 1 | `APPROVE`, `DENY` | `direct` |
 | `response-align.ts` | 5 | `APPROVE`, `DENY` | `direct` |
 | `plan-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |

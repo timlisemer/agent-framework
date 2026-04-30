@@ -1,5 +1,8 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { checkToolApproval } from "../agents/hooks/tool-approve.js";
+import { planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
+import { getBlacklistHighlights } from "../utils/command-patterns.js";
+import { RESTRICTED_MCP_TOOLS } from "../utils/slash-commands.js";
+import { logFastPathApproval } from "../utils/logger.js";
 
 // Commands subagents may invoke via Bash. Default-deny -- anything not listed is denied.
 // Deliberately omitted:
@@ -117,18 +120,32 @@ export const subagentRule: PreToolRule = {
       return { fastAllow: "Subagent read-only Bash approved" };
     }
 
-    const decision = await checkToolApproval(
-      ctx.toolName,
-      ctx.toolInput,
-      ctx.projectDir,
-      "PreToolUse",
-      { skipLlmOnClean: true, planModeContext: ctx.planModeCtx.contextString }
-    );
-
-    if (!decision.approved) {
-      return { fastDeny: decision.reason ?? "Tool denied" };
+    // Mirror the four deterministic checks from the old checkToolApproval
+    // skipLlmOnClean path. Skipping any of these would allow subagent calls
+    // to Edit-in-plan-mode or to restricted MCP tools like
+    // mcp__agent-framework__commit to slip through silently.
+    if (ctx.planModeCtx.contextString) {
+      const input = ctx.toolInput as Record<string, unknown>;
+      const filePath = (input?.file_path as string) ?? (input?.path as string) ?? "";
+      const editBlock = planModeEditBlock(true, ctx.toolName, filePath);
+      if (editBlock) return { fastDeny: editBlock };
+      const bashBlock = planModeBashBlock(true, ctx.toolName, (input?.command as string) ?? "");
+      if (bashBlock) return { fastDeny: bashBlock };
     }
 
+    const highlights = getBlacklistHighlights(ctx.toolName, ctx.toolInput, ctx.projectDir);
+    if (highlights.length > 0) {
+      const reason = highlights.map(h => h.replace(/^\[BLACKLIST: [^\]]+\]\s*/, "")).join(". ");
+      return { fastDeny: reason };
+    }
+
+    if (RESTRICTED_MCP_TOOLS.has(ctx.toolName)) {
+      return {
+        fastDeny: `${ctx.toolName} requires explicit slash-command authorization (/commit, /push, /confirm, or /quickpush).`,
+      };
+    }
+
+    logFastPathApproval("subagent", "PreToolUse", ctx.toolName, ctx.projectDir, "Subagent tool approved");
     return { fastAllow: "Subagent tool approved" };
   },
 };

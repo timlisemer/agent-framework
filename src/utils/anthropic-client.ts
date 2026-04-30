@@ -12,7 +12,7 @@
  *
  * All agents use the direct Anthropic API (`messages.create`) because:
  *
- * **Hook agents** (tool-approve, tool-appeal, error-acknowledge, etc.):
+ * **Hook agents** (rule-gate, tool-appeal, error-acknowledge, etc.):
  * - Run inside Claude's tool execution loop
  * - Must be fast (<100ms) - validation should not delay tool execution
  * - Simple request/response pattern
@@ -78,7 +78,7 @@ export function getAnthropicClient(): Anthropic {
       apiKey: process.env.ANTHROPIC_API_KEY || null,
       authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
       baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
-      // Reduce from default 2 — framework's own retry loops (tool-approve,
+      // Reduce from default 2 — framework's own retry loops (rule-gate,
       // tool-appeal) already handle retries with exponential backoff.
       // SDK retrying on the same broken connection compounds hangs.
       maxRetries: 1,

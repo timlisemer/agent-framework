@@ -20,7 +20,6 @@
  * ## HOOK AGENTS
  *
  * PreToolUse Hook (`src/hooks/pre-tool-use.ts`):
- * - tool-approve: Policy enforcement (haiku)
  * - tool-appeal: Reviews denials with user context (haiku)
  * - plan-validate: Checks plan drift against user request (sonnet)
  * - style-drift: Detects unrequested style changes (haiku)
@@ -30,7 +29,6 @@
  * - response-align (stop): Checks stop response for plain text questions, unanswered questions
  */
 
-export { checkToolApproval } from './tool-approve.js';
 export { appealHelper } from './tool-appeal.js';
 export { checkPlanIntent } from './plan-validate.js';
 export { checkStyleDrift } from './style-drift.js';

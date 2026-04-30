@@ -8,9 +8,9 @@
  *   without file I/O.
  * - `isLowRiskTool` in src/rules/utils.ts uses the derived set to keep
  *   these three MCP tools OUT of the low-risk auto-approval bypass.
- * - `TOOL_APPROVE_AGENT` and `TOOL_APPEAL_AGENT` prompts document the
- *   same mapping in prose (src/utils/agent-configs.ts) -- keep them in
- *   sync with the map below.
+ * - `TOOL_APPROVE_PROMPT_SECTION` and `TOOL_APPEAL_AGENT` prompts document
+ *   the same mapping in prose (src/utils/agent-configs.ts) -- keep them
+ *   in sync with the map below.
  *
  * New slash commands that allow MCP side-effect tools must be added here
  * AND to the corresponding agent prompts in agent-configs.ts.

@@ -3,7 +3,7 @@ import {
   FABRICATED_DENY_FINGERPRINTS,
   FORBIDDEN_DENY_PATTERNS,
   isFabricatedDenyReason,
-} from "../../../src/agents/hooks/tool-approve.js";
+} from "../../../src/utils/fabricated-deny-patterns.js";
 
 describe("FORBIDDEN_DENY_PATTERNS shape invariant", () => {
   it("each entry has a non-empty humanReadable AND a valid regex", () => {

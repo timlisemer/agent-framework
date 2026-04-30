@@ -2,6 +2,8 @@ import type { PreToolRule, RuleContext } from "./types.js";
 import { runAgentWithRetryAndTelemetry } from "../utils/agent-runner.js";
 import { RULE_GATE_AGENT } from "../utils/agent-configs.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
+import { extractGateNote } from "../utils/gate-reasoning-cache.js";
+import { isFabricatedDenyReason } from "../utils/fabricated-deny-patterns.js";
 import { buildAppealUserState } from "../agents/hooks/tool-appeal-user-state.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
 import { APPEAL_COUNTS } from "../utils/transcript-presets.js";
@@ -171,6 +173,8 @@ export async function evaluateRules(
       }
     );
     llmOutput = llmResult.output;
+    const llmGateNote = extractGateNote(llmOutput);
+    if (llmGateNote) gateNote = llmGateNote;
   } catch {
     logFastPathApproval("rule-gate", hookName, ctx.toolName, ctx.projectDir, "LLM error - fail open");
   }
@@ -190,6 +194,12 @@ export async function evaluateRules(
   const denyReason = llmOutput.startsWith("DENY:")
     ? llmOutput.slice(5).trim()
     : llmOutput;
+
+  if (isFabricatedDenyReason(denyReason)) {
+    console.error(`[rule-gate] Discarded hallucinated deny reason: ${denyReason.slice(0, 200)}`);
+    if (deferredDenies.length > 0) return applyDeferredDeny(deferredDenies[0], ctx, hookName, gateNote);
+    return null;
+  }
 
   // Check if any triggered rule is appealable
   const hasAppealable = triggered.some(({ rule }) => rule.appealable);

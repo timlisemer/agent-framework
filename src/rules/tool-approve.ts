@@ -1,9 +1,11 @@
 import * as fs from "fs";
 import * as path from "node:path";
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { TOOL_APPROVE_AGENT } from "../utils/agent-configs.js";
+import { TOOL_APPROVE_PROMPT_SECTION } from "../utils/agent-configs.js";
 import { FILE_TOOLS, extractFilePath, isPlanFile } from "./utils.js";
-import { checkToolApproval } from "../agents/hooks/tool-approve.js";
+import { planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
+import { getBlacklistHighlights } from "../utils/command-patterns.js";
+import { RESTRICTED_MCP_TOOLS } from "../utils/slash-commands.js";
 import { detectWorkaroundPattern } from "../utils/command-patterns.js";
 import { recordDenial, MAX_SIMILAR_DENIALS } from "../utils/denial-cache.js";
 import { resolvePlanPath, readPlanContent } from "../utils/session-utils.js";
@@ -18,7 +20,7 @@ export const toolApproveRule: PreToolRule = {
   priority: 100,
   appealable: true,
   usesLlm: true,
-  promptSection: TOOL_APPROVE_AGENT.systemPrompt,
+  promptSection: TOOL_APPROVE_PROMPT_SECTION,
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     // Plan files are handled by the dedicated plan-validate block in
@@ -64,31 +66,37 @@ export const toolApproveRule: PreToolRule = {
       return { fastAllow: "ExitPlanMode approved after plan validation" };
     }
 
-    const decision = await checkToolApproval(
-      ctx.toolName,
-      ctx.toolInput,
-      ctx.projectDir,
-      "PreToolUse",
-      {
-        sessionDir: ctx.sessionDir,
-        planModeContext: ctx.planModeCtx.contextString,
-        outsideRootPath: ctx.outsideRootPath,
-      }
-    );
-
-    if (!decision.approved) {
-      // Blacklist violations are immediate fastDeny (no LLM context needed)
-      return { fastDeny: decision.reason ?? "Tool denied" };
+    // Deterministic pre-checks for plan mode blocks
+    if (ctx.planModeCtx.contextString) {
+      const input = ctx.toolInput as Record<string, unknown>;
+      const filePath = (input?.file_path as string) ?? (input?.path as string) ?? "";
+      const editBlock = planModeEditBlock(true, ctx.toolName, filePath);
+      if (editBlock) return { fastDeny: editBlock };
+      const bashBlock = planModeBashBlock(true, ctx.toolName, (input?.command as string) ?? "");
+      if (bashBlock) return { fastDeny: bashBlock };
     }
 
-    // Contribute gate note and context for LLM
-    const outsideWarning = ctx.outsideRootPath
-      ? `\n\n!!! OUT-OF-TREE TARGET: ${ctx.outsideRootPath} — be extra conservative; prefer DENY unless explicitly authorized.\n`
-      : "";
+    const highlights = getBlacklistHighlights(ctx.toolName, ctx.toolInput, ctx.projectDir);
+    if (highlights.length > 0) {
+      const reason = highlights.map(h => h.replace(/^\[BLACKLIST: [^\]]+\]\s*/, "")).join(". ");
+      return { fastDeny: reason };
+    }
+
+    if (RESTRICTED_MCP_TOOLS.has(ctx.toolName)) {
+      return {
+        fastDeny: `${ctx.toolName} requires explicit slash-command authorization (/commit, /push, /confirm, or /quickpush).`,
+      };
+    }
+
+    // Contribute aggregator context — CLAUDE.md project rules + tool target.
+    const claudeMd = path.join(ctx.projectDir, "CLAUDE.md");
+    const rulesText = await fs.promises.readFile(claudeMd, "utf-8").catch(() => "");
+    if (!rulesText) return null;
+
     return {
       llmContext:
-        `TOOL APPROVAL CONTEXT:\n${decision.gateNote || "No additional context"}` +
-        outsideWarning,
+        `PROJECT RULES (from CLAUDE.md):\n${rulesText}\n\n` +
+        `TOOL TO EVALUATE:\nTool: ${ctx.toolName}\nInput: ${JSON.stringify(ctx.toolInput)}`,
     };
   },
 
