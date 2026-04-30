@@ -30,7 +30,7 @@ Every time a scenario moves in or out of this folder, update this
 README's scenario list below AND the sibling folder's README in the same
 commit.
 
-## Current scenarios in working/ (53)
+## Current scenarios in working/ (54)
 
 - `agent-launch-with-run-in-background-should-deny` — main-session `Agent`
   tool calls with `run_in_background: true` are denied by the new
@@ -56,6 +56,13 @@ commit.
   `mcp__agent-framework__check` as the correct path (promoted from todo).
 - `bash-npx-vitest-retry-after-user-blocked-should-deny` — retrying a
   Bash vitest command after the user just blocked it must deny.
+- `bash-cd-cat-head-chain-blocked-by-tool-approve-should-deny` -
+  Bash command `cd <abs-path> && ls ... && cat <file> | head -N` concentrates
+  four blacklist hits (cd, cd && chain, cat, head) and tool-approve must
+  deterministically fastDeny with the canonical `Use Read tool` and
+  `Use absolute paths` highlights. Live (commit 1.0.1) had `gate: all-rules
+  - All checks passed` and allowed; current code denies (promoted from todo
+  on 2026-04-30 after 3 consecutive deny runs at commit 1.0.373).
 - `bash-rg-pattern-search-on-project-file-should-allow` — post-v2.1.117
   `rg PATTERN path/` is the canonical search workflow; tool-approve must
   approve and not hallucinate a `duplicates Read tool` rule.

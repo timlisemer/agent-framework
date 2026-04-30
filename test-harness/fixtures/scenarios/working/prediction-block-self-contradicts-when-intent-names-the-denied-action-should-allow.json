@@ -176,5 +176,5 @@
     "notes": "Live denied via prediction-block. The cached intent text literally describes the bug ('the AI correctly repeated the user intent but then blocked enforcing it') and the hook then blocks the AI from reading the scenario file to fix the description that codifies that very bug. The user's freshest message was a corrective rhetorical question that carried an implicit 'fix the description' instruction. There is NO prior-turn intent contamination in this scenario -- Bug B from the sibling scenario is absent. This isolates Bug A (self-contradicting deny) cleanly: the hook describes the user's instruction in its own intent field and then denies the tool call that would carry it out. Fixed by decidePrediction step 3.9 (SELF_CONTRADICTING_BLOCK_INTENT_RE) which suppresses mood-driven re-deny when the cached intent prose paraphrases the AI as having previously blocked the user's wish. Same bug class as the sibling scenario; this fixture exists to make the failure mode unambiguous (single-bug repro vs the sibling's two-bug compound)."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-29T22:21:44.971Z"
+  "expectation_reality_last_run_at": "2026-04-30T14:00:37.236Z"
 }

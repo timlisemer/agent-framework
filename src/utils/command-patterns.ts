@@ -11,6 +11,12 @@ import { redactPathTokens } from "./path-redaction.js";
 
 export interface BlacklistPattern {
   pattern: RegExp;
+  // Optional stricter regex used only by getContentBlacklistHighlights.
+  // Lets an entry stay loose for Bash (where the input is always a
+  // shell command) while requiring shape evidence (a flag or a
+  // `<PATH>` redaction marker) when scanning plan / CLAUDE.md prose,
+  // so prose words like "node with" or "tail events" do not match.
+  contentPattern?: RegExp;
   name: string;
   alternative: string;
   bashOnly?: boolean;
@@ -23,9 +29,9 @@ export interface BlacklistPattern {
  */
 export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // File reading - should use Read tool
-  { pattern: /\bcat\s+/, name: 'cat', alternative: 'Use Read tool' },
-  { pattern: /\bhead\s+/, name: 'head', alternative: 'Use Read tool with limit' },
-  { pattern: /\btail\s+/, name: 'tail', alternative: 'Use Read tool with offset' },
+  { pattern: /\bcat\s+/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?cat\s+\S|\bcat\s+(?:-[\w-]+|<PATH>))/, name: 'cat', alternative: 'Use Read tool', redactPaths: true },
+  { pattern: /\bhead\s+/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?head\s+\S|\bhead\s+(?:-[\w-]+|\+?\d+|<PATH>))/, name: 'head', alternative: 'Use Read tool with limit', redactPaths: true },
+  { pattern: /\btail\s+/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?tail\s+\S|\btail\s+(?:-[\w-]+|\+?\d+|<PATH>))/, name: 'tail', alternative: 'Use Read tool with offset', redactPaths: true },
 
   // grep/rg/find intentionally NOT blacklisted: native macOS/Linux Claude Code
   // builds removed the Grep/Glob tools in v2.1.117 and route search through
@@ -52,7 +58,7 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bbun\s+run\s+(check|typecheck)\b/, name: "bun check/typecheck", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
   { pattern: /\bcargo\s+build\b/, name: "cargo build", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
   { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\b(tsc|npx\s+tsc)\b/, name: "tsc", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\b(tsc|npx\s+tsc)\b/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?(?:npx\s+)?tsc\b|\bnpx\s+tsc\b|\btsc\s+(?:-[\w-]+|<PATH>))/, name: "tsc", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
 
   // Package install commands - dependency-modifying, should not be run by AI
   { pattern: /\bnpm\s+install\b/, name: "npm install", alternative: "LLMs should not modify project dependencies", redactPaths: true },
@@ -95,10 +101,14 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bcargo\s+run\b/, name: "cargo run", alternative: "Run commands not allowed", redactPaths: true },
   { pattern: /\bgo\s+run\b/, name: "go run", alternative: "Run commands not allowed", redactPaths: true },
 
-  // Code execution commands - should be added to Justfile/Makefile check target
+  // Code execution commands - should be added to Justfile/Makefile check target.
+  // node contentPattern matches when the verb is at line start (after optional
+  // indent / bullet / numbered-list marker), OR when the next token is a flag
+  // or redacted <PATH> argument. Bare-prose use ("submenu node with ...") no
+  // longer fires.
   { pattern: /\bpython\s+(-c\s+)?/, name: "python", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
   { pattern: /\bpython3\s+(-c\s+)?/, name: "python3", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bnode\s+(-e\s+)?/, name: "node", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bnode\s+(-e\s+)?/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?node\s+\S|\bnode\s+(?:-[\w-]+|<PATH>))/, name: "node", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
   { pattern: /\bruby\s+(-e\s+)?/, name: "ruby", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
   { pattern: /\bperl\s+(-e\s+)?/, name: "perl", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
 ];
@@ -250,10 +260,14 @@ export function getContentBlacklistHighlights(
       redactedTarget = redactPathTokens(stripped);
     }
 
-    for (const { pattern, name, alternative, bashOnly, redactPaths: shouldRedact } of BLACKLIST_PATTERNS) {
+    for (const { pattern, contentPattern, name, alternative, bashOnly, redactPaths: shouldRedact } of BLACKLIST_PATTERNS) {
       if (bashOnly) continue;
       const t = shouldRedact ? redactedTarget : target;
-      if (pattern.test(t)) {
+      // Prefer the stricter content-mode regex when the entry defines one;
+      // it requires shape evidence (a flag or `<PATH>` token) that prose
+      // word-pairs like "node with" or "tail events" don't have.
+      const re = contentPattern ?? pattern;
+      if (re.test(t)) {
         const rendered = `[VIOLATION: ${name}] "${line.trim()}" → ${alternative}`;
         highlights.push({
           lineIndex: i,

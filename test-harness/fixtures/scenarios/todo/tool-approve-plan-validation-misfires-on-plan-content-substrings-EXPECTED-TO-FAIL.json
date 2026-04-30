@@ -1,6 +1,6 @@
 {
   "name": "tool-approve-plan-validation-misfires-on-plan-content-substrings-EXPECTED-TO-FAIL",
-  "description": "Live repro from session e1d1591d-5fa8-4a47-9bd3-4b7f24a1bf69, tool_use_id toolu_01PUu4ohQqemFRd2R3c1LKSn. PreToolUse:ExitPlanMode hook blocked with this exact reason verbatim: Plan validation failed: \"- For variable-length tail events (`togglegroup`), split off fixed\" → Use Read tool with offset. \"`just check` (Tier-A scanner + tsc + tests) gates the merge.\" → You must run mcp__agent-framework__check. Expected: allow. EXPECTED TO FAIL against current code.",
+  "description": "Live repro from session e1d1591d-5fa8-4a47-9bd3-4b7f24a1bf69, tool_use_id toolu_01PUu4ohQqemFRd2R3c1LKSn. PreToolUse:ExitPlanMode hook blocked with this exact reason verbatim: Plan validation failed: \"- For variable-length tail events (`togglegroup`), split off fixed\" → Use Read tool with offset. \"`just check` (Tier-A scanner + tsc + tests) gates the merge.\" → You must run mcp__agent-framework__check. Expected: allow. EXPECTED TO FAIL against current code. 2026-04-30 update: after a regex tightening landed in src/utils/command-patterns.ts (added optional contentPattern field requiring verb-at-line-start OR a flag-or-<PATH> argument; the substring-match deterministic fastDeny on \"tail events\" and bare \"tsc\" inside parenthesised prose is verifiably gone), this fixture passes most of the time but flaps -- observed pass rate roughly 3/4 across consecutive runs, with the occasional fail being a deny by the `gate` rule (LLM-based intent-alignment), NOT the regex fastDeny that this fixture was originally designed to capture. Speculation: the regex bug IS fixed and the fastDeny stays gone deterministically, but the gate-LLM occasionally reads the user's `/plan3` slash-command transcript as \"continue exploration / review\" rather than \"finish planning and call ExitPlanMode\", so it intermittently denies the ExitPlanMode call as scope-misaligned. That gate-LLM variance is independent of the regex tightening and would have flapped the same way in the live session if the regex fastDeny had not pre-empted the LLM. To promote out of todo/ deterministically, either pin the gate-LLM to a deterministic temperature/seed for this transcript shape, or expand the fixture transcript so the gate-LLM has a clearer \"finish now\" signal. Until then, leaving in todo/ keeps the regression visible without claiming a feature was landed when only the regex half of the path is solid.",
   "transcript": [
     {
       "role": "user",
@@ -74,5 +74,7 @@
   },
   "expect": {
     "expected": "allow"
-  }
+  },
+  "expectation_reality": "working",
+  "expectation_reality_last_run_at": "2026-04-30T13:54:02.071Z"
 }

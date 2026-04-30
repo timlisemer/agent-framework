@@ -442,6 +442,39 @@ describe("getContentBlacklistHighlights path redaction", () => {
   it("does not false-fire node pattern on 'node_modules/foo.js'", () => {
     expect(getContentBlacklistHighlights("Check node_modules/foo.js in the plan")).toEqual([]);
   });
+
+  it("does not false-fire node pattern on prose phrase 'node with'", () => {
+    const plan = "- submenu node with children-display and 2 leaves.";
+    expect(getContentBlacklistHighlights(plan)).toEqual([]);
+  });
+
+  it("does not false-fire tail pattern on prose phrase 'tail events'", () => {
+    const plan = "- For variable-length tail events, split off fixed prefix fields.";
+    expect(getContentBlacklistHighlights(plan)).toEqual([]);
+  });
+
+  it("does not false-fire tsc pattern on bare word in parenthesised prose", () => {
+    const plan = "Tier-A scanner plus tsc plus tests gates the merge.";
+    expect(getContentBlacklistHighlights(plan)).toEqual([]);
+  });
+
+  it("still fires node pattern on a real `node script.js` invocation in plan prose", () => {
+    const highlights = getContentBlacklistHighlights("Run node script.js to bootstrap the demo.");
+    expect(highlights.length).toBeGreaterThan(0);
+    expect(highlights[0].rendered).toContain("[VIOLATION: node]");
+  });
+
+  it("still fires tail pattern on a real `tail -n 20 server.log` invocation in plan prose", () => {
+    const highlights = getContentBlacklistHighlights("Run tail -n 20 server.log to inspect the trailing lines.");
+    expect(highlights.length).toBeGreaterThan(0);
+    expect(highlights[0].rendered).toContain("[VIOLATION: tail]");
+  });
+
+  it("still fires tsc pattern on a real `npx tsc` invocation in plan prose", () => {
+    const highlights = getContentBlacklistHighlights("Run npx tsc to typecheck before merging.");
+    expect(highlights.length).toBeGreaterThan(0);
+    expect(highlights[0].rendered).toContain("[VIOLATION: tsc]");
+  });
 });
 
 describe("filterBlacklistOutsideManualVerification + heading helpers", () => {
