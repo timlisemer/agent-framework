@@ -1,0 +1,93 @@
+{
+  "name": "drift-block-fires-on-legitimate-multi-edit-of-single-file-EXPECTED-TO-FAIL",
+  "description": "Live repro from session 3f1637b2-a3f8-4b02-828a-370d7f18f5d9, tool_use_id toolu_016oeVuLGJrXqdnY8E9zdwUX (jsonl line 149). The PreToolUse:Edit hook denied a third Edit to session-lock.ts attributed to gate=drift-block with reason `4 edits to \"/home/tim/Coding/nixos/files/ags/src/services/session-lock.ts\" — stop making many small edits. Read the full file, plan all remaining changes, and apply them in ONE Edit/Write call. You may continue editing this file; just consolidate.` But the multi-edit pattern was correct here: implementing a retry-with-backoff state machine across non-adjacent regions of session-lock.ts (state declarations near the top, signal handlers in the middle, public lock()/unlock() functions near the bottom). Three discontiguous regions cannot be consolidated into ONE Edit/Write call without rewriting the entire file (regressing readability and producing a Write payload an order of magnitude larger than necessary). The drift-block heuristic should distinguish (a) thrashing on the SAME region — repeated old_string variants on adjacent lines, indicating Claude is iterating on a fix — from (b) legitimate touches at distinct file regions. Counting raw edits-per-file is too crude. Expected: allow. EXPECTED TO FAIL against current code until drift-block compares old_string anchor positions and only fires when N edits cluster within K lines of each other (true thrashing) rather than on file-level edit count alone.",
+  "transcript": [
+    {
+      "role": "user",
+      "isMeta": false,
+      "content": "The lockscreen crashed. Fix it with a retry-with-backoff machine in session-lock.ts."
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Plan approved. Three regions of session-lock.ts touched so far: state declarations, the failed-signal handler, and the attemptLock() body. Now updating lock() and unlock() to manage the retry state."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_016oeVuLGJrXqdnY8E9zdwUX",
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/tim/Coding/nixos/files/ags/src/services/session-lock.ts",
+            "old_string": "export function lock(): void {\n  if (locked) return;\n  if (instance) return;\n  try {\n    instance = new Gtk4SessionLock.Instance();\n    attachSignals(instance);\n    const ok = instance.lock();\n    if (!ok) {\n      logError(\"instance.lock() returned false\");\n      if (instance) {\n        instance = null;\n      }\n    }\n  } catch (e) {\n    logError(\"lock() threw\", e);\n    instance = null;\n  }\n}\n\nexport function unlock(): void {\n  if (!instance) {\n    logError(\"unlock() called with no active lock instance\");\n    return;\n  }\n  try {\n    instance.unlock();\n  } catch (e) {\n    logError(\"instance.unlock() threw\", e);\n  }\n}",
+            "new_string": "export function lock(): void {\n  if (locked) return;\n  if (instance) return;\n  retryTimer.cancel();\n  attemptCount = 1;\n  attemptStartMs = Date.now();\n  tryAcquireLock();\n}\n\nexport function unlock(): void {\n  retryTimer.cancel();\n  attemptCount = 0;\n  if (!instance) {\n    logError(\"unlock() called with no active lock instance\");\n    return;\n  }\n  try {\n    instance.unlock();\n  } catch (e) {\n    logError(\"instance.unlock() threw\", e);\n  }\n}"
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "toolu_016oeVuLGJrXqdnY8E9zdwUX"
+  },
+  "env": {
+    "cwd": "/home/tim/Coding/private_repos/astral",
+    "permission_mode": "default"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "satisfied",
+      "trust": "high",
+      "intent": "User wants the AGS lockscreen ::failed crash fixed via a retry-with-backoff state machine in session-lock.ts; plan was approved and the AI is implementing it across non-adjacent regions of the file.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "blockAllTools": false,
+      "userMessageSnippet": "The lockscreen crashed. Fix it with a retry-with-backoff machine in session-lock.ts."
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2,
+    "toolLog": [
+      {
+        "tool": "Edit",
+        "toolUseId": "toolu_synthetic_seed_edit_1",
+        "path": "/home/tim/Coding/nixos/files/ags/src/services/session-lock.ts",
+        "status": "allowed",
+        "gate": "all-rules",
+        "reason": "All checks passed"
+      },
+      {
+        "tool": "Edit",
+        "toolUseId": "toolu_synthetic_seed_edit_2",
+        "path": "/home/tim/Coding/nixos/files/ags/src/services/session-lock.ts",
+        "status": "allowed",
+        "gate": "all-rules",
+        "reason": "All checks passed"
+      },
+      {
+        "tool": "Edit",
+        "toolUseId": "toolu_synthetic_seed_edit_3",
+        "path": "/home/tim/Coding/nixos/files/ags/src/services/session-lock.ts",
+        "status": "allowed",
+        "gate": "all-rules",
+        "reason": "All checks passed"
+      },
+      {
+        "tool": "Edit",
+        "toolUseId": "toolu_synthetic_seed_edit_4",
+        "path": "/home/tim/Coding/nixos/files/ags/src/services/session-lock.ts",
+        "status": "allowed",
+        "gate": "all-rules",
+        "reason": "All checks passed"
+      }
+    ]
+  },
+  "expect": {
+    "expected": "allow",
+    "notes": "Three prior Edits to session-lock.ts were approved (the seeded toolLog reflects that). The fourth Edit touches a non-adjacent region (lock()/unlock() at the bottom of the file vs. earlier edits to imports + signal handlers). Drift-block's edits-per-file counter is too crude to distinguish region-thrashing from legitimate multi-region implementation. Live behavior denies via drift-block — that's the bug."
+  },
+  "expectation_reality": "broken",
+  "expectation_reality_last_run_at": "2026-04-30T12:40:06.323Z"
+}
