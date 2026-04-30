@@ -85,6 +85,12 @@ export interface SessionState {
    * re-firing on every subsequent PreToolUse during the same approval.
    */
   lastProcessedPlanApprovalToolUseId: string | null;
+  /**
+   * Wall-clock timestamp of the last UserPromptSubmit. Used by drift-detect
+   * to scope "edits to this file" counting to the current user turn — every
+   * new user message resets the drift count to 0 by advancing this cutoff.
+   */
+  lastUserMessageTimestamp: number;
 }
 
 /**
@@ -107,6 +113,7 @@ export function sessionStateDefaults(): SessionState {
     currentWindowSize: 2,
     driftState: {},
     lastProcessedPlanApprovalToolUseId: null,
+    lastUserMessageTimestamp: 0,
   };
 }
 

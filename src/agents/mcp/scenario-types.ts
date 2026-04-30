@@ -319,7 +319,7 @@ export interface Scenario {
     }>;
     /**
      * Optional graduated drift-block state keyed by absolute target path. Use
-     * this to reproduce `Final Warning:` / `Error:` transitions without
+     * this to reproduce post-nudge / thrashing-message transitions without
      * replaying the whole prior-denial history — seed `level` directly.
      */
     driftState?: Record<

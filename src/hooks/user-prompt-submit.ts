@@ -266,6 +266,8 @@ async function main() {
           hasExplicitOverride,
         },
         lastProcessedPlanApprovalToolUseId: null,
+        driftState: {},
+        lastUserMessageTimestamp: Date.now(),
       }));
     } else {
       // Parse failed AFTER runAgent's format-validation retry chain ran (or
@@ -309,6 +311,8 @@ async function main() {
         editIntentOverturnCount: 0,
         respondFirstChecked: false,
         forceCheckPending: false,
+        driftState: {},
+        lastUserMessageTimestamp: Date.now(),
       }));
     }
   } catch (err) {

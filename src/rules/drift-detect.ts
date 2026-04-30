@@ -17,7 +17,12 @@ export const driftDetectRule: PreToolRule = {
       return null;
     }
 
-    const recentLog = readToolLogEntries(ctx.sessionDir, 50);
+    // Scope drift counting to the current user turn. Every UserPromptSubmit
+    // bumps lastUserMessageTimestamp, so prior-turn allowed edits no longer
+    // count toward the warning threshold — drift counters reset per turn.
+    const sinceTs = ctx.state.lastUserMessageTimestamp ?? 0;
+    const recentLog = readToolLogEntries(ctx.sessionDir, 50)
+      .filter((e) => e.ts >= sinceTs);
     const drift = detectDrift(
       ctx.toolName,
       ctx.toolInput,
@@ -54,10 +59,10 @@ export const driftDetectRule: PreToolRule = {
     const target = extractDriftTarget(ctx.toolInput);
     if (!target || !EDIT_TOOLS.includes(ctx.toolName)) return;
 
-    // Only graduate the loop/thrashing branch. Workaround-escalation denials
-    // share this onDenialConfirmed but don't use the Warning/Final Warning/Error
-    // prefixes, so they're excluded here.
-    if (!/^(Warning|Final Warning|Error): /.test(reason)) return;
+    // Only graduate the loop/thrashing branch. All three drift messages share
+    // the substring `edits to "` (level 0/1/2/3 emissions in drift-detector.ts).
+    // Workaround-escalation denials use a different shape and are excluded.
+    if (!/edits to "/.test(reason)) return;
 
     await ctx.stateManager.update((s) => {
       const prior = s.driftState?.[target] ?? { level: 0 as const, allowedSinceLevelChange: 0 };

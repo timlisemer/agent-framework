@@ -58,10 +58,16 @@ export function detectDrift(
 /**
  * Graduated loop/thrashing detection.
  *
- * Level 0 (normal): 4+ allowed edits to the same file → block with `Warning:`.
- * Level 1 (post-Warning): 3 free edits, then block with `Final Warning:`.
- * Level 2 (post-Final-Warning): 1 free edit, then block with `Error:`.
- * Level 3 (errored): every subsequent edit is blocked with `Error:`.
+ * Level 0 (normal): 4+ allowed edits to the same file → consolidation nudge.
+ * Level 1 (post-nudge): 3 free edits, then a stronger consolidation nudge.
+ * Level 2 (post-second-nudge): 1 free edit, then "thrashing" message.
+ * Level 3 (clamped): every subsequent edit gets the "thrashing" message.
+ *
+ * All three messages tell the AI to KEEP editing the file but consolidate the
+ * remaining changes into one Edit/Write call. They share the substring
+ * `edits to "` so the drift-detect rule can recognize its own emissions in
+ * onDenialConfirmed without relying on a Warning/Error prefix that the AI
+ * misreads as a hard prohibition.
  *
  * State transitions are applied by the caller (drift-detect rule) based on
  * whether this returns a detected signal and whether appeals overturn it.
@@ -82,19 +88,15 @@ function checkRepetition(
   );
   const count = sameTargetAllowedEdits.length;
 
+  const thrashingMessage = `${count} edits to "${target}" — you are thrashing. The fix is not to stop editing; it is to consolidate. Read the full current file, plan every remaining change, then apply them in ONE Edit or Write call.`;
+
   if (state.level === 3) {
-    return {
-      detected: true,
-      reason: `Error: ${count} edits to "${target}" detected - possible loop or thrashing`,
-    };
+    return { detected: true, reason: thrashingMessage };
   }
 
   if (state.level === 2) {
     if (state.allowedSinceLevelChange >= 1) {
-      return {
-        detected: true,
-        reason: `Error: ${count} edits to "${target}" detected - possible loop or thrashing`,
-      };
+      return { detected: true, reason: thrashingMessage };
     }
     return NO_DRIFT;
   }
@@ -103,7 +105,7 @@ function checkRepetition(
     if (state.allowedSinceLevelChange >= 3) {
       return {
         detected: true,
-        reason: `Final Warning: ${count} edits to "${target}" detected - possible loop or thrashing`,
+        reason: `${count} edits to "${target}" — last nudge. Do NOT make another partial edit. Read the file, list every remaining change, then apply them all in a single Edit/Write call.`,
       };
     }
     return NO_DRIFT;
@@ -112,7 +114,7 @@ function checkRepetition(
   if (count >= 4) {
     return {
       detected: true,
-      reason: `Warning: ${count} edits to "${target}" detected - possible loop or thrashing`,
+      reason: `${count} edits to "${target}" — stop making many small edits. Read the full file, plan all remaining changes, and apply them in ONE Edit/Write call. You may continue editing this file; just consolidate.`,
     };
   }
 
