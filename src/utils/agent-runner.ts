@@ -642,14 +642,10 @@ Your final response should be your complete analysis in the required format.`;
         // api_retry system messages expose transient API retries (added in
         // SDK v0.2.77). Surface counts so the enriched sentinel can show
         // "apiRetries=N/last=<error>".
-        if (
-          message.type === "system" &&
-          "subtype" in message &&
-          message.subtype === "api_retry"
-        ) {
+        if (message.type === "system" && msgAny.subtype === "api_retry") {
           apiRetryCount++;
-          if ("error" in message && typeof message.error === "string") {
-            lastApiRetryStatus = message.error;
+          if (typeof msgAny.error === "string") {
+            lastApiRetryStatus = msgAny.error;
           }
         }
 
