@@ -142,7 +142,8 @@ export function runHarnessCommand(
 
   // Spawn-level failure (binary not found, signal killed, timeout)
   if (result.error) {
-    if ((result as unknown as { killed: boolean }).killed) {
+    const errCode = (result.error as NodeJS.ErrnoException).code;
+    if (errCode === "ETIMEDOUT" || (result as unknown as { killed: boolean }).killed) {
       throw new Error(
         `${scriptRelPath} timed out after ${Math.round(timeoutMs / 1000)}s. ` +
         `Partial output:\n${(stderr || stdout || "(none)").slice(0, 500)}`

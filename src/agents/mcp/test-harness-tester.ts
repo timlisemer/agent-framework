@@ -32,6 +32,7 @@ import {
   runScenarioCommand,
   getVersion,
   checkAndIncrementRunLimit,
+  rollbackRunLimit,
   detectWorkflowState,
   formatStatusFooter,
   appendTestRunFile,
@@ -66,15 +67,21 @@ function handleRunTest(
   transcriptPathOverride?: string,
 ): string {
   checkAndIncrementRunLimit(transcriptName, "run_test");
-  const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
-  const labelsPath = path.join(transcriptRunDir(transcriptName), "labels.json");
-  if (!fs.existsSync(labelsPath)) {
-    throw new Error("labels.json not found. This transcript is not ready for testing.");
+  let output: string;
+  try {
+    const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
+    const labelsPath = path.join(transcriptRunDir(transcriptName), "labels.json");
+    if (!fs.existsSync(labelsPath)) {
+      throw new Error("labels.json not found. This transcript is not ready for testing.");
+    }
+    output = runReplayCommand([
+      "--transcript", transcriptPath,
+      "--expect", labelsPath,
+    ], 1800000, rootOverride);
+  } catch (err) {
+    rollbackRunLimit(transcriptName, "run_test");
+    throw err;
   }
-  const output = runReplayCommand([
-    "--transcript", transcriptPath,
-    "--expect", labelsPath,
-  ], 600000, rootOverride);
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state) + "\n\nWORKFLOW: You must call run_single_hook (free, unlimited) before your next run_test.";
 }
@@ -87,27 +94,33 @@ function handleRunSingleHook(
   transcriptPathOverride?: string,
 ): string {
   checkAndIncrementRunLimit(transcriptName, "run_single_hook");
-  const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
-  const labelsPath = path.join(transcriptRunDir(transcriptName), "labels.json");
-  if (!fs.existsSync(labelsPath)) {
-    throw new Error("labels.json not found. This transcript is not ready for testing.");
-  }
-  if (truncateToLine !== undefined) {
-    if (!Number.isFinite(truncateToLine) || truncateToLine < 1) {
-      throw new Error(
-        `truncate_to_line must be a positive 1-based integer, got ${truncateToLine}`,
-      );
+  let output: string;
+  try {
+    const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
+    const labelsPath = path.join(transcriptRunDir(transcriptName), "labels.json");
+    if (!fs.existsSync(labelsPath)) {
+      throw new Error("labels.json not found. This transcript is not ready for testing.");
     }
+    if (truncateToLine !== undefined) {
+      if (!Number.isFinite(truncateToLine) || truncateToLine < 1) {
+        throw new Error(
+          `truncate_to_line must be a positive 1-based integer, got ${truncateToLine}`,
+        );
+      }
+    }
+    const args = [
+      "--transcript", transcriptPath,
+      "--expect", labelsPath,
+      "--filter", hookKey,
+    ];
+    if (truncateToLine !== undefined) {
+      args.push("--truncate-to-line", String(truncateToLine));
+    }
+    output = runReplayCommand(args, 300000, rootOverride);
+  } catch (err) {
+    rollbackRunLimit(transcriptName, "run_single_hook");
+    throw err;
   }
-  const args = [
-    "--transcript", transcriptPath,
-    "--expect", labelsPath,
-    "--filter", hookKey,
-  ];
-  if (truncateToLine !== undefined) {
-    args.push("--truncate-to-line", String(truncateToLine));
-  }
-  const output = runReplayCommand(args, 300000, rootOverride);
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state) + "\n\nWORKFLOW: You must call run_single_hook (free, unlimited) before your next run_test.";
 }
