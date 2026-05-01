@@ -41,6 +41,7 @@ import {
   readScenarioFile,
   listAllScenarios,
   filterScenariosBySource,
+  resolveTranscriptFromSession,
   type ScenarioSource,
   type ScenarioSourceTag,
 } from "./test-harness-shared.js";
@@ -425,6 +426,13 @@ function resolveTranscriptPath(transcriptName: string, override?: string): strin
   if (fs.existsSync(runPath)) {
     return runPath;
   }
+  // Try sidecar resolution for session-folder names ({ts}_{hash} pattern)
+  if (/^\d{4}-\d{2}-\d{2}-\d{4}_[0-9a-f]+$/.test(transcriptName)) {
+    const sidecarPath = resolveTranscriptFromSession(transcriptName);
+    if (sidecarPath) {
+      return sidecarPath;
+    }
+  }
   // Fall back to project dir (uses current cwd for encoding)
   const projectPath = projectTranscriptFile(transcriptName);
   if (fs.existsSync(projectPath)) {
@@ -433,7 +441,8 @@ function resolveTranscriptPath(transcriptName: string, override?: string): strin
   throw new Error(
     `Transcript not found for "${transcriptName}". Check the name and try find_work. ` +
     `If the transcript lives outside the default project transcripts directory, ` +
-    `pass "transcript_path" to point at the file directly.`,
+    `pass "transcript_path" to point at the file directly, or pass the session ` +
+    `folder name (e.g. "2025-01-15-1430_abc12345") to resolve via the session sidecar.`,
   );
 }
 
@@ -457,8 +466,9 @@ export interface TesterInput {
   truncate_to_line?: number;
   /**
    * Absolute path to the transcript .jsonl file. Use when the transcript
-   * lives outside the default ~/.claude/projects/-home-tim-Coding-public-
-   * repos-agent-framework directory. After auto_label/scaffold has copied
+   * lives outside the default ~/.claude/projects/<encoded-project>/ directory.
+   * You may also pass a session folder name (e.g. "2025-01-15-1430_abc12345")
+   * to resolve via the session sidecar. After auto_label/scaffold has copied
    * the transcript into ~/.agent-framework/test-runs/<name>/, the override
    * is no longer needed; the resolver finds it there automatically.
    */
@@ -467,7 +477,7 @@ export interface TesterInput {
    * For run_scenario / read_scenario: slug identifying a scenario. For
    * run_scenario the slug is resolved across the union of four sources:
    * ~/.agent-framework/test-runs/scenarios/<name>/scenario.json (home)
-   * and <root>/test-harness/fixtures/scenarios/{working,broken,todo}/<name>.json
+   * and <root>/test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json
    * (committed fixtures). A slug must be unique across all four sources.
    * read_scenario still only reads home (reports + inline-authored
    * scenario.json live there). Must match [A-Za-z0-9._-]+.
@@ -485,11 +495,11 @@ export interface TesterInput {
    * For run_scenarios (batch action): explicit list of scenario slugs to
    * run. Slugs are resolved against the UNION of four sources: home
    * (~/.agent-framework/test-runs/scenarios/) and the three fixture
-   * subfolders (test-harness/fixtures/scenarios/{working,broken,todo}/).
+   * subfolders (test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/).
    * A slug that exists in two or more sources is a hard error. Omit or
    * pass an empty array to run EVERY scenario across all four sources,
    * alphabetically by name. Per-result output shape:
-   *   {source: "home" | "fixture-working" | "fixture-broken" | "fixture-todo"}.
+   *   {source: "home" | "expected-to-pass" | "fixture-bug" | "expected-to-fail"}.
    */
   scenario_names?: string[];
   /**
@@ -796,13 +806,13 @@ Step 4 -- Iterate. If the hook decides wrong, fix the rule, rebuild
 
 Step 5 -- Keep the scenario. Every scenario file under
   ~/.agent-framework/test-runs/scenarios/ AND every committed fixture at
-  <repo>/test-harness/fixtures/scenarios/{working,broken,todo}/<name>.json
+  <repo>/test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json
   is a permanent regression test. Pick the subfolder per category:
-  working/ = passes today; broken/ = fixture itself is wrong; todo/ =
-  description contains "EXPECTED TO FAIL" (feature not yet implemented).
-  See each subfolder's README.md for the full move policy. run_scenarios
-  (no filter) runs the UNION of all four sources in one MCP call.
-  Fixtures run in place from the repo; reports + cache always land under
+  expected-to-pass/ = passes today; fixture-bug/ = fixture itself is wrong;
+  expected-to-fail/ = feature not yet implemented. See each subfolder's
+  README.md for the full move policy. run_scenarios (no filter) runs the
+  UNION of all four sources in one MCP call. Fixtures run in place from
+  the repo; reports + cache always land under
   ~/.agent-framework/test-runs/scenarios/<name>/.
 
 ### B.3 Scenario actions
@@ -816,35 +826,39 @@ Step 5 -- Keep the scenario. Every scenario file under
       scenario.name>/scenario.json (overwriting), then execute.
     - If only scenario_name is provided: resolve the slug against the
       UNION of four sources: home (~/.agent-framework/test-runs/scenarios/)
-      and fixtures (<repo>/test-harness/fixtures/scenarios/{working,
-      broken,todo}/). Fixtures run in place; --output-dir points at the
-      home tree so cache/ and report-scenario.json always land there.
+      and fixtures (<repo>/test-harness/fixtures/scenarios/{expected-to-pass,
+      fixture-bug,expected-to-fail}/). Fixtures run in place; cache/ and
+      report-scenario.json always land under
+      ~/.agent-framework/test-runs/scenarios/<name>/.
     - Exit status: pass -> 0, fail -> 1, validation error -> 2.
     - Returned JSON (both single and fanout modes) carries
-      \`expectation_reality: "working" | "broken"\` and
-      \`expectation_reality_last_run_at: ISO-8601\` at the top level —
-      the reflection of this run's pass state, also written back to the
-      scenario source file. A \`broken/\` fixture reporting
-      reality=working is a promotion candidate; a \`working/\` fixture
-      reporting reality=broken is a regression.
+      \`expectation_reality: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null\`
+      and \`expectation_reality_last_run_at: ISO-8601\` at the top level -
+      the reflection of this run's pass state, also persisted to the
+      sibling sidecar
+      ~/.agent-framework/test-runs/scenarios/<name>/last-run.json
+      (NOT written back to the fixture). A \`fixture-bug/\` fixture
+      reporting reality=expected-to-pass is a promotion candidate; an
+      \`expected-to-pass/\` fixture reporting reality=fixture-bug is a
+      regression.
 
 **run_scenarios** -- execute MULTIPLE scenarios in one MCP call
   Optional: scenario_names (string[]), working_dir, scenario_source
   Sources (unioned):
     1. ~/.agent-framework/test-runs/scenarios/<name>/scenario.json
        User-authored / inline-created originals.
-    2. <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/working/<name>.json
+    2. <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/expected-to-pass/<name>.json
        Committed fixtures that pass consistently against current code.
-    3. <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/broken/<name>.json
+    3. <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/fixture-bug/<name>.json
        Committed fixtures whose own JSON is wrong (needs fixture-fixing).
-    4. <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/todo/<name>.json
-       Committed fixtures codifying unimplemented features (description
-       contains "EXPECTED TO FAIL"). See each subfolder's README.md.
+    4. <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/expected-to-fail/<name>.json
+       Committed fixtures codifying unimplemented features. See each
+       subfolder's README.md.
   Filename stem MUST equal scenario.name; validateScenario enforced at load.
   Slug collisions across ANY two or more sources are a HARD ERROR -- the
   whole batch fails with a message listing every offending path with its
   source tag. Delete all but one copy to proceed.
-  Optional scenario_source: "working" | "broken" | "todo" | "home" --
+  Optional scenario_source: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home" --
     when set, restricts the batch to that single source tree. Slug
     uniqueness is still enforced across all four sources regardless.
   Behavior:
@@ -854,34 +868,35 @@ Step 5 -- Keep the scenario. Every scenario file under
       error entries; batch continues.
     - scenario_names omitted or empty: runs EVERY scenario in the
       (filtered) union, alphabetically by name.
-    - Empty scenario_source="broken" result is NOT an error -- an empty
-      broken/ folder is the healthy state.
+    - Empty scenario_source="fixture-bug" result is NOT an error -- an empty
+      fixture-bug/ folder is the healthy state.
     - Fixtures run IN PLACE (no staging, no copy). scenario.ts is
-      invoked with --scenario <fixture-path> --output-dir
-      ~/.agent-framework/test-runs/scenarios/<name>/ so cache/ and
-      report-scenario.json always land under home, never next to the
+      invoked with --scenario <fixture-path> and writes cache/ and
+      report-scenario.json under
+      ~/.agent-framework/test-runs/scenarios/<name>/, never next to the
       repo fixture. Edits to a fixture are picked up on the next run.
     - Returns aggregated JSON: {total, passed, failed, results[]}.
-      Each result: {name, source: "home"|"fixture-working"|"fixture-broken"
-      |"fixture-todo", pass, decision, gate, expected, reason, ms,
-      expectation_reality: "working"|"broken",
-      expectation_reality_last_run_at: ISO-8601, error?}. A \`broken/\`
-      fixture whose result has expectation_reality="working" is a
-      promotion candidate; a \`working/\` fixture whose result has
-      expectation_reality="broken" is a regression. The aggregate
+      Each result: {name, source: "home"|"expected-to-pass"|"fixture-bug"
+      |"expected-to-fail", pass, decision, gate, expected, reason, ms,
+      expectation_reality: "expected-to-pass"|"fixture-bug"|"expected-to-fail"|null,
+      expectation_reality_last_run_at: ISO-8601, error?}. A \`fixture-bug/\`
+      fixture whose result has expectation_reality="expected-to-pass" is a
+      promotion candidate; an \`expected-to-pass/\` fixture whose result has
+      expectation_reality="fixture-bug" is a regression. The aggregate
       response does NOT summarize mismatches; callers inspect results[]
       directly.
     - Writes scenarios/<name>/report-scenario.json per scenario. Each
       run also writes \`expectation_reality\` and
-      \`expectation_reality_last_run_at\` back to the scenario source
-      file so the reflection travels with the fixture under git.
+      \`expectation_reality_last_run_at\` to the sibling sidecar
+      ~/.agent-framework/test-runs/scenarios/<name>/last-run.json
+      (NOT to the fixture - fixtures stay read-only at runtime).
 
 **list_scenarios** -- list all scenarios across home + fixture subfolders
   Optional: working_dir, scenario_source
-  Each row tagged [home] or [fixture-working] or [fixture-broken] or
-  [fixture-todo], with "has-report" when a prior run produced
+  Each row tagged [home] or [expected-to-pass] or [fixture-bug] or
+  [expected-to-fail], with "has-report" when a prior run produced
   ~/.agent-framework/test-runs/scenarios/<name>/report-scenario.json.
-  Optional scenario_source: "working" | "broken" | "todo" | "home" --
+  Optional scenario_source: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home" --
     when set, filters the list to that single source tree.
   Slug collisions across trees throw here as well -- fix them before
   continuing.
@@ -893,7 +908,7 @@ Step 5 -- Keep the scenario. Every scenario file under
   home scenario.json (fixtures run in place), so
   read_scenario <fixture-slug> filename=scenario.json returns an error
   -- read the fixture file directly from
-  <repo>/test-harness/fixtures/scenarios/{working,broken,todo}/<name>.json
+  <repo>/test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json
   instead. Reports always land in home and can be read here.
 
 ### B.4 Scenario JSON schema
@@ -1314,26 +1329,24 @@ the same scenario JSON schema.
 2. Fixtures (repo-tracked, read-only source) -- three category subfolders:
    <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/
      REPRODUCTION-NOTES.md     Authoring notes (not a scenario; stays at root).
-     working/
+     expected-to-pass/
        README.md               Category definition + scenario list + move policy.
        {scenario-name}.json    Scenario passes consistently against current code.
-     broken/
+     fixture-bug/
        README.md               Category definition + scenario list + move policy.
        {scenario-name}.json    Fixture itself is wrong (needs fixture-fixing).
-     todo/
+     expected-to-fail/
        README.md               Category definition + scenario list + move policy.
-       {scenario-name}.json    Codifies unimplemented feature; description
-                               must contain "EXPECTED TO FAIL".
+       {scenario-name}.json    Codifies unimplemented feature.
    Filename stem MUST equal inner scenario.name (enforced at load).
    validateScenario enforced per entry.
 
 Invariant: a given slug may live in EXACTLY ONE of the four sources
-(home, fixture-working, fixture-broken, fixture-todo). A collision
+(home, expected-to-pass, fixture-bug, expected-to-fail). A collision
 throws with every offending path labeled by its source tag. Fixtures
-run IN PLACE from the repo; run_scenario / run_scenarios invoke
-scenario.ts with --output-dir pointed at tree (1) above so artifacts
-never pollute the repo. Edits to a fixture are picked up on the very
-next run.
+run IN PLACE from the repo; run_scenario / run_scenarios always write
+artifacts under tree (1) above so the repo is never polluted. Edits to
+a fixture are picked up on the very next run.
 
 ---
 

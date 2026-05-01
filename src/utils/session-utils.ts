@@ -8,7 +8,7 @@
  *   ~/.claude/plans/{slug}.md
  *
  * Example:
- *   Transcript: ~/.claude/projects/-home-tim-Coding-foo/abc123.jsonl
+ *   Transcript: ~/.claude/projects/<encoded-project>/abc123.jsonl
  *   Entry contains: {"slug": "woolly-swinging-neumann", ...}
  *   Plan file: ~/.claude/plans/woolly-swinging-neumann.md
  *

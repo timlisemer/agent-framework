@@ -6,6 +6,7 @@ import { runCheckAgent } from "../agents/mcp/check.js";
 import { runConfirmAgent } from "../agents/mcp/confirm.js";
 import { runCommitAgent } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
+import { runTranscriptAgent } from "../agents/mcp/transcript.js";
 import { evaluateRules } from "../rules/index.js";
 import { validateIntentRule } from "../rules/validate-intent.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
@@ -18,6 +19,7 @@ import {
   PUSH_HELP,
   LIST_REPOS_HELP,
   VALIDATE_INTENT_HELP,
+  TRANSCRIPT_HELP,
 } from "./help-docs.js";
 import { getRepoInfo } from "../utils/git-utils.js";
 import { initializeTelemetry } from "../telemetry/index.js";
@@ -405,6 +407,18 @@ server.registerTool(
   }
 );
 
+server.registerTool(
+  "transcript",
+  {
+    title: "Transcript",
+    description: "Return the absolute path to the current Claude Code session's transcript .jsonl file. Used by the /transcript slash command.",
+    inputSchema: {
+      transcript_path: z.string().describe("Path to the conversation transcript file (auto-supplied by Claude Code)")
+    }
+  },
+  async (args) => ({ content: [{ type: "text", text: await runTranscriptAgent(args.transcript_path) }] })
+);
+
 const predictionAnnotationSchema = z.object({
   verdict: z.enum(["correct", "too_broad", "wrong", "INVESTIGATE"]).describe("Hindsight verdict on the prediction that caused this deny."),
   forbidden_blocks: z.array(z.object({
@@ -482,7 +496,7 @@ server.registerTool(
       date_from: z.string().optional().describe("For find_work: only transcripts modified on or after this date (YYYY-MM-DD)"),
       date_to: z.string().optional().describe("For find_work: only transcripts modified on or before this date (YYYY-MM-DD)"),
       limit: z.number().optional().describe("For find_work: how many transcripts to process. Omit=1, 0=unlimited, N=N"),
-      transcript_path: z.string().optional().describe("Absolute path to a transcript .jsonl file. Use when the transcript lives outside the default ~/.claude/projects/<encoded-project>/ directory (e.g. sessions from other project dirs). Applies to auto_label/generate_labels/scaffold/list/expand/validate. Only needed once; subsequent actions find the transcript in ~/.agent-framework/test-runs/<name>/ after the first copy."),
+      transcript_path: z.string().optional().describe("Absolute path to a transcript .jsonl file. Use when the transcript lives outside the default ~/.claude/projects/<encoded-project>/ directory (e.g. sessions from other project dirs). You may also pass a session folder name (e.g. '2025-01-15-1430_abc12345') and the resolver will look up the path via the session sidecar at ~/.agent-framework/sessions/. Applies to auto_label/generate_labels/scaffold/list/expand/validate. Only needed once; subsequent actions find the transcript in ~/.agent-framework/test-runs/<name>/ after the first copy."),
       working_dir: z.string().optional().describe("Local repo path. When set, the labeler invokes replay.ts from this directory instead of the deployed AGENT_FRAMEWORK_ROOT, so locally edited test-harness/ source is used. Mirrors the tester's `working_dir`."),
     }
   },
@@ -627,7 +641,7 @@ server.registerTool(
       hook_key: z.string().optional().describe("For run_single_hook: hook key to test (tool_use_id or stop:N from report failures)"),
       working_dir: z.string().optional().describe("Local repo path for run_test/run_single_hook/list/expand/run_scenario/run_scenarios/list_scenarios (overrides AGENT_FRAMEWORK_ROOT so edited code AND locally-edited fixture scenarios are used)"),
       truncate_to_line: z.number().optional().describe("For run_single_hook: 1-based line cap. When set, the harness appends only transcript lines <= truncate_to_line before firing the target hook. The hook still fires with its full tool_use_id because input is synthesized from the in-memory parsed lines. Use this to reproduce timing-sensitive states like pre-flush replay."),
-      transcript_path: z.string().optional().describe("Absolute path to a transcript .jsonl file. Use when the transcript lives outside the default ~/.claude/projects/<encoded-project>/ directory (e.g. sessions from other project dirs). Only needed if the test-runs copy is not yet in place."),
+      transcript_path: z.string().optional().describe("Absolute path to a transcript .jsonl file. Use when the transcript lives outside the default ~/.claude/projects/<encoded-project>/ directory (e.g. sessions from other project dirs). You may also pass a session folder name (e.g. '2025-01-15-1430_abc12345') and the resolver will look up the path via the session sidecar at ~/.agent-framework/sessions/. Only needed if the test-runs copy is not yet in place."),
       scenario_name: z.string().optional().describe("For run_scenario / read_scenario: slug identifying a scenario. For run_scenario, resolved across the union of four sources: ~/.agent-framework/test-runs/scenarios/<name>/scenario.json (home) and <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json (committed fixtures). Slugs must be unique across all four sources. read_scenario still reads only from the home tree. Must match [A-Za-z0-9._-]+."),
       scenario: scenarioSchema.optional().describe("For run_scenario: inline Scenario JSON. When set, overwrites the on-disk scenarios/<name>/scenario.json before running. Omit to re-run a previously stored scenario. See the 'help' action (Workflow B) for the full schema and examples."),
       scenario_names: z.array(z.string()).optional().describe("For run_scenarios: explicit list of scenario slugs to run. Resolved against the UNION of four sources: ~/.agent-framework/test-runs/scenarios/<name>/scenario.json (home) and <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json (committed fixtures). A slug present in two or more sources is a hard error. Fixtures run in place; reports + cache always land under the home tree. Omit or pass an empty array to run EVERY scenario in the union, alphabetically. Returns aggregated JSON {total, passed, failed, results[]} with per-result {source: \"home\"|\"expected-to-pass\"|\"fixture-bug\"|\"expected-to-fail\"}. Each result also carries `expectation_reality: \"expected-to-pass\" | \"fixture-bug\" | \"expected-to-fail\" | null` and `expectation_reality_last_run_at: ISO-8601` — the most recent run's reality, written to last-run.json sidecar. A mismatch between folder and reality surfaces regressions or landed features. The aggregate response does NOT summarize mismatches; callers inspect `results[]` directly."),
@@ -659,6 +673,7 @@ const HELP_RESOURCES: Array<{
   { tool: "validate_intent", title: "validate_intent -- Help", summary: "User intention alignment check", body: VALIDATE_INTENT_HELP },
   { tool: "test_harness_tester", title: "test_harness_tester -- Help", summary: "Test harness tester (transcripts + scenarios)", body: TESTER_HELP },
   { tool: "test_harness_labeler", title: "test_harness_labeler -- Help", summary: "Test harness transcript labeler", body: LABELER_HELP },
+  { tool: "transcript", title: "transcript -- Help", summary: "Session transcript path resolver", body: TRANSCRIPT_HELP },
 ];
 
 for (const { tool, title, summary, body } of HELP_RESOURCES) {

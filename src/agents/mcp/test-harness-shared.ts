@@ -26,12 +26,47 @@ import {
   transcriptDraftLabelFile as pathsTranscriptDraftLabelFile,
   transcriptMcpStateFile as pathsTranscriptMcpStateFile,
   scenarioLastRunFile,
+  sessionTranscriptPathSidecar,
 } from "../../utils/paths.js";
 
 // ─── Path Resolution ───────────────────────────────────────────────────────
 
 export function testRunsDir(): string {
   return path.join(runtimeRoot(), "test-runs");
+}
+
+/**
+ * Resolve a transcript path from a session folder name.
+ *
+ * Session folders live at ~/.agent-framework/sessions/<project>/<sessionFolderName>/
+ * and contain a transcript-path.txt sidecar pointing at the live transcript.
+ *
+ * The session-folder pattern is "{ts}_{hash}" (e.g. "2025-01-15-1430_abc12345").
+ * Returns null if the sidecar does not exist or the referenced file is missing.
+ */
+export function resolveTranscriptFromSession(sessionFolderName: string): string | null {
+  const sessionsRoot = path.join(runtimeRoot(), "sessions");
+  // Walk all project subdirs looking for a matching session folder
+  let projectDirs: string[] = [];
+  try {
+    projectDirs = fs.readdirSync(sessionsRoot);
+  } catch {
+    return null;
+  }
+  for (const projectDir of projectDirs) {
+    const sessionDir = path.join(sessionsRoot, projectDir, sessionFolderName);
+    const sidecarPath = sessionTranscriptPathSidecar(sessionDir);
+    if (!fs.existsSync(sidecarPath)) continue;
+    try {
+      const transcriptPath = fs.readFileSync(sidecarPath, "utf-8").trim();
+      if (transcriptPath && fs.existsSync(transcriptPath)) {
+        return transcriptPath;
+      }
+    } catch {
+      // skip
+    }
+  }
+  return null;
 }
 
 export function transcriptProjectDir(): string {

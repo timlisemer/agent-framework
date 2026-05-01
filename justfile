@@ -5,6 +5,7 @@ build:
 check:
     npx tsc --noEmit
     npx vitest run --reporter=verbose
+    npx tsx scripts/check-fixture-purity.ts
 
 clean:
     rm -rf dist

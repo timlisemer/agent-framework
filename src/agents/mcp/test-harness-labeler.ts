@@ -45,6 +45,7 @@ import {
   detectWorkflowState,
   formatStatusFooter,
   appendTestRunFile,
+  resolveTranscriptFromSession,
 } from "./test-harness-shared.js";
 
 /**
@@ -667,6 +668,13 @@ function resolveTranscriptPath(transcriptName: string, override?: string): strin
     }
     return override;
   }
+  // Try sidecar resolution for session-folder names ({ts}_{hash} pattern)
+  if (/^\d{4}-\d{2}-\d{2}-\d{4}_[0-9a-f]+$/.test(transcriptName)) {
+    const sidecarPath = resolveTranscriptFromSession(transcriptName);
+    if (sidecarPath) {
+      return sidecarPath;
+    }
+  }
   // For generate_labels/scaffold, use original transcript from project dir
   const projectPath = projectTranscriptFile(transcriptName);
   if (fs.existsSync(projectPath)) {
@@ -680,7 +688,8 @@ function resolveTranscriptPath(transcriptName: string, override?: string): strin
   throw new Error(
     `Transcript not found for "${transcriptName}". Check the name and try find_work. ` +
     `If the transcript lives outside the default project transcripts directory, ` +
-    `pass "transcript_path" to point at the file directly.`,
+    `pass "transcript_path" to point at the file directly, or pass the session ` +
+    `folder name (e.g. "2025-01-15-1430_abc12345") to resolve via the session sidecar.`,
   );
 }
 
@@ -695,6 +704,13 @@ function resolveTranscriptForList(transcriptName: string, override?: string): st
   const runPath = path.join(transcriptRunDir(transcriptName), "transcript.jsonl");
   if (fs.existsSync(runPath)) {
     return runPath;
+  }
+  // Try sidecar resolution for session-folder names ({ts}_{hash} pattern)
+  if (/^\d{4}-\d{2}-\d{2}-\d{4}_[0-9a-f]+$/.test(transcriptName)) {
+    const sidecarPath = resolveTranscriptFromSession(transcriptName);
+    if (sidecarPath) {
+      return sidecarPath;
+    }
   }
   return resolveTranscriptPath(transcriptName);
 }

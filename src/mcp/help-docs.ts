@@ -209,3 +209,20 @@ Structured verdict with ALIGNED or DRIFTED verdict and a short reason.
 - Before committing a large change, to catch scope creep
 - As a stop-hook check to detect drift from user intent
 - Any time you want an independent second opinion on "did I do the right thing"`;
+
+export const TRANSCRIPT_HELP = `# transcript -- Session Transcript Path Resolver
+
+Returns the absolute path to the current Claude Code session's transcript .jsonl file and refreshes the transcript-path.txt sidecar under ~/.agent-framework/sessions/.
+
+## Inputs
+
+- transcript_path (required): auto-supplied by Claude Code via the /transcript slash command
+
+## Output
+
+The absolute path to the transcript file as a plain string.
+
+## When to use
+
+- Via the /transcript slash command to get the current session's transcript path
+- When you need to pass a session folder name to test_harness_labeler scaffold or list and want the sidecar to be up-to-date`;

@@ -1,0 +1,1 @@
+Fixtures here describe behaviour that is INTENTIONALLY broken — the fixture itself is the bug demonstration. A run with `expectation_reality: "expected-to-pass"` indicates the underlying bug got fixed; promote to `expected-to-pass/`.
