@@ -62,6 +62,17 @@ export interface RuleContext {
    * imperative — apply normal mood policy".
    */
   cachedSnippetSideTaskDischarged?: boolean;
+  /**
+   * Tools authorized by the active slash-command workflow, resolved from
+   * the most recent <command-name>/NAME</command-name> entry in the
+   * transcript via SLASH_COMMAND_ALLOWED_TOOLS. Undefined when no slash
+   * command is active or the command has no entry. Read by
+   * decidePrediction step 3.11 (via prediction-block) to allow the
+   * workflow's authorized tools through mood-driven policy. Optional so
+   * unit-test ctx mocks can omit it; consumers must treat undefined as
+   * "no slash-command authorization information available".
+   */
+  slashCommandAllowedTools?: readonly string[];
 }
 
 export type RuleCheckResult =

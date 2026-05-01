@@ -1,36 +1,56 @@
 /**
- * Canonical slash-command → allowed-MCP-tools mapping.
- *
- * Single source of truth for which MCP tool each slash command permits.
- * Consumers:
- * - `extractSlashCommandMetadata` in src/utils/transcript.ts resolves
- *   `<command-name>/NAME</command-name>` invocations to allowed-tools
- *   without file I/O.
- * - `isLowRiskTool` in src/rules/utils.ts uses the derived set to keep
- *   these three MCP tools OUT of the low-risk auto-approval bypass.
- * - `TOOL_APPROVE_PROMPT_SECTION` and `TOOL_APPEAL_AGENT` prompts document
- *   the same mapping in prose (src/utils/agent-configs.ts) -- keep them
- *   in sync with the map below.
- *
- * New slash commands that allow MCP side-effect tools must be added here
- * AND to the corresponding agent prompts in agent-configs.ts.
+ * Slash commands that GATE specific MCP tools — those tools cannot run
+ * without an explicit slash-command invocation. Single source of truth
+ * for RESTRICTED_MCP_TOOLS. Consumed (transitively) by:
+ *  - isLowRiskTool (src/rules/utils.ts) — excludes from low-risk auto-approve
+ *  - tool-approve  (src/rules/tool-approve.ts:85) — hard-deny without auth
+ *  - subagent      (src/rules/subagent.ts:142)    — hard-deny without auth
  */
-export const SLASH_COMMAND_ALLOWED_TOOLS: Record<string, readonly string[]> = {
-  commit: ["mcp__agent-framework__commit"],
-  push: ["mcp__agent-framework__push", "mcp__agent-framework__commit"],
+export const SLASH_COMMAND_GATED_MCP_TOOLS: Record<string, readonly string[]> = {
+  commit:    ["mcp__agent-framework__commit"],
+  push:      ["mcp__agent-framework__push", "mcp__agent-framework__commit"],
   quickpush: ["mcp__agent-framework__push", "mcp__agent-framework__commit"],
-  confirm: ["mcp__agent-framework__confirm"],
+  confirm:   ["mcp__agent-framework__confirm"],
+  check:     ["mcp__agent-framework__check"],
 };
 
 /**
- * The set of MCP tool names that require an explicit slash-command
- * invocation to run. Derived from `SLASH_COMMAND_ALLOWED_TOOLS` so any
- * new entry propagates automatically.
+ * Per-command workflow tool sets. The tools each slash-command workflow
+ * legitimately uses — including non-MCP tools (Agent, ExitPlanMode) the
+ * command's body orchestrates.
  *
- * These are the tools that `tool-approve` hard-denies and that
- * `isLowRiskTool` must exclude from the low-risk allow set so trust-based
- * auto-approval cannot silently run them.
+ * Read by decidePrediction step 3.11 to allow these tools through
+ * mood-driven policy when the user has actively invoked the command.
+ * The slash-command tag <command-name>/NAME</command-name> persists in
+ * the transcript across all internal steps of the workflow, so this
+ * single per-command tool set naturally pins authorization for the full
+ * multi-step flow until a NEW slash command is invoked or the user
+ * issues an explicit revocation.
+ *
+ * Read/Grep/Glob/LS/Bash are intentionally absent from the plan*
+ * entries — they are already low-risk and bypass mood policy via
+ * decidePrediction step 4 (isLowRiskTool). Add them here only if a real
+ * session shows them denying under sustained frustration during a
+ * slash-command workflow.
  */
+export const SLASH_COMMAND_WORKFLOW_TOOLS: Record<string, readonly string[]> = {
+  plan1:     ["Agent", "ExitPlanMode"],
+  plan3:     ["Agent", "ExitPlanMode"],
+  plan5:     ["Agent", "ExitPlanMode"],
+  implement: ["Agent"],
+};
+
+/**
+ * Combined view: every tool a slash command authorizes. Consumed by
+ * extractSlashCommandMetadata (src/utils/transcript.ts:328) to populate
+ * SlashCommandContext.allowedTools for both the appealHelper LLM prompt
+ * and decidePrediction step 3.11.
+ */
+export const SLASH_COMMAND_ALLOWED_TOOLS: Record<string, readonly string[]> = {
+  ...SLASH_COMMAND_GATED_MCP_TOOLS,
+  ...SLASH_COMMAND_WORKFLOW_TOOLS,
+};
+
 export const RESTRICTED_MCP_TOOLS: ReadonlySet<string> = new Set(
-  Object.values(SLASH_COMMAND_ALLOWED_TOOLS).flat(),
+  Object.values(SLASH_COMMAND_GATED_MCP_TOOLS).flat(),
 );

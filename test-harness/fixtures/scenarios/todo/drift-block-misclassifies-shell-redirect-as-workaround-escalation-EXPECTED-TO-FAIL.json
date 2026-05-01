@@ -72,5 +72,5 @@
     "notes": "The two prior denied Bash commands contain ` 2>&1` only because every shell pipeline that wants to capture stderr uses that idiom — it's not the prohibited pattern. The actual prohibited pattern was the filter-to-changes (grep, git diff --name-only). drift-block's literal substring match on ` 2>&1` is a false positive: it should match the user-rejected SEMANTIC pattern, not a vocabulary collision."
   },
   "expectation_reality": "broken",
-  "expectation_reality_last_run_at": "2026-04-30T12:37:07.124Z"
+  "expectation_reality_last_run_at": "2026-05-01T10:23:19.773Z"
 }

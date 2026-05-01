@@ -610,6 +610,7 @@ export function decidePrediction(
   latestUserMessage: string = "",
   recentUserMessages: string[] = [],
   cachedSnippetSideTaskDischarged: boolean = false,
+  slashCommandAllowedTools: readonly string[] = [],
 ): PredictionDecision {
   if (!prediction) return { decision: "allow" };
 
@@ -871,6 +872,42 @@ export function decidePrediction(
         reason: `Cached prediction is anchored to a discharged side-clarification (intervening tool round-trip obeyed it); an earlier still-active user turn favorably names ${toolName}; mood-driven re-deny would treat the nested clarification as a replacement intent.`,
       };
     }
+  }
+
+  // 3.11. Active slash-command authorization.
+  //
+  // Root-cause fix for the "user invokes /plan3 with frustrated framing;
+  // mood-driven step-4 deny blocks the very Agent dispatches /plan3 is
+  // designed to spawn" bug class. The slash-command tag is the user's
+  // explicit authorization for the workflow's tool set — the frustrated
+  // text accompanying the invocation is venting AT prior AI work, not
+  // retracting the command.
+  //
+  // The appealHelper LLM already grants this exemption when it sees
+  // `=== SLASH COMMAND INVOKED ===` listing the firing tool
+  // (TOOL_APPEAL_AGENT prompt rule, agent-configs.ts:565-576); bring the
+  // same logic into the deterministic policy because prediction-block is
+  // appealable: false, so the LLM rescue never fires here.
+  //
+  // The slash-command tag persists across the multi-step workflow
+  // (steps 1-5 of /plan3 share one tag), so this exemption naturally covers
+  // the full workflow until a NEW slash command shadows the tag or the
+  // user issues an explicit revocation (caught by the guards below).
+  //
+  // Strict guards mirror 3.6-3.10:
+  //   - userSaidProhibition: a categorical "freeze. no tools." in the
+  //     snippet still wins (computed at line 701).
+  //   - blockedForThisToolByName: per-target structured block on the firing
+  //     tool still wins (computed at line 737).
+  if (
+    !userSaidProhibition &&
+    !blockedForThisToolByName &&
+    slashCommandAllowedTools.includes(toolName)
+  ) {
+    return {
+      decision: "allow",
+      reason: `Active slash command authorizes ${toolName} (per SLASH_COMMAND_ALLOWED_TOOLS); mood-driven re-deny would block the workflow the user explicitly invoked.`,
+    };
   }
 
   // 4. Mood-driven default policy. Allow set mirrors `low-risk-bypass`

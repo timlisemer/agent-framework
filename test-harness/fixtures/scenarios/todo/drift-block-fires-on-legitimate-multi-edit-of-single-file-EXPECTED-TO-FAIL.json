@@ -89,5 +89,5 @@
     "notes": "Three prior Edits to session-lock.ts were approved (the seeded toolLog reflects that). The fourth Edit touches a non-adjacent region (lock()/unlock() at the bottom of the file vs. earlier edits to imports + signal handlers). Drift-block's edits-per-file counter is too crude to distinguish region-thrashing from legitimate multi-region implementation. Live behavior denies via drift-block — that's the bug."
   },
   "expectation_reality": "broken",
-  "expectation_reality_last_run_at": "2026-04-30T12:40:06.323Z"
+  "expectation_reality_last_run_at": "2026-05-01T10:23:19.182Z"
 }

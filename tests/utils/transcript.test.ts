@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { detectParallelBatch } from "../../src/utils/transcript.js";
+import { detectParallelBatch, resolveActiveSlashCommandAllowedTools } from "../../src/utils/transcript.js";
 
 describe("detectParallelBatch", () => {
   let tempDir: string;
@@ -265,5 +265,76 @@ describe("detectParallelBatch", () => {
     const result = await detectParallelBatch(filePath, "toolu_p2");
     expect(result).not.toBeNull();
     expect(result?.allIds).toEqual(["toolu_p1", "toolu_p2"]);
+  });
+});
+
+describe("resolveActiveSlashCommandAllowedTools", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "transcript-slash-test-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function writeTranscript(entries: unknown[]): string {
+    const filePath = path.join(tempDir, "transcript.jsonl");
+    const content = entries.map((e) => JSON.stringify(e)).join("\n") + "\n";
+    fs.writeFileSync(filePath, content);
+    return filePath;
+  }
+
+  function userText(text: string) {
+    return {
+      message: {
+        role: "user",
+        content: [{ type: "text", text }],
+      },
+    };
+  }
+
+  it("transcript with /plan3 tag -> returns ['Agent','ExitPlanMode']", async () => {
+    const filePath = writeTranscript([
+      userText("<command-name>/plan3</command-name>\nthats complete bullshit do not cheat"),
+    ]);
+    const result = await resolveActiveSlashCommandAllowedTools(filePath);
+    expect(result).toEqual(["Agent", "ExitPlanMode"]);
+  });
+
+  it("transcript with /plan3 tag followed by non-tag user turn -> still returns plan3 tools", async () => {
+    const filePath = writeTranscript([
+      userText("<command-name>/plan3</command-name>\ndo the plan"),
+      userText("ok continue"),
+    ]);
+    const result = await resolveActiveSlashCommandAllowedTools(filePath);
+    // The backward scan finds "ok continue" first (no tag), then finds /plan3 tag
+    expect(result).toEqual(["Agent", "ExitPlanMode"]);
+  });
+
+  it("transcript with /plan3 then later /commit -> returns commit tools (most recent tag wins)", async () => {
+    const filePath = writeTranscript([
+      userText("<command-name>/plan3</command-name>\ndo the plan"),
+      userText("ok continue"),
+      userText("<command-name>/commit</command-name>\nnow commit"),
+    ]);
+    const result = await resolveActiveSlashCommandAllowedTools(filePath);
+    expect(result).toEqual(["mcp__agent-framework__commit"]);
+  });
+
+  it("empty transcript -> returns undefined", async () => {
+    const filePath = writeTranscript([]);
+    const result = await resolveActiveSlashCommandAllowedTools(filePath);
+    expect(result).toBeUndefined();
+  });
+
+  it("transcript with no tag -> returns undefined", async () => {
+    const filePath = writeTranscript([
+      userText("just a regular message"),
+      userText("another message"),
+    ]);
+    const result = await resolveActiveSlashCommandAllowedTools(filePath);
+    expect(result).toBeUndefined();
   });
 });

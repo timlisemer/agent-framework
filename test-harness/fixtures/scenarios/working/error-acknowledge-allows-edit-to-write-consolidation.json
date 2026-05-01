@@ -68,5 +68,5 @@
     "notes": "Correct behavior: Edit→Write on the same file after a drift Warning is the legitimate consolidation/corrective action. drift-detect at level=1 with allowedSinceLevelChange<3 already allows it; error-acknowledge must not re-deny as unrelated work. Reproduces live 'Error: The error was ignored -- AI proceeded with unrelated work' deny."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-30T13:57:34.668Z"
+  "expectation_reality_last_run_at": "2026-05-01T10:19:13.271Z"
 }

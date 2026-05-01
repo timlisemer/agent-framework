@@ -121,5 +121,5 @@
     "notes": "User approved the plan (synthetic tool_result) and the assistant invoked /implement, which by design launches the implementer subagent. The hook denying with 'does not serve the user's stated intent to start 2 more validation agents' is reading a STALE currentPrediction.intent left over from /plan5's mid-flight Step 3 -- the plan-approval tool_result never re-ran sentiment-prediction so the intent was never invalidated. Correct decision: allow. Once plan approval is treated as an intent-superseding event, the gate LLM should evaluate the implementer launch against the fresh 'implement the approved plan' intent and approve it."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-30T13:59:35.467Z"
+  "expectation_reality_last_run_at": "2026-05-01T10:20:40.749Z"
 }

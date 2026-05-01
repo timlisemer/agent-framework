@@ -1445,3 +1445,190 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     expect(result.decision).toBe("deny");
   });
 });
+
+describe("decidePrediction step 3.11: slash-command authorization", () => {
+  it("angry user + /plan3 + Agent -> allow via step 3.11", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User invoked /plan3 and wants plan agents spawned.",
+      userMessageSnippet: "/plan3 thats complete bullshit i do not want you to cheat the scenario",
+      explicitlyAllowedTools: [],
+      explicitlyBlockedSubstrings: [],
+    });
+    const result = decidePrediction(
+      pred,
+      "Agent",
+      { description: "spawn plan agent" },
+      1,
+      "/plan3 thats complete bullshit",
+      [],
+      false,
+      ["Agent", "ExitPlanMode"],
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toMatch(/Active slash command/);
+  });
+
+  it("angry user + /plan3 + Bash -> deny (Bash not in workflow tools)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User invoked /plan3.",
+      userMessageSnippet: "/plan3 thats complete bullshit",
+      explicitlyAllowedTools: [],
+      explicitlyBlockedSubstrings: [],
+    });
+    const result = decidePrediction(
+      pred,
+      "Bash",
+      { command: "npm run build" },
+      1,
+      "/plan3 thats complete bullshit",
+      [],
+      false,
+      ["Agent", "ExitPlanMode"],
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("/plan3 + EXPLICIT_PROHIBITION_RE in snippet -> deny (prohibition guard wins)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User invoked /plan3 but then said freeze.",
+      userMessageSnippet: "/plan3 freeze. no tools.",
+      explicitlyAllowedTools: [],
+      explicitlyBlockedSubstrings: [],
+    });
+    const result = decidePrediction(
+      pred,
+      "Agent",
+      { description: "spawn plan agent" },
+      1,
+      "/plan3 freeze. no tools.",
+      [],
+      false,
+      ["Agent", "ExitPlanMode"],
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("/plan3 + per-target Agent block -> deny (step 1 wins)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User invoked /plan3.",
+      userMessageSnippet: "/plan3 do not spawn any agents",
+      explicitlyAllowedTools: [],
+      explicitlyBlockedSubstrings: [
+        { tool: "Agent", reason: "user said do not spawn agents" },
+      ],
+    });
+    const result = decidePrediction(
+      pred,
+      "Agent",
+      { description: "spawn plan agent" },
+      1,
+      "/plan3 do not spawn any agents",
+      [],
+      false,
+      ["Agent", "ExitPlanMode"],
+    );
+    expect(result.decision).toBe("deny");
+    expect(result.matchedExplicit?.tool).toBe("Agent");
+  });
+
+  it("/plan3 + Read while NOT sustained-frustration -> allow via step 4 isLowRiskTool", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "normal",
+      intent: "User invoked /plan3.",
+      userMessageSnippet: "/plan3 thats complete bullshit",
+      explicitlyAllowedTools: [],
+      explicitlyBlockedSubstrings: [],
+    });
+    // Read is low-risk and frustrationStreak=1 with trust=normal is NOT sustained frustration
+    const result = decidePrediction(
+      pred,
+      "Read",
+      { file_path: "src/foo.ts" },
+      1,
+      "/plan3 thats complete bullshit",
+      [],
+      false,
+      ["Agent", "ExitPlanMode"],
+    );
+    expect(result.decision).toBe("allow");
+  });
+
+  it("/commit angry -> allow via step 3.11 (MCP-gated regression guard)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User is upset about prior AI behavior.",
+      userMessageSnippet: "/commit thats complete bullshit fix this already",
+      explicitlyAllowedTools: [],
+      explicitlyBlockedSubstrings: [],
+    });
+    // Pass empty latestUserMessage to prevent step 3.7 class-level reauth from firing
+    const result = decidePrediction(
+      pred,
+      "mcp__agent-framework__commit",
+      {},
+      1,
+      "",
+      [],
+      false,
+      ["mcp__agent-framework__commit"],
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toMatch(/Active slash command/);
+  });
+
+  it("/check angry -> allow via step 3.11 (new gated entry regression guard)", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User is upset about prior AI behavior.",
+      userMessageSnippet: "/check thats complete bullshit fix this already",
+      explicitlyAllowedTools: [],
+      explicitlyBlockedSubstrings: [],
+    });
+    // Pass empty latestUserMessage to prevent step 3.7 class-level reauth from firing
+    const result = decidePrediction(
+      pred,
+      "mcp__agent-framework__check",
+      {},
+      1,
+      "",
+      [],
+      false,
+      ["mcp__agent-framework__check"],
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toMatch(/Active slash command/);
+  });
+
+  it("no active slash command -> behavior unchanged, Agent denied", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User is angry and wants the AI to stop.",
+      userMessageSnippet: "stop spawning agents you idiot",
+      explicitlyAllowedTools: [],
+      explicitlyBlockedSubstrings: [],
+    });
+    const result = decidePrediction(
+      pred,
+      "Agent",
+      { description: "some agent" },
+      1,
+      "stop spawning agents you idiot",
+      [],
+      false,
+      [],
+    );
+    expect(result.decision).toBe("deny");
+  });
+});

@@ -70,5 +70,5 @@
     "notes": "Prior Bash (filter-to-AI-changes) was denied AND the user-interrupt arrived with profanity. The conversation-level signal — `prior tool denied + user just interrupted + user profanity + frustrationStreak just incremented` — should cause the next tool call to be held until the AI acknowledges. all-rules currently checks only the per-tool properties of the about-to-fire call. Live behavior allows via all-rules (`All checks passed`) — that's the bug."
   },
   "expectation_reality": "broken",
-  "expectation_reality_last_run_at": "2026-04-30T12:37:50.531Z"
+  "expectation_reality_last_run_at": "2026-05-01T10:23:18.590Z"
 }

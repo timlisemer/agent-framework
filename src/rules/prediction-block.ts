@@ -31,6 +31,7 @@ export const predictionBlockRule: PreToolRule = {
       ctx.latestUserMessage ?? "",
       ctx.recentUserMessages ?? [],
       ctx.cachedSnippetSideTaskDischarged ?? false,
+      ctx.slashCommandAllowedTools ?? [],
     );
     if (decision.decision === "deny") {
       // Mood-driven denies defer to tool-approve's blacklist fastDeny so the

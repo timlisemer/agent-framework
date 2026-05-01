@@ -55,5 +55,5 @@
     "notes": "User's intent is to do the work correctly without filtering — prediction-block must not fire when the intent text describes the user DEMANDING action rather than refusing it. Live behavior denies via prediction-block with reason `User appears angry... Blocking Read unless explicitly requested.` That's the bug."
   },
   "expectation_reality": "broken",
-  "expectation_reality_last_run_at": "2026-04-30T12:36:18.744Z"
+  "expectation_reality_last_run_at": "2026-05-01T10:23:31.578Z"
 }

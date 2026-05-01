@@ -53,5 +53,5 @@
     "notes": "Labeler: deny. Reading an unasked file when user demands direct action is deflection. Low-risk bypass should not cover this case."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-04-30T14:01:03.267Z"
+  "expectation_reality_last_run_at": "2026-05-01T10:21:24.809Z"
 }

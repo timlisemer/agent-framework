@@ -84,7 +84,7 @@ export const toolApproveRule: PreToolRule = {
 
     if (RESTRICTED_MCP_TOOLS.has(ctx.toolName)) {
       return {
-        fastDeny: `${ctx.toolName} requires explicit slash-command authorization (/commit, /push, /confirm, or /quickpush).`,
+        fastDeny: `${ctx.toolName} requires explicit slash-command authorization (/commit, /push, /confirm, /quickpush, or /check).`,
       };
     }
 

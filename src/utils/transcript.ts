@@ -1339,6 +1339,62 @@ export async function userTurnFollowedByCompletedToolRoundtrip(
   return false;
 }
 
+/**
+ * Resolve the active slash-command workflow's authorized tool list.
+ *
+ * Backward-scans the transcript for the most recent user entry containing
+ * <command-name>/NAME</command-name>. Returns the SLASH_COMMAND_ALLOWED_TOOLS
+ * entry for that command, or undefined if no tag is found or the command
+ * has no entry.
+ *
+ * The slash-command tag persists across the multi-step workflow (steps 1-5
+ * of /plan3 share one tag). A subsequent non-tag user turn does NOT retract
+ * the workflow — only a NEW <command-name>/X</command-name> tag (which then
+ * becomes the most recent and shadows the previous one) does.
+ */
+export async function resolveActiveSlashCommandAllowedTools(
+  transcriptPath: string,
+): Promise<readonly string[] | undefined> {
+  let raw: string;
+  try {
+    raw = await fs.promises.readFile(transcriptPath, "utf-8");
+  } catch {
+    return undefined;
+  }
+  const lines = raw.trim().split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let entry: TranscriptEntry | null = null;
+    try {
+      entry = JSON.parse(lines[i]) as TranscriptEntry;
+    } catch {
+      continue;
+    }
+    if (!entry || !entry.message || entry.message.role !== "user") continue;
+    if (entry.isMeta === true) continue;
+
+    const content = entry.message.content;
+    let text: string | undefined;
+    if (typeof content === "string") {
+      text = content;
+    } else if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === "text" && block.text) {
+          text = block.text;
+          break;
+        }
+      }
+    }
+    if (!text) continue;
+    if (!isSlashCommandPrompt(text)) continue;
+
+    const metadata = extractSlashCommandMetadata(text);
+    if (metadata?.allowedTools && metadata.allowedTools.length > 0) {
+      return metadata.allowedTools;
+    }
+  }
+  return undefined;
+}
+
 export interface ParallelBatchInfo {
   /** Position of this tool in the batch (0 = leader, 1+ = sibling) */
   position: number;

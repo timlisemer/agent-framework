@@ -20,6 +20,7 @@ import {
   userTurnIsFreshSinceLockout,
   readRecentUserMessagesArray,
   userTurnFollowedByCompletedToolRoundtrip,
+  resolveActiveSlashCommandAllowedTools,
   type ParallelBatchInfo,
 } from "../utils/transcript.js";
 import {
@@ -361,6 +362,10 @@ async function main() {
       ).catch(() => false);
   }
 
+  const slashCommandAllowedTools = await resolveActiveSlashCommandAllowedTools(
+    input.transcript_path,
+  ).catch(() => undefined);
+
   // Build rule context
   const ctx: RuleContext = {
     toolName,
@@ -379,6 +384,7 @@ async function main() {
     latestUserMessage,
     recentUserMessages,
     cachedSnippetSideTaskDischarged,
+    slashCommandAllowedTools,
   };
 
   // Run all rules (respond-first, low-risk, plan-mode-block, subagent,
