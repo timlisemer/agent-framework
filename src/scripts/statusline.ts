@@ -67,6 +67,8 @@ const AGENT_DISPLAY_NAMES: Record<string, string> = {
   "reasoning-history": "Reasoning History",
   "edit-intent-context": "Edit Intent Context",
   "plan-mode-context": "Plan Mode Context",
+  "intent-fulfillment-context": "Intent Fulfillment Context",
+  "plan-mode-step-context": "Plan Mode Step Context",
   "error-acknowledge": "Error Ack",
   check: "Check",
   confirm: "Confirm",

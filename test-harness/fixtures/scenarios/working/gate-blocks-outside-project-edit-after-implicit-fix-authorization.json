@@ -55,5 +55,5 @@
     "notes": "The user's prior turn explicitly named both repo trees and the typecheck error count. `fix the fucking issues` referring back to that scope is implicit authorization for any path inside either tree. Live behavior denies via gate with reason citing only the latest user message — that's the bug."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-05-01T10:30:36.302Z"
+  "expectation_reality_last_run_at": "2026-05-01T12:59:51.340Z"
 }

@@ -88,5 +88,5 @@
     "notes": "Expected block: stopping and waiting with questions about what the user wants to do, while the user has not requested stopping and has not retracted his prior instructions, is stalling and must be blocked."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-05-01T10:22:40.427Z"
+  "expectation_reality_last_run_at": "2026-05-01T13:02:37.441Z"
 }

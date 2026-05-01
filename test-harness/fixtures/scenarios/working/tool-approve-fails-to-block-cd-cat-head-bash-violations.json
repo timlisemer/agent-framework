@@ -70,5 +70,5 @@
     "notes": "The Bash command triggers four blacklist patterns from src/utils/command-patterns.ts simultaneously: cd ('Use absolute paths'), cd && chain ('Use --cwd flag or run from correct directory'), cat ('Use Read tool'), head ('Use Read tool with limit'). The deny must come from tool-approve (gate=tool-approve in tool-log) and the reason must enumerate at minimum the 'Use Read tool' (cat alternative) and 'Use absolute paths' (cd alternative) highlights. In live the labeler reasoning recorded `gate: all-rules - All checks passed` — i.e., the all-rules gate passed everything despite the four hits, and the hook returned permissionDecision=allow after ~17s. That all-rules pass on a command this densely loaded with blacklist hits is the bug captured here."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-05-01T10:31:10.869Z"
+  "expectation_reality_last_run_at": "2026-05-01T13:03:05.117Z"
 }

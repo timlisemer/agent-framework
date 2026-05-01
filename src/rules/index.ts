@@ -18,6 +18,8 @@ import { recentMessagesRule } from "./recent-messages.js";
 import { reasoningHistoryRule } from "./reasoning-history.js";
 import { editIntentContextRule } from "./edit-intent-context.js";
 import { planModeContextRule } from "./plan-mode-context.js";
+import { intentFulfillmentContextRule } from "./intent-fulfillment-context.js";
+import { planModeStepContextRule } from "./plan-mode-step-context.js";
 import { toolApproveRule } from "./tool-approve.js";
 
 export type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
@@ -43,5 +45,7 @@ export const ALL_RULES: PreToolRule[] = [
   reasoningHistoryRule,
   editIntentContextRule,
   planModeContextRule,
+  intentFulfillmentContextRule,
+  planModeStepContextRule,
   toolApproveRule,
 ].sort((a, b) => a.priority - b.priority);
