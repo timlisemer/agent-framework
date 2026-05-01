@@ -22,16 +22,7 @@
  * PreToolUse Hook (`src/hooks/pre-tool-use.ts`):
  * - tool-appeal: Reviews denials with user context (haiku)
  * - plan-validate: Checks plan drift against user request (sonnet)
- * - style-drift: Detects unrequested style changes (haiku)
- * - response-align: Checks preamble + tool call alignment with user request (sonnet)
- *
- * Stop Hook (`src/hooks/stop-response-check.ts`):
- * - response-align (stop): Checks stop response for plain text questions, unanswered questions
  */
 
 export { appealHelper } from './tool-appeal.js';
 export { checkPlanIntent } from './plan-validate.js';
-export { checkStyleDrift } from './style-drift.js';
-export {
-  checkStopResponseAlignment,
-} from './response-align.js';

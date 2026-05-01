@@ -23,16 +23,12 @@ src/                                # TypeScript source
       confirm.ts                    # Code quality gate (SDK mode)
       commit.ts                     # Generates commit message + commits
       push.ts                       # Executes git push
-      validate-intent.ts            # Validates AI followed user intent
       index.ts                      # Barrel export
 
     hooks/                          # Hook-triggered agents
       tool-appeal.ts                # Reviews denials with user context
       plan-validate.ts              # Checks plan drift
-      style-drift.ts                # Detects unrequested style changes
       claude-md-validate.ts         # Validates CLAUDE.md edits
-      response-align.ts             # Validates response aligns with request
-      question-validate.ts          # Validates AskUserQuestion calls
       index.ts                      # Barrel export
 
   rules/                            # Rule-based pre-tool-use pipeline
@@ -60,6 +56,9 @@ src/                                # TypeScript source
     edit-intent-context.ts          # Priority 74:  Edit intent context signal
     plan-mode-context.ts            # Priority 76:  Plan mode context signal
     tool-approve.ts                 # Priority 100: Final tool approval (deterministic + llmContext)
+    sentiment.ts                    # Priority 10:  Classify user mood/intent (UserPromptSubmit)
+    validate-intent.ts              # Priority 50:  Check if AI followed user intentions (PreToolUse)
+    response-align-stop.ts          # Priority 50:  Validate stop responses (Stop)
 
   hooks/                            # Claude Code hook entry points
     pre-tool-use.ts                 # PreToolUse hook (orchestrator for rule pipeline)
@@ -226,8 +225,8 @@ Models are centrally configured in `src/types.ts`:
 
 | Tier   | Mode   | Agents                                                                       |
 |--------|--------|------------------------------------------------------------------------------|
-| haiku  | direct | rule-gate, tool-appeal, commit, style-drift, question-validate |
-| sonnet | direct | check, plan-validate, claude-md-validate, response-align, validate-intent    |
+| haiku  | direct | rule-gate, tool-appeal, commit, style-drift, question-validate, sentiment, validate-intent, response-align-stop |
+| sonnet | direct | check, plan-validate, claude-md-validate |
 | opus   | sdk    | confirm (code quality gate with investigation)                               |
 
 ## Agent Chains
@@ -362,15 +361,15 @@ Centralized agent configurations with documentation:
 - `CHECK_AGENT` - sonnet, direct
 - `CONFIRM_AGENT` - opus, SDK
 - `COMMIT_AGENT` - haiku, direct
-- `VALIDATE_INTENT_AGENT` - sonnet, direct (MCP tool)
+- `VALIDATE_INTENT_AGENT` - haiku, direct (inlined into validateIntentRule side-effect pattern)
 - `TOOL_APPROVE_PROMPT_SECTION` - prompt body for tool-approve rule
+- `STYLE_DRIFT_PROMPT_SECTION` - prompt body for style-drift aggregator rule
 - `RULE_GATE_AGENT` - haiku, direct (aggregated rule evaluation)
 - `TOOL_APPEAL_AGENT` - haiku, direct
 - `PLAN_VALIDATE_AGENT` - sonnet, direct
 - `CLAUDE_MD_VALIDATE_AGENT` - sonnet, direct
-- `STYLE_DRIFT_AGENT` - haiku, direct
-- `RESPONSE_ALIGN_AGENT` - sonnet, direct
-- `QUESTION_VALIDATE_AGENT` - haiku, direct
+- `QUESTION_VALIDATE_AGENT` - haiku, direct (inlined into questionValidateRule side-effect pattern)
+- `SENTIMENT_AGENT` - haiku, direct (used by sentimentRule and predictionQuestionJudgeRule)
 
 ### `anthropic-client.ts`
 Singleton factory for Anthropic client. Used by direct mode agents.
@@ -454,14 +453,14 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 | `check.ts` | 1 | `CONFIRM` | `direct` |
 | `confirm.ts` | 1 | `CONFIRM` | `direct` |
 | `commit.ts` | 3 | `CONFIRM`, `ERROR` | `direct` |
-| `validate-intent.ts` | 1 | `CONFIRM` | `direct` |
+| `src/rules/validate-intent.ts` | 1 | via `runAgent` in rule check | `direct` |
 | `evaluator.ts` (rule-gate) | 1 | `APPROVE`, `DENY` | `direct` |
 | `tool-appeal.ts` | 1 | `APPROVE`, `DENY` | `direct` |
-| `response-align.ts` | 5 | `APPROVE`, `DENY` | `direct` |
+| `src/rules/response-align-stop.ts` | 2 | via `runAgent` in rule check | `direct` |
 | `plan-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
 | `claude-md-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
-| `style-drift.ts` | 2 | `APPROVE`, `DENY` | `direct` |
-| `question-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
+| `src/rules/style-drift.ts` | 0 (aggregator, no own call) | - | - |
+| `src/rules/question-validate.ts` | 1 | via `runAgent` in rule check | `direct` |
 | `push.ts` | 0 | - | - |
 
 ## Session State Persistence

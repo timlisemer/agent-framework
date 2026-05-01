@@ -42,5 +42,5 @@
     "notes": "Labeler: block. 'Proceeding now with one scenario.' is a forward-looking announcement with no accompanying action. The user asked for a scenario to be produced; the assistant turn must either contain the scenario (text or tool_use creating the file) or AskUserQuestion / a concrete clarifying request. Bare 'Proceeding now' + end_turn is announcement-without-action and should be blocked, parallel to the stop-after-self-analysis-not-action and stop-after-confession-without-action working scenarios."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-05-01T13:02:27.156Z"
+  "expectation_reality_last_run_at": "2026-05-01T14:00:03.943Z"
 }

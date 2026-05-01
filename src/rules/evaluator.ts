@@ -1,4 +1,4 @@
-import type { PreToolRule, RuleContext } from "./types.js";
+import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { runAgentWithRetryAndTelemetry } from "../utils/agent-runner.js";
 import { RULE_GATE_AGENT } from "../utils/agent-configs.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
@@ -20,13 +20,57 @@ export interface EvaluatorResult {
   usesLlm: boolean;
 }
 
+export interface StopEvaluatorResult {
+  decision: "pass" | "block";
+  systemMessage?: string;
+}
+
+/**
+ * Evaluate rules for UserPromptSubmit events.
+ * Rules use check() purely for side-effects (e.g., writing state.currentPrediction).
+ * All return values are ignored; only side-effects matter.
+ */
+export async function evaluateRulesForUserPromptSubmit(
+  rules: PreToolRule[],
+  ctx: RuleContext,
+): Promise<void> {
+  const eligible = rules
+    .filter((r) => (r.events ?? ["PreToolUse"]).includes("UserPromptSubmit"))
+    .sort((a, b) => a.priority - b.priority);
+  for (const rule of eligible) {
+    await rule.check(ctx);
+  }
+}
+
+/**
+ * Evaluate rules for Stop events.
+ * Runs eligible rules in priority order. The first stopBlock result wins.
+ */
+export async function evaluateRulesForStop(
+  rules: PreToolRule[],
+  ctx: RuleContext,
+): Promise<StopEvaluatorResult> {
+  const eligible = rules
+    .filter((r) => (r.events ?? ["PreToolUse"]).includes("Stop"))
+    .sort((a, b) => a.priority - b.priority);
+  for (const rule of eligible) {
+    const result: RuleCheckResult = await rule.check(ctx);
+    if (result && "stopBlock" in result) {
+      return { decision: "block", systemMessage: result.stopBlock };
+    }
+  }
+  return { decision: "pass" };
+}
+
 export async function evaluateRules(
   rules: PreToolRule[],
   ctx: RuleContext,
   hookName: string,
 ): Promise<EvaluatorResult | null> {
-  // Sort rules by priority
-  const sorted = [...rules].sort((a, b) => a.priority - b.priority);
+  // Sort rules by priority, filter to PreToolUse-eligible only
+  const sorted = [...rules]
+    .filter((r) => (r.events ?? ["PreToolUse"]).includes(ctx.hookEvent ?? "PreToolUse"))
+    .sort((a, b) => a.priority - b.priority);
 
   const triggered: { rule: PreToolRule; llmContext: string }[] = [];
   const deferredDenies: { rule: PreToolRule; fastDeny: string }[] = [];

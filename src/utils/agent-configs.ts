@@ -14,18 +14,20 @@
  *
  * ## AGENT SUMMARY
  *
- * | Agent           | Tier   | Mode   | Purpose                                    |
- * |-----------------|--------|--------|--------------------------------------------|
- * | check           | sonnet | direct | Summarize linter/type-check results        |
- * | confirm         | opus   | sdk    | Quality gate with code investigation       |
- * | commit          | haiku  | direct | Generate commit messages                   |
- * | validate-intent | sonnet | direct | Check if AI followed user intentions       |
- * | rule-gate       | haiku  | direct | Aggregated rule evaluation for tool calls  |
- * | tool-appeal     | haiku  | direct | Review denied tool calls with user context |
- * | error-ack       | haiku  | direct | Validate error acknowledgment              |
- * | plan-validate   | sonnet | direct | Check plan alignment with user intent      |
- * | intent-validate | haiku  | direct | Detect off-topic AI behavior               |
- * | style-drift     | haiku  | direct | Verify regex-detected style changes        |
+ * | Agent                | Tier   | Mode   | Pattern        | Purpose                                          |
+ * |----------------------|--------|--------|----------------|--------------------------------------------------|
+ * | check                | sonnet | direct | mcp            | Summarize linter/type-check results              |
+ * | confirm              | opus   | sdk    | mcp            | Quality gate with code investigation             |
+ * | commit               | haiku  | direct | mcp            | Generate commit messages                         |
+ * | validate-intent      | haiku  | direct | side-effect    | Check if AI followed user intentions (PreToolUse)|
+ * | rule-gate            | haiku  | direct | aggregator     | Aggregated rule evaluation for tool calls        |
+ * | tool-appeal          | haiku  | direct | hook           | Review denied tool calls with user context       |
+ * | error-ack            | haiku  | direct | aggregator     | Validate error acknowledgment                    |
+ * | plan-validate        | sonnet | direct | hook           | Check plan alignment with user intent            |
+ * | intent-validate      | haiku  | direct | aggregator     | Detect off-topic AI behavior                     |
+ * | question-validate    | haiku  | direct | side-effect    | Validate AskUserQuestion calls (PreToolUse)      |
+ * | sentiment            | haiku  | direct | side-effect    | Classify user mood/intent (UserPromptSubmit)     |
+ * | response-align-stop  | haiku  | direct | side-effect    | Validate stop responses (Stop)                   |
  *
  * ## MODEL TIER GUIDELINES
  *
@@ -1124,68 +1126,6 @@ Examples of good BLOCK feedback:
 - "Complete the current task before asking about next steps"`,
 };
 
-/**
- * Style Drift Agent Configuration
- *
- * Verifies style change hints from regex detection.
- *
- * **Tier: haiku** - Must be fast (<100ms), simple approve/deny decision
- * **Mode: direct** - Style hints and content provided upfront
- *
- * This agent is called ONLY when regex detects potential style changes
- * (semicolons, trailing commas). Quote changes are handled by fast-path:
- * - Quote away from preference → Fast deny (no LLM)
- * - Quote toward preference → Fast approve (no LLM)
- *
- * The LLM verifies if detected style changes were user-requested.
- */
-export const STYLE_DRIFT_AGENT: Omit<AgentConfig, 'workingDir'> = {
-  name: 'style-drift',
-  tier: MODEL_TIERS.HAIKU,
-  mode: 'direct',
-  maxTokens: 500,
-  systemPrompt: `You verify style change hints from regex detection.
-
-## CONTEXT YOU RECEIVE
-
-1. STYLE CHANGES DETECTED: Regex-detected style differences (semicolons, trailing commas)
-2. STYLE PREFERENCES: From CLAUDE.md or defaults
-3. USER MESSAGES: Recent user context
-4. EDIT CONTENT: The old and new strings
-
-## YOUR JOB
-
-Verify if detected style changes are legitimate or unrequested drift.
-
-## APPROVE IF
-
-- User requested style/formatting changes ("clean up", "format", "fix style")
-- Style changes are part of functional changes (new code in different style is fine)
-- User's CLAUDE.md allows this style
-- The logic/semantics of code changed (not just cosmetic)
-- Mixed changes where style change accompanies logic change
-
-## DENY IF
-
-- Style changes are the ONLY modification (pure cosmetic drift)
-- No user request for formatting/cleanup in messages
-- Style goes against stated preferences
-
-## OUTPUT FORMAT (STRICT)
-
-Your response MUST start with EXACTLY one of:
-
-APPROVE
-OR
-DENY: <specific issue> - revert to <original style>
-
-Examples:
-APPROVE
-DENY: semicolon removed without request - keep semicolons
-DENY: trailing comma added without request - remove trailing comma
-
-NO other text before the decision word.`,
-};
 
 /**
  * Validate Intent Agent Configuration
@@ -1193,7 +1133,7 @@ NO other text before the decision word.`,
  * Evaluates whether AI actions aligned with user's original request
  * and plan (if one exists).
  *
- * **Tier: sonnet** - Detailed analysis of intent vs execution
+ * **Tier: haiku** - Downgraded from sonnet; inlined into validateIntentRule side-effect pattern
  * **Mode: direct** - All context provided upfront (transcript + diff + plan)
  *
  * Detects:
@@ -1204,7 +1144,7 @@ NO other text before the decision word.`,
  */
 export const VALIDATE_INTENT_AGENT: Omit<AgentConfig, "workingDir"> = {
   name: "validate-intent",
-  tier: MODEL_TIERS.SONNET,
+  tier: MODEL_TIERS.HAIKU,
   mode: "direct",
   maxTokens: 1500,
   systemPrompt: `You are an intent alignment validator. Your job is to determine if the AI correctly followed the user's intentions.
@@ -1458,3 +1398,54 @@ QUOTED/PASTED CONTENT: The user's message may contain pasted CLI output, logs, o
 
 Agent/Task tool prompts: The AI assembles prompts for subagents by combining user context with operational instructions (repo descriptions, tool guidance, workspace paths). This is NORMAL subagent dispatch, not "adding to the user's message." Only DENY Agent/Task if the subagent's PURPOSE contradicts user intent, not because the prompt contains standard operational context.`,
 };
+
+/**
+ * Style Drift Prompt Section
+ *
+ * Verbatim copy of the style-drift rule's prompt body, used as the
+ * promptSection for rule-gate aggregator integration.
+ *
+ * Detects unrequested cosmetic/style changes (semicolons, trailing commas,
+ * quote style, etc.) that were not explicitly requested by the user.
+ */
+export const STYLE_DRIFT_PROMPT_SECTION: string = `You verify style change hints from regex detection.
+
+## CONTEXT YOU RECEIVE
+
+1. STYLE CHANGES DETECTED: Regex-detected style differences (semicolons, trailing commas)
+2. STYLE PREFERENCES: From CLAUDE.md or defaults
+3. USER MESSAGES: Recent user context
+4. EDIT CONTENT: The old and new strings
+
+## YOUR JOB
+
+Verify if detected style changes are legitimate or unrequested drift.
+
+## APPROVE IF
+
+- User requested style/formatting changes ("clean up", "format", "fix style")
+- Style changes are part of functional changes (new code in different style is fine)
+- User's CLAUDE.md allows this style
+- The logic/semantics of code changed (not just cosmetic)
+- Mixed changes where style change accompanies logic change
+
+## DENY IF
+
+- Style changes are the ONLY modification (pure cosmetic drift)
+- No user request for formatting/cleanup in messages
+- Style goes against stated preferences
+
+## OUTPUT FORMAT (STRICT)
+
+Your response MUST start with EXACTLY one of:
+
+APPROVE
+OR
+DENY: <specific issue> - revert to <original style>
+
+Examples:
+APPROVE
+DENY: semicolon removed without request - keep semicolons
+DENY: trailing comma added without request - remove trailing comma
+
+NO other text before the decision word.`;

@@ -29,6 +29,5 @@ export { runCheckAgent } from './check.js';
 export { runConfirmAgent } from './confirm.js';
 export { runCommitAgent } from './commit.js';
 export { runPushAgent } from './push.js';
-export { runValidateIntentAgent } from './validate-intent.js';
 export { handleTestHarnessLabeler } from './test-harness-labeler.js';
 export { handleTestHarnessTester } from './test-harness-tester.js';

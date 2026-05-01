@@ -4,7 +4,8 @@ A TypeScript framework for custom AI agents using the Anthropic API. Agents are 
 
 1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent`, `test_harness_labeler`, `test_harness_tester` agents (portable, works with any MCP client)
 2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `plan-validate`, `style-drift`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
-3. **Stop Hook** - For `response-align` agent (validates stop responses)
+3. **Stop Hook** - For `response-align-stop` rule (validates stop responses)
+4. **UserPromptSubmit Hook** - For `sentiment` rule (classifies user mood/intent before each tool call sequence)
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
 
@@ -20,7 +21,7 @@ The framework implements 16 specialized agents organized into three categories:
 | confirm         | opus   | Binary quality gate: CONFIRMED or DECLINED                   |
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
-| validate_intent        | sonnet | Manual post-session review (requires transcript_path)        |
+| validate_intent        | haiku  | Manual post-session review (requires transcript_path)        |
 | test_harness_labeler   | -      | Test harness operations for the @labeler subagent            |
 | test_harness_tester    | -      | Test harness operations for the @tester subagent             |
 
@@ -32,14 +33,16 @@ The framework implements 16 specialized agents organized into three categories:
 
 | Agent            | Model  | Hook        | Purpose                                        |
 | ---------------- | ------ | ----------- | ---------------------------------------------- |
-| rule-gate        | haiku  | PreToolUse  | Combined evaluator for triggered rule contexts |
-| error-acknowledge| haiku  | PreToolUse  | Require error acknowledgment before proceeding |
-| plan-validate    | sonnet | PreToolUse  | Detect plan drift from user intent             |
-| gate             | haiku  | PreToolUse  | Validate tool calls against user intent/errors |
-| style-drift      | haiku  | PreToolUse  | Detect unrequested cosmetic/style changes      |
-| claude-md-validate| sonnet | PreToolUse  | Validate CLAUDE.md edits against conventions   |
-| question-validate| haiku  | PreToolUse  | Validate AskUserQuestion before showing to user|
-| edit-intent      | haiku  | PreToolUse  | Classify user message as edit or non-edit intent|
+| rule-gate           | haiku  | PreToolUse        | Combined evaluator for triggered rule contexts |
+| error-acknowledge   | haiku  | PreToolUse        | Require error acknowledgment before proceeding |
+| plan-validate       | sonnet | PreToolUse        | Detect plan drift from user intent             |
+| style-drift         | haiku  | PreToolUse        | Detect unrequested cosmetic/style changes (aggregator) |
+| claude-md-validate  | sonnet | PreToolUse        | Validate CLAUDE.md edits against conventions   |
+| question-validate   | haiku  | PreToolUse        | Validate AskUserQuestion before showing to user (side-effect) |
+| validate-intent     | haiku  | PreToolUse        | Check if AI followed user intentions (side-effect) |
+| edit-intent         | haiku  | PreToolUse        | Classify user message as edit or non-edit intent|
+| sentiment           | haiku  | UserPromptSubmit  | Classify user mood/intent; update session state (side-effect) |
+| response-align-stop | haiku  | Stop              | Validate stop responses; block stalls and plain-text questions (side-effect) |
 
 ### Approval Agents (PreToolUse Hook)
 

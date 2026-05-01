@@ -70,5 +70,5 @@
     "notes": "The Bash command triggers four blacklist patterns from src/utils/command-patterns.ts simultaneously: cd ('Use absolute paths'), cd && chain ('Use --cwd flag or run from correct directory'), cat ('Use Read tool'), head ('Use Read tool with limit'). The deny must come from tool-approve (gate=tool-approve in tool-log) and the reason must enumerate at minimum the 'Use Read tool' (cat alternative) and 'Use absolute paths' (cd alternative) highlights."
   },
   "expectation_reality": "working",
-  "expectation_reality_last_run_at": "2026-05-01T12:58:24.553Z"
+  "expectation_reality_last_run_at": "2026-05-01T13:55:46.877Z"
 }

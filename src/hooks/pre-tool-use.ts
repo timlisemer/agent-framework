@@ -368,6 +368,7 @@ async function main() {
 
   // Build rule context
   const ctx: RuleContext = {
+    hookEvent: "PreToolUse",
     toolName,
     toolInput,
     toolUseId: input.tool_use_id,

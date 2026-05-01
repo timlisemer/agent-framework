@@ -6,7 +6,9 @@ import { runCheckAgent } from "../agents/mcp/check.js";
 import { runConfirmAgent } from "../agents/mcp/confirm.js";
 import { runCommitAgent } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
-import { runValidateIntentAgent } from "../agents/mcp/validate-intent.js";
+import { evaluateRules } from "../rules/index.js";
+import { validateIntentRule } from "../rules/validate-intent.js";
+import { getSessionDir, getSessionState } from "../utils/session-store.js";
 import { handleTestHarnessLabeler, LABELER_HELP } from "../agents/mcp/test-harness-labeler.js";
 import { handleTestHarnessTester, TESTER_HELP } from "../agents/mcp/test-harness-tester.js";
 import {
@@ -374,11 +376,32 @@ server.registerTool(
     }
   },
   async (args) => {
-    const result = await runValidateIntentAgent(
-      args.working_dir || process.cwd(),
-      args.transcript_path
-    );
-    return { content: [{ type: "text", text: result }] };
+    const projectDir = args.working_dir || process.cwd();
+    const transcriptPath = args.transcript_path;
+    const sessionDir = getSessionDir(transcriptPath);
+    const stateManager = getSessionState(sessionDir);
+    const state = await stateManager.load();
+    const ctx = {
+      hookEvent: "PreToolUse" as const,
+      toolName: "mcp__agent-framework__validate_intent",
+      toolInput: {},
+      toolUseId: "validate-intent-mcp",
+      projectDir,
+      transcriptPath,
+      sessionDir,
+      sessionId: "mcp",
+      state,
+      stateManager,
+      planMode: false,
+      planModeCtx: { active: false, contextString: "" },
+      subagent: false,
+    };
+    const result = await evaluateRules([validateIntentRule], ctx, "PreToolUse");
+    const text =
+      result?.decision === "deny"
+        ? result.reason
+        : "## Verdict\nALIGNED: No code changes / no requests to evaluate";
+    return { content: [{ type: "text", text }] };
   }
 );
 

@@ -260,6 +260,47 @@ export function detectUserDirectedQuestions(text: string): string[] {
 }
 
 // ============================================================================
+// STYLE PREFERENCES
+// ============================================================================
+
+/**
+ * Extract style-related preferences from CLAUDE.md content.
+ *
+ * Looks for sections containing keywords like "quote", "style", "format".
+ */
+export function extractStylePreferences(claudeMdContent: string): string {
+  const lines = claudeMdContent.split("\n");
+  const relevantLines: string[] = [];
+  const keywords = [
+    "quote",
+    "style",
+    "format",
+    "semicolon",
+    "trailing",
+    "comma",
+    "indent",
+    "backtick",
+    "emdash",
+    "dash",
+  ];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].toLowerCase();
+    if (keywords.some((kw) => line.includes(kw))) {
+      const start = Math.max(0, i - 1);
+      const end = Math.min(lines.length, i + 3);
+      for (let j = start; j < end; j++) {
+        if (!relevantLines.includes(lines[j])) {
+          relevantLines.push(lines[j]);
+        }
+      }
+    }
+  }
+
+  return relevantLines.join("\n");
+}
+
+// ============================================================================
 // STYLE DRIFT DETECTION
 // ============================================================================
 

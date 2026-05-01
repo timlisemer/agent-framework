@@ -21,9 +21,12 @@ import { planModeContextRule } from "./plan-mode-context.js";
 import { intentFulfillmentContextRule } from "./intent-fulfillment-context.js";
 import { planModeStepContextRule } from "./plan-mode-step-context.js";
 import { toolApproveRule } from "./tool-approve.js";
+import { validateIntentRule } from "./validate-intent.js";
+import { sentimentRule } from "./sentiment.js";
+import { responseAlignStopRule } from "./response-align-stop.js";
 
-export type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-export { evaluateRules } from "./evaluator.js";
+export type { PreToolRule, RuleContext, RuleCheckResult, HookEvent } from "./types.js";
+export { evaluateRules, evaluateRulesForUserPromptSubmit, evaluateRulesForStop } from "./evaluator.js";
 
 export const ALL_RULES: PreToolRule[] = [
   respondFirstRule,
@@ -48,4 +51,7 @@ export const ALL_RULES: PreToolRule[] = [
   intentFulfillmentContextRule,
   planModeStepContextRule,
   toolApproveRule,
+  validateIntentRule,
+  sentimentRule,
+  responseAlignStopRule,
 ].sort((a, b) => a.priority - b.priority);

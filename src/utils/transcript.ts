@@ -1559,3 +1559,13 @@ export async function detectParallelBatch(
     allIds: batchIds,
   };
 }
+
+/**
+ * Find the most recent message by transcript index.
+ * readTranscriptExact scans backwards, so array order doesn't match chronological order.
+ */
+export function getMostRecentMessage(messages: TranscriptMessage[]): TranscriptMessage {
+  return messages.reduce((latest, msg) =>
+    msg.index > latest.index ? msg : latest
+  );
+}

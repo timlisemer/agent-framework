@@ -3,64 +3,73 @@ import { initializeTelemetry } from "../telemetry/index.js";
 initializeTelemetry();
 
 import { type StopHookInput } from "@anthropic-ai/claude-agent-sdk";
-import { checkStopResponseAlignment } from "../agents/hooks/response-align.js";
 import { initRewindSession, detectRewind } from "../utils/rewind-cache.js";
 import { setTranscriptPath } from "../utils/execution-context.js";
 import { writeTool } from "../utils/synthetic.js";
 import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
-import { isPlanModeActive, isPlanModeFromInput } from "../utils/plan-mode-detector.js";
+import { isPlanModeActive, isPlanModeFromInput, getPlanModeContext } from "../utils/plan-mode-detector.js";
+import { isSubagent } from "../utils/subagent-detector.js";
+import { readTranscriptExact } from "../utils/transcript.js";
+import { FIRST_RESPONSE_STOP_COUNTS } from "../utils/transcript-presets.js";
+import { evaluateRulesForStop, ALL_RULES } from "../rules/index.js";
+import { getMostRecentMessage } from "../rules/response-align-stop.js";
+import type { RuleContext } from "../rules/types.js";
 
 /**
  * Stop Hook: Response Check
  *
  * This hook runs when the AI stops (text-only response, no tool calls).
- * It detects when the AI:
- * - Uses plain text questions instead of AskUserQuestion tool
- * - Asks for plan approval in text instead of ExitPlanMode tool
- * - Doesn't answer the user's question
- * - Stops without clear reason
- *
- * If detected, it injects a system message to course-correct the AI.
+ * Bootstraps the rule pipeline for Stop-eligible rules (responseAlignStopRule).
  */
 
 async function main() {
   const input = await readStdinJson<StopHookInput>();
 
-  // Set session and check for rewind
   setTranscriptPath(input.transcript_path);
   const sessionDir = getSessionDir(input.transcript_path);
   initRewindSession(sessionDir);
-  const rewound = await detectRewind(input.transcript_path);
 
-  if (rewound) {
-    // After rewind, don't inject errors - let AI continue fresh
+  if (await detectRewind(input.transcript_path)) {
     exitAfterFlush(0);
     return;
   }
 
-  const planMode = input.permission_mode !== undefined
-    ? isPlanModeFromInput(input)
-    : isPlanModeActive(input.transcript_path);
+  const stateManager = getSessionState(sessionDir);
+  const state = await stateManager.load();
 
-  const state = await getSessionState(sessionDir).load();
-  const result = await checkStopResponseAlignment(
-    input.transcript_path,
-    process.env.CLAUDE_PROJECT_DIR || process.cwd(),
-    "Stop",
+  const planMode =
+    input.permission_mode !== undefined
+      ? isPlanModeFromInput(input)
+      : isPlanModeActive(input.transcript_path);
+
+  const tx = await readTranscriptExact(input.transcript_path, FIRST_RESPONSE_STOP_COUNTS);
+  if (tx.user.length === 0 || tx.assistant.length === 0) {
+    exitAfterFlush(0);
+    return;
+  }
+
+  const ctx: RuleContext = {
+    hookEvent: "Stop",
+    toolName: "",
+    projectDir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
+    transcriptPath: input.transcript_path,
+    sessionDir,
+    sessionId: input.session_id,
+    state,
+    stateManager,
     planMode,
-    state.currentPrediction,
-    state.frustrationStreak ?? 0,
-  );
+    planModeCtx: getPlanModeContext(planMode),
+    subagent: isSubagent(input.transcript_path),
+    assistantText: getMostRecentMessage(tx.assistant).content,
+    userText: getMostRecentMessage(tx.user).content,
+  };
 
-  if (!result.approved && result.systemMessage) {
-    await writeTool(input.transcript_path, input.session_id, "stop-hook", result.systemMessage!);
+  const result = await evaluateRulesForStop(ALL_RULES, ctx);
 
-    const output = JSON.stringify({
-      decision: "block",
-      reason: result.systemMessage,
-    });
-    exitAfterFlush(0, output);
+  if (result.decision === "block" && result.systemMessage) {
+    await writeTool(input.transcript_path, input.session_id, "response-align-stop", result.systemMessage);
+    exitAfterFlush(0, JSON.stringify({ decision: "block", reason: result.systemMessage }));
     return;
   }
 

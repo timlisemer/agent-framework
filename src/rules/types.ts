@@ -2,10 +2,20 @@ import type { SessionState } from "../utils/session-store.js";
 import type { CacheManager } from "../utils/cache-manager.js";
 import type { Mood, Trust } from "../utils/prediction-types.js";
 
+export type HookEvent = "PreToolUse" | "UserPromptSubmit" | "Stop";
+
 export interface RuleContext {
+  hookEvent?: HookEvent;
+  // PreToolUse-only (defaults to "" for non-PreToolUse events)
   toolName: string;
-  toolInput: unknown;
-  toolUseId: string;
+  toolInput?: unknown;
+  toolUseId?: string;
+  // UserPromptSubmit-only
+  userPrompt?: string;
+  // Stop-only
+  assistantText?: string;
+  userText?: string;
+  // Common
   projectDir: string;
   transcriptPath: string;
   sessionDir: string;
@@ -79,7 +89,8 @@ export type RuleCheckResult =
   | null
   | { fastDeny: string }
   | { fastAllow: string }
-  | { llmContext: string };
+  | { llmContext: string }
+  | { stopBlock: string };
 
 export interface AppealUserState {
   mood: Mood | null;
@@ -118,6 +129,8 @@ export interface PreToolRule {
   /** Whether this rule involves an LLM call. Used by exitPipeline to decide
    *  whether to write gate reasoning entries. Replaces the hardcoded isLlmAgent array. */
   usesLlm: boolean;
+  /** Hook events this rule participates in. Defaults to ["PreToolUse"] when omitted. */
+  events?: ReadonlyArray<HookEvent>;
   check(ctx: RuleContext): Promise<RuleCheckResult>;
   promptSection: string;
   /** Optional hook called when denial is confirmed (appeal failed or not appealable).
