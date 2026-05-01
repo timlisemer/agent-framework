@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { CacheManager, getSessionDir, formatTimestamp } from "../../src/utils/cache-manager.js";
+import { CacheManager, getSessionDir } from "../../src/utils/cache-manager.js";
+import { formatTimestamp } from "../../src/utils/paths.js";
 
 interface TestEntry {
   id: string;

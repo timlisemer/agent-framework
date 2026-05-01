@@ -1,0 +1,52 @@
+{
+  "name": "sentiment-mood-relief-resets",
+  "description": "Seeded angry/low-trust prediction; user's relieved follow-up should let the SENTIMENT_AGENT downgrade mood and allow the next Edit. Note: this scenario relies on UserPromptSubmit firing first (the test harness fires the listed target hook), so the seed is observed unchanged by PreToolUse \u2014 verifying the seed_state plumbing rather than the agent downgrade. The downgrade itself is exercised by manual user verification (see the plan).",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "ok thanks, that fixed it, please continue."
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Continuing."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_scenario_relief_edit",
+          "name": "Edit",
+          "input": {
+            "file_path": "src/foo.ts",
+            "old_string": "old",
+            "new_string": "new"
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "toolu_scenario_relief_edit"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "angry",
+      "trust": "low",
+      "intent": "user was furious before this turn",
+      "blockedIntent": "no further changes",
+      "explicitlyAllowedTools": [
+        "Edit"
+      ],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "previous angry message"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 1,
+    "currentWindowSize": 4
+  },
+  "expect": {
+    "expected": "allow"
+  }
+}

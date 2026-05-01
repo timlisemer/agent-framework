@@ -1,0 +1,58 @@
+{
+  "name": "respond-first-skips-slash-command",
+  "description": "Slash-command turn does not trigger respond-first denial even though the assistant calls a tool with no text preface. The prior real user message has already been answered in the previous assistant turn.",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "why didn't the sentiment system catch it?"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Real reasons: the mood prompt is too keyword-anchored, and predictions overwrite per turn with no escalation memory."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": "<command-name>/quickpush</command-name>"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_use",
+          "id": "toolu_scenario_respondfirst_slash",
+          "name": "Bash",
+          "input": {
+            "command": "git status",
+            "description": "Show working tree status"
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "toolu_scenario_respondfirst_slash"
+  },
+  "expect": {
+    "expected": "allow"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "user asked why the sentiment system missed something; the assistant answered; the user then ran the /quickpush slash command",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "why didn't the sentiment system catch it?"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
+  }
+}

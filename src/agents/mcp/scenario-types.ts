@@ -214,25 +214,6 @@ export interface Scenario {
   name: string;
   /** Optional human description. Not scored. */
   description?: string;
-  /**
-   * Reflection of the most recent run against this scenario's declared
-   * expectations. `"working"` when `pass === true` (hook decision matched
-   * `expect`, and every `predictions` assertion passed); `"broken"`
-   * otherwise (including crash, malformed output, runner error). Absent
-   * on a brand-new scenario that has never executed; always populated by
-   * the runner afterwards. A `"broken"` reflection on a fixture in
-   * `working/` is a regression; a `"working"` reflection on a fixture in
-   * `broken/` or `todo/` is a promotion candidate.
-   */
-  expectation_reality?: "working" | "broken";
-  /**
-   * ISO-8601 UTC timestamp of the most recent run's reflection. Kept in
-   * the fixture (rather than relying on `report-scenario.json` mtime) so
-   * the record travels with the fixture file under version control and
-   * is human-legible in the JSON itself. Absent on brand-new scenarios;
-   * always populated by the runner afterwards.
-   */
-  expectation_reality_last_run_at?: string;
   /** Transcript entries in order, oldest first. Must be non-empty. */
   transcript: ScenarioEntry[];
   /** Target hook + tool_use / prompt. */
@@ -424,13 +405,15 @@ export type ScenarioResult =
       /** Echoed scenario.env.llm_stubs for reproducibility. */
       llm_stubs_used?: Record<string, string>;
       /**
-       * Reflection of this run: `"working"` iff `pass === true`, else
-       * `"broken"`. Always populated — the runner sets it on every run
-       * (including crashes and malformed-output cases, which surface as
-       * `"broken"`). Persisted back to the scenario source file too.
+       * Reality of this run relative to where the fixture lives:
+       * - `"expected-to-pass"` when pass === true (fixture in expected-to-pass/ matched)
+       * - `"fixture-bug"` when pass === false and fixture is NOT in expected-to-fail/
+       * - `"expected-to-fail"` when pass === false and fixture IS in expected-to-fail/
+       * - `null` for home-source scenarios on failure (no folder context)
+       * Written to last-run.json sidecar, NOT back to the fixture file.
        */
-      expectation_reality: "working" | "broken";
-      /** ISO-8601 UTC timestamp of this run's reflection. */
+      expectation_reality: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null;
+      /** ISO-8601 UTC timestamp of this run's reality. */
       expectation_reality_last_run_at: string;
     }
   | {
@@ -448,13 +431,15 @@ export type ScenarioResult =
       /** Echoed scenario.env.llm_stubs for reproducibility. */
       llm_stubs_used?: Record<string, string>;
       /**
-       * Reflection of this run: `"working"` iff `pass === true`, else
-       * `"broken"`. Always populated — the runner sets it on every run
-       * (including crashes and malformed-output cases, which surface as
-       * `"broken"`). Persisted back to the scenario source file too.
+       * Reality of this run relative to where the fixture lives:
+       * - `"expected-to-pass"` when pass === true
+       * - `"fixture-bug"` when pass === false and not in expected-to-fail/
+       * - `"expected-to-fail"` when pass === false and in expected-to-fail/
+       * - `null` for home-source scenarios on failure
+       * Written to last-run.json sidecar, NOT back to the fixture file.
        */
-      expectation_reality: "working" | "broken";
-      /** ISO-8601 UTC timestamp of this run's reflection. */
+      expectation_reality: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null;
+      /** ISO-8601 UTC timestamp of this run's reality. */
       expectation_reality_last_run_at: string;
     };
 
@@ -472,6 +457,11 @@ export function validateScenario(raw: unknown): Scenario {
   if (typeof r.name !== "string" || !/^[A-Za-z0-9._-]+$/.test(r.name)) {
     throw new Error(
       `scenario.name must match [A-Za-z0-9._-]+, got ${JSON.stringify(r.name)}`,
+    );
+  }
+  if ("expectation_reality" in r || "expectation_reality_last_run_at" in r) {
+    throw new Error(
+      "scenario fixture must not contain expectation_reality / expectation_reality_last_run_at — those live in last-run.json",
     );
   }
   if (r.description !== undefined && typeof r.description !== "string") {

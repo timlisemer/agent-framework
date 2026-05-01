@@ -1,0 +1,53 @@
+{
+  "name": "sentiment-happy-allows",
+  "description": "Happy mood allows the next Edit by default policy.",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "perfect, exactly what I wanted, please continue."
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Continuing with the next change."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_scenario_edit_happy",
+          "name": "Edit",
+          "input": {
+            "file_path": "src/foo.ts",
+            "old_string": "old",
+            "new_string": "new"
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "toolu_scenario_edit_happy"
+  },
+  "expect": {
+    "expected": "allow"
+  },
+  "predictions": {
+    "must_have_mood": "happy"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "happy",
+      "trust": "high",
+      "intent": "user approves and wants AI to continue",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "perfect, exactly what I wanted, please continue."
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
+  }
+}

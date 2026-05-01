@@ -1,85 +1,16 @@
 import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
+import { sessionDir as pathsSessionDir } from "./paths.js";
 import { hashString } from "./hash-utils.js";
 
 /**
- * Base directory for all agent-framework files.
- * All session state, caches, and summaries live under this directory.
- */
-const BASE_DIR = path.join(os.homedir(), ".agent-framework");
-
-/**
- * In-memory cache of resolved session directories.
- * Avoids repeated readdirSync calls within the same process lifetime.
- * Keyed by transcript hash.
- */
-const sessionDirCache = new Map<string, string>();
-
-/**
- * Format a creation timestamp for session folder names.
- * @returns Timestamp string in "yyyy-mm-dd-HHmm" format
- */
-export function formatTimestamp(date: Date = new Date()): string {
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const HH = String(date.getHours()).padStart(2, "0");
-  const min = String(date.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}-${HH}${min}`;
-}
-
-/**
- * Encode a project root path into a directory-safe name.
- * Replaces / with - and strips leading -, matching Claude Code's convention.
- */
-export function encodeProjectRoot(): string {
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-  return projectDir.replace(/\//g, "-").replace(/^-/, "");
-}
-
-/**
  * Get the session-scoped directory for a transcript.
- * All session files (state, caches, logs, summaries) live here.
- *
- * The folder name is `{yyyy-mm-dd-HHmm}_{hash}` where the timestamp is set
- * once at creation time. Discovery scans the parent dir for an existing folder
- * ending with `_{hash}` to preserve the original creation timestamp.
+ * Delegates to paths.sessionDir which owns the implementation.
  *
  * @param transcriptPath - Path to the Claude Code transcript JSONL
  * @returns Full path to the session directory
  */
 export function getSessionDir(transcriptPath: string): string {
-  if (process.env.AGENT_FRAMEWORK_SESSION_DIR) {
-    fs.mkdirSync(process.env.AGENT_FRAMEWORK_SESSION_DIR, { recursive: true });
-    return process.env.AGENT_FRAMEWORK_SESSION_DIR;
-  }
-
-  const hash = hashString(transcriptPath);
-
-  const cached = sessionDirCache.get(hash);
-  if (cached) return cached;
-
-  const parentDir = path.join(BASE_DIR, "sessions", encodeProjectRoot());
-  fs.mkdirSync(parentDir, { recursive: true });
-
-  const suffix = `_${hash}`;
-  try {
-    const entries = fs.readdirSync(parentDir);
-    const existing = entries.find((e) => e.endsWith(suffix));
-    if (existing) {
-      const dirPath = path.join(parentDir, existing);
-      sessionDirCache.set(hash, dirPath);
-      return dirPath;
-    }
-  } catch {
-    // Parent dir just created, no entries yet
-  }
-
-  const dirPath = path.join(parentDir, `${formatTimestamp()}_${hash}`);
-  fs.mkdirSync(dirPath, { recursive: true });
-  sessionDirCache.set(hash, dirPath);
-  return dirPath;
+  return pathsSessionDir(transcriptPath);
 }
 
 /**
@@ -109,6 +40,14 @@ export interface CacheConfig<T> {
   getEntries?: (data: T) => unknown[];
   /** Function to set entries array on data (required for expiryMs/maxEntries) */
   setEntries?: (data: T, entries: unknown[]) => T;
+  /**
+   * Optional validator called in load() after the session-id check.
+   * Return the (possibly mutated) data to accept it, or null to reset to
+   * defaultData(). When null is returned the defaults are saved immediately
+   * so subsequent loads don't re-trigger validation against the same stale
+   * data. Additive — unused until the deferred subagent-detector follow-up plan.
+   */
+  validate?: (data: T) => T | null;
 }
 
 /**
@@ -280,6 +219,17 @@ export class CacheManager<T> {
       }
 
       let data = state.data;
+
+      // Optional validate callback — on null, reset to defaults and persist
+      if (this.config.validate) {
+        const validated = this.config.validate(data);
+        if (validated === null) {
+          const defaults = this.config.defaultData();
+          await this.save(defaults);
+          return defaults;
+        }
+        data = validated;
+      }
 
       // Apply time expiry and max entries if configured
       if (this.config.getEntries && this.config.setEntries) {

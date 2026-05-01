@@ -1,0 +1,78 @@
+{
+  "name": "plan3-agent-blocked-by-mood-after-frustrated-slash-invocation-should-allow",
+  "description": "Reproduce the bug where a user invokes /plan3 with frustrated framing and two of the three parallel Agent dispatches are denied by prediction-block. The slash-command tag <command-name>/plan3</command-name> is the user's explicit authorization for the Agent-dispatch workflow /plan3 orchestrates (step 1: spawn 3 parallel plan agents). The frustrated text accompanying the invocation is venting AT prior AI work, not retracting the command. prediction-block (appealable: false) fires because decidePrediction has no slash-command awareness. Fix: decidePrediction step 3.11 checks slashCommandAllowedTools (resolved from the transcript tag via resolveActiveSlashCommandAllowedTools) and allows Agent when it appears in the list. After fix: gate=prediction-block allows with reason 'Active slash command authorizes Agent (per SLASH_COMMAND_ALLOWED_TOOLS); mood-driven re-deny would block the workflow the user explicitly invoked.'",
+  "transcript": [
+    {
+      "role": "user",
+      "isMeta": false,
+      "content": "<command-message>plan3</command-message>\n<command-name>/plan3</command-name>\n<command-args>thats complete bullshit. first of all i do not want you to cheat the scenario, second of all the plan is wrong</command-args>"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "I'll spawn three parallel planning agents to address this."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_plan3_leader",
+          "name": "Agent",
+          "input": {
+            "description": "Plan agent 1 of 3",
+            "subagent_type": "plan",
+            "prompt": "Read the current plan and propose improvements."
+          }
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_plan3_sibling1",
+          "name": "Agent",
+          "input": {
+            "description": "Plan agent 2 of 3",
+            "subagent_type": "plan",
+            "prompt": "Analyze the scenario and identify what is wrong."
+          }
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_plan3_sibling2",
+          "name": "Agent",
+          "input": {
+            "description": "Plan agent 3 of 3",
+            "subagent_type": "plan",
+            "prompt": "Suggest corrective actions for the plan."
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "toolu_plan3_sibling1"
+  },
+  "env": {
+    "cwd": "/home/tim/Coding/public_repos/agent-framework",
+    "permission_mode": "default",
+    "subagent": false
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "angry",
+      "trust": "low",
+      "intent": "User invoked /plan3 and wants three parallel plan agents spawned to fix the plan.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "blockAllTools": false,
+      "userMessageSnippet": "/plan3 thats complete bullshit. first of all i do not want you to cheat the scenario"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 1,
+    "currentWindowSize": 4
+  },
+  "expect": {
+    "expected": "allow",
+    "notes": "The user explicitly invoked /plan3, which authorizes Agent dispatches. The frustrated framing is venting at prior AI work, not retracting the command. Before fix: prediction-block denies with 'User appears angry (trust: low, frustrationStreak: 1). Blocking Agent unless explicitly requested.' After fix: prediction-block allows via step 3.11 with reason 'Active slash command authorizes Agent (per SLASH_COMMAND_ALLOWED_TOOLS); mood-driven re-deny would block the workflow the user explicitly invoked.'"
+  }
+}

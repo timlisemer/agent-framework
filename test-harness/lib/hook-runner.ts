@@ -15,6 +15,8 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { readJsonl } from "../../src/utils/file-io.js";
+import { sessionToolLogFile, sessionStateFile, agentFrameworkRoot, distHookScript, packageJsonPath } from "../../src/utils/paths.js";
 import type {
   ReasonMustExpectation,
   ReasonMustResult,
@@ -28,14 +30,11 @@ import {
 } from "../../src/utils/prediction-types.js";
 
 /**
- * Absolute path to the repo root. This module lives at
- * `test-harness/lib/hook-runner.ts`, so climb two levels to reach the root.
+ * Absolute path to the repo root.
+ * Delegates to paths.agentFrameworkRoot() which uses AGENT_FRAMEWORK_ROOT env
+ * or climbs from import.meta.url.
  */
-export const REPO_ROOT = path.resolve(
-  path.dirname(new URL(import.meta.url).pathname),
-  "..",
-  "..",
-);
+export const REPO_ROOT = agentFrameworkRoot();
 
 /**
  * Build-version string used by both replay.ts and scenario.ts reports.
@@ -44,7 +43,7 @@ export const REPO_ROOT = path.resolve(
 export function getVersion(): string {
   try {
     const pkg = JSON.parse(
-      fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf-8"),
+      fs.readFileSync(packageJsonPath(), "utf-8"),
     );
     const [major, minor] = pkg.version.split(".");
     const data = JSON.parse(
@@ -63,7 +62,7 @@ export function getVersion(): string {
  * Resolve the absolute path to a compiled hook script under dist/hooks/.
  */
 export function hookScript(name: string): string {
-  return path.join(REPO_ROOT, "dist", "hooks", `${name}.js`);
+  return distHookScript(name);
 }
 
 /**
@@ -93,18 +92,11 @@ export function buildEnv(
 export function readLastToolLogEntry(
   sessionDir: string,
 ): { gate?: string; reason?: string } {
-  const toolLogPath = path.join(sessionDir, "tool-log.jsonl");
-  try {
-    const content = fs.readFileSync(toolLogPath, "utf-8");
-    const logLines = content.split("\n").filter(Boolean);
-    if (logLines.length > 0) {
-      const lastEntry = JSON.parse(logLines[logLines.length - 1]);
-      return { gate: lastEntry.gate, reason: lastEntry.reason };
-    }
-  } catch {
-    // No tool-log yet
-  }
-  return {};
+  const entries = readJsonl<{ gate?: string; reason?: string }>(
+    sessionToolLogFile(sessionDir),
+    { tail: 1 },
+  );
+  return entries.length > 0 ? { gate: entries[0].gate, reason: entries[0].reason } : {};
 }
 
 /**
@@ -120,26 +112,13 @@ export function readToolLogEntriesAfterOffset(
   sessionDir: string,
   byteOffset: number,
 ): { gate?: string; reason?: string } {
-  const toolLogPath = path.join(sessionDir, "tool-log.jsonl");
-  try {
-    const fd = fs.openSync(toolLogPath, "r");
-    try {
-      const stat = fs.fstatSync(fd);
-      if (stat.size <= byteOffset) return {};
-      const len = stat.size - byteOffset;
-      const buf = Buffer.alloc(len);
-      fs.readSync(fd, buf, 0, len, byteOffset);
-      const slice = buf.toString("utf-8");
-      const logLines = slice.split("\n").filter(Boolean);
-      if (logLines.length > 0) {
-        const lastEntry = JSON.parse(logLines[logLines.length - 1]);
-        return { gate: lastEntry.gate, reason: lastEntry.reason };
-      }
-    } finally {
-      fs.closeSync(fd);
-    }
-  } catch {
-    // No tool-log yet or read failure — fall through
+  const entries = readJsonl<{ gate?: string; reason?: string }>(
+    sessionToolLogFile(sessionDir),
+    { byteOffset },
+  );
+  if (entries.length > 0) {
+    const last = entries[entries.length - 1];
+    return { gate: last.gate, reason: last.reason };
   }
   return {};
 }
@@ -241,7 +220,7 @@ export async function findActivePredictionMatching(
   toolName: string,
   toolInput: unknown,
 ): Promise<{ prediction: ToolPrediction; decision: PredictionDecision } | null> {
-  const statePath = path.join(sessionDir, "state.json");
+  const statePath = sessionStateFile(sessionDir);
   try {
     const raw = await fs.promises.readFile(statePath, "utf-8");
     const parsed = JSON.parse(raw) as {
@@ -273,7 +252,7 @@ export function findActivePredictionMatchingSync(
   toolName: string,
   toolInput: unknown,
 ): { prediction: ToolPrediction; decision: PredictionDecision } | null {
-  const statePath = path.join(sessionDir, "state.json");
+  const statePath = sessionStateFile(sessionDir);
   try {
     const raw = fs.readFileSync(statePath, "utf-8");
     const parsed = JSON.parse(raw) as {

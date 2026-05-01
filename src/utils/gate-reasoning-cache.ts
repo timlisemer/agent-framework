@@ -8,6 +8,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { CacheManager } from "./cache-manager.js";
+import { sessionGateReasoningFile, sessionToolLogFile } from "./paths.js";
 
 const NORMAL_PRIORITY_LIMIT = 8;
 const HIGH_PRIORITY_LIMIT = 12;
@@ -45,9 +46,8 @@ function getManager(sessionDir: string): CacheManager<GateReasoningData> {
  * Sets the CacheManager file path to {sessionDir}/gate-reasoning.json.
  */
 export function initGateReasoningSession(sessionDir: string): void {
-  const filePath = path.join(sessionDir, "gate-reasoning.json");
   cacheManager = new CacheManager<GateReasoningData>({
-    filePath,
+    filePath: sessionGateReasoningFile(sessionDir),
     defaultData: () => ({ entries: [], condensedHistory: "" }),
   });
 }
@@ -202,7 +202,7 @@ interface ToolLogEntry {
 }
 
 function readToolLog(sessionDir: string): ToolLogEntry[] {
-  const logPath = path.join(sessionDir, "tool-log.jsonl");
+  const logPath = sessionToolLogFile(sessionDir);
   let content: string;
   try {
     content = fs.readFileSync(logPath, "utf-8");

@@ -21,9 +21,9 @@
  */
 
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import { validateScenario } from "./scenario-types.js";
+import { projectTranscriptFile } from "../../utils/paths.js";
 import {
   findTestableTranscripts,
   transcriptRunDir,
@@ -186,18 +186,18 @@ function handleRunScenario(
     const outputDir = scenarioDir(name);
     const inputPath = path.join(outputDir, "scenario.json");
     return runScenarioCommand(
-      ["--scenario", inputPath, "--output-dir", outputDir],
+      ["--scenario", inputPath, "--source", "home"],
       300000,
       rootOverride,
     );
   }
 
-  // By-name lookup across all four sources (home + fixture-working + fixture-broken + fixture-todo).
+  // By-name lookup across all four sources (home + expected-to-pass + fixture-bug + expected-to-fail).
   const all = listAllScenarios(rootOverride);
   const target = all.find((s) => s.name === scenarioName);
   if (!target) {
     throw new Error(
-      `scenario "${scenarioName}" not found under ~/.agent-framework/test-runs/scenarios/ or test-harness/fixtures/scenarios/{working,broken,todo}/. Pass 'scenario' inline to author a new one.`,
+      `scenario "${scenarioName}" not found under ~/.agent-framework/test-runs/scenarios/ or test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/. Pass 'scenario' inline to author a new one.`,
     );
   }
   if (target.error) {
@@ -207,7 +207,7 @@ function handleRunScenario(
   }
   fs.mkdirSync(target.outputDir, { recursive: true });
   return runScenarioCommand(
-    ["--scenario", target.inputPath, "--output-dir", target.outputDir],
+    ["--scenario", target.inputPath, "--source", target.source],
     300000,
     rootOverride,
   );
@@ -215,28 +215,31 @@ function handleRunScenario(
 
 function handleListScenarios(
   rootOverride?: string,
-  sourceFilter?: "working" | "broken" | "todo" | "home",
+  sourceFilter?: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home",
 ): string {
   const all = listAllScenarios(rootOverride);
   const items = sourceFilter ? filterScenariosBySource(all, sourceFilter) : all;
   if (items.length === 0) {
     if (sourceFilter) {
       return `No scenarios in source "${sourceFilter}". ` +
-        (sourceFilter === "broken"
-          ? "An empty broken/ folder is the healthy state."
-          : sourceFilter === "todo"
-            ? "An empty todo/ folder means every codified TODO feature has landed."
+        (sourceFilter === "fixture-bug"
+          ? "An empty fixture-bug/ folder is the healthy state."
+          : sourceFilter === "expected-to-fail"
+            ? "An empty expected-to-fail/ folder means every codified TODO feature has landed."
             : "");
     }
     return (
       "No scenarios. Use run_scenario with an inline 'scenario' object, " +
-      "or add a fixture at test-harness/fixtures/scenarios/{working,broken,todo}/<name>.json."
+      "or add a fixture at test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json."
     );
   }
   const lines = ["SCENARIOS:", ""];
   for (const s of items) {
     const tags: string[] = [s.source];
     if (s.hasReport) tags.push("has-report");
+    if (s.lastRun) {
+      tags.push(`last-run:${s.lastRun.reality ?? "null"} at ${s.lastRun.at.slice(0, 10)}`);
+    }
     lines.push(`  ${s.name}  [${tags.join(", ")}]`);
   }
   return lines.join("\n");
@@ -246,17 +249,17 @@ function handleListScenarios(
  * Run several scenarios in one MCP call. Resolves names against the UNION
  * of ~/.agent-framework/test-runs/scenarios/ (home) and the three
  * repo-tracked fixture subfolders test-harness/fixtures/scenarios/
- * {working,broken,todo}/. Slug collisions across any two sources are a
- * hard error. With no names supplied, runs every scenario across all
- * four sources alphabetically. Fixtures run IN PLACE from the repo;
- * reports + cache always land under the home tree. The optional
- * `sourceFilter` scopes the batch to one source (working|broken|todo|home);
- * slug-uniqueness is enforced across all four sources regardless.
+ * {expected-to-pass,fixture-bug,expected-to-fail}/. Slug collisions across
+ * any two sources are a hard error. With no names supplied, runs every
+ * scenario across all four sources alphabetically. Fixtures run IN PLACE
+ * from the repo; reports + cache always land under the home tree. The optional
+ * `sourceFilter` scopes the batch to one source; slug-uniqueness is enforced
+ * across all four sources regardless.
  */
 function handleRunScenarios(
   scenarioNames: string[] | undefined,
   rootOverride?: string,
-  sourceFilter?: "working" | "broken" | "todo" | "home",
+  sourceFilter?: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home",
 ): string {
   type ScenarioResult = {
     name: string;
@@ -268,7 +271,7 @@ function handleRunScenarios(
     reason?: string;
     ms?: number;
     error?: string;
-    expectation_reality?: "working" | "broken";
+    expectation_reality?: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null;
     expectation_reality_last_run_at?: string;
   };
 
@@ -305,10 +308,10 @@ function handleRunScenarios(
   if (targets.length === 0) {
     const scopeMsg = sourceFilter
       ? `No scenarios in source "${sourceFilter}"` +
-        (sourceFilter === "broken" || sourceFilter === "todo"
+        (sourceFilter === "fixture-bug" || sourceFilter === "expected-to-fail"
           ? ` (empty ${sourceFilter}/ is the healthy state).`
           : ".")
-      : "No scenarios discoverable under ~/.agent-framework/test-runs/scenarios/ or test-harness/fixtures/scenarios/{working,broken,todo}/. " +
+      : "No scenarios discoverable under ~/.agent-framework/test-runs/scenarios/ or test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/. " +
         "Create one via run_scenario with an inline 'scenario' object, or add a fixture.";
     return JSON.stringify(
       {
@@ -328,7 +331,7 @@ function handleRunScenarios(
     if ("missing" in t) {
       const inScope = sourceFilter
         ? `source "${sourceFilter}"`
-        : "home or fixtures/{working,broken,todo}";
+        : "home or fixtures/{expected-to-pass,fixture-bug,expected-to-fail}";
       results.push({
         name: t.missing,
         error: `scenario "${t.missing}" not found in ${inScope}`,
@@ -342,7 +345,7 @@ function handleRunScenarios(
     try {
       fs.mkdirSync(t.outputDir, { recursive: true });
       const raw = runScenarioCommand(
-        ["--scenario", t.inputPath, "--output-dir", t.outputDir],
+        ["--scenario", t.inputPath, "--source", t.source],
         300000,
         rootOverride,
       );
@@ -354,7 +357,7 @@ function handleRunScenarios(
           expected?: string;
           reason?: string;
           ms?: number;
-          expectation_reality?: "working" | "broken";
+          expectation_reality?: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null;
           expectation_reality_last_run_at?: string;
         };
         results.push({
@@ -422,18 +425,14 @@ function resolveTranscriptPath(transcriptName: string, override?: string): strin
   if (fs.existsSync(runPath)) {
     return runPath;
   }
-  // Fall back to project dir
-  const projectPath = path.join(
-    os.homedir(),
-    ".claude", "projects", "-home-tim-Coding-public-repos-agent-framework",
-    transcriptName + ".jsonl"
-  );
+  // Fall back to project dir (uses current cwd for encoding)
+  const projectPath = projectTranscriptFile(transcriptName);
   if (fs.existsSync(projectPath)) {
     return projectPath;
   }
   throw new Error(
     `Transcript not found for "${transcriptName}". Check the name and try find_work. ` +
-    `If the transcript lives outside ~/.claude/projects/-home-tim-Coding-public-repos-agent-framework, ` +
+    `If the transcript lives outside the default project transcripts directory, ` +
     `pass "transcript_path" to point at the file directly.`,
   );
 }
@@ -495,12 +494,12 @@ export interface TesterInput {
   scenario_names?: string[];
   /**
    * For run_scenarios / list_scenarios: restrict to ONE source tree.
-   * "working" | "broken" | "todo" select fixture subfolders; "home"
-   * selects ~/.agent-framework/test-runs/scenarios/. Omit to include all
-   * four. Slug uniqueness is enforced across all four roots regardless
-   * of this filter.
+   * "expected-to-pass" | "fixture-bug" | "expected-to-fail" select fixture
+   * subfolders; "home" selects ~/.agent-framework/test-runs/scenarios/. Omit
+   * to include all four. Slug uniqueness is enforced across all four roots
+   * regardless of this filter.
    */
-  scenario_source?: "working" | "broken" | "todo" | "home";
+  scenario_source?: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home";
 }
 
 export async function handleTestHarnessTester(input: TesterInput): Promise<string> {
@@ -550,7 +549,7 @@ export async function handleTestHarnessTester(input: TesterInput): Promise<strin
         return handleRunScenarios(input.scenario_names, input.working_dir, input.scenario_source);
 
       case "list_scenarios":
-        return handleListScenarios(input.working_dir, input.scenario_source);
+        return handleListScenarios(input.working_dir, input.scenario_source as "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home" | undefined);
 
       case "read_scenario":
         if (!input.scenario_name) throw new Error("scenario_name is required");

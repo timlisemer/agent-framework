@@ -31,7 +31,7 @@
 
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { providerConfigPath } from "./paths.js";
 import type { ModelTier } from "../types.js";
 
 // Branded type to enforce using constants
@@ -111,7 +111,7 @@ function loadConfigFile(): ProviderConfigFile {
 
   const configPaths = [
     join(process.cwd(), ".agent-framework.json"),
-    join(homedir(), ".config", "agent-framework", "config.json"),
+    providerConfigPath(),
   ];
 
   for (const configPath of configPaths) {

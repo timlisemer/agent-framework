@@ -12,48 +12,48 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { execFileSync, spawnSync } from "child_process";
 import {
   validateScenario,
   validateReasonMustExpectation,
   type ReasonMustExpectation,
 } from "./scenario-types.js";
-
-const TEST_RUNS_DIR = path.join(os.homedir(), ".agent-framework", "test-runs");
-
-const TRANSCRIPT_PROJECT_DIR = path.join(
-  os.homedir(),
-  ".claude",
-  "projects",
-  "-home-tim-Coding-public-repos-agent-framework"
-);
+import {
+  runtimeRoot,
+  projectTranscriptsDir,
+  transcriptRunDir as pathsTranscriptRunDir,
+  transcriptLabelFile as pathsTranscriptLabelFile,
+  transcriptDraftLabelFile as pathsTranscriptDraftLabelFile,
+  transcriptMcpStateFile as pathsTranscriptMcpStateFile,
+  scenarioLastRunFile,
+} from "../../utils/paths.js";
 
 // ─── Path Resolution ───────────────────────────────────────────────────────
 
 export function testRunsDir(): string {
-  return TEST_RUNS_DIR;
+  return path.join(runtimeRoot(), "test-runs");
 }
 
 export function transcriptProjectDir(): string {
-  return TRANSCRIPT_PROJECT_DIR;
+  return projectTranscriptsDir(process.cwd());
 }
 
 export function transcriptRunDir(transcriptName: string): string {
-  return path.join(TEST_RUNS_DIR, transcriptName);
+  return pathsTranscriptRunDir(transcriptName);
 }
 
 // ─── Scoped File I/O ───────────────────────────────────────────────────────
 
 function assertWithinTestRuns(filePath: string): void {
   const resolved = path.resolve(filePath);
-  if (!resolved.startsWith(TEST_RUNS_DIR)) {
+  const testRunsBase = testRunsDir();
+  if (!resolved.startsWith(testRunsBase)) {
     throw new Error(`Path escapes test-runs directory: ${filePath}`);
   }
 }
 
 export function readTestRunFile(transcriptName: string, filename: string): string {
-  const filePath = path.join(TEST_RUNS_DIR, transcriptName, filename);
+  const filePath = path.join(testRunsDir(), transcriptName, filename);
   assertWithinTestRuns(filePath);
   if (!fs.existsSync(filePath)) {
     throw new Error(`File not found: ${filePath}`);
@@ -62,7 +62,7 @@ export function readTestRunFile(transcriptName: string, filename: string): strin
 }
 
 export function writeTestRunFile(transcriptName: string, filename: string, content: string): string {
-  const dirPath = path.join(TEST_RUNS_DIR, transcriptName);
+  const dirPath = path.join(testRunsDir(), transcriptName);
   const filePath = path.join(dirPath, filename);
   assertWithinTestRuns(filePath);
   fs.mkdirSync(dirPath, { recursive: true });
@@ -71,7 +71,7 @@ export function writeTestRunFile(transcriptName: string, filename: string, conte
 }
 
 export function appendTestRunFile(transcriptName: string, filename: string, content: string): string {
-  const dirPath = path.join(TEST_RUNS_DIR, transcriptName);
+  const dirPath = path.join(testRunsDir(), transcriptName);
   const filePath = path.join(dirPath, filename);
   assertWithinTestRuns(filePath);
   fs.mkdirSync(dirPath, { recursive: true });
@@ -80,7 +80,7 @@ export function appendTestRunFile(transcriptName: string, filename: string, cont
 }
 
 export function testRunFileExists(transcriptName: string, filename: string): boolean {
-  const filePath = path.join(TEST_RUNS_DIR, transcriptName, filename);
+  const filePath = path.join(testRunsDir(), transcriptName, filename);
   return fs.existsSync(filePath);
 }
 
@@ -246,8 +246,12 @@ interface LabelFile {
 }
 
 export function readLabelFile(transcriptName: string, draft: boolean): LabelFile {
-  const filename = draft ? "labels.draft.json" : "labels.json";
-  const content = readTestRunFile(transcriptName, filename);
+  const filePath = draft ? pathsTranscriptDraftLabelFile(transcriptName) : pathsTranscriptLabelFile(transcriptName);
+  assertWithinTestRuns(filePath);
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`File not found: ${filePath}`);
+  }
+  const content = fs.readFileSync(filePath, "utf-8");
   const parsed = JSON.parse(content);
   return {
     _meta: parsed._meta,
@@ -257,7 +261,10 @@ export function readLabelFile(transcriptName: string, draft: boolean): LabelFile
 }
 
 export function writeLabelFile(transcriptName: string, draft: boolean, labelFile: LabelFile): string {
-  const filename = draft ? "labels.draft.json" : "labels.json";
+  const filePath = draft ? pathsTranscriptDraftLabelFile(transcriptName) : pathsTranscriptLabelFile(transcriptName);
+  assertWithinTestRuns(filePath);
+  const dirPath = path.dirname(filePath);
+  fs.mkdirSync(dirPath, { recursive: true });
   const output: Record<string, unknown> = {};
   if (labelFile._meta) {
     output._meta = labelFile._meta;
@@ -266,7 +273,8 @@ export function writeLabelFile(transcriptName: string, draft: boolean, labelFile
   if (labelFile.reasoning && Object.keys(labelFile.reasoning).length > 0) {
     output.reasoning = labelFile.reasoning;
   }
-  return writeTestRunFile(transcriptName, filename, JSON.stringify(output, null, 2) + "\n");
+  fs.writeFileSync(filePath, JSON.stringify(output, null, 2) + "\n");
+  return filePath;
 }
 
 export function updateSingleLabel(
@@ -521,7 +529,9 @@ interface McpState {
 function readMcpState(transcriptName: string): McpState {
   const defaults: McpState = { generate_labels_count: 0, scaffold_count: 0, run_test_count: 0, run_single_hook_count: 0, run_single_hook_since_last_run_test: 0 };
   try {
-    const content = readTestRunFile(transcriptName, "mcp-state.json");
+    const filePath = pathsTranscriptMcpStateFile(transcriptName);
+    if (!fs.existsSync(filePath)) return defaults;
+    const content = fs.readFileSync(filePath, "utf-8");
     return { ...defaults, ...JSON.parse(content) };
   } catch {
     return defaults;
@@ -529,7 +539,10 @@ function readMcpState(transcriptName: string): McpState {
 }
 
 function writeMcpState(transcriptName: string, state: McpState): void {
-  writeTestRunFile(transcriptName, "mcp-state.json", JSON.stringify(state, null, 2) + "\n");
+  const filePath = pathsTranscriptMcpStateFile(transcriptName);
+  const dirPath = path.dirname(filePath);
+  fs.mkdirSync(dirPath, { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(state, null, 2) + "\n");
 }
 
 export function checkAndIncrementRunLimit(transcriptName: string, action: "generate_labels" | "scaffold" | "run_test" | "run_single_hook"): void {
@@ -676,16 +689,17 @@ export function findUnlabeledTranscripts(
   dateTo?: string,
 ): TranscriptInfo[] {
   const results: TranscriptInfo[] = [];
+  const transcriptDir = projectTranscriptsDir(process.cwd());
 
-  if (!fs.existsSync(TRANSCRIPT_PROJECT_DIR)) {
+  if (!fs.existsSync(transcriptDir)) {
     return results;
   }
 
-  const entries = fs.readdirSync(TRANSCRIPT_PROJECT_DIR);
+  const entries = fs.readdirSync(transcriptDir);
   for (const entry of entries) {
     if (!entry.endsWith(".jsonl")) continue;
 
-    const fullPath = path.join(TRANSCRIPT_PROJECT_DIR, entry);
+    const fullPath = path.join(transcriptDir, entry);
     const name = entry.replace(".jsonl", "");
 
     // Skip if already labeled
@@ -730,13 +744,13 @@ export function findUnlabeledTranscripts(
 export function findTestableTranscripts(): Array<{ name: string; status: "UNTESTED" | "FAILING" }> {
   const results: Array<{ name: string; status: "UNTESTED" | "FAILING" }> = [];
 
-  if (!fs.existsSync(TEST_RUNS_DIR)) {
+  if (!fs.existsSync(testRunsDir())) {
     return results;
   }
 
-  const entries = fs.readdirSync(TEST_RUNS_DIR);
+  const entries = fs.readdirSync(testRunsDir());
   for (const entry of entries) {
-    const dirPath = path.join(TEST_RUNS_DIR, entry);
+    const dirPath = path.join(testRunsDir(), entry);
     try {
       const stat = fs.statSync(dirPath);
       if (!stat.isDirectory()) continue;
@@ -768,17 +782,16 @@ export function findTestableTranscripts(): Array<{ name: string; status: "UNTEST
 
 // ─── Scenario Helpers ──────────────────────────────────────────────────────
 
-const SCENARIOS_DIR = path.join(TEST_RUNS_DIR, "scenarios");
 const FIXTURES_SCENARIOS_SUBPATH = path.join(
   "test-harness",
   "fixtures",
   "scenarios",
 );
-const FIXTURE_SUBFOLDERS = ["working", "broken", "todo"] as const;
+const FIXTURE_SUBFOLDERS = ["expected-to-pass", "fixture-bug", "expected-to-fail"] as const;
 
-/** Absolute path to the scenarios root under TEST_RUNS_DIR. */
+/** Absolute path to the scenarios root under test-runs/. */
 export function scenariosDir(): string {
-  return SCENARIOS_DIR;
+  return path.join(testRunsDir(), "scenarios");
 }
 
 /**
@@ -804,8 +817,9 @@ export function scenarioDir(name: string): string {
   if (!/^[A-Za-z0-9._-]+$/.test(name)) {
     throw new Error(`invalid scenario name (must match [A-Za-z0-9._-]+): ${name}`);
   }
-  const resolved = path.join(SCENARIOS_DIR, name);
-  if (!resolved.startsWith(SCENARIOS_DIR)) {
+  const scenariosBase = scenariosDir();
+  const resolved = path.join(scenariosBase, name);
+  if (!resolved.startsWith(scenariosBase)) {
     throw new Error(`scenario name escapes scenarios dir: ${name}`);
   }
   return resolved;
@@ -842,9 +856,9 @@ export function readScenarioFile(name: string, filename: string): string {
 /**
  * Describes one discoverable scenario across the four sources: home
  * (~/.agent-framework/test-runs/scenarios/<name>/scenario.json) and the
- * three repo-tracked fixture subfolders (working/, broken/, todo/ under
- * <root>/test-harness/fixtures/scenarios/). `inputPath` is what the
- * scenario runner reads; `outputDir` is where cache/ and
+ * three repo-tracked fixture subfolders (expected-to-pass/, fixture-bug/,
+ * expected-to-fail/ under <root>/test-harness/fixtures/scenarios/). `inputPath`
+ * is what the scenario runner reads; `outputDir` is where cache/ and
  * report-scenario.json land — always under
  * ~/.agent-framework/test-runs/scenarios/<name>/ so the repo-tracked
  * fixture files never get polluted by per-run artifacts. `error` is set
@@ -855,9 +869,11 @@ export function readScenarioFile(name: string, filename: string): string {
  */
 export type ScenarioSourceTag =
   | "home"
-  | "fixture-working"
-  | "fixture-broken"
-  | "fixture-todo";
+  | "expected-to-pass"
+  | "fixture-bug"
+  | "expected-to-fail";
+
+export type ScenarioRealityValue = "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null;
 
 export interface ScenarioSource {
   name: string;
@@ -866,13 +882,15 @@ export interface ScenarioSource {
   outputDir: string;
   hasReport: boolean;
   error?: string;
+  /** Most recent run's reality, loaded from last-run.json sidecar if it exists. */
+  lastRun?: { reality: ScenarioRealityValue; at: string };
 }
 
 /**
  * Enumerate every scenario discoverable across four sources: home
  * (~/.agent-framework/test-runs/scenarios/) and the three repo-tracked
- * fixture subfolders (<root>/test-harness/fixtures/scenarios/working/,
- * broken/, todo/). Entries are sorted alphabetically by name.
+ * fixture subfolders (<root>/test-harness/fixtures/scenarios/expected-to-pass/,
+ * fixture-bug/, expected-to-fail/). Entries are sorted alphabetically by name.
  *
  * Per-fixture validation errors (filename stem != scenario.name, or
  * validateScenario rejection) are attached to the entry as `error`
@@ -898,18 +916,20 @@ export function listAllScenarios(rootOverride?: string): ScenarioSource[] {
     out.set(entry.name, entry);
   };
 
-  if (fs.existsSync(SCENARIOS_DIR)) {
-    for (const entry of fs.readdirSync(SCENARIOS_DIR)) {
+  const scenariosBase = scenariosDir();
+  if (fs.existsSync(scenariosBase)) {
+    for (const entry of fs.readdirSync(scenariosBase)) {
       if (!/^[A-Za-z0-9._-]+$/.test(entry)) continue;
-      const inputPath = path.join(SCENARIOS_DIR, entry, "scenario.json");
+      const inputPath = path.join(scenariosBase, entry, "scenario.json");
       if (!fs.existsSync(inputPath)) continue;
-      const outputDir = path.join(SCENARIOS_DIR, entry);
+      const outputDir = path.join(scenariosBase, entry);
       addOrCollide({
         name: entry,
         source: "home",
         inputPath,
         outputDir,
         hasReport: fs.existsSync(path.join(outputDir, "report-scenario.json")),
+        lastRun: readScenarioLastRun(entry),
       });
     }
   }
@@ -924,7 +944,7 @@ export function listAllScenarios(rootOverride?: string): ScenarioSource[] {
   for (const sub of FIXTURE_SUBFOLDERS) {
     const subDir = path.join(fixRoot, sub);
     if (!fs.existsSync(subDir)) continue;
-    const tag: ScenarioSourceTag = `fixture-${sub}` as ScenarioSourceTag;
+    const tag: ScenarioSourceTag = sub;
 
     for (const file of fs.readdirSync(subDir)) {
       if (!file.endsWith(".json")) continue;
@@ -932,7 +952,7 @@ export function listAllScenarios(rootOverride?: string): ScenarioSource[] {
       if (!/^[A-Za-z0-9._-]+$/.test(name)) continue;
 
       const inputPath = path.join(subDir, file);
-      const outputDir = path.join(SCENARIOS_DIR, name);
+      const outputDir = path.join(scenariosBase, name);
       const hasReport = fs.existsSync(
         path.join(outputDir, "report-scenario.json"),
       );
@@ -957,6 +977,7 @@ export function listAllScenarios(rootOverride?: string): ScenarioSource[] {
         inputPath,
         outputDir,
         hasReport,
+        lastRun: readScenarioLastRun(name),
         ...(fixtureError ? { error: fixtureError } : {}),
       });
     }
@@ -965,19 +986,35 @@ export function listAllScenarios(rootOverride?: string): ScenarioSource[] {
 }
 
 /**
- * Filter scenarios by a user-friendly source label. Accepts the short
- * forms used in the MCP input enum (working|broken|todo|home) and maps
- * them to the internal ScenarioSourceTag.
+ * Filter scenarios by source label.
  */
 export function filterScenariosBySource(
   all: ScenarioSource[],
-  filter: "working" | "broken" | "todo" | "home",
+  filter: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home",
 ): ScenarioSource[] {
-  const target: ScenarioSourceTag =
-    filter === "home" ? "home" : (`fixture-${filter}` as ScenarioSourceTag);
-  return all.filter((s) => s.source === target);
+  return all.filter((s) => s.source === filter);
 }
 
 function sortedScenarios(m: Map<string, ScenarioSource>): ScenarioSource[] {
   return Array.from(m.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Read last-run.json sidecar for a scenario, if it exists.
+ * Returns undefined when the file is absent or malformed.
+ */
+function readScenarioLastRun(name: string): { reality: ScenarioRealityValue; at: string } | undefined {
+  try {
+    const filePath = scenarioLastRunFile(name);
+    if (!fs.existsSync(filePath)) return undefined;
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as {
+      reality?: unknown;
+      at?: unknown;
+    };
+    if (typeof parsed.at !== "string") return undefined;
+    const reality = parsed.reality as ScenarioRealityValue;
+    return { reality, at: parsed.at };
+  } catch {
+    return undefined;
+  }
 }

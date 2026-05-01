@@ -4,8 +4,8 @@ initializeTelemetry();
 
 import { type PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import * as path from "path";
-import * as os from "os";
 import * as fs from "fs";
+import { claudePlansRoot } from "../utils/paths.js";
 import { readStdinJson, initHookProcess, exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
@@ -418,10 +418,9 @@ async function main() {
 
     if (filePath) {
       // Plan-validate: Write/Edit to ~/.claude/plans/
-      const plansDir = path.join(os.homedir(), ".claude", "plans");
       if (
         (toolName === "Write" || toolName === "Edit") &&
-        isPathInDirectory(filePath, plansDir)
+        isPathInDirectory(filePath, claudePlansRoot())
       ) {
         // Skip validation if ExitPlanMode was recently approved
         const recentContext = await readTranscriptExact(

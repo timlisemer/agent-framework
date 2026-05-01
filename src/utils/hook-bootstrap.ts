@@ -12,7 +12,7 @@
 import { flushTelemetry } from "../telemetry/index.js";
 import { flushStatuslineUpdates } from "./logger.js";
 import { setTranscriptPath } from "./execution-context.js";
-import { getSessionDir } from "./cache-manager.js";
+import { sessionDir as getSessionDir } from "./paths.js";
 import { initDenialSession } from "./denial-cache.js";
 import { initRewindSession } from "./rewind-cache.js";
 import { initStatuslineSession } from "./statusline-state.js";

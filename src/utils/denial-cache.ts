@@ -1,5 +1,5 @@
-import * as path from "path";
 import { CacheManager } from "./cache-manager.js";
+import { sessionDenialCacheFile } from "./paths.js";
 
 const DENIAL_EXPIRY_MS = 60 * 1000; // 1 minute
 const DENIAL_MAX_ENTRIES = 20;
@@ -23,7 +23,7 @@ let cacheManager: CacheManager<DenialData> | null = null;
  */
 export function initDenialSession(sessionDir: string): void {
   cacheManager = new CacheManager<DenialData>({
-    filePath: path.join(sessionDir, "hook-denials.json"),
+    filePath: sessionDenialCacheFile(sessionDir),
     defaultData: () => ({ entries: [] }),
     expiryMs: DENIAL_EXPIRY_MS,
     maxEntries: DENIAL_MAX_ENTRIES,

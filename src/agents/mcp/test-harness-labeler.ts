@@ -22,8 +22,8 @@
  */
 
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
+import { projectTranscriptFile, transcriptCacheDir, transcriptMcpStateFile } from "../../utils/paths.js";
 import {
   findUnlabeledTranscripts,
   transcriptRunDir,
@@ -304,7 +304,6 @@ function handleExpand(
  */
 function collectPredictionContext(transcriptName: string, target: string): string {
   if (target.startsWith("stop:")) return "";
-  const runDir = transcriptRunDir(transcriptName);
   // Read whichever label file exists.
   let labelFile: ReturnType<typeof readLabelFile> | null = null;
   try {
@@ -338,7 +337,7 @@ function collectPredictionContext(transcriptName: string, target: string): strin
   let toolLogGate: string | undefined;
   let toolLogToolUseId: string | undefined;
   try {
-    const toolLogPath = path.join(runDir, "cache", "tool-log.jsonl");
+    const toolLogPath = path.join(transcriptCacheDir(transcriptName), "tool-log.jsonl");
     const content = fs.readFileSync(toolLogPath, "utf-8");
     const logLines = content.split("\n").filter(Boolean);
     for (const line of logLines) {
@@ -396,7 +395,7 @@ function collectPredictionContext(transcriptName: string, target: string): strin
   }
   // Read state.json for live currentPrediction details.
   try {
-    const statePath = path.join(runDir, "cache", "state.json");
+    const statePath = path.join(transcriptCacheDir(transcriptName), "state.json");
     const raw = fs.readFileSync(statePath, "utf-8");
     const parsed = JSON.parse(raw) as {
       data?: {
@@ -540,18 +539,15 @@ function handleUpdateLabelPredictions(
  * labels.draft.json, or notes_and_questions.md.
  */
 function handleResetForRelabel(transcriptName: string): string {
-  const runDir = transcriptRunDir(transcriptName);
   const removed: string[] = [];
-  const mcpStatePath = path.join(runDir, "mcp-state.json");
   try {
-    fs.unlinkSync(mcpStatePath);
+    fs.unlinkSync(transcriptMcpStateFile(transcriptName));
     removed.push("mcp-state.json");
   } catch {
     // Not present — nothing to remove
   }
-  const cacheDir = path.join(runDir, "cache");
   try {
-    fs.rmSync(cacheDir, { recursive: true, force: true });
+    fs.rmSync(transcriptCacheDir(transcriptName), { recursive: true, force: true });
     removed.push("cache/");
   } catch {
     // Not present
@@ -672,10 +668,7 @@ function resolveTranscriptPath(transcriptName: string, override?: string): strin
     return override;
   }
   // For generate_labels/scaffold, use original transcript from project dir
-  const projectPath = path.join(
-    path.join(os.homedir(), ".claude", "projects", "-home-tim-Coding-public-repos-agent-framework"),
-    transcriptName + ".jsonl"
-  );
+  const projectPath = projectTranscriptFile(transcriptName);
   if (fs.existsSync(projectPath)) {
     return projectPath;
   }
@@ -686,7 +679,7 @@ function resolveTranscriptPath(transcriptName: string, override?: string): strin
   }
   throw new Error(
     `Transcript not found for "${transcriptName}". Check the name and try find_work. ` +
-    `If the transcript lives outside ~/.claude/projects/-home-tim-Coding-public-repos-agent-framework, ` +
+    `If the transcript lives outside the default project transcripts directory, ` +
     `pass "transcript_path" to point at the file directly.`,
   );
 }
@@ -757,9 +750,8 @@ export interface LabelerInput {
   }>;
   /**
    * Absolute path to the transcript .jsonl file. Use when the transcript
-   * lives outside the default ~/.claude/projects/-home-tim-Coding-public-
-   * repos-agent-framework directory (e.g. a session from another project
-   * like iocto). Applies to auto_label / generate_labels / scaffold /
+   * lives outside the default project transcripts directory (e.g. a session
+   * from another project). Applies to auto_label / generate_labels / scaffold /
    * list / expand / validate. After auto_label or scaffold runs, the
    * transcript is copied into ~/.agent-framework/test-runs/<name>/ and
    * subsequent actions find it there automatically, so the override is

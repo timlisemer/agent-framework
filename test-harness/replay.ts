@@ -16,7 +16,6 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import {
   LivePredictionSnapshot,
   ReplayEvent,
@@ -41,9 +40,16 @@ import {
 } from "./lib/hook-runner.js";
 import { readToolLogEntries, type ToolLogEntry } from "../src/utils/session-store.js";
 import type { LabelValue } from "../src/agents/mcp/test-harness-shared.js";
+import {
+  runtimeRoot,
+  transcriptRunDir,
+  transcriptCacheDir,
+  transcriptReplayPidFile,
+  transcriptDraftLabelFile,
+} from "../src/utils/paths.js";
+import { isProcessAlive } from "../src/utils/subagent-detector.js";
+import { appendJsonlEntrySync, writeJsonl } from "../src/utils/file-io.js";
 
-const BASE_DIR = path.join(os.homedir(), ".agent-framework");
-const TEST_RUNS_DIR = path.join(BASE_DIR, "test-runs");
 const MIN_PREFIX_LENGTH = 12;
 
 function transcriptSlug(transcriptPath: string): string {
@@ -51,11 +57,11 @@ function transcriptSlug(transcriptPath: string): string {
 }
 
 function transcriptDir(transcriptPath: string): string {
-  return path.join(TEST_RUNS_DIR, transcriptSlug(transcriptPath));
+  return transcriptRunDir(transcriptSlug(transcriptPath));
 }
 
 function cacheDir(transcriptPath: string): string {
-  return path.join(transcriptDir(transcriptPath), "cache");
+  return transcriptCacheDir(transcriptSlug(transcriptPath));
 }
 
 // ─── Arg Parsing ────────────────────────────────────────────────────────────
@@ -457,33 +463,55 @@ function getBatchLeaderToolInfo(
 // ─── Stale Sweep ────────────────────────────────────────────────────────────
 
 function sweepStaleCaches(): void {
+  const testRunsRoot = path.join(runtimeRoot(), "test-runs");
   try {
-    const entries = fs.readdirSync(TEST_RUNS_DIR);
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const entries = fs.readdirSync(testRunsRoot);
 
     for (const entry of entries) {
-      const cachePath = path.join(TEST_RUNS_DIR, entry, "cache");
+      const runDir = path.join(testRunsRoot, entry);
+      const cachePath = path.join(runDir, "cache");
       try {
-        const stat = fs.statSync(cachePath);
-        if (stat.mtimeMs > oneHourAgo) continue;
+        const cacheStat = fs.statSync(cachePath);
 
-        // Check if replay.pid exists and process is alive
+        // A cache is eligible ONLY when:
+        // 1. cache/replay.pid exists and references a dead PID
+        // 2. The parent run dir has a report (report.json or report-single.json)
+        //    AND that report's mtime is newer than the cache dir's mtime
+
+        // Check 1: replay.pid must exist and reference a dead PID
         const pidFile = path.join(cachePath, "replay.pid");
+        let pidDead = false;
         try {
           const pidContent = fs.readFileSync(pidFile, "utf-8").trim();
           const pid = parseInt(pidContent, 10);
           if (!isNaN(pid)) {
-            try {
-              process.kill(pid, 0);
-              // Process is alive — skip this cache
-              continue;
-            } catch {
-              // Process is dead — safe to remove
-            }
+            pidDead = !isProcessAlive(pid);
+          }
+          // If file exists but PID is NaN, treat as no pid (safe to sweep)
+          else {
+            pidDead = true;
           }
         } catch {
-          // No replay.pid — safe to remove
+          // No replay.pid — not eligible (could be mid-run without pid yet)
+          continue;
         }
+
+        if (!pidDead) continue;
+
+        // Check 2: report exists and is newer than cache dir
+        const reportJson = path.join(runDir, "report.json");
+        const reportSingle = path.join(runDir, "report-single.json");
+        let reportMtime = 0;
+        for (const reportPath of [reportJson, reportSingle]) {
+          try {
+            const st = fs.statSync(reportPath);
+            if (st.mtimeMs > reportMtime) reportMtime = st.mtimeMs;
+          } catch {
+            // Report doesn't exist
+          }
+        }
+        if (reportMtime === 0) continue; // No report — not eligible
+        if (reportMtime <= cacheStat.mtimeMs) continue; // Report older than cache — still running
 
         fs.rmSync(cachePath, { recursive: true, force: true });
       } catch {
@@ -1024,7 +1052,7 @@ async function main(): Promise<void> {
 
   // Clean previous cache (check for live process first)
   const cachePath = cacheDir(config.transcript);
-  const prevPidFile = path.join(cachePath, "replay.pid");
+  const prevPidFile = transcriptReplayPidFile(transcriptSlug(config.transcript));
   try {
     const pidContent = fs.readFileSync(prevPidFile, "utf-8").trim();
     const pid = parseInt(pidContent, 10);
@@ -1050,7 +1078,7 @@ async function main(): Promise<void> {
   const sessionDir = cachePath;
 
   // 5. Write replay.pid
-  const replayPidFile = path.join(sessionDir, "replay.pid");
+  const replayPidFile = transcriptReplayPidFile(transcriptSlug(config.transcript));
   fs.writeFileSync(replayPidFile, String(process.pid));
 
   // 6. Set AGENT_FRAMEWORK_SESSION_DIR
@@ -1058,7 +1086,7 @@ async function main(): Promise<void> {
 
   // 7. Create empty temp transcript (filename must NOT start with "agent-")
   const transcriptPath = path.join(sessionDir, "transcript.jsonl");
-  fs.writeFileSync(transcriptPath, "");
+  writeJsonl(transcriptPath, []);
 
   // 8. Generate session ID
   const sessionId = "replay-" + transcriptSlug(config.transcript);

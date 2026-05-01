@@ -11,8 +11,8 @@
  * @module statusline-state
  */
 
-import * as path from "path";
 import { CacheManager } from "./cache-manager.js";
+import { sessionStatuslineFile } from "./paths.js";
 import type { DecisionType } from "../telemetry/types.js";
 import type { ExecutionType } from "../types.js";
 
@@ -78,7 +78,7 @@ let cacheManager: CacheManager<StatusLineData> | null = null;
  */
 export function initStatuslineSession(sessionDir: string): void {
   cacheManager = new CacheManager<StatusLineData>({
-    filePath: path.join(sessionDir, "statusline.json"),
+    filePath: sessionStatuslineFile(sessionDir),
     defaultData: () => ({ entries: [] }),
     expiryMs: STATUSLINE_CONFIG.expiryMs,
     maxEntries: STATUSLINE_CONFIG.maxEntries,

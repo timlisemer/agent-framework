@@ -16,8 +16,8 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import * as crypto from "crypto";
+import { scenarioLastRunFile, scenarioPlansDir, claudePlansRoot, scenarioRunDir } from "../src/utils/paths.js";
 import {
   type FanoutFireResult,
   type HookEventName,
@@ -47,6 +47,7 @@ import {
 import { sessionStateDefaults, type SessionState } from "../src/utils/session-store.js";
 import type { ToolPrediction } from "../src/utils/prediction-types.js";
 import { scenarioDir } from "../src/agents/mcp/test-harness-shared.js";
+import type { ScenarioSourceTag } from "../src/agents/mcp/test-harness-shared.js";
 
 function getArg(name: string, required: boolean = false): string | undefined {
   const args = process.argv.slice(2);
@@ -573,36 +574,60 @@ async function evaluateScenarioPredictions(
 }
 
 /**
- * Persist `expectation_reality` + `expectation_reality_last_run_at` back to
- * the scenario source file at `scenarioPath`. Uses `JSON.stringify(..., 2) + "\n"`
- * to match the existing fixture formatting (see `writeScenarioFile` in
- * `test-harness-shared.ts`). Writeback failures (permission denied, file
- * moved mid-run, etc.) must NOT fail the run — log a warning to stderr and
- * continue. The output JSON is the authoritative return value; the file
- * writeback is convenience persistence for diffability.
+ * Write per-run reality to a last-run.json sidecar under the scenario's
+ * home-tree run dir. This keeps the committed fixture file immutable.
+ * Best-effort: transient failures must NOT fail the run — log a warning
+ * to stderr and continue.
  */
-function writeExpectationRealityBack(
+function writeLastRun(
+  name: string,
   scenarioPath: string,
-  expectation_reality: "working" | "broken",
+  expectation_reality: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null,
   expectation_reality_last_run_at: string,
 ): void {
   try {
-    const raw = fs.readFileSync(scenarioPath, "utf-8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    parsed.expectation_reality = expectation_reality;
-    parsed.expectation_reality_last_run_at = expectation_reality_last_run_at;
-    fs.writeFileSync(scenarioPath, JSON.stringify(parsed, null, 2) + "\n");
+    const lastRunPath = scenarioLastRunFile(name);
+    const dir = path.dirname(lastRunPath);
+    fs.mkdirSync(dir, { recursive: true });
+    const payload = {
+      reality: expectation_reality,
+      at: expectation_reality_last_run_at,
+      source_path: scenarioPath,
+      report_path: path.join(dir, "report-scenario.json"),
+    };
+    fs.writeFileSync(lastRunPath, JSON.stringify(payload, null, 2) + "\n");
   } catch (err) {
     console.error(
-      `warning: failed to write expectation_reality back to ${scenarioPath}: ` +
+      `warning: failed to write last-run.json for scenario ${name}: ` +
         (err instanceof Error ? err.message : String(err)),
     );
   }
 }
 
+/**
+ * Compute the expectation_reality value for a run.
+ * - pass === true -> "expected-to-pass"
+ * - pass === false + source "expected-to-fail" -> "expected-to-fail"
+ * - pass === false + source "fixture-bug" -> "fixture-bug"
+ * - pass === false + source "home" or unset -> null (no folder context)
+ * - pass === false + source "expected-to-pass" -> "fixture-bug" (regression)
+ */
+function computeExpectationReality(
+  pass: boolean,
+  source: ScenarioSourceTag | undefined,
+): "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null {
+  if (pass) return "expected-to-pass";
+  if (source === "expected-to-fail") return "expected-to-fail";
+  if (source === "fixture-bug") return "fixture-bug";
+  if (source === "home" || source === undefined) return null;
+  // source === "expected-to-pass" with pass===false is a regression
+  return "fixture-bug";
+}
+
 async function main() {
   const scenarioPath = getArg("scenario", true)!;
-  const outputDirArg = getArg("output-dir", false);
+  // --source is required: "home" | "expected-to-pass" | "fixture-bug" | "expected-to-fail"
+  const sourceArg = getArg("source", false) as ScenarioSourceTag | undefined;
   if (!fs.existsSync(scenarioPath)) {
     console.error(`scenario file not found: ${scenarioPath}`);
     process.exit(2);
@@ -620,16 +645,9 @@ async function main() {
   }
 
   const started = Date.now();
-  // --output-dir wins when supplied; otherwise the scenario file's dirname
-  // (preserves in-place behavior for home-tree scenario.json files that sit
-  // alongside their report-scenario.json). Cache is independent of
-  // outputDir — it ALWAYS lives under the home tree at
-  // ~/.agent-framework/test-runs/scenarios/<name>/cache/ so that running a
-  // fixture scenario directly via the CLI never pollutes the committed
-  // test-harness/fixtures/scenarios/ tree with cache files.
-  const outputDir = outputDirArg
-    ? path.resolve(outputDirArg)
-    : path.dirname(scenarioPath);
+  // outputDir always lives under the home tree so fixture files are never
+  // polluted by per-run artifacts.
+  const outputDir = scenarioRunDir(scenario.name);
   fs.mkdirSync(outputDir, { recursive: true });
   const cacheDir = path.join(scenarioDir(scenario.name), "cache");
   fs.rmSync(cacheDir, { recursive: true, force: true });
@@ -705,22 +723,21 @@ async function main() {
     fs.writeFileSync(path.join(cacheDir, "tool-log.jsonl"), lines);
   }
 
-  // Materialize ~/.claude/plans/<slug>.md when seed_state.planFile is set.
+  // Materialize plan file when seed_state.planFile is set.
+  // Per-scenario plan files live under ~/.agent-framework/test-runs/scenarios/<name>/plans/
+  // (not in the global ~/.claude/plans/) to avoid cross-scenario pollution.
+  // AGENT_FRAMEWORK_PLAN_DIR is set in the env so session-utils.resolvePlanPath
+  // finds the file there instead of ~/.claude/plans/.
   // The transcript's first synthesized JSONL line carries `slug: <slug>` (see
-  // buildAllTranscriptLines) so resolvePlanPath -> extractSlugFromSession
-  // finds it. Refuse to clobber an existing file at the same path —
-  // concurrent runs against the same slug must fail loudly. The cleanup
-  // unlink runs in the main `finally` block below.
+  // buildAllTranscriptLines) so resolvePlanPath -> extractSlugFromSession finds it.
   let planFileCleanupPath: string | null = null;
   if (scenario.seed_state.planFile) {
-    const planDir = path.join(os.homedir(), ".claude", "plans");
+    const planDir = scenarioPlansDir(scenario.name);
     fs.mkdirSync(planDir, { recursive: true });
     const planPath = path.join(planDir, `${scenario.seed_state.planFile.slug}.md`);
-    if (fs.existsSync(planPath)) {
-      throw new Error(`refusing to clobber existing plan file at ${planPath}`);
-    }
     fs.writeFileSync(planPath, scenario.seed_state.planFile.content);
     planFileCleanupPath = planPath;
+    process.env.AGENT_FRAMEWORK_PLAN_DIR = planDir;
   }
 
   const cwd = scenario.env?.cwd ?? outputDir;
@@ -830,8 +847,7 @@ async function main() {
       }
 
       const pass = scored.pass && predictionsPass;
-      const expectation_reality: "working" | "broken" =
-        pass === true ? "working" : "broken";
+      const expectation_reality = computeExpectationReality(pass, sourceArg);
       const expectation_reality_last_run_at = new Date().toISOString();
 
       const result: ScenarioResult = {
@@ -857,7 +873,8 @@ async function main() {
         expectation_reality_last_run_at,
       };
 
-      writeExpectationRealityBack(
+      writeLastRun(
+        scenario.name,
         scenarioPath,
         expectation_reality,
         expectation_reality_last_run_at,
@@ -1026,8 +1043,7 @@ async function main() {
       }
 
       const aggregatePass = fires.every((f) => f.pass) && predictionsPass;
-      const expectation_reality: "working" | "broken" =
-        aggregatePass === true ? "working" : "broken";
+      const expectation_reality = computeExpectationReality(aggregatePass, sourceArg);
       const expectation_reality_last_run_at = new Date().toISOString();
       const result: ScenarioResult = {
         mode: "fanout",
@@ -1044,7 +1060,8 @@ async function main() {
         expectation_reality_last_run_at,
       };
 
-      writeExpectationRealityBack(
+      writeLastRun(
+        scenario.name,
         scenarioPath,
         expectation_reality,
         expectation_reality_last_run_at,

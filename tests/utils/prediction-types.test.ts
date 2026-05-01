@@ -542,7 +542,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
       "Read",
       {
         file_path:
-          "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/todo/prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow.json",
+          "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/expected-to-pass/prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow.json",
         offset: 1,
         limit: 5,
       },

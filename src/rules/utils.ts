@@ -1,5 +1,5 @@
 import * as path from "path";
-import * as os from "os";
+import { claudeRoot, claudePlansRoot } from "../utils/paths.js";
 import { RESTRICTED_MCP_TOOLS } from "../utils/slash-commands.js";
 
 // File tools that go through path-based risk classification (trusted/sensitive)
@@ -90,10 +90,9 @@ export function isPathInDirectory(filePath: string, dirPath: string): boolean {
 }
 
 export function isTrustedPath(filePath: string, projectDir: string): boolean {
-  const claudeDir = path.join(os.homedir(), ".claude");
   return (
     isPathInDirectory(filePath, projectDir) ||
-    isPathInDirectory(filePath, claudeDir)
+    isPathInDirectory(filePath, claudeRoot())
   );
 }
 
@@ -117,8 +116,7 @@ export function extractPathOrCmd(toolInput: unknown): { path?: string; cmd?: str
  * True iff filePath (resolved absolute) is inside ~/.claude/plans.
  */
 export function isPlanFile(filePath: string): boolean {
-  const plansDir = path.join(os.homedir(), ".claude", "plans");
-  return isPathInDirectory(filePath, plansDir);
+  return isPathInDirectory(filePath, claudePlansRoot());
 }
 
 /**

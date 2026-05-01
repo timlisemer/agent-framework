@@ -23,6 +23,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { getSessionDir } from "./cache-manager.js";
+import { sessionSubagentCounterFile } from "./paths.js";
 
 const DEBUG = process.env.AGENT_FRAMEWORK_DEBUG === "1";
 
@@ -49,7 +50,6 @@ export interface SubagentDetectionResult {
 // is stored alongside the agent set. If that process is no longer alive,
 // all tracked agents are stale (session ended without proper cleanup).
 
-const SUBAGENT_COUNTER_FILE = "active-subagents.json";
 
 let counterCache: { sessionDir: string; count: number; ts: number } | null = null;
 const COUNTER_CACHE_TTL_MS = 2000;
@@ -98,7 +98,7 @@ function releaseSubagentLock(lockPath: string): void {
   try { fs.unlinkSync(lockPath); } catch {}
 }
 
-function isProcessAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -129,12 +129,12 @@ function readSubagentCount(filePath: string): number {
 }
 
 export function getActiveSubagentCount(sessionDir: string): number {
-  const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
+  const filePath = sessionSubagentCounterFile(sessionDir);
   return readSubagentCount(filePath);
 }
 
 export function incrementActiveSubagents(sessionDir: string, agentId?: string): void {
-  const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
+  const filePath = sessionSubagentCounterFile(sessionDir);
   const lockPath = filePath + ".lock";
   const locked = acquireSubagentLock(lockPath);
   try {
@@ -151,7 +151,7 @@ export function incrementActiveSubagents(sessionDir: string, agentId?: string): 
 }
 
 export function decrementActiveSubagents(sessionDir: string, agentId?: string): void {
-  const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
+  const filePath = sessionSubagentCounterFile(sessionDir);
   const lockPath = filePath + ".lock";
   const locked = acquireSubagentLock(lockPath);
   try {
@@ -170,7 +170,7 @@ export function decrementActiveSubagents(sessionDir: string, agentId?: string): 
 }
 
 export function resetActiveSubagents(sessionDir: string): void {
-  const filePath = path.join(sessionDir, SUBAGENT_COUNTER_FILE);
+  const filePath = sessionSubagentCounterFile(sessionDir);
   try {
     fs.writeFileSync(filePath, JSON.stringify({ agents: [] }));
   } catch {}

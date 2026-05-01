@@ -16,8 +16,7 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
-import * as os from "os";
+import { claudePlanFile } from "./paths.js";
 
 interface SessionMetadata {
   slug?: string;
@@ -50,13 +49,16 @@ async function extractSlugFromSession(transcriptPath: string): Promise<string | 
 
 /**
  * Resolve the plan file path from transcript path.
+ * Honors AGENT_FRAMEWORK_PLAN_DIR env var first (used by scenario runner
+ * to redirect plan files to a per-scenario plans/ dir), then falls back
+ * to ~/.claude/plans/<slug>.md.
  * Returns null if no plan exists for this session.
  */
 export async function resolvePlanPath(transcriptPath: string): Promise<string | null> {
   const slug = await extractSlugFromSession(transcriptPath);
   if (!slug) return null;
 
-  const planPath = path.join(os.homedir(), ".claude", "plans", `${slug}.md`);
+  const planPath = claudePlanFile(slug);
 
   try {
     await fs.promises.access(planPath);

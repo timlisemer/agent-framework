@@ -8,12 +8,12 @@
  * @module session-store
  */
 
-import * as fs from "fs";
 import * as path from "path";
 import {
   CacheManager,
-  getSessionDir as getSessionDirFromCacheManager,
 } from "./cache-manager.js";
+import { sessionDir as pathsSessionDir, sessionToolLogFile, sessionStateFile } from "./paths.js";
+import { appendJsonlEntry, appendJsonlEntrySync, readJsonl } from "./file-io.js";
 import type { ToolPrediction } from "./prediction-types.js";
 
 export interface ToolLogEntry {
@@ -120,41 +120,35 @@ export function sessionStateDefaults(): SessionState {
 type SessionStateManager = CacheManager<SessionState>;
 
 /**
- * Re-export getSessionDir from cache-manager.
+ * Re-export sessionDir from paths as getSessionDir for backward compatibility.
  * All session files live under ~/.agent-framework/sessions/{project}/{hash}/.
  */
 export function getSessionDir(transcriptPath: string): string {
-  return getSessionDirFromCacheManager(transcriptPath);
+  return pathsSessionDir(transcriptPath);
 }
 
 /**
  * Append a tool log entry to the session's JSONL tool log.
  */
 export async function appendToolLog(sessionDir: string, entry: ToolLogEntry): Promise<void> {
-  const logPath = path.join(sessionDir, "tool-log.jsonl");
-  await fs.promises.appendFile(logPath, JSON.stringify(entry) + "\n");
+  await appendJsonlEntry(sessionToolLogFile(sessionDir), entry);
 }
 
 /**
  * Read the last N entries from the tool log as parsed ToolLogEntry objects.
  */
 export function readToolLogEntries(sessionDir: string, count: number): ToolLogEntry[] {
-  const logPath = path.join(sessionDir, "tool-log.jsonl");
-  try {
-    const content = fs.readFileSync(logPath, "utf-8");
-    const lines = content.split("\n").filter(Boolean);
-    const tail = lines.slice(-count);
-    const entries: ToolLogEntry[] = [];
-    for (const line of tail) {
-      try {
-        entries.push(JSON.parse(line) as ToolLogEntry);
-      } catch {
-        // Skip malformed lines
-      }
-    }
-    return entries;
-  } catch {
-    return [];
+  return readJsonl<ToolLogEntry>(sessionToolLogFile(sessionDir), { tail: count });
+}
+
+/**
+ * Seed the tool log in a cache directory with an array of entries.
+ * Used by the scenario runner to pre-populate tool-log state before firing hooks.
+ */
+export function seedToolLog(cacheDir: string, entries: ToolLogEntry[]): void {
+  const logPath = path.join(cacheDir, "tool-log.jsonl");
+  for (const entry of entries) {
+    appendJsonlEntrySync(logPath, entry);
   }
 }
 
@@ -188,7 +182,7 @@ export function formatToolDetail(toolName: string, toolInput: unknown): string {
  */
 export function getSessionState(sessionDir: string): SessionStateManager {
   return new CacheManager<SessionState>({
-    filePath: path.join(sessionDir, "state.json"),
+    filePath: sessionStateFile(sessionDir),
     defaultData: sessionStateDefaults,
   });
 }
