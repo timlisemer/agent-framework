@@ -216,7 +216,7 @@ Returns the absolute path to the current Claude Code session's transcript .jsonl
 
 ## Inputs
 
-- transcript_path (required): auto-supplied by Claude Code via the /transcript slash command
+- transcript_path (optional): explicit transcript file path. Omit to auto-resolve from the most recent transcript-path.txt sidecar under ~/.agent-framework/sessions/<project>/.
 
 ## Output
 

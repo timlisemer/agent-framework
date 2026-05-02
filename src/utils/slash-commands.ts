@@ -11,7 +11,6 @@ export const SLASH_COMMAND_GATED_MCP_TOOLS: Record<string, readonly string[]> = 
   push:      ["mcp__agent-framework__push", "mcp__agent-framework__commit"],
   quickpush: ["mcp__agent-framework__push", "mcp__agent-framework__commit"],
   confirm:   ["mcp__agent-framework__confirm"],
-  check:     ["mcp__agent-framework__check"],
 };
 
 /**

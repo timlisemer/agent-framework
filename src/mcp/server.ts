@@ -411,9 +411,9 @@ server.registerTool(
   "transcript",
   {
     title: "Transcript",
-    description: "Return the absolute path to the current Claude Code session's transcript .jsonl file. Used by the /transcript slash command.",
+    description: "Return the absolute path to the current Claude Code session's transcript .jsonl file. Used by the /transcript slash command. Resolves the path from the most recent transcript-path.txt sidecar under ~/.agent-framework/sessions/<project>/ when called with no arguments.",
     inputSchema: {
-      transcript_path: z.string().describe("Path to the conversation transcript file (auto-supplied by Claude Code)")
+      transcript_path: z.string().optional().describe("Optional explicit transcript file path. Omit to auto-resolve from the most recent session sidecar.")
     }
   },
   async (args) => ({ content: [{ type: "text", text: await runTranscriptAgent(args.transcript_path) }] })

@@ -370,7 +370,7 @@ export const TOOL_APPROVE_PROMPT_SECTION: string = `You are a tool approval gate
 
 === SLASH COMMAND CONTEXT ===
 
-If \`=== SLASH COMMAND INVOKED ===\` appears in the context and its \`Allowed tools:\` field literally contains the tool name being evaluated, APPROVE immediately. Examples: \`/commit\` authorizes \`mcp__agent-framework__commit\`; \`/push\` authorizes \`mcp__agent-framework__push\`; \`/check\` authorizes \`mcp__agent-framework__check\`; \`/plan3\` authorizes \`Agent\` and \`ExitPlanMode\`; \`/implement\` authorizes \`Agent\`.
+If \`=== SLASH COMMAND INVOKED ===\` appears in the context and its \`Allowed tools:\` field literally contains the tool name being evaluated, APPROVE immediately. Examples: \`/commit\` authorizes \`mcp__agent-framework__commit\`; \`/push\` authorizes \`mcp__agent-framework__push\`; \`/plan3\` authorizes \`Agent\` and \`ExitPlanMode\`; \`/implement\` authorizes \`Agent\`.
 
 === CORE PRINCIPLE: AIs DO NOT RUN BUILD/COMPILE COMMANDS ===
 
@@ -574,7 +574,7 @@ The original block followed strict rules. Your job is to check if the block shou
 
 === SLASH COMMAND CONTEXT ===
 
-If \`=== SLASH COMMAND INVOKED ===\` is present and its \`Allowed tools:\` field literally contains the blocked tool name, OVERTURN immediately. Examples: \`/commit\` authorizes \`mcp__agent-framework__commit\`; \`/push\` authorizes \`mcp__agent-framework__push\`; \`/check\` authorizes \`mcp__agent-framework__check\`; \`/plan3\` authorizes \`Agent\` and \`ExitPlanMode\`; \`/implement\` authorizes \`Agent\`.
+If \`=== SLASH COMMAND INVOKED ===\` is present and its \`Allowed tools:\` field literally contains the blocked tool name, OVERTURN immediately. Examples: \`/commit\` authorizes \`mcp__agent-framework__commit\`; \`/push\` authorizes \`mcp__agent-framework__push\`; \`/plan3\` authorizes \`Agent\` and \`ExitPlanMode\`; \`/implement\` authorizes \`Agent\`.
 
 === USER STATE IS GROUND TRUTH ===
 
