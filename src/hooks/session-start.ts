@@ -99,7 +99,7 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
     return;
   }
 
-  // resume: no-op. Claude Code's native compaction handles transcript continuity.
+  // resume: no-op. The host agent's native compaction handles transcript continuity.
   const state = await getSessionState(sessionDir).load().catch(() => sessionStateDefaults());
   const snapshotSeq = appendStateSnapshot(sessionDir, state, transcript_path);
   const epoch = loadCurrentEpoch(sessionDir);

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * StatusLine Script for Claude Code
+ * StatusLine Script for the host agent
  *
- * This script is called by Claude Code's statusLine feature.
+ * This script is called by the host agent's statusLine feature.
  * It reads the recent decision state and outputs formatted text.
  *
  * Input (stdin): JSON with conversation context including transcript_path and cwd
@@ -31,7 +31,7 @@ import {
 import { getSessionDir } from "../utils/cache-manager.js";
 
 /**
- * JSON input structure from Claude Code statusLine.
+ * JSON input structure from the host agent's statusLine.
  */
 interface StatusLineInput {
   transcript_path: string;

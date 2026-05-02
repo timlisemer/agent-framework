@@ -212,7 +212,7 @@ Structured verdict with ALIGNED or DRIFTED verdict and a short reason.
 
 export const TRANSCRIPT_HELP = `# transcript -- Session Transcript Path Resolver
 
-Returns the absolute path to the current Claude Code session's transcript .jsonl file and refreshes the transcript-path.txt sidecar under ~/.agent-framework/sessions/.
+Returns the absolute path to the current agent session's transcript .jsonl file and refreshes the transcript-path.txt sidecar under ~/.agent-framework/sessions/.
 
 ## Inputs
 

@@ -91,7 +91,7 @@ The `commit` agent enforces the complete verification chain before committing.
 │  whenever a higher-priority rule has emitted llmContext, so the rule-gate
 │  aggregator's judgment is always authoritative.
 │
-├─ plan-validate: Check for plan drift on ~/.claude/plans writes
+├─ plan-validate: Check for plan drift on ~/.claude/plans writes (Claude-specific)
 ├─ claude-md-validate: Validate CLAUDE.md edits
 │
 └─ Post-allow bookkeeping (tool count, ExitPlanMode cleanup)
@@ -115,7 +115,8 @@ npm run build
 # Set env var (add to shell profile)
 export AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
 
-# Register MCP server with Claude Code
+# Register MCP server with your AI coding tool (Claude Code shown)
+# For Claude Code:
 claude mcp add agent-framework node $AGENT_FRAMEWORK_ROOT/dist/mcp/server.js
 
 # Register hooks (NixOS: declare in your NixOS config; other: symlink manually)
@@ -123,7 +124,7 @@ claude mcp add agent-framework node $AGENT_FRAMEWORK_ROOT/dist/mcp/server.js
 # settings.json path: adapters/claude/dotclaude/settings.json
 ```
 
-On NixOS, symlinks into `~/.claude/` are managed declaratively. Run
+On NixOS, symlinks into the host agent's config dir (`~/.claude/` for Claude Code) are managed declaratively. Run
 `nixos-rebuild switch` after `just build` to activate the new hook scripts.
 See [`adapters/claude/README.md`](adapters/claude/README.md) for details.
 
@@ -139,59 +140,9 @@ For manual MCP config (alternative to `claude mcp add`):
 }
 ```
 
-## Claude Code Tool Names
+## Tool Names
 
-The `PreToolUse` hook intercepts tool calls. To configure which tools trigger your hook, you need to know the exact tool names Claude Code uses.
-
-### How Tool Names Were Discovered
-
-**The problem**: Claude Code's documentation doesn't provide a complete list of tool names. We needed to find them to properly configure hook matchers.
-
-**Discovery process**:
-
-1. **Web search** - Searched for "Claude Code PreToolUse hook matcher tool names" but official docs only mention a few examples (Bash, Edit, Write, Read)
-
-2. **SDK type definitions** - The `@anthropic-ai/claude-agent-sdk` package contains TypeScript definitions. Found the tool list by exploring:
-
-   ```bash
-   find node_modules -name "*.d.ts" -path "*anthropic*"
-   ```
-
-3. **Found the source** - The file `sdk-tools.d.ts` contains a `ToolInputSchemas` union type that defines input schemas for ALL tools. The tool name maps to the input type name (e.g., `BashInput` → tool name `Bash`, `FileReadInput` → tool name `Read`)
-
-```bash
-# The SDK exposes tool input schemas in:
-node_modules/@anthropic-ai/claude-agent-sdk/sdk-tools.d.ts
-```
-
-This file defines a `ToolInputSchemas` union type that lists all available tools:
-
-```typescript
-export type ToolInputSchemas =
-  | AgentInput // Tool: Agent (or Task)
-  | BashInput // Tool: Bash
-  | TaskOutputInput // Tool: TaskOutput
-  | ExitPlanModeInput // Tool: ExitPlanMode
-  | FileEditInput // Tool: Edit
-  | FileReadInput // Tool: Read
-  | FileWriteInput // Tool: Write
-  | GlobInput // Tool: Glob
-  | GrepInput // Tool: Grep
-  | KillShellInput // Tool: KillShell
-  | ListMcpResourcesInput // Tool: ListMcpResources
-  | McpInput // Tool: mcp__<server>__<tool>
-  | NotebookEditInput // Tool: NotebookEdit
-  | ReadMcpResourceInput // Tool: ReadMcpResource
-  | TodoWriteInput // Tool: TodoWrite
-  | WebFetchInput // Tool: WebFetch
-  | WebSearchInput // Tool: WebSearch
-  | AskUserQuestionInput; // Tool: AskUserQuestion
-```
-
-Additional tools exist but aren't in the SDK types:
-- `LSP` - Language Server Protocol queries
-- `EnterPlanMode` - Enter planning mode
-- `Skill` - Invoke skills like /commit, /push
+The `PreToolUse` hook intercepts tool calls. To configure which tools trigger your hook, you need to know the exact tool names the host agent uses.
 
 ### Tool Risk Categories
 
@@ -204,7 +155,7 @@ Additional tools exist but aren't in the SDK types:
 
 **Path-based classification**: File tools are auto-approved when:
 - File path is inside the project directory (`CLAUDE_PROJECT_DIR` or cwd), OR
-- File path is inside `~/.claude/` (Claude Code's own files)
+- File path is inside `~/.claude/` (the host agent's own files)
 - AND the path doesn't match sensitive patterns (`.env`, `credentials`, `.ssh`, `.aws`, `secrets`, `.key`, `.pem`, `password`)
 
 ### Hook Matcher Configuration
@@ -242,7 +193,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 # Required for hooks - avoids expensive filesystem traversal on every hook invocation
 AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
 
-# Optional - set by Claude Code automatically
+# Optional - set by the host agent automatically
 CLAUDE_PROJECT_DIR=/path/to/project
 
 # Optional - alternative API endpoint (e.g., OpenRouter)
@@ -293,7 +244,7 @@ export AGENT_FRAMEWORK_SDK_PROVIDER=claude-subscription
 ### Provider Constraints
 
 - **Direct mode**: Supports both `openrouter` and `claude-subscription`
-- **SDK mode**: Only supports `claude-subscription` (Claude Code subprocess cannot use custom base URLs)
+- **SDK mode**: Only supports `claude-subscription` (the host agent's SDK subprocess cannot use custom base URLs)
 
 ### Recommended Setup
 
@@ -315,9 +266,9 @@ This gives you:
 
 ## Usage
 
-### From Claude Code
+### From the Host Agent
 
-Once configured, Claude Code can:
+Once configured, the agent can:
 
 ```
 > Use the check tool to verify code quality
@@ -330,7 +281,7 @@ CONFIRMED
 a1b2c3d
 ```
 
-The tool-approve hook runs automatically on every tool call Claude tries to execute.
+The tool-approve hook runs automatically on every tool call the agent tries to execute.
 
 The respond-first rule (priority 5) is purely deterministic: it fastDenies whenever the assistant calls a tool without first emitting any text in the current turn, with narrow carve-outs for slash commands, confirmation patterns, and inaction-complaint sentiment. Semantic alignment between text and user intent is left to prediction-block / gate / tool-approve.
 

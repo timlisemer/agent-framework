@@ -411,7 +411,7 @@ server.registerTool(
   "transcript",
   {
     title: "Transcript",
-    description: "Return the absolute path to the current Claude Code session's transcript .jsonl file. Used by the /transcript slash command. Resolves the path from the most recent transcript-path.txt sidecar under ~/.agent-framework/sessions/<project>/ when called with no arguments.",
+    description: "Return the absolute path to the current agent session's transcript .jsonl file. Used by the /transcript slash command. Resolves the path from the most recent transcript-path.txt sidecar under ~/.agent-framework/sessions/<project>/ when called with no arguments.",
     inputSchema: {
       transcript_path: z.string().optional().describe("Optional explicit transcript file path. Omit to auto-resolve from the most recent session sidecar.")
     }
@@ -656,7 +656,7 @@ server.registerTool(
 
 // ─── Help Resources ────────────────────────────────────────────────────────
 // Each tool's help documentation is exposed as a resource so clients calling
-// resources/list (e.g. Claude Code's ListMcpResourcesTool) can discover them
+// resources/list (e.g. the host agent's ListMcpResourcesTool) can discover them
 // and then fetch the body via resources/read.
 
 const HELP_RESOURCES: Array<{

@@ -10,7 +10,7 @@ adapters/                           # Adapter layer (per-tool stdout/exit-code t
     dotclaude/                      # Files symlinked into ~/.claude/ (NixOS-managed)
       commands/                     # Slash commands (/check, /commit, etc.)
       settings.json                 # Hook configuration (uses $AGENT_FRAMEWORK_ROOT)
-    hooks/                          # Claude-specific hook entry points (dist/ targets)
+    hooks/                          # Adapter-specific hook entry points (dist/ targets)
   README.md                         # Adapter contract + how to add a new adapter
 
 src/                                # TypeScript source
@@ -129,7 +129,7 @@ how to add a new adapter.
 
 ## Unified Agent Execution
 
-All agents use the unified `runAgent()` function from `utils/agent-runner.ts`. This provides a single interface regardless of whether the agent uses direct API calls or the Claude SDK.
+All agents use the unified `runAgent()` function from `utils/agent-runner.ts`. This provides a single interface regardless of whether the agent uses direct API calls or the host agent's SDK.
 
 ### Execution Modes
 
@@ -220,7 +220,7 @@ Provider resolution follows this priority order:
 
 ### SDK Mode Constraint
 
-**SDK mode with OpenRouter is not supported.** The Claude Agent SDK spawns a Claude Code subprocess that cannot use custom base URLs. SDK mode automatically uses `claude-subscription` (or throws an error if explicitly configured for openrouter).
+**SDK mode with OpenRouter is not supported.** The SDK spawns a host-agent subprocess that cannot use custom base URLs. SDK mode automatically uses `claude-subscription` (or throws an error if explicitly configured for openrouter).
 
 ### Provider Model IDs
 
@@ -272,7 +272,7 @@ commit → confirm → check
 
 ## MCP Elicitation
 
-The `commit`, `confirm`, and `push` tools use MCP elicitation (`server.elicitInput()`) to ask users structured questions mid-tool-execution, replacing the previous pattern where slash commands instructed Claude Code to call `AskUserQuestion`.
+The `commit`, `confirm`, and `push` tools use MCP elicitation (`server.elicitInput()`) to ask users structured questions mid-tool-execution, replacing the previous pattern where slash commands instructed the agent to call `AskUserQuestion`.
 
 ### Flow (commit/confirm)
 
@@ -353,7 +353,7 @@ Tool call received
 │
 ├─> Rewind detection (after rules, before validators)
 │
-├─> plan-validate (Sonnet) if writing to ~/.claude/plans/
+├─> plan-validate (Sonnet) if writing to ~/.claude/plans/ (Claude-specific)
 ├─> claude-md-validate (Sonnet) for CLAUDE.md edits
 │
 └─> Post-allow bookkeeping (tool count, ExitPlanMode cleanup)
@@ -436,7 +436,7 @@ Standard configurations for different use cases:
 | `ANTHROPIC_API_KEY` | Yes | API key for Anthropic |
 | `ANTHROPIC_AUTH_TOKEN` | No | Alternative auth token |
 | `ANTHROPIC_BASE_URL` | No | Custom API endpoint |
-| `CLAUDE_PROJECT_DIR` | Auto | Set by Claude Code |
+| `CLAUDE_PROJECT_DIR` | Auto | Set by the host agent |
 | `AGENT_FRAMEWORK_ROOT` | Yes (hooks) | Path to agent-framework directory |
 | `AGENT_FRAMEWORK_PROVIDER` | No | Global provider (openrouter/claude-subscription) |
 | `AGENT_FRAMEWORK_DIRECT_PROVIDER` | No | Provider for direct mode agents |
@@ -500,7 +500,7 @@ Each session persists three files under `~/.agent-framework/sessions/{project}/{
 2. **`gate-reasoning.json`** — priority-evicted denial memory with NOTE/WARNING/appeal outcomes.
 3. **`tool-log.jsonl`** — append-only audit trail consumed by drift-detect, error-acknowledge, pre-tool-use, gate-reasoning, and the test-harness.
 
-Compaction recovery relies on Claude Code's native transcript compaction — no app-layer summary re-inject.
+Compaction recovery relies on the host agent's native transcript compaction — no app-layer summary re-inject.
 
 ### Hook Lifecycle
 
@@ -530,7 +530,7 @@ The following components were removed:
 - `strict-mode-tracker.ts` — Replaced by `tool-log.jsonl` and SessionState.
 - `summary-updater.ts` / `summary-cache.ts` summary document surface — Replaced by prediction-driven checks and `gate-reasoning.json`.
 - `spawn-background.ts` — No background forks remain; SENTIMENT_AGENT runs synchronously with a hard timeout.
-- `pre-compact.ts` — No app-layer compaction recovery; Claude Code's native compaction handles it.
+- `pre-compact.ts` — No app-layer compaction recovery; the host agent's native compaction handles it.
 - `correction-cache.ts` — Dead after summary-updater removal.
 - `checkGate` dead export from `src/agents/hooks/gate.ts` — evaluator's rule-gate path replaces it.
 - `useSyncPipeline` / `coldStart` fields — sync/lazy pipeline bifurcation deleted; every rule runs on every call.

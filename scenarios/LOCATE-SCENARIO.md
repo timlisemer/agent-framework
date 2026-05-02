@@ -1,12 +1,12 @@
 # Locating a captured scenario from a quote
 
-This file is a recipe for a Claude Code session that has been asked **"find the scenario where the previous session said/did X"**, where X is a quoted string from a different session. Follow the recipe verbatim.
+This file is a recipe for an agent session that has been asked **"find the scenario where the previous session said/did X"**, where X is a quoted string from a different session. Follow the recipe verbatim.
 
 ## Where data lives
 
 | Path | What's there |
 |------|--------------|
-| `~/.claude/projects/<encoded>/<session-id>.jsonl` | The raw Claude transcript — every user/assistant/tool_result line, the user's literal text, the assistant's literal text, tool inputs and outputs. |
+| `~/.claude/projects/<encoded>/<session-id>.jsonl` | The raw Claude transcript — every user/assistant/tool_result line, the user's literal text, the assistant's literal text, tool inputs and outputs. (Claude-specific path; future adapters use their own transcript directories.) |
 | `~/.agent-framework/sessions/<encoded>/<yyyy-mm-dd-HHmm>_<hash>/captures.jsonl` | One ~200-byte pointer per hook fire: `{seq, ts, epoch_id, parent_capture_seq, event, tool_use_id, transcript_anchor_uuid, decision: {decision, by, reason}, state_snapshot_seq, raw_input_hash}`. The `decision.reason` field is the hook's verbatim deny/block message. |
 | `~/.agent-framework/sessions/<encoded>/<dir>/state-snapshots.jsonl` | Append-only state snapshots referenced by capture pointers. |
 | `~/.agent-framework/sessions/<encoded>/<dir>/epochs.jsonl` | One line per epoch (session-start / compact / rewind / clear). |

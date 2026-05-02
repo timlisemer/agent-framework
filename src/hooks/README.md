@@ -1,8 +1,8 @@
 # Hook Handlers
 
-Hook handlers implement the core logic for each Claude Code hook event.
+Hook handlers implement the core logic for each host-agent hook event.
 They consume canonical input shapes (today identical to
-`@anthropic-ai/claude-agent-sdk` types) and produce output via an
+the host agent's SDK (currently `@anthropic-ai/claude-agent-sdk` for Claude Code) types) and produce output via an
 `AdapterEncoder` passed in from the adapter entry point.
 
 Adapters live under `adapters/<name>/` and are responsible for translating

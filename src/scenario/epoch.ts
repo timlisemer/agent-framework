@@ -3,7 +3,7 @@
  *
  * An epoch is a contiguous slice of the transcript during which state
  * (predictions, drift, tool-log, gate-reasoning) was accumulated. A new
- * epoch starts whenever Claude Code "rewinds" the transcript (e.g. a /clear
+ * epoch starts whenever the host agent "rewinds" the transcript (e.g. a /clear
  * or context-compact that truncates history) or when the user explicitly
  * compacts the session.
  *

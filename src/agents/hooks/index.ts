@@ -1,12 +1,12 @@
 /**
  * Hook-Triggered Agents
  *
- * These agents are triggered by Claude Code hooks (PreToolUse, Stop).
+ * These agents are triggered by adapter hooks (PreToolUse, Stop).
  * They use the direct Anthropic API for fast validation.
  *
  * ## WHY DIRECT API (not SDK streaming)?
  *
- * Hook agents are validators that run INSIDE Claude's tool execution loop.
+ * Hook agents are validators that run INSIDE the host agent's tool execution loop.
  * They must be:
  * - Fast (<100ms) - validation should not noticeably delay tool execution
  * - Lightweight - no sub-agent spawning or tool orchestration needed

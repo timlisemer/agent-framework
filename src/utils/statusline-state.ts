@@ -1,8 +1,8 @@
 /**
- * StatusLine State - Session-aware state for Claude Code statusLine display
+ * StatusLine State - Session-aware state for host-agent statusLine display
  *
  * Maintains a circular buffer of recent agent decisions that can be
- * displayed in Claude Code's statusLine feature.
+ * displayed in the host agent's statusLine feature.
  *
  * Session isolation is structural: each session has its own file in
  * the session directory. Subagents share the parent's session directory
