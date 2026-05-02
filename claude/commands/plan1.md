@@ -20,7 +20,7 @@ If the user's task description is something like "validate your theory" or "fix 
 
 ## Step 1: Launch 1 Plan agent
 
-Call the Agent tool once with subagent_type "Plan", description "Plan agent", and the prompt below:
+Call the Agent tool once with subagent_type "Plan", description "Plan agent", model "sonnet" (unless the user explicitly requested a different tier), and the prompt below:
 
 ```
 Do NOT write a plan file. Report your plan directly to me.
@@ -49,7 +49,7 @@ After the agent returns, write the plan to the plan file. Include:
 
 ## Step 3: Launch 1 Validation agent
 
-Call the Agent tool once with subagent_type "Plan", description "Plan validation agent", and the prompt below:
+Call the Agent tool once with subagent_type "Plan", description "Plan validation agent", model "sonnet" (unless the user explicitly requested a different tier), and the prompt below:
 
 ```
 Do NOT write a plan file. Report your validation findings directly to me.

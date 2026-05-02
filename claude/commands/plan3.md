@@ -23,9 +23,11 @@ If the user's task description is something like "validate your theory" or "fix 
 You MUST call the Agent tool exactly 3 times in your SINGLE NEXT RESPONSE. All 3 Agent tool calls go in ONE message -- do NOT send one agent, wait for it, then send the next. You must emit all 3 tool_use blocks together so they run concurrently. If you only launch 1 agent, you have failed this step.
 
 Correct pattern (all 3 in one response):
-- Agent call 1: subagent_type "Plan", description "Plan agent 1 of 3", prompt = (see below)
-- Agent call 2: subagent_type "Plan", description "Plan agent 2 of 3", prompt = (same)
-- Agent call 3: subagent_type "Plan", description "Plan agent 3 of 3", prompt = (same)
+- Agent call 1: subagent_type "Plan", description "Plan agent 1 of 3", model "sonnet", prompt = (see below)
+- Agent call 2: subagent_type "Plan", description "Plan agent 2 of 3", model "sonnet", prompt = (same)
+- Agent call 3: subagent_type "Plan", description "Plan agent 3 of 3", model "sonnet", prompt = (same)
+
+Use model "sonnet" for all 3 agents unless the user explicitly requested a different tier.
 
 All 3 agents get the IDENTICAL prompt:
 
@@ -61,7 +63,7 @@ Write the consolidated plan to the plan file. Include:
 
 ## Step 3: Launch 3 Validation agents in parallel
 
-Same rule as Step 1: you MUST call the Agent tool exactly 3 times in your SINGLE NEXT RESPONSE. All 3 in ONE message, running concurrently. Each agent gets the IDENTICAL prompt:
+Same rule as Step 1: you MUST call the Agent tool exactly 3 times in your SINGLE NEXT RESPONSE. All 3 in ONE message, running concurrently. Each call uses subagent_type "Plan" with model "sonnet" (unless the user explicitly requested a different tier). Each agent gets the IDENTICAL prompt:
 
 ```
 Do NOT write a plan file. Report your validation findings directly to me.

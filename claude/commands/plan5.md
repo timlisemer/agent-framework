@@ -23,11 +23,13 @@ If the user's task description is something like "validate your theory" or "fix 
 You MUST call the Agent tool exactly 5 times in your SINGLE NEXT RESPONSE. All 5 Agent tool calls go in ONE message -- do NOT send one agent, wait for it, then send the next. You must emit all 5 tool_use blocks together so they run concurrently. If you only launch 1 agent, you have failed this step.
 
 Correct pattern (all 5 in one response):
-- Agent call 1: subagent_type "Plan", description "Plan agent 1 of 4", prompt = (see below)
-- Agent call 2: subagent_type "Plan", description "Plan agent 2 of 4", prompt = (same)
-- Agent call 3: subagent_type "Plan", description "Plan agent 3 of 4", prompt = (same)
-- Agent call 4: subagent_type "Plan", description "Plan agent 4 of 4", prompt = (same)
-- Agent call 5: subagent_type "Plan", description "Plan agent 5 outside-the-box", prompt = (same + special instruction)
+- Agent call 1: subagent_type "Plan", description "Plan agent 1 of 4", model "sonnet", prompt = (see below)
+- Agent call 2: subagent_type "Plan", description "Plan agent 2 of 4", model "sonnet", prompt = (same)
+- Agent call 3: subagent_type "Plan", description "Plan agent 3 of 4", model "sonnet", prompt = (same)
+- Agent call 4: subagent_type "Plan", description "Plan agent 4 of 4", model "sonnet", prompt = (same)
+- Agent call 5: subagent_type "Plan", description "Plan agent 5 outside-the-box", model "opus", prompt = (same + special instruction)
+
+Use model "sonnet" for the first 4 agents and model "opus" for the 5th outside-the-box agent, unless the user explicitly requested a different tier.
 
 The first 4 agents get the IDENTICAL prompt:
 
@@ -73,11 +75,13 @@ Write the consolidated plan to the plan file. Include:
 Same rule as Step 1: you MUST call the Agent tool exactly 5 times in your SINGLE NEXT RESPONSE. All 5 in ONE message, running concurrently.
 
 Correct pattern (all 5 in one response):
-- Agent call 1: subagent_type "Plan", description "Plan validation agent 1 of 4", prompt = (see below)
-- Agent call 2: subagent_type "Plan", description "Plan validation agent 2 of 4", prompt = (same)
-- Agent call 3: subagent_type "Plan", description "Plan validation agent 3 of 4", prompt = (same)
-- Agent call 4: subagent_type "Plan", description "Plan validation agent 4 of 4", prompt = (same)
-- Agent call 5: subagent_type "Plan", description "Plan validation agent 5 alternative-approach", prompt = (see alternative prompt below)
+- Agent call 1: subagent_type "Plan", description "Plan validation agent 1 of 4", model "sonnet", prompt = (see below)
+- Agent call 2: subagent_type "Plan", description "Plan validation agent 2 of 4", model "sonnet", prompt = (same)
+- Agent call 3: subagent_type "Plan", description "Plan validation agent 3 of 4", model "sonnet", prompt = (same)
+- Agent call 4: subagent_type "Plan", description "Plan validation agent 4 of 4", model "sonnet", prompt = (same)
+- Agent call 5: subagent_type "Plan", description "Plan validation agent 5 alternative-approach", model "opus", prompt = (see alternative prompt below)
+
+Use model "sonnet" for the first 4 validation agents and model "opus" for the 5th alternative-approach agent, unless the user explicitly requested a different tier.
 
 The first 4 validation agents get the IDENTICAL prompt:
 
