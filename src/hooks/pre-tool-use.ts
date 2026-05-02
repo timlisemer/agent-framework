@@ -1,16 +1,12 @@
-import "../utils/load-env.js";
-import { initializeTelemetry } from "../telemetry/index.js";
-initializeTelemetry();
-
 import { type PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import * as path from "path";
 import * as fs from "fs";
 import { claudePlansRoot } from "../utils/paths.js";
-import { readStdinJson, initHookProcess, exitAfterFlush } from "../utils/hook-bootstrap.js";
+import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
-import { detectRewind } from "../utils/rewind-cache.js";
 import { readPlanContent } from "../utils/session-utils.js";
+import type { AdapterEncoder } from "../adapter/types.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
 import { buildAppealUserState } from "../agents/hooks/tool-appeal-user-state.js";
 import {
@@ -56,38 +52,10 @@ import {
 } from "../rules/utils.js";
 import { ALL_RULES, evaluateRules } from "../rules/index.js";
 import type { RuleContext } from "../rules/types.js";
-
-
-/**
- * Output structured JSON to allow the tool call and exit.
- * Private - only callable from exitPipeline().
- */
-async function outputAllow(): Promise<never> {
-  const output = JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "allow",
-    },
-  });
-
-  return exitAfterFlush(0, output);
-}
-
-/**
- * Output structured JSON to deny the tool call with a reason and exit.
- * Private - only callable from exitPipeline().
- */
-async function outputDeny(reason: string): Promise<never> {
-  const output = JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: reason,
-    },
-  });
-
-  return exitAfterFlush(0, output);
-}
+import { appendCapture } from "../scenario/capture.js";
+import { appendStateSnapshot } from "../scenario/snapshot.js";
+import { detectEpochChange, loadCurrentEpoch, rotateEpoch } from "../scenario/epoch.js";
+import { onEpochRotation } from "../scenario/lifecycle.js";
 
 interface PipelineExit {
   decision: "allow" | "deny";
@@ -97,14 +65,21 @@ interface PipelineExit {
   mirroredFromLeader?: boolean;
 }
 
-async function main() {
-  const input = await readStdinJson<PreToolUseHookInput>();
+export async function mainPreToolUse(input: PreToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
-  // Initialize all sessions
-  initHookProcess(input.transcript_path);
-
   const sessionDir = getSessionDir(input.transcript_path);
+
+  // Detect epoch change (transcript rewind) and reset derived caches when needed.
+  const epochChange = detectEpochChange(sessionDir, input.transcript_path);
+  if (epochChange.rotated) {
+    const newEpoch = rotateEpoch(
+      sessionDir,
+      epochChange.reason!,
+      epochChange.anchorUuid ?? null,
+    );
+    await onEpochRotation(sessionDir, newEpoch);
+  }
 
   const stateManager = getSessionState(sessionDir);
   let state = await stateManager.load();
@@ -256,8 +231,27 @@ async function main() {
       ms: Date.now() - startTime,
     });
 
-    if (exit.decision === "allow") return outputAllow();
-    return outputDeny(exit.reason);
+    {
+      const latestState = await stateManager.load().catch(() => state);
+      const snapshotSeq = appendStateSnapshot(sessionDir, latestState, input.transcript_path);
+      const currentEpoch = loadCurrentEpoch(sessionDir);
+      appendCapture(sessionDir, {
+        ts: Date.now(),
+        epoch_id: currentEpoch?.id ?? "unknown",
+        parent_capture_seq: null,
+        event: "PreToolUse",
+        tool_use_id: input.tool_use_id,
+        decision: exit.decision,
+        state_snapshot_seq: snapshotSeq,
+      });
+    }
+
+    if (exit.decision === "allow") {
+      const out = encoder.encodePreToolUseAllow();
+      return exitAfterFlush(out.exitCode, out.stdout);
+    }
+    const out = encoder.encodePreToolUseDeny(exit.reason);
+    return exitAfterFlush(out.exitCode, out.stdout);
   }
 
   /**
@@ -405,9 +399,6 @@ async function main() {
     return;
   }
 
-  // Rewind detection -- runs AFTER evaluateRules, preserving current position
-  await detectRewind(input.transcript_path);
-
   // EXCEPTIONS: plan-validate and claude-md-validate run AFTER all rules pass.
   // sensitive-path-block rule (priority 58) does not apply to plan/CLAUDE.md
   // files so they always reach this point.
@@ -546,21 +537,3 @@ async function main() {
   });
 }
 
-main().catch(async (err) => {
-  // Safety net: Always output a valid JSON response before exiting
-  const errorMessage = err instanceof Error ? err.message : String(err);
-  const output = JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: `Hook error: ${errorMessage}. Please try again.`,
-    },
-  });
-
-  process.stdout.write(output + "\n");
-  console.error("PreToolUse hook error:", err);
-
-  // Wait briefly for output to flush, then exit
-  await new Promise((r) => setTimeout(r, 200));
-  process.exit(1);
-});

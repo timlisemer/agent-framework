@@ -10,8 +10,8 @@ import { runTranscriptAgent } from "../agents/mcp/transcript.js";
 import { evaluateRules } from "../rules/index.js";
 import { validateIntentRule } from "../rules/validate-intent.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
-import { handleTestHarnessLabeler, LABELER_HELP } from "../agents/mcp/test-harness-labeler.js";
-import { handleTestHarnessTester, TESTER_HELP } from "../agents/mcp/test-harness-tester.js";
+import { handleScenarioLabeler, LABELER_HELP } from "../agents/mcp/scenario-labeler.js";
+import { handleScenarioTester, TESTER_HELP } from "../agents/mcp/scenario-tester.js";
 import {
   CHECK_HELP,
   CONFIRM_HELP,
@@ -448,9 +448,9 @@ const richExpectationSchema = z.object({
 });
 
 server.registerTool(
-  "test_harness_labeler",
+  "scenario_labeler",
   {
-    title: "Test Harness Labeler",
+    title: "Scenario Labeler",
     description: "Label test harness transcripts. Actions: find_work, auto_label, generate_labels, scaffold, list, expand, validate, update_label, update_labels, set_label, update_label_prediction, update_label_predictions, reset_for_relabel, finalize, read_file, append_notes, git_hash, help. Use help action for full documentation.",
     inputSchema: {
       action: z.enum([
@@ -501,7 +501,7 @@ server.registerTool(
     }
   },
   async (args) => {
-    const result = await handleTestHarnessLabeler(args);
+    const result = await handleScenarioLabeler(args);
     return { content: [{ type: "text", text: result }] };
   }
 );
@@ -623,9 +623,9 @@ const scenarioSchema = z.object({
 });
 
 server.registerTool(
-  "test_harness_tester",
+  "scenario_tester",
   {
-    title: "Test Harness Tester",
+    title: "Scenario Tester",
     description: "Run test harness against labeled transcripts OR against synthetic scenarios. Actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, run_scenario, run_scenarios, list_scenarios, read_scenario, git_hash, help. Use help action for full documentation.",
     inputSchema: {
       action: z.enum([
@@ -642,14 +642,14 @@ server.registerTool(
       working_dir: z.string().optional().describe("Local repo path for run_test/run_single_hook/list/expand/run_scenario/run_scenarios/list_scenarios (overrides AGENT_FRAMEWORK_ROOT so edited code AND locally-edited fixture scenarios are used)"),
       truncate_to_line: z.number().optional().describe("For run_single_hook: 1-based line cap. When set, the harness appends only transcript lines <= truncate_to_line before firing the target hook. The hook still fires with its full tool_use_id because input is synthesized from the in-memory parsed lines. Use this to reproduce timing-sensitive states like pre-flush replay."),
       transcript_path: z.string().optional().describe("Absolute path to a transcript .jsonl file. Use when the transcript lives outside the default ~/.claude/projects/<encoded-project>/ directory (e.g. sessions from other project dirs). You may also pass a session folder name (e.g. '2025-01-15-1430_abc12345') and the resolver will look up the path via the session sidecar at ~/.agent-framework/sessions/. Only needed if the test-runs copy is not yet in place."),
-      scenario_name: z.string().optional().describe("For run_scenario / read_scenario: slug identifying a scenario. For run_scenario, resolved across the union of four sources: ~/.agent-framework/test-runs/scenarios/<name>/scenario.json (home) and <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json (committed fixtures). Slugs must be unique across all four sources. read_scenario still reads only from the home tree. Must match [A-Za-z0-9._-]+."),
+      scenario_name: z.string().optional().describe("For run_scenario / read_scenario: slug identifying a scenario. For run_scenario, resolved across the union of four sources: ~/.agent-framework/test-runs/scenarios/<name>/scenario.json (home) and <AGENT_FRAMEWORK_ROOT>/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json (committed fixtures). Slugs must be unique across all four sources. read_scenario still reads only from the home tree. Must match [A-Za-z0-9._-]+."),
       scenario: scenarioSchema.optional().describe("For run_scenario: inline Scenario JSON. When set, overwrites the on-disk scenarios/<name>/scenario.json before running. Omit to re-run a previously stored scenario. See the 'help' action (Workflow B) for the full schema and examples."),
-      scenario_names: z.array(z.string()).optional().describe("For run_scenarios: explicit list of scenario slugs to run. Resolved against the UNION of four sources: ~/.agent-framework/test-runs/scenarios/<name>/scenario.json (home) and <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json (committed fixtures). A slug present in two or more sources is a hard error. Fixtures run in place; reports + cache always land under the home tree. Omit or pass an empty array to run EVERY scenario in the union, alphabetically. Returns aggregated JSON {total, passed, failed, results[]} with per-result {source: \"home\"|\"expected-to-pass\"|\"fixture-bug\"|\"expected-to-fail\"}. Each result also carries `expectation_reality: \"expected-to-pass\" | \"fixture-bug\" | \"expected-to-fail\" | null` and `expectation_reality_last_run_at: ISO-8601` — the most recent run's reality, written to last-run.json sidecar. A mismatch between folder and reality surfaces regressions or landed features. The aggregate response does NOT summarize mismatches; callers inspect `results[]` directly."),
-      scenario_source: z.enum(["expected-to-pass", "fixture-bug", "expected-to-fail", "home"]).optional().describe("For run_scenarios / list_scenarios: scope to ONE source. 'expected-to-pass' | 'fixture-bug' | 'expected-to-fail' select fixture subfolders (<AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/<sub>/). 'home' selects ~/.agent-framework/test-runs/scenarios/. Omit to include all four. Slug uniqueness is enforced across all four roots regardless of filter."),
+      scenario_names: z.array(z.string()).optional().describe("For run_scenarios: explicit list of scenario slugs to run. Resolved against the UNION of four sources: ~/.agent-framework/test-runs/scenarios/<name>/scenario.json (home) and <AGENT_FRAMEWORK_ROOT>/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json (committed fixtures). A slug present in two or more sources is a hard error. Fixtures run in place; reports + cache always land under the home tree. Omit or pass an empty array to run EVERY scenario in the union, alphabetically. Returns aggregated JSON {total, passed, failed, results[]} with per-result {source: \"home\"|\"expected-to-pass\"|\"fixture-bug\"|\"expected-to-fail\"}. Each result also carries `expectation_reality: \"expected-to-pass\" | \"fixture-bug\" | \"expected-to-fail\" | null` and `expectation_reality_last_run_at: ISO-8601` — the most recent run's reality, written to last-run.json sidecar. A mismatch between folder and reality surfaces regressions or landed features. The aggregate response does NOT summarize mismatches; callers inspect `results[]` directly."),
+      scenario_source: z.enum(["expected-to-pass", "fixture-bug", "expected-to-fail", "home"]).optional().describe("For run_scenarios / list_scenarios: scope to ONE source. 'expected-to-pass' | 'fixture-bug' | 'expected-to-fail' select fixture subfolders (<AGENT_FRAMEWORK_ROOT>/scenarios/<sub>/). 'home' selects ~/.agent-framework/test-runs/scenarios/. Omit to include all four. Slug uniqueness is enforced across all four roots regardless of filter."),
     }
   },
   async (args) => {
-    const result = await handleTestHarnessTester(args);
+    const result = await handleScenarioTester(args);
     return { content: [{ type: "text", text: result }] };
   }
 );
@@ -671,8 +671,8 @@ const HELP_RESOURCES: Array<{
   { tool: "push", title: "push -- Help", summary: "Git push wrapper", body: PUSH_HELP },
   { tool: "list_repos", title: "list_repos -- Help", summary: "Repo + submodule status", body: LIST_REPOS_HELP },
   { tool: "validate_intent", title: "validate_intent -- Help", summary: "User intention alignment check", body: VALIDATE_INTENT_HELP },
-  { tool: "test_harness_tester", title: "test_harness_tester -- Help", summary: "Test harness tester (transcripts + scenarios)", body: TESTER_HELP },
-  { tool: "test_harness_labeler", title: "test_harness_labeler -- Help", summary: "Test harness transcript labeler", body: LABELER_HELP },
+  { tool: "scenario_tester", title: "scenario_tester -- Help", summary: "Scenario tester (transcripts + scenarios)", body: TESTER_HELP },
+  { tool: "scenario_labeler", title: "scenario_labeler -- Help", summary: "Scenario transcript labeler", body: LABELER_HELP },
   { tool: "transcript", title: "transcript -- Help", summary: "Session transcript path resolver", body: TRANSCRIPT_HELP },
 ];
 

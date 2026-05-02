@@ -1,10 +1,6 @@
-import "../utils/load-env.js";
-import { initializeTelemetry } from "../telemetry/index.js";
-initializeTelemetry();
-
 import * as fs from "fs";
 import * as path from "path";
-import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
+import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import {
   getSessionDir,
@@ -12,25 +8,29 @@ import {
   resetActiveSubagents,
   sessionStateDefaults,
 } from "../utils/session-store.js";
+import type { AdapterEncoder } from "../adapter/types.js";
+import { appendCapture } from "../scenario/capture.js";
+import { appendStateSnapshot } from "../scenario/snapshot.js";
+import { rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
+import { onEpochRotation } from "../scenario/lifecycle.js";
 
 /**
  * SessionStart Hook
  *
  * Manages session lifecycle:
  * - "startup": init session-dir + state.json
- * - "resume" / "compact": no-op (Claude Code's native compaction handles
- *   transcript continuity)
+ * - "resume": no-op
+ * - "compact": rotate epoch + reset derived caches
  * - "clear": delete session-dir
  */
 
-interface SessionStartHookInput {
+export interface SessionStartHookInput {
   source: "startup" | "resume" | "compact" | "clear";
   session_id: string;
   transcript_path: string;
 }
 
-async function main() {
-  const input = await readStdinJson<SessionStartHookInput>();
+export async function mainSessionStart(input: SessionStartHookInput, encoder: AdapterEncoder): Promise<void> {
   const { source, transcript_path } = input;
 
   // Reset subagent counter on startup -- leaked counters from crashed
@@ -43,7 +43,8 @@ async function main() {
   }
 
   if (isSubagent(transcript_path)) {
-    exitAfterFlush(0);
+    const out = encoder.encodeOk("SessionStart");
+    await exitAfterFlush(out.exitCode, out.stdout);
     return;
   }
 
@@ -55,23 +56,61 @@ async function main() {
     if (!fs.existsSync(statePath)) {
       await getSessionState(sessionDir).save(sessionStateDefaults());
     }
-    exitAfterFlush(0);
+    const state = await getSessionState(sessionDir).load().catch(() => sessionStateDefaults());
+    const snapshotSeq = appendStateSnapshot(sessionDir, state, transcript_path);
+    const epoch = loadCurrentEpoch(sessionDir);
+    appendCapture(sessionDir, {
+      ts: Date.now(),
+      epoch_id: epoch?.id ?? "unknown",
+      parent_capture_seq: null,
+      event: "SessionStart",
+      decision: "ok",
+      state_snapshot_seq: snapshotSeq,
+    });
+    const out = encoder.encodeOk("SessionStart");
+    await exitAfterFlush(out.exitCode, out.stdout);
     return;
   }
 
   if (source === "clear") {
+    // Delete session dir entirely — no epoch rotation (dir is being deleted).
     await fs.promises.rm(sessionDir, { recursive: true, force: true });
-    exitAfterFlush(0);
+    const out = encoder.encodeOk("SessionStart");
+    await exitAfterFlush(out.exitCode, out.stdout);
     return;
   }
 
-  // resume / compact: no-op. Claude Code's native compaction handles
-  // transcript continuity; state.json / tool-log.jsonl / gate-reasoning.json
-  // persist on disk untouched.
-  exitAfterFlush(0);
-}
+  if (source === "compact") {
+    // Compact: rotate epoch and reset derived caches.
+    const newEpoch = rotateEpoch(sessionDir, "compact", null);
+    await onEpochRotation(sessionDir, newEpoch);
+    const state = await getSessionState(sessionDir).load().catch(() => sessionStateDefaults());
+    const snapshotSeq = appendStateSnapshot(sessionDir, state, transcript_path);
+    appendCapture(sessionDir, {
+      ts: Date.now(),
+      epoch_id: newEpoch.id,
+      parent_capture_seq: null,
+      event: "SessionStart",
+      decision: "ok",
+      state_snapshot_seq: snapshotSeq,
+    });
+    const out = encoder.encodeOk("SessionStart");
+    await exitAfterFlush(out.exitCode, out.stdout);
+    return;
+  }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(0);
-});
+  // resume: no-op. Claude Code's native compaction handles transcript continuity.
+  const state = await getSessionState(sessionDir).load().catch(() => sessionStateDefaults());
+  const snapshotSeq = appendStateSnapshot(sessionDir, state, transcript_path);
+  const epoch = loadCurrentEpoch(sessionDir);
+  appendCapture(sessionDir, {
+    ts: Date.now(),
+    epoch_id: epoch?.id ?? "unknown",
+    parent_capture_seq: null,
+    event: "SessionStart",
+    decision: "ok",
+    state_snapshot_seq: snapshotSeq,
+  });
+  const out = encoder.encodeOk("SessionStart");
+  await exitAfterFlush(out.exitCode, out.stdout);
+}

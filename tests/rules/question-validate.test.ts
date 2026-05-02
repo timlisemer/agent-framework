@@ -12,7 +12,7 @@ vi.mock("../../src/utils/transcript.js", async () => {
   );
   return {
     ...actual,
-    readTranscriptExact: vi.fn().mockResolvedValue({ user: [], assistant: [] }),
+    readTranscriptExact: vi.fn().mockResolvedValue({ user: [], assistant: [], tool: [], totalCount: 0 }),
     formatTranscriptResult: vi.fn().mockReturnValue(""),
   };
 });
@@ -103,7 +103,7 @@ describe("questionValidateRule — deterministic null paths", () => {
   });
 
   it("returns null when conversation is empty string after formatting", async () => {
-    mockReadTranscriptExact.mockResolvedValueOnce({ user: [], assistant: [] });
+    mockReadTranscriptExact.mockResolvedValueOnce({ user: [], assistant: [], tool: [], totalCount: 0 });
     mockFormatTranscriptResult.mockReturnValueOnce("");
     const ctx = makeCtx();
     const result = await questionValidateRule.check(ctx);
@@ -116,7 +116,12 @@ describe("questionValidateRule — LLM-call paths", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Provide non-empty transcript so LLM is called
-    mockReadTranscriptExact.mockResolvedValue({ user: ["hello"], assistant: [] });
+    mockReadTranscriptExact.mockResolvedValue({
+      user: [{ role: "user" as const, content: "hello", index: 0 }],
+      assistant: [],
+      tool: [],
+      totalCount: 1,
+    });
     mockFormatTranscriptResult.mockReturnValue("User: hello");
   });
 

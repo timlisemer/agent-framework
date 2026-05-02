@@ -1,10 +1,10 @@
-import "../utils/load-env.js";
-import { initializeTelemetry } from "../telemetry/index.js";
-initializeTelemetry();
-
-import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
+import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
-import { getSessionDir, appendToolLog } from "../utils/session-store.js";
+import { getSessionDir, appendToolLog, getSessionState } from "../utils/session-store.js";
+import type { AdapterEncoder } from "../adapter/types.js";
+import { appendCapture } from "../scenario/capture.js";
+import { appendStateSnapshot } from "../scenario/snapshot.js";
+import { loadCurrentEpoch } from "../scenario/epoch.js";
 
 /**
  * PostToolUseFailure Hook
@@ -12,19 +12,18 @@ import { getSessionDir, appendToolLog } from "../utils/session-store.js";
  * Logs tool failures to the session JSONL tool log.
  */
 
-interface PostToolUseFailureHookInput {
+export interface PostToolUseFailureHookInput {
   tool_name: string;
   error: string;
   is_interrupt: boolean;
   transcript_path: string;
 }
 
-async function main() {
-  const input = await readStdinJson<PostToolUseFailureHookInput>();
-
+export async function mainPostToolUseFailure(input: PostToolUseFailureHookInput, encoder: AdapterEncoder): Promise<void> {
   // Skip subagents and interrupts
   if (isSubagent(input.transcript_path) || input.is_interrupt) {
-    exitAfterFlush(0);
+    const out = encoder.encodeOk("PostToolUseFailure");
+    await exitAfterFlush(out.exitCode, out.stdout);
     return;
   }
 
@@ -38,10 +37,20 @@ async function main() {
     ms: 0,
   });
 
-  exitAfterFlush(0);
-}
+  const state = await getSessionState(sessionDir).load().catch(() => null);
+  if (state) {
+    const snapshotSeq = appendStateSnapshot(sessionDir, state, input.transcript_path);
+    const epoch = loadCurrentEpoch(sessionDir);
+    appendCapture(sessionDir, {
+      ts: Date.now(),
+      epoch_id: epoch?.id ?? "unknown",
+      parent_capture_seq: null,
+      event: "PostToolUseFailure",
+      decision: "error",
+      state_snapshot_seq: snapshotSeq,
+    });
+  }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(0);
-});
+  const out = encoder.encodeOk("PostToolUseFailure");
+  await exitAfterFlush(out.exitCode, out.stdout);
+}

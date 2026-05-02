@@ -3,10 +3,10 @@ import {
   evaluateReasonMust,
   formatReasonMustFailure,
   scoreRichExpectation,
-} from "../../test-harness/lib/hook-runner.js";
+} from "../../src/scenario/lib/hook-runner.js";
 import type {
   ReasonMustExpectation,
-} from "../../src/agents/mcp/scenario-types.js";
+} from "../../src/scenario/types.js";
 
 describe("evaluateReasonMust", () => {
   it("returns empty array for empty reason_must", () => {

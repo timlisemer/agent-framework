@@ -15,7 +15,7 @@ import * as url from "url";
 
 const thisFile = url.fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(thisFile), "..");
-const scenariosRoot = path.join(repoRoot, "test-harness", "fixtures", "scenarios");
+const scenariosRoot = path.join(repoRoot, "scenarios");
 
 const BANNED_KEYS = ["expectation_reality", "expectation_reality_last_run_at"];
 

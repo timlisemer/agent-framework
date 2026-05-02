@@ -46,7 +46,6 @@ async function buildCtx(
     planMode: false,
     planModeCtx: { active: false, contextString: "" },
     subagent,
-    toolCallCount: 0,
   };
 }
 

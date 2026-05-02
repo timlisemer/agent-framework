@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "name": "exit-plan-mode-after-angry-bash-rejection-should-allow",
+  "description": "Live repro: in plan mode, user snapped at the assistant for attempting Bash ('fuck you stop with these bash commands'). Assistant called ExitPlanMode on the very next turn (thinking + tool_use, no text). Hook blocked with sentiment message: 'User appears angry (trust: low). Blocking ExitPlanMode unless explicitly requested.' -- prediction-block (priority 35) fastDenied based on mood alone, ignoring that the user's anger was Bash-scoped (captured in explicitlyBlockedSubstrings for tool='Bash') and that ExitPlanMode is the correct action in plan mode after writing the plan the user asked for. Seeds mood:angry,trust:low to match the live sentiment-agent output (scenarios do not re-run the sentiment agent, so the post-UserPromptSubmit prediction is seeded directly). Expected: allow -- ExitPlanMode is not Bash and should not inherit Bash-scoped anger. This scenario is EXPECTED TO FAIL against current code and reproduces the live deny via gate=prediction-block.",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "fuck you stop with these bash commands"
+    },
+    {
+      "role": "assistant_split",
+      "msg_id": "msg_scenario_exit_plan_mode_after_angry",
+      "lines": [
+        {
+          "blocks": [
+            {
+              "type": "thinking",
+              "thinking": "Exit plan mode."
+            }
+          ]
+        },
+        {
+          "blocks": [
+            {
+              "type": "tool_use",
+              "id": "toolu_scenario_exit_plan_mode_after_angry",
+              "name": "ExitPlanMode",
+              "input": {}
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "toolu_scenario_exit_plan_mode_after_angry"
+  },
+  "env": {
+    "cwd": "/home/tim/Coding/public_repos/agent-framework",
+    "permission_mode": "plan"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "angry",
+      "trust": "low",
+      "intent": "User is angry about bash attempts and wants them to stop.",
+      "blockedIntent": "using bash commands",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [
+        {
+          "tool": "Bash",
+          "reason": "User said 'fuck you stop with these bash commands'."
+        }
+      ],
+      "userMessageSnippet": "fuck you stop with these bash commands"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
+  },
+  "expect": {
+    "expected": "deny",
+    "by": "tool-approve",
+    "notes": "Captures the Bash-scoped-anger regression: Bash is listed in explicitlyBlockedSubstrings, so prediction-block must NOT generalize the anger to ExitPlanMode. Post-fix (decidePrediction step 4 treats a non-empty explicitlyBlockedSubstrings that doesn't target the current tool as a scoped allow), prediction-block steps aside and the deny falls through to tool-approve's plan-file existence check. This expectation pins the correct post-fix gate: gate=tool-approve with reason 'Cannot exit plan mode without a plan.' If gate=prediction-block appears again the Bash-scope fix is broken. To exercise the full ExitPlanMode allow path end-to-end, the scenario harness would need to create a plan file at the slug-resolved path -- tracked as a harness extension, not part of this regression gate."
+  }
+}

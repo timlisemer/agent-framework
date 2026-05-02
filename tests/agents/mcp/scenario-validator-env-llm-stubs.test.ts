@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { validateScenario } from "../../../src/agents/mcp/scenario-types.js";
+import { validateScenario } from "../../../src/scenario/types.js";
 
 function baseScenario(): Record<string, unknown> {
   return {
+    schema_version: 1,
     name: "test-llm-stubs",
     transcript: [
       { role: "user", content: "do something" },

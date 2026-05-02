@@ -2,6 +2,3 @@ node_modules/
 dist/
 .env
 *.log
-test-harness/results/
-test-harness/fixtures/transcripts/
-test-harness/fixtures/scenarios/*/cache/

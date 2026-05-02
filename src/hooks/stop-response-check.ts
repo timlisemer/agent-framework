@@ -1,12 +1,7 @@
-import "../utils/load-env.js";
-import { initializeTelemetry } from "../telemetry/index.js";
-initializeTelemetry();
-
 import { type StopHookInput } from "@anthropic-ai/claude-agent-sdk";
-import { initRewindSession, detectRewind } from "../utils/rewind-cache.js";
 import { setTranscriptPath } from "../utils/execution-context.js";
 import { writeTool } from "../utils/synthetic.js";
-import { readStdinJson, exitAfterFlush } from "../utils/hook-bootstrap.js";
+import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
 import { isPlanModeActive, isPlanModeFromInput, getPlanModeContext } from "../utils/plan-mode-detector.js";
 import { isSubagent } from "../utils/subagent-detector.js";
@@ -15,6 +10,11 @@ import { FIRST_RESPONSE_STOP_COUNTS } from "../utils/transcript-presets.js";
 import { evaluateRulesForStop, ALL_RULES } from "../rules/index.js";
 import { getMostRecentMessage } from "../rules/response-align-stop.js";
 import type { RuleContext } from "../rules/types.js";
+import type { AdapterEncoder } from "../adapter/types.js";
+import { appendCapture } from "../scenario/capture.js";
+import { appendStateSnapshot } from "../scenario/snapshot.js";
+import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
+import { onEpochRotation } from "../scenario/lifecycle.js";
 
 /**
  * Stop Hook: Response Check
@@ -23,16 +23,19 @@ import type { RuleContext } from "../rules/types.js";
  * Bootstraps the rule pipeline for Stop-eligible rules (responseAlignStopRule).
  */
 
-async function main() {
-  const input = await readStdinJson<StopHookInput>();
-
+export async function mainStop(input: StopHookInput, encoder: AdapterEncoder): Promise<void> {
   setTranscriptPath(input.transcript_path);
   const sessionDir = getSessionDir(input.transcript_path);
-  initRewindSession(sessionDir);
 
-  if (await detectRewind(input.transcript_path)) {
-    exitAfterFlush(0);
-    return;
+  // Detect epoch change (transcript rewind) and reset derived caches when needed.
+  const epochChange = detectEpochChange(sessionDir, input.transcript_path);
+  if (epochChange.rotated) {
+    const newEpoch = rotateEpoch(
+      sessionDir,
+      epochChange.reason!,
+      epochChange.anchorUuid ?? null,
+    );
+    await onEpochRotation(sessionDir, newEpoch);
   }
 
   const stateManager = getSessionState(sessionDir);
@@ -45,7 +48,18 @@ async function main() {
 
   const tx = await readTranscriptExact(input.transcript_path, FIRST_RESPONSE_STOP_COUNTS);
   if (tx.user.length === 0 || tx.assistant.length === 0) {
-    exitAfterFlush(0);
+    const snapshotSeq = appendStateSnapshot(sessionDir, state, input.transcript_path);
+    const epoch = loadCurrentEpoch(sessionDir);
+    appendCapture(sessionDir, {
+      ts: Date.now(),
+      epoch_id: epoch?.id ?? "unknown",
+      parent_capture_seq: null,
+      event: "Stop",
+      decision: "pass",
+      state_snapshot_seq: snapshotSeq,
+    });
+    const out = encoder.encodeStopPass();
+    await exitAfterFlush(out.exitCode, out.stdout);
     return;
   }
 
@@ -67,16 +81,33 @@ async function main() {
 
   const result = await evaluateRulesForStop(ALL_RULES, ctx);
 
+  const epoch = loadCurrentEpoch(sessionDir);
+
   if (result.decision === "block" && result.systemMessage) {
     await writeTool(input.transcript_path, input.session_id, "response-align-stop", result.systemMessage);
-    exitAfterFlush(0, JSON.stringify({ decision: "block", reason: result.systemMessage }));
+    const snapshotSeq = appendStateSnapshot(sessionDir, state, input.transcript_path);
+    appendCapture(sessionDir, {
+      ts: Date.now(),
+      epoch_id: epoch?.id ?? "unknown",
+      parent_capture_seq: null,
+      event: "Stop",
+      decision: "block",
+      state_snapshot_seq: snapshotSeq,
+    });
+    const out = encoder.encodeStopBlock(result.systemMessage);
+    await exitAfterFlush(out.exitCode, out.stdout);
     return;
   }
 
-  exitAfterFlush(0);
+  const snapshotSeq = appendStateSnapshot(sessionDir, state, input.transcript_path);
+  appendCapture(sessionDir, {
+    ts: Date.now(),
+    epoch_id: epoch?.id ?? "unknown",
+    parent_capture_seq: null,
+    event: "Stop",
+    decision: "pass",
+    state_snapshot_seq: snapshotSeq,
+  });
+  const out = encoder.encodeStopPass();
+  await exitAfterFlush(out.exitCode, out.stdout);
 }
-
-main().catch((err) => {
-  console.error(err);
-  exitAfterFlush(0);
-});

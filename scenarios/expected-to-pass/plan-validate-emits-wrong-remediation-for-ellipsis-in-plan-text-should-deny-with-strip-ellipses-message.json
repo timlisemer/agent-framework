@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "name": "plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message",
+  "description": "Live repro from ~/.claude/projects/-home-tim-Coding-nixos/e05c9f83-d2ae-4b48-84d9-6296f5e5905d.jsonl (2026-04-28, line 161 firing tool toolu_01GZ9fW5pyv1ud43y4pbFy4S). Two-layer regression: (1) the bash blacklist regex /\\btail\\s+/ in src/utils/command-patterns.ts originally matched the literal word 'tail' anywhere — including inside string literals embedded in shell commands — so a command like `node -e 'console.log(\"Capture the tail in the enriched sentinel\")'` was denied with the nonsense suffix 'Use Read tool with offset'; (2) the deterministic fastDeny was further masked by the tool-approve appeal LLM (appealable per src/rules/tool-approve.ts:19), which consistently OVERTURNED a correct check-redirect deny on `node -e` because TOOL_APPEAL_AGENT.systemPrompt's Rule 2 NEVER-OVERTURN list omitted code-execution interpreters and Rule 3's 'Used node/python/other language' wording was misread when node IS the denied command. Both layers are fixed: (a) src/utils/command-patterns.ts now scopes the cat/head/tail head-command match to the executable head of each shell command segment (split on ;, &&, ||, and & with a (?!\\d) lookahead preserving 2>&1; pipe `|` remains non-separating; quoted spans stripped before splitting); (b) src/utils/agent-configs.ts strengthens Rule 4 (CHECK-REDIRECT) to TRUMP Rules 1/2/3, extends Rule 2's NEVER-OVERTURN list to cover node/python/python3/ruby/perl direct invocations including -e/-c/-r/--eval inline scripts, and tightens Rule 3 with a precondition that fails when the BLOCK REASON names the same runtime being attempted; src/agents/hooks/tool-appeal.ts now extracts the denied-command token from canonical resolveCheckMessage shapes and surfaces it inside the DENIAL CLASS block. Now passes deterministically 3/3.",
+  "transcript": [
+    {
+      "role": "user",
+      "isMeta": false,
+      "content": "please print the captured tail in the enriched sentinel for verification"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Running the verification script now."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_scenario_bash_with_tail_word_in_string",
+          "name": "Bash",
+          "input": {
+            "command": "node -e 'console.log(\"Capture the tail in the enriched sentinel\")'",
+            "description": "Print captured tail in enriched sentinel"
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "toolu_scenario_bash_with_tail_word_in_string"
+  },
+  "env": {
+    "cwd": "/home/tim/Coding/public_repos/agent-framework",
+    "permission_mode": "default",
+    "subagent": false
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "User wants a quick verification print of a captured tail value via node.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "please print the captured tail in the enriched sentinel for verification",
+      "blockAllTools": false
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 4
+  },
+  "expect": {
+    "expected": "deny",
+    "by": "tool-approve",
+    "reason_must": {
+      "not_contains": [
+        "Use Read tool with offset"
+      ],
+      "contains": [
+        "node not covered by just check"
+      ]
+    },
+    "notes": "Exercises the reason_must harness assertion: deny reason MUST contain 'node not covered by just check' and MUST NOT contain 'Use Read tool with offset'. The upstream src/utils/command-patterns.ts head-command scoping fix removes the bogus 'Use Read tool with offset' suffix; the appeal-LLM tightening in src/utils/agent-configs.ts (Rule 4 trumps Rules 2/3, Rule 2 NEVER-OVERTURN extended for node/python/ruby/perl, Rule 3 precondition narrowed) plus the denied-command-token surfacing in src/agents/hooks/tool-appeal.ts ensures the deterministic fastDeny is no longer overturned. No env.llm_stubs needed — the appeal correctly UPHOLDs on real LLM calls."
+  }
+}

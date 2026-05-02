@@ -5,14 +5,13 @@ This document explains the architectural decisions in the agent-framework.
 ## Directory Structure
 
 ```
-claude/                             # Claude Code integration (symlink targets)
-  commands/                         # Slash commands (/check, /commit, etc.)
-    check.md
-    commit.md
-    confirm.md
-    push.md
-  skills/                           # Skills (pure Markdown, auto-applied by Claude)
-  settings.json                     # Hook configuration (uses $AGENT_FRAMEWORK_ROOT)
+adapters/                           # Adapter layer (per-tool stdout/exit-code translation)
+  claude/                           # Claude Code adapter
+    dotclaude/                      # Files symlinked into ~/.claude/ (NixOS-managed)
+      commands/                     # Slash commands (/check, /commit, etc.)
+      settings.json                 # Hook configuration (uses $AGENT_FRAMEWORK_ROOT)
+    hooks/                          # Claude-specific hook entry points (dist/ targets)
+  README.md                         # Adapter contract + how to add a new adapter
 
 src/                                # TypeScript source
   types.ts                          # Core types and model IDs
@@ -60,13 +59,30 @@ src/                                # TypeScript source
     validate-intent.ts              # Priority 50:  Check if AI followed user intentions (PreToolUse)
     response-align-stop.ts          # Priority 50:  Validate stop responses (Stop)
 
-  hooks/                            # Claude Code hook entry points
+  hooks/                            # Canonical hook handlers (adapter-agnostic)
     pre-tool-use.ts                 # PreToolUse hook (orchestrator for rule pipeline)
     post-tool-use.ts                # PostToolUse hook
     stop-response-check.ts          # Stop hook
     session-start.ts                # SessionStart hook (lifecycle)
     user-prompt-submit.ts           # UserPromptSubmit hook
     post-tool-use-failure.ts        # PostToolUseFailure hook
+    subagent-start.ts               # SubagentStart hook
+    subagent-stop.ts                # SubagentStop hook
+
+  scenario/                         # Scenario testing + capture pipeline
+    types.ts                        # Scenario schema + validateScenario
+    runner.ts                       # Scenario execution (single-hook + fan-out)
+    replay.ts                       # Full-session transcript replay
+    capture.ts                      # Append-only capture JSONL
+    snapshot.ts                     # State snapshot JSONL
+    epoch.ts                        # Epoch detection + rotation
+    lifecycle.ts                    # Epoch-rotation side-effects
+    materialize.ts                  # Reconstruct Scenario from capture pointer
+    lib/                            # Shared harness, classifier, hook-runner
+
+  adapter/
+    types.ts                        # AdapterEncoder interface (single source of truth)
+    runtime.ts                      # Adapter resolution helpers
 
   mcp/
     server.ts                       # MCP server exposing tools
@@ -97,6 +113,19 @@ dist/                               # Compiled JavaScript (build output)
   agents/                           # Compiled agents
   utils/                            # Compiled utilities
 ```
+
+## Adapters
+
+The adapter layer translates between canonical hook handler outputs and the
+stdout/exit-code conventions of a specific AI coding tool. Each adapter
+implements `AdapterEncoder` from `src/adapter/types.ts`.
+
+Today only the Claude Code adapter exists (`adapters/claude/`). Adding support
+for another tool (e.g. Codex) requires only a new adapter directory — the rule
+logic in `src/hooks/` is unchanged.
+
+See [`adapters/README.md`](adapters/README.md) for the adapter contract and
+how to add a new adapter.
 
 ## Unified Agent Execution
 

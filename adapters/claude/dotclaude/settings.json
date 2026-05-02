@@ -1,0 +1,111 @@
+{
+  "model": "opus[1m]",
+  "effortLevel": "medium",
+  "voiceEnabled": true,
+  "autoMemoryEnabled": false,
+  "enabledPlugins": {
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": false,
+    "lua-lsp@claude-plugins-official": true,
+    "clangd-lsp@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "jdtls-lsp@claude-plugins-official": true,
+    "csharp-lsp@claude-plugins-official": true,
+    "frontend-design@claude-plugins-official": true
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "node $AGENT_FRAMEWORK_ROOT/dist/src/scripts/statusline.js"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/claude/hooks/pre-tool-use.js"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/claude/hooks/post-tool-use.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/claude/hooks/stop-response-check.js",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/claude/hooks/session-start.js"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/claude/hooks/user-prompt-submit.js"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/claude/hooks/post-tool-use-failure.js"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/claude/hooks/subagent-start.js"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/claude/hooks/subagent-stop.js"
+          }
+        ]
+      }
+    ]
+  }
+}

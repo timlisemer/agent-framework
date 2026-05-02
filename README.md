@@ -2,7 +2,7 @@
 
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
-1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent`, `test_harness_labeler`, `test_harness_tester` agents (portable, works with any MCP client)
+1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent`, `scenario_labeler`, `scenario_tester` agents (portable, works with any MCP client)
 2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `plan-validate`, `style-drift`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
 3. **Stop Hook** - For `response-align-stop` rule (validates stop responses)
 4. **UserPromptSubmit Hook** - For `sentiment` rule (classifies user mood/intent before each tool call sequence)
@@ -22,12 +22,12 @@ The framework implements 16 specialized agents organized into three categories:
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
 | validate_intent        | haiku  | Manual post-session review (requires transcript_path)        |
-| test_harness_labeler   | -      | Test harness operations for the @labeler subagent            |
-| test_harness_tester    | -      | Test harness operations for the @tester subagent             |
+| scenario_labeler   | -      | Test harness operations for the @labeler subagent            |
+| scenario_tester    | -      | Test harness operations for the @tester subagent             |
 
 **Note on validate_intent**: Unlike other MCP tools, `validate_intent` is not auto-triggered. It's a manual post-session review tool that analyzes a conversation transcript to check if the AI followed user intentions. Requires `transcript_path` parameter pointing to a `.jsonl` transcript file. Returns `ALIGNED` or `DRIFTED` verdict.
 
-**Note on test_harness tools**: These are subagent-only tools that wrap `test-harness/replay.ts` operations. The labeler tool handles transcript labeling workflows; the tester tool handles test execution and report reading. Neither makes LLM calls internally.
+**Note on scenario tools**: These are subagent-only tools that wrap scenario runner operations. The labeler tool handles transcript labeling workflows; the tester tool handles test execution and report reading. Neither makes LLM calls internally.
 
 ### Validation Agents (Hook-Triggered)
 
@@ -118,15 +118,14 @@ export AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
 # Register MCP server with Claude Code
 claude mcp add agent-framework node $AGENT_FRAMEWORK_ROOT/dist/mcp/server.js
 
-# Symlink commands (slash commands like /check, /commit)
-ln -s $AGENT_FRAMEWORK_ROOT/claude/commands ~/.claude/commands
-
-# Symlink skills (auto-applied by Claude when relevant)
-ln -s $AGENT_FRAMEWORK_ROOT/claude/skills ~/.claude/skills
-
-# Copy settings.json (hooks use $AGENT_FRAMEWORK_ROOT internally)
-cp $AGENT_FRAMEWORK_ROOT/claude/settings.json ~/.claude/settings.json
+# Register hooks (NixOS: declare in your NixOS config; other: symlink manually)
+# Hook scripts live under adapters/claude/dotclaude/ after build.
+# settings.json path: adapters/claude/dotclaude/settings.json
 ```
+
+On NixOS, symlinks into `~/.claude/` are managed declaratively. Run
+`nixos-rebuild switch` after `just build` to activate the new hook scripts.
+See [`adapters/claude/README.md`](adapters/claude/README.md) for details.
 
 For manual MCP config (alternative to `claude mcp add`):
 ```json

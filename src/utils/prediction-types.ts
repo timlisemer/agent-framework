@@ -210,7 +210,7 @@ export const SELF_CONTRADICTING_BLOCK_INTENT_RE =
  * agent" in narrative prose cannot over-fire.
  */
 export const TOOL_NAME_ALIASES: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
-  ["mcp__agent-framework__test_harness_tester", ["test_harness_tester", "tester mcp", "the tester", "via the tester"]],
+  ["mcp__agent-framework__scenario_tester", ["scenario_tester", "tester mcp", "the tester", "via the tester"]],
   ["Agent", ["validator agent", "another validator agent", "spawn an agent", "spawn a subagent", "launch an agent", "launch a subagent", "start an agent", "start a subagent", "run an agent", "run a subagent", "another subagent"]],
 ]);
 

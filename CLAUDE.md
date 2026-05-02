@@ -20,7 +20,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details and design decision
 | `src/utils/agent-configs.ts`        | Centralized agent configurations                                   |
 | `src/utils/anthropic-client.ts`     | Singleton Anthropic client factory                                 |
 | `src/utils/elicitation.ts`          | MCP elicitation helpers (repo selection, preferences, uncertainty) |
-| `claude/settings.json`              | Hook configuration for Claude Code                                 |
+| `adapters/claude/dotclaude/settings.json` | Hook configuration for Claude Code                           |
+| `src/adapter/types.ts`              | AdapterEncoder interface (single source of truth)                  |
+| `src/scenario/types.ts`             | Scenario schema + validateScenario + hook vocabularies             |
 | `src/utils/session-store.ts`        | SessionState cache + JSONL tool log                                |
 | `src/utils/prediction-types.ts`     | Sentiment-prediction shape + decidePrediction policy table         |
 | `src/utils/drift-detector.ts`      | Pure TypeScript drift/anomaly detection heuristics                 |

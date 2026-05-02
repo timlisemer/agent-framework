@@ -4,7 +4,6 @@ import {
   SELF_CONTRADICTING_BLOCK_INTENT_RE,
   classifyBlockAllTools,
   decidePrediction,
-  extractToolTargets,
   intentNamesTarget,
   intentRevokesTarget,
   isHighFrictionPrediction,
@@ -351,7 +350,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     });
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__test_harness_tester",
+      "mcp__agent-framework__scenario_tester",
       { action: "run_scenario", scenario_name: "x" },
       3,
     );
@@ -386,7 +385,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
       });
       const result = decidePrediction(
         pred,
-        "mcp__agent-framework__test_harness_tester",
+        "mcp__agent-framework__scenario_tester",
         {},
         3,
       );
@@ -411,7 +410,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
       });
       const result = decidePrediction(
         pred,
-        "mcp__agent-framework__test_harness_tester",
+        "mcp__agent-framework__scenario_tester",
         {},
         3,
       );
@@ -426,7 +425,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
       intent: "User has explicitly re-authorized the test harness.",
       explicitlyBlockedSubstrings: [
         {
-          tool: "mcp__agent-framework__test_harness_tester",
+          tool: "mcp__agent-framework__scenario_tester",
           reason: "user said no tester",
         },
       ],
@@ -434,13 +433,13 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     });
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__test_harness_tester",
+      "mcp__agent-framework__scenario_tester",
       {},
       3,
     );
     expect(result.decision).toBe("deny");
     expect(result.matchedExplicit?.tool).toBe(
-      "mcp__agent-framework__test_harness_tester",
+      "mcp__agent-framework__scenario_tester",
     );
   });
 
@@ -454,7 +453,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     });
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__test_harness_tester",
+      "mcp__agent-framework__scenario_tester",
       {},
       3,
     );
@@ -487,7 +486,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     });
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__test_harness_tester",
+      "mcp__agent-framework__scenario_tester",
       {},
       3,
     );
@@ -507,7 +506,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     });
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__test_harness_tester",
+      "mcp__agent-framework__scenario_tester",
       {
         action: "run_scenario",
         scenario_name: "bash-blocked-after-mcp-help",
@@ -542,7 +541,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
       "Read",
       {
         file_path:
-          "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/expected-to-pass/prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow.json",
+          "/home/tim/Coding/public_repos/agent-framework/scenarios/expected-to-pass/prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow.json",
         offset: 1,
         limit: 5,
       },
@@ -725,7 +724,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
     });
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__test_harness_tester",
+      "mcp__agent-framework__scenario_tester",
       {},
       2,
     );
@@ -1299,7 +1298,7 @@ describe("latestUserMessageReauthorizesClass", () => {
 });
 
 describe("step 3.10: discharged-side-clarification fallback", () => {
-  const TESTER = "mcp__agent-framework__test_harness_tester";
+  const TESTER = "mcp__agent-framework__scenario_tester";
   const sidePred = (): ToolPrediction =>
     makePrediction({
       mood: "frustrated",

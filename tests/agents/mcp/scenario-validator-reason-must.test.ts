@@ -2,10 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { validateScenario } from "../../../src/agents/mcp/scenario-types.js";
+import { validateScenario } from "../../../src/scenario/types.js";
 
 function baseScenario(): Record<string, unknown> {
   return {
+    schema_version: 1,
     name: "test-reason-must",
     transcript: [
       {
@@ -206,7 +207,7 @@ describe("setRichLabel reason_must round-trip", () => {
 
   it("rejects reason_must on expected='allow' (validates within setRichLabel)", async () => {
     const { setRichLabel } = await import(
-      "../../../src/agents/mcp/test-harness-shared.js"
+      "../../../src/agents/mcp/scenario-mcp-shared.js"
     );
     expect(() =>
       setRichLabel(
@@ -223,7 +224,7 @@ describe("setRichLabel reason_must round-trip", () => {
 
   it("accepts reason_must on expected='deny' and round-trips through writeLabelFile", async () => {
     const { setRichLabel } = await import(
-      "../../../src/agents/mcp/test-harness-shared.js"
+      "../../../src/agents/mcp/scenario-mcp-shared.js"
     );
     const result = setRichLabel(
       transcriptName,
@@ -245,7 +246,7 @@ describe("setRichLabel reason_must round-trip", () => {
 
   it("rejects malformed reason_must shapes via setRichLabel", async () => {
     const { setRichLabel } = await import(
-      "../../../src/agents/mcp/test-harness-shared.js"
+      "../../../src/agents/mcp/scenario-mcp-shared.js"
     );
     expect(() =>
       setRichLabel(

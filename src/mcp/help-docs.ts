@@ -225,4 +225,4 @@ The absolute path to the transcript file as a plain string.
 ## When to use
 
 - Via the /transcript slash command to get the current session's transcript path
-- When you need to pass a session folder name to test_harness_labeler scaffold or list and want the sidecar to be up-to-date`;
+- When you need to pass a session folder name to scenario_labeler scaffold or list and want the sidecar to be up-to-date`;

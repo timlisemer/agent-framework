@@ -48,17 +48,24 @@ export function agentFrameworkRoot(): string {
 }
 
 /**
- * Repo-relative path to test-harness fixture scenarios.
+ * Repo-relative path to fixture scenarios.
  */
-export function fixturesScenariosRoot(): string {
-  return path.join(agentFrameworkRoot(), "test-harness", "fixtures", "scenarios");
+export function scenariosRepoRoot(): string {
+  return path.join(agentFrameworkRoot(), "scenarios");
 }
 
 /**
- * Repo-relative path to test-harness fixture transcripts.
+ * Root directory for a named adapter.
  */
-export function fixturesTranscriptsRoot(): string {
-  return path.join(agentFrameworkRoot(), "test-harness", "fixtures", "transcripts");
+export function adapterRoot(name: string): string {
+  return path.join(agentFrameworkRoot(), "adapters", name);
+}
+
+/**
+ * The dotclaude directory for the Claude adapter.
+ */
+export function adapterDotclaudeDir(name: string): string {
+  return path.join(agentFrameworkRoot(), "adapters", name, "dotclaude");
 }
 
 /**
@@ -229,10 +236,6 @@ export function sessionDenialCacheFile(sessionDir: string): string {
   return path.join(sessionDir, "hook-denials.json");
 }
 
-export function sessionRewindCacheFile(sessionDir: string): string {
-  return path.join(sessionDir, "rewind-cache.json");
-}
-
 export function sessionStatuslineFile(sessionDir: string): string {
   return path.join(sessionDir, "statusline.json");
 }
@@ -338,8 +341,25 @@ export function projectTranscriptFile(name: string, absPath?: string): string {
 
 // ─── Repo-relative + safety ────────────────────────────────────────────────
 
+export function distAdapterHookScript(name: string, adapter: string = "claude"): string {
+  return path.join(agentFrameworkRoot(), "dist", "adapters", adapter, "hooks", `${name}.js`);
+}
+
+/** @deprecated Use distAdapterHookScript instead */
 export function distHookScript(name: string): string {
-  return path.join(agentFrameworkRoot(), "dist", "hooks", `${name}.js`);
+  return distAdapterHookScript(name);
+}
+
+export function sessionCapturesFile(dir: string): string {
+  return path.join(dir, "captures.jsonl");
+}
+
+export function sessionStateSnapshotsFile(dir: string): string {
+  return path.join(dir, "state-snapshots.jsonl");
+}
+
+export function sessionEpochsFile(dir: string): string {
+  return path.join(dir, "epochs.jsonl");
 }
 
 export function packageJsonPath(): string {

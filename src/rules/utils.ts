@@ -57,8 +57,8 @@ export const LOW_RISK_TOOLS = [
  * substitute for cross-turn rejection memory.
  */
 const HEAVY_MCP_TOOLS: ReadonlySet<string> = new Set([
-  "mcp__agent-framework__test_harness_tester",
-  "mcp__agent-framework__test_harness_labeler",
+  "mcp__agent-framework__scenario_tester",
+  "mcp__agent-framework__scenario_labeler",
 ]);
 
 /**

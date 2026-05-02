@@ -21,7 +21,7 @@ vi.mock("../../src/utils/transcript.js", async () => {
   );
   return {
     ...actual,
-    readTranscriptExact: vi.fn().mockResolvedValue({ user: [], assistant: [] }),
+    readTranscriptExact: vi.fn().mockResolvedValue({ user: [], assistant: [], tool: [], totalCount: 0 }),
     formatTranscriptResult: vi.fn().mockReturnValue(""),
   };
 });
@@ -77,7 +77,7 @@ describe("validateIntentRule — deterministic null paths", () => {
   });
 
   it("returns null when transcript has no user messages", async () => {
-    mockReadTranscriptExact.mockResolvedValueOnce({ user: [], assistant: [] });
+    mockReadTranscriptExact.mockResolvedValueOnce({ user: [], assistant: [], tool: [], totalCount: 0 });
     const ctx = makeCtx();
     const result = await validateIntentRule.check(ctx);
     expect(result).toBeNull();
@@ -94,13 +94,16 @@ describe("validateIntentRule — deterministic null paths", () => {
 
   it("returns null when there is no diff and no status", async () => {
     mockReadTranscriptExact.mockResolvedValueOnce({
-      user: ["fix the bug"],
-      assistant: ["OK, I'll fix it"],
+      user: [{ role: "user" as const, content: "fix the bug", index: 0 }],
+      assistant: [{ role: "assistant" as const, content: "OK, I'll fix it", index: 1 }],
+      tool: [],
+      totalCount: 2,
     });
     mockGetUncommittedChanges.mockReturnValueOnce({
       status: "",
       diff: "",
       diffStat: "",
+      untrackedDiff: "",
     });
     const ctx = makeCtx();
     const result = await validateIntentRule.check(ctx);
@@ -113,13 +116,16 @@ describe("validateIntentRule — LLM-call path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockReadTranscriptExact.mockResolvedValue({
-      user: ["fix the bug"],
-      assistant: ["OK, I'll fix it"],
+      user: [{ role: "user" as const, content: "fix the bug", index: 0 }],
+      assistant: [{ role: "assistant" as const, content: "OK, I'll fix it", index: 1 }],
+      tool: [],
+      totalCount: 2,
     });
     mockGetUncommittedChanges.mockReturnValue({
       status: "M src/foo.ts",
       diff: "diff --git a/src/foo.ts b/src/foo.ts\n+const fixed = true;",
       diffStat: " src/foo.ts | 1 +",
+      untrackedDiff: "",
     });
   });
 

@@ -1,13 +1,14 @@
-import "../utils/load-env.js";
-import { initializeTelemetry } from "../telemetry/index.js";
-initializeTelemetry();
-
-import { readStdinJson, exitAfterFlush, initHookProcess } from "../utils/hook-bootstrap.js";
+import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
 import { isPlanModeActive, isPlanModeFromInput, getPlanModeContext } from "../utils/plan-mode-detector.js";
 import { evaluateRulesForUserPromptSubmit, ALL_RULES } from "../rules/index.js";
 import type { RuleContext } from "../rules/types.js";
+import type { AdapterEncoder } from "../adapter/types.js";
+import { appendCapture } from "../scenario/capture.js";
+import { appendStateSnapshot } from "../scenario/snapshot.js";
+import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
+import { onEpochRotation } from "../scenario/lifecycle.js";
 
 /**
  * UserPromptSubmit Hook
@@ -17,25 +18,35 @@ import type { RuleContext } from "../rules/types.js";
  * for side-effects (e.g., writing state.currentPrediction).
  */
 
-interface UserPromptSubmitHookInput {
+export interface UserPromptSubmitHookInput {
   prompt: string;
   transcript_path: string;
   session_id: string;
   permission_mode?: string;
 }
 
-async function main() {
-  const input = await readStdinJson<UserPromptSubmitHookInput>();
+export async function mainUserPromptSubmit(input: UserPromptSubmitHookInput, encoder: AdapterEncoder): Promise<void> {
   const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 
   if (isSubagent(input.transcript_path)) {
-    exitAfterFlush(0);
+    const out = encoder.encodeOk("UserPromptSubmit");
+    await exitAfterFlush(out.exitCode, out.stdout);
     return;
   }
 
-  initHookProcess(input.transcript_path);
-
   const sessionDir = getSessionDir(input.transcript_path);
+
+  // Detect epoch change (transcript rewind) and reset derived caches when needed.
+  const epochChange = detectEpochChange(sessionDir, input.transcript_path);
+  if (epochChange.rotated) {
+    const newEpoch = rotateEpoch(
+      sessionDir,
+      epochChange.reason!,
+      epochChange.anchorUuid ?? null,
+    );
+    await onEpochRotation(sessionDir, newEpoch);
+  }
+
   const stateManager = getSessionState(sessionDir);
   const state = await stateManager.load();
 
@@ -60,10 +71,19 @@ async function main() {
   };
 
   await evaluateRulesForUserPromptSubmit(ALL_RULES, ctx);
-  exitAfterFlush(0);
-}
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(0);
-});
+  const latestState = await stateManager.load().catch(() => state);
+  const snapshotSeq = appendStateSnapshot(sessionDir, latestState, input.transcript_path);
+  const epoch = loadCurrentEpoch(sessionDir);
+  appendCapture(sessionDir, {
+    ts: Date.now(),
+    epoch_id: epoch?.id ?? "unknown",
+    parent_capture_seq: null,
+    event: "UserPromptSubmit",
+    decision: "ok",
+    state_snapshot_seq: snapshotSeq,
+  });
+
+  const out = encoder.encodeOk("UserPromptSubmit");
+  await exitAfterFlush(out.exitCode, out.stdout);
+}

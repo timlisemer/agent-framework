@@ -1,7 +1,9 @@
-import "../utils/load-env.js";
-
-import { readStdinJson } from "../utils/hook-bootstrap.js";
-import { getSessionDir, decrementActiveSubagents } from "../utils/session-store.js";
+import { exitAfterFlush } from "../utils/hook-bootstrap.js";
+import { getSessionDir, decrementActiveSubagents, getSessionState } from "../utils/session-store.js";
+import type { AdapterEncoder } from "../adapter/types.js";
+import { appendCapture } from "../scenario/capture.js";
+import { appendStateSnapshot } from "../scenario/snapshot.js";
+import { loadCurrentEpoch } from "../scenario/epoch.js";
 
 /**
  * SubagentStop Hook
@@ -9,7 +11,7 @@ import { getSessionDir, decrementActiveSubagents } from "../utils/session-store.
  * Decrements the active subagent counter.
  */
 
-interface SubagentStopHookInput {
+export interface SubagentStopHookInput {
   agent_id: string;
   agent_transcript_path: string;
   transcript_path: string;
@@ -17,18 +19,28 @@ interface SubagentStopHookInput {
   stop_hook_active: boolean;
 }
 
-async function main() {
-  const input = await readStdinJson<SubagentStopHookInput>();
+export async function mainSubagentStop(input: SubagentStopHookInput, encoder: AdapterEncoder): Promise<void> {
   const sessionDir = getSessionDir(input.transcript_path);
   try {
     decrementActiveSubagents(sessionDir, input.agent_id);
   } catch (err) {
     console.error("[subagent-stop] decrement failed:", err);
   }
-  process.exit(0);
-}
 
-main().catch((err) => {
-  console.error("[subagent-stop]", err);
-  process.exit(0);
-});
+  const state = await getSessionState(sessionDir).load().catch(() => null);
+  if (state) {
+    const snapshotSeq = appendStateSnapshot(sessionDir, state, input.transcript_path);
+    const epoch = loadCurrentEpoch(sessionDir);
+    appendCapture(sessionDir, {
+      ts: Date.now(),
+      epoch_id: epoch?.id ?? "unknown",
+      parent_capture_seq: null,
+      event: "SubagentStop",
+      decision: "ok",
+      state_snapshot_seq: snapshotSeq,
+    });
+  }
+
+  const out = encoder.encodeOk("SubagentStop");
+  await exitAfterFlush(out.exitCode, out.stdout);
+}

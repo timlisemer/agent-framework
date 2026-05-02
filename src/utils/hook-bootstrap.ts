@@ -14,8 +14,8 @@ import { flushStatuslineUpdates } from "./logger.js";
 import { setTranscriptPath } from "./execution-context.js";
 import { sessionDir as getSessionDir } from "./paths.js";
 import { initDenialSession } from "./denial-cache.js";
-import { initRewindSession } from "./rewind-cache.js";
 import { initStatuslineSession } from "./statusline-state.js";
+import { initEpochSession } from "../scenario/epoch.js";
 
 /**
  * Read and parse JSON from stdin with an optional timeout.
@@ -79,6 +79,6 @@ export function initHookProcess(transcriptPath: string): void {
   setTranscriptPath(transcriptPath);
   const sessionDir = getSessionDir(transcriptPath);
   initDenialSession(sessionDir);
-  initRewindSession(sessionDir);
   initStatuslineSession(sessionDir);
+  initEpochSession(sessionDir);
 }
