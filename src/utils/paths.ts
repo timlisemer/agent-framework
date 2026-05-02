@@ -12,6 +12,7 @@ import * as os from "os";
 import * as path from "path";
 import * as url from "url";
 import { hashString } from "./hash-utils.js";
+import { resolveHostContext } from "./host-context.js";
 
 // ─── In-memory caches ─────────────────────────────────────────────────────
 
@@ -100,6 +101,20 @@ export function claudePlanFile(slug: string): string {
 }
 
 /**
+ * Active host-agent config root (~/.claude or ~/.codex).
+ */
+export function hostConfigRoot(): string {
+  return resolveHostContext().configRoot;
+}
+
+/**
+ * Active host-agent plan directory.
+ */
+export function hostPlansRoot(): string {
+  return resolveHostContext().plansRoot;
+}
+
+/**
  * Path to the provider config file.
  * Searches cwd first, then ~/.config/agent-framework/config.json.
  */
@@ -116,7 +131,7 @@ export function providerConfigPath(): string {
  * Example: /home/user/project -> home-user-project
  */
 export function encodeAgentFrameworkProjectDir(absPath?: string): string {
-  const projectDir = absPath ?? (process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
+  const projectDir = absPath ?? resolveHostContext().projectDir;
   return projectDir.replace(/\//g, "-").replace(/^-/, "");
 }
 

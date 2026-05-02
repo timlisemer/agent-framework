@@ -5,6 +5,8 @@ import { isPlanModeActive, isPlanModeFromInput, getPlanModeContext } from "../ut
 import { evaluateRulesForUserPromptSubmit, ALL_RULES } from "../rules/index.js";
 import type { RuleContext } from "../rules/types.js";
 import type { AdapterEncoder } from "../adapter/types.js";
+import type { FrameworkUserPromptSubmitHookInput } from "./types.js";
+import { resolveHostContext } from "../utils/host-context.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
@@ -18,15 +20,9 @@ import { onEpochRotation } from "../scenario/lifecycle.js";
  * for side-effects (e.g., writing state.currentPrediction).
  */
 
-export interface UserPromptSubmitHookInput {
-  prompt: string;
-  transcript_path: string;
-  session_id: string;
-  permission_mode?: string;
-}
-
-export async function mainUserPromptSubmit(input: UserPromptSubmitHookInput, encoder: AdapterEncoder): Promise<void> {
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookInput, encoder: AdapterEncoder): Promise<void> {
+  const host = resolveHostContext(input);
+  const projectDir = host.projectDir;
 
   if (isSubagent(input.transcript_path)) {
     const out = encoder.encodeOk("UserPromptSubmit");
@@ -60,6 +56,7 @@ export async function mainUserPromptSubmit(input: UserPromptSubmitHookInput, enc
     toolName: "",
     userPrompt: input.prompt,
     projectDir,
+    host,
     transcriptPath: input.transcript_path,
     sessionDir,
     sessionId: input.session_id,

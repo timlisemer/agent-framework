@@ -17,6 +17,7 @@ See [`src/adapter/types.ts`](../src/adapter/types.ts) for the full interface.
 | Directory       | Tool            | Status  |
 |-----------------|-----------------|---------|
 | `claude/`       | Claude Code     | Active  |
+| `codex/`        | Codex CLI       | Active  |
 
 ## Adding a New Adapter
 

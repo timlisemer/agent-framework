@@ -1,4 +1,3 @@
-import { type StopHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { setTranscriptPath } from "../utils/execution-context.js";
 import { writeTool } from "../utils/synthetic.js";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
@@ -11,6 +10,8 @@ import { evaluateRulesForStop, ALL_RULES } from "../rules/index.js";
 import { getMostRecentMessage } from "../rules/response-align-stop.js";
 import type { RuleContext } from "../rules/types.js";
 import type { AdapterEncoder } from "../adapter/types.js";
+import type { FrameworkStopHookInput } from "./types.js";
+import { resolveHostContext } from "../utils/host-context.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
@@ -23,7 +24,8 @@ import { onEpochRotation } from "../scenario/lifecycle.js";
  * Bootstraps the rule pipeline for Stop-eligible rules (responseAlignStopRule).
  */
 
-export async function mainStop(input: StopHookInput, encoder: AdapterEncoder): Promise<void> {
+export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEncoder): Promise<void> {
+  const host = resolveHostContext(input);
   setTranscriptPath(input.transcript_path);
   const sessionDir = getSessionDir(input.transcript_path);
 
@@ -66,7 +68,8 @@ export async function mainStop(input: StopHookInput, encoder: AdapterEncoder): P
   const ctx: RuleContext = {
     hookEvent: "Stop",
     toolName: "",
-    projectDir: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
+    projectDir: host.projectDir,
+    host,
     transcriptPath: input.transcript_path,
     sessionDir,
     sessionId: input.session_id,

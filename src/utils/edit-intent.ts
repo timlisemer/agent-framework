@@ -11,7 +11,7 @@
 import type { ToolPrediction } from "./prediction-types.js";
 
 // Tools that modify files
-const EDIT_TOOLS = ["Write", "Edit", "NotebookEdit"];
+const EDIT_TOOLS = ["Write", "Edit", "NotebookEdit", "apply_patch"];
 
 /**
  * Check if a tool name is a file-editing tool.
@@ -22,15 +22,17 @@ export function isEditTool(toolName: string): boolean {
 
 /**
  * Check if a file path is exempt from edit intent blocking.
- * Plan files, memory files, and CLAUDE.md are handled by their own validators.
+ * Plan files, memory files, and host instruction files are handled by their own validators.
  */
 export function isEditIntentExemptPath(filePath: string): boolean {
   // Plan files
   if (filePath.includes("/.claude/plans/")) return true;
+  if (filePath.includes("/.codex/plans/")) return true;
   // Memory files
   if (filePath.includes("/.claude/projects/") && (filePath.includes("/memory/") || filePath.endsWith("MEMORY.md"))) return true;
-  // CLAUDE.md
+  // Host instruction files
   if (filePath.endsWith("CLAUDE.md")) return true;
+  if (filePath.endsWith("AGENTS.md")) return true;
   return false;
 }
 

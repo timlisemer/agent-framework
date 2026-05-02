@@ -1,12 +1,12 @@
 import * as path from "path";
-import { claudeRoot, claudePlansRoot } from "../utils/paths.js";
+import { hostConfigRoot, hostPlansRoot } from "../utils/paths.js";
 import { RESTRICTED_MCP_TOOLS } from "../utils/slash-commands.js";
 
 // File tools that go through path-based risk classification (trusted/sensitive)
 // and write-specific gates (edit-intent, CLAUDE.md validation, plan-file validation,
 // style-drift). Read is NOT here -- it's read-only with no side effects, so it
 // belongs in LOW_RISK_TOOLS for immediate auto-approval.
-export const FILE_TOOLS = ["Write", "Edit", "NotebookEdit"];
+export const FILE_TOOLS = ["Write", "Edit", "NotebookEdit", "apply_patch"];
 
 // Sensitive file patterns - always require LLM approval
 export const SENSITIVE_PATTERNS = [
@@ -92,7 +92,7 @@ export function isPathInDirectory(filePath: string, dirPath: string): boolean {
 export function isTrustedPath(filePath: string, projectDir: string): boolean {
   return (
     isPathInDirectory(filePath, projectDir) ||
-    isPathInDirectory(filePath, claudeRoot())
+    isPathInDirectory(filePath, hostConfigRoot())
   );
 }
 
@@ -107,7 +107,7 @@ export function isSensitivePath(filePath: string): boolean {
 export function extractPathOrCmd(toolInput: unknown): { path?: string; cmd?: string } {
   const input = toolInput as Record<string, unknown>;
   return {
-    path: (input?.file_path as string) ?? (input?.path as string) ?? undefined,
+    path: (input?.file_path as string) ?? (input?.notebook_path as string) ?? (input?.path as string) ?? undefined,
     cmd: (input?.command as string) ?? undefined,
   };
 }
@@ -116,7 +116,7 @@ export function extractPathOrCmd(toolInput: unknown): { path?: string; cmd?: str
  * True iff filePath (resolved absolute) is inside ~/.claude/plans.
  */
 export function isPlanFile(filePath: string): boolean {
-  return isPathInDirectory(filePath, claudePlansRoot());
+  return isPathInDirectory(filePath, hostPlansRoot());
 }
 
 /**
@@ -133,8 +133,35 @@ export function extractFilePath(
     notebook_path?: unknown;
     path?: unknown;
   } | undefined;
+  if (toolName === "apply_patch") {
+    return extractApplyPatchPaths(toolInput)[0];
+  }
+
   const raw =
     (toolName === "NotebookEdit" ? input?.notebook_path : input?.file_path) ??
     input?.path;
   return typeof raw === "string" && raw.length > 0 ? raw : undefined;
+}
+
+export function extractFilePaths(
+  toolName: string,
+  toolInput: unknown,
+): string[] {
+  if (toolName === "apply_patch") return extractApplyPatchPaths(toolInput);
+  const single = extractFilePath(toolName, toolInput);
+  return single ? [single] : [];
+}
+
+function extractApplyPatchPaths(toolInput: unknown): string[] {
+  const command = typeof toolInput === "string"
+    ? toolInput
+    : (toolInput as { command?: unknown; patch?: unknown } | undefined)?.command ??
+      (toolInput as { patch?: unknown } | undefined)?.patch;
+  if (typeof command !== "string") return [];
+  const paths: string[] = [];
+  for (const line of command.split(/\r?\n/)) {
+    const match = line.match(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/);
+    if (match) paths.push(match[1].trim());
+  }
+  return [...new Set(paths)];
 }

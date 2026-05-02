@@ -1,7 +1,5 @@
-import { type PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import * as path from "path";
 import * as fs from "fs";
-import { claudePlansRoot } from "../utils/paths.js";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
@@ -49,9 +47,12 @@ import {
   extractPathOrCmd,
   isPlanFile,
   extractFilePath,
+  extractFilePaths,
 } from "../rules/utils.js";
 import { ALL_RULES, evaluateRules } from "../rules/index.js";
 import type { RuleContext } from "../rules/types.js";
+import type { FrameworkPreToolUseHookInput } from "./types.js";
+import { resolveHostContext } from "../utils/host-context.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, loadCurrentEpoch, rotateEpoch } from "../scenario/epoch.js";
@@ -65,8 +66,9 @@ interface PipelineExit {
   mirroredFromLeader?: boolean;
 }
 
-export async function mainPreToolUse(input: PreToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
+  const host = resolveHostContext(input);
+  const projectDir = host.projectDir;
 
   const sessionDir = getSessionDir(input.transcript_path);
 
@@ -318,11 +320,11 @@ export async function mainPreToolUse(input: PreToolUseHookInput, encoder: Adapte
   //   NEVER a hard block — the task explicitly requires soft LLM review.
   let outsideRootPath: string | undefined;
   if (FILE_TOOLS.includes(toolName)) {
-    const raw = extractFilePath(toolName, toolInput);
-    if (raw) {
+    for (const raw of extractFilePaths(toolName, toolInput)) {
       const abs = path.isAbsolute(raw) ? raw : path.resolve(projectDir, raw);
       if (!isPathInDirectory(abs, projectDir) && !isPlanFile(abs)) {
         outsideRootPath = abs;
+        break;
       }
     }
   }
@@ -367,6 +369,7 @@ export async function mainPreToolUse(input: PreToolUseHookInput, encoder: Adapte
     toolInput,
     toolUseId: input.tool_use_id,
     projectDir,
+    host,
     transcriptPath: input.transcript_path,
     sessionDir,
     sessionId: input.session_id,
@@ -403,15 +406,13 @@ export async function mainPreToolUse(input: PreToolUseHookInput, encoder: Adapte
   // sensitive-path-block rule (priority 58) does not apply to plan/CLAUDE.md
   // files so they always reach this point.
   if (FILE_TOOLS.includes(toolName)) {
-    const filePath =
-      (toolInput as { file_path?: string }).file_path ||
-      (toolInput as { path?: string }).path;
+      const filePath = extractFilePath(toolName, toolInput);
 
     if (filePath) {
       // Plan-validate: Write/Edit to ~/.claude/plans/
       if (
         (toolName === "Write" || toolName === "Edit") &&
-        isPathInDirectory(filePath, claudePlansRoot())
+        isPathInDirectory(filePath, host.plansRoot)
       ) {
         // Skip validation if ExitPlanMode was recently approved
         const recentContext = await readTranscriptExact(
@@ -470,10 +471,11 @@ export async function mainPreToolUse(input: PreToolUseHookInput, encoder: Adapte
         return;
       }
 
-      // Claude-MD-validate: Write/Edit to CLAUDE.md
+      // Host instruction-file validate: Write/Edit to CLAUDE.md. AGENTS.md
+      // uses the same validator until it gets a dedicated policy prompt.
       if (
         (toolName === "Write" || toolName === "Edit") &&
-        filePath.endsWith("CLAUDE.md")
+        (filePath.endsWith("CLAUDE.md") || filePath.endsWith("AGENTS.md"))
       ) {
         let currentContent: string | null = null;
         try {
@@ -497,7 +499,7 @@ export async function mainPreToolUse(input: PreToolUseHookInput, encoder: Adapte
 
           const appeal = await appealHelper(
             toolName,
-            `CLAUDE.md ${toolName.toLowerCase()} to ${filePath}`,
+            `${path.basename(filePath)} ${toolName.toLowerCase()} to ${filePath}`,
             mdTranscript,
             validation.reason || "CLAUDE.md validation failed",
             projectDir,
@@ -510,7 +512,7 @@ export async function mainPreToolUse(input: PreToolUseHookInput, encoder: Adapte
             await exitPipeline({
               decision: "deny",
               agent: "claude-md-validate",
-              reason: `CLAUDE.md validation failed: ${validation.reason}`,
+              reason: `${path.basename(filePath)} validation failed: ${validation.reason}`,
               usesLlm: true,
             });
             return;
@@ -521,7 +523,7 @@ export async function mainPreToolUse(input: PreToolUseHookInput, encoder: Adapte
         await exitPipeline({
           decision: "allow",
           agent: "claude-md-validate",
-          reason: "CLAUDE.md validation passed",
+          reason: `${path.basename(filePath)} validation passed`,
           usesLlm: true,
         });
         return;
@@ -536,4 +538,3 @@ export async function mainPreToolUse(input: PreToolUseHookInput, encoder: Adapte
     reason: "All checks passed",
   });
 }
-

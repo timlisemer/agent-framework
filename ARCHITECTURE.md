@@ -120,9 +120,9 @@ The adapter layer translates between canonical hook handler outputs and the
 stdout/exit-code conventions of a specific AI coding tool. Each adapter
 implements `AdapterEncoder` from `src/adapter/types.ts`.
 
-Today only the Claude Code adapter exists (`adapters/claude/`). Adding support
-for another tool (e.g. Codex) requires only a new adapter directory — the rule
-logic in `src/hooks/` is unchanged.
+Today the Claude Code (`adapters/claude/`) and Codex CLI
+(`adapters/codex/`) adapters exist. Adding support for another tool requires
+only a new adapter directory — the rule logic in `src/hooks/` is unchanged.
 
 See [`adapters/README.md`](adapters/README.md) for the adapter contract and
 how to add a new adapter.

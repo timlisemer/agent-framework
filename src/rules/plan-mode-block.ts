@@ -1,5 +1,5 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { FILE_TOOLS } from "./utils.js";
+import { FILE_TOOLS, extractFilePaths } from "./utils.js";
 import {
   planModeEditBlock,
   planModeBashBlock,
@@ -20,21 +20,22 @@ export const planModeBlockRule: PreToolRule = {
     }
 
     if (FILE_TOOLS.includes(ctx.toolName)) {
-      const filePath =
-        (ctx.toolInput as { file_path?: string }).file_path ||
-        (ctx.toolInput as { path?: string }).path || "";
-      const editBlock = planModeEditBlock(ctx.planMode, ctx.toolName, filePath);
-      if (editBlock) {
-        return { fastDeny: editBlock };
+      const filePaths = extractFilePaths(ctx.toolName, ctx.toolInput);
+      const firstFilePath = filePaths[0] ?? "";
+      for (const filePath of filePaths) {
+        const editBlock = planModeEditBlock(ctx.planMode, ctx.toolName, filePath);
+        if (editBlock) {
+          return { fastDeny: editBlock };
+        }
       }
       // Authoritative fast-allow: plan-file / CLAUDE.md / memory-file edits
       // are the planner's legitimate write targets in plan mode. Stop here
       // before the rule-gate LLM (gate, priority 70) speculates a denial
       // with hallucinated reasoning about post-validation approval.
-      if (isEditIntentExemptPath(filePath)) {
+      if (firstFilePath && filePaths.every(isEditIntentExemptPath)) {
         return {
           fastAllow:
-            "Plan mode allows edits to plan files / CLAUDE.md / memory files (path is exempt).",
+            "Plan mode allows edits to plan files / host instruction files / memory files (path is exempt).",
         };
       }
     }

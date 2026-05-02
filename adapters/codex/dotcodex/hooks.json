@@ -1,0 +1,73 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/codex/hooks/session-start.js",
+            "statusMessage": "Initializing agent-framework"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/codex/hooks/user-prompt-submit.js",
+            "statusMessage": "Classifying user intent"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/codex/hooks/pre-tool-use.js",
+            "statusMessage": "Checking tool use"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/codex/hooks/permission-request.js",
+            "statusMessage": "Checking permission request"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/codex/hooks/post-tool-use.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/codex/hooks/stop-response-check.js",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

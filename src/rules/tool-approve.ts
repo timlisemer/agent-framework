@@ -2,7 +2,7 @@ import * as fs from "fs";
 import * as path from "node:path";
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { TOOL_APPROVE_PROMPT_SECTION } from "../utils/agent-configs.js";
-import { FILE_TOOLS, extractFilePath, isPlanFile } from "./utils.js";
+import { FILE_TOOLS, extractFilePaths, isPlanFile } from "./utils.js";
 import { planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
 import { getBlacklistHighlights } from "../utils/command-patterns.js";
 import { RESTRICTED_MCP_TOOLS } from "../utils/slash-commands.js";
@@ -28,8 +28,7 @@ export const toolApproveRule: PreToolRule = {
     // it has no concept of the plans-dir exception and would sample
     // "DENY outside project" nondeterministically.
     if (FILE_TOOLS.includes(ctx.toolName)) {
-      const fp = extractFilePath(ctx.toolName, ctx.toolInput);
-      if (fp) {
+      for (const fp of extractFilePaths(ctx.toolName, ctx.toolInput)) {
         const abs = path.isAbsolute(fp) ? fp : path.resolve(ctx.projectDir, fp);
         if (isPlanFile(abs)) return null;
       }
@@ -69,9 +68,10 @@ export const toolApproveRule: PreToolRule = {
     // Deterministic pre-checks for plan mode blocks
     if (ctx.planModeCtx.contextString) {
       const input = ctx.toolInput as Record<string, unknown>;
-      const filePath = (input?.file_path as string) ?? (input?.path as string) ?? "";
-      const editBlock = planModeEditBlock(true, ctx.toolName, filePath);
-      if (editBlock) return { fastDeny: editBlock };
+      for (const filePath of extractFilePaths(ctx.toolName, ctx.toolInput)) {
+        const editBlock = planModeEditBlock(true, ctx.toolName, filePath);
+        if (editBlock) return { fastDeny: editBlock };
+      }
       const bashBlock = planModeBashBlock(true, ctx.toolName, (input?.command as string) ?? "");
       if (bashBlock) return { fastDeny: bashBlock };
     }
@@ -88,14 +88,21 @@ export const toolApproveRule: PreToolRule = {
       };
     }
 
-    // Contribute aggregator context — CLAUDE.md project rules + tool target.
-    const claudeMd = path.join(ctx.projectDir, "CLAUDE.md");
-    const rulesText = await fs.promises.readFile(claudeMd, "utf-8").catch(() => "");
+    // Contribute aggregator context — host instruction files + tool target.
+    const host = ctx.host;
+    const instructionFiles = host?.instructionFiles ?? [path.join(ctx.projectDir, "CLAUDE.md")];
+    const chunks = await Promise.all(
+      instructionFiles.map(async (file) => {
+        const content = await fs.promises.readFile(file, "utf-8").catch(() => "");
+        return content ? `# ${path.basename(file)}\n${content}` : "";
+      })
+    );
+    const rulesText = chunks.filter(Boolean).join("\n\n");
     if (!rulesText) return null;
 
     return {
       llmContext:
-        `PROJECT RULES (from CLAUDE.md):\n${rulesText}\n\n` +
+        `PROJECT RULES (from ${host?.instructionLabel ?? "CLAUDE.md"}):\n${rulesText}\n\n` +
         `TOOL TO EVALUATE:\nTool: ${ctx.toolName}\nInput: ${JSON.stringify(ctx.toolInput)}`,
     };
   },

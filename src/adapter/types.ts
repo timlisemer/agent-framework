@@ -9,6 +9,7 @@
 
 export type EventName =
   | "PreToolUse"
+  | "PermissionRequest"
   | "PostToolUse"
   | "Stop"
   | "UserPromptSubmit"
@@ -24,6 +25,9 @@ export interface AdapterEncoder {
   readonly name: string;           // "claude", "codex", ...
   encodePreToolUseAllow(): EncodedOutput;
   encodePreToolUseDeny(reason: string): EncodedOutput;
+  encodePermissionRequestAllow?(): EncodedOutput;
+  encodePermissionRequestDeny?(reason: string): EncodedOutput;
+  encodePostToolUseBlock?(reason: string): EncodedOutput;
   encodeStopBlock(reason: string): EncodedOutput;
   encodeStopPass(): EncodedOutput;
   encodeOk(event: EventName): EncodedOutput;          // exit-code-only events

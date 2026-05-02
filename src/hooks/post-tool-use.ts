@@ -1,4 +1,3 @@
-import { type PostToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { getSessionDir, appendToolLog, getSessionState } from "../utils/session-store.js";
@@ -7,8 +6,10 @@ import type { AdapterEncoder } from "../adapter/types.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { loadCurrentEpoch } from "../scenario/epoch.js";
+import type { FrameworkPostToolUseHookInput } from "./types.js";
+import { extractPathOrCmd } from "../rules/utils.js";
 
-export async function mainPostToolUse(input: PostToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
+export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
   const subagent = isSubagent(input.transcript_path);
 
   if (!subagent) {
@@ -17,8 +18,8 @@ export async function mainPostToolUse(input: PostToolUseHookInput, encoder: Adap
     await appendToolLog(sessionDir, {
       ts: Date.now(),
       tool: input.tool_name,
-      path: (input.tool_input as Record<string, unknown>)?.file_path as string | undefined,
-      cmd: (input.tool_input as Record<string, unknown>)?.command as string | undefined,
+      path: extractPathOrCmd(input.tool_input).path,
+      cmd: extractPathOrCmd(input.tool_input).cmd,
       status: "allowed",
       gate: "post-tool-use",
       ms: 0,
@@ -41,7 +42,7 @@ export async function mainPostToolUse(input: PostToolUseHookInput, encoder: Adap
 
     // AskUserQuestion: write user's answer as a synthetic user message
     if (input.tool_name === "AskUserQuestion") {
-      const answer = extractAskUserAnswer((input as Record<string, unknown>).tool_response);
+      const answer = extractAskUserAnswer(input.tool_response);
       if (answer) {
         await writeUser(input.transcript_path, input.session_id, "AskUserQuestion", answer);
       }

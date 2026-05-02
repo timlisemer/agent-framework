@@ -1,0 +1,48 @@
+sandbox_mode = "danger-full-access"
+
+[features]
+codex_hooks = true
+
+[plugins."github@openai-curated"]
+enabled = true
+
+[projects."/home/tim/Coding"]
+trust_level = "trusted"
+
+[mcp_servers.nixos-search]
+command = "/run/current-system/sw/bin/docker"
+args = [
+  "exec",
+  "-i",
+  "mcp-toolbox",
+  "sh",
+  "-c",
+  "exec 2>/dev/null; /app/tools/mcp-nixos/venv/bin/python3 -m mcp_nixos.server",
+]
+
+[mcp_servers.tailwind-svelte]
+command = "/run/current-system/sw/bin/docker"
+args = [
+  "exec",
+  "-i",
+  "mcp-toolbox",
+  "node",
+  "/app/tools/tailwind-svelte-assistant/run.mjs",
+]
+
+[mcp_servers.context7]
+command = "/run/current-system/sw/bin/docker"
+args = [
+  "exec",
+  "-i",
+  "mcp-toolbox",
+  "npx",
+  "-y",
+  "@upstash/context7-mcp",
+]
+
+[mcp_servers.agent-framework]
+command = "/run/current-system/sw/bin/node"
+args = [
+  "/mnt/docker-data/volumes/mcp-toolbox/agent-framework/dist/src/mcp/server.js",
+]

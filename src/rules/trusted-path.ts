@@ -1,5 +1,5 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { FILE_TOOLS, isSensitivePath } from "./utils.js";
+import { FILE_TOOLS, extractFilePaths, isSensitivePath } from "./utils.js";
 
 export const trustedPathRule: PreToolRule = {
   name: "sensitive-path-block",
@@ -13,13 +13,11 @@ export const trustedPathRule: PreToolRule = {
     if (ctx.subagent) return null;
     if (!FILE_TOOLS.includes(ctx.toolName)) return null;
 
-    const filePath =
-      (ctx.toolInput as { file_path?: string }).file_path ||
-      (ctx.toolInput as { path?: string }).path || "";
-    if (!filePath) return null;
-
-    if (isSensitivePath(filePath)) {
-      return { fastDeny: `Sensitive path blocked: ${filePath} matches a sensitive-file pattern (.env, credentials, .ssh, .aws, secrets, .key, .pem, password).` };
+    const filePaths = extractFilePaths(ctx.toolName, ctx.toolInput);
+    for (const filePath of filePaths) {
+      if (isSensitivePath(filePath)) {
+        return { fastDeny: `Sensitive path blocked: ${filePath} matches a sensitive-file pattern (.env, credentials, .ssh, .aws, secrets, .key, .pem, password).` };
+      }
     }
     return null;
   },

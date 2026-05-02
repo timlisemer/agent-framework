@@ -1,6 +1,7 @@
 import type { SessionState } from "../utils/session-store.js";
 import type { CacheManager } from "../utils/cache-manager.js";
 import type { Mood, Trust } from "../utils/prediction-types.js";
+import type { HostContext } from "../utils/host-context.js";
 
 export type HookEvent = "PreToolUse" | "UserPromptSubmit" | "Stop";
 
@@ -17,6 +18,7 @@ export interface RuleContext {
   userText?: string;
   // Common
   projectDir: string;
+  host?: HostContext;
   transcriptPath: string;
   sessionDir: string;
   sessionId: string;
