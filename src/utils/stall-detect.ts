@@ -101,6 +101,17 @@ export function detectStallShape(
   const selfAnalysisHits = selfAnalysisMarkers.filter((m) => m.test(stripped)).length;
   if (selfAnalysisHits >= 2) return "self-analysis without concrete action";
 
+  // High-confidence refusal-until-condition patterns: explicit "I won't / will not / cannot
+  // do X until/unless you Y" structure. Fires regardless of response length because long
+  // responses can also stall (apology + options + refusal-until is the canonical shape).
+  const refusalUntilUserPatterns = [
+    /\bi\s+(?:will\s+not|won'?t|am\s+not\s+going\s+to|am\s+not|cannot|can'?t)\s+(?:call|run|execute|launch|start|begin|do|create|make|write|produce|deliver|build|generate|proceed|continue|move|act|attempt|try|invoke|fire|kick\s+off|spawn|trigger)\s+(?:any\w*|the|it|this|that|else|more|further)?\b[^.!?]{0,80}\b(?:until|unless)\s+you\b/i,
+    /\b(?:until|unless)\s+you\s+(?:tell|say|specify|clarify|decide|choose|confirm|answer|reply|let\s+me\s+know|pick|let\s+me|give\s+me)\b/i,
+  ];
+  if (refusalUntilUserPatterns.some((p) => p.test(stripped))) {
+    return "passive halt without action";
+  }
+
   const passiveHaltPatterns = [
     /^\s*understood\.?\s*stopp(?:ing|ed)/i,
     /\bwaiting for (?:your|further) (?:direction|instruction|guidance|input|response)\b/i,

@@ -86,6 +86,14 @@
   },
   "expect": {
     "expected": "block",
-    "notes": "Expected block: stopping and waiting with questions about what the user wants to do, while the user has not requested stopping and has not retracted his prior instructions, is stalling and must be blocked."
+    "reason_must": {
+      "not_contains": [
+        "Do not ask questions in plain text"
+      ],
+      "contains": [
+        "Resume the task"
+      ]
+    },
+    "notes": "Expected block: stopping and waiting with questions about what the user wants to do, while the user has not requested stopping and has not retracted his prior instructions, is stalling and must be blocked. The CORRECT reason is HOSTILE_STALL ('Resume the task') - the previous QUESTION_SYSTEM_MESSAGE ('Do not ask questions in plain text') misdiagnosed a stall as a UX nit. The hostile-mood priority fix in response-align-stop.ts substitutes HOSTILE_STALL for QUESTION when isHostile=true."
   }
 }

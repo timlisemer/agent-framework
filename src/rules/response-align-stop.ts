@@ -348,7 +348,10 @@ export const responseAlignStopRule: PreToolRule = {
       } else if (trimmedOutput.includes("MISUNDERSTOOD")) {
         return { stopBlock: MISUNDERSTOOD_SYSTEM_MESSAGE };
       } else if (trimmedOutput.includes("QUESTION")) {
-        return { stopBlock: QUESTION_SYSTEM_MESSAGE };
+        // Priority fix: when the user is hostile, asking-instead-of-acting IS stalling.
+        // The "use AskUserQuestion" feedback misdiagnoses a stall as a UX nit. Emit the
+        // hostile-stall message so the assistant resumes the demanded task.
+        return { stopBlock: isHostile ? HOSTILE_STALL_SYSTEM_MESSAGE : QUESTION_SYSTEM_MESSAGE };
       }
       // classification === "OK" — fall through
     }
