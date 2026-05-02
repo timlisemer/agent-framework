@@ -16,10 +16,17 @@ import { dirname, join } from "path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function loadVersion(): string {
-  const pkg = JSON.parse(
-    readFileSync(join(__dirname, "../package.json"), "utf-8")
-  );
-  const [major, minor] = pkg.version.split(".");
+  let major = "0";
+  let minor = "0";
+  for (const candidate of ["../package.json", "../../package.json"]) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(__dirname, candidate), "utf-8"));
+      [major, minor] = pkg.version.split(".");
+      break;
+    } catch {
+      // try next candidate
+    }
+  }
 
   try {
     const data = JSON.parse(
