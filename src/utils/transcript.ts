@@ -1,6 +1,9 @@
 import * as fs from "fs";
 import { stripQuotedAndPastedContent } from "./quote-detection.js";
-import { SLASH_COMMAND_ALLOWED_TOOLS } from "./slash-commands.js";
+import {
+  SLASH_COMMAND_ALLOWED_TOOLS,
+  extractCodexSkillCommandName,
+} from "./slash-commands.js";
 
 /**
  * Claude Code Interruption Message Filter
@@ -296,13 +299,15 @@ export function trimToolOutput(output: string, maxLines = 20): string {
 
 
 /**
- * Detect if content is a slash command invocation message.
- * When a user invokes a slash command, Claude Code wraps the input in
- * <command-name>/commandname</command-name> tags.
+ * Detect if content is a workflow invocation message.
+ * Claude Code wraps slash commands in <command-name> tags. Codex exposes
+ * command-equivalent workflows as explicit $agent-framework-* skill mentions.
  */
 function isSlashCommandPrompt(content: string): boolean {
-  // Check for Claude Code's slash command invocation tags
-  return /<command-name>\s*\//.test(content);
+  return (
+    /<command-name>\s*\//.test(content) ||
+    extractCodexSkillCommandName(content) !== undefined
+  );
 }
 
 
@@ -329,6 +334,14 @@ function extractSlashCommandMetadata(content: string): SlashCommandContext | nul
     if (mapped) {
       return { commandName: tagName, allowedTools: [...mapped] };
     }
+  }
+
+  const codexCommandName = extractCodexSkillCommandName(content);
+  if (codexCommandName) {
+    return {
+      commandName: codexCommandName,
+      allowedTools: [...SLASH_COMMAND_ALLOWED_TOOLS[codexCommandName]],
+    };
   }
 
   // Must have YAML frontmatter

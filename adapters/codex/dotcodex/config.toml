@@ -42,7 +42,8 @@ args = [
 ]
 
 [mcp_servers.agent-framework]
-command = "/run/current-system/sw/bin/node"
+command = "/run/current-system/sw/bin/bash"
 args = [
-  "/mnt/docker-data/volumes/mcp-toolbox/agent-framework/dist/src/mcp/server.js",
+  "-lc",
+  "exec node /mnt/docker-data/volumes/mcp-toolbox/agent-framework/dist/src/mcp/server.js",
 ]

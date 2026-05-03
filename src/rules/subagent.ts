@@ -139,9 +139,12 @@ export const subagentRule: PreToolRule = {
       return { fastDeny: reason };
     }
 
-    if (RESTRICTED_MCP_TOOLS.has(ctx.toolName)) {
+    if (
+      RESTRICTED_MCP_TOOLS.has(ctx.toolName) &&
+      !ctx.slashCommandAllowedTools?.includes(ctx.toolName)
+    ) {
       return {
-        fastDeny: `${ctx.toolName} requires explicit slash-command authorization (/commit, /push, /confirm, or /quickpush).`,
+        fastDeny: `${ctx.toolName} requires explicit workflow authorization (/commit, /push, /confirm, /quickpush, or the matching Codex agent-framework skill).`,
       };
     }
 

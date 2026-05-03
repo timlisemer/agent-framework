@@ -50,6 +50,20 @@ export const SLASH_COMMAND_ALLOWED_TOOLS: Record<string, readonly string[]> = {
   ...SLASH_COMMAND_WORKFLOW_TOOLS,
 };
 
+const CODEX_AGENT_FRAMEWORK_SKILL_PREFIX = "agent-framework-";
+
+export function codexSkillNameToCommandName(skillName: string): string | undefined {
+  if (!skillName.startsWith(CODEX_AGENT_FRAMEWORK_SKILL_PREFIX)) return undefined;
+  const commandName = skillName.slice(CODEX_AGENT_FRAMEWORK_SKILL_PREFIX.length);
+  return SLASH_COMMAND_ALLOWED_TOOLS[commandName] ? commandName : undefined;
+}
+
+export function extractCodexSkillCommandName(content: string): string | undefined {
+  const skillMatch = content.match(/(?:^|\s)\$agent-framework-([\w-]+)\b/);
+  if (!skillMatch) return undefined;
+  return codexSkillNameToCommandName(`${CODEX_AGENT_FRAMEWORK_SKILL_PREFIX}${skillMatch[1]}`);
+}
+
 export const RESTRICTED_MCP_TOOLS: ReadonlySet<string> = new Set(
   Object.values(SLASH_COMMAND_GATED_MCP_TOOLS).flat(),
 );
