@@ -43,9 +43,11 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // Directory change - always deny
   { pattern: /\bcd\s+/, name: 'cd', alternative: 'Use absolute paths' },
 
-  // Git write operations
+  // Git write operations. Keep this list explicit: read-only commands like
+  // `git status`, `git diff`, `git log`, and `git show` must remain usable
+  // for inspection.
   { pattern: /\bgit\s+(commit|push|add)\b/, name: 'git write op (MCP)', alternative: 'Use MCP tools: /commit, /push, or /quickpush' },
-  { pattern: /\bgit\s+(?!commit|push|add)\w+/, name: 'git write op', alternative: 'Git write operation denied' },
+  { pattern: /\bgit\s+(?:am|apply|bisect|checkout|cherry-pick|clean|clone|fetch|gc|merge|mv|pull|rebase|reflog|remote|reset|restore|revert|rm|stash|submodule|switch|tag|worktree)\b/, name: 'git write op', alternative: 'Git write operation denied' },
 
   // Build/check commands - LLMs should NOT build, only verify with check tool
   { pattern: /\bmake\s+check\b/, name: "make check", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
@@ -153,6 +155,99 @@ export const WORKAROUND_PATTERNS: Record<string, { variants: string[]; redactPat
     redactPaths: true,
   },
 };
+
+function stripQuotedRegions(s: string): string {
+  return s.replace(/'[^']*'|"[^"]*"/g, (m) => " ".repeat(m.length));
+}
+
+// Commands allowed for read-only Bash use. Shared by subagent gating and
+// prediction-block so the same inspection/navigation surface stays consistent.
+export const READ_ONLY_BASH_COMMANDS: ReadonlySet<string> = new Set([
+  "ls", "tree", "pwd", "dirname", "basename", "realpath", "readlink",
+  "grep", "rg", "find", "fd",
+  "wc", "sort", "uniq", "cut", "tr", "diff", "comm",
+  "head", "tail",
+  "file", "stat",
+  "jq",
+  "which", "type",
+  "echo", "printf",
+]);
+
+const READ_ONLY_BASH_COMMAND_LEVEL_DENY: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
+  // Command/process substitution -- arbitrary-code-execution laundering.
+  { pattern: /\$\(|`|<\(|>\(/, reason: "command or process substitution ($(...), backticks, <(...), >(...))" },
+
+  // find destructive flags (GNU + BSD).
+  { pattern: /\bfind\b[^|;&]*\s-(delete|exec(dir)?|ok(dir)?|fprint[0f]?|fls)\b/, reason: "find destructive flag (-delete/-exec/-execdir/-ok/-okdir/-fprint/-fls)" },
+
+  // File redirection. Matches `> file`, `>> file`, `1>file`, `>|file`, etc.
+  // Excludes `2>&1` / `>&N` via `(?![&(])`, and `/dev/...` targets via `(?!\/dev\/)`.
+  // Process substitution is caught by the substitution rule above.
+  { pattern: />>?\s*(?!\/dev\/)(?![&(])[^|&(\s]/, reason: "shell redirect to file" },
+];
+
+export function checkReadOnlyBashAllowlist(command: string): { allowed: true } | { allowed: false; reason: string } {
+  const trimmed = command.trim();
+  if (!trimmed) {
+    return { allowed: false, reason: "empty command" };
+  }
+
+  for (const { pattern, reason } of READ_ONLY_BASH_COMMAND_LEVEL_DENY) {
+    if (pattern.test(trimmed)) {
+      return { allowed: false, reason };
+    }
+  }
+
+  // Split on shell control operators. Use quote-stripped basis for split positions
+  // so shell metachars inside quoted args (e.g. `grep 'a; b' file`) don't cause
+  // spurious segment boundaries.
+  const basis = stripQuotedRegions(trimmed);
+  const splitRegex = /\s*(?:\|\||&&|[;|&\n\r])\s*/g;
+  const segments: string[] = [];
+  let last = 0;
+  for (const m of basis.matchAll(splitRegex)) {
+    segments.push(trimmed.slice(last, m.index));
+    last = (m.index ?? 0) + m[0].length;
+  }
+  segments.push(trimmed.slice(last));
+
+  for (const segment of segments) {
+    const seg = segment.trim();
+    if (!seg) continue;
+
+    const firstToken = seg.split(/\s+/)[0];
+
+    // No inline env prefix (closes PATH/LD_PRELOAD injection).
+    if (firstToken.includes("=")) {
+      return { allowed: false, reason: `inline env assignment not allowed: ${firstToken}` };
+    }
+    // No relative paths (closes `./grep` laundering where a subagent drops an
+    // attacker-controlled binary named `grep` in cwd).
+    if (firstToken.includes("/") && !firstToken.startsWith("/")) {
+      return { allowed: false, reason: `relative path execution not allowed: ${firstToken}` };
+    }
+
+    const bare = firstToken.startsWith("/") ? firstToken.split("/").pop()! : firstToken;
+
+    if (!READ_ONLY_BASH_COMMANDS.has(bare)) {
+      return { allowed: false, reason: `command not in read-only allowlist: ${bare}` };
+    }
+  }
+
+  return { allowed: true };
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function containsCommandVariant(command: string, variant: string): boolean {
+  const trimmed = variant.trim();
+  if (!trimmed) return false;
+  const escaped = escapeRegExp(trimmed).replace(/\\\s+/g, "\\s+");
+  const re = new RegExp(`(?:^|[\\s;&|])${escaped}(?=$|[\\s;&|])`);
+  return re.test(command);
+}
 
 /**
  * Maps blacklist pattern names to equivalent commands to search for in check targets.
@@ -318,14 +413,13 @@ export function getBlacklistHighlights(toolName: string, toolInput: unknown, wor
   // `nohup tail`, `time cat`), backtick / $(…) substitutions, and
   // `bash -c "tail …"` shell-escapes are no longer caught here — none
   // had a test or scenario depending on the previous incidental match.
+  const quoteStrippedCommand = stripQuotedRegions(command);
   const FILE_READING_PATTERN_NAMES = new Set(["cat", "head", "tail"]);
-  const segmentHeads = command
-    .replace(/'[^']*'/g, "")
-    .replace(/"[^"]*"/g, "")
+  const segmentHeads = quoteStrippedCommand
     .split(/&&|\|\||;|&(?!\d)/)
     .map((seg) => seg.trim().split(/\s+/)[0])
     .filter((head) => head.length > 0);
-  const redactedCommand = redactPathTokens(command);
+  const redactedCommand = redactPathTokens(quoteStrippedCommand);
 
   return BLACKLIST_PATTERNS
     .filter(({ pattern, name, redactPaths: shouldRedact }) => {
@@ -335,7 +429,7 @@ export function getBlacklistHighlights(toolName: string, toolInput: unknown, wor
         // so redactPaths is a no-op for these patterns.
         return segmentHeads.some((head) => pattern.test(head + " "));
       }
-      const target = shouldRedact ? redactedCommand : command;
+      const target = shouldRedact ? redactedCommand : quoteStrippedCommand;
       return pattern.test(target);
     })
     .map(({ name, alternative }) => {
@@ -357,10 +451,11 @@ export function detectWorkaroundPattern(
 ): string | null {
   if (toolName !== "Bash") return null;
   const command = (toolInput as { command?: string }).command ?? "";
-  const redacted = redactPathTokens(command);
+  const quoteStrippedCommand = stripQuotedRegions(command);
+  const redacted = redactPathTokens(quoteStrippedCommand);
   for (const [category, { variants, redactPaths: shouldRedact }] of Object.entries(WORKAROUND_PATTERNS)) {
-    const target = shouldRedact ? redacted : command;
-    if (variants.some((v) => target.includes(v))) return category;
+    const target = shouldRedact ? redacted : quoteStrippedCommand;
+    if (variants.some((v) => containsCommandVariant(target, v))) return category;
   }
   return null;
 }

@@ -606,7 +606,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
     expect(result.decision).toBe("deny");
   });
 
-  it("case 7: negative — object is non-user: 'the AI blocked unsafe code from running' -> deny", () => {
+  it("case 7: read-only Bash allowlist bypasses mood deny", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -614,10 +614,10 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
       userMessageSnippet: "good",
     });
     const result = decidePrediction(pred, "Bash", { command: "ls" }, 2);
-    expect(result.decision).toBe("deny");
+    expect(result.decision).toBe("allow");
   });
 
-  it("case 8: negative — labeler shape '...the exact context of what was denied...' -> deny", () => {
+  it("case 8: read-only Bash remains allowed when asking about prior denial context", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -626,7 +626,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
       userMessageSnippet: "explain",
     });
     const result = decidePrediction(pred, "Bash", { command: "ls" }, 2);
-    expect(result.decision).toBe("deny");
+    expect(result.decision).toBe("allow");
   });
 
   it("case 9: negative — no block-verb: 'user wants the AI to stop' -> deny", () => {
@@ -1074,7 +1074,7 @@ describe("step 3.8: cached-intent target-naming fallback", () => {
     expect(result.decision).toBe("deny");
   });
 
-  it("Tools without an extractor (Bash) under same conditions -> deny (step 3.8 inert)", () => {
+  it("Tools without an extractor (Bash) under same conditions -> allow for read-only Bash", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -1082,7 +1082,7 @@ describe("step 3.8: cached-intent target-naming fallback", () => {
       userMessageSnippet: "fix the parser",
     });
     const result = decidePrediction(pred, "Bash", { command: "ls plan3" }, 4);
-    expect(result.decision).toBe("deny");
+    expect(result.decision).toBe("allow");
   });
 
   it("ordering: explicit block on Skill (step 2) wins over step 3.8", () => {
@@ -1226,10 +1226,10 @@ describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", ()
     expect(result.decision).toBe("deny");
   });
 
-  it("'now implement' + Bash -> deny (Bash not in derived set for EDIT_VERB_RE)", () => {
+  it("'now implement' + read-only Bash -> allow via read-only Bash allowlist", () => {
     const pred = makeAngryLowStreak4();
     const result = decidePrediction(pred, "Bash", { command: "ls" }, 4, "now implement");
-    expect(result.decision).toBe("deny");
+    expect(result.decision).toBe("allow");
   });
 
   it("'stop. now implement.' + Edit -> allow (sentence boundary breaks revocation window)", () => {

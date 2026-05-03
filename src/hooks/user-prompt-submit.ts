@@ -10,7 +10,7 @@ import { resolveHostContext } from "../utils/host-context.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
-import { onEpochRotation } from "../scenario/lifecycle.js";
+import { onEpochRotation, onUserPromptTurn } from "../scenario/lifecycle.js";
 
 /**
  * UserPromptSubmit Hook
@@ -44,6 +44,7 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
   }
 
   const stateManager = getSessionState(sessionDir);
+  await onUserPromptTurn(sessionDir);
   const state = await stateManager.load();
 
   const planMode =

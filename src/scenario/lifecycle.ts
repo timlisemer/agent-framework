@@ -62,3 +62,41 @@ export async function onEpochRotation(sessionDir: string, _epoch: Epoch): Promis
     // Best-effort.
   }
 }
+
+/**
+ * Reset derived decision state at the start of a fresh user turn.
+ *
+ * This is intentionally narrower than epoch rotation: forensic logs remain
+ * intact, and the sentiment rule still owns currentPrediction updates.
+ */
+export async function onUserPromptTurn(sessionDir: string): Promise<void> {
+  const toUnlink = [
+    sessionGateReasoningFile(sessionDir),
+    sessionDenialCacheFile(sessionDir),
+  ];
+  for (const filePath of toUnlink) {
+    try {
+      fs.unlinkSync(filePath);
+    } catch {
+      // Expected when the file doesn't exist yet.
+    }
+  }
+
+  try {
+    const stateManager = getSessionState(sessionDir);
+    await stateManager.update((s) => ({
+      ...s,
+      forceCheckPending: false,
+      previousEditIntent: s.currentEditIntent ?? null,
+      currentEditIntent: null,
+      editIntentTimestamp: Date.now(),
+      editIntentOverturnCount: 0,
+      respondFirstChecked: false,
+      driftState: {},
+      lastProcessedPlanApprovalToolUseId: null,
+      lastUserMessageTimestamp: Date.now(),
+    }));
+  } catch {
+    // Best-effort.
+  }
+}

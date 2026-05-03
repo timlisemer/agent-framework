@@ -141,7 +141,17 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
     expect(result).not.toBeNull();
     expect(result).toHaveProperty("fastDeny");
     const deny = result as { fastDeny: string };
-    expect(deny.fastDeny).toContain("requires explicit slash-command authorization");
+    expect(deny.fastDeny).toContain("requires explicit workflow authorization");
+  });
+
+  it("allows RESTRICTED_MCP_TOOLS when workflow authorization is active", async () => {
+    const ctx = makeCtx({
+      toolName: "mcp__agent-framework__commit",
+      toolInput: {},
+      slashCommandAllowedTools: ["mcp__agent-framework__commit"],
+    });
+    const result = await toolApproveRule.check(ctx);
+    expect(result).toBeNull();
   });
 
   it("returns null (no contribution) when no CLAUDE.md exists and no blacklist hit", async () => {

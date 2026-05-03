@@ -5,7 +5,7 @@ import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
  *
  * Set by tool-approve.onDenialConfirmed when a workaround Bash command is
  * denied. While `state.forceCheckPending` is true, all tools are denied except
- * `mcp__agent-framework__check` and `ToolSearch`. Cleared in pre-tool-use.ts
+ * the framework check MCP and `ToolSearch`. Cleared in pre-tool-use.ts
  * after the check tool is allowed.
  *
  * Not appealable: this is a deliberate lockout, not a heuristic guess.
@@ -21,7 +21,11 @@ export const forceCheckRequiredRule: PreToolRule = {
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     if (ctx.subagent) return null;
     if (!ctx.state.forceCheckPending) return null;
-    const allowed = new Set(["mcp__agent-framework__check", "ToolSearch"]);
+    const allowed = new Set([
+      "mcp__agent-framework__check",
+      "mcp__agent_framework__check",
+      "ToolSearch",
+    ]);
     if (allowed.has(ctx.toolName)) return null;
     return {
       fastDeny:

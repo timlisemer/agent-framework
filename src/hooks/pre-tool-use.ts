@@ -215,7 +215,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
     // satisfies the force-check lockout. Keeping this outside the
     // `!mirroredFromLeader` guard preserves today's semantics where every
     // allowed MCP-matching tool clears the flag.
-    if (exit.decision === "allow" && /^mcp__.*(commit|push|confirm|check)$/.test(toolName)) {
+    if (exit.decision === "allow" && /^mcp__.*(?:commit|push|confirm|check)$/.test(toolName)) {
       await stateManager.update((s) => ({ ...s, forceCheckPending: false }));
     }
 

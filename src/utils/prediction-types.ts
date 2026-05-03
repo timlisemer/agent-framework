@@ -21,6 +21,7 @@ import {
   CHECK_VERB_RE,
   READ_VERB_RE,
 } from "./edit-intent.js";
+import { checkReadOnlyBashAllowlist } from "./command-patterns.js";
 
 export type Mood = "angry" | "frustrated" | "neutral" | "satisfied" | "happy";
 export type Trust = "low" | "normal" | "high";
@@ -930,6 +931,13 @@ export function decidePrediction(
       prediction,
       frustrationStreak,
     );
+
+    const bashCommand = toolName === "Bash"
+      ? String((toolInput as { command?: unknown })?.command ?? "")
+      : "";
+    if (bashCommand && checkReadOnlyBashAllowlist(bashCommand).allowed) {
+      return { decision: "allow" };
+    }
 
     if (isLowRiskTool(toolName) && !sustainedFrustration) {
       return { decision: "allow" };

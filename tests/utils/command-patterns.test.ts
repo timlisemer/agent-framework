@@ -5,6 +5,7 @@ import {
   getContentBlacklistHighlights,
   getBlacklistHighlights,
   detectWorkaroundPattern,
+  checkReadOnlyBashAllowlist,
 } from "../../src/utils/command-patterns.js";
 import { redactPathTokens } from "../../src/utils/path-redaction.js";
 
@@ -18,6 +19,25 @@ describe("getBlacklistDescription", () => {
     for (const { name } of BLACKLIST_PATTERNS) {
       expect(description).toContain(name);
     }
+  });
+});
+
+describe("checkReadOnlyBashAllowlist", () => {
+  it("allows existing read-only command heads and simple pipelines", () => {
+    expect(checkReadOnlyBashAllowlist("rg -n foo src").allowed).toBe(true);
+    expect(checkReadOnlyBashAllowlist("find src -name '*.ts' | wc -l").allowed).toBe(true);
+    expect(checkReadOnlyBashAllowlist("ls && pwd").allowed).toBe(true);
+  });
+
+  it("denies commands outside the read-only allowlist", () => {
+    const result = checkReadOnlyBashAllowlist("npm run build");
+    expect(result.allowed).toBe(false);
+  });
+
+  it("denies read-only-looking commands with mutation-capable shell features", () => {
+    expect(checkReadOnlyBashAllowlist("find . -delete").allowed).toBe(false);
+    expect(checkReadOnlyBashAllowlist("rg foo > out.txt").allowed).toBe(false);
+    expect(checkReadOnlyBashAllowlist("rg $(pwd)").allowed).toBe(false);
   });
 });
 
@@ -143,6 +163,27 @@ describe("getBlacklistHighlights", () => {
     expect(getBlacklistHighlights("Bash", { command: "ls -la" })).toEqual([]);
   });
 
+  it("allows read-only git inspection commands", () => {
+    for (const command of ["git status", "git diff", "git log --oneline", "git show HEAD"]) {
+      expect(getBlacklistHighlights("Bash", { command })).toEqual([]);
+    }
+  });
+
+  it("blocks raw git write operations", () => {
+    for (const command of ["git add .", "git commit -m fix", "git push", "git reset --hard", "git merge main"]) {
+      const highlights = getBlacklistHighlights("Bash", { command });
+      expect(highlights.some((h) => h.includes("git write op"))).toBe(true);
+    }
+  });
+
+  it("does not scan rg search text as executable git intent", () => {
+    expect(
+      getBlacklistHighlights("Bash", {
+        command: `rg -n "git write op|Git write operation" src tests`,
+      }),
+    ).toEqual([]);
+  });
+
   it("detects 'vitest' in Bash command", () => {
     const highlights = getBlacklistHighlights("Bash", { command: "npx vitest run" });
     expect(highlights.length).toBeGreaterThan(0);
@@ -254,6 +295,15 @@ describe("detectWorkaroundPattern", () => {
 
   it("returns 'test' for command containing 'test'", () => {
     expect(detectWorkaroundPattern("Bash", { command: "npm test" })).toBe("test");
+  });
+
+  it("does not treat quoted search text or test paths as workaround commands", () => {
+    expect(detectWorkaroundPattern("Bash", {
+      command: `rg -n "npm test|vitest" tests src`,
+    })).toBeNull();
+    expect(detectWorkaroundPattern("Bash", {
+      command: `find . -name "*.test.ts"`,
+    })).toBeNull();
   });
 
   it("returns 'install' for 'npm install'", () => {
