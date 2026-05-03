@@ -4,7 +4,6 @@ import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { TOOL_APPROVE_PROMPT_SECTION } from "../utils/agent-configs.js";
 import { FILE_TOOLS, extractFilePaths, isPlanFile } from "./utils.js";
 import { planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
-import { getBlacklistHighlights } from "../utils/command-patterns.js";
 import { RESTRICTED_MCP_TOOLS } from "../utils/slash-commands.js";
 import { detectWorkaroundPattern } from "../utils/command-patterns.js";
 import { recordDenial, MAX_SIMILAR_DENIALS } from "../utils/denial-cache.js";
@@ -74,12 +73,6 @@ export const toolApproveRule: PreToolRule = {
       }
       const bashBlock = planModeBashBlock(true, ctx.toolName, (input?.command as string) ?? "");
       if (bashBlock) return { fastDeny: bashBlock };
-    }
-
-    const highlights = getBlacklistHighlights(ctx.toolName, ctx.toolInput, ctx.projectDir);
-    if (highlights.length > 0) {
-      const reason = highlights.map(h => h.replace(/^\[BLACKLIST: [^\]]+\]\s*/, "")).join(". ");
-      return { fastDeny: reason };
     }
 
     if (

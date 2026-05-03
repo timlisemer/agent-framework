@@ -15,9 +15,10 @@ Do not create these symlinks manually in normal deployments.
 `dotcodex/skills/agent-framework-*` contains Codex-native skill equivalents
 for the Claude slash-command workflows (`/check`, `/commit`, `/confirm`,
 `/push`, `/quickpush`, `/transcript`, `/plan1`, `/plan3`, `/plan5`, and
-`/implement`). The NixOS activation script links these as individual
-directories under `~/.codex/skills/` so existing user and system skills remain
-intact.
+`/implement`). The NixOS activation script creates real directories under
+`~/.codex/skills/` and copies each `SKILL.md` into place. Do not symlink these
+skill directories: Codex skill discovery does not follow symlinked skill
+directories reliably. Existing user and system skills remain intact.
 
 `dotcodex/agents/*.toml` contains Codex custom-agent equivalents for the
 Claude subagent roles. The NixOS activation script links these as individual

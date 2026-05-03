@@ -320,7 +320,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
       userText("<command-name>/commit</command-name>\nnow commit"),
     ]);
     const result = await resolveActiveSlashCommandAllowedTools(filePath);
-    expect(result).toEqual(["mcp__agent-framework__commit"]);
+    expect(result).toEqual(["mcp__agent-framework__commit", "mcp__agent_framework__commit"]);
   });
 
   it("empty transcript -> returns undefined", async () => {

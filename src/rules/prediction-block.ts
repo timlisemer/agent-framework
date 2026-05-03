@@ -1,7 +1,6 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
 import { decidePrediction } from "../utils/prediction-types.js";
-import { getBlacklistHighlights } from "../utils/command-patterns.js";
 
 export const predictionBlockRule: PreToolRule = {
   name: "prediction-block",
@@ -34,14 +33,6 @@ export const predictionBlockRule: PreToolRule = {
       ctx.slashCommandAllowedTools ?? [],
     );
     if (decision.decision === "deny") {
-      // Mood-driven denies defer to tool-approve's blacklist fastDeny so the
-      // user sees the actionable alternative (e.g. "use mcp__agent-framework__check")
-      // instead of a generic frustration message. Explicit user blocks
-      // (matchedExplicit) and blockAllTools still win here.
-      const isMoodDriven = !decision.matchedExplicit && !prediction.blockAllTools;
-      if (isMoodDriven && getBlacklistHighlights(ctx.toolName, ctx.toolInput).length > 0) {
-        return null;
-      }
       return { fastDeny: decision.reason ?? "Tool blocked by user-state prediction" };
     }
     return null;

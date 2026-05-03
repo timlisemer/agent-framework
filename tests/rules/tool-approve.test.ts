@@ -124,14 +124,6 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
     };
   }
 
-  it("fastDeny for blacklisted cd command", async () => {
-    const ctx = makeCtx({ toolInput: { command: "cd /tmp && ls" } });
-    const result = await toolApproveRule.check(ctx);
-    expect(result).not.toBeNull();
-    expect(result).toHaveProperty("fastDeny");
-    expect((result as { fastDeny: string }).fastDeny).toBeTruthy();
-  });
-
   it("fastDeny for RESTRICTED_MCP_TOOLS when no CLAUDE.md", async () => {
     const ctx = makeCtx({
       toolName: "mcp__agent-framework__commit",

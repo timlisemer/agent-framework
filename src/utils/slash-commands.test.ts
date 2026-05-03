@@ -41,6 +41,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
 
     await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual([
       "mcp__agent-framework__commit",
+      "mcp__agent_framework__commit",
     ]);
   });
 
@@ -51,6 +52,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
 
     await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual([
       "mcp__agent-framework__confirm",
+      "mcp__agent_framework__confirm",
     ]);
   });
 
@@ -62,4 +64,3 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
     await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toBeUndefined();
   });
 });
-

@@ -51,10 +51,10 @@ export const LOW_RISK_TOOLS = [
  *
  * Distinct concept from cross-turn rejection memory: that lives in mood/
  * trust/frustrationStreak signals consumed by decidePrediction. When the
- * user has asked the assistant to stop, prediction-block (priority 35)
- * denies via the sustained-frustration mood path BEFORE low-risk-bypass
- * (priority 38) runs -- so this constant is purely a cost gate, not a
- * substitute for cross-turn rejection memory.
+ * user has asked the assistant to stop, decidePrediction still has a separate
+ * sustained-frustration path for tools that do not auto-approve through
+ * low-risk-bypass (priority 33), so this constant is purely a cost gate, not
+ * a substitute for cross-turn rejection memory.
  */
 const HEAVY_MCP_TOOLS: ReadonlySet<string> = new Set([
   "mcp__agent-framework__scenario_tester",
@@ -63,7 +63,7 @@ const HEAVY_MCP_TOOLS: ReadonlySet<string> = new Set([
 
 /**
  * True iff a tool is generally safe to allow without further checks.
- * Mirrors the predicate used by `low-risk-bypass` (priority 38) so the
+ * Mirrors the predicate used by `low-risk-bypass` (priority 33) so the
  * sentiment prediction system aligns with the framework-wide allow set.
  *
  * Allows: anything in LOW_RISK_TOOLS, plus any `mcp__*` tool not in

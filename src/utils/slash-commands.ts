@@ -7,10 +7,10 @@
  *  - subagent      (src/rules/subagent.ts:142)    — hard-deny without auth
  */
 export const SLASH_COMMAND_GATED_MCP_TOOLS: Record<string, readonly string[]> = {
-  commit:    ["mcp__agent-framework__commit"],
-  push:      ["mcp__agent-framework__push", "mcp__agent-framework__commit"],
-  quickpush: ["mcp__agent-framework__push", "mcp__agent-framework__commit"],
-  confirm:   ["mcp__agent-framework__confirm"],
+  commit:    ["mcp__agent-framework__commit", "mcp__agent_framework__commit"],
+  push:      ["mcp__agent-framework__push", "mcp__agent-framework__commit", "mcp__agent_framework__push", "mcp__agent_framework__commit"],
+  quickpush: ["mcp__agent-framework__push", "mcp__agent-framework__commit", "mcp__agent_framework__push", "mcp__agent_framework__commit"],
+  confirm:   ["mcp__agent-framework__confirm", "mcp__agent_framework__confirm"],
 };
 
 /**

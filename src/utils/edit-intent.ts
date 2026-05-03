@@ -169,8 +169,17 @@ export function deriveAllowedToolsFromIntent(message: string): string[] {
   }
   if (RENAME_MOVE_VERB_RE.test(message)) tools.add("Bash");
   if (TEST_RUN_VERB_RE.test(message)) tools.add("Bash");
-  if (COMMIT_VERB_RE.test(message)) tools.add("mcp__agent-framework__commit");
-  if (PUSH_VERB_RE.test(message)) tools.add("mcp__agent-framework__push");
-  if (CHECK_VERB_RE.test(message)) tools.add("mcp__agent-framework__check");
+  if (COMMIT_VERB_RE.test(message)) {
+    tools.add("mcp__agent-framework__commit");
+    tools.add("mcp__agent_framework__commit");
+  }
+  if (PUSH_VERB_RE.test(message)) {
+    tools.add("mcp__agent-framework__push");
+    tools.add("mcp__agent_framework__push");
+  }
+  if (CHECK_VERB_RE.test(message)) {
+    tools.add("mcp__agent-framework__check");
+    tools.add("mcp__agent_framework__check");
+  }
   return [...tools];
 }

@@ -5,7 +5,11 @@ import { writeTool } from "../utils/synthetic.js";
 export const lowRiskRule: PreToolRule = {
   name: "low-risk-bypass",
   displayName: "Low Risk",
-  priority: 38,
+  // Keep this after force-check-required (32) so recovery lockout still wins,
+  // but before blacklist/prediction-block. If early low-risk approval ever
+  // allows distracting reads during hostile turns, move this back below
+  // prediction-block and keep read-only Bash handled in decidePrediction.
+  priority: 33,
   appealable: false,
   usesLlm: false,
   promptSection: "",
