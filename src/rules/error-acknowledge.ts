@@ -38,9 +38,21 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
       return null;
     }
 
-    // Read recent tool log for denials
+    // Read recent tool log for denials. A later successful framework
+    // check/commit/push/confirm satisfies older workaround denials, matching
+    // pre-tool-use's forceCheckPending clear semantics.
     const recentLog = readToolLogEntries(ctx.sessionDir, 5);
-    const recentDenial = recentLog.find((entry) => entry.status === "denied");
+    let recentDenial: ReturnType<typeof readToolLogEntries>[number] | undefined;
+    for (let i = recentLog.length - 1; i >= 0; i--) {
+      const entry = recentLog[i];
+      if (entry.status === "allowed" && /^mcp__.*(?:commit|push|confirm|check)$/.test(entry.tool)) {
+        break;
+      }
+      if (entry.status === "denied") {
+        recentDenial = entry;
+        break;
+      }
+    }
 
     if (!recentDenial) {
       return null;

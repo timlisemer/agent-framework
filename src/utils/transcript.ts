@@ -196,6 +196,118 @@ interface TranscriptEntry {
   };
 }
 
+function normalizeCodexContentBlock(block: unknown): ContentBlock | null {
+  if (!block || typeof block !== "object") return null;
+  const input = block as Record<string, unknown>;
+  const type = typeof input.type === "string" ? input.type : "";
+
+  if (type === "input_text" || type === "output_text") {
+    const text = typeof input.text === "string" ? input.text : "";
+    return { type: "text", text };
+  }
+
+  if (type === "text" || type === "thinking" || type === "tool_use" || type === "tool_result") {
+    return {
+      type,
+      text: typeof input.text === "string" ? input.text : undefined,
+      content: typeof input.content === "string" || Array.isArray(input.content)
+        ? input.content as string | ContentBlock[]
+        : undefined,
+      tool_use_id: typeof input.tool_use_id === "string" ? input.tool_use_id : undefined,
+      name: typeof input.name === "string" ? input.name : undefined,
+      id: typeof input.id === "string" ? input.id : undefined,
+      is_error: typeof input.is_error === "boolean" ? input.is_error : undefined,
+    };
+  }
+
+  return null;
+}
+
+function normalizeCodexToolName(payload: Record<string, unknown>): string {
+  const name = typeof payload.name === "string" ? payload.name : "unknown";
+  const namespace = typeof payload.namespace === "string" ? payload.namespace : "";
+  return `${namespace}${name}`;
+}
+
+function normalizeTranscriptEntry(raw: unknown): TranscriptEntry | null {
+  if (!raw || typeof raw !== "object") return null;
+  const entry = raw as TranscriptEntry & { payload?: Record<string, unknown> };
+
+  // Claude Code and scenario fixtures already use the canonical shape.
+  if (entry.message) return entry;
+
+  const payload = entry.payload;
+  if (!payload || typeof payload !== "object") {
+    return { isMeta: entry.isMeta };
+  }
+
+  if (payload.type === "message") {
+    const role = typeof payload.role === "string" ? payload.role : "";
+    if (role !== "user" && role !== "assistant") return { isMeta: entry.isMeta };
+
+    const rawContent = payload.content;
+    let content: string | ContentBlock[] = "";
+    if (typeof rawContent === "string") {
+      content = rawContent;
+    } else if (Array.isArray(rawContent)) {
+      content = rawContent
+        .map(normalizeCodexContentBlock)
+        .filter((block): block is ContentBlock => block !== null);
+    }
+
+    return {
+      isMeta: entry.isMeta,
+      message: {
+        id: typeof payload.id === "string" ? payload.id : undefined,
+        role,
+        content,
+      },
+    };
+  }
+
+  if (payload.type === "function_call" || payload.type === "custom_tool_call") {
+    const callId = typeof payload.call_id === "string" ? payload.call_id : undefined;
+    return {
+      message: {
+        id: typeof payload.id === "string" ? payload.id : callId,
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: callId,
+            name: normalizeCodexToolName(payload),
+          },
+        ],
+      },
+    };
+  }
+
+  if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {
+    return {
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: typeof payload.call_id === "string" ? payload.call_id : undefined,
+            content: typeof payload.output === "string" ? payload.output : JSON.stringify(payload.output ?? ""),
+          },
+        ],
+      },
+    };
+  }
+
+  return { isMeta: entry.isMeta };
+}
+
+function parseTranscriptEntry(line: string): TranscriptEntry | null {
+  try {
+    return normalizeTranscriptEntry(JSON.parse(line));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * One logical assistant API message, which Claude Code may split across
  * multiple jsonl lines sharing the same `message.id`. Under load those
@@ -553,13 +665,7 @@ export async function readTranscriptExact(
   let slashCommandContext: SlashCommandContext | undefined;
 
   // Parse all lines once upfront to avoid triple-parsing (performance optimization)
-  const parsedEntries: (TranscriptEntry | null)[] = allLines.map((line) => {
-    try {
-      return JSON.parse(line) as TranscriptEntry;
-    } catch {
-      return null;
-    }
-  });
+  const parsedEntries: (TranscriptEntry | null)[] = allLines.map(parseTranscriptEntry);
 
   // Group assistant entries by message.id — Claude Code splits one logical
   // API message across multiple jsonl lines, one per content block, and can
@@ -809,13 +915,7 @@ export async function currentTurnAssistantState(
 ): Promise<CurrentTurnAssistantState> {
   const content = await fs.promises.readFile(transcriptPath, "utf-8");
   const allLines = content.trim().split("\n");
-  const parsedEntries: (TranscriptEntry | null)[] = allLines.map((line) => {
-    try {
-      return JSON.parse(line) as TranscriptEntry;
-    } catch {
-      return null;
-    }
-  });
+  const parsedEntries: (TranscriptEntry | null)[] = allLines.map(parseTranscriptEntry);
 
   // Find the last non-meta user entry.
   let lastUserIndex = -1;
@@ -892,13 +992,7 @@ export async function userTurnIsFreshSinceLockout(
 ): Promise<boolean> {
   const content = await fs.promises.readFile(transcriptPath, "utf-8");
   const allLines = content.trim().split("\n");
-  const parsedEntries: (TranscriptEntry | null)[] = allLines.map((line) => {
-    try {
-      return JSON.parse(line) as TranscriptEntry;
-    } catch {
-      return null;
-    }
-  });
+  const parsedEntries: (TranscriptEntry | null)[] = allLines.map(parseTranscriptEntry);
 
   let userIdx = -1;
   for (let i = parsedEntries.length - 1; i >= 0; i--) {
@@ -1111,12 +1205,7 @@ export async function readRecentUserMessages(
   const lines = raw.trim().split("\n");
   const collected: string[] = [];
   for (let i = lines.length - 1; i >= 0 && collected.length < n; i--) {
-    let entry: TranscriptEntry | null = null;
-    try {
-      entry = JSON.parse(lines[i]) as TranscriptEntry;
-    } catch {
-      continue;
-    }
+    const entry = parseTranscriptEntry(lines[i]);
     if (!entry || !entry.message || entry.message.role !== "user") continue;
     if (entry.isMeta === true) continue;
 
@@ -1181,12 +1270,7 @@ export async function readRecentUserMessagesArray(
   const lines = raw.trim().split("\n");
   const collected: string[] = [];
   for (let i = lines.length - 1; i >= 0 && collected.length < n; i--) {
-    let entry: TranscriptEntry | null = null;
-    try {
-      entry = JSON.parse(lines[i]) as TranscriptEntry;
-    } catch {
-      continue;
-    }
+    const entry = parseTranscriptEntry(lines[i]);
     if (!entry || !entry.message || entry.message.role !== "user") continue;
     if (entry.isMeta === true) continue;
 
@@ -1254,13 +1338,7 @@ export async function userTurnFollowedByCompletedToolRoundtrip(
     return false;
   }
   const lines = raw.trim().split("\n");
-  const parsed: (TranscriptEntry | null)[] = lines.map((l) => {
-    try {
-      return JSON.parse(l) as TranscriptEntry;
-    } catch {
-      return null;
-    }
-  });
+  const parsed: (TranscriptEntry | null)[] = lines.map(parseTranscriptEntry);
 
   // Locate the LAST non-meta user-text entry whose RAW first text block
   // startsWith `trimmed`.
@@ -1363,12 +1441,7 @@ export async function resolveActiveSlashCommandAllowedTools(
   }
   const lines = raw.trim().split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
-    let entry: TranscriptEntry | null = null;
-    try {
-      entry = JSON.parse(lines[i]) as TranscriptEntry;
-    } catch {
-      continue;
-    }
+    const entry = parseTranscriptEntry(lines[i]);
     if (!entry || !entry.message || entry.message.role !== "user") continue;
     if (entry.isMeta === true) continue;
 
@@ -1420,14 +1493,7 @@ export async function detectParallelBatch(
   const content = await fs.promises.readFile(transcriptPath, "utf-8");
   const lines = content.trim().split("\n");
 
-  // Parse each line as JSON
-  const parsed: (Record<string, unknown> | null)[] = lines.map((line) => {
-    try {
-      return JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
-  });
+  const parsed: (TranscriptEntry | null)[] = lines.map(parseTranscriptEntry);
 
   // Collect all assistant tool_use entries with their line indices and tool_use_ids
   interface ToolUseEntry {
@@ -1440,17 +1506,16 @@ export async function detectParallelBatch(
   for (let i = 0; i < parsed.length; i++) {
     const entry = parsed[i];
     if (!entry) continue;
-    const message = entry.message as Record<string, unknown> | undefined;
+    const message = entry.message;
     if (!message || message.role !== "assistant") continue;
     const entryContent = message.content;
     if (!Array.isArray(entryContent)) continue;
     for (const block of entryContent) {
-      const b = block as Record<string, unknown>;
-      if (b.type === "tool_use" && b.id) {
+      if (block.type === "tool_use" && block.id) {
         toolUseEntries.push({
           lineIndex: i,
-          toolUseId: b.id as string,
-          toolName: (b.name as string) ?? "",
+          toolUseId: block.id,
+          toolName: block.name ?? "",
         });
       }
     }
@@ -1475,14 +1540,14 @@ export async function detectParallelBatch(
   function isThinkingOnlyLine(lineIdx: number): boolean {
     const entry = parsed[lineIdx];
     if (!entry) return false;
-    const message = entry.message as Record<string, unknown> | undefined;
+    const message = entry.message;
     if (!message || message.role !== "assistant") return false;
     const entryContent = message.content;
     if (!Array.isArray(entryContent)) return false;
-    const hasToolUse = entryContent.some((b: Record<string, unknown>) => b.type === "tool_use");
-    const hasText = entryContent.some((b: Record<string, unknown>) => b.type === "text" && (b.text as string)?.length > 0);
+    const hasToolUse = entryContent.some((b) => b.type === "tool_use");
+    const hasText = entryContent.some((b) => b.type === "text" && (b.text ?? "").length > 0);
     if (hasToolUse || hasText) return false;
-    const hasThinking = entryContent.some((b: Record<string, unknown>) => b.type === "thinking");
+    const hasThinking = entryContent.some((b) => b.type === "thinking");
     return hasThinking;
   }
 

@@ -35,11 +35,29 @@ See [`src/adapter/types.ts`](../src/adapter/types.ts) for the full interface.
 import type { AdapterEncoder } from "../../src/adapter/types.js";
 
 export const codexEncoder: AdapterEncoder = {
-  encodePreToolUseAllow: () => ({ exitCode: 0, stdout: undefined }),
-  encodePreToolUseDeny: (reason) => ({ exitCode: 1, stdout: reason }),
+  name: "codex",
+  encodePreToolUseAllow: () => ({ exitCode: 0, stdout: "" }),
+  encodePreToolUseDeny: (reason) => ({
+    exitCode: 0,
+    stdout: JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: reason,
+      },
+    }),
+  }),
   // ...
 };
 ```
+
+## Shared Transcript Policy
+
+Shared hook logic in `src/` reads a canonical transcript shape. Claude Code
+already writes that shape directly (`message.role/content`, `isMeta`, and
+split assistant messages). Codex rollout JSONL is normalized into the same
+shape at the transcript utility boundary. Adapter encoders still own only host
+stdout/exit-code conventions; policy and workflow authorization stay shared.
 
 ## Scenario Format
 

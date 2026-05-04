@@ -43,6 +43,19 @@ describe("detectParallelBatch", () => {
     };
   }
 
+  function codexFunctionCall(id: string, name = "spawn_agent", namespace = "") {
+    return {
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        call_id: id,
+        name,
+        namespace,
+        arguments: "{}",
+      },
+    };
+  }
+
   function userText(text: string) {
     return {
       message: {
@@ -270,6 +283,17 @@ describe("detectParallelBatch", () => {
     expect(result).not.toBeNull();
     expect(result?.allIds).toEqual(["toolu_p1", "toolu_p2"]);
   });
+
+  it("detects batches from Codex rollout-shaped function calls", async () => {
+    const filePath = writeTranscript([
+      userText("run two agents"),
+      codexFunctionCall("call_p1", "spawn_agent"),
+      codexFunctionCall("call_p2", "spawn_agent"),
+    ]);
+    const result = await detectParallelBatch(filePath, "call_p2");
+    expect(result).not.toBeNull();
+    expect(result?.allIds).toEqual(["call_p1", "call_p2"]);
+  });
 });
 
 describe("resolveActiveSlashCommandAllowedTools", () => {
@@ -299,12 +323,41 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
     };
   }
 
+  function codexMessage(role: "user" | "assistant", text: string) {
+    return {
+      type: "response_item",
+      payload: {
+        type: "message",
+        role,
+        content: [
+          {
+            type: role === "user" ? "input_text" : "output_text",
+            text,
+          },
+        ],
+      },
+    };
+  }
+
   it("transcript with /plan3 tag -> returns ['Agent','ExitPlanMode']", async () => {
     const filePath = writeTranscript([
       userText("<command-name>/plan3</command-name>\nthats complete bullshit do not cheat"),
     ]);
     const result = await resolveActiveSlashCommandAllowedTools(filePath);
     expect(result).toEqual(["Agent", "ExitPlanMode"]);
+  });
+
+  it("Codex rollout transcript with quickpush skill -> returns commit tools", async () => {
+    const filePath = writeTranscript([
+      codexMessage("user", "$agent-framework-quickpush"),
+    ]);
+    const result = await resolveActiveSlashCommandAllowedTools(filePath);
+    expect(result).toEqual([
+      "mcp__agent-framework__push",
+      "mcp__agent-framework__commit",
+      "mcp__agent_framework__push",
+      "mcp__agent_framework__commit",
+    ]);
   });
 
   it("readTranscriptExact marks newest direct slash prompt as slash command", async () => {
@@ -337,6 +390,40 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
     expect(result.newestUserWasSlashCommand).toBe(true);
     expect(result.slashCommandContext?.commandName).toBe("plan3");
     expect(result.user[0].content).toBe("older normal prompt");
+  });
+
+  it("readTranscriptExact recognizes Codex rollout-shaped skill prompts", async () => {
+    const filePath = writeTranscript([
+      codexMessage("user", "older normal prompt"),
+      codexMessage("user", "$agent-framework-quickpush"),
+      codexMessage("user", "<skill>\n<name>agent-framework-quickpush</name>\n</skill>"),
+    ]);
+
+    const result = await readTranscriptExact(filePath, {
+      counts: { user: 1 },
+      excludeSlashCommandPrompts: true,
+      includeSlashCommandContext: true,
+    });
+    expect(result.newestUserWasSlashCommand).toBe(true);
+    expect(result.slashCommandContext?.commandName).toBe("quickpush");
+    expect(result.slashCommandContext?.allowedTools).toContain("mcp__agent-framework__commit");
+    expect(result.slashCommandContext?.allowedTools).toContain("mcp__agent_framework__commit");
+    expect(result.user[0].content).toBe("older normal prompt");
+  });
+
+  it("format context includes Codex rollout-shaped user and assistant messages", async () => {
+    const filePath = writeTranscript([
+      codexMessage("user", "$agent-framework-quickpush"),
+      codexMessage("assistant", "Using quickpush now."),
+    ]);
+
+    const result = await readTranscriptExact(filePath, {
+      counts: { user: 1, assistant: 1 },
+      includeSlashCommandContext: true,
+    });
+    expect(result.user[0].content).toBe("$agent-framework-quickpush");
+    expect(result.assistant[0].content).toBe("Using quickpush now.");
+    expect(result.slashCommandContext?.commandName).toBe("quickpush");
   });
 
   it("transcript with /plan3 tag followed by non-tag user turn -> still returns plan3 tools", async () => {
