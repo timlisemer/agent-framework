@@ -43,11 +43,11 @@
  *
  * ## SECURITY CONSIDERATIONS
  *
- * SDK mode is restricted to Read + read-only Bash. The pre-tool-use hook
+ * SDK mode is restricted to Read + classified read-only Bash. The pre-tool-use hook
  * treats SDK agents as subagents (via AGENT_FRAMEWORK_SDK_AGENT env marker)
- * and gates Bash through the same read-only allowlist applied to Task-spawned
+ * and gates Bash through the same Bash policy classifier applied to Task-spawned
  * subagents in src/rules/subagent.ts:
- * - Bash is allowed only for read-only search/navigation (ls, grep, rg, find, etc.)
+ * - Bash is allowed only for read-only search/navigation and safe read-only pipelines
  * - Mutation, execution, and network commands are denied deterministically
  * - No Write/Edit access - prevents file modifications
  * - Git data is passed via prompt rather than gathered via git commands
@@ -97,10 +97,11 @@ import type { DecisionType } from "../telemetry/types.js";
  *
  * These tools allow code investigation without modification:
  * - Read: Read file contents
- * - Bash: Read-only search/navigation only. The pre-tool-use hook gates
- *   Bash through the subagent read-only allowlist (ls, grep, rg, find,
- *   wc, sort, uniq, cut, tr, head, tail, file, stat, jq, echo, printf).
- *   Mutation, execution, and network commands are denied deterministically.
+ * - Bash: Classified read-only commands only. The pre-tool-use hook gates
+ *   Bash through the subagent Bash policy classifier (ls, grep, rg, find,
+ *   wc, sort, uniq, cut, tr, head, tail, file, stat, jq, echo, printf,
+ *   safe read-only pipelines, and read-only-heavy nix-eval-jobs).
+ *   Mutation, execution, build/compile, and network commands are denied deterministically.
  *
  * Glob/Grep were previously listed separately but were removed by
  * Claude Code v2.1.117 on native macOS/Linux builds (search routes through
@@ -506,7 +507,7 @@ async function runDirectAgent(
 /**
  * Execute an agent using Claude SDK for multi-turn interactions.
  *
- * This mode gives the agent access to Read and read-only Bash (search/navigation)
+ * This mode gives the agent access to Read and classified read-only Bash
  * for autonomous code investigation. Uses bypassPermissions mode for
  * unattended execution.
  *
@@ -514,9 +515,9 @@ async function runDirectAgent(
  *
  * The agent is intentionally limited to read-only tools:
  * - Read: View file contents
- * - Bash: Read-only search/navigation only (ls, grep, rg, find, wc, sort,
- *   uniq, cut, tr, head, tail, file, stat, jq, echo, printf). Gated by the
- *   pre-tool-use hook via the subagent read-only allowlist.
+ * - Bash: Classified read-only commands only (simple inspection,
+ *   read-only-heavy evaluation such as nix-eval-jobs, and safe read-only
+ *   pipelines). Gated by the pre-tool-use hook via the subagent Bash policy.
  *
  * Git data (status/diff/log/show) must be passed via the prompt context
  * rather than gathered via bash git commands -- those are denied by the hook.
@@ -547,7 +548,7 @@ async function runSdkAgent(
   // For subscription: pass OAuth token so Claude Code uses subscription auth
   // AGENT_FRAMEWORK_SDK_AGENT: marker read by subagent-detector.ts (method 0)
   // so SDK agents are treated as subagents by the pre-tool-use hook. Gates
-  // Bash through the subagent read-only allowlist in src/rules/subagent.ts.
+  // Bash through the subagent Bash policy classifier in src/rules/subagent.ts.
   const subprocessEnv = {
     ...process.env,
     AGENT_FRAMEWORK_SDK_AGENT: config.name,
@@ -567,7 +568,7 @@ async function runSdkAgent(
 
 You have access to these tools for investigating code:
 - **Read**: View file contents.
-- **Bash**: Read-only search and navigation only. The pre-tool-use hook gates Bash through a read-only allowlist: ls, tree, grep, rg, find, fd, wc, sort, uniq, cut, tr, head, tail, file, stat, jq, echo, printf. Mutation, execution, installs, builds, network fetch, and git writes are denied.
+- **Bash**: Classified read-only commands only: simple inspection, read-only-heavy evaluation such as nix-eval-jobs, and safe read-only pipelines. Mutation, execution, installs, builds, network fetch, and git writes are denied.
 
 Use these tools when you need to:
 - Understand context around changed code

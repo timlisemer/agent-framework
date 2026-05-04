@@ -35,7 +35,6 @@ describe("checkReadOnlyBashAllowlist", () => {
       "sed -n '1,80p' src/index.ts",
       "awk '{print $1}' package.json",
       "nl -ba src/index.ts",
-      "cd src && rg -n foo .",
       "find src -name '*.ts' | xargs grep -l foo",
       "git status --short",
       "git diff -- src/index.ts",
@@ -54,6 +53,7 @@ describe("checkReadOnlyBashAllowlist", () => {
     expect(checkReadOnlyBashAllowlist("find . -delete").allowed).toBe(false);
     expect(checkReadOnlyBashAllowlist("rg foo > out.txt").allowed).toBe(false);
     expect(checkReadOnlyBashAllowlist("rg $(pwd)").allowed).toBe(false);
+    expect(checkReadOnlyBashAllowlist("cd src && rg -n foo .").allowed).toBe(false);
     expect(checkReadOnlyBashAllowlist("sed -i 's/a/b/' file.txt").allowed).toBe(false);
     expect(checkReadOnlyBashAllowlist("git push").allowed).toBe(false);
     expect(checkReadOnlyBashAllowlist("git add .").allowed).toBe(false);

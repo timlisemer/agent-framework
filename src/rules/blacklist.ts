@@ -1,6 +1,6 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import {
-  detectWorkaroundPattern,
+  classifyBashCommand,
   getBlacklistHighlights,
 } from "../utils/command-patterns.js";
 import { MAX_SIMILAR_DENIALS, recordDenial } from "../utils/denial-cache.js";
@@ -24,10 +24,12 @@ export const blacklistRule: PreToolRule = {
   },
 
   async onDenialConfirmed(ctx: RuleContext, _reason: string): Promise<void> {
-    const workaroundCategory = detectWorkaroundPattern(ctx.toolName, ctx.toolInput);
-    if (!workaroundCategory) return;
+    if (ctx.toolName !== "Bash") return;
+    const command = (ctx.toolInput as { command?: string }).command ?? "";
+    const classification = classifyBashCommand(command, ctx.projectDir);
+    if (classification.riskClass !== "high-risk-workaround" || !classification.workaroundCategory) return;
 
-    const count = await recordDenial(workaroundCategory);
+    const count = await recordDenial(classification.workaroundCategory);
     if (count >= MAX_SIMILAR_DENIALS) {
       // The evaluator owns the rendered denial text; the count is retained
       // for repeated-workaround state and future policy tightening.

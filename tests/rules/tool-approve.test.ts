@@ -34,6 +34,7 @@ vi.mock("../../src/utils/logger.js", () => ({
 import { toolApproveRule } from "../../src/rules/tool-approve.js";
 import { resolvePlanPath, readPlanContent } from "../../src/utils/session-utils.js";
 import { checkPlanIntent } from "../../src/agents/hooks/plan-validate.js";
+import { clearDenialCache, initDenialSession } from "../../src/utils/denial-cache.js";
 import type { RuleContext } from "../../src/rules/types.js";
 
 const mockResolvePlanPath = vi.mocked(resolvePlanPath);
@@ -179,5 +180,31 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
     const result = await toolApproveRule.check(ctx);
     expect(result).not.toBeNull();
     expect(result).toHaveProperty("fastDeny");
+  });
+
+  it("does not set forceCheckPending for denied nix-eval-jobs", async () => {
+    const update = vi.fn();
+    const ctx = makeCtx({
+      toolName: "Bash",
+      toolInput: { command: "nix-eval-jobs --flake .#checks.x86_64-linux --workers 1" },
+      stateManager: { update } as unknown as RuleContext["stateManager"],
+    });
+
+    await toolApproveRule.onDenialConfirmed?.(ctx, "denied by tool approve");
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("sets forceCheckPending only for high-risk workaround Bash denials", async () => {
+    initDenialSession(tempDir);
+    await clearDenialCache();
+    const update = vi.fn();
+    const ctx = makeCtx({
+      toolName: "Bash",
+      toolInput: { command: "npm run build" },
+      stateManager: { update } as unknown as RuleContext["stateManager"],
+    });
+
+    await toolApproveRule.onDenialConfirmed?.(ctx, "denied by tool approve");
+    expect(update).toHaveBeenCalledOnce();
   });
 });

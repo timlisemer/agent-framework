@@ -36,6 +36,13 @@ describe("blacklistRule", () => {
     expect((result as { fastDeny: string }).fastDeny).toContain("Use absolute paths");
   });
 
+  it("still denies nix eval before prediction", async () => {
+    const result = await blacklistRule.check(makeCtx({
+      toolInput: { command: "nix eval .#checks.x86_64-linux" },
+    }));
+    expect(result).toEqual({ fastDeny: "Use nix-eval-jobs instead" });
+  });
+
   it("sets forceCheckPending for denied workaround commands", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "blacklist-test-"));
     initDenialSession(tempDir);
@@ -52,6 +59,17 @@ describe("blacklistRule", () => {
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it("does not set forceCheckPending for denied nix-eval-jobs", async () => {
+    const update = vi.fn();
+    const ctx = makeCtx({
+      toolInput: { command: "nix-eval-jobs --flake .#checks.x86_64-linux --workers 1" },
+      stateManager: { update } as unknown as RuleContext["stateManager"],
+    });
+
+    await blacklistRule.onDenialConfirmed?.(ctx, "denied by prediction");
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("runs after force-check and low-risk but before prediction-block", () => {

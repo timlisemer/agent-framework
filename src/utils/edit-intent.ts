@@ -9,6 +9,7 @@
  */
 
 import type { ToolPrediction } from "./prediction-types.js";
+import { PLAN_MODE_BASH_WRITE_PATTERNS } from "./bash-command-policy.js";
 
 // Tools that modify files
 const EDIT_TOOLS = ["Write", "Edit", "NotebookEdit", "apply_patch"];
@@ -88,16 +89,6 @@ export function deriveEditIntentFromPrediction(
   return null;
 }
 
-// --- Bash commands that perform writes/mutations ---
-const BASH_WRITE_PATTERNS: RegExp[] = [
-  /\b(echo|printf)\s+.*>/,
-  /\btee\s+/,
-  /\bsed\s+-i/,
-  /\b(mkdir|touch|rm|mv|cp)\s+/,
-  /\bgit\s+(commit|push|add|merge|rebase|reset)\b/,
-  /\bnpm\s+(install|run\s+build)\b/,
-];
-
 const PLAN_MODE_SCRATCH_GUIDANCE =
   "If you need a scratch/test script, do NOT write to /tmp directly. Instead write it under " +
   "/tmp/claude-test-scripts/<repo-path>/<YYYY-MM-DD-HHMM>/ (repo-path = absolute path of the current " +
@@ -132,7 +123,7 @@ export function planModeBashBlock(
 ): string | null {
   if (!planMode) return null;
   if (toolName !== "Bash") return null;
-  for (const pattern of BASH_WRITE_PATTERNS) {
+  for (const pattern of PLAN_MODE_BASH_WRITE_PATTERNS) {
     if (pattern.test(command)) {
       return `Plan mode is active - write commands are blocked. Command: ${command.slice(0, 100)}. ${PLAN_MODE_SCRATCH_GUIDANCE}`;
     }

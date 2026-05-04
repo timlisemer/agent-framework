@@ -5,7 +5,7 @@ import { TOOL_APPROVE_PROMPT_SECTION } from "../utils/agent-configs.js";
 import { FILE_TOOLS, extractFilePaths, isPlanFile } from "./utils.js";
 import { planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
 import { RESTRICTED_MCP_TOOLS } from "../utils/slash-commands.js";
-import { detectWorkaroundPattern } from "../utils/command-patterns.js";
+import { classifyBashCommand } from "../utils/command-patterns.js";
 import { recordDenial, MAX_SIMILAR_DENIALS } from "../utils/denial-cache.js";
 import { resolvePlanPath, readPlanContent } from "../utils/session-utils.js";
 import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
@@ -96,10 +96,20 @@ export const toolApproveRule: PreToolRule = {
     const rulesText = chunks.filter(Boolean).join("\n\n");
     if (!rulesText) return null;
 
+    const bashPolicyContext = ctx.toolName === "Bash"
+      ? (() => {
+        const classification = classifyBashCommand(
+          String((ctx.toolInput as { command?: unknown }).command ?? ""),
+          ctx.projectDir,
+        );
+        return `\nBASH POLICY CLASSIFICATION:\nclass: ${classification.riskClass}\nread_only: ${classification.readOnly ? "true" : "false"}\nprediction identities: ${classification.predictionIdentities.join(", ")}\nread-only-heavy evaluation is not build/compile.\n`;
+      })()
+      : "";
+
     return {
       llmContext:
         `PROJECT RULES (from ${host?.instructionLabel ?? "CLAUDE.md"}):\n${rulesText}\n\n` +
-        `TOOL TO EVALUATE:\nTool: ${ctx.toolName}\nInput: ${JSON.stringify(ctx.toolInput)}`,
+        `TOOL TO EVALUATE:\nTool: ${ctx.toolName}\nInput: ${JSON.stringify(ctx.toolInput)}${bashPolicyContext}`,
     };
   },
 
@@ -107,9 +117,11 @@ export const toolApproveRule: PreToolRule = {
     // Track workaround patterns for escalation. The force-check-required rule
     // (priority 32) consumes state.forceCheckPending to deny all subsequent
     // tools except mcp__agent-framework__check / ToolSearch.
-    const workaroundCategory = detectWorkaroundPattern(ctx.toolName, ctx.toolInput);
-    if (workaroundCategory) {
-      const count = await recordDenial(workaroundCategory);
+    if (ctx.toolName !== "Bash") return;
+    const command = (ctx.toolInput as { command?: string }).command ?? "";
+    const classification = classifyBashCommand(command, ctx.projectDir);
+    if (classification.riskClass === "high-risk-workaround" && classification.workaroundCategory) {
+      const count = await recordDenial(classification.workaroundCategory);
       if (count >= MAX_SIMILAR_DENIALS) {
         // Note: reason is modified by the evaluator based on this count
       }

@@ -22,7 +22,7 @@ import {
   CHECK_VERB_RE,
   READ_VERB_RE,
 } from "./edit-intent.js";
-import { checkReadOnlyBashAllowlist } from "./command-patterns.js";
+import { classifyBashCommand } from "./command-patterns.js";
 
 export type Mood = "angry" | "frustrated" | "neutral" | "satisfied" | "happy";
 export type Trust = "low" | "normal" | "high";
@@ -630,6 +630,12 @@ export function decidePrediction(
   if (!prediction) return { decision: "allow" };
 
   const inputStr = stringifyToolInput(toolInput);
+  const bashClassification = toolName === "Bash"
+    ? classifyBashCommand(String((toolInput as { command?: unknown })?.command ?? ""))
+    : null;
+  const toolIdentities = bashClassification?.predictionIdentities ?? [toolName];
+  const matchesToolIdentity = (candidate: string): boolean =>
+    candidate === toolName || toolIdentities.includes(candidate);
 
   // 1. Per-target explicit-block precedes explicit-allow. When the user
   // says "change the typo, but don't touch logic.ts" the LLM correctly
@@ -638,7 +644,7 @@ export function decidePrediction(
   // reordering, the explicit-allow short-circuit at step 2 would let an
   // Edit on logic.ts through, silently bypassing the explicit block.
   for (const blk of prediction.explicitlyBlockedSubstrings) {
-    if (blk.tool !== toolName) continue;
+    if (!matchesToolIdentity(blk.tool)) continue;
     if (blk.targetSubstring && !inputStr.includes(blk.targetSubstring)) continue;
     return {
       decision: "deny",
@@ -648,7 +654,19 @@ export function decidePrediction(
   }
 
   // 2. Explicit allow wins for tools without a matching per-target block.
-  if (prediction.explicitlyAllowedTools.includes(toolName)) {
+  const explicitlyAllowedByIdentity = prediction.explicitlyAllowedTools.some((t) =>
+    matchesToolIdentity(t),
+  );
+  const explicitlyAllowedBySpecificBashIdentity = !!bashClassification &&
+    prediction.explicitlyAllowedTools.some((t) => t !== "Bash" && matchesToolIdentity(t));
+  if (
+    explicitlyAllowedByIdentity &&
+    (
+      !bashClassification ||
+      bashClassification.riskClass === "simple-read-only" ||
+      explicitlyAllowedBySpecificBashIdentity
+    )
+  ) {
     return { decision: "allow" };
   }
 
@@ -679,7 +697,7 @@ export function decidePrediction(
       prediction.userMessageSnippet,
     );
     const blockedForThisTool = prediction.explicitlyBlockedSubstrings.some(
-      (b) => b.tool === toolName,
+      (b) => matchesToolIdentity(b.tool),
     );
     if (
       !userSaidProhibition &&
@@ -762,7 +780,7 @@ export function decidePrediction(
   // a genuinely angry "stop using the tester" / "freeze" / "don't run X"
   // still denies via step 4.
   const blockedForThisToolByName = prediction.explicitlyBlockedSubstrings.some(
-    (b) => b.tool === toolName,
+    (b) => matchesToolIdentity(b.tool),
   );
   if (!blockedForThisToolByName) {
     if (latestUserMessageFavorablyNamesTool(prediction.userMessageSnippet, toolName)) {
@@ -780,11 +798,10 @@ export function decidePrediction(
     // Path (a') — CLASS-LEVEL fresh imperative on the live transcript.
     if (latestUserMessage && latestUserMessageReauthorizesClass(latestUserMessage, toolName)) {
       if (toolName === "Bash") {
-        const bashCommand = String((toolInput as { command?: unknown })?.command ?? "");
-        if (!checkReadOnlyBashAllowlist(bashCommand).allowed) {
+        if (!bashClassification?.readOnly) {
           return {
             decision: "deny",
-            reason: `User's latest transcript message implies Bash, but this deterministic reauthorization path is limited to read-only Bash commands. ${bashCommand ? "Command is not read-only allowlisted." : "No Bash command was provided."}`,
+            reason: `User's latest transcript message implies Bash, but this deterministic reauthorization path is limited to read-only Bash commands. ${bashClassification?.reason ?? "No Bash command was provided."}`,
           };
         }
       }
@@ -985,10 +1002,7 @@ export function decidePrediction(
       frustrationStreak,
     );
 
-    const bashCommand = toolName === "Bash"
-      ? String((toolInput as { command?: unknown })?.command ?? "")
-      : "";
-    if (bashCommand && checkReadOnlyBashAllowlist(bashCommand).allowed) {
+    if (bashClassification?.riskClass === "simple-read-only") {
       return { decision: "allow" };
     }
 
@@ -1004,7 +1018,7 @@ export function decidePrediction(
     // punish unrelated tools for a scoped grievance.
     const hasAnyExplicitBlock = prediction.explicitlyBlockedSubstrings.length > 0;
     const anyBlockTargetsThisTool = prediction.explicitlyBlockedSubstrings.some(
-      (b) => b.tool === toolName,
+      (b) => matchesToolIdentity(b.tool),
     );
     if (hasAnyExplicitBlock && !anyBlockTargetsThisTool) {
       return { decision: "allow" };

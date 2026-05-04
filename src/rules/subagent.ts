@@ -1,7 +1,7 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
 import {
-  checkReadOnlyBashAllowlist,
+  classifyBashCommand,
   getBlacklistHighlights,
 } from "../utils/command-patterns.js";
 import { RESTRICTED_MCP_TOOLS } from "../utils/slash-commands.js";
@@ -22,11 +22,11 @@ export const subagentRule: PreToolRule = {
 
     if (ctx.toolName === "Bash") {
       const command = (ctx.toolInput as { command?: string }).command ?? "";
-      const result = checkReadOnlyBashAllowlist(command);
-      if (!result.allowed) {
-        return { fastDeny: `Subagent Bash restricted to read-only commands. ${result.reason}` };
+      const classification = classifyBashCommand(command, ctx.projectDir);
+      if (!classification.readOnly) {
+        return { fastDeny: `Subagent Bash restricted to read-only commands. ${classification.reason ?? "command is not read-only"}` };
       }
-      return { fastAllow: "Subagent read-only Bash approved" };
+      return { fastAllow: `Subagent ${classification.riskClass} Bash approved` };
     }
 
     // Mirror the four deterministic checks from the old checkToolApproval

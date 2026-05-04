@@ -79,6 +79,53 @@ describe("decidePrediction", () => {
     expect(allowResult.decision).toBe("allow");
   });
 
+  it("explicit Bash class and command blocks deny nix-eval-jobs", () => {
+    for (const block of [
+      { tool: "Bash", reason: "user said no bash" },
+      { tool: "Bash:read-only-heavy", reason: "user said no heavy bash" },
+      { tool: "Bash:nix-eval-jobs", reason: "user said no nix-eval-jobs" },
+      { tool: "Bash", targetSubstring: "nix-eval-jobs", reason: "user said no nix-eval-jobs" },
+    ]) {
+      const pred = makePrediction({
+        explicitlyBlockedSubstrings: [block],
+      });
+      const result = decidePrediction(pred, "Bash", {
+        command: "nix-eval-jobs --flake .#checks.x86_64-linux --workers 1",
+      }, 0);
+      expect(result.decision).toBe("deny");
+    }
+  });
+
+  it("explicit Bash allow is bounded to simple read-only Bash unless a class or command identity is allowed", () => {
+    const bashAllowed = makePrediction({
+      mood: "angry",
+      trust: "low",
+      explicitlyAllowedTools: ["Bash"],
+    });
+    expect(decidePrediction(bashAllowed, "Bash", { command: "rg -n foo src" }, 3).decision).toBe("allow");
+    expect(decidePrediction(bashAllowed, "Bash", {
+      command: "nix-eval-jobs --flake .#checks.x86_64-linux --workers 1",
+    }, 3).decision).toBe("deny");
+
+    const heavyAllowed = makePrediction({
+      mood: "angry",
+      trust: "low",
+      explicitlyAllowedTools: ["Bash:read-only-heavy"],
+    });
+    expect(decidePrediction(heavyAllowed, "Bash", {
+      command: "nix-eval-jobs --flake .#checks.x86_64-linux --workers 1",
+    }, 3).decision).toBe("allow");
+
+    const commandAllowed = makePrediction({
+      mood: "angry",
+      trust: "low",
+      explicitlyAllowedTools: ["Bash:nix-eval-jobs"],
+    });
+    expect(decidePrediction(commandAllowed, "Bash", {
+      command: "nix-eval-jobs --flake .#checks.x86_64-linux --workers 1",
+    }, 3).decision).toBe("allow");
+  });
+
   it("low trust/Edit -> deny", () => {
     const pred = makePrediction({ mood: "neutral", trust: "low" });
     const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 0);
@@ -118,6 +165,29 @@ describe("decidePrediction", () => {
     const pred = makePrediction({ mood: "frustrated", trust: "normal" });
     const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 0);
     expect(result.decision).toBe("deny");
+  });
+
+  it("restrictive prediction denies heavy and complex Bash unless reauthorized; simple read-only keeps current behavior", () => {
+    const pred = makePrediction({ mood: "frustrated", trust: "low" });
+
+    expect(decidePrediction(pred, "Bash", { command: "rg -n foo src" }, 3).decision).toBe("allow");
+    expect(decidePrediction(pred, "Bash", {
+      command: "nix-eval-jobs --flake .#nixosConfigurations.tim-server.config.system.build.toplevel --workers 1",
+    }, 3).decision).toBe("deny");
+    expect(decidePrediction(pred, "Bash", { command: "cat file | grep x | head -20" }, 3).decision).toBe("deny");
+
+    const reauthorized = decidePrediction(pred, "Bash", {
+      command: "nix-eval-jobs --flake .#nixosConfigurations.tim-server.config.system.build.toplevel --workers 1",
+    }, 3, "run nix-eval-jobs");
+    expect(reauthorized.decision).toBe("allow");
+  });
+
+  it("regression: nix-eval-jobs is prediction-visible read-only-heavy, not build/compile", () => {
+    const pred = makePrediction({ mood: "neutral", trust: "normal" });
+    const result = decidePrediction(pred, "Bash", {
+      command: "nix-eval-jobs --flake .#nixosConfigurations.tim-server.config.system.build.toplevel --workers 1",
+    }, 0);
+    expect(result.decision).toBe("allow");
   });
 
   it("satisfied mood with normal trust -> allow Edit", () => {
@@ -1237,7 +1307,7 @@ describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", ()
     const result = decidePrediction(
       pred,
       "Bash",
-      { command: "cd src && rg -n prediction-block ." },
+      { command: "rg -n prediction-block src" },
       4,
       "do what i told you and investigate correctly",
     );

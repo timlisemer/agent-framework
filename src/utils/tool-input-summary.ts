@@ -13,6 +13,8 @@
  * prediction-types.ts for that.
  */
 
+import { classifyBashCommand } from "./bash-command-policy.js";
+
 type Dict = Record<string, unknown>;
 
 function bytesAndLines(v: unknown): string {
@@ -38,8 +40,12 @@ export function summarizeToolInputForLlm(toolName: string, toolInput: unknown): 
   switch (toolName) {
     case "Bash": {
       const cmd = typeof i.command === "string" ? i.command : "";
+      const classification = classifyBashCommand(cmd);
       return `Bash(${kv([
         ["command", q(cmd)],
+        ["class", classification.riskClass],
+        ["read_only", classification.readOnly ? "true" : "false"],
+        ["prediction_identities", classification.predictionIdentities.join("|")],
         ["description", typeof i.description === "string" ? q(i.description) : undefined],
         ["timeout", typeof i.timeout === "number" ? String(i.timeout) : undefined],
         ["run_in_background", i.run_in_background === true ? "true" : undefined],

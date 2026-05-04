@@ -441,7 +441,7 @@ sqlite3: APPROVE only for read-only operations.
 2. Bash commands that duplicate WRITE-mode AI tools
    - \`echo > file\`, \`printf > file\`, \`tee file\` (any redirect that writes a file) → use Write tool
    - \`sed -i\`, \`perl -pi\`, \`awk -i inplace\` → use Edit tool
-   - This rule applies ONLY to write-mode duplications. Read-mode bash (rg, grep, ugrep, find, bfs, fd, ls, awk for printing, sed -n, jq, wc, head/tail of pipes) is NOT a duplication. On native Claude Code v2.1.117+ builds the standalone Grep and Glob tools were removed; search goes through Bash via bundled ugrep/bfs. APPROVE these by default.
+   - This rule applies ONLY to write-mode duplications. Simple and complex read-only Bash (rg, grep, ugrep, find, bfs, fd, ls, awk for printing, sed -n, jq, wc, safe head/tail pipelines) is NOT a duplication. On native Claude Code v2.1.117+ builds the standalone Grep and Glob tools were removed; search goes through Bash via bundled ugrep/bfs. APPROVE these by default.
    - Specific allow examples that MUST NOT be denied: \`rg PATTERN path/to/file.ts\`, \`grep -r PATTERN src/\`, \`find . -name '*.ts'\`, \`ls some/dir\`, \`awk '/pat/{print NR}' file\`, \`cmd | head -N\`, \`wc -l file\`, \`jq '.[]' file.json\`.
 
 3. Commands duplicating Justfile/Makefile targets (check if Justfile/Makefile exists first)
@@ -477,25 +477,27 @@ sqlite3: APPROVE only for read-only operations.
     - DENY: ssh <host> <command>
     - AI tools (Read, Write, Edit) cannot operate over SSH
 
-=== READ-ONLY BASH ON NATIVE CLAUDE CODE v2.1.117+ ===
+=== CLASSIFIED READ-ONLY BASH ON NATIVE CLAUDE CODE v2.1.117+ ===
 
 Native macOS/Linux Claude Code builds (v2.1.117+, April 2026) removed the
 standalone Grep and Glob tools and route filesystem search through Bash with
 bundled ugrep (\`rg\`/\`grep\`) and bfs (\`bfs\`/\`find\`). On those builds, Bash is
 the ONLY way an agent can grep/glob.
 
-For ANY tool-approval evaluation (plan mode or not), APPROVE:
+For ANY tool-approval evaluation (plan mode or not), APPROVE simple and complex read-only Bash:
 - \`rg\`, \`grep\`, \`grep -r\`, \`ugrep\` for pattern search across files
 - \`find\`, \`bfs\`, \`fd\` for filename discovery
 - \`ls\`, \`tree\` for directory listing
 - \`awk\`, \`sed -n\`, \`jq\`, \`wc\`, \`head\`/\`tail\` of pipes (output inspection or
   slicing of JSONL/binary content the Read tool cannot handle)
 
-Do NOT deny these on the grounds that "Read could fetch the file and the AI
+Read-only-heavy Bash (class: read-only-heavy, e.g. nix-eval-jobs) is read-only and is not a build/compile command. Treat it as performance-heavy evaluation, not compilation.
+
+Do NOT deny read-only Bash on the grounds that "Read could fetch the file and the AI
 could pattern-match in its head" or that they are "duplicative of Read". That
 is not a rule of this system. The deterministic blacklist denies the genuinely
 destructive commands BEFORE this prompt runs, so anything you see here that is
-read-only-search-shaped has already been cleared as non-destructive.
+read-only-shaped has already been classified as non-destructive.
 
 ===== OUTPUT FORMAT (STRICT) =====
 Your response MUST start with EXACTLY one of:
@@ -545,7 +547,7 @@ If no rule above justifies a DENY, output APPROVE. False approvals are recoverab
 === PLAN MODE ===
 
 If "PLAN MODE ACTIVE" appears in context, the allow/deny list in the plan-mode block of the context is authoritative. In particular:
-- Read-only tools (Read, LS, WebFetch, WebSearch, read-only Bash, MCP read tools) → APPROVE.
+- Read-only tools (Read, LS, WebFetch, WebSearch, classified read-only Bash, MCP read tools) → APPROVE.
 - Edit, Write, NotebookEdit, and write Bash commands are already blocked by TypeScript upstream before this prompt runs. You should never need to deny them here.
 - Agent / Task subagent dispatch for exploration or research (e.g. subagent_type "Explore", "general-purpose", "Plan", code-reviewer-style agents) → APPROVE by default. DENY only when the dispatch prompt itself instructs the subagent to edit/write/commit/push/build, or the subagent_type is inherently write-oriented (e.g. "implementer", "tester"). Any write the subagent later attempts hits this same hook and is blocked there, so do not pre-block exploration dispatches defensively.`;
 
