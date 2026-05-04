@@ -33,6 +33,8 @@ export const SLASH_COMMAND_GATED_MCP_TOOLS: Record<string, readonly string[]> = 
  * slash-command workflow.
  */
 export const SLASH_COMMAND_WORKFLOW_TOOLS: Record<string, readonly string[]> = {
+  check:     ["mcp__agent-framework__check", "mcp__agent_framework__check"],
+  transcript: ["mcp__agent-framework__transcript", "mcp__agent_framework__transcript"],
   plan1:     ["Agent", "ExitPlanMode"],
   plan3:     ["Agent", "ExitPlanMode"],
   plan5:     ["Agent", "ExitPlanMode"],
@@ -52,6 +54,11 @@ export const SLASH_COMMAND_ALLOWED_TOOLS: Record<string, readonly string[]> = {
 
 const CODEX_AGENT_FRAMEWORK_SKILL_PREFIX = "agent-framework-";
 
+export interface SlashCommandWorkflowInvocation {
+  commandName: string;
+  allowedTools: readonly string[];
+}
+
 export function codexSkillNameToCommandName(skillName: string): string | undefined {
   if (!skillName.startsWith(CODEX_AGENT_FRAMEWORK_SKILL_PREFIX)) return undefined;
   const commandName = skillName.slice(CODEX_AGENT_FRAMEWORK_SKILL_PREFIX.length);
@@ -62,6 +69,37 @@ export function extractCodexSkillCommandName(content: string): string | undefine
   const skillMatch = content.match(/(?:^|\s)\$agent-framework-([\w-]+)\b/);
   if (!skillMatch) return undefined;
   return codexSkillNameToCommandName(`${CODEX_AGENT_FRAMEWORK_SKILL_PREFIX}${skillMatch[1]}`);
+}
+
+export function commandNameToWorkflowInvocation(commandName: string): SlashCommandWorkflowInvocation | null {
+  const allowedTools = SLASH_COMMAND_ALLOWED_TOOLS[commandName];
+  if (!allowedTools) return null;
+  return { commandName, allowedTools };
+}
+
+/**
+ * Detect known agent-framework workflow invocations across host syntaxes:
+ * - Claude transcript tags: <command-name>/quickpush</command-name>
+ * - Direct slash prompts: /quickpush
+ * - Codex skill mentions: $agent-framework-quickpush
+ */
+export function detectAgentFrameworkWorkflowInvocation(content: string): SlashCommandWorkflowInvocation | null {
+  const tagMatch = content.match(/<command-name>\s*\/([\w-]+)\s*<\/command-name>/);
+  if (tagMatch) {
+    return commandNameToWorkflowInvocation(tagMatch[1]);
+  }
+
+  const codexCommandName = extractCodexSkillCommandName(content);
+  if (codexCommandName) {
+    return commandNameToWorkflowInvocation(codexCommandName);
+  }
+
+  const slashMatch = content.match(/^\s*\/([\w-]+)(?:\s|$)/);
+  if (slashMatch) {
+    return commandNameToWorkflowInvocation(slashMatch[1]);
+  }
+
+  return null;
 }
 
 export const RESTRICTED_MCP_TOOLS: ReadonlySet<string> = new Set(

@@ -1,8 +1,7 @@
 import * as fs from "fs";
 import { stripQuotedAndPastedContent } from "./quote-detection.js";
 import {
-  SLASH_COMMAND_ALLOWED_TOOLS,
-  extractCodexSkillCommandName,
+  detectAgentFrameworkWorkflowInvocation,
 } from "./slash-commands.js";
 
 /**
@@ -304,10 +303,7 @@ export function trimToolOutput(output: string, maxLines = 20): string {
  * command-equivalent workflows as explicit $agent-framework-* skill mentions.
  */
 function isSlashCommandPrompt(content: string): boolean {
-  return (
-    /<command-name>\s*\//.test(content) ||
-    extractCodexSkillCommandName(content) !== undefined
-  );
+  return detectAgentFrameworkWorkflowInvocation(content) !== null;
 }
 
 
@@ -327,20 +323,11 @@ function extractSlashCommandMetadata(content: string): SlashCommandContext | nul
   // <command-name>/NAME</command-name> appears on a separate user entry
   // WITHOUT frontmatter. Detect the tag and resolve allowed-tools from
   // the command file on disk.
-  const tagMatch = content.match(/<command-name>\s*\/([\w-]+)\s*<\/command-name>/);
-  if (tagMatch) {
-    const tagName = tagMatch[1];
-    const mapped = SLASH_COMMAND_ALLOWED_TOOLS[tagName];
-    if (mapped) {
-      return { commandName: tagName, allowedTools: [...mapped] };
-    }
-  }
-
-  const codexCommandName = extractCodexSkillCommandName(content);
-  if (codexCommandName) {
+  const invocation = detectAgentFrameworkWorkflowInvocation(content);
+  if (invocation) {
     return {
-      commandName: codexCommandName,
-      allowedTools: [...SLASH_COMMAND_ALLOWED_TOOLS[codexCommandName]],
+      commandName: invocation.commandName,
+      allowedTools: [...invocation.allowedTools],
     };
   }
 

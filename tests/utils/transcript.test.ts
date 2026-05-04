@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { detectParallelBatch, resolveActiveSlashCommandAllowedTools } from "../../src/utils/transcript.js";
+import {
+  detectParallelBatch,
+  readTranscriptExact,
+  resolveActiveSlashCommandAllowedTools,
+} from "../../src/utils/transcript.js";
 
 describe("detectParallelBatch", () => {
   let tempDir: string;
@@ -301,6 +305,38 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
     ]);
     const result = await resolveActiveSlashCommandAllowedTools(filePath);
     expect(result).toEqual(["Agent", "ExitPlanMode"]);
+  });
+
+  it("readTranscriptExact marks newest direct slash prompt as slash command", async () => {
+    const filePath = writeTranscript([
+      userText("older normal prompt"),
+      userText("/quickpush"),
+    ]);
+
+    const result = await readTranscriptExact(filePath, {
+      counts: { user: 1 },
+      excludeSlashCommandPrompts: true,
+      includeSlashCommandContext: true,
+    });
+    expect(result.newestUserWasSlashCommand).toBe(true);
+    expect(result.user).toHaveLength(1);
+    expect(result.user[0].content).toBe("older normal prompt");
+  });
+
+  it("readTranscriptExact marks newest Codex skill prompt as slash command", async () => {
+    const filePath = writeTranscript([
+      userText("older normal prompt"),
+      userText("$agent-framework-plan3"),
+    ]);
+
+    const result = await readTranscriptExact(filePath, {
+      counts: { user: 1 },
+      excludeSlashCommandPrompts: true,
+      includeSlashCommandContext: true,
+    });
+    expect(result.newestUserWasSlashCommand).toBe(true);
+    expect(result.slashCommandContext?.commandName).toBe("plan3");
+    expect(result.user[0].content).toBe("older normal prompt");
   });
 
   it("transcript with /plan3 tag followed by non-tag user turn -> still returns plan3 tools", async () => {

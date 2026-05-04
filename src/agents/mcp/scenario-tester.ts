@@ -1147,6 +1147,7 @@ against the full file state. Passing \`at\` is a validation error.
   run_scenario
     working_dir: /home/tim/Coding/public_repos/agent-framework
     scenario: {
+      "schema_version": 1,
       "name": "plan-mode-blocks-edit",
       "description": "Edit tool in plan mode must be denied by plan-mode-block rule",
       "transcript": [
@@ -1175,6 +1176,7 @@ Re-run later with: run_scenario scenario_name: "plan-mode-blocks-edit"
   run_scenario
     working_dir: /home/tim/Coding/public_repos/agent-framework
     scenario: {
+      "schema_version": 1,
       "name": "respond-first-no-text",
       "transcript": [
         { "role": "user", "content": "go" },
@@ -1203,6 +1205,7 @@ Same transcript as B.8 but with a text block before the tool_use:
   run_scenario
     working_dir: /home/tim/Coding/public_repos/agent-framework
     scenario: {
+      "schema_version": 1,
       "name": "respond-first-with-text",
       "transcript": [
         { "role": "user", "content": "go" },
