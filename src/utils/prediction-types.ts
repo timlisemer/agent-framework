@@ -191,6 +191,15 @@ export const SELF_CONTRADICTING_BLOCK_INTENT_RE =
   /\b(the\s+ai|ai'?s|the\s+assistant|assistant'?s|the\s+hook|hook'?s)\b[^.!?]{0,80}\b(block\w*|prevent\w*|refus\w*|deni\w*|denied|contradict\w*)\b[^.!?]{0,80}\b(enforc\w+|carry\w*\s+out|carrying\s+out|(?:act\w*\s+on\s+)?the\s+user(?:'?s)?\s+(?:intent|instruction|request|wish|directive))\b/i;
 
 /**
+ * High-precision action-demand morphology in SENTIMENT_AGENT's prose
+ * `intent`. This is NOT a broad tool allow-list by itself; it only preserves
+ * low-risk inspection tools when the mood fallback would otherwise treat angry
+ * action-demand language as a blanket tool prohibition.
+ */
+export const ACTION_DEMAND_INTENT_RE =
+  /\buser\s+(?:demands?|wants|instructs?|asks?|expects?)\b[^.!?]{0,120}\b(?:ai|assistant)\b[^.!?]{0,120}\b(?:do|perform|complete|finish|fix|check|run|execute|continue|resume|implement|edit|write|change|remove|delete|patch|apply)\b/i;
+
+/**
  * Aliases users use to refer to a tool by short name rather than its full
  * canonical name. Maps a canonical tool name to literal substrings the
  * user may have written. Lower-cased on both sides at match time. Narrow
@@ -532,6 +541,18 @@ export function isSustainedFrustration(
   return negativeMood && (p.trust === "low" || frustrationStreak >= 2);
 }
 
+function isInspectionOnlyTool(toolName: string): boolean {
+  return [
+    "Read",
+    "LSP",
+    "WebSearch",
+    "WebFetch",
+    "ToolSearch",
+    "ListMcpResources",
+    "ReadMcpResource",
+  ].includes(toolName);
+}
+
 /**
  * Categorical block-all-tools classification from the user message alone.
  * Mirrors the SENTIMENT_AGENT prompt's category-A vs category-B
@@ -639,6 +660,17 @@ export function decidePrediction(
 
   // 2. Explicit allow wins for tools without a matching per-target block.
   if (prediction.explicitlyAllowedTools.includes(toolName)) {
+    return { decision: "allow" };
+  }
+
+  // 2.1. Edit-class normalization. Codex's `apply_patch` is an edit tool,
+  // but SENTIMENT_AGENT may authorize the edit class as Claude-native
+  // `Edit`/`Write`. Treat any edit-class allow as authorizing any edit-class
+  // tool, after per-target explicit blocks have been checked above.
+  if (
+    isEditTool(toolName) &&
+    prediction.explicitlyAllowedTools.some((t) => isEditTool(t))
+  ) {
     return { decision: "allow" };
   }
 
@@ -912,6 +944,25 @@ export function decidePrediction(
     return {
       decision: "allow",
       reason: `Active slash command authorizes ${toolName} (per SLASH_COMMAND_ALLOWED_TOOLS); mood-driven re-deny would block the workflow the user explicitly invoked.`,
+    };
+  }
+
+  // 3.12. Angry action-demand fallback for low-risk tools. If the prediction's
+  // own intent says the user is demanding the AI do/perform/fix/check/continue
+  // work, and there is no explicit prohibition or per-tool block, do not
+  // convert anger into a blanket denial of harmless inspection. This does NOT
+  // authorize arbitrary mutation or unrelated workflow tools; edit-class tools
+  // are handled by explicit allow / undo / fresh imperative paths above.
+  if (
+    !userSaidProhibition &&
+    !blockedForThisToolByName &&
+    !prediction.blockedIntent &&
+    isInspectionOnlyTool(toolName) &&
+    ACTION_DEMAND_INTENT_RE.test(prediction.intent)
+  ) {
+    return {
+      decision: "allow",
+      reason: `User intent demands action rather than prohibiting tools; mood-driven denial of ${toolName} would block the requested work.`,
     };
   }
 
