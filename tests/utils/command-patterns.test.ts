@@ -154,6 +154,14 @@ describe("getBlacklistHighlights", () => {
     expect(highlights.length).toBeGreaterThan(0);
   });
 
+  it("detects 'nix eval' in Bash command and points to nix-eval-jobs", () => {
+    const highlights = getBlacklistHighlights("Bash", {
+      command: "nix eval .#nixosConfigurations.host.config.system.build.toplevel",
+    });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: nix eval]"))).toBe(true);
+    expect(highlights.some((h) => h.includes("Use nix-eval-jobs instead"))).toBe(true);
+  });
+
   it("returns multiple violations for compound command", () => {
     const highlights = getBlacklistHighlights("Bash", { command: "cd /tmp && cat file.txt" });
     expect(highlights.length).toBeGreaterThanOrEqual(2);
@@ -524,6 +532,13 @@ describe("getContentBlacklistHighlights path redaction", () => {
     const highlights = getContentBlacklistHighlights("Run npx tsc to typecheck before merging.");
     expect(highlights.length).toBeGreaterThan(0);
     expect(highlights[0].rendered).toContain("[VIOLATION: tsc]");
+  });
+
+  it("still fires nix eval pattern on a real invocation in plan prose", () => {
+    const highlights = getContentBlacklistHighlights("Run nix eval .#checks.x86_64-linux before merging.");
+    expect(highlights.length).toBeGreaterThan(0);
+    expect(highlights[0].rendered).toContain("[VIOLATION: nix eval]");
+    expect(highlights[0].rendered).toContain("Use nix-eval-jobs instead");
   });
 });
 

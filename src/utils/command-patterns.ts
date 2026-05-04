@@ -92,6 +92,9 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // Nix formatting - should use check tool
   { pattern: /\balejandra\b/, name: "alejandra", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
 
+  // Nix evaluation - use batch evaluator instead of ad hoc shell evals
+  { pattern: /\bnix\s+eval\b/, name: "nix eval", alternative: "Use nix-eval-jobs instead", redactPaths: true },
+
   // SSH remote execution
   { pattern: /\bssh\s+/, name: 'ssh', alternative: 'Remote execution denied' },
 
