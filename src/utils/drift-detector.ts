@@ -48,8 +48,8 @@ export function detectDrift(
   const repetitionSignal = checkRepetition(toolName, target, recentToolLog, state);
   if (repetitionSignal.detected) return repetitionSignal;
 
-  // Workaround escalation: 2+ recent denials to similar target
-  const workaroundSignal = checkWorkaroundEscalation(target, recentToolLog);
+  // Workaround escalation: 2+ recent denials to the same denied Bash pattern.
+  const workaroundSignal = checkWorkaroundEscalation(toolName, target, recentToolLog);
   if (workaroundSignal.detected) return workaroundSignal;
 
   return NO_DRIFT;
@@ -122,22 +122,71 @@ function checkRepetition(
 }
 
 /**
- * Detect 2+ recent denials to similar target (workaround escalation).
+ * Detect 2+ recent denials to the same denied Bash pattern.
  */
-function checkWorkaroundEscalation(target: string, recentToolLog: ToolLogEntry[]): DriftSignal {
-  if (!target) return NO_DRIFT;
+function checkWorkaroundEscalation(toolName: string, target: string, recentToolLog: ToolLogEntry[]): DriftSignal {
+  if (toolName !== "Bash" || !target) return NO_DRIFT;
 
-  const targetBase = target.split("/").pop() ?? target;
-  const recentDenials = recentToolLog.filter(
-    (e) => e.status === "denied" && (e.path?.includes(targetBase) || e.cmd?.includes(targetBase))
-  );
+  const currentFingerprints = collectBashDenialFingerprints(target, "");
+  if (currentFingerprints.size === 0) return NO_DRIFT;
 
-  if (recentDenials.length >= 2) {
-    return {
-      detected: true,
-      reason: `${recentDenials.length} recent denials targeting "${targetBase}" - possible workaround escalation`,
-    };
+  for (const fingerprint of currentFingerprints) {
+    const recentDenials = recentToolLog.filter((e) => {
+      if (e.status !== "denied" || e.tool !== "Bash") return false;
+      const deniedFingerprints = collectBashDenialFingerprints(e.cmd ?? "", e.reason ?? "");
+      return deniedFingerprints.has(fingerprint);
+    });
+    if (recentDenials.length >= 2) {
+      return {
+        detected: true,
+        reason: `${recentDenials.length} recent denials targeting "${fingerprint}" - possible workaround escalation`,
+      };
+    }
   }
 
   return NO_DRIFT;
+}
+
+function collectBashDenialFingerprints(command: string, reason: string): Set<string> {
+  const fingerprints = new Set<string>();
+  const findFlags = findDestructiveFlags(command);
+  for (const flag of findFlags) {
+    fingerprints.add(`find:${flag}`);
+  }
+  if (findFlags.length > 0) {
+    fingerprints.add("find:destructive");
+  }
+
+  if (
+    fingerprints.size === 0 &&
+    /find destructive flag/i.test(reason)
+  ) {
+    fingerprints.add("find:destructive");
+  }
+
+  if (isFilteredCheckCommand(command) || /filter restricting check output/i.test(reason)) {
+    fingerprints.add("check-output-filter");
+  }
+
+  return fingerprints;
+}
+
+function findDestructiveFlags(command: string): string[] {
+  const flags: string[] = [];
+  const findCommandPattern = /\bfind\b[^|;&]*/g;
+  for (const match of command.matchAll(findCommandPattern)) {
+    const segment = match[0];
+    const flagPattern = /\s-(delete|execdir|exec|okdir|ok|fprint0|fprint|fls)\b/g;
+    for (const flagMatch of segment.matchAll(flagPattern)) {
+      flags.push(flagMatch[1]);
+    }
+  }
+  return flags;
+}
+
+function isFilteredCheckCommand(command: string): boolean {
+  const runsCheckLikeCommand = /\b(npx\s+tsc|tsc|vitest|jest|npm\s+test|just\s+check|make\s+check|cargo\s+(check|clippy)|go\s+test|go\s+vet|ruff\s+check|pylint|eslint)\b/.test(command);
+  if (!runsCheckLikeCommand) return false;
+
+  return /\|\s*grep\b|\bgit\s+diff\s+--name-only\b/.test(command);
 }

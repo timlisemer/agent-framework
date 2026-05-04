@@ -8,6 +8,10 @@ function allowedEdit(path: string = TARGET): ToolLogEntry {
   return { ts: 0, tool: "Edit", path, status: "allowed", gate: "edit-intent", ms: 0 };
 }
 
+function deniedBash(command: string, reason: string): ToolLogEntry {
+  return { ts: 0, tool: "Bash", cmd: command, status: "denied", gate: "tool-approve", reason, ms: 0 };
+}
+
 describe("detectDrift - graduated repetition block", () => {
   it("allows at level 0 when fewer than 4 allowed edits exist", () => {
     const log: ToolLogEntry[] = [allowedEdit(), allowedEdit(), allowedEdit()];
@@ -98,5 +102,98 @@ describe("detectDrift - graduated repetition block", () => {
     expect(signal.detected).toBe(true);
     expect(signal.reason).toContain(`4 edits to "${TARGET}"`);
     expect(signal.reason).toContain("stop making many small edits");
+  });
+});
+
+describe("detectDrift - workaround escalation fingerprints", () => {
+  it("allows a corrected find command after prior destructive-flag denials", () => {
+    const log: ToolLogEntry[] = [
+      deniedBash(
+        "find /home/tim/.agent-framework/sessions -name '*.jsonl' -exec grep -H foo {} \\;",
+        "find destructive flag (-delete/-exec/-execdir/-ok/-okdir/-fprint/-fls)",
+      ),
+      deniedBash(
+        "find /home/tim/.agent-framework/sessions -type f -exec rg foo {} \\;",
+        "find destructive flag (-delete/-exec/-execdir/-ok/-okdir/-fprint/-fls)",
+      ),
+    ];
+
+    const signal = detectDrift(
+      "Bash",
+      { command: "find /home/tim/.agent-framework/sessions -type f -name '*.jsonl' -print" },
+      log,
+      {},
+    );
+
+    expect(signal.detected).toBe(false);
+  });
+
+  it("denies a third retry that keeps the same find destructive flag", () => {
+    const log: ToolLogEntry[] = [
+      deniedBash(
+        "find /home/tim/.agent-framework/sessions -name '*.jsonl' -exec grep -H foo {} \\;",
+        "find destructive flag (-delete/-exec/-execdir/-ok/-okdir/-fprint/-fls)",
+      ),
+      deniedBash(
+        "find /home/tim/.agent-framework/sessions -type f -exec rg foo {} \\;",
+        "find destructive flag (-delete/-exec/-execdir/-ok/-okdir/-fprint/-fls)",
+      ),
+    ];
+
+    const signal = detectDrift(
+      "Bash",
+      { command: "find /home/tim/.agent-framework/sessions -type f -exec rg bar {} \\;" },
+      log,
+      {},
+    );
+
+    expect(signal.detected).toBe(true);
+    expect(signal.reason).toContain("find:exec");
+    expect(signal.reason).toContain("possible workaround escalation");
+  });
+
+  it("ignores generic shell tokens shared with prior denials", () => {
+    const log: ToolLogEntry[] = [
+      deniedBash(
+        "cd /home/tim/Coding/nixos/files/ags && npx tsc --noEmit 2>&1 | grep -E \"session-lock|utils/timers\" | head -30",
+        "Filter restricting check output to AI's own changes",
+      ),
+      deniedBash(
+        "cd /home/tim/Coding/nixos/files/ags && git diff --name-only HEAD 2>&1 && npx tsc --noEmit 2>&1 | head -50",
+        "Filter restricting check output to AI's own changes",
+      ),
+    ];
+
+    const signal = detectDrift(
+      "Bash",
+      { command: "ls -la /home/tim/Coding/nixos/files/ags/src/bindings/ 2>&1; echo \"---\"; ls /home/tim/Coding/private_repos/astral/bindings/ 2>&1" },
+      log,
+      {},
+    );
+
+    expect(signal.detected).toBe(false);
+  });
+
+  it("denies a repeated check-output filtering pattern", () => {
+    const log: ToolLogEntry[] = [
+      deniedBash(
+        "cd /home/tim/Coding/nixos/files/ags && npx tsc --noEmit 2>&1 | grep -E \"session-lock|utils/timers\" | head -30",
+        "Filter restricting check output to AI's own changes",
+      ),
+      deniedBash(
+        "cd /home/tim/Coding/nixos/files/ags && git diff --name-only HEAD 2>&1 && npx tsc --noEmit 2>&1 | head -50",
+        "Filter restricting check output to AI's own changes",
+      ),
+    ];
+
+    const signal = detectDrift(
+      "Bash",
+      { command: "npx tsc --noEmit 2>&1 | grep -E \"session-lock\" | head -50" },
+      log,
+      {},
+    );
+
+    expect(signal.detected).toBe(true);
+    expect(signal.reason).toContain("check-output-filter");
   });
 });
