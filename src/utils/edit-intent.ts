@@ -151,6 +151,8 @@ export const EDIT_VERB_RE =
 // Bounded distance so unrelated mentions of "file" don't pull in Bash.
 export const RENAME_MOVE_VERB_RE = /\b(renam\w*|mov\w*)\b[^.!?]{0,50}\b(file|files)\b/i;
 export const TEST_RUN_VERB_RE = /\b(test|tests|run\s+\w+)\b/i;
+export const BASH_INSPECTION_VERB_RE =
+  /\b(investigat\w*|explor\w*|search\w*|grep|rg|find|list|check|look\s+into|trace|inspect)\b/i;
 export const COMMIT_VERB_RE = /\bcommit\b/i;
 export const PUSH_VERB_RE = /\bpush\b/i;
 export const CHECK_VERB_RE = /\b(typecheck|build|check|lint)\b/i;
@@ -169,6 +171,7 @@ export function deriveAllowedToolsFromIntent(message: string): string[] {
   }
   if (RENAME_MOVE_VERB_RE.test(message)) tools.add("Bash");
   if (TEST_RUN_VERB_RE.test(message)) tools.add("Bash");
+  if (BASH_INSPECTION_VERB_RE.test(message)) tools.add("Bash");
   if (COMMIT_VERB_RE.test(message)) {
     tools.add("mcp__agent-framework__commit");
     tools.add("mcp__agent_framework__commit");

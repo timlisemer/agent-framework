@@ -6,6 +6,9 @@ export const predictionBlockRule: PreToolRule = {
   name: "prediction-block",
   displayName: "Prediction Block",
   priority: 35,
+  // Keep deterministic for now. This rule used to be appealable, but the
+  // appeal path overruled most prediction blocks; first try targeted logic
+  // fixes without re-opening that behavior.
   appealable: false,
   usesLlm: false,
   promptSection: "",

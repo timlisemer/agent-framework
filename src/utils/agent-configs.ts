@@ -385,7 +385,6 @@ If you see "=== BLACKLISTED PATTERNS DETECTED ===" in the context, you MUST DENY
 These patterns are detected automatically and represent hard rules:
 - cd command → DENY (no exceptions, use --cwd flags instead)
 - build/check commands → DENY (AIs must not run build/compile shell commands. Use mcp__agent-framework__check instead.)
-- cat/head/tail of a single literal local file path → enforced upstream by the deterministic blacklist; you will NEVER see such a call. Do NOT cite this rule, do NOT quote the bullet text, in any DENY reason. The blacklist does NOT apply to \`cmd | head\` (output truncation), \`tail -f\` (log follow), or cat/head/tail of files Read cannot handle (binary, /proc, /sys, /dev/fd/*).
 - git write operations → DENY
 - Code execution (python, node, ruby, perl) → DENY (add to Makefile check target, then use mcp__agent-framework__check)
 
@@ -536,8 +535,7 @@ Every DENY reason you emit MUST cite a rule literally present in this prompt (on
 - Invent policies that are not written above. "In PLAN MODE, <tool> is denied" is NOT a rule of this system. Do not write it.
 - Cite counters such as "Nth attempt" or "repeated attempts". You do not have access to such counters, and inventing one fabricates evidence.
 - Generalise from unrelated signals (user mood, prior prompt content) to block a tool the rules above do not block.
-- Assert that read-only commands (rg/grep/ugrep/find/bfs/fd/ls/awk/sed/jq/wc) duplicate the Read or LS tool. They do not — that rule does not exist for those commands.
-- Quote the deterministic upstream blacklist bullet (the cat/head/tail line) as your own DENY reason. The LLM never sees a real cat/head/tail-of-file call.
+- Assert that read-only commands (cat/head/tail/rg/grep/ugrep/find/bfs/fd/ls/awk/sed/jq/wc) duplicate the Read or LS tool. They do not — that rule does not exist for those commands.
 
 The following literal phrases are mechanically auto-overturned if they appear in your DENY reason — do NOT use them:
 ${FORBIDDEN_DENY_PROMPT_LIST}
@@ -627,8 +625,7 @@ If the original denial reason contains any of the following phrases, it is fabri
 - "enforce core tools"
 - "#<number> in sequence" or "Nth in sequence"
 - "Matches pattern of repeated <tool> attempts"
-- "duplicates Read tool" / "is duplicative of Read tool" / "duplicates LS tool" / "duplicates Read/LS tools" / "use Read tool instead" / "use Read or LS tool instead" / "Read tool can fetch ... for equivalent analysis" — when the blocked command is rg, grep, ugrep, find, fd, bfs, awk, sed, ls, jq, wc, sort, uniq, cut, tr, diff, comm, file, or stat (i.e. anything other than a bare cat/head/tail/less/more on a literal file path). Post-v2.1.117 these ARE the official search mechanism on native Claude Code builds.
-- A literal quote of the prompt's "cat/head/tail → DENY (use Read tool)" line in a deny reason whose target command is NOT actually cat/head/tail of a literal file path. The deterministic blacklist enforces that rule upstream; quoting it is a hallucination.
+- "duplicates Read tool" / "is duplicative of Read tool" / "duplicates LS tool" / "duplicates Read/LS tools" / "use Read tool instead" / "use Read or LS tool instead" / "Read tool can fetch ... for equivalent analysis" — when the blocked command is cat, head, tail, rg, grep, ugrep, find, fd, bfs, awk, sed, ls, jq, wc, sort, uniq, cut, tr, diff, comm, file, or stat (i.e. read-only inspection rather than a mutating/build/test command). Post-v2.1.117 these ARE the official search mechanism on native Claude Code builds.
 
 These fingerprints indicate the denial was not grounded in the actual rule set. Override them.`,
 };

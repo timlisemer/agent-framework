@@ -1232,6 +1232,32 @@ describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", ()
     expect(result.decision).toBe("allow");
   });
 
+  it("'investigate correctly' + read-only Bash -> allow via class-level Bash inspection", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(
+      pred,
+      "Bash",
+      { command: "cd src && rg -n prediction-block ." },
+      4,
+      "do what i told you and investigate correctly",
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("class-level imperative");
+  });
+
+  it("'investigate correctly' + mutating Bash -> deny despite class-level Bash inspection", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(
+      pred,
+      "Bash",
+      { command: "git push" },
+      4,
+      "do what i told you and investigate correctly",
+    );
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toContain("limited to read-only Bash commands");
+  });
+
   it("'stop. now implement.' + Edit -> allow (sentence boundary breaks revocation window)", () => {
     const pred = makeAngryLowStreak4();
     const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "stop. now implement.");
@@ -1239,11 +1265,11 @@ describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", ()
     expect(result.reason).toContain("class-level imperative");
   });
 
-  it("cross-class scoping: 'now run the tests, don't refactor that' + Bash -> allow (Bash mapped via TEST_RUN_VERB_RE; verb-class guard does NOT consider EDIT_VERB_RE match for 'refactor')", () => {
+  it("cross-class scoping: 'now run the tests, don't refactor that' + non-read-only Bash -> deny (class reauthorization is bounded by read-only Bash)", () => {
     const pred = makeAngryLowStreak4();
     const result = decidePrediction(pred, "Bash", { command: "npx vitest" }, 4, "now run the tests, don't refactor that");
-    expect(result.decision).toBe("allow");
-    expect(result.reason).toContain("class-level imperative");
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toContain("limited to read-only Bash commands");
   });
 
   it("cross-class scoping: 'now run the tests, don't refactor that' + Edit -> deny (Edit mapped via EDIT_VERB_RE 'refactor'; verb-class guard finds 'don't' in window before 'refactor')", () => {
@@ -1290,6 +1316,10 @@ describe("latestUserMessageReauthorizesClass", () => {
 
   it("'now run the tests, don't refactor' -> Bash: true (class scoping ignores EDIT_VERB_RE match)", () => {
     expect(latestUserMessageReauthorizesClass("now run the tests, don't refactor", "Bash")).toBe(true);
+  });
+
+  it("'investigate correctly' -> Bash: true", () => {
+    expect(latestUserMessageReauthorizesClass("investigate correctly", "Bash")).toBe(true);
   });
 
   it("empty string -> Edit: false", () => {

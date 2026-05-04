@@ -79,6 +79,19 @@ export function isLowRiskTool(toolName: string): boolean {
   );
 }
 
+/**
+ * Low-risk tools that inspect external state/content. Excludes low-risk
+ * workflow/meta tools such as Skill, TodoWrite, TaskOutput, and EnterPlanMode.
+ */
+export function isLowRiskInspectionTool(toolName: string): boolean {
+  return (
+    ["Read", "LSP", "WebSearch", "WebFetch", "ToolSearch", "ListMcpResources", "ReadMcpResource"].includes(toolName) ||
+    (toolName.startsWith("mcp__")
+      && !RESTRICTED_MCP_TOOLS.has(toolName)
+      && !HEAVY_MCP_TOOLS.has(toolName))
+  );
+}
+
 export const CONFIRMATION_PATTERN = /^\s*(y(es|ep|eah|up)?(\s*please)?|ok(ay)?|sure|go\s*ahead|do\s*it|proceed|confirm(ed)?|approved?|lgtm|sounds?\s*good|that('?s| is)\s*(fine|good|correct|right)|please(\s*do)?|yea|aye|k)\s*[.!]?\s*$/i;
 
 export function isPathInDirectory(filePath: string, dirPath: string): boolean {

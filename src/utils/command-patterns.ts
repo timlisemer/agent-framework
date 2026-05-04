@@ -28,11 +28,6 @@ export interface BlacklistPattern {
  * Used by tool-approve agent to highlight violations.
  */
 export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
-  // File reading - should use Read tool
-  { pattern: /\bcat\s+/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?cat\s+\S|\bcat\s+(?:-[\w-]+|<PATH>))/, name: 'cat', alternative: 'Use Read tool', redactPaths: true },
-  { pattern: /\bhead\s+/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?head\s+\S|\bhead\s+(?:-[\w-]+|\+?\d+|<PATH>))/, name: 'head', alternative: 'Use Read tool with limit', redactPaths: true },
-  { pattern: /\btail\s+/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?tail\s+\S|\btail\s+(?:-[\w-]+|\+?\d+|<PATH>))/, name: 'tail', alternative: 'Use Read tool with offset', redactPaths: true },
-
   // grep/rg/find intentionally NOT blacklisted: native macOS/Linux Claude Code
   // builds removed the Grep/Glob tools in v2.1.117 and route search through
   // bash (bundled ugrep/bfs), so blocking them leaves no search mechanism.
@@ -167,13 +162,29 @@ function stripQuotedRegions(s: string): string {
 // prediction-block so the same inspection/navigation surface stays consistent.
 export const READ_ONLY_BASH_COMMANDS: ReadonlySet<string> = new Set([
   "ls", "tree", "pwd", "dirname", "basename", "realpath", "readlink",
-  "grep", "rg", "find", "fd",
+  "cd",
+  "cat", "grep", "rg", "find", "fd", "sed", "awk", "nl",
   "wc", "sort", "uniq", "cut", "tr", "diff", "comm",
   "head", "tail",
   "file", "stat",
-  "jq",
+  "jq", "xargs",
   "which", "type",
+  "git",
   "echo", "printf",
+]);
+
+const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "blame", "branch", "describe", "diff", "grep", "log", "ls-files",
+  "rev-list", "rev-parse", "shortlog", "show", "show-branch", "status",
+]);
+
+const XARGS_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
+  "-d", "--delimiter",
+  "-E", "--eof",
+  "-I", "--replace",
+  "-n", "--max-args",
+  "-P", "--max-procs",
+  "-s", "--max-chars",
 ]);
 
 const READ_ONLY_BASH_COMMAND_LEVEL_DENY: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
@@ -183,11 +194,87 @@ const READ_ONLY_BASH_COMMAND_LEVEL_DENY: ReadonlyArray<{ pattern: RegExp; reason
   // find destructive flags (GNU + BSD).
   { pattern: /\bfind\b[^|;&]*\s-(delete|exec(dir)?|ok(dir)?|fprint[0f]?|fls)\b/, reason: "find destructive flag (-delete/-exec/-execdir/-ok/-okdir/-fprint/-fls)" },
 
+  // sed in-place editing.
+  { pattern: /\bsed\b[^|;&]*\s-i(?:\b|['".A-Za-z0-9_-])/, reason: "sed in-place edit (-i)" },
+
   // File redirection. Matches `> file`, `>> file`, `1>file`, `>|file`, etc.
   // Excludes `2>&1` / `>&N` via `(?![&(])`, and `/dev/...` targets via `(?!\/dev\/)`.
   // Process substitution is caught by the substitution rule above.
   { pattern: />>?\s*(?!\/dev\/)(?![&(])[^|&(\s]/, reason: "shell redirect to file" },
 ];
+
+function tokenizeSegment(segment: string): string[] {
+  return segment.trim().split(/\s+/).filter(Boolean);
+}
+
+function commandBare(token: string): string {
+  return token.startsWith("/") ? token.split("/").pop()! : token;
+}
+
+function gitSubcommand(tokens: string[]): string | null {
+  for (let i = 1; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === "-C" || token === "-c") {
+      i++;
+      continue;
+    }
+    if (token.startsWith("--git-dir=") || token.startsWith("--work-tree=")) continue;
+    if (token.startsWith("-")) continue;
+    return token;
+  }
+  return null;
+}
+
+function xargsCommandToken(tokens: string[]): string | null {
+  for (let i = 1; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (XARGS_OPTIONS_WITH_VALUE.has(token)) {
+      i++;
+      continue;
+    }
+    if (token.startsWith("-")) continue;
+    return token;
+  }
+  return null;
+}
+
+function validateReadOnlyCommandHead(tokens: string[]): { allowed: true } | { allowed: false; reason: string } {
+  const firstToken = tokens[0];
+
+  // No inline env prefix (closes PATH/LD_PRELOAD injection).
+  if (firstToken.includes("=")) {
+    return { allowed: false, reason: `inline env assignment not allowed: ${firstToken}` };
+  }
+  // No relative paths (closes `./grep` laundering where a subagent drops an
+  // attacker-controlled binary named `grep` in cwd).
+  if (firstToken.includes("/") && !firstToken.startsWith("/")) {
+    return { allowed: false, reason: `relative path execution not allowed: ${firstToken}` };
+  }
+
+  const bare = commandBare(firstToken);
+
+  if (!READ_ONLY_BASH_COMMANDS.has(bare)) {
+    return { allowed: false, reason: `command not in read-only allowlist: ${bare}` };
+  }
+
+  if (bare === "git") {
+    const subcommand = gitSubcommand(tokens);
+    if (!subcommand) {
+      return { allowed: false, reason: "git command missing read-only subcommand" };
+    }
+    if (!READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) {
+      return { allowed: false, reason: `git subcommand not in read-only allowlist: ${subcommand}` };
+    }
+  }
+
+  if (bare === "xargs") {
+    const commandToken = xargsCommandToken(tokens);
+    if (!commandToken) return { allowed: true };
+    return validateReadOnlyCommandHead([commandToken]);
+  }
+
+  return { allowed: true };
+}
 
 export function checkReadOnlyBashAllowlist(command: string): { allowed: true } | { allowed: false; reason: string } {
   const trimmed = command.trim();
@@ -218,23 +305,8 @@ export function checkReadOnlyBashAllowlist(command: string): { allowed: true } |
     const seg = segment.trim();
     if (!seg) continue;
 
-    const firstToken = seg.split(/\s+/)[0];
-
-    // No inline env prefix (closes PATH/LD_PRELOAD injection).
-    if (firstToken.includes("=")) {
-      return { allowed: false, reason: `inline env assignment not allowed: ${firstToken}` };
-    }
-    // No relative paths (closes `./grep` laundering where a subagent drops an
-    // attacker-controlled binary named `grep` in cwd).
-    if (firstToken.includes("/") && !firstToken.startsWith("/")) {
-      return { allowed: false, reason: `relative path execution not allowed: ${firstToken}` };
-    }
-
-    const bare = firstToken.startsWith("/") ? firstToken.split("/").pop()! : firstToken;
-
-    if (!READ_ONLY_BASH_COMMANDS.has(bare)) {
-      return { allowed: false, reason: `command not in read-only allowlist: ${bare}` };
-    }
+    const result = validateReadOnlyCommandHead(tokenizeSegment(seg));
+    if (!result.allowed) return result;
   }
 
   return { allowed: true };
@@ -403,38 +475,15 @@ export function getBlacklistHighlights(toolName: string, toolInput: unknown, wor
   const command = (toolInput as { command?: string }).command;
   if (!command) return [];
 
-  // File-reading patterns (cat/head/tail) match only when one of those
-  // binaries is the EXECUTABLE HEAD of a sequence segment — never an
-  // incidental occurrence inside an argument or string literal (e.g.
-  // `node -e 'console.log("the tail value")'`). Sequence separators
-  // that spawn a fresh executable: ;, &&, ||, & (background). The
-  // `&(?!\d)` lookahead avoids splitting on shell redirection like
-  // `2>&1`. Pipe `|` is NOT a separator: `ls | head -5` is output
-  // truncation, not file reading. Quoted spans are stripped before
-  // splitting so separators inside string literals don't fragment the
-  // command. Accepted trade-off: wrapper prefixes (`sudo tail`,
-  // `nohup tail`, `time cat`), backtick / $(…) substitutions, and
-  // `bash -c "tail …"` shell-escapes are no longer caught here — none
-  // had a test or scenario depending on the previous incidental match.
   const quoteStrippedCommand = stripQuotedRegions(command);
-  const FILE_READING_PATTERN_NAMES = new Set(["cat", "head", "tail"]);
-  const segmentHeads = quoteStrippedCommand
-    .split(/&&|\|\||;|&(?!\d)/)
-    .map((seg) => seg.trim().split(/\s+/)[0])
-    .filter((head) => head.length > 0);
   const redactedCommand = redactPathTokens(quoteStrippedCommand);
 
-  return BLACKLIST_PATTERNS
-    .filter(({ pattern, name, redactPaths: shouldRedact }) => {
-      if (FILE_READING_PATTERN_NAMES.has(name)) {
-        // Append a trailing space so the pattern's required `\s+`
-        // matches a bare-word head. The verb itself has no path tokens,
-        // so redactPaths is a no-op for these patterns.
-        return segmentHeads.some((head) => pattern.test(head + " "));
-      }
-      const target = shouldRedact ? redactedCommand : quoteStrippedCommand;
-      return pattern.test(target);
-    })
+  const matchingPatterns = BLACKLIST_PATTERNS.filter(({ pattern, redactPaths: shouldRedact }) => {
+    const target = shouldRedact ? redactedCommand : quoteStrippedCommand;
+    return pattern.test(target);
+  });
+
+  return matchingPatterns
     .map(({ name, alternative }) => {
       const equivalents = CHECK_EQUIVALENTS[name];
       const msg = equivalents && workingDir

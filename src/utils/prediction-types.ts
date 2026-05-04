@@ -9,13 +9,14 @@
  * @module prediction-types
  */
 
-import { isLowRiskTool } from "../rules/utils.js";
+import { isLowRiskTool, isLowRiskInspectionTool } from "../rules/utils.js";
 import {
   isEditTool,
   deriveAllowedToolsFromIntent,
   EDIT_VERB_RE,
   RENAME_MOVE_VERB_RE,
   TEST_RUN_VERB_RE,
+  BASH_INSPECTION_VERB_RE,
   COMMIT_VERB_RE,
   PUSH_VERB_RE,
   CHECK_VERB_RE,
@@ -453,7 +454,7 @@ function verbRegexesProducingTool(toolName: string): RegExp[] {
     case "Write":
       return [EDIT_VERB_RE];
     case "Bash":
-      return [RENAME_MOVE_VERB_RE, TEST_RUN_VERB_RE];
+      return [RENAME_MOVE_VERB_RE, TEST_RUN_VERB_RE, BASH_INSPECTION_VERB_RE];
     case "mcp__agent-framework__commit":
     case "mcp__agent_framework__commit":
       return [COMMIT_VERB_RE];
@@ -539,18 +540,6 @@ export function isSustainedFrustration(
   if (!p) return false;
   const negativeMood = p.mood === "angry" || p.mood === "frustrated";
   return negativeMood && (p.trust === "low" || frustrationStreak >= 2);
-}
-
-function isInspectionOnlyTool(toolName: string): boolean {
-  return [
-    "Read",
-    "LSP",
-    "WebSearch",
-    "WebFetch",
-    "ToolSearch",
-    "ListMcpResources",
-    "ReadMcpResource",
-  ].includes(toolName);
 }
 
 /**
@@ -790,6 +779,15 @@ export function decidePrediction(
     }
     // Path (a') — CLASS-LEVEL fresh imperative on the live transcript.
     if (latestUserMessage && latestUserMessageReauthorizesClass(latestUserMessage, toolName)) {
+      if (toolName === "Bash") {
+        const bashCommand = String((toolInput as { command?: unknown })?.command ?? "");
+        if (!checkReadOnlyBashAllowlist(bashCommand).allowed) {
+          return {
+            decision: "deny",
+            reason: `User's latest transcript message implies Bash, but this deterministic reauthorization path is limited to read-only Bash commands. ${bashCommand ? "Command is not read-only allowlisted." : "No Bash command was provided."}`,
+          };
+        }
+      }
       return {
         decision: "allow",
         reason: `User's latest transcript message is a class-level imperative implying ${toolName} (cached prediction was stale); ${toolName} proceeds.`,
@@ -957,7 +955,7 @@ export function decidePrediction(
     !userSaidProhibition &&
     !blockedForThisToolByName &&
     !prediction.blockedIntent &&
-    isInspectionOnlyTool(toolName) &&
+    isLowRiskInspectionTool(toolName) &&
     ACTION_DEMAND_INTENT_RE.test(prediction.intent)
   ) {
     return {

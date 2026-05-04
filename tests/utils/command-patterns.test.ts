@@ -29,6 +29,22 @@ describe("checkReadOnlyBashAllowlist", () => {
     expect(checkReadOnlyBashAllowlist("ls && pwd").allowed).toBe(true);
   });
 
+  it("allows expanded read-only investigation commands", () => {
+    for (const command of [
+      "cat package.json",
+      "sed -n '1,80p' src/index.ts",
+      "awk '{print $1}' package.json",
+      "nl -ba src/index.ts",
+      "cd src && rg -n foo .",
+      "find src -name '*.ts' | xargs grep -l foo",
+      "git status --short",
+      "git diff -- src/index.ts",
+      "git show HEAD:package.json",
+    ]) {
+      expect(checkReadOnlyBashAllowlist(command).allowed).toBe(true);
+    }
+  });
+
   it("denies commands outside the read-only allowlist", () => {
     const result = checkReadOnlyBashAllowlist("npm run build");
     expect(result.allowed).toBe(false);
@@ -38,6 +54,10 @@ describe("checkReadOnlyBashAllowlist", () => {
     expect(checkReadOnlyBashAllowlist("find . -delete").allowed).toBe(false);
     expect(checkReadOnlyBashAllowlist("rg foo > out.txt").allowed).toBe(false);
     expect(checkReadOnlyBashAllowlist("rg $(pwd)").allowed).toBe(false);
+    expect(checkReadOnlyBashAllowlist("sed -i 's/a/b/' file.txt").allowed).toBe(false);
+    expect(checkReadOnlyBashAllowlist("git push").allowed).toBe(false);
+    expect(checkReadOnlyBashAllowlist("git add .").allowed).toBe(false);
+    expect(checkReadOnlyBashAllowlist("find . -name '*.ts' | xargs node").allowed).toBe(false);
   });
 });
 
@@ -46,11 +66,8 @@ describe("getContentBlacklistHighlights", () => {
     expect(getContentBlacklistHighlights("const x = 1;\nreturn x;")).toEqual([]);
   });
 
-  it("detects 'cat somefile' in content", () => {
-    const highlights = getContentBlacklistHighlights("cat /etc/passwd");
-    expect(highlights.length).toBe(1);
-    expect(highlights[0].rendered).toContain("cat");
-    expect(highlights[0].rendered).toContain("VIOLATION");
+  it("does NOT flag 'cat somefile' in content", () => {
+    expect(getContentBlacklistHighlights("cat /etc/passwd")).toEqual([]);
   });
 
   it("does NOT flag 'grep pattern' in content (bash grep is allowed post-v2.1.117)", () => {
@@ -74,7 +91,7 @@ describe("getContentBlacklistHighlights", () => {
   });
 
   it("returns one highlight per line (not per pattern)", () => {
-    const highlights = getContentBlacklistHighlights("cat somefile\ngit commit -m 'x'");
+    const highlights = getContentBlacklistHighlights("npm install express\ngit commit -m 'x'");
     expect(highlights).toHaveLength(2);
   });
 
@@ -142,11 +159,8 @@ describe("getBlacklistHighlights", () => {
     expect(getBlacklistHighlights("Bash", {})).toEqual([]);
   });
 
-  it("detects 'cat /etc/passwd' in Bash command", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "cat /etc/passwd" });
-    expect(highlights.length).toBeGreaterThan(0);
-    expect(highlights[0]).toContain("BLACKLIST");
-    expect(highlights[0]).toContain("cat");
+  it("does NOT flag 'cat /etc/passwd' in Bash command", () => {
+    expect(getBlacklistHighlights("Bash", { command: "cat /etc/passwd" })).toEqual([]);
   });
 
   it("detects 'tsc' in Bash command", () => {
@@ -163,7 +177,7 @@ describe("getBlacklistHighlights", () => {
   });
 
   it("returns multiple violations for compound command", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "cd /tmp && cat file.txt" });
+    const highlights = getBlacklistHighlights("Bash", { command: "cd /tmp && git push" });
     expect(highlights.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -232,14 +246,14 @@ describe("getBlacklistHighlights", () => {
     expect(highlights.some((h) => h.includes("[BLACKLIST: python3]"))).toBe(true);
   });
 
-  it("still fires 'tail' when invoked as the executable", () => {
+  it("does NOT fire 'tail' when invoked as the executable", () => {
     const highlights = getBlacklistHighlights("Bash", { command: "tail -n 10 server.log" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: tail]"))).toBe(true);
+    expect(highlights.some((h) => h.includes("[BLACKLIST: tail]"))).toBe(false);
   });
 
-  it("still fires 'head' on bare 'head -n 50 file.log'", () => {
+  it("does NOT fire 'head' on bare 'head -n 50 file.log'", () => {
     const highlights = getBlacklistHighlights("Bash", { command: "head -n 50 file.log" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: head]"))).toBe(true);
+    expect(highlights.some((h) => h.includes("[BLACKLIST: head]"))).toBe(false);
   });
 
   it("still treats 'ls | head -5' as output truncation (pipe is not a segment separator)", () => {
@@ -247,9 +261,9 @@ describe("getBlacklistHighlights", () => {
     expect(highlights.some((h) => h.includes("[BLACKLIST: head]"))).toBe(false);
   });
 
-  it("fires 'cat' on the second segment of a sequence command", () => {
+  it("does NOT fire 'cat' on the second segment of a sequence command", () => {
     const highlights = getBlacklistHighlights("Bash", { command: "ls /tmp; cat /etc/hosts" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: cat]"))).toBe(true);
+    expect(highlights.some((h) => h.includes("[BLACKLIST: cat]"))).toBe(false);
   });
 
   it("does not get fragmented by separators inside string literals", () => {
@@ -397,9 +411,9 @@ describe("getBlacklistHighlights path redaction regression", () => {
     expect(highlights.some((h) => h.includes("[BLACKLIST: cd]"))).toBe(true);
   });
 
-  it("still fires 'cat' on 'cat test-harness/file.txt' (path-sensitive pattern)", () => {
+  it("does NOT fire 'cat' on 'cat test-harness/file.txt'", () => {
     const highlights = getBlacklistHighlights("Bash", { command: "cat test-harness/file.txt" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: cat]"))).toBe(true);
+    expect(highlights.some((h) => h.includes("[BLACKLIST: cat]"))).toBe(false);
   });
 
   it("still fires 'echo redirect' on 'echo hi > test-harness/out.log'", () => {
@@ -522,10 +536,9 @@ describe("getContentBlacklistHighlights path redaction", () => {
     expect(highlights[0].rendered).toContain("[VIOLATION: node]");
   });
 
-  it("still fires tail pattern on a real `tail -n 20 server.log` invocation in plan prose", () => {
+  it("does NOT fire tail pattern on a real `tail -n 20 server.log` invocation in plan prose", () => {
     const highlights = getContentBlacklistHighlights("Run tail -n 20 server.log to inspect the trailing lines.");
-    expect(highlights.length).toBeGreaterThan(0);
-    expect(highlights[0].rendered).toContain("[VIOLATION: tail]");
+    expect(highlights).toEqual([]);
   });
 
   it("still fires tsc pattern on a real `npx tsc` invocation in plan prose", () => {
