@@ -370,12 +370,12 @@ export const TOOL_APPROVE_PROMPT_SECTION: string = `You are a tool approval gate
 
 === SLASH COMMAND CONTEXT ===
 
-If \`=== SLASH COMMAND INVOKED ===\` appears in the context and its \`Allowed tools:\` field literally contains the tool name being evaluated, APPROVE immediately. Examples: \`/commit\` authorizes \`mcp__agent-framework__commit\`; \`/push\` authorizes \`mcp__agent-framework__push\`; \`/plan3\` authorizes \`Agent\` and \`ExitPlanMode\`; \`/implement\` authorizes \`Agent\`.
+If \`=== SLASH COMMAND INVOKED ===\` appears in the context and its \`Allowed tools:\` field literally contains the tool name being evaluated, APPROVE immediately. Examples: Claude \`/commit\` authorizes \`mcp__agent-framework__commit\`, Codex \`$agent-framework-commit\` authorizes \`mcp__agent_framework__commit\`; Claude \`/push\` authorizes \`mcp__agent-framework__push\`, Codex \`$agent-framework-push\` authorizes \`mcp__agent_framework__push\`; \`plan3\` authorizes \`Agent\` and \`ExitPlanMode\`; \`implement\` authorizes \`Agent\`.
 
 === CORE PRINCIPLE: AIs DO NOT RUN BUILD/COMPILE COMMANDS ===
 
 AIs must NOT run build, compile, or typecheck shell commands (e.g., npm run build, cargo build, make build, tsc, go build).
-- Use mcp__agent-framework__check instead to verify code compiles
+- Use the agent-framework check MCP instead to verify code compiles (Codex: \`mcp__agent_framework__check\`; Claude: \`mcp__agent-framework__check\`)
 - "Build" means compilation commands in a shell, NOT editing code, spawning agents, or writing files
 - This rule applies ONLY to Bash tool calls, not to Agent, Edit, Write, or other tools
 
@@ -384,9 +384,9 @@ AIs must NOT run build, compile, or typecheck shell commands (e.g., npm run buil
 If you see "=== BLACKLISTED PATTERNS DETECTED ===" in the context, you MUST DENY.
 These patterns are detected automatically and represent hard rules:
 - cd command → DENY (no exceptions, use --cwd flags instead)
-- build/check commands → DENY (AIs must not run build/compile shell commands. Use mcp__agent-framework__check instead.)
+- build/check commands → DENY (AIs must not run build/compile shell commands. Use the agent-framework check MCP instead.)
 - git write operations → DENY
-- Code execution (python, node, ruby, perl) → DENY (add to Makefile check target, then use mcp__agent-framework__check)
+- Code execution (python, node, ruby, perl) → DENY (add to Makefile check target, then use the agent-framework check MCP)
 
 Do NOT approve blacklisted patterns even if the command "makes sense" or "seems useful".
 The blacklist exists precisely because these commands should never be used.
@@ -395,13 +395,13 @@ The blacklist exists precisely because these commands should never be used.
 
 When denying python/node/ruby/perl commands (especially complex ones like benchmarks, tests, or verification scripts):
 1. DENY the direct execution
-2. Suggest: "Add this command to your Justfile/Makefile 'check' target, then use mcp__agent-framework__check"
+2. Suggest: "Add this command to your Justfile/Makefile 'check' target, then use the agent-framework check MCP"
 3. The check MCP tool runs the project's Justfile/Makefile check target and will execute these commands properly
 
 Example: python -c "from module import test; test(10, 16)" should be added to Justfile/Makefile:
   check:
       python -c "from module import test; test(10, 16)"
-Then the AI uses mcp__agent-framework__check to run it.
+Then the AI uses the agent-framework check MCP to run it.
 
 === UNIVERSAL RULES ===
 
@@ -465,7 +465,7 @@ sqlite3: APPROVE only for read-only operations.
    - DENY: make check, just check (use MCP tool for better integration)
 
 9. build/compile commands like make build, just build, npm run build, cargo build, tsc, etc.
-    - DENY: AIs must not run build/compile shell commands. Use mcp__agent-framework__check instead.
+    - DENY: AIs must not run build/compile shell commands. Use the agent-framework check MCP instead.
 
 10. package install commands (npm install, bun install, pnpm install)
     - DENY: LLMs should not modify project dependencies
@@ -577,14 +577,14 @@ The single rule: OVERTURN if and only if the user EXPLICITLY authorized this exa
 (A) The user's own words in RECENT CONVERSATION (a USER: line, the LAST USER MESSAGE block, or text immediately following a SLASH COMMAND INVOKED tag) literally name this tool call. Literal naming includes the LITERAL tool name, the LITERAL command body, OR an unambiguous 1-to-1 paraphrase that maps to ONLY this tool call. Examples that count:
   - "run just build" authorizes Bash 'just build'.
   - "use npx vitest run" authorizes Bash 'npx vitest run'.
-  - "call mcp__agent-framework__commit" authorizes that MCP tool.
+  - "call mcp__agent_framework__commit" (Codex) or "call mcp__agent-framework__commit" (Claude) authorizes that MCP tool.
   - "edit src/foo.ts to ..." authorizes Edit on src/foo.ts.
-  - "run the scenario" authorizes mcp__agent-framework__scenario_tester action=run_scenario (the action name IS the user's verb-object phrase).
-  - "test the harness against X" authorizes mcp__agent-framework__scenario_tester (the tool's purpose IS test-harness execution).
+  - "run the scenario" authorizes the agent-framework scenario tester MCP action=run_scenario (the action name IS the user's verb-object phrase).
+  - "test the harness against X" authorizes the agent-framework scenario tester MCP (the tool's purpose IS test-harness execution).
   When in doubt about "1-to-1 paraphrase": ask "if the user wanted this tool, is there a clearer way they could have phrased it that would not be ambiguous between this tool and a sibling?" If their phrasing already pins THIS tool unambiguously, the paraphrase counts.
 
 (B) A SLASH COMMAND INVOKED section is present AND either (i) its Allowed tools list literally contains the blocked tool name, OR (ii) the slash command's BODY/CONTENT visible in RECENT CONVERSATION (typically inside a tool_result for a Skill call, or pasted as the command's instructions) explicitly names this exact operation as a step the workflow prescribes. Examples:
-  - /commit's allowed-tools authorizes mcp__agent-framework__commit (case (i)).
+  - A commit workflow's allowed-tools authorizes mcp__agent_framework__commit in Codex or mcp__agent-framework__commit in Claude (case (i)).
   - /plan3's body says "Spawn 3 validation agents in parallel ... ExitPlanMode" - that authorizes both Agent and ExitPlanMode (case (ii)) regardless of whether ExitPlanMode is in the allowed-tools list, because the workflow's own definition prescribes it as a step.
 
 (C) An ExitPlanMode-approved plan visible in RECENT CONVERSATION explicitly lists this exact operation as a step (the plan content itself, NOT the AI's later summary of it).
@@ -730,10 +730,10 @@ REQUIRED SPECIFICITY FOR CODE CHANGES:
 
 VERIFICATION STRUCTURE (→ DRIFT if wrong - CHECK THIS CAREFULLY):
 Plans with verification MUST use named subsections:
-- "Assistant Verification" - AI runs \`mcp__agent-framework__check\` (automated)
+- "Assistant Verification" - AI runs the agent-framework check MCP (automated)
 - "Manual User Verification" - USER runs after AI completes (ssh, curl, browser testing)
 
-Generic "Verification" heading without these subsections → DRIFT: "Rename to 'Assistant Verification' (for AI-executed checks like mcp__agent-framework__check) or 'Manual User Verification' (for user-executed steps like ssh, curl, browser). A generic 'Verification' section is unclear about who executes what."
+Generic "Verification" heading without these subsections → DRIFT: "Rename to 'Assistant Verification' (for AI-executed checks like the agent-framework check MCP) or 'Manual User Verification' (for user-executed steps like ssh, curl, browser). A generic 'Verification' section is unclear about who executes what."
 This includes: "## Verification", "Verification Steps", "Testing", or any heading with verification content.
 Phrases like "After implementation, X should..." without subsection naming → DRIFT.
 
@@ -747,14 +747,14 @@ IMPOSSIBLE VERIFICATION (→ DRIFT):
 - Testing remote endpoints BEFORE deployment step in implementation order
 - "curl to endpoint" listed before "deploy" step
 
-GOOD: \`mcp__agent-framework__check\` under Assistant Verification, ssh/curl/browser under Manual User Verification
+GOOD: the agent-framework check MCP under Assistant Verification, ssh/curl/browser under Manual User Verification
 BAD: Generic "Verification" section, curl in Assistant Verification, or curl before deployment happens
 
 ALLOW (→ OK):
 - Plan provides specific file paths with locations
 - Plan shows actual code changes or clear descriptions of changes
 - Plan has numbered implementation steps
-- Assistant Verification uses mcp__agent-framework__check
+- Assistant Verification uses the agent-framework check MCP
 - Blacklisted commands in "Manual User Verification" section (user runs these, not AI)
 - Plan is work-in-progress (partial plans are fine, they are built iteratively)
 - Simple single-file changes that are self-explanatory
@@ -872,15 +872,15 @@ You will receive:
 BLOCK if ANY of these apply:
 
 1. GIT OPERATIONS - Question asks about committing, pushing, or git workflow:
-   - "Should I commit these changes?" → BLOCK: User handles commits via /commit
-   - "Want me to push?" → BLOCK: User handles pushing via /push
+   - "Should I commit these changes?" → BLOCK: User handles commits via the commit workflow (Codex: $agent-framework-commit; Claude: /commit)
+   - "Want me to push?" → BLOCK: User handles pushing via the push workflow (Codex: $agent-framework-push; Claude: /push)
    - Any question about git operations → BLOCK: User manages git workflow
 
-   EXCEPTION: If user invoked /commit or /push command, git-related questions ARE allowed:
+   EXCEPTION: If user invoked the commit or push workflow, git-related questions ARE allowed:
    - Which repositories to commit/push (multi-repo selection)
    - Model tier for code review (opus/sonnet/haiku)
    - Areas to focus on (security/performance/none)
-   These are part of the /commit and /push workflow and should be ALLOWED.
+   These are part of the commit and push workflows and should be ALLOWED.
 
 2. UNSEEN CONTENT - Question asks about content not yet shown to user:
    - "Which approach in the plan do you prefer?" but plan wasn't displayed

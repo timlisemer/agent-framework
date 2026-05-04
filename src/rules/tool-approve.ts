@@ -80,7 +80,7 @@ export const toolApproveRule: PreToolRule = {
       !ctx.slashCommandAllowedTools?.includes(ctx.toolName)
     ) {
       return {
-        fastDeny: `${ctx.toolName} requires explicit workflow authorization (/commit, /push, /confirm, /quickpush, or the matching Codex agent-framework skill).`,
+        fastDeny: `${ctx.toolName} requires explicit workflow authorization (Claude: /commit, /push, /confirm, /quickpush; Codex: $agent-framework-commit, $agent-framework-push, $agent-framework-confirm, $agent-framework-quickpush).`,
       };
     }
 
@@ -116,7 +116,7 @@ export const toolApproveRule: PreToolRule = {
   async onDenialConfirmed(ctx: RuleContext, _reason: string): Promise<void> {
     // Track workaround patterns for escalation. The force-check-required rule
     // (priority 32) consumes state.forceCheckPending to deny all subsequent
-    // tools except mcp__agent-framework__check / ToolSearch.
+    // tools except the agent-framework check MCP / ToolSearch.
     if (ctx.toolName !== "Bash") return;
     const command = (ctx.toolInput as { command?: string }).command ?? "";
     const classification = classifyBashCommand(command, ctx.projectDir);

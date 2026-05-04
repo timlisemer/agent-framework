@@ -12,10 +12,13 @@ configuration.
 `dotcodex/hooks.json` is intended to be symlinked into `~/.codex/hooks.json`.
 Do not create these symlinks manually in normal deployments.
 
-`dotcodex/skills/agent-framework-*` contains Codex-native skill equivalents
-for the Claude slash-command workflows (`/check`, `/commit`, `/confirm`,
-`/push`, `/quickpush`, `/transcript`, `/plan1`, `/plan3`, `/plan5`, and
-`/implement`). The NixOS activation script creates real directories under
+`dotcodex/skills/agent-framework-*` contains Codex-native skills
+(`$agent-framework-check`, `$agent-framework-commit`,
+`$agent-framework-confirm`, `$agent-framework-push`,
+`$agent-framework-quickpush`, `$agent-framework-transcript`,
+`$agent-framework-plan1`, `$agent-framework-plan3`,
+`$agent-framework-plan5`, and `$agent-framework-implement`). These mirror
+the Claude slash-command workflows. The NixOS activation script creates real directories under
 `~/.codex/skills/` and copies each `SKILL.md` into place. Do not symlink these
 skill directories: Codex skill discovery does not follow symlinked skill
 directories reliably. Existing user and system skills remain intact.

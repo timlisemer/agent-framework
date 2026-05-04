@@ -117,7 +117,7 @@ export function getCheckTargetContext(workingDir: string): CheckTargetContext {
 // Message resolution
 // ---------------------------------------------------------------------------
 
-const ACTION = "You must run mcp__agent-framework__check";
+const ACTION = "You must run the agent-framework check MCP (Codex: mcp__agent_framework__check; Claude: mcp__agent-framework__check)";
 
 /**
  * Produce a context-aware error message for a blocked command.

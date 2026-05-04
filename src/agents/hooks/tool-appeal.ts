@@ -68,8 +68,8 @@ import type { AppealUserState } from "../../rules/types.js";
 // The literal "ACTION" suffix appended by resolveCheckMessage
 // (src/utils/check-target-context.ts:120) and used by the static `alternative`
 // strings in src/utils/command-patterns.ts:45-93. Used to detect denials that
-// steer the AI toward the sanctioned mcp__agent-framework__check tool.
-const CHECK_REDIRECT_FINGERPRINT = /You must run mcp__agent-framework__check/i;
+// steer the AI toward the sanctioned agent-framework check MCP tool.
+const CHECK_REDIRECT_FINGERPRINT = /You must run (?:the agent-framework check MCP|mcp__agent[-_]framework__check)/i;
 
 function renderUserStateSection(userState: AppealUserState): string {
   const explicitlyBlockedStr =
@@ -152,7 +152,7 @@ Allowed tools: ${allowedToolsStr}
     const tokenLine = deniedToken
       ? `Denied-command token: ${deniedToken}\nIMPORTANT: the tool call now under appeal IS the denied command — not an alternative TO it. Rule 3's "Used node/python/other language instead of the denied command" does NOT apply here. Rule 2's "Inline string testing" and "Command output capture" carve-outs do NOT apply here.\n`
       : "";
-    denialClassSection = `\n=== DENIAL CLASS ===\ncheck-redirect: this denial steers from a raw build/test/typecheck/lint/runtime command toward the sanctioned mcp__agent-framework__check tool. The user's underlying intent is fulfilled by the alternative tool — not by the raw command.\n${tokenLine}=== END DENIAL CLASS ===\n`;
+    denialClassSection = `\n=== DENIAL CLASS ===\ncheck-redirect: this denial steers from a raw build/test/typecheck/lint/runtime command toward the sanctioned agent-framework check MCP tool (Codex: mcp__agent_framework__check; Claude: mcp__agent-framework__check). The user's underlying intent is fulfilled by the alternative tool — not by the raw command.\n${tokenLine}=== END DENIAL CLASS ===\n`;
   }
 
   const userStateSection = renderUserStateSection(userState);

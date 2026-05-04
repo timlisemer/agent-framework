@@ -32,7 +32,7 @@ describe("forceCheckRequiredRule", () => {
   it("denies unrelated tools while check is pending", async () => {
     const result = await forceCheckRequiredRule.check(makeCtx("Bash"));
     expect(result).toEqual({
-      fastDeny: "Workaround Bash command was denied earlier. You must run mcp__agent-framework__check before any other tool.",
+      fastDeny: "Workaround Bash command was denied earlier. You must run the agent-framework check MCP before any other tool (Codex: mcp__agent_framework__check; Claude: mcp__agent-framework__check).",
     });
   });
 

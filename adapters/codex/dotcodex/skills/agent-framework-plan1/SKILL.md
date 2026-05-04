@@ -1,6 +1,6 @@
 ---
 name: agent-framework-plan1
-description: Spawn one Codex planning agent, consolidate its plan, then spawn one validation agent and present a final proposed plan. Use when the user invokes the agent-framework plan1 workflow or asks for the old /plan1 command equivalent.
+description: Spawn one Codex planning agent, consolidate its plan, then spawn one validation agent and present a final proposed plan. Use when the user invokes $agent-framework-plan1.
 ---
 
 # Agent Framework Plan1
@@ -13,4 +13,3 @@ Use the user's invoking prompt as the task description. Subagents do not share t
 4. Spawn exactly one `default` validation agent with the same model and reasoning effort. Tell it to inspect the current code and validate the draft plan for incorrect assumptions, missing changes, edge cases, regressions, and insufficient implementation detail.
 5. Wait for the validation agent to finish and apply valid corrections.
 6. Present the final plan in a single `<proposed_plan>` block. Include summary, key changes, tests, and assumptions.
-

@@ -1,6 +1,6 @@
 ---
 name: agent-framework-plan3
-description: Spawn three Codex planning agents in parallel, consolidate, then spawn three validation agents and present a final proposed plan. Use when the user invokes the agent-framework plan3 workflow or asks for the old /plan3 command equivalent.
+description: Spawn three Codex planning agents in parallel, consolidate, then spawn three validation agents and present a final proposed plan. Use when the user invokes $agent-framework-plan3.
 ---
 
 # Agent Framework Plan3
@@ -13,4 +13,3 @@ Use the user's invoking prompt as the task description. Subagents do not share t
 4. Spawn exactly three `default` validation agents in one parallel batch with the same model and reasoning effort. Tell each to inspect the code and validate the consolidated plan for incorrect assumptions, missing changes, edge cases, regressions, and insufficient implementation detail.
 5. Wait for all three validators. Fix issues reported by multiple validators and apply single-validator issues when correct on the merits.
 6. Present the final plan in a single `<proposed_plan>` block. Include summary, key changes, tests, and assumptions.
-

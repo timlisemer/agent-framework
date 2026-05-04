@@ -67,8 +67,21 @@ export function codexSkillNameToCommandName(skillName: string): string | undefin
 
 export function extractCodexSkillCommandName(content: string): string | undefined {
   const skillMatch = content.match(/(?:^|\s)\$agent-framework-([\w-]+)\b/);
-  if (!skillMatch) return undefined;
-  return codexSkillNameToCommandName(`${CODEX_AGENT_FRAMEWORK_SKILL_PREFIX}${skillMatch[1]}`);
+  if (skillMatch) {
+    return codexSkillNameToCommandName(`${CODEX_AGENT_FRAMEWORK_SKILL_PREFIX}${skillMatch[1]}`);
+  }
+
+  const skillTagMatch = content.match(/<name>\s*(agent-framework-[\w-]+)\s*<\/name>/);
+  if (skillTagMatch) {
+    return codexSkillNameToCommandName(skillTagMatch[1]);
+  }
+
+  const skillFrontmatterMatch = content.match(/^name:\s*(agent-framework-[\w-]+)\b/m);
+  if (skillFrontmatterMatch) {
+    return codexSkillNameToCommandName(skillFrontmatterMatch[1]);
+  }
+
+  return undefined;
 }
 
 export function commandNameToWorkflowInvocation(commandName: string): SlashCommandWorkflowInvocation | null {

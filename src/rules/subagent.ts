@@ -31,8 +31,8 @@ export const subagentRule: PreToolRule = {
 
     // Mirror the four deterministic checks from the old checkToolApproval
     // skipLlmOnClean path. Skipping any of these would allow subagent calls
-    // to Edit-in-plan-mode or to restricted MCP tools like
-    // mcp__agent-framework__commit to slip through silently.
+    // to Edit-in-plan-mode or to restricted MCP tools like the
+    // agent-framework commit MCP to slip through silently.
     if (ctx.planModeCtx.contextString) {
       const input = ctx.toolInput as Record<string, unknown>;
       const filePath = (input?.file_path as string) ?? (input?.path as string) ?? "";
@@ -53,7 +53,7 @@ export const subagentRule: PreToolRule = {
       !ctx.slashCommandAllowedTools?.includes(ctx.toolName)
     ) {
       return {
-        fastDeny: `${ctx.toolName} requires explicit workflow authorization (/commit, /push, /confirm, /quickpush, or the matching Codex agent-framework skill).`,
+        fastDeny: `${ctx.toolName} requires explicit workflow authorization (Claude: /commit, /push, /confirm, /quickpush; Codex: $agent-framework-commit, $agent-framework-push, $agent-framework-confirm, $agent-framework-quickpush).`,
       };
     }
 

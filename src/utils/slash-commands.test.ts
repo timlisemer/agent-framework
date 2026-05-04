@@ -30,9 +30,15 @@ describe("extractCodexSkillCommandName", () => {
     expect(extractCodexSkillCommandName("please $agent-framework-quickpush now")).toBe("quickpush");
   });
 
+  it("maps Codex skill context blocks to command names", () => {
+    expect(extractCodexSkillCommandName("<skill>\n<name>agent-framework-quickpush</name>\n</skill>")).toBe("quickpush");
+    expect(extractCodexSkillCommandName("---\nname: agent-framework-confirm\ndescription: Confirm\n---")).toBe("confirm");
+  });
+
   it("ignores non-agent-framework skills and unknown command suffixes", () => {
     expect(extractCodexSkillCommandName("$skill-creator")).toBeUndefined();
     expect(extractCodexSkillCommandName("$agent-framework-unknown")).toBeUndefined();
+    expect(extractCodexSkillCommandName("<skill><name>agent-framework-unknown</name></skill>")).toBeUndefined();
   });
 });
 
@@ -96,6 +102,19 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
     await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual([
       "mcp__agent-framework__confirm",
       "mcp__agent_framework__confirm",
+    ]);
+  });
+
+  it("resolves Codex agent-framework skill context blocks", async () => {
+    const transcript = await writeTranscript([
+      userEntry("<skill>\n<name>agent-framework-quickpush</name>\n</skill>"),
+    ]);
+
+    await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual([
+      "mcp__agent-framework__push",
+      "mcp__agent-framework__commit",
+      "mcp__agent_framework__push",
+      "mcp__agent_framework__commit",
     ]);
   });
 

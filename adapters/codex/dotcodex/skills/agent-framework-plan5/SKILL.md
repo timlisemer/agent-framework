@@ -1,6 +1,6 @@
 ---
 name: agent-framework-plan5
-description: Spawn five Codex planning agents, including one xhigh-reasoning alternative thinker, then five validation agents and present a final proposed plan. Use when the user invokes the agent-framework plan5 workflow or asks for the old /plan5 command equivalent.
+description: Spawn five Codex planning agents, including one xhigh-reasoning alternative thinker, then five validation agents and present a final proposed plan. Use when the user invokes $agent-framework-plan5.
 ---
 
 # Agent Framework Plan5
@@ -17,4 +17,3 @@ Use the user's invoking prompt as the task description. Subagents do not share t
 8. Tell the fifth validator to understand the plan, then propose a completely different approach if it would be better, with honest tradeoffs.
 9. Wait for all validators. Apply valid corrections, and replace or adjust the plan if the alternative approach is genuinely better.
 10. Present the final plan in a single `<proposed_plan>` block. Include summary, key changes, tests, and assumptions.
-

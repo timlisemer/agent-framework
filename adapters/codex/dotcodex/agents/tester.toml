@@ -24,9 +24,8 @@ Hard constraints:
 - Do not call build commands; the harness builds automatically.
 - Minimize harness runs; each costs money.
 - Process one transcript per invocation.
-- Use mcp__agent-framework__scenario_tester for harness operations.
+- Use mcp__agent_framework__scenario_tester for harness operations.
 - If run_test returns a build failure, stop and report the error.
 - Fix root causes. Do not silence warnings, suppress errors, weaken assertions, or change test/label expectations to hide failures.
 - Do not add backwards-compatibility shims, deprecated re-exports, or legacy fallbacks.
 """
-

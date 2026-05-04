@@ -1,6 +1,6 @@
 ---
 name: agent-framework-implement
-description: Implement an approved plan with a Codex implementer agent, then validate the result with an implementation validator agent. Use when the user invokes the agent-framework implement workflow or asks for the old /implement command equivalent.
+description: Implement an approved plan with a Codex implementer agent, then validate the result with an implementation validator agent. Use when the user invokes $agent-framework-implement.
 ---
 
 # Agent Framework Implement

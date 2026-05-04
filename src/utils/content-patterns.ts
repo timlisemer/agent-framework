@@ -130,7 +130,7 @@ export function getPlanClearingHighlights(content: string): string[] {
  * Returns highlighted violations for injection into agent prompts.
  *
  * Plans with verification content MUST use named subsections:
- * - "Assistant Verification" for AI-executed checks (mcp__agent-framework__check)
+ * - "Assistant Verification" for AI-executed checks (the agent-framework check MCP)
  * - "Manual User Verification" for user-executed steps (ssh, curl, browser)
  * Having only one subsection is fine; having neither is a violation.
  */
@@ -143,7 +143,7 @@ export function getVerificationStructureHighlights(content: string): string[] {
 
   if (!hasAssistant && !hasManual) {
     return [
-      `[VIOLATION: generic verification] "${headingMatch[0].trim()}" → Split into "## Assistant Verification" (for mcp__agent-framework__check) and/or "## Manual User Verification" (for user-executed steps like ssh, curl, browser)`,
+      `[VIOLATION: generic verification] "${headingMatch[0].trim()}" → Split into "## Assistant Verification" (for the agent-framework check MCP) and/or "## Manual User Verification" (for user-executed steps like ssh, curl, browser)`,
     ];
   }
 

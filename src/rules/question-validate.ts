@@ -18,15 +18,15 @@ You will receive:
 BLOCK if ANY of these apply:
 
 1. GIT OPERATIONS - Question asks about committing, pushing, or git workflow:
-   - "Should I commit these changes?" → BLOCK: User handles commits via /commit
-   - "Want me to push?" → BLOCK: User handles pushing via /push
+   - "Should I commit these changes?" → BLOCK: User handles commits via the commit workflow (Codex: $agent-framework-commit; Claude: /commit)
+   - "Want me to push?" → BLOCK: User handles pushing via the push workflow (Codex: $agent-framework-push; Claude: /push)
    - Any question about git operations → BLOCK: User manages git workflow
 
-   EXCEPTION: If user invoked /commit or /push command, git-related questions ARE allowed:
+   EXCEPTION: If user invoked the commit or push workflow, git-related questions ARE allowed:
    - Which repositories to commit/push (multi-repo selection)
    - Model tier for code review (opus/sonnet/haiku)
    - Areas to focus on (security/performance/none)
-   These are part of the /commit and /push workflow and should be ALLOWED.
+   These are part of the commit and push workflows and should be ALLOWED.
 
 2. UNSEEN CONTENT - Question asks about content not yet shown to user:
    - "Which approach in the plan do you prefer?" but plan wasn't displayed

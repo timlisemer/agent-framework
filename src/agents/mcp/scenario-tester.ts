@@ -800,7 +800,7 @@ Step 3 -- Call run_scenario with the inline \`scenario\` object. The first
   report-scenario.json for pass/fail.
 
 Step 4 -- Iterate. If the hook decides wrong, fix the rule, rebuild
-  (via mcp__agent-framework__check), re-run the same scenario by name
+  (via the agent-framework check MCP), re-run the same scenario by name
   (no inline blob) to confirm the fix. Iteration is free -- run_scenario
   has no LLM cost and no run-limit.
 

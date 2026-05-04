@@ -29,7 +29,7 @@ export const forceCheckRequiredRule: PreToolRule = {
     if (allowed.has(ctx.toolName)) return null;
     return {
       fastDeny:
-        "Workaround Bash command was denied earlier. You must run mcp__agent-framework__check before any other tool.",
+        "Workaround Bash command was denied earlier. You must run the agent-framework check MCP before any other tool (Codex: mcp__agent_framework__check; Claude: mcp__agent-framework__check).",
     };
   },
 };

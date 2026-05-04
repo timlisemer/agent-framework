@@ -56,7 +56,7 @@ export interface SessionState {
   currentPrediction: ToolPrediction | null;
   /**
    * Set true by tool-approve.onDenialConfirmed when a workaround Bash command is
-   * denied. Cleared when mcp__agent-framework__check (or any commit/push/confirm)
+   * denied. Cleared when the agent-framework check MCP (or any commit/push/confirm)
    * is allowed. While true, the force-check-required rule denies all tools
    * except check / ToolSearch.
    */

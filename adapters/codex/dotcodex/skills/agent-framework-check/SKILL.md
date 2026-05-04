@@ -1,6 +1,6 @@
 ---
 name: agent-framework-check
-description: Run the agent-framework check MCP tool and report summarized lint/type-check results. Use when the user invokes the agent-framework check workflow or asks for the old /check command equivalent.
+description: Run the agent-framework check MCP tool and report summarized lint/type-check results. Use when the user invokes $agent-framework-check.
 ---
 
 # Agent Framework Check

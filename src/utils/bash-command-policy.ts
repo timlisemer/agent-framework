@@ -8,6 +8,8 @@
  */
 
 import { resolveCheckMessage } from "./check-target-context.js";
+
+const CHECK_MCP_ACTION = "You must run the agent-framework check MCP (Codex: mcp__agent_framework__check; Claude: mcp__agent-framework__check)";
 import { redactPathTokens } from "./path-redaction.js";
 
 export interface BlacklistPattern {
@@ -61,21 +63,21 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // Git write operations. Keep this list explicit: read-only commands like
   // `git status`, `git diff`, `git log`, and `git show` must remain usable
   // for inspection.
-  { pattern: /\bgit\s+(commit|push|add)\b/, name: 'git write op (MCP)', alternative: 'Use MCP tools: /commit, /push, or /quickpush' },
+  { pattern: /\bgit\s+(commit|push|add)\b/, name: 'git write op (MCP)', alternative: 'Use workflow tools (Codex: $agent-framework-commit, $agent-framework-push, or $agent-framework-quickpush; Claude: /commit, /push, or /quickpush)' },
   { pattern: /\bgit\s+(?:am|apply|bisect|checkout|cherry-pick|clean|clone|fetch|gc|merge|mv|pull|rebase|reflog|remote|reset|restore|revert|rm|stash|submodule|switch|tag|worktree)\b/, name: 'git write op', alternative: 'Git write operation denied' },
 
   // Build/check commands - LLMs should NOT build, only verify with check tool
-  { pattern: /\bmake\s+check\b/, name: "make check", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bjust\s+check\b/, name: "just check", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bmake\s+build\b/, name: "make build", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bjust\s+build\b/, name: "just build", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bnpm\s+run\s+build\b/, name: "npm build", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bnpm\s+run\s+(check|typecheck)\b/, name: "npm check/typecheck", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bbun\s+run\s+build\b/, name: "bun build", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bbun\s+run\s+(check|typecheck)\b/, name: "bun check/typecheck", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bcargo\s+build\b/, name: "cargo build", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\b(tsc|npx\s+tsc)\b/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?(?:npx\s+)?tsc\b|\bnpx\s+tsc\b|\btsc\s+(?:-[\w-]+|<PATH>))/, name: "tsc", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bmake\s+check\b/, name: "make check", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bjust\s+check\b/, name: "just check", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bmake\s+build\b/, name: "make build", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bjust\s+build\b/, name: "just build", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bnpm\s+run\s+build\b/, name: "npm build", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bnpm\s+run\s+(check|typecheck)\b/, name: "npm check/typecheck", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bbun\s+run\s+build\b/, name: "bun build", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bbun\s+run\s+(check|typecheck)\b/, name: "bun check/typecheck", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bcargo\s+build\b/, name: "cargo build", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\b(tsc|npx\s+tsc)\b/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?(?:npx\s+)?tsc\b|\bnpx\s+tsc\b|\btsc\s+(?:-[\w-]+|<PATH>))/, name: "tsc", alternative: CHECK_MCP_ACTION, redactPaths: true },
 
   // Package install commands - dependency-modifying, should not be run by AI
   { pattern: /\bnpm\s+install\b/, name: "npm install", alternative: "LLMs should not modify project dependencies", redactPaths: true },
@@ -83,9 +85,9 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bpnpm\s+install\b/, name: "pnpm install", alternative: "LLMs should not modify project dependencies", redactPaths: true },
 
   // Lint commands - should use check tool
-  { pattern: /\bnpm\s+run\s+lint\b/, name: "npm lint", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bbun\s+run\s+lint\b/, name: "bun lint", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bnpm\s+run\s+lint\b/, name: "npm lint", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bbun\s+run\s+lint\b/, name: "bun lint", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: CHECK_MCP_ACTION, redactPaths: true },
 
   // Test commands - tests may not exist, use check for build verification
   // bashOnly: dedicated runners are caught by their own bare names; bare-word
@@ -99,13 +101,13 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // canonical npm/yarn/pnpm/bun form (the repo's own package.json uses
   // `npm run test` via scripts.test) and mirrors the existing convention at
   // lines 50/52/63/64 (npm run check/typecheck, bun run check/typecheck, etc.)
-  { pattern: /\b(?:vitest|jest|mocha|pytest|ava|(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test|(?:npx|cargo)\s+test)\b/, name: "test command", alternative: "You must run mcp__agent-framework__check", bashOnly: true, redactPaths: true },
+  { pattern: /\b(?:vitest|jest|mocha|pytest|ava|(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test|(?:npx|cargo)\s+test)\b/, name: "test command", alternative: CHECK_MCP_ACTION, bashOnly: true, redactPaths: true },
 
   // Command chaining with cd - always deny
   { pattern: /\bcd\s+[^&]+&&/, name: 'cd && chain', alternative: 'Use --cwd flag or run from correct directory' },
 
   // Nix formatting - should use check tool
-  { pattern: /\balejandra\b/, name: "alejandra", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\balejandra\b/, name: "alejandra", alternative: CHECK_MCP_ACTION, redactPaths: true },
 
   // Nix evaluation - use batch evaluator instead of ad hoc shell evals
   { pattern: /\bnix\s+eval\b/, name: "nix eval", alternative: "Use nix-eval-jobs instead", redactPaths: true },
@@ -126,11 +128,11 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // indent / bullet / numbered-list marker), OR when the next token is a flag
   // or redacted <PATH> argument. Bare-prose use ("submenu node with ...") no
   // longer fires.
-  { pattern: /\bpython\s+(-c\s+)?/, name: "python", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bpython3\s+(-c\s+)?/, name: "python3", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bnode\s+(-e\s+)?/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?node\s+\S|\bnode\s+(?:-[\w-]+|<PATH>))/, name: "node", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bruby\s+(-e\s+)?/, name: "ruby", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
-  { pattern: /\bperl\s+(-e\s+)?/, name: "perl", alternative: "You must run mcp__agent-framework__check", redactPaths: true },
+  { pattern: /\bpython\s+(-c\s+)?/, name: "python", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bpython3\s+(-c\s+)?/, name: "python3", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bnode\s+(-e\s+)?/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?node\s+\S|\bnode\s+(?:-[\w-]+|<PATH>))/, name: "node", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bruby\s+(-e\s+)?/, name: "ruby", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bperl\s+(-e\s+)?/, name: "perl", alternative: CHECK_MCP_ACTION, redactPaths: true },
 ];
 
 /**
@@ -476,7 +478,7 @@ export function detectWorkaroundCommand(command: string): string | null {
 
 /**
  * Maps blacklist pattern names to equivalent commands to search for in check targets.
- * Only patterns that redirect to mcp__agent-framework__check need entries here.
+ * Only patterns that redirect to the agent-framework check MCP need entries here.
  * Used by getBlacklistHighlights to produce context-aware error messages.
  */
 export const CHECK_EQUIVALENTS: Record<string, string[]> = {
@@ -648,7 +650,7 @@ export function getBlacklistHighlights(toolName: string, toolInput: unknown, wor
     return [`[BLACKLIST: bash blocked] ${classification.alternative ?? classification.reason ?? "Bash command blocked"}`];
   }
   if (classification.riskClass === "high-risk-workaround") {
-    return [`[BLACKLIST: ${classification.workaroundCategory ?? "workaround"}] You must run mcp__agent-framework__check`];
+    return [`[BLACKLIST: ${classification.workaroundCategory ?? "workaround"}] ${CHECK_MCP_ACTION}`];
   }
   return [];
 }
