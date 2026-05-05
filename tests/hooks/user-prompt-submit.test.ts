@@ -68,18 +68,28 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
   });
 
   it("skips UserPromptSubmit rules for Codex agent-framework skill invocations", async () => {
-    await mainUserPromptSubmit(
-      {
-        session_id: "session-skill",
-        transcript_path: transcriptPath,
-        cwd: tempDir,
-        prompt: "$agent-framework-quickpush",
-      },
-      encoder,
-    );
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      await mainUserPromptSubmit(
+        {
+          session_id: "session-skill",
+          transcript_path: transcriptPath,
+          cwd: tempDir,
+          prompt: "$agent-framework-quickpush",
+        },
+        encoder,
+      );
 
-    expect(mockEvaluateRulesForUserPromptSubmit).not.toHaveBeenCalled();
-    expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "ok");
+      expect(mockEvaluateRulesForUserPromptSubmit).not.toHaveBeenCalled();
+      expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "ok");
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
   });
 
   it("still runs UserPromptSubmit rules for ordinary prompts", async () => {

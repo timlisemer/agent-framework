@@ -1,5 +1,4 @@
 import * as fs from "fs";
-import * as path from "path";
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { isTrustedPath, isSensitivePath } from "./utils.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
@@ -11,6 +10,7 @@ import {
   extractStylePreferences,
 } from "../utils/content-patterns.js";
 import { STYLE_DRIFT_PROMPT_SECTION } from "../utils/agent-configs.js";
+import { activeSpec } from "../adapter/spec.js";
 
 /**
  * Input shape for Edit tool
@@ -119,14 +119,22 @@ export const styleDriftRule: PreToolRule = {
     // Residual ambiguous case (semicolon / trailing-comma / mixed) → llmContext
     const hintSection = formatStyleHints(styleChanges);
 
-    // Load CLAUDE.md for style preferences
+    // Load active adapter's instruction files for style preferences
+    // (Claude: CLAUDE.md; Codex: AGENTS.md + CLAUDE.md).
+    const host = activeSpec().resolveHostContext({ cwd: ctx.projectDir });
     let stylePreferences = "";
-    const claudeMdPath = path.join(ctx.projectDir, "CLAUDE.md");
-    try {
-      const content = await fs.promises.readFile(claudeMdPath, "utf-8");
-      stylePreferences = extractStylePreferences(content);
-    } catch {
-      // File doesn't exist or read error — use defaults
+    for (const instructionPath of host.instructionFiles) {
+      try {
+        const content = await fs.promises.readFile(instructionPath, "utf-8");
+        const extracted = extractStylePreferences(content);
+        if (extracted) {
+          stylePreferences = stylePreferences
+            ? `${stylePreferences}\n${extracted}`
+            : extracted;
+        }
+      } catch {
+        // File doesn't exist or read error — try next
+      }
     }
 
     const transcriptResult = await readTranscriptExact(ctx.transcriptPath, STYLE_DRIFT_COUNTS);
@@ -144,7 +152,7 @@ export const styleDriftRule: PreToolRule = {
 
     const llmContext =
       `${hintSection}\n` +
-      `STYLE PREFERENCES (from CLAUDE.md):\n${stylePreferences || "Default: double quotes, follow existing file conventions"}\n\n` +
+      `STYLE PREFERENCES (from ${host.instructionLabel}):\n${stylePreferences || "Default: double quotes, follow existing file conventions"}\n\n` +
       `RECENT USER MESSAGES:\n${userMessages || "No user messages available"}\n\n` +
       `EDIT DETAILS:\nFile: ${file_path}\n\n` +
       `Old content:\n\`\`\`\n${truncatedOld}\n\`\`\`\n\n` +

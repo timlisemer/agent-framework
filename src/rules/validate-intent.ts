@@ -1,5 +1,6 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { runAgent, type AgentConfig } from "../utils/agent-runner.js";
+import { activeSpec } from "../adapter/spec.js";
 import { MODEL_TIERS } from "../types.js";
 import { getUncommittedChanges } from "../utils/git-utils.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
@@ -102,7 +103,7 @@ export const validateIntentRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.toolName !== "mcp__agent-framework__validate_intent") return null;
+    if (activeSpec().recognizeMcp(ctx.rawToolName ?? ctx.toolName) !== "validate_intent") return null;
 
     const tx = await readTranscriptExact(ctx.transcriptPath, VALIDATE_INTENT_COUNTS).catch(() => null);
     if (!tx || tx.user.length === 0) return null;

@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "name": "codex-apply-patch-canonicalizes-to-edit",
+  "description": "Codex apply_patch call after user authorized 'Edit' via explicitlyAllowedTools. The Codex canonicalizeToolCall converts apply_patch to 'Edit'. tool-approve must allow because the canonical tool name is Edit and the user explicitly authorized Edit. env.adapter=codex.",
+  "transcript": [
+    {
+      "role": "user",
+      "isMeta": false,
+      "content": "Please update the file now."
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "I will apply the patch to update the configuration file."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_codex_apply_patch_canonicalize",
+          "name": "apply_patch",
+          "input": {
+            "command": "*** Begin Patch\n*** Update File: /home/tim/Coding/public_repos/agent-framework/src/version.ts\n@@\n-export const VERSION = \"1.0.0\";\n+export const VERSION = \"1.0.1\";\n*** End Patch\n"
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "call_codex_apply_patch_canonicalize"
+  },
+  "env": {
+    "adapter": "codex",
+    "cwd": "/home/tim/Coding/public_repos/agent-framework",
+    "permission_mode": "default"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "User wants the AI to update the configuration file.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [
+        "Edit"
+      ],
+      "explicitlyBlockedSubstrings": [],
+      "blockAllTools": false,
+      "contextSwitch": "no",
+      "questionIsStalling": "n/a",
+      "userMessageSnippet": "Please update the file now."
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 4
+  },
+  "expect": {
+    "expected": "allow",
+    "notes": "The Codex canonicalizeToolCall converts apply_patch to 'Edit'. The prediction's explicitlyAllowedTools contains 'Edit'. The tool is allowed because the canonical name matches the authorized tool."
+  }
+}

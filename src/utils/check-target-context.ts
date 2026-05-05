@@ -117,7 +117,11 @@ export function getCheckTargetContext(workingDir: string): CheckTargetContext {
 // Message resolution
 // ---------------------------------------------------------------------------
 
-const ACTION = "You must run the agent-framework check MCP (Codex: mcp__agent_framework__check; Claude: mcp__agent-framework__check)";
+import { activeSpec } from "../adapter/spec.js";
+
+function getAction(): string {
+  return `You must run ${activeSpec().renderCheckMcpHint()}`;
+}
 
 /**
  * Produce a context-aware error message for a blocked command.
@@ -135,22 +139,24 @@ export function resolveCheckMessage(
 ): string {
   const ctx = getCheckTargetContext(workingDir);
 
+  const action = getAction();
+
   if (!ctx.runner) {
-    return `No Justfile/Makefile found. ${ACTION}`;
+    return `No Justfile/Makefile found. ${action}`;
   }
 
   const runnerCmd = ctx.runner === "just" ? "just check" : "make check";
 
   if (!ctx.hasCheckTarget) {
-    return `${ctx.runner === "just" ? "Justfile" : "Makefile"} found but no check target. ${ACTION}`;
+    return `${ctx.runner === "just" ? "Justfile" : "Makefile"} found but no check target. ${action}`;
   }
 
   const body = ctx.checkBody.toLowerCase();
   const matched = equivalents.find((eq) => body.includes(eq.toLowerCase()));
 
   if (!matched) {
-    return `${patternName} not covered by ${runnerCmd}. ${ACTION}`;
+    return `${patternName} not covered by ${runnerCmd}. ${action}`;
   }
 
-  return `${patternName} covered by ${runnerCmd} (via ${matched}). ${ACTION}`;
+  return `${patternName} covered by ${runnerCmd} (via ${matched}). ${action}`;
 }

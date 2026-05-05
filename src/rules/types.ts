@@ -8,7 +8,10 @@ export type HookEvent = "PreToolUse" | "UserPromptSubmit" | "Stop";
 export interface RuleContext {
   hookEvent?: HookEvent;
   // PreToolUse-only (defaults to "" for non-PreToolUse events)
+  /** Canonical tool name (after adapter canonicalization). */
   toolName: string;
+  /** Raw wire tool name as received from the adapter (pre-canonicalization). For telemetry. */
+  rawToolName?: string;
   toolInput?: unknown;
   toolUseId?: string;
   // UserPromptSubmit-only

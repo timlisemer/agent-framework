@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "name": "claude-slash-command-authorizes-mcp-commit",
+  "description": "Claude parity twin of codex-skill-invocation-authorizes-mcp-commit. User sends '<command-name>/commit</command-name>' which Claude recognizes as the 'commit' workflow. The assistant then calls mcp__agent-framework__commit. tool-approve must allow because the workflow authorization covers the canonical mcp-commit tool.",
+  "transcript": [
+    {
+      "role": "user",
+      "isMeta": false,
+      "content": "<command-name>/commit</command-name>"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Running the commit MCP tool."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_claude_mcp_commit_1",
+          "name": "mcp__agent-framework__commit",
+          "input": {
+            "skip_elicitation": true,
+            "auto_push": false
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "toolu_claude_mcp_commit_1"
+  },
+  "env": {
+    "cwd": "/home/tim/Coding/public_repos/agent-framework",
+    "permission_mode": "default"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "User invoked the /commit slash command",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "blockAllTools": false,
+      "contextSwitch": "no",
+      "questionIsStalling": "n/a",
+      "userMessageSnippet": "/commit"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
+  },
+  "expect": {
+    "expected": "allow",
+    "notes": "The Claude adapter recognizes '<command-name>/commit</command-name>' as the 'commit' canonical workflow. resolveActiveSlashCommandAllowedTools returns ['mcp-commit']. The Claude wire name mcp__agent-framework__commit canonicalizes to 'mcp-commit'. tool-approve allows because slashCommandAllowedTools includes 'mcp-commit'."
+  }
+}

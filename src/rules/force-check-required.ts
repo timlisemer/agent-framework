@@ -1,4 +1,5 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
+import { activeSpec } from "../adapter/spec.js";
 
 /**
  * Force-Check-Required Rule (priority 32)
@@ -21,15 +22,12 @@ export const forceCheckRequiredRule: PreToolRule = {
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     if (ctx.subagent) return null;
     if (!ctx.state.forceCheckPending) return null;
-    const allowed = new Set([
-      "mcp__agent-framework__check",
-      "mcp__agent_framework__check",
-      "ToolSearch",
-    ]);
-    if (allowed.has(ctx.toolName)) return null;
+    const spec = activeSpec();
+    const rawName = ctx.rawToolName ?? ctx.toolName;
+    if (spec.recognizeMcp(rawName) === "check" || ctx.toolName === "ToolSearch") return null;
     return {
       fastDeny:
-        "Workaround Bash command was denied earlier. You must run the agent-framework check MCP before any other tool (Codex: mcp__agent_framework__check; Claude: mcp__agent-framework__check).",
+        `Workaround Bash command was denied earlier. You must run ${spec.renderCheckMcpHint()} before any other tool.`,
     };
   },
 };

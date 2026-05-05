@@ -9,6 +9,7 @@
  */
 
 import type { Mood, ToolPrediction, Trust } from "../utils/prediction-types.js";
+import { registeredAdapterNames } from "../adapter/spec.js";
 
 /** Which hook a scenario targets. */
 export type HookEventName =
@@ -198,6 +199,13 @@ export interface ScenarioEnv {
   cwd?: string;
   /** Hook timeout in milliseconds. Defaults to 60000. */
   timeout_ms?: number;
+  /**
+   * Adapter name to use when materializing and running this scenario.
+   * Any registered adapter name (e.g. "claude", "codex"). Validated at
+   * runtime against SPECS in src/adapter/spec.ts. Defaults to the active
+   * adapter if omitted.
+   */
+  adapter?: string;
   /**
    * Per-agent LLM stub map: agent name (matching `telemetry.agent`) → exact
    * stubbed output text. Plumbed into the hook process via the
@@ -888,6 +896,17 @@ export function validateScenario(raw: unknown): Scenario {
     }
     if (env.timeout_ms !== undefined && typeof env.timeout_ms !== "number") {
       throw new Error("scenario.env.timeout_ms must be a number");
+    }
+    if (env.adapter !== undefined) {
+      if (typeof env.adapter !== "string") {
+        throw new Error("scenario.env.adapter must be a string when set");
+      }
+      const known = registeredAdapterNames();
+      if (!known.includes(env.adapter as string)) {
+        throw new Error(
+          `scenario.env.adapter "${env.adapter}" is not a registered adapter (known: ${known.join(", ")})`,
+        );
+      }
     }
     if (env.llm_stubs !== undefined) {
       validateLlmStubs(env.llm_stubs);

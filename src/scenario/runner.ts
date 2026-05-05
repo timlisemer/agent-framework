@@ -16,7 +16,6 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import * as crypto from "crypto";
 import { scenarioLastRunFile, scenarioPlansDir, scenarioRunDir } from "../utils/paths.js";
 import {
   type FanoutFireResult,
@@ -48,6 +47,8 @@ import { sessionStateDefaults, type SessionState } from "../utils/session-store.
 import type { ToolPrediction } from "../utils/prediction-types.js";
 import { scenarioDir } from "../agents/mcp/scenario-mcp-shared.js";
 import type { ScenarioSourceTag } from "../agents/mcp/scenario-mcp-shared.js";
+import { activeSpec } from "../adapter/spec.js";
+import type { ScenarioMaterializeCtx } from "../adapter/types.js";
 
 function getArg(name: string, required: boolean = false): string | undefined {
   const args = process.argv.slice(2);
@@ -127,13 +128,17 @@ interface BuildResult {
 /**
  * Build every jsonl line for the scenario (in-memory only — does NOT
  * write to disk). Used by both single-hook and fan-out paths so that
- * `materializeBlocks` id synthesis is stable across the two modes.
+ * tool_use id synthesis is stable across the two modes.
  *
  * In single-hook mode, honors `target.batch_visible_through` by capping
  * which sub-lines of the final `assistant_split` are included in
  * `allLines`. In fan-out mode, `allLines` contains every sub-line and
  * the fan-out runner writes progressively growing slices via
  * `writeTranscriptSlice`.
+ *
+ * Delegates wire-format emission to `activeSpec().materializeScenarioEntry()`.
+ * The active spec is determined by `scenario.env?.adapter` — caller must set
+ * `process.env.AGENT_FRAMEWORK_ADAPTER` before calling this function.
  */
 function buildAllTranscriptLines(
   scenario: Scenario,
@@ -143,143 +148,134 @@ function buildAllTranscriptLines(
   const allLines: string[] = [];
   let prevUuid: string | null = null;
   const baseTs = Date.now();
-  let toolUseCounter = 0;
   const finalToolUses: FinalToolUse[] = [];
   const finalSplitSubLines: FinalSplitSubLineInfo[] = [];
   const finalIndex = scenario.transcript.length - 1;
   let finalSplitStart = -1;
 
-  const nextToolUseId = () => {
-    toolUseCounter += 1;
-    return `toolu_scenario_${toolUseCounter}`;
-  };
-
-  const emitAssistantLine = (
-    blocks: ScenarioBlock[],
-    msgId: string,
-    entryIndex: number,
-    lineOffset: number,
-  ): void => {
-    materializeBlocks(blocks, nextToolUseId);
-    const hasToolUse = blocks.some((b) => b.type === "tool_use");
-    const uuid = crypto.randomUUID();
-    const timestamp = new Date(
-      baseTs + entryIndex * 100 + lineOffset * 10,
-    ).toISOString();
-    const message: Record<string, unknown> = {
-      id: msgId,
-      model: "claude-opus-4-6",
-      role: "assistant",
-      content: blocks,
-      stop_reason: hasToolUse ? "tool_use" : "end_turn",
-      stop_sequence: null,
-      usage: { input_tokens: 1, output_tokens: 1 },
-    };
-    const line: Record<string, unknown> = {
-      parentUuid: prevUuid,
-      isSidechain: false,
-      userType: "external",
-      cwd: ctx.cwd,
-      sessionId: ctx.sessionId,
-      version: "0.0.0",
-      type: "assistant",
-      message,
-      uuid,
-      timestamp,
-      permissionMode,
-    };
-    prevUuid = uuid;
-    allLines.push(JSON.stringify(line));
-  };
-
+  const spec = activeSpec();
   const fanout = scenario.target.fanout === true;
 
   for (let i = 0; i < scenario.transcript.length; i++) {
     const entry = scenario.transcript[i];
     const isFinal = i === finalIndex;
-    if (entry.role === "user") {
-      const content =
-        typeof entry.content === "string"
-          ? entry.content
-          : materializeBlocks(entry.content, nextToolUseId);
-      const uuid = crypto.randomUUID();
-      const timestamp = new Date(baseTs + i * 100).toISOString();
-      const line: Record<string, unknown> = {
-        parentUuid: prevUuid,
-        isSidechain: false,
-        userType: "external",
-        cwd: ctx.cwd,
-        sessionId: ctx.sessionId,
-        version: "0.0.0",
-        type: "user",
-        message: { role: "user", content },
-        uuid,
-        timestamp,
-        permissionMode,
-      };
-      if (entry.isMeta === true) line.isMeta = true;
-      prevUuid = uuid;
-      allLines.push(JSON.stringify(line));
-    } else if (entry.role === "assistant") {
-      emitAssistantLine(entry.content, `msg_scenario_${i}`, i, 0);
-      if (isFinal) {
-        for (const b of entry.content) {
-          if (b.type === "tool_use") {
-            finalToolUses.push({
-              id: (b as { id: string }).id,
-              name: b.name,
-              input: b.input,
-            });
-          }
-        }
-      }
-    } else {
-      // assistant_split
-      if (isFinal) {
-        finalSplitStart = allLines.length;
-      }
+
+    if (entry.role === "assistant_split" && isFinal) {
+      finalSplitStart = allLines.length;
       const lastIdx = entry.lines.length - 1;
-      // In single-hook mode, honor batch_visible_through by clipping the
-      // slice written into `allLines`. In fan-out mode, every sub-line
-      // is materialized and the fan-out runner grows the on-disk file
-      // slice-by-slice. See TranscriptEntry / AssistantGroup in
-      // src/utils/transcript.ts for the on-disk shape this must match.
       const cap =
-        !fanout && isFinal && scenario.target.batch_visible_through !== undefined
+        !fanout && scenario.target.batch_visible_through !== undefined
           ? scenario.target.batch_visible_through
           : lastIdx;
-      // Fan-out: iterate all sub-lines. Single-hook: stop at cap.
-      const upperBound = fanout && isFinal ? lastIdx : cap;
+      const upperBound = fanout ? lastIdx : cap;
+
       for (let j = 0; j <= upperBound; j++) {
         const absoluteIndex = allLines.length;
-        // emitAssistantLine runs materializeBlocks internally, so by the
-        // time it returns the block id fields are synthesized and we can
-        // record the resolved tool_use for finalSplitSubLines /
-        // finalToolUses.
-        emitAssistantLine(entry.lines[j].blocks, entry.msg_id, i, j);
+        const subCtx: ScenarioMaterializeCtx = {
+          sessionId: ctx.sessionId,
+          cwd: ctx.cwd,
+          permissionMode,
+          prevUuid,
+          baseTs: baseTs + i * 100 + j * 10,
+        };
+        // Materialize only this sub-line (a single-element split entry)
+        const subEntry = {
+          role: "assistant_split" as const,
+          msg_id: entry.msg_id,
+          lines: [entry.lines[j]],
+        };
+        const materialized = spec.materializeScenarioEntry(subEntry, subCtx);
+        for (const m of materialized) {
+          allLines.push(m.jsonl);
+          prevUuid = m.uuid;
+        }
+
         if (isFinal) {
+          // Find tool_use ids from this sub-line's materialized output
           let resolved: FinalToolUse | undefined;
-          for (const b of entry.lines[j].blocks) {
-            if (b.type === "tool_use") {
-              resolved = {
-                id: (b as { id: string }).id,
-                name: b.name,
-                input: b.input,
-              };
-              break;
+          for (const m of materialized) {
+            for (const tid of m.toolUseIds) {
+              // Find the block in the original sub-line to get name/input
+              const block = entry.lines[j].blocks.find(
+                (b) => b.type === "tool_use" && (b as { id?: string }).id === tid.refKey,
+              );
+              if (!block && entry.lines[j].blocks.some((b) => b.type === "tool_use")) {
+                // id was synthesized by materializer; use first tool_use block
+                const firstToolUse = entry.lines[j].blocks.find(
+                  (b) => b.type === "tool_use",
+                ) as ScenarioBlock & { type: "tool_use" } | undefined;
+                if (firstToolUse) {
+                  resolved = {
+                    id: tid.resolvedId,
+                    name: firstToolUse.name,
+                    input: firstToolUse.input,
+                  };
+                  // Stamp the resolved id back onto the original block
+                  (firstToolUse as { id: string }).id = tid.resolvedId;
+                }
+              } else if (block && block.type === "tool_use") {
+                resolved = {
+                  id: tid.resolvedId,
+                  name: block.name,
+                  input: block.input,
+                };
+                (block as { id: string }).id = tid.resolvedId;
+              }
+              if (resolved) break;
             }
+            if (resolved) break;
           }
           finalSplitSubLines.push({
             subLineIndex: j,
             absoluteIndex,
             toolUse: resolved,
           });
-          // In single-hook mode the visible slice is what finalToolUses
-          // must reflect (the collector previously ran only inside
-          // emitAssistantLine calls that actually executed — that
-          // transitive shortening is preserved here).
           if (!fanout && resolved && j <= cap) {
             finalToolUses.push(resolved);
+          }
+        }
+      }
+    } else {
+      const materializeCtx: ScenarioMaterializeCtx = {
+        sessionId: ctx.sessionId,
+        cwd: ctx.cwd,
+        permissionMode,
+        prevUuid,
+        baseTs: baseTs + i * 100,
+      };
+      const materialized = spec.materializeScenarioEntry(entry, materializeCtx);
+      for (const m of materialized) {
+        allLines.push(m.jsonl);
+        prevUuid = m.uuid;
+      }
+
+      if (isFinal && entry.role === "assistant") {
+        for (const m of materialized) {
+          for (const tid of m.toolUseIds) {
+            const block = (entry.content as ScenarioBlock[]).find(
+              (b) => b.type === "tool_use" && (b as { id?: string }).id === tid.refKey,
+            );
+            if (!block) {
+              // id was synthesized; find the first tool_use block
+              const firstToolUse = (entry.content as ScenarioBlock[]).find(
+                (b) => b.type === "tool_use",
+              ) as (ScenarioBlock & { type: "tool_use" }) | undefined;
+              if (firstToolUse) {
+                (firstToolUse as { id: string }).id = tid.resolvedId;
+                finalToolUses.push({
+                  id: tid.resolvedId,
+                  name: firstToolUse.name,
+                  input: firstToolUse.input,
+                });
+              }
+            } else if (block.type === "tool_use") {
+              (block as { id: string }).id = tid.resolvedId;
+              finalToolUses.push({
+                id: tid.resolvedId,
+                name: block.name,
+                input: block.input,
+              });
+            }
           }
         }
       }
@@ -322,22 +318,6 @@ function writeTranscriptSlice(
   fs.writeFileSync(transcriptPath, slice.join("\n") + (slice.length > 0 ? "\n" : ""));
 }
 
-/**
- * Walk the scenario blocks and assign synthesized ids to any tool_use
- * block that doesn't carry one. Mutates the block objects in place so
- * callers see the resolved ids.
- */
-function materializeBlocks(
-  blocks: ScenarioBlock[],
-  nextId: () => string,
-): ScenarioBlock[] {
-  for (const b of blocks) {
-    if (b.type === "tool_use" && !b.id) {
-      (b as { id: string }).id = nextId();
-    }
-  }
-  return blocks;
-}
 
 function resolveToolUseBlock(
   scenario: Scenario,
@@ -774,6 +754,15 @@ async function main() {
     : `scenario-${scenario.name}.jsonl`;
   const transcriptPath = path.join(cacheDir, transcriptBasename);
 
+  // Set the adapter for this scenario run. This must happen BEFORE
+  // buildAllTranscriptLines so activeSpec() picks up the correct materializer.
+  const scenarioAdapter = scenario.env?.adapter;
+  if (scenarioAdapter) {
+    process.env.AGENT_FRAMEWORK_ADAPTER = scenarioAdapter;
+  } else {
+    delete process.env.AGENT_FRAMEWORK_ADAPTER;
+  }
+
   const built = buildAllTranscriptLines(scenario, {
     transcriptPath,
     sessionId,
@@ -804,7 +793,7 @@ async function main() {
       // Fire session-start preamble unless the target IS SessionStart.
       if (scenario.target.hook !== "SessionStart") {
         await runHook({
-          hookScript: hookScript("session-start"),
+          hookScript: hookScript("session-start", scenarioAdapter),
           inputJson: JSON.stringify({
             hook_event_name: "SessionStart",
             source: "startup",
@@ -813,7 +802,7 @@ async function main() {
             cwd,
             permission_mode: scenario.env?.permission_mode ?? "default",
           }),
-          env: buildEnv(cacheDir, cwd, envExtras),
+          env: buildEnv(cacheDir, cwd, envExtras, scenarioAdapter),
           timeoutMs,
         });
       }
@@ -834,9 +823,9 @@ async function main() {
         finalToolUses: built.finalToolUses,
       });
       const hookResult = await runHook({
-        hookScript: hookScript(hookScriptName(scenario.target.hook)),
+        hookScript: hookScript(hookScriptName(scenario.target.hook), scenarioAdapter),
         inputJson: JSON.stringify(stdin),
-        env: buildEnv(cacheDir, cwd, envExtras),
+        env: buildEnv(cacheDir, cwd, envExtras, scenarioAdapter),
         timeoutMs,
       });
 
@@ -945,7 +934,7 @@ async function main() {
 
       // Fire session-start preamble once.
       await runHook({
-        hookScript: hookScript("session-start"),
+        hookScript: hookScript("session-start", scenarioAdapter),
         inputJson: JSON.stringify({
           hook_event_name: "SessionStart",
           source: "startup",
@@ -954,7 +943,7 @@ async function main() {
           cwd,
           permission_mode: scenario.env?.permission_mode ?? "default",
         }),
-        env: buildEnv(cacheDir, cwd, envExtras),
+        env: buildEnv(cacheDir, cwd, envExtras, scenarioAdapter),
         timeoutMs,
       });
 
@@ -1000,9 +989,9 @@ async function main() {
           tool_use_id: sub.toolUse.id,
         };
         const hookResult = await runHook({
-          hookScript: hookScript("pre-tool-use"),
+          hookScript: hookScript("pre-tool-use", scenarioAdapter),
           inputJson: JSON.stringify(stdin),
-          env: buildEnv(cacheDir, cwd, envExtras),
+          env: buildEnv(cacheDir, cwd, envExtras, scenarioAdapter),
           timeoutMs,
         });
         const parsed = parsePreToolUseDecision(hookResult, timeoutMs);

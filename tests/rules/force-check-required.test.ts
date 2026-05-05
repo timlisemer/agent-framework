@@ -29,16 +29,29 @@ describe("forceCheckRequiredRule", () => {
     await expect(forceCheckRequiredRule.check(makeCtx("Bash", false))).resolves.toBeNull();
   });
 
-  it("denies unrelated tools while check is pending", async () => {
+  it("denies unrelated tools while check is pending (Claude adapter default)", async () => {
     const result = await forceCheckRequiredRule.check(makeCtx("Bash"));
     expect(result).toEqual({
-      fastDeny: "Workaround Bash command was denied earlier. You must run the agent-framework check MCP before any other tool (Codex: mcp__agent_framework__check; Claude: mcp__agent-framework__check).",
+      fastDeny: "Workaround Bash command was denied earlier. You must run agent-framework check MCP (mcp__agent-framework__check) before any other tool.",
     });
   });
 
-  it("allows both framework check MCP tool spellings while pending", async () => {
+  it("allows Claude framework check MCP wire name while pending", async () => {
     await expect(forceCheckRequiredRule.check(makeCtx("mcp__agent-framework__check"))).resolves.toBeNull();
-    await expect(forceCheckRequiredRule.check(makeCtx("mcp__agent_framework__check"))).resolves.toBeNull();
+  });
+
+  it("allows Codex framework check MCP wire name while pending (codex adapter)", async () => {
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      await expect(forceCheckRequiredRule.check(makeCtx("mcp__agent_framework__check"))).resolves.toBeNull();
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
   });
 
   it("allows ToolSearch while pending", async () => {

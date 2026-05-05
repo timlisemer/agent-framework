@@ -285,14 +285,24 @@ describe("detectParallelBatch", () => {
   });
 
   it("detects batches from Codex rollout-shaped function calls", async () => {
-    const filePath = writeTranscript([
-      userText("run two agents"),
-      codexFunctionCall("call_p1", "spawn_agent"),
-      codexFunctionCall("call_p2", "spawn_agent"),
-    ]);
-    const result = await detectParallelBatch(filePath, "call_p2");
-    expect(result).not.toBeNull();
-    expect(result?.allIds).toEqual(["call_p1", "call_p2"]);
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      const filePath = writeTranscript([
+        userText("run two agents"),
+        codexFunctionCall("call_p1", "spawn_agent"),
+        codexFunctionCall("call_p2", "spawn_agent"),
+      ]);
+      const result = await detectParallelBatch(filePath, "call_p2");
+      expect(result).not.toBeNull();
+      expect(result?.allIds).toEqual(["call_p1", "call_p2"]);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
   });
 });
 
@@ -348,16 +358,21 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
   });
 
   it("Codex rollout transcript with quickpush skill -> returns commit tools", async () => {
-    const filePath = writeTranscript([
-      codexMessage("user", "$agent-framework-quickpush"),
-    ]);
-    const result = await resolveActiveSlashCommandAllowedTools(filePath);
-    expect(result).toEqual([
-      "mcp__agent-framework__push",
-      "mcp__agent-framework__commit",
-      "mcp__agent_framework__push",
-      "mcp__agent_framework__commit",
-    ]);
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      const filePath = writeTranscript([
+        codexMessage("user", "$agent-framework-quickpush"),
+      ]);
+      const result = await resolveActiveSlashCommandAllowedTools(filePath);
+      expect(result).toEqual(["mcp-push", "mcp-commit"]);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
   });
 
   it("readTranscriptExact marks newest direct slash prompt as slash command", async () => {
@@ -377,53 +392,83 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
   });
 
   it("readTranscriptExact marks newest Codex skill prompt as slash command", async () => {
-    const filePath = writeTranscript([
-      userText("older normal prompt"),
-      userText("$agent-framework-plan3"),
-    ]);
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      const filePath = writeTranscript([
+        userText("older normal prompt"),
+        userText("$agent-framework-plan3"),
+      ]);
 
-    const result = await readTranscriptExact(filePath, {
-      counts: { user: 1 },
-      excludeSlashCommandPrompts: true,
-      includeSlashCommandContext: true,
-    });
-    expect(result.newestUserWasSlashCommand).toBe(true);
-    expect(result.slashCommandContext?.commandName).toBe("plan3");
-    expect(result.user[0].content).toBe("older normal prompt");
+      const result = await readTranscriptExact(filePath, {
+        counts: { user: 1 },
+        excludeSlashCommandPrompts: true,
+        includeSlashCommandContext: true,
+      });
+      expect(result.newestUserWasSlashCommand).toBe(true);
+      expect(result.slashCommandContext?.commandName).toBe("plan3");
+      expect(result.user[0].content).toBe("older normal prompt");
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
   });
 
   it("readTranscriptExact recognizes Codex rollout-shaped skill prompts", async () => {
-    const filePath = writeTranscript([
-      codexMessage("user", "older normal prompt"),
-      codexMessage("user", "$agent-framework-quickpush"),
-      codexMessage("user", "<skill>\n<name>agent-framework-quickpush</name>\n</skill>"),
-    ]);
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      const filePath = writeTranscript([
+        codexMessage("user", "older normal prompt"),
+        codexMessage("user", "$agent-framework-quickpush"),
+        codexMessage("user", "<skill>\n<name>agent-framework-quickpush</name>\n</skill>"),
+      ]);
 
-    const result = await readTranscriptExact(filePath, {
-      counts: { user: 1 },
-      excludeSlashCommandPrompts: true,
-      includeSlashCommandContext: true,
-    });
-    expect(result.newestUserWasSlashCommand).toBe(true);
-    expect(result.slashCommandContext?.commandName).toBe("quickpush");
-    expect(result.slashCommandContext?.allowedTools).toContain("mcp__agent-framework__commit");
-    expect(result.slashCommandContext?.allowedTools).toContain("mcp__agent_framework__commit");
-    expect(result.user[0].content).toBe("older normal prompt");
+      const result = await readTranscriptExact(filePath, {
+        counts: { user: 1 },
+        excludeSlashCommandPrompts: true,
+        includeSlashCommandContext: true,
+      });
+      expect(result.newestUserWasSlashCommand).toBe(true);
+      expect(result.slashCommandContext?.commandName).toBe("quickpush");
+      expect(result.slashCommandContext?.allowedTools).toContain("mcp-commit");
+      expect(result.slashCommandContext?.allowedTools).toContain("mcp-push");
+      expect(result.user[0].content).toBe("older normal prompt");
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
   });
 
   it("format context includes Codex rollout-shaped user and assistant messages", async () => {
-    const filePath = writeTranscript([
-      codexMessage("user", "$agent-framework-quickpush"),
-      codexMessage("assistant", "Using quickpush now."),
-    ]);
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      const filePath = writeTranscript([
+        codexMessage("user", "$agent-framework-quickpush"),
+        codexMessage("assistant", "Using quickpush now."),
+      ]);
 
-    const result = await readTranscriptExact(filePath, {
-      counts: { user: 1, assistant: 1 },
-      includeSlashCommandContext: true,
-    });
-    expect(result.user[0].content).toBe("$agent-framework-quickpush");
-    expect(result.assistant[0].content).toBe("Using quickpush now.");
-    expect(result.slashCommandContext?.commandName).toBe("quickpush");
+      const result = await readTranscriptExact(filePath, {
+        counts: { user: 1, assistant: 1 },
+        includeSlashCommandContext: true,
+      });
+      expect(result.user[0].content).toBe("$agent-framework-quickpush");
+      expect(result.assistant[0].content).toBe("Using quickpush now.");
+      expect(result.slashCommandContext?.commandName).toBe("quickpush");
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
   });
 
   it("transcript with /plan3 tag followed by non-tag user turn -> still returns plan3 tools", async () => {
@@ -443,7 +488,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
       userText("<command-name>/commit</command-name>\nnow commit"),
     ]);
     const result = await resolveActiveSlashCommandAllowedTools(filePath);
-    expect(result).toEqual(["mcp__agent-framework__commit", "mcp__agent_framework__commit"]);
+    expect(result).toEqual(["mcp-commit"]);
   });
 
   it("empty transcript -> returns undefined", async () => {

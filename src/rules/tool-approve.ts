@@ -4,7 +4,8 @@ import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { TOOL_APPROVE_PROMPT_SECTION } from "../utils/agent-configs.js";
 import { FILE_TOOLS, extractFilePaths, isPlanFile } from "./utils.js";
 import { planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
-import { RESTRICTED_MCP_TOOLS } from "../utils/slash-commands.js";
+import { RESTRICTED_MCPS } from "../utils/slash-commands.js";
+import { activeSpec } from "../adapter/spec.js";
 import { classifyBashCommand } from "../utils/command-patterns.js";
 import { recordDenial, MAX_SIMILAR_DENIALS } from "../utils/denial-cache.js";
 import { resolvePlanPath, readPlanContent } from "../utils/session-utils.js";
@@ -75,13 +76,15 @@ export const toolApproveRule: PreToolRule = {
       if (bashBlock) return { fastDeny: bashBlock };
     }
 
-    if (
-      RESTRICTED_MCP_TOOLS.has(ctx.toolName) &&
-      !ctx.slashCommandAllowedTools?.includes(ctx.toolName)
-    ) {
-      return {
-        fastDeny: `${ctx.toolName} requires explicit workflow authorization (Claude: /commit, /push, /confirm, /quickpush; Codex: $agent-framework-commit, $agent-framework-push, $agent-framework-confirm, $agent-framework-quickpush).`,
-      };
+    {
+      const spec = activeSpec();
+      const mcp = spec.recognizeMcp(ctx.rawToolName ?? ctx.toolName);
+      if (mcp && RESTRICTED_MCPS.has(mcp) && !ctx.slashCommandAllowedTools?.includes(ctx.toolName)) {
+        const hint = spec.renderWorkflowAuthorizationHint(["commit", "push", "confirm", "quickpush"]);
+        return {
+          fastDeny: `${ctx.rawToolName ?? ctx.toolName} requires explicit workflow authorization (${hint}).`,
+        };
+      }
     }
 
     // Contribute aggregator context — host instruction files + tool target.

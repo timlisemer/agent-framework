@@ -10,9 +10,10 @@
 
 import type { ToolPrediction } from "./prediction-types.js";
 import { PLAN_MODE_BASH_WRITE_PATTERNS } from "./bash-command-policy.js";
+import { activeSpec } from "../adapter/spec.js";
 
-// Tools that modify files
-const EDIT_TOOLS = ["Write", "Edit", "NotebookEdit", "apply_patch"];
+// Tools that modify files (apply_patch is handled by Codex adapter → Edit before rules run)
+const EDIT_TOOLS = ["Write", "Edit", "NotebookEdit"];
 
 /**
  * Check if a tool name is a file-editing tool.
@@ -23,18 +24,10 @@ export function isEditTool(toolName: string): boolean {
 
 /**
  * Check if a file path is exempt from edit intent blocking.
- * Plan files, memory files, and host instruction files are handled by their own validators.
+ * Delegates to the active adapter spec which knows its own exempt paths.
  */
 export function isEditIntentExemptPath(filePath: string): boolean {
-  // Plan files
-  if (filePath.includes("/.claude/plans/")) return true;
-  if (filePath.includes("/.codex/plans/")) return true;
-  // Memory files
-  if (filePath.includes("/.claude/projects/") && (filePath.includes("/memory/") || filePath.endsWith("MEMORY.md"))) return true;
-  // Host instruction files
-  if (filePath.endsWith("CLAUDE.md")) return true;
-  if (filePath.endsWith("AGENTS.md")) return true;
-  return false;
+  return activeSpec().isEditIntentExemptPath(filePath);
 }
 
 /**
@@ -164,16 +157,13 @@ export function deriveAllowedToolsFromIntent(message: string): string[] {
   if (TEST_RUN_VERB_RE.test(message)) tools.add("Bash");
   if (BASH_INSPECTION_VERB_RE.test(message)) tools.add("Bash");
   if (COMMIT_VERB_RE.test(message)) {
-    tools.add("mcp__agent-framework__commit");
-    tools.add("mcp__agent_framework__commit");
+    tools.add("mcp-commit");
   }
   if (PUSH_VERB_RE.test(message)) {
-    tools.add("mcp__agent-framework__push");
-    tools.add("mcp__agent_framework__push");
+    tools.add("mcp-push");
   }
   if (CHECK_VERB_RE.test(message)) {
-    tools.add("mcp__agent-framework__check");
-    tools.add("mcp__agent_framework__check");
+    tools.add("mcp-check");
   }
   return [...tools];
 }

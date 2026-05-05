@@ -5,6 +5,7 @@ import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
 import { readPlanContent } from "../utils/session-utils.js";
 import type { AdapterEncoder } from "../adapter/types.js";
+import { activeSpec } from "../adapter/spec.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
 import { buildAppealUserState } from "../agents/hooks/tool-appeal-user-state.js";
 import {
@@ -67,6 +68,10 @@ interface PipelineExit {
 }
 
 export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
+  const spec = activeSpec();
+  const canonical = spec.canonicalizeToolCall(input.tool_name, input.tool_input);
+  const rawToolName = input.tool_name;
+
   const host = resolveHostContext(input);
   const projectDir = host.projectDir;
 
@@ -87,8 +92,8 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   let state = await stateManager.load();
 
   // Module-scoped variables for exitPipeline
-  const toolName = input.tool_name;
-  const toolInput = input.tool_input;
+  const toolName = canonical.toolName;     // canonical end-to-end downstream
+  const toolInput = canonical.toolInput;
   let currentGateNote: string | undefined;
   const startTime = Date.now();
 
@@ -215,8 +220,11 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
     // satisfies the force-check lockout. Keeping this outside the
     // `!mirroredFromLeader` guard preserves today's semantics where every
     // allowed MCP-matching tool clears the flag.
-    if (exit.decision === "allow" && /^mcp__.*(?:commit|push|confirm|check)$/.test(toolName)) {
-      await stateManager.update((s) => ({ ...s, forceCheckPending: false }));
+    {
+      const mcp = spec.recognizeMcp(rawToolName);
+      if (exit.decision === "allow" && mcp && (["commit", "push", "confirm", "check"] as const).includes(mcp as "commit" | "push" | "confirm" | "check")) {
+        await stateManager.update((s) => ({ ...s, forceCheckPending: false }));
+      }
     }
 
     await appendToolLog(sessionDir, {
@@ -366,6 +374,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   const ctx: RuleContext = {
     hookEvent: "PreToolUse",
     toolName,
+    rawToolName,
     toolInput,
     toolUseId: input.tool_use_id,
     projectDir,
@@ -471,11 +480,13 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
         return;
       }
 
-      // Host instruction-file validate: Write/Edit to CLAUDE.md. AGENTS.md
-      // uses the same validator until it gets a dedicated policy prompt.
+      // Host instruction-file validate: Write/Edit to any of the active
+      // adapter's instruction files (Claude: CLAUDE.md; Codex: AGENTS.md and
+      // CLAUDE.md). The validator handles all of them with the same prompt.
+      const instructionBasenames = host.instructionFiles.map((f) => path.basename(f));
       if (
         (toolName === "Write" || toolName === "Edit") &&
-        (filePath.endsWith("CLAUDE.md") || filePath.endsWith("AGENTS.md"))
+        instructionBasenames.some((name) => filePath.endsWith(name))
       ) {
         let currentContent: string | null = null;
         try {

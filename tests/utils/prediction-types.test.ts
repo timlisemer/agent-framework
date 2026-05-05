@@ -420,7 +420,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     });
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__scenario_tester",
+      "mcp-scenario_tester",
       { action: "run_scenario", scenario_name: "x" },
       3,
     );
@@ -455,7 +455,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
       });
       const result = decidePrediction(
         pred,
-        "mcp__agent-framework__scenario_tester",
+        "mcp-scenario_tester",
         {},
         3,
       );
@@ -480,7 +480,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
       });
       const result = decidePrediction(
         pred,
-        "mcp__agent-framework__scenario_tester",
+        "mcp-scenario_tester",
         {},
         3,
       );
@@ -495,7 +495,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
       intent: "User has explicitly re-authorized the test harness.",
       explicitlyBlockedSubstrings: [
         {
-          tool: "mcp__agent-framework__scenario_tester",
+          tool: "mcp-scenario_tester",
           reason: "user said no tester",
         },
       ],
@@ -503,13 +503,13 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     });
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__scenario_tester",
+      "mcp-scenario_tester",
       {},
       3,
     );
     expect(result.decision).toBe("deny");
     expect(result.matchedExplicit?.tool).toBe(
-      "mcp__agent-framework__scenario_tester",
+      "mcp-scenario_tester",
     );
   });
 
@@ -523,7 +523,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     });
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__scenario_tester",
+      "mcp-scenario_tester",
       {},
       3,
     );
@@ -556,7 +556,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     });
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__scenario_tester",
+      "mcp-scenario_tester",
       {},
       3,
     );
@@ -576,7 +576,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     });
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__scenario_tester",
+      "mcp-scenario_tester",
       {
         action: "run_scenario",
         scenario_name: "bash-blocked-after-mcp-help",
@@ -794,7 +794,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
     });
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__scenario_tester",
+      "mcp-scenario_tester",
       {},
       2,
     );
@@ -1398,7 +1398,7 @@ describe("latestUserMessageReauthorizesClass", () => {
 });
 
 describe("step 3.10: discharged-side-clarification fallback", () => {
-  const TESTER = "mcp__agent-framework__scenario_tester";
+  const TESTER = "mcp-scenario_tester";
   const sidePred = (): ToolPrediction =>
     makePrediction({
       mood: "frustrated",

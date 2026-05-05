@@ -8,9 +8,20 @@
  */
 
 import { resolveCheckMessage } from "./check-target-context.js";
-
-const CHECK_MCP_ACTION = "You must run the agent-framework check MCP (Codex: mcp__agent_framework__check; Claude: mcp__agent-framework__check)";
 import { redactPathTokens } from "./path-redaction.js";
+import { activeSpec } from "../adapter/spec.js";
+
+function checkMcpAction(): string {
+  return `You must run the ${activeSpec().renderCheckMcpHint()}`;
+}
+
+function gitWorkflowAlternative(): string {
+  const spec = activeSpec();
+  const commit = spec.renderWorkflowInvocation("commit");
+  const push = spec.renderWorkflowInvocation("push");
+  const quickpush = spec.renderWorkflowInvocation("quickpush");
+  return `Use workflow tools (${commit}, ${push}, or ${quickpush})`;
+}
 
 export interface BlacklistPattern {
   pattern: RegExp;
@@ -21,9 +32,15 @@ export interface BlacklistPattern {
   // so prose words like "node with" or "tail events" do not match.
   contentPattern?: RegExp;
   name: string;
-  alternative: string;
+  /** Static string or lazy getter called at lookup time (for adapter-dynamic alternatives). */
+  alternative: string | (() => string);
   bashOnly?: boolean;
   redactPaths?: boolean;
+}
+
+/** Resolve a BlacklistPattern alternative to a string. */
+function resolveAlternative(alt: string | (() => string)): string {
+  return typeof alt === "function" ? alt() : alt;
 }
 
 export type BashCommandRiskClass =
@@ -63,21 +80,21 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // Git write operations. Keep this list explicit: read-only commands like
   // `git status`, `git diff`, `git log`, and `git show` must remain usable
   // for inspection.
-  { pattern: /\bgit\s+(commit|push|add)\b/, name: 'git write op (MCP)', alternative: 'Use workflow tools (Codex: $agent-framework-commit, $agent-framework-push, or $agent-framework-quickpush; Claude: /commit, /push, or /quickpush)' },
+  { pattern: /\bgit\s+(commit|push|add)\b/, name: 'git write op (MCP)', alternative: gitWorkflowAlternative },
   { pattern: /\bgit\s+(?:am|apply|bisect|checkout|cherry-pick|clean|clone|fetch|gc|merge|mv|pull|rebase|reflog|remote|reset|restore|revert|rm|stash|submodule|switch|tag|worktree)\b/, name: 'git write op', alternative: 'Git write operation denied' },
 
   // Build/check commands - LLMs should NOT build, only verify with check tool
-  { pattern: /\bmake\s+check\b/, name: "make check", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bjust\s+check\b/, name: "just check", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bmake\s+build\b/, name: "make build", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bjust\s+build\b/, name: "just build", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bnpm\s+run\s+build\b/, name: "npm build", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bnpm\s+run\s+(check|typecheck)\b/, name: "npm check/typecheck", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bbun\s+run\s+build\b/, name: "bun build", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bbun\s+run\s+(check|typecheck)\b/, name: "bun check/typecheck", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bcargo\s+build\b/, name: "cargo build", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\b(tsc|npx\s+tsc)\b/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?(?:npx\s+)?tsc\b|\bnpx\s+tsc\b|\btsc\s+(?:-[\w-]+|<PATH>))/, name: "tsc", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bmake\s+check\b/, name: "make check", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bjust\s+check\b/, name: "just check", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bmake\s+build\b/, name: "make build", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bjust\s+build\b/, name: "just build", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bnpm\s+run\s+build\b/, name: "npm build", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bnpm\s+run\s+(check|typecheck)\b/, name: "npm check/typecheck", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bbun\s+run\s+build\b/, name: "bun build", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bbun\s+run\s+(check|typecheck)\b/, name: "bun check/typecheck", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bcargo\s+build\b/, name: "cargo build", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\b(tsc|npx\s+tsc)\b/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?(?:npx\s+)?tsc\b|\bnpx\s+tsc\b|\btsc\s+(?:-[\w-]+|<PATH>))/, name: "tsc", alternative: checkMcpAction, redactPaths: true },
 
   // Package install commands - dependency-modifying, should not be run by AI
   { pattern: /\bnpm\s+install\b/, name: "npm install", alternative: "LLMs should not modify project dependencies", redactPaths: true },
@@ -85,9 +102,9 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bpnpm\s+install\b/, name: "pnpm install", alternative: "LLMs should not modify project dependencies", redactPaths: true },
 
   // Lint commands - should use check tool
-  { pattern: /\bnpm\s+run\s+lint\b/, name: "npm lint", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bbun\s+run\s+lint\b/, name: "bun lint", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bnpm\s+run\s+lint\b/, name: "npm lint", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bbun\s+run\s+lint\b/, name: "bun lint", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: checkMcpAction, redactPaths: true },
 
   // Test commands - tests may not exist, use check for build verification
   // bashOnly: dedicated runners are caught by their own bare names; bare-word
@@ -101,13 +118,13 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // canonical npm/yarn/pnpm/bun form (the repo's own package.json uses
   // `npm run test` via scripts.test) and mirrors the existing convention at
   // lines 50/52/63/64 (npm run check/typecheck, bun run check/typecheck, etc.)
-  { pattern: /\b(?:vitest|jest|mocha|pytest|ava|(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test|(?:npx|cargo)\s+test)\b/, name: "test command", alternative: CHECK_MCP_ACTION, bashOnly: true, redactPaths: true },
+  { pattern: /\b(?:vitest|jest|mocha|pytest|ava|(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test|(?:npx|cargo)\s+test)\b/, name: "test command", alternative: checkMcpAction, bashOnly: true, redactPaths: true },
 
   // Command chaining with cd - always deny
   { pattern: /\bcd\s+[^&]+&&/, name: 'cd && chain', alternative: 'Use --cwd flag or run from correct directory' },
 
   // Nix formatting - should use check tool
-  { pattern: /\balejandra\b/, name: "alejandra", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\balejandra\b/, name: "alejandra", alternative: checkMcpAction, redactPaths: true },
 
   // Nix evaluation - use batch evaluator instead of ad hoc shell evals
   { pattern: /\bnix\s+eval\b/, name: "nix eval", alternative: "Use nix-eval-jobs instead", redactPaths: true },
@@ -128,11 +145,11 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // indent / bullet / numbered-list marker), OR when the next token is a flag
   // or redacted <PATH> argument. Bare-prose use ("submenu node with ...") no
   // longer fires.
-  { pattern: /\bpython\s+(-c\s+)?/, name: "python", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bpython3\s+(-c\s+)?/, name: "python3", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bnode\s+(-e\s+)?/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?node\s+\S|\bnode\s+(?:-[\w-]+|<PATH>))/, name: "node", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bruby\s+(-e\s+)?/, name: "ruby", alternative: CHECK_MCP_ACTION, redactPaths: true },
-  { pattern: /\bperl\s+(-e\s+)?/, name: "perl", alternative: CHECK_MCP_ACTION, redactPaths: true },
+  { pattern: /\bpython\s+(-c\s+)?/, name: "python", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bpython3\s+(-c\s+)?/, name: "python3", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bnode\s+(-e\s+)?/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?node\s+\S|\bnode\s+(?:-[\w-]+|<PATH>))/, name: "node", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bruby\s+(-e\s+)?/, name: "ruby", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bperl\s+(-e\s+)?/, name: "perl", alternative: checkMcpAction, redactPaths: true },
 ];
 
 /**
@@ -400,7 +417,7 @@ export function classifyBashCommand(command: string, workingDir?: string): BashC
     const equivalents = CHECK_EQUIVALENTS[name];
     const msg = equivalents && workingDir
       ? resolveCheckMessage(name, equivalents, workingDir)
-      : alternative;
+      : resolveAlternative(alternative);
     return `[BLACKLIST: ${name}] ${msg}`;
   });
 
@@ -416,7 +433,7 @@ export function classifyBashCommand(command: string, workingDir?: string): BashC
   if (matchingPatterns.length > 0) {
     return base("blocked", {
       blacklistHighlights,
-      alternative: matchingPatterns[0]?.alternative,
+      alternative: matchingPatterns[0] ? resolveAlternative(matchingPatterns[0].alternative) : undefined,
       reason: matchingPatterns[0]?.name,
     });
   }
@@ -510,7 +527,7 @@ export const CHECK_EQUIVALENTS: Record<string, string[]> = {
  * Used by plan-validate and claude-md-validate to share rules with tool-approve.
  */
 export function getBlacklistDescription(): string {
-  return BLACKLIST_PATTERNS.map(({ name, alternative }) => `- ${name} → ${alternative}`).join("\n");
+  return BLACKLIST_PATTERNS.map(({ name, alternative }) => `- ${name} → ${resolveAlternative(alternative)}`).join("\n");
 }
 
 export interface BlacklistHighlight {
@@ -590,11 +607,12 @@ export function getContentBlacklistHighlights(
       // word-pairs like "node with" or "tail events" don't have.
       const re = contentPattern ?? pattern;
       if (re.test(t)) {
-        const rendered = `[VIOLATION: ${name}] "${line.trim()}" → ${alternative}`;
+        const altStr = resolveAlternative(alternative);
+        const rendered = `[VIOLATION: ${name}] "${line.trim()}" → ${altStr}`;
         highlights.push({
           lineIndex: i,
           line,
-          message: alternative,
+          message: altStr,
           rendered,
         });
         break;
@@ -640,7 +658,7 @@ export function getBlacklistHighlights(toolName: string, toolInput: unknown, wor
       const equivalents = CHECK_EQUIVALENTS[name];
       const msg = equivalents && workingDir
         ? resolveCheckMessage(name, equivalents, workingDir)
-        : alternative;
+        : resolveAlternative(alternative);
       return `[BLACKLIST: ${name}] ${msg}`;
     });
   if (highlights.length > 0) return highlights;
@@ -650,7 +668,7 @@ export function getBlacklistHighlights(toolName: string, toolInput: unknown, wor
     return [`[BLACKLIST: bash blocked] ${classification.alternative ?? classification.reason ?? "Bash command blocked"}`];
   }
   if (classification.riskClass === "high-risk-workaround") {
-    return [`[BLACKLIST: ${classification.workaroundCategory ?? "workaround"}] ${CHECK_MCP_ACTION}`];
+    return [`[BLACKLIST: ${classification.workaroundCategory ?? "workaround"}] ${checkMcpAction()}`];
   }
   return [];
 }

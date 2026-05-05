@@ -32,7 +32,8 @@ import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { runConfirmAgent } from "./confirm.js";
 
-const HOOK_NAME = "mcp__agent-framework__commit";
+import { activeSpec } from "../../adapter/spec.js";
+function getHookName(): string { return activeSpec().mcpWireName("commit"); }
 
 /**
  * Parse the LLM response to extract size and message.
@@ -76,7 +77,7 @@ export async function runCommitAgent(
   if (transcriptPath) {
     setTranscriptPath(transcriptPath);
   }
-  logAgentStarted("commit", HOOK_NAME);
+  logAgentStarted("commit", getHookName());
 
   const { status, diff, diffStat, untrackedDiff } = getUncommittedChanges(workingDir);
 
@@ -120,8 +121,8 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
   if (!parsed || !parsed.message) {
     logAgentResult(result, {
       agent: "commit",
-      hookName: HOOK_NAME,
-      toolName: HOOK_NAME,
+      hookName: getHookName(),
+      toolName: getHookName(),
       workingDir,
       executionType: EXECUTION_TYPES.LLM,
       decisionOverride: "ERROR",
@@ -140,8 +141,8 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
   if (commit.exitCode !== 0) {
     logAgentResult(result, {
       agent: "commit",
-      hookName: HOOK_NAME,
-      toolName: HOOK_NAME,
+      hookName: getHookName(),
+      toolName: getHookName(),
       workingDir,
       executionType: EXECUTION_TYPES.LLM,
       decisionOverride: "ERROR",
@@ -155,8 +156,8 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
 
   logAgentResult(result, {
     agent: "commit",
-    hookName: HOOK_NAME,
-    toolName: HOOK_NAME,
+    hookName: getHookName(),
+    toolName: getHookName(),
     workingDir,
     executionType: EXECUTION_TYPES.LLM,
     decisionOverride: "CONFIRM",

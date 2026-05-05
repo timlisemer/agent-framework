@@ -60,9 +60,10 @@ export function getVersion(): string {
 
 /**
  * Resolve the absolute path to a compiled adapter hook script.
+ * When `adapter` is omitted, defaults to the Claude adapter.
  */
-export function hookScript(name: string): string {
-  return distAdapterHookScript(name);
+export function hookScript(name: string, adapter?: string): string {
+  return distAdapterHookScript(name, adapter);
 }
 
 /**
@@ -71,16 +72,21 @@ export function hookScript(name: string): string {
  * `extra` merges additional env vars on top of the defaults — used by
  * scenario.ts to plumb `AGENT_FRAMEWORK_LLM_STUBS` into the hook process so
  * agent-runner can stub LLM calls deterministically.
+ *
+ * When `adapter` is provided it is forwarded as `AGENT_FRAMEWORK_ADAPTER`
+ * so the hook subprocess uses the correct adapter.
  */
 export function buildEnv(
   sessionDir: string,
   cwd: string,
   extra?: Record<string, string>,
+  adapter?: string,
 ): Record<string, string> {
   return {
     AGENT_FRAMEWORK_ROOT: REPO_ROOT,
     CLAUDE_PROJECT_DIR: cwd,
     AGENT_FRAMEWORK_SESSION_DIR: sessionDir,
+    ...(adapter ? { AGENT_FRAMEWORK_ADAPTER: adapter } : {}),
     ...(extra ?? {}),
   };
 }

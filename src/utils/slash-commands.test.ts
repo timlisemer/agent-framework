@@ -2,11 +2,10 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { describe, it, expect } from "vitest";
-import {
-  detectAgentFrameworkWorkflowInvocation,
-  extractCodexSkillCommandName,
-} from "./slash-commands.js";
+import { SLASH_COMMAND_ALLOWED_TOOLS, RESTRICTED_MCPS } from "./slash-commands.js";
 import { resolveActiveSlashCommandAllowedTools } from "./transcript.js";
+import { claudeSpec } from "../../adapters/claude/index.js";
+import { codexSpec } from "../../adapters/codex/index.js";
 
 async function writeTranscript(lines: unknown[]): Promise<string> {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "agent-framework-slash-"));
@@ -15,7 +14,7 @@ async function writeTranscript(lines: unknown[]): Promise<string> {
   return file;
 }
 
-function userEntry(content: string): unknown {
+function claudeUserEntry(content: string): unknown {
   return {
     message: {
       role: "user",
@@ -24,114 +23,103 @@ function userEntry(content: string): unknown {
   };
 }
 
-describe("extractCodexSkillCommandName", () => {
-  it("maps explicit Codex agent-framework skill mentions to command names", () => {
-    expect(extractCodexSkillCommandName("$agent-framework-commit")).toBe("commit");
-    expect(extractCodexSkillCommandName("please $agent-framework-quickpush now")).toBe("quickpush");
+describe("SLASH_COMMAND_ALLOWED_TOOLS canonical keys", () => {
+  it("commit maps to canonical mcp-commit tool", () => {
+    expect(SLASH_COMMAND_ALLOWED_TOOLS["commit"]).toEqual(["mcp-commit"]);
   });
 
-  it("maps Codex skill context blocks to command names", () => {
-    expect(extractCodexSkillCommandName("<skill>\n<name>agent-framework-quickpush</name>\n</skill>")).toBe("quickpush");
-    expect(extractCodexSkillCommandName("---\nname: agent-framework-confirm\ndescription: Confirm\n---")).toBe("confirm");
+  it("push maps to canonical mcp-push and mcp-commit tools", () => {
+    expect(SLASH_COMMAND_ALLOWED_TOOLS["push"]).toEqual(["mcp-push", "mcp-commit"]);
   });
 
-  it("ignores non-agent-framework skills and unknown command suffixes", () => {
-    expect(extractCodexSkillCommandName("$skill-creator")).toBeUndefined();
-    expect(extractCodexSkillCommandName("$agent-framework-unknown")).toBeUndefined();
-    expect(extractCodexSkillCommandName("<skill><name>agent-framework-unknown</name></skill>")).toBeUndefined();
+  it("quickpush maps to canonical mcp-push and mcp-commit tools", () => {
+    expect(SLASH_COMMAND_ALLOWED_TOOLS["quickpush"]).toEqual(["mcp-push", "mcp-commit"]);
+  });
+
+  it("check maps to canonical mcp-check tool", () => {
+    expect(SLASH_COMMAND_ALLOWED_TOOLS["check"]).toEqual(["mcp-check"]);
+  });
+
+  it("plan3 maps to Agent and ExitPlanMode", () => {
+    expect(SLASH_COMMAND_ALLOWED_TOOLS["plan3"]).toEqual(["Agent", "ExitPlanMode"]);
   });
 });
 
-describe("detectAgentFrameworkWorkflowInvocation", () => {
+describe("RESTRICTED_MCPS", () => {
+  it("contains commit, push, confirm", () => {
+    expect(RESTRICTED_MCPS.has("commit")).toBe(true);
+    expect(RESTRICTED_MCPS.has("push")).toBe(true);
+    expect(RESTRICTED_MCPS.has("confirm")).toBe(true);
+    expect(RESTRICTED_MCPS.has("check")).toBe(false);
+  });
+});
+
+describe("claudeSpec.recognizeWorkflowInvocation", () => {
   it("detects Claude slash-command tags", () => {
-    expect(detectAgentFrameworkWorkflowInvocation("<command-name>/quickpush</command-name>")).toEqual({
-      commandName: "quickpush",
-      allowedTools: [
-        "mcp__agent-framework__push",
-        "mcp__agent-framework__commit",
-        "mcp__agent_framework__push",
-        "mcp__agent_framework__commit",
-      ],
-    });
-    expect(detectAgentFrameworkWorkflowInvocation("<command-name>/plan3</command-name>")?.allowedTools).toEqual([
-      "Agent",
-      "ExitPlanMode",
-    ]);
+    expect(claudeSpec.recognizeWorkflowInvocation("<command-name>/quickpush</command-name>")).toBe("quickpush");
+    expect(claudeSpec.recognizeWorkflowInvocation("<command-name>/plan3</command-name>")).toBe("plan3");
   });
 
   it("detects direct slash prompts", () => {
-    expect(detectAgentFrameworkWorkflowInvocation("/quickpush")?.commandName).toBe("quickpush");
-    expect(detectAgentFrameworkWorkflowInvocation("  /check now")?.allowedTools).toEqual([
-      "mcp__agent-framework__check",
-      "mcp__agent_framework__check",
-    ]);
+    expect(claudeSpec.recognizeWorkflowInvocation("/quickpush")).toBe("quickpush");
+    expect(claudeSpec.recognizeWorkflowInvocation("  /check now")).toBe("check");
   });
 
-  it("detects Codex agent-framework skill mentions", () => {
-    expect(detectAgentFrameworkWorkflowInvocation("$agent-framework-quickpush")?.commandName).toBe("quickpush");
-    expect(detectAgentFrameworkWorkflowInvocation("$agent-framework-transcript")?.allowedTools).toEqual([
-      "mcp__agent-framework__transcript",
-      "mcp__agent_framework__transcript",
-    ]);
-  });
-
-  it("ignores unknown and unrelated command-like inputs", () => {
-    expect(detectAgentFrameworkWorkflowInvocation("/not-agent-framework")).toBeNull();
-    expect(detectAgentFrameworkWorkflowInvocation("$agent-framework-unknown")).toBeNull();
-    expect(detectAgentFrameworkWorkflowInvocation("$skill-creator")).toBeNull();
+  it("ignores unknown commands", () => {
+    expect(claudeSpec.recognizeWorkflowInvocation("/not-agent-framework")).toBeNull();
+    expect(claudeSpec.recognizeWorkflowInvocation("$agent-framework-commit")).toBeNull();
   });
 });
 
-describe("resolveActiveSlashCommandAllowedTools", () => {
-  it("resolves Claude slash-command tags", async () => {
+describe("codexSpec.recognizeWorkflowInvocation", () => {
+  it("detects Codex skill mentions", () => {
+    expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-quickpush")).toBe("quickpush");
+    expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-transcript")).toBe("transcript");
+  });
+
+  it("detects Codex skill context blocks", () => {
+    expect(codexSpec.recognizeWorkflowInvocation("<skill>\n<name>agent-framework-quickpush</name>\n</skill>")).toBe("quickpush");
+    expect(codexSpec.recognizeWorkflowInvocation("---\nname: agent-framework-confirm\ndescription: Confirm\n---")).toBe("confirm");
+  });
+
+  it("ignores non-agent-framework and unknown command suffixes", () => {
+    expect(codexSpec.recognizeWorkflowInvocation("$skill-creator")).toBeNull();
+    expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-unknown")).toBeNull();
+    expect(codexSpec.recognizeWorkflowInvocation("<skill><name>agent-framework-unknown</name></skill>")).toBeNull();
+  });
+});
+
+describe("resolveActiveSlashCommandAllowedTools (Claude adapter)", () => {
+  it("resolves Claude slash-command tags to canonical tool names", async () => {
     const transcript = await writeTranscript([
-      userEntry("<command-name>/commit</command-name>"),
+      claudeUserEntry("<command-name>/commit</command-name>"),
+    ]);
+
+    await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual(["mcp-commit"]);
+  });
+
+  it("resolves check command to canonical mcp-check", async () => {
+    const transcript = await writeTranscript([
+      claudeUserEntry("/check"),
+    ]);
+
+    await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual(["mcp-check"]);
+  });
+
+  it("resolves quickpush to canonical mcp-push and mcp-commit", async () => {
+    const transcript = await writeTranscript([
+      claudeUserEntry("<command-name>/quickpush</command-name>"),
     ]);
 
     await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual([
-      "mcp__agent-framework__commit",
-      "mcp__agent_framework__commit",
+      "mcp-push",
+      "mcp-commit",
     ]);
   });
 
-  it("resolves explicit Codex agent-framework skill mentions", async () => {
+  it("does not authorize tools for unrelated prompts", async () => {
     const transcript = await writeTranscript([
-      userEntry("$agent-framework-confirm"),
-    ]);
-
-    await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual([
-      "mcp__agent-framework__confirm",
-      "mcp__agent_framework__confirm",
-    ]);
-  });
-
-  it("resolves Codex agent-framework skill context blocks", async () => {
-    const transcript = await writeTranscript([
-      userEntry("<skill>\n<name>agent-framework-quickpush</name>\n</skill>"),
-    ]);
-
-    await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual([
-      "mcp__agent-framework__push",
-      "mcp__agent-framework__commit",
-      "mcp__agent_framework__push",
-      "mcp__agent_framework__commit",
-    ]);
-  });
-
-  it("resolves direct slash prompts", async () => {
-    const transcript = await writeTranscript([
-      userEntry("/check"),
-    ]);
-
-    await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual([
-      "mcp__agent-framework__check",
-      "mcp__agent_framework__check",
-    ]);
-  });
-
-  it("does not authorize restricted tools for unrelated prompts", async () => {
-    const transcript = await writeTranscript([
-      userEntry("please commit this when ready"),
+      claudeUserEntry("please commit this when ready"),
     ]);
 
     await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toBeUndefined();

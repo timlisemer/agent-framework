@@ -11,7 +11,7 @@ import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
 import { onEpochRotation, onUserPromptTurn } from "../scenario/lifecycle.js";
-import { detectAgentFrameworkWorkflowInvocation } from "../utils/slash-commands.js";
+import { activeSpec } from "../adapter/spec.js";
 
 /**
  * UserPromptSubmit Hook
@@ -69,8 +69,8 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
     subagent: false,
   };
 
-  const workflowInvocation = detectAgentFrameworkWorkflowInvocation(input.prompt);
-  if (!workflowInvocation) {
+  const workflowInvocation = activeSpec().recognizeWorkflowInvocation(input.prompt);
+  if (workflowInvocation === null) {
     await evaluateRulesForUserPromptSubmit(ALL_RULES, ctx);
   }
 

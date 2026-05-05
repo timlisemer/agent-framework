@@ -1,12 +1,15 @@
 import * as path from "path";
 import { hostConfigRoot, hostPlansRoot } from "../utils/paths.js";
-import { RESTRICTED_MCP_TOOLS } from "../utils/slash-commands.js";
+import { RESTRICTED_MCPS } from "../utils/slash-commands.js";
+import { activeSpec } from "../adapter/spec.js";
+import type { CanonicalMcp } from "../adapter/types.js";
 
 // File tools that go through path-based risk classification (trusted/sensitive)
 // and write-specific gates (edit-intent, CLAUDE.md validation, plan-file validation,
 // style-drift). Read is NOT here -- it's read-only with no side effects, so it
 // belongs in LOW_RISK_TOOLS for immediate auto-approval.
-export const FILE_TOOLS = ["Write", "Edit", "NotebookEdit", "apply_patch"];
+// apply_patch is excluded: Codex canonicalizes it to Edit before rules run.
+export const FILE_TOOLS = ["Write", "Edit", "NotebookEdit"];
 
 // Sensitive file patterns - always require LLM approval
 export const SENSITIVE_PATTERNS = [
@@ -44,39 +47,35 @@ export const LOW_RISK_TOOLS = [
 ];
 
 /**
- * MCP tools that should NEVER auto-approve via low-risk-bypass even when
- * the user is calm. These run heavyweight side effects (multi-minute test
- * suites, label rewrites). Cost-gated, not user-state-gated. Compare with
- * RESTRICTED_MCP_TOOLS, which is auth-gated via slash commands.
- *
- * Distinct concept from cross-turn rejection memory: that lives in mood/
- * trust/frustrationStreak signals consumed by decidePrediction. When the
- * user has asked the assistant to stop, decidePrediction still has a separate
- * sustained-frustration path for tools that do not auto-approve through
- * low-risk-bypass (priority 33), so this constant is purely a cost gate, not
- * a substitute for cross-turn rejection memory.
+ * MCP canonical names that should NEVER auto-approve via low-risk-bypass even
+ * when the user is calm. These run heavyweight side effects (multi-minute test
+ * suites, label rewrites). Cost-gated, not user-state-gated.
  */
-const HEAVY_MCP_TOOLS: ReadonlySet<string> = new Set([
-  "mcp__agent-framework__scenario_tester",
-  "mcp__agent-framework__scenario_labeler",
-]);
+const HEAVY_MCPS: ReadonlySet<CanonicalMcp> = new Set(["scenario_tester", "scenario_labeler"]);
 
 /**
  * True iff a tool is generally safe to allow without further checks.
- * Mirrors the predicate used by `low-risk-bypass` (priority 33) so the
- * sentiment prediction system aligns with the framework-wide allow set.
+ * Mirrors the predicate used by `low-risk-bypass` (priority 33).
  *
- * Allows: anything in LOW_RISK_TOOLS, plus any `mcp__*` tool not in
- * `RESTRICTED_MCP_TOOLS` (commit/push/confirm -- slash-command gated)
- * and not in `HEAVY_MCP_TOOLS` (test-harness actions that run suites).
+ * Allows: anything in LOW_RISK_TOOLS, plus any canonical MCP tool not in
+ * `RESTRICTED_MCPS` (commit/push/confirm -- slash-command gated) and not
+ * in `HEAVY_MCPS` (test-harness actions that run suites).
+ *
+ * For raw (pre-canonicalization) MCP names, use recognizeMcp first.
  */
 export function isLowRiskTool(toolName: string): boolean {
-  return (
-    LOW_RISK_TOOLS.includes(toolName) ||
-    (toolName.startsWith("mcp__")
-      && !RESTRICTED_MCP_TOOLS.has(toolName)
-      && !HEAVY_MCP_TOOLS.has(toolName))
-  );
+  if (LOW_RISK_TOOLS.includes(toolName)) return true;
+  // Check if it's a canonical mcp- prefixed tool
+  if (toolName.startsWith("mcp-")) {
+    const canonical = toolName.slice(4) as CanonicalMcp;
+    return !RESTRICTED_MCPS.has(canonical) && !HEAVY_MCPS.has(canonical);
+  }
+  // Legacy: recognize via active spec (wire names that weren't yet canonicalized)
+  const mcp = activeSpec().recognizeMcp(toolName);
+  if (mcp) {
+    return !RESTRICTED_MCPS.has(mcp) && !HEAVY_MCPS.has(mcp);
+  }
+  return false;
 }
 
 /**
@@ -84,12 +83,18 @@ export function isLowRiskTool(toolName: string): boolean {
  * workflow/meta tools such as Skill, TodoWrite, TaskOutput, and EnterPlanMode.
  */
 export function isLowRiskInspectionTool(toolName: string): boolean {
-  return (
-    ["Read", "LSP", "WebSearch", "WebFetch", "ToolSearch", "ListMcpResources", "ReadMcpResource"].includes(toolName) ||
-    (toolName.startsWith("mcp__")
-      && !RESTRICTED_MCP_TOOLS.has(toolName)
-      && !HEAVY_MCP_TOOLS.has(toolName))
-  );
+  if (["Read", "LSP", "WebSearch", "WebFetch", "ToolSearch", "ListMcpResources", "ReadMcpResource"].includes(toolName)) {
+    return true;
+  }
+  if (toolName.startsWith("mcp-")) {
+    const canonical = toolName.slice(4) as CanonicalMcp;
+    return !RESTRICTED_MCPS.has(canonical) && !HEAVY_MCPS.has(canonical);
+  }
+  const mcp = activeSpec().recognizeMcp(toolName);
+  if (mcp) {
+    return !RESTRICTED_MCPS.has(mcp) && !HEAVY_MCPS.has(mcp);
+  }
+  return false;
 }
 
 export const CONFIRMATION_PATTERN = /^\s*(y(es|ep|eah|up)?(\s*please)?|ok(ay)?|sure|go\s*ahead|do\s*it|proceed|confirm(ed)?|approved?|lgtm|sounds?\s*good|that('?s| is)\s*(fine|good|correct|right)|please(\s*do)?|yea|aye|k)\s*[.!]?\s*$/i;
@@ -126,7 +131,7 @@ export function extractPathOrCmd(toolInput: unknown): { path?: string; cmd?: str
 }
 
 /**
- * True iff filePath (resolved absolute) is inside ~/.claude/plans.
+ * True iff filePath (resolved absolute) is inside the host plans root.
  */
 export function isPlanFile(filePath: string): boolean {
   return isPathInDirectory(filePath, hostPlansRoot());
@@ -136,6 +141,9 @@ export function isPlanFile(filePath: string): boolean {
  * Extract the file path arg from a file-tool input (Write/Edit/NotebookEdit).
  * NotebookEdit uses `notebook_path`; others use `file_path`. Read uses `path`
  * but is not a file-mutating tool so callers generally skip it.
+ *
+ * Note: apply_patch is handled by the Codex adapter (canonicalized to Edit)
+ * before rules run, so it never appears here.
  */
 export function extractFilePath(
   toolName: string,
@@ -146,9 +154,6 @@ export function extractFilePath(
     notebook_path?: unknown;
     path?: unknown;
   } | undefined;
-  if (toolName === "apply_patch") {
-    return extractApplyPatchPaths(toolInput)[0];
-  }
 
   const raw =
     (toolName === "NotebookEdit" ? input?.notebook_path : input?.file_path) ??
@@ -160,21 +165,6 @@ export function extractFilePaths(
   toolName: string,
   toolInput: unknown,
 ): string[] {
-  if (toolName === "apply_patch") return extractApplyPatchPaths(toolInput);
   const single = extractFilePath(toolName, toolInput);
   return single ? [single] : [];
-}
-
-function extractApplyPatchPaths(toolInput: unknown): string[] {
-  const command = typeof toolInput === "string"
-    ? toolInput
-    : (toolInput as { command?: unknown; patch?: unknown } | undefined)?.command ??
-      (toolInput as { patch?: unknown } | undefined)?.patch;
-  if (typeof command !== "string") return [];
-  const paths: string[] = [];
-  for (const line of command.split(/\r?\n/)) {
-    const match = line.match(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/);
-    if (match) paths.push(match[1].trim());
-  }
-  return [...new Set(paths)];
 }

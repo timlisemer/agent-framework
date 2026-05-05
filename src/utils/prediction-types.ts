@@ -221,8 +221,7 @@ export const ACTION_DEMAND_INTENT_RE =
  * agent" in narrative prose cannot over-fire.
  */
 export const TOOL_NAME_ALIASES: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
-  ["mcp__agent-framework__scenario_tester", ["scenario_tester", "tester mcp", "the tester", "via the tester"]],
-  ["mcp__agent_framework__scenario_tester", ["scenario_tester", "tester mcp", "the tester", "via the tester"]],
+  ["mcp-scenario_tester", ["scenario_tester", "tester mcp", "the tester", "via the tester"]],
   ["Agent", ["validator agent", "another validator agent", "spawn an agent", "spawn a subagent", "launch an agent", "launch a subagent", "start an agent", "start a subagent", "run an agent", "run a subagent", "another subagent"]],
 ]);
 
@@ -455,14 +454,11 @@ function verbRegexesProducingTool(toolName: string): RegExp[] {
       return [EDIT_VERB_RE];
     case "Bash":
       return [RENAME_MOVE_VERB_RE, TEST_RUN_VERB_RE, BASH_INSPECTION_VERB_RE];
-    case "mcp__agent-framework__commit":
-    case "mcp__agent_framework__commit":
+    case "mcp-commit":
       return [COMMIT_VERB_RE];
-    case "mcp__agent-framework__push":
-    case "mcp__agent_framework__push":
+    case "mcp-push":
       return [PUSH_VERB_RE];
-    case "mcp__agent-framework__check":
-    case "mcp__agent_framework__check":
+    case "mcp-check":
       return [CHECK_VERB_RE];
     default:
       return [];

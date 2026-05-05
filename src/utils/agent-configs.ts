@@ -59,6 +59,7 @@
 import type { AgentConfig } from "./agent-runner.js";
 import { MODEL_TIERS } from "../types.js";
 import { FORBIDDEN_DENY_PROMPT_LIST } from "./fabricated-deny-patterns.js";
+import { activeSpec } from "../adapter/spec.js";
 
 // ============================================================================
 // MCP AGENTS
@@ -366,16 +367,21 @@ refactor: restructure agents directory
  * Note: Dynamic content (project rules from CLAUDE.md) is added at runtime
  * via the rule's check() llmContext contribution.
  */
-export const TOOL_APPROVE_PROMPT_SECTION: string = `You are a tool approval gate. Evaluate tool calls for safety and compliance.
+export function buildToolApprovePromptSection(): string {
+  const spec = activeSpec();
+  const commitInvoke = spec.renderWorkflowInvocation("commit");
+  const pushInvoke = spec.renderWorkflowInvocation("push");
+  const checkHint = spec.renderCheckMcpHint();
+  return `You are a tool approval gate. Evaluate tool calls for safety and compliance.
 
 === SLASH COMMAND CONTEXT ===
 
-If \`=== SLASH COMMAND INVOKED ===\` appears in the context and its \`Allowed tools:\` field literally contains the tool name being evaluated, APPROVE immediately. Examples: Claude \`/commit\` authorizes \`mcp__agent-framework__commit\`, Codex \`$agent-framework-commit\` authorizes \`mcp__agent_framework__commit\`; Claude \`/push\` authorizes \`mcp__agent-framework__push\`, Codex \`$agent-framework-push\` authorizes \`mcp__agent_framework__push\`; \`plan3\` authorizes \`Agent\` and \`ExitPlanMode\`; \`implement\` authorizes \`Agent\`.
+If \`=== SLASH COMMAND INVOKED ===\` appears in the context and its \`Allowed tools:\` field literally contains the tool name being evaluated, APPROVE immediately. Examples: \`${commitInvoke}\` authorizes the commit MCP tool; \`${pushInvoke}\` authorizes the push MCP tool; \`plan3\` authorizes \`Agent\` and \`ExitPlanMode\`; \`implement\` authorizes \`Agent\`.
 
 === CORE PRINCIPLE: AIs DO NOT RUN BUILD/COMPILE COMMANDS ===
 
 AIs must NOT run build, compile, or typecheck shell commands (e.g., npm run build, cargo build, make build, tsc, go build).
-- Use the agent-framework check MCP instead to verify code compiles (Codex: \`mcp__agent_framework__check\`; Claude: \`mcp__agent-framework__check\`)
+- Use the ${checkHint} instead to verify code compiles
 - "Build" means compilation commands in a shell, NOT editing code, spawning agents, or writing files
 - This rule applies ONLY to Bash tool calls, not to Agent, Edit, Write, or other tools
 
@@ -550,6 +556,10 @@ If "PLAN MODE ACTIVE" appears in context, the allow/deny list in the plan-mode b
 - Read-only tools (Read, LS, WebFetch, WebSearch, classified read-only Bash, MCP read tools) → APPROVE.
 - Edit, Write, NotebookEdit, and write Bash commands are already blocked by TypeScript upstream before this prompt runs. You should never need to deny them here.
 - Agent / Task subagent dispatch for exploration or research (e.g. subagent_type "Explore", "general-purpose", "Plan", code-reviewer-style agents) → APPROVE by default. DENY only when the dispatch prompt itself instructs the subagent to edit/write/commit/push/build, or the subagent_type is inherently write-oriented (e.g. "implementer", "tester"). Any write the subagent later attempts hits this same hook and is blocked there, so do not pre-block exploration dispatches defensively.`;
+}
+
+/** @deprecated Use buildToolApprovePromptSection() */
+export const TOOL_APPROVE_PROMPT_SECTION: string = buildToolApprovePromptSection();
 
 /**
  * Tool Appeal Agent Configuration
@@ -563,7 +573,11 @@ If "PLAN MODE ACTIVE" appears in context, the allow/deny list in the plan-mode b
  * user explicitly approved the operation or if there's a clear mismatch
  * between what user asked and what AI is doing.
  */
-export const TOOL_APPEAL_AGENT: Omit<AgentConfig, 'workingDir'> = {
+export function buildToolAppealAgent(): Omit<AgentConfig, 'workingDir'> {
+  const spec = activeSpec();
+  const commitWire = spec.mcpWireName("commit");
+  const commitInvoke = spec.renderWorkflowInvocation("commit");
+  return {
   name: 'tool-appeal',
   tier: MODEL_TIERS.HAIKU,
   mode: 'direct',
@@ -577,14 +591,14 @@ The single rule: OVERTURN if and only if the user EXPLICITLY authorized this exa
 (A) The user's own words in RECENT CONVERSATION (a USER: line, the LAST USER MESSAGE block, or text immediately following a SLASH COMMAND INVOKED tag) literally name this tool call. Literal naming includes the LITERAL tool name, the LITERAL command body, OR an unambiguous 1-to-1 paraphrase that maps to ONLY this tool call. Examples that count:
   - "run just build" authorizes Bash 'just build'.
   - "use npx vitest run" authorizes Bash 'npx vitest run'.
-  - "call mcp__agent_framework__commit" (Codex) or "call mcp__agent-framework__commit" (Claude) authorizes that MCP tool.
+  - "call ${commitWire}" authorizes that MCP tool.
   - "edit src/foo.ts to ..." authorizes Edit on src/foo.ts.
   - "run the scenario" authorizes the agent-framework scenario tester MCP action=run_scenario (the action name IS the user's verb-object phrase).
   - "test the harness against X" authorizes the agent-framework scenario tester MCP (the tool's purpose IS test-harness execution).
   When in doubt about "1-to-1 paraphrase": ask "if the user wanted this tool, is there a clearer way they could have phrased it that would not be ambiguous between this tool and a sibling?" If their phrasing already pins THIS tool unambiguously, the paraphrase counts.
 
 (B) A SLASH COMMAND INVOKED section is present AND either (i) its Allowed tools list literally contains the blocked tool name, OR (ii) the slash command's BODY/CONTENT visible in RECENT CONVERSATION (typically inside a tool_result for a Skill call, or pasted as the command's instructions) explicitly names this exact operation as a step the workflow prescribes. Examples:
-  - A commit workflow's allowed-tools authorizes mcp__agent_framework__commit in Codex or mcp__agent-framework__commit in Claude (case (i)).
+  - A commit workflow's allowed-tools authorizes ${commitWire} (invoke with ${commitInvoke}) (case (i)).
   - /plan3's body says "Spawn 3 validation agents in parallel ... ExitPlanMode" - that authorizes both Agent and ExitPlanMode (case (ii)) regardless of whether ExitPlanMode is in the allowed-tools list, because the workflow's own definition prescribes it as a step.
 
 (C) An ExitPlanMode-approved plan visible in RECENT CONVERSATION explicitly lists this exact operation as a step (the plan content itself, NOT the AI's later summary of it).
@@ -630,7 +644,11 @@ If the original denial reason contains any of the following phrases, it is fabri
 - "duplicates Read tool" / "is duplicative of Read tool" / "duplicates LS tool" / "duplicates Read/LS tools" / "use Read tool instead" / "use Read or LS tool instead" / "Read tool can fetch ... for equivalent analysis" — when the blocked command is cat, head, tail, rg, grep, ugrep, find, fd, bfs, awk, sed, ls, jq, wc, sort, uniq, cut, tr, diff, comm, file, or stat (i.e. read-only inspection rather than a mutating/build/test command). Post-v2.1.117 these ARE the official search mechanism on native Claude Code builds.
 
 These fingerprints indicate the denial was not grounded in the actual rule set. Override them.`,
-};
+  };
+}
+
+/** @deprecated Use buildToolAppealAgent() */
+export const TOOL_APPEAL_AGENT: Omit<AgentConfig, 'workingDir'> = buildToolAppealAgent();
 
 /**
  * Plan Validate Agent Configuration
@@ -857,7 +875,11 @@ Reply: OK or DRIFT: <specific issue found>`,
  * This agent prevents frustrating UX where user is trapped by questions
  * about content they haven't seen (e.g., plan file not yet displayed).
  */
-export const QUESTION_VALIDATE_AGENT: Omit<AgentConfig, "workingDir"> = {
+export function buildQuestionValidateAgent(): Omit<AgentConfig, "workingDir"> {
+  const spec = activeSpec();
+  const commitInvoke = spec.renderWorkflowInvocation("commit");
+  const pushInvoke = spec.renderWorkflowInvocation("push");
+  return {
   name: "question-validate",
   tier: MODEL_TIERS.HAIKU,
   mode: "direct",
@@ -872,8 +894,8 @@ You will receive:
 BLOCK if ANY of these apply:
 
 1. GIT OPERATIONS - Question asks about committing, pushing, or git workflow:
-   - "Should I commit these changes?" → BLOCK: User handles commits via the commit workflow (Codex: $agent-framework-commit; Claude: /commit)
-   - "Want me to push?" → BLOCK: User handles pushing via the push workflow (Codex: $agent-framework-push; Claude: /push)
+   - "Should I commit these changes?" → BLOCK: User handles commits via the commit workflow (${commitInvoke})
+   - "Want me to push?" → BLOCK: User handles pushing via the push workflow (${pushInvoke})
    - Any question about git operations → BLOCK: User manages git workflow
 
    EXCEPTION: If user invoked the commit or push workflow, git-related questions ARE allowed:
@@ -930,7 +952,11 @@ Examples of good BLOCK feedback:
 - "Show the plan to user first with /plan or by reading the file, then ask"
 - "User already said they want 'maximum code reduction' - proceed with that"
 - "Complete the current task before asking about next steps"`,
-};
+  };
+}
+
+/** @deprecated Use buildQuestionValidateAgent() */
+export const QUESTION_VALIDATE_AGENT: Omit<AgentConfig, "workingDir"> = buildQuestionValidateAgent();
 
 
 /**

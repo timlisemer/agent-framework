@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "name": "codex-skill-invocation-authorizes-mcp-commit",
+  "description": "Codex skill invocation: user sends '$agent-framework-commit' which the Codex adapter recognizes as the 'commit' workflow. The assistant then calls mcp__agent_framework__commit. tool-approve must allow because the workflow authorization covers the canonical mcp-commit tool. env.adapter=codex.",
+  "transcript": [
+    {
+      "role": "user",
+      "isMeta": false,
+      "content": "$agent-framework-commit"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Running the commit agent framework skill."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_codex_mcp_commit_1",
+          "name": "mcp__agent_framework__commit",
+          "input": {
+            "skip_elicitation": true,
+            "auto_push": false
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "call_codex_mcp_commit_1"
+  },
+  "env": {
+    "adapter": "codex",
+    "cwd": "/home/tim/Coding/public_repos/agent-framework",
+    "permission_mode": "default"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "User invoked the agent-framework-commit skill",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "blockAllTools": false,
+      "contextSwitch": "no",
+      "questionIsStalling": "n/a",
+      "userMessageSnippet": "$agent-framework-commit"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
+  },
+  "expect": {
+    "expected": "allow",
+    "notes": "The Codex adapter recognizes '$agent-framework-commit' as the 'commit' canonical workflow. resolveActiveSlashCommandAllowedTools returns ['mcp-commit']. The Codex wire name mcp__agent_framework__commit canonicalizes to 'mcp-commit'. tool-approve allows because slashCommandAllowedTools includes 'mcp-commit'."
+  }
+}

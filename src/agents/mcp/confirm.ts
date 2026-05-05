@@ -25,7 +25,8 @@ import { setTranscriptPath } from "../../utils/execution-context.js";
 import { runConfirmPrefilter, formatConfirmPrefilter } from "../../utils/confirm-prefilter.js";
 import { runCheckAgent } from "./check.js";
 
-const HOOK_NAME = "mcp__agent-framework__confirm";
+import { activeSpec } from "../../adapter/spec.js";
+function getHookName(): string { return activeSpec().mcpWireName("confirm"); }
 
 /**
  * Run the confirm agent to evaluate code changes.
@@ -46,7 +47,7 @@ export async function runConfirmAgent(
   if (transcriptPath) {
     setTranscriptPath(transcriptPath);
   }
-  logAgentStarted("confirm", HOOK_NAME);
+  logAgentStarted("confirm", getHookName());
 
   const tier = parseTierName(tierName);
   // Step 1: Run check agent first
@@ -94,8 +95,8 @@ ${diff || "(no diff)"}${extraContext ? `\n\nUSER INSTRUCTIONS:\n${extraContext}`
 
   logAgentResult(result, {
     agent: "confirm",
-    hookName: HOOK_NAME,
-    toolName: HOOK_NAME,
+    hookName: getHookName(),
+    toolName: getHookName(),
     workingDir,
     executionType: EXECUTION_TYPES.LLM,
     decisionOverride: "CONFIRM",

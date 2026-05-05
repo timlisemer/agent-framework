@@ -1,4 +1,5 @@
 import "../utils/load-env.js";
+import { activeSpec } from "../adapter/spec.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -389,7 +390,8 @@ server.registerTool(
     const state = await stateManager.load();
     const ctx = {
       hookEvent: "PreToolUse" as const,
-      toolName: "mcp__agent-framework__validate_intent",
+      toolName: "mcp-validate_intent",
+      rawToolName: activeSpec().mcpWireName("validate_intent"),
       toolInput: {},
       toolUseId: "validate-intent-mcp",
       projectDir,

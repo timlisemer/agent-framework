@@ -53,7 +53,8 @@ import { getUncommittedChanges, getRepoInfo } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 
-const HOOK_NAME = "mcp__agent-framework__check";
+import { activeSpec } from "../../adapter/spec.js";
+function getHookName(): string { return activeSpec().mcpWireName("check"); }
 
 /**
  * Regex matching unused-code lines emitted by linters across languages.
@@ -319,7 +320,7 @@ export async function runCheckAgent(workingDir: string, transcriptPath?: string)
   if (transcriptPath) {
     setTranscriptPath(transcriptPath);
   }
-  logAgentStarted("check", HOOK_NAME);
+  logAgentStarted("check", getHookName());
 
   // Get main repo path for fallback
   const repoInfo = getRepoInfo(workingDir);
@@ -372,8 +373,8 @@ export async function runCheckAgent(workingDir: string, transcriptPath?: string)
 
   logAgentResult(result, {
     agent: "check",
-    hookName: HOOK_NAME,
-    toolName: HOOK_NAME,
+    hookName: getHookName(),
+    toolName: getHookName(),
     workingDir,
     executionType: EXECUTION_TYPES.LLM,
     decisionOverride: "CONFIRM",

@@ -18,8 +18,8 @@ You will receive:
 BLOCK if ANY of these apply:
 
 1. GIT OPERATIONS - Question asks about committing, pushing, or git workflow:
-   - "Should I commit these changes?" → BLOCK: User handles commits via the commit workflow (Codex: $agent-framework-commit; Claude: /commit)
-   - "Want me to push?" → BLOCK: User handles pushing via the push workflow (Codex: $agent-framework-push; Claude: /push)
+   - "Should I commit these changes?" → BLOCK: User handles commits via the commit workflow
+   - "Want me to push?" → BLOCK: User handles pushing via the push workflow
    - Any question about git operations → BLOCK: User manages git workflow
 
    EXCEPTION: If user invoked the commit or push workflow, git-related questions ARE allowed:

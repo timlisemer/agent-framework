@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "name": "codex-respond-first-no-text-before-parallel-tools-denies",
+  "description": "Regression guard: when the Codex assistant emits only function_call lines with NO preceding text message in the same turn, respond-first must still deny. The user is angry and the assistant jumped straight to tool calls without responding. env.adapter=codex.",
+  "transcript": [
+    {
+      "role": "user",
+      "isMeta": false,
+      "content": "I told you to fix the tray right-click stub, why haven't you done anything?"
+    },
+    {
+      "role": "assistant_split",
+      "msg_id": "msg_codex_no_text_parallel_batch",
+      "lines": [
+        {
+          "blocks": [
+            {
+              "type": "tool_use",
+              "id": "call_no_text_search_1",
+              "name": "Bash",
+              "input": {
+                "command": "rg -n \"sys_tray|right_click\" crates/astral-shell/src/widgets/bar/"
+              }
+            }
+          ]
+        },
+        {
+          "blocks": [
+            {
+              "type": "tool_use",
+              "id": "call_no_text_search_2",
+              "name": "Bash",
+              "input": {
+                "command": "rg -n \"popover|shared\" crates/astral-shell/src/widgets/shared/"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "call_no_text_search_1",
+    "batch_visible_through": 0
+  },
+  "env": {
+    "adapter": "codex",
+    "cwd": "/home/tim/Coding/public_repos/astral",
+    "permission_mode": "default"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "angry",
+      "trust": "low",
+      "intent": "User is demanding the AI fix the tray right-click stub and is frustrated it hasn't been done.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "blockAllTools": false,
+      "contextSwitch": "no",
+      "questionIsStalling": "n/a",
+      "userMessageSnippet": "I told you to fix the tray right-click stub, why haven't you done anything?"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 3,
+    "currentWindowSize": 8
+  },
+  "expect": {
+    "expected": "deny",
+    "by": "respond-first",
+    "notes": "The Codex assistant emits only function_call lines with no preceding text message in the same logical turn. The Codex parseTranscript coalesces these into one entry with only tool_uses and no text. respond-first must deny because the assistant did not respond before acting."
+  }
+}
