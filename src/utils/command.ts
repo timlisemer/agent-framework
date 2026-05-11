@@ -1,4 +1,5 @@
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
+import { OperationCancelledError, type CancellationOptions, throwIfAborted } from "./cancellation.js";
 
 /**
  * Run a shell command and capture output.
@@ -53,4 +54,105 @@ export function runCommand(cmd: string, cwd: string): { output: string; exitCode
     const output = (error.stdout || "") + (error.stderr || "");
     return { output, exitCode: error.status ?? 1 };
   }
+}
+
+export type ProcessMode =
+  | { shell: true; command: string }
+  | { shell: false; file: string; args: string[] };
+
+export async function runProcessCancellable(
+  mode: ProcessMode,
+  cwd: string,
+  options: CancellationOptions = {}
+): Promise<{ output: string; exitCode: number }> {
+  throwIfAborted(options.signal);
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let stdout = "";
+    let stderr = "";
+
+    const child = mode.shell
+      ? spawn(mode.command, {
+          cwd,
+          shell: true,
+          detached: process.platform !== "win32",
+          stdio: ["ignore", "pipe", "pipe"],
+        })
+      : spawn(mode.file, mode.args, {
+          cwd,
+          shell: false,
+          detached: process.platform !== "win32",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+
+    const cleanup = () => {
+      options.signal?.removeEventListener("abort", onAbort);
+    };
+
+    const terminate = () => {
+      if (child.pid === undefined) {
+        return;
+      }
+
+      if (process.platform === "win32") {
+        child.kill("SIGTERM");
+        return;
+      }
+
+      try {
+        process.kill(-child.pid, "SIGTERM");
+      } catch {
+        child.kill("SIGTERM");
+      }
+
+      setTimeout(() => {
+        if (child.killed) {
+          return;
+        }
+        try {
+          process.kill(-child.pid!, "SIGKILL");
+        } catch {
+          child.kill("SIGKILL");
+        }
+      }, 1000).unref();
+    };
+
+    const onAbort = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      terminate();
+      cleanup();
+      reject(new OperationCancelledError());
+    };
+
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+
+    child.stdout?.on("data", (data: Buffer | string) => {
+      stdout += data.toString();
+    });
+    child.stderr?.on("data", (data: Buffer | string) => {
+      stderr += data.toString();
+    });
+
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    });
+
+    child.on("close", (code) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve({ output: stdout + stderr, exitCode: code ?? 1 });
+    });
+  });
 }

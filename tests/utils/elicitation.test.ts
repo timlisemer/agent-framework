@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { sortReposSubmodulesFirst, parseUncertainties } from "../../src/utils/elicitation.js";
+import { describe, it, expect, vi } from "vitest";
+import { sortReposSubmodulesFirst, parseUncertainties, elicitRepoSelection } from "../../src/utils/elicitation.js";
 import type { RepoInfo } from "../../src/utils/git-utils.js";
 
 describe("sortReposSubmodulesFirst", () => {
@@ -103,5 +103,40 @@ describe("parseUncertainties", () => {
     const output = "DECLINED\nUNCERTAIN: test -   Extra spaces   ";
     const result = parseUncertainties(output);
     expect(result[0].description).toBe("Extra spaces");
+  });
+});
+
+describe("elicitation cancellation", () => {
+  it("passes no-timeout and AbortSignal to MCP elicitation", async () => {
+    const controller = new AbortController();
+    const elicitInput = vi.fn().mockResolvedValue({
+      action: "accept",
+      content: { "/repo/a": true, "/repo/b": false },
+    });
+    const repoInfo: RepoInfo = {
+      mainRepo: "/repo/a",
+      mainRepoName: "a",
+      mainRepoHasChanges: true,
+      submodules: [],
+      reposWithChanges: [
+        { path: "/repo/a", name: "a" },
+        { path: "/repo/b", name: "b" },
+      ],
+    };
+
+    const selected = await elicitRepoSelection(
+      { elicitInput } as never,
+      repoInfo,
+      { signal: controller.signal },
+    );
+
+    expect(selected).toEqual([{ path: "/repo/a", name: "a" }]);
+    expect(elicitInput).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({
+        timeout: 2147483647,
+        signal: controller.signal,
+      }),
+    );
   });
 });

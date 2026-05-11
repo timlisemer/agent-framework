@@ -19,11 +19,12 @@
 import { EXECUTION_TYPES, parseTierName } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
-import { getUncommittedChanges } from "../../utils/git-utils.js";
+import { getUncommittedChangesCancellable } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { runConfirmPrefilter, formatConfirmPrefilter } from "../../utils/confirm-prefilter.js";
 import { runCheckAgent } from "./check.js";
+import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 
 import { activeSpec } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("confirm"); }
@@ -41,7 +42,8 @@ export async function runConfirmAgent(
   workingDir: string,
   tierName?: string,
   extraContext?: string,
-  transcriptPath?: string
+  transcriptPath?: string,
+  options: CancellationOptions = {}
 ): Promise<string> {
   // Set up execution context for statusLine logging
   if (transcriptPath) {
@@ -51,7 +53,7 @@ export async function runConfirmAgent(
 
   const tier = parseTierName(tierName);
   // Step 1: Run check agent first
-  const checkResult = await runCheckAgent(workingDir, transcriptPath);
+  const checkResult = await runCheckAgent(workingDir, transcriptPath, options);
 
   const errorMatch = checkResult.match(/Errors:\s*(\d+)/i);
   const errorCount = errorMatch ? parseInt(errorMatch[1], 10) : 0;
@@ -75,7 +77,8 @@ DECLINED: ${declineReason}`;
   }
 
   // Step 3: Get git data
-  const { status, diff } = getUncommittedChanges(workingDir);
+  throwIfAborted(options.signal);
+  const { status, diff } = await getUncommittedChangesCancellable(workingDir, options);
 
   // Step 3.5: Pre-filter deterministic violations (file/extension-aware)
   const prefilterSection = formatConfirmPrefilter(runConfirmPrefilter(status, diff));
@@ -90,7 +93,8 @@ ${status || "(no changes)"}
 
 GIT DIFF (all uncommitted changes):
 ${diff || "(no diff)"}${extraContext ? `\n\nUSER INSTRUCTIONS:\n${extraContext}` : ""}`,
-    }
+    },
+    options
   );
 
   logAgentResult(result, {

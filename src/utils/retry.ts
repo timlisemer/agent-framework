@@ -31,6 +31,7 @@
 
 import type Anthropic from "@anthropic-ai/sdk";
 import { extractTextFromResponse } from "./response-parser.js";
+import { isCancellationError, type CancellationOptions } from "./cancellation.js";
 
 /**
  * Options for retry behavior.
@@ -76,7 +77,7 @@ export async function retryUntilValid(
   model: string,
   initialResponse: string,
   context: string,
-  options: RetryOptions
+  options: RetryOptions & CancellationOptions
 ): Promise<string> {
   const { maxRetries = 2, formatValidator, formatReminder, maxTokens = 100 } = options;
 
@@ -103,10 +104,14 @@ export async function retryUntilValid(
         // Disable SDK-level retries — this function IS the retry mechanism
         // Having the SDK silently retry underneath creates invisible double-timeouts
         maxRetries: 0,
+        signal: options.signal,
       });
 
       decision = extractTextFromResponse(retryResponse);
     } catch (error) {
+      if (isCancellationError(error)) {
+        throw error;
+      }
       // Return error as string rather than throwing
       const errorMessage =
         error instanceof Error ? error.message : String(error);

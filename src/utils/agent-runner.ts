@@ -91,6 +91,13 @@ import {
 import { extractTextFromResponse } from "./response-parser.js";
 import { logAgentDecision, extractDecision, logAgentStarted } from "./logger.js";
 import type { DecisionType } from "../telemetry/types.js";
+import {
+  abortableDelay,
+  isCancellationError,
+  linkAbortSignal,
+  type CancellationOptions,
+  throwIfAborted,
+} from "./cancellation.js";
 
 /**
  * Tools available to SDK mode agents.
@@ -326,8 +333,10 @@ export interface AgentExecutionResult {
  */
 export async function runAgent(
   config: AgentConfig,
-  input: AgentInput
+  input: AgentInput,
+  options: CancellationOptions = {}
 ): Promise<AgentExecutionResult> {
+  throwIfAborted(options.signal);
   const startTime = Date.now();
 
   // Combine prompt and context
@@ -343,8 +352,8 @@ export async function runAgent(
   try {
     result =
       config.mode === "sdk"
-        ? await runSdkAgent(config, fullPrompt)
-        : await runDirectAgent(config, fullPrompt);
+        ? await runSdkAgent(config, fullPrompt, options)
+        : await runDirectAgent(config, fullPrompt, options);
 
     // Detect error responses
     if (result.text.startsWith("[DIRECT ERROR]") || result.text.startsWith("[SDK ERROR]")) {
@@ -379,6 +388,9 @@ export async function runAgent(
                 role: "user",
                 content: `Invalid format. ${formatReminder}\n\nOriginal output:\n${result.text.slice(0, 2000)}`,
               }],
+            }, {
+              maxRetries: 0,
+              signal: options.signal,
             });
             result.text = extractTextFromResponse(retryResponse);
 
@@ -394,6 +406,9 @@ export async function runAgent(
       }
     }
   } catch (error) {
+    if (isCancellationError(error)) {
+      throw error;
+    }
     result = { text: error instanceof Error ? error.message : String(error) };
     success = false;
     errorCount = 1;
@@ -433,8 +448,10 @@ export async function runAgent(
  */
 async function runDirectAgent(
   config: AgentConfig,
-  prompt: string
+  prompt: string,
+  options: CancellationOptions = {}
 ): Promise<InternalAgentResult> {
+  throwIfAborted(options.signal);
   // Resolve provider for direct mode (currently always openrouter)
   const provider = resolveProvider(config.tier, "direct");
 
@@ -455,6 +472,7 @@ async function runDirectAgent(
       // SDK retrying internally reuses the same connection pool, which just
       // delays failure surfacing if the connection is broken.
       maxRetries: 0,
+      signal: options.signal,
     });
 
     // Extract usage data from response
@@ -496,6 +514,9 @@ async function runDirectAgent(
       provider: provider.type,
     };
   } catch (error) {
+    if (isCancellationError(error)) {
+      throw error;
+    }
     // Return error as string rather than throwing
     // This allows the caller to handle it gracefully (matches runSdkAgent pattern)
     const errorMessage =
@@ -535,8 +556,10 @@ async function runDirectAgent(
  */
 async function runSdkAgent(
   config: AgentConfig,
-  prompt: string
+  prompt: string,
+  options: CancellationOptions = {}
 ): Promise<InternalAgentResult> {
+  throwIfAborted(options.signal);
   // Validate workingDir for SDK mode
   if (!config.workingDir) {
     throw new Error(`SDK mode requires workingDir for agent '${config.name}'`);
@@ -609,33 +632,37 @@ Your final response should be your complete analysis in the required format.`;
     let totalCachedTokens = 0;
 
     try {
+      const abortController = new AbortController();
+      const unlinkAbortSignal = linkAbortSignal(options.signal, abortController);
       // Create SDK query with configured tools
-      const q = query({
-        prompt,
-        options: {
-          model: provider.modelId,
-          cwd: config.workingDir,
-          systemPrompt: enhancedSystemPrompt,
-          tools,
-          allowedTools: tools, // Auto-approve these tools
-          permissionMode: "bypassPermissions",
-          allowDangerouslySkipPermissions: true,
-          maxTurns: config.maxTurns ?? 10,
-          env: subprocessEnv, // Pass env to subprocess (cleared for subscription)
-          // SDK 0.2.x spawns a native Claude Code subprocess. Point at the
-          // user-installed binary at ~/.local/bin/claude instead of the
-          // bundled @anthropic-ai/claude-agent-sdk-linux-x64-musl/claude
-          // which isn't present in this deployment.
-          pathToClaudeCodeExecutable: `${homedir()}/.local/bin/claude`,
-          persistSession: false, // Don't create transcript files for SDK agents
-          stderr: (data: string) => {
-            // Cap to last 2 KiB so a chatty subprocess can't blow memory.
-            stderrBuffer = (stderrBuffer + data).slice(-2048);
+      try {
+        const q = query({
+          prompt,
+          options: {
+            model: provider.modelId,
+            cwd: config.workingDir,
+            systemPrompt: enhancedSystemPrompt,
+            tools,
+            allowedTools: tools, // Auto-approve these tools
+            permissionMode: "bypassPermissions",
+            allowDangerouslySkipPermissions: true,
+            maxTurns: config.maxTurns ?? 10,
+            env: subprocessEnv, // Pass env to subprocess (cleared for subscription)
+            // SDK 0.2.x spawns a native Claude Code subprocess. Point at the
+            // user-installed binary at ~/.local/bin/claude instead of the
+            // bundled @anthropic-ai/claude-agent-sdk-linux-x64-musl/claude
+            // which isn't present in this deployment.
+            pathToClaudeCodeExecutable: `${homedir()}/.local/bin/claude`,
+            persistSession: false, // Don't create transcript files for SDK agents
+            abortController,
+            stderr: (data: string) => {
+              // Cap to last 2 KiB so a chatty subprocess can't blow memory.
+              stderrBuffer = (stderrBuffer + data).slice(-2048);
+            },
           },
-        },
-      });
+        });
 
-      for await (const message of q) {
+        for await (const message of q) {
         messageCount++;
         lastMessageType = message.type;
         const msgAny = message as Record<string, unknown>;
@@ -742,8 +769,14 @@ Your final response should be your complete analysis in the required format.`;
             }
           }
         }
+        }
+      } finally {
+        unlinkAbortSignal();
       }
     } catch (error) {
+      if (isCancellationError(error)) {
+        throw error;
+      }
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       return {
@@ -836,7 +869,7 @@ Your final response should be your complete analysis in the required format.`;
 
   // 250 ms cool-off so any underlying HTTP/2 / TLS state has a chance to tear
   // down — same-tick retries don't fix connection-pool failures.
-  await new Promise<void>((resolve) => setTimeout(resolve, 250));
+  await abortableDelay(250, options.signal);
 
   const second = await runOnce();
   if (second.kind === "ok") {
@@ -1006,12 +1039,13 @@ export interface AgentRetryOptions {
 export async function runAgentWithRetry(
   config: AgentConfig,
   input: AgentInput,
-  retryOptions: AgentRetryOptions
+  retryOptions: AgentRetryOptions,
+  options: CancellationOptions = {}
 ): Promise<AgentExecutionResult> {
   const startTime = Date.now();
 
   // Get initial response
-  const initialResult = await runAgent(config, input);
+  const initialResult = await runAgent(config, input, options);
 
   // Check if already valid
   if (retryOptions.formatValidator(initialResult.output)) {
@@ -1055,6 +1089,9 @@ export async function runAgentWithRetry(
         // OpenRouter: request usage/cost data in response
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...({ usage: { include: true } } as any),
+      }, {
+        maxRetries: 0,
+        signal: options.signal,
       });
 
       // Capture generation ID from retry response
@@ -1066,6 +1103,9 @@ export async function runAgentWithRetry(
 
       decision = extractTextFromResponse(retryResponse);
     } catch (error) {
+      if (isCancellationError(error)) {
+        throw error;
+      }
       // Return error as string rather than throwing (matches runDirectAgent pattern)
       const errorMessage =
         error instanceof Error ? error.message : String(error);

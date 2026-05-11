@@ -23,33 +23,25 @@
  * @module commit
  */
 
-import { execFileSync } from "child_process";
 import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { COMMIT_AGENT } from "../../utils/agent-configs.js";
-import { runCommand } from "../../utils/command.js";
-import { getUncommittedChanges, classifyCommitSize } from "../../utils/git-utils.js";
+import { runProcessCancellable } from "../../utils/command.js";
+import { getUncommittedChangesCancellable, classifyCommitSize } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { runConfirmAgent } from "./confirm.js";
+import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 
 import { activeSpec } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("commit"); }
 
-function runGit(args: string[], cwd: string): { output: string; exitCode: number } {
-  try {
-    const output = execFileSync("git", args, {
-      cwd,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return { output, exitCode: 0 };
-  } catch (err) {
-    const error = err as { stdout?: string | Buffer; stderr?: string | Buffer; status?: number };
-    const stdout = error.stdout ? error.stdout.toString() : "";
-    const stderr = error.stderr ? error.stderr.toString() : "";
-    return { output: stdout + stderr, exitCode: error.status ?? 1 };
-  }
+function runGit(
+  args: string[],
+  cwd: string,
+  options: CancellationOptions = {}
+): Promise<{ output: string; exitCode: number }> {
+  return runProcessCancellable({ shell: false, file: "git", args }, cwd, options);
 }
 
 /**
@@ -88,7 +80,8 @@ export async function runCommitAgent(
   workingDir: string,
   confirmTierName?: string,
   confirmExtraContext?: string,
-  transcriptPath?: string
+  transcriptPath?: string,
+  options: CancellationOptions = {}
 ): Promise<string> {
   // Set up execution context for statusLine logging
   if (transcriptPath) {
@@ -96,14 +89,21 @@ export async function runCommitAgent(
   }
   logAgentStarted("commit", getHookName());
 
-  const { status, diff, diffStat, untrackedDiff } = getUncommittedChanges(workingDir);
+  const { status, diff, diffStat, untrackedDiff } = await getUncommittedChangesCancellable(workingDir, options);
 
   if (!status.trim()) {
     return "SKIPPED: nothing to commit";
   }
 
   // Confirm changes before generating commit message (pass through tier/context)
-  const confirmResult = await runConfirmAgent(workingDir, confirmTierName, confirmExtraContext, transcriptPath);
+  throwIfAborted(options.signal);
+  const confirmResult = await runConfirmAgent(
+    workingDir,
+    confirmTierName,
+    confirmExtraContext,
+    transcriptPath,
+    options
+  );
   if (confirmResult.includes("DECLINED")) {
     return confirmResult;
   }
@@ -130,7 +130,8 @@ ${diffStat}
 
 DIFF (for context):
 ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
-    }
+    },
+    options
   );
 
   const parsed = parseCommitResponse(result.output);
@@ -153,7 +154,8 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
 
   // Execute the commit. Use argv-based git calls so shell-active commit
   // message text like backticks, $(), or <proposed_plan> stays literal.
-  const add = runGit(["add", "-A"], workingDir);
+  throwIfAborted(options.signal);
+  const add = await runGit(["add", "-A"], workingDir, options);
   if (add.exitCode !== 0) {
     logAgentResult(result, {
       agent: "commit",
@@ -167,7 +169,8 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
     return `ERROR: Git add failed: ${add.output}`;
   }
 
-  const commit = runGit(["commit", "-m", parsed.message], workingDir);
+  throwIfAborted(options.signal);
+  const commit = await runGit(["commit", "-m", parsed.message], workingDir, options);
 
   if (commit.exitCode !== 0) {
     logAgentResult(result, {
@@ -182,9 +185,11 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
     return `ERROR: Commit failed: ${commit.output}`;
   }
 
-  const hashResult = runCommand("git rev-parse --short HEAD", workingDir);
+  throwIfAborted(options.signal);
+  const hashResult = await runGit(["rev-parse", "--short", "HEAD"], workingDir, options);
   const hash = hashResult.output.trim();
 
+  throwIfAborted(options.signal);
   logAgentResult(result, {
     agent: "commit",
     hookName: getHookName(),

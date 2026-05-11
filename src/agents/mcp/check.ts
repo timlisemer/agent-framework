@@ -48,10 +48,11 @@ import { execSync } from "child_process";
 import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CHECK_AGENT } from "../../utils/agent-configs.js";
-import { runCommand } from "../../utils/command.js";
-import { getUncommittedChanges, getRepoInfo } from "../../utils/git-utils.js";
+import { runProcessCancellable } from "../../utils/command.js";
+import { getUncommittedChangesCancellable, getRepoInfoCancellable } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
+import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 
 import { activeSpec } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("check"); }
@@ -315,7 +316,11 @@ function findCheckRunner(
  * @param transcriptPath - Optional transcript path for statusLine updates
  * @returns Structured summary with errors, warnings, and status
  */
-export async function runCheckAgent(workingDir: string, transcriptPath?: string): Promise<string> {
+export async function runCheckAgent(
+  workingDir: string,
+  transcriptPath?: string,
+  options: CancellationOptions = {}
+): Promise<string> {
   // Set up execution context for statusLine logging
   if (transcriptPath) {
     setTranscriptPath(transcriptPath);
@@ -323,17 +328,18 @@ export async function runCheckAgent(workingDir: string, transcriptPath?: string)
   logAgentStarted("check", getHookName());
 
   // Get main repo path for fallback
-  const repoInfo = getRepoInfo(workingDir);
+  const repoInfo = await getRepoInfoCancellable(workingDir, options);
   const mainRepo = repoInfo.mainRepo;
 
   // Step 1: Get uncommitted files info
-  const { status } = getUncommittedChanges(workingDir);
+  const { status } = await getUncommittedChangesCancellable(workingDir, options);
 
   // Step 2: Run linter if configured (check workingDir first, then main repo)
   let lintOutput = "";
   const linter = detectLinter(workingDir, mainRepo);
   if (linter) {
-    const lint = runCommand(linter.cmd, linter.dir);
+    throwIfAborted(options.signal);
+    const lint = await runProcessCancellable({ shell: true, command: linter.cmd }, linter.dir, options);
     const lintLocation = linter.dir === workingDir ? "" : ` (from ${path.basename(linter.dir)})`;
     lintOutput = `LINTER OUTPUT${lintLocation} (exit code ${lint.exitCode}):\n${lint.output}\n`;
   }
@@ -344,7 +350,8 @@ export async function runCheckAgent(workingDir: string, transcriptPath?: string)
   if (checkRunner && "error" in checkRunner) {
     checkOutput = `CHECK OUTPUT: ${checkRunner.error}`;
   } else if (checkRunner) {
-    const check = runCommand(checkRunner.cmd, checkRunner.dir);
+    throwIfAborted(options.signal);
+    const check = await runProcessCancellable({ shell: true, command: checkRunner.cmd }, checkRunner.dir, options);
     const label = checkRunner.type === "just" ? "JUST CHECK" : "MAKE CHECK";
     const checkLocation = checkRunner.dir === workingDir ? "" : ` (from ${path.basename(checkRunner.dir)})`;
     checkOutput = `${label} OUTPUT${checkLocation} (exit code ${check.exitCode}):\n${check.output}`;
@@ -358,7 +365,8 @@ export async function runCheckAgent(workingDir: string, transcriptPath?: string)
     {
       prompt: "Summarize the following check results:",
       context: `UNCOMMITTED FILES:\n${status || "(none)"}\n\n${lintOutput}${checkOutput}`,
-    }
+    },
+    options
   );
 
   // TS post-parse normalization:

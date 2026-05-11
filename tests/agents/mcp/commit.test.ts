@@ -40,10 +40,12 @@ function makeRepo(): string {
 
 describe("runCommitAgent", () => {
   let repo: string;
+  let activeController: AbortController;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.runConfirmAgent.mockResolvedValue("## Verdict\nCONFIRMED: ok");
+    activeController = new AbortController();
     repo = makeRepo();
   });
 
@@ -83,5 +85,24 @@ describe("runCommitAgent", () => {
     const message = git(repo, ["log", "-1", "--pretty=%B"]);
     expect(message).toContain("`<proposed_plan>`");
     expect(message).toContain("$(echo unsafe)");
+  });
+
+  it("cancels before git add without creating a commit or staging files", async () => {
+    fs.writeFileSync(path.join(repo, "file.txt"), "content\n");
+    mocks.runAgent.mockImplementationOnce(async () => {
+      const controller = activeController;
+      controller.abort();
+      return {
+        output: "SIZE: SMALL\nMESSAGE:\ncommit: should not happen",
+      };
+    });
+    const before = git(repo, ["rev-parse", "HEAD"]).trim();
+
+    await expect(
+      runCommitAgent(repo, "haiku", undefined, undefined, { signal: activeController.signal }),
+    ).rejects.toMatchObject({ name: "OperationCancelledError" });
+
+    expect(git(repo, ["rev-parse", "HEAD"]).trim()).toBe(before);
+    expect(git(repo, ["diff", "--cached", "--name-only"]).trim()).toBe("");
   });
 });

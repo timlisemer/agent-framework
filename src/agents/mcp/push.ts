@@ -10,7 +10,8 @@
  * @module push
  */
 
-import { execSync } from "child_process";
+import { runProcessCancellable } from "../../utils/command.js";
+import { isCancellationError, type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 
 /**
  * Push committed changes to the remote repository.
@@ -18,15 +19,25 @@ import { execSync } from "child_process";
  * @param workingDir - The project directory to push from
  * @returns Success message or error string
  */
-export async function runPushAgent(workingDir: string): Promise<string> {
+export async function runPushAgent(
+  workingDir: string,
+  options: CancellationOptions = {}
+): Promise<string> {
   try {
-    const output = execSync("git push", {
-      cwd: workingDir,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    return output.trim() || "Pushed successfully";
+    throwIfAborted(options.signal);
+    const result = await runProcessCancellable(
+      { shell: false, file: "git", args: ["push"] },
+      workingDir,
+      options
+    );
+    if (result.exitCode !== 0) {
+      return `ERROR: ${result.output}`;
+    }
+    return result.output.trim() || "Pushed successfully";
   } catch (err) {
+    if (isCancellationError(err)) {
+      throw err;
+    }
     return `ERROR: ${(err as Error).message}`;
   }
 }

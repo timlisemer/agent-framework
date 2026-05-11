@@ -10,6 +10,7 @@ type QueryGenerator = (stderr: StderrCallback) => AsyncGenerator<unknown, void, 
 
 let queryGenerators: QueryGenerator[] = [];
 let queryCallCount = 0;
+const queryArgs: Array<{ options?: { stderr?: (data: string) => void; abortController?: AbortController } }> = [];
 
 function setQueryGenerators(...gens: QueryGenerator[]): void {
   queryGenerators = gens;
@@ -17,7 +18,8 @@ function setQueryGenerators(...gens: QueryGenerator[]): void {
 }
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
-  query: vi.fn().mockImplementation((args: { options?: { stderr?: (data: string) => void } }) => {
+  query: vi.fn().mockImplementation((args: { options?: { stderr?: (data: string) => void; abortController?: AbortController } }) => {
+    queryArgs.push(args);
     const idx = Math.min(queryCallCount, queryGenerators.length - 1);
     const gen = queryGenerators[idx];
     queryCallCount++;
@@ -70,6 +72,7 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
   beforeEach(() => {
     messagesCreateSpy.mockReset();
     (queryMock as unknown as { mockClear: () => void }).mockClear?.();
+    queryArgs.length = 0;
     setQueryGenerators();
   });
 
@@ -196,6 +199,59 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
     expect(queryMock).toHaveBeenCalledTimes(2);
     expect(result.success).toBe(true);
     expect(result.errorCount).toBe(0);
+  });
+
+  it("passes a linked abortController to SDK query", async () => {
+    setQueryGenerators(
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      async function* (_stderr) {
+        yield {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "## Verdict\nCONFIRMED: ok",
+        };
+      },
+    );
+    const controller = new AbortController();
+
+    await runAgent(makeConfig(), { prompt: "Evaluate:" }, { signal: controller.signal });
+
+    expect(queryArgs[0].options?.abortController).toBeInstanceOf(AbortController);
+    expect(queryArgs[0].options?.abortController?.signal.aborted).toBe(false);
+  });
+
+  it("passes AbortSignal to direct Anthropic requests", async () => {
+    messagesCreateSpy.mockResolvedValueOnce({
+      content: [{ type: "text", text: "OK" }],
+      usage: {},
+    });
+    const controller = new AbortController();
+
+    await runAgent(
+      {
+        name: "direct-test",
+        tier: MODEL_TIERS.HAIKU,
+        mode: "direct",
+        systemPrompt: "Test",
+      },
+      { prompt: "Evaluate:" },
+      { signal: controller.signal },
+    );
+
+    expect(messagesCreateSpy).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ maxRetries: 0, signal: controller.signal }),
+    );
+  });
+
+  it("throws cancellation instead of fallback-wrapping a pre-aborted signal", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      runAgent(makeConfig(), { prompt: "Evaluate:" }, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: "OperationCancelledError" });
   });
 
   it("does not retry on error_max_turns (deterministic limit)", async () => {

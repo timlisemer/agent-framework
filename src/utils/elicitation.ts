@@ -12,10 +12,15 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { RepoInfo } from "./git-utils.js";
+import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
 
 // MCP SDK always calls setTimeout internally with no way to disable it.
 // Max 32-bit signed int is the largest value setTimeout accepts.
 const NO_TIMEOUT: RequestOptions = { timeout: 2147483647 };
+
+function noTimeoutWithCancellation(options: CancellationOptions = {}): RequestOptions {
+  return { ...NO_TIMEOUT, signal: options.signal };
+}
 
 export interface RepoSelection {
   path: string;
@@ -33,8 +38,10 @@ export interface Preferences {
  */
 export async function elicitRepoSelection(
   mcpServer: Server,
-  repoInfo: RepoInfo
+  repoInfo: RepoInfo,
+  options: CancellationOptions = {}
 ): Promise<RepoSelection[]> {
+  throwIfAborted(options.signal);
   const repos = repoInfo.reposWithChanges;
 
   if (repos.length === 0) {
@@ -64,7 +71,9 @@ export async function elicitRepoSelection(
       type: "object",
       properties,
     },
-  }, NO_TIMEOUT);
+  }, noTimeoutWithCancellation(options));
+
+  throwIfAborted(options.signal);
 
   if (result.action !== "accept" || !result.content) {
     return [];
@@ -79,8 +88,10 @@ export async function elicitRepoSelection(
  */
 export async function elicitPreferences(
   mcpServer: Server,
-  repoName: string
+  repoName: string,
+  options: CancellationOptions = {}
 ): Promise<Preferences> {
+  throwIfAborted(options.signal);
   const result = await mcpServer.elicitInput({
     mode: "form",
     message: `Preferences for ${repoName}:`,
@@ -103,7 +114,9 @@ export async function elicitPreferences(
         },
       },
     },
-  }, NO_TIMEOUT);
+  }, noTimeoutWithCancellation(options));
+
+  throwIfAborted(options.signal);
 
   if (result.action !== "accept" || !result.content) {
     return { modelTier: "opus", focus: undefined };
@@ -160,8 +173,10 @@ export function parseUncertainties(
  */
 export async function elicitUncertaintyClarification(
   mcpServer: Server,
-  uncertainties: Array<{ category: string; description: string }>
+  uncertainties: Array<{ category: string; description: string }>,
+  options: CancellationOptions = {}
 ): Promise<string | undefined> {
+  throwIfAborted(options.signal);
   if (uncertainties.length === 0) {
     return undefined;
   }
@@ -182,7 +197,9 @@ export async function elicitUncertaintyClarification(
       type: "object",
       properties,
     },
-  }, NO_TIMEOUT);
+  }, noTimeoutWithCancellation(options));
+
+  throwIfAborted(options.signal);
 
   if (result.action !== "accept" || !result.content) {
     return undefined;

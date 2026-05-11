@@ -38,6 +38,8 @@ args = ["exec", "-i", "mcp-toolbox", "npx", "-y", "@upstash/context7-mcp"]
 
 [mcp_servers.agent-framework]
 command = "/run/current-system/sw/bin/bash"
+# Commit can run check and confirm before pushing, so allow five minutes before the client aborts.
+tool_timeout_sec = 300
 args = [
   "-lc",
   "exec node /mnt/docker-data/volumes/mcp-toolbox/agent-framework/dist/src/mcp/server.js",

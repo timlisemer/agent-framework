@@ -1,5 +1,6 @@
 import path from "path";
-import { runCommand } from "./command.js";
+import { runCommand, runProcessCancellable } from "./command.js";
+import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
 
 const isWindows = process.platform === "win32";
 const NULL_DEVICE = isWindows ? "NUL" : "/dev/null";
@@ -233,6 +234,42 @@ export function getUncommittedChanges(workingDir: string): GitChanges {
   };
 }
 
+async function runGit(
+  args: string[],
+  cwd: string,
+  options: CancellationOptions = {}
+): Promise<{ output: string; exitCode: number }> {
+  throwIfAborted(options.signal);
+  return runProcessCancellable({ shell: false, file: "git", args }, cwd, options);
+}
+
+/**
+ * Cancellable async variant of getUncommittedChanges for MCP request paths.
+ */
+export async function getUncommittedChangesCancellable(
+  workingDir: string,
+  options: CancellationOptions = {}
+): Promise<GitChanges> {
+  const status = await runGit(["status", "--porcelain"], workingDir, options);
+  const diffStat = await runGit(["diff", "--stat", "HEAD"], workingDir, options);
+  const trackedDiff = await runGit(["diff", "HEAD"], workingDir, options);
+  const untrackedFiles = await runGit(["ls-files", "--others", "--exclude-standard"], workingDir, options);
+
+  let untrackedDiff = "";
+  for (const file of (untrackedFiles.output || "").split("\n").filter(Boolean)) {
+    throwIfAborted(options.signal);
+    const fileDiff = await runGit(["diff", "--no-index", NULL_DEVICE, file], workingDir, options);
+    untrackedDiff += fileDiff.output || "";
+  }
+
+  return {
+    status: status.output || "",
+    diff: (trackedDiff.output || "") + untrackedDiff,
+    diffStat: diffStat.output || "",
+    untrackedDiff,
+  };
+}
+
 /**
  * Find the topmost git repository by traversing up the directory tree.
  * This handles the case where we're inside a submodule and need to find the parent repo.
@@ -252,6 +289,34 @@ function findTopmostRepo(startDir: string): string {
     // Check if parent directory is inside a git repo
     const parentGitResult = runCommand(`git rev-parse --show-toplevel ${SUPPRESS_STDERR} || ${isWindows ? "echo." : "echo ''"}`, parentDir);
     const parentRepo = (parentGitResult.output || "").trim();
+
+    if (parentRepo && parentRepo !== currentRepo) {
+      currentRepo = parentRepo;
+      parentDir = path.dirname(currentRepo);
+    } else {
+      break;
+    }
+  }
+
+  return currentRepo;
+}
+
+async function findTopmostRepoCancellable(
+  startDir: string,
+  options: CancellationOptions = {}
+): Promise<string> {
+  const gitRootResult = await runGit(["rev-parse", "--show-toplevel"], startDir, options);
+  let currentRepo = gitRootResult.exitCode === 0 ? (gitRootResult.output || "").trim() : "";
+
+  if (!currentRepo) {
+    return startDir;
+  }
+
+  let parentDir = path.dirname(currentRepo);
+  while (parentDir && parentDir !== path.dirname(parentDir)) {
+    throwIfAborted(options.signal);
+    const parentGitResult = await runGit(["rev-parse", "--show-toplevel"], parentDir, options);
+    const parentRepo = parentGitResult.exitCode === 0 ? (parentGitResult.output || "").trim() : "";
 
     if (parentRepo && parentRepo !== currentRepo) {
       currentRepo = parentRepo;
@@ -314,6 +379,65 @@ export function getRepoInfo(workingDir: string): RepoInfo {
   // Build list of repos with changes
   const reposWithChanges: Array<{ path: string; name: string }> = [];
 
+  if (mainRepoHasChanges) {
+    reposWithChanges.push({ path: mainRepo, name: mainRepoName });
+  }
+
+  for (const sub of submodules) {
+    if (sub.hasChanges) {
+      reposWithChanges.push({
+        path: sub.absolutePath,
+        name: path.basename(sub.absolutePath),
+      });
+    }
+  }
+
+  return {
+    mainRepo,
+    mainRepoName,
+    mainRepoHasChanges,
+    submodules,
+    reposWithChanges,
+  };
+}
+
+/**
+ * Cancellable async variant of getRepoInfo for long-running MCP request paths.
+ */
+export async function getRepoInfoCancellable(
+  workingDir: string,
+  options: CancellationOptions = {}
+): Promise<RepoInfo> {
+  const mainRepo = await findTopmostRepoCancellable(workingDir, options);
+  const mainRepoName = path.basename(mainRepo);
+
+  const submoduleResult = await runGit(["submodule", "status"], mainRepo, options);
+  const submodulePaths = (submoduleResult.output || "")
+    .split("\n")
+    .map((line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return "";
+      const parts = trimmed.split(/\s+/);
+      return parts.length >= 2 ? parts[1] : "";
+    })
+    .filter(Boolean);
+
+  const submodules: SubmoduleInfo[] = [];
+  for (const subPath of submodulePaths) {
+    throwIfAborted(options.signal);
+    const absolutePath = path.join(mainRepo, subPath);
+    const statusResult = await runGit(["status", "--porcelain"], absolutePath, options);
+    submodules.push({
+      path: subPath,
+      absolutePath,
+      hasChanges: Boolean((statusResult.output || "").trim()),
+    });
+  }
+
+  const mainStatusResult = await runGit(["status", "--porcelain", "--ignore-submodules=all"], mainRepo, options);
+  const mainRepoHasChanges = Boolean((mainStatusResult.output || "").trim());
+
+  const reposWithChanges: Array<{ path: string; name: string }> = [];
   if (mainRepoHasChanges) {
     reposWithChanges.push({ path: mainRepo, name: mainRepoName });
   }

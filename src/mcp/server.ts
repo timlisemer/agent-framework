@@ -22,7 +22,8 @@ import {
   VALIDATE_INTENT_HELP,
   TRANSCRIPT_HELP,
 } from "./help-docs.js";
-import { getRepoInfo } from "../utils/git-utils.js";
+import { getRepoInfo, getRepoInfoCancellable } from "../utils/git-utils.js";
+import { throwIfAborted } from "../utils/cancellation.js";
 import { initializeTelemetry } from "../telemetry/index.js";
 import {
   elicitRepoSelection,
@@ -73,8 +74,9 @@ server.registerTool(
       transcript_path: z.string().optional().describe("Session transcript path for statusLine")
     }
   },
-  async (args) => {
-    const result = await runCheckAgent(args.working_dir || process.cwd(), args.transcript_path);
+  async (args, extra) => {
+    const options = { signal: extra.signal };
+    const result = await runCheckAgent(args.working_dir || process.cwd(), args.transcript_path, options);
     return { content: [{ type: "text", text: result }] };
   }
 );
@@ -92,9 +94,11 @@ server.registerTool(
       skip_elicitation: coercibleBoolean.describe("Skip interactive questions, use defaults")
     }
   },
-  async (args) => {
+  async (args, extra) => {
+    const options = { signal: extra.signal };
     const workingDir = args.working_dir || process.cwd();
-    const repoInfo = getRepoInfo(workingDir);
+    const repoInfo = await getRepoInfoCancellable(workingDir, options);
+    throwIfAborted(extra.signal);
 
     if (repoInfo.reposWithChanges.length === 0) {
       return { content: [{ type: "text", text: "No repositories with uncommitted changes found." }] };
@@ -108,7 +112,8 @@ server.registerTool(
     // Select repos (elicit if multiple, unless skipped)
     let selectedRepos = repoInfo.reposWithChanges;
     if (!args.skip_elicitation && repoInfo.reposWithChanges.length > 1) {
-      selectedRepos = await elicitRepoSelection(server.server, repoInfo);
+      selectedRepos = await elicitRepoSelection(server.server, repoInfo, options);
+      throwIfAborted(extra.signal);
       if (selectedRepos.length === 0) {
         return { content: [{ type: "text", text: "No repositories selected." }] };
       }
@@ -118,11 +123,13 @@ server.registerTool(
     // Phase 1: Collect all preferences upfront
     const repoPrefs = new Map<string, { tier: string | undefined; extraContext: string | undefined }>();
     for (const repo of selectedRepos) {
+      throwIfAborted(extra.signal);
       if (!args.skip_elicitation && !args.model_tier) {
-        const prefs = await elicitPreferences(server.server, repo.name);
+        const prefs = await elicitPreferences(server.server, repo.name, options);
+        throwIfAborted(extra.signal);
         const focus = prefs.focus ? `Focus: ${prefs.focus}` : undefined;
-        const extra = args.extra_context && focus ? `${args.extra_context}\n${focus}` : focus || args.extra_context;
-        repoPrefs.set(repo.path, { tier: prefs.modelTier, extraContext: extra });
+        const combinedExtraContext = args.extra_context && focus ? `${args.extra_context}\n${focus}` : focus || args.extra_context;
+        repoPrefs.set(repo.path, { tier: prefs.modelTier, extraContext: combinedExtraContext });
       } else {
         repoPrefs.set(repo.path, { tier: args.model_tier, extraContext: args.extra_context });
       }
@@ -131,6 +138,7 @@ server.registerTool(
     // Phase 2: Process all repos
     const results: string[] = [];
     for (const repo of selectedRepos) {
+      throwIfAborted(extra.signal);
       const prefs = repoPrefs.get(repo.path)!;
       let extraContext = prefs.extraContext;
 
@@ -141,16 +149,17 @@ server.registerTool(
         extraContext = extraContext ? `${multiContext}\n${extraContext}` : multiContext;
       }
 
-      let result = await runConfirmAgent(repo.path, prefs.tier, extraContext, args.transcript_path);
+      let result = await runConfirmAgent(repo.path, prefs.tier, extraContext, args.transcript_path, options);
 
       // Post-processing: If DECLINED with uncertainties, elicit clarification and retry
       if (!args.skip_elicitation && result.includes("DECLINED")) {
         const uncertainties = parseUncertainties(result);
         if (uncertainties.length > 0) {
-          const clarification = await elicitUncertaintyClarification(server.server, uncertainties);
+          const clarification = await elicitUncertaintyClarification(server.server, uncertainties, options);
+          throwIfAborted(extra.signal);
           if (clarification) {
             const retryContext = extraContext ? `${extraContext}\n${clarification}` : clarification;
-            result = await runConfirmAgent(repo.path, prefs.tier, retryContext, args.transcript_path);
+            result = await runConfirmAgent(repo.path, prefs.tier, retryContext, args.transcript_path, options);
           }
         }
       }
@@ -180,9 +189,11 @@ server.registerTool(
       auto_push: coercibleBoolean.describe("Automatically push all committed repos after successful commit")
     }
   },
-  async (args) => {
+  async (args, extra) => {
+    const options = { signal: extra.signal };
     const workingDir = args.working_dir || process.cwd();
-    const repoInfo = getRepoInfo(workingDir);
+    const repoInfo = await getRepoInfoCancellable(workingDir, options);
+    throwIfAborted(extra.signal);
 
     if (repoInfo.reposWithChanges.length === 0) {
       return { content: [{ type: "text", text: "SKIPPED: No repositories with uncommitted changes found." }] };
@@ -196,7 +207,8 @@ server.registerTool(
     // Select repos (elicit if multiple, unless skipped)
     let selectedRepos = repoInfo.reposWithChanges;
     if (!args.skip_elicitation && repoInfo.reposWithChanges.length > 1) {
-      selectedRepos = await elicitRepoSelection(server.server, repoInfo);
+      selectedRepos = await elicitRepoSelection(server.server, repoInfo, options);
+      throwIfAborted(extra.signal);
       if (selectedRepos.length === 0) {
         return { content: [{ type: "text", text: "No repositories selected." }] };
       }
@@ -206,11 +218,13 @@ server.registerTool(
     // Phase 1: Collect all preferences upfront
     const repoPrefs = new Map<string, { tier: string | undefined; extraContext: string | undefined }>();
     for (const repo of selectedRepos) {
+      throwIfAborted(extra.signal);
       if (!args.skip_elicitation && !args.model_tier) {
-        const prefs = await elicitPreferences(server.server, repo.name);
+        const prefs = await elicitPreferences(server.server, repo.name, options);
+        throwIfAborted(extra.signal);
         const focus = prefs.focus ? `Focus: ${prefs.focus}` : undefined;
-        const extra = args.extra_context && focus ? `${args.extra_context}\n${focus}` : focus || args.extra_context;
-        repoPrefs.set(repo.path, { tier: prefs.modelTier, extraContext: extra });
+        const combinedExtraContext = args.extra_context && focus ? `${args.extra_context}\n${focus}` : focus || args.extra_context;
+        repoPrefs.set(repo.path, { tier: prefs.modelTier, extraContext: combinedExtraContext });
       } else {
         repoPrefs.set(repo.path, { tier: args.model_tier, extraContext: args.extra_context });
       }
@@ -220,6 +234,7 @@ server.registerTool(
     const results: string[] = [];
     const committedRepos: typeof selectedRepos = [];
     for (const repo of selectedRepos) {
+      throwIfAborted(extra.signal);
       const prefs = repoPrefs.get(repo.path)!;
       let extraContext = prefs.extraContext;
 
@@ -230,7 +245,7 @@ server.registerTool(
         extraContext = extraContext ? `${multiContext}\n${extraContext}` : multiContext;
       }
 
-      const result = await runCommitAgent(repo.path, prefs.tier, extraContext, args.transcript_path);
+      const result = await runCommitAgent(repo.path, prefs.tier, extraContext, args.transcript_path, options);
 
       // runCommitAgent emits "HASH: <sha>" on its last line only on successful
       // commits (commit.ts:166). All failure paths omit it. Substring-matching
@@ -251,6 +266,7 @@ server.registerTool(
 
     // Phase 3: Auto-push if requested
     if (args.auto_push && committedRepos.length > 0) {
+      throwIfAborted(extra.signal);
       let reposToPush = committedRepos;
 
       // If elicitation is enabled and multiple repos, ask which to push
@@ -258,7 +274,8 @@ server.registerTool(
         reposToPush = await elicitRepoSelection(server.server, {
           ...repoInfo,
           reposWithChanges: committedRepos,
-        });
+        }, options);
+        throwIfAborted(extra.signal);
         if (reposToPush.length === 0) {
           results.push("\nPush skipped: no repositories selected for push.");
           return { content: [{ type: "text", text: results.join("\n\n") }] };
@@ -268,7 +285,8 @@ server.registerTool(
 
       results.push("\n--- Push Results ---");
       for (const repo of reposToPush) {
-        const pushResult = await runPushAgent(repo.path);
+        throwIfAborted(extra.signal);
+        const pushResult = await runPushAgent(repo.path, options);
         if (reposToPush.length > 1) {
           results.push(`=== ${repo.name} (${repo.path}) ===\n${pushResult}`);
         } else {
@@ -291,9 +309,11 @@ server.registerTool(
       skip_elicitation: coercibleBoolean.describe("Skip interactive questions, push all repos")
     }
   },
-  async (args) => {
+  async (args, extra) => {
+    const options = { signal: extra.signal };
     const workingDir = args.working_dir || process.cwd();
-    const repoInfo = getRepoInfo(workingDir);
+    const repoInfo = await getRepoInfoCancellable(workingDir, options);
+    throwIfAborted(extra.signal);
 
     // For push, we push all repos (or let user select)
     // Use reposWithChanges as a starting point, but push can also push repos without uncommitted changes
@@ -302,12 +322,13 @@ server.registerTool(
 
     // If no repos have uncommitted changes, just push the working dir
     if (selectedRepos.length === 0) {
-      const result = await runPushAgent(workingDir);
+      const result = await runPushAgent(workingDir, options);
       return { content: [{ type: "text", text: result }] };
     }
 
     if (!args.skip_elicitation && selectedRepos.length > 1) {
-      selectedRepos = await elicitRepoSelection(server.server, repoInfo);
+      selectedRepos = await elicitRepoSelection(server.server, repoInfo, options);
+      throwIfAborted(extra.signal);
       if (selectedRepos.length === 0) {
         return { content: [{ type: "text", text: "No repositories selected." }] };
       }
@@ -316,7 +337,8 @@ server.registerTool(
 
     const results: string[] = [];
     for (const repo of selectedRepos) {
-      const result = await runPushAgent(repo.path);
+      throwIfAborted(extra.signal);
+      const result = await runPushAgent(repo.path, options);
       if (selectedRepos.length > 1) {
         results.push(`=== ${repo.name} (${repo.path}) ===\n${result}`);
       } else {
