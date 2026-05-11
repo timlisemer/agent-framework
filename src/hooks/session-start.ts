@@ -9,6 +9,8 @@ import {
   sessionStateDefaults,
 } from "../utils/session-store.js";
 import type { AdapterEncoder } from "../adapter/types.js";
+import { resolveHostContext } from "../utils/host-context.js";
+import { detectPlanModeEntryAndBuildInjection } from "../utils/plan-mode-entry-state.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
@@ -28,6 +30,31 @@ export interface SessionStartHookInput {
   source: "startup" | "resume" | "compact" | "clear";
   session_id: string;
   transcript_path: string;
+  cwd?: string;
+  permission_mode?: string;
+}
+
+async function maybeInjectPlansOnPlanModeEntry(
+  input: SessionStartHookInput,
+  encoder: AdapterEncoder,
+  sessionDir: string,
+): Promise<boolean> {
+  const host = resolveHostContext({ cwd: input.cwd });
+  const injection = await detectPlanModeEntryAndBuildInjection({
+    source: "SessionStart",
+    sessionDir,
+    transcriptPath: input.transcript_path,
+    projectDir: host.projectDir,
+    permissionMode: input.permission_mode,
+  });
+
+  if (injection.message && encoder.encodeContext) {
+    const out = encoder.encodeContext("SessionStart", injection.message);
+    await exitAfterFlush(out.exitCode, out.stdout);
+    return true;
+  }
+
+  return false;
 }
 
 export async function mainSessionStart(input: SessionStartHookInput, encoder: AdapterEncoder): Promise<void> {
@@ -67,6 +94,7 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
       decision: "ok",
       state_snapshot_seq: snapshotSeq,
     });
+    if (await maybeInjectPlansOnPlanModeEntry(input, encoder, sessionDir)) return;
     const out = encoder.encodeOk("SessionStart");
     await exitAfterFlush(out.exitCode, out.stdout);
     return;
@@ -94,6 +122,7 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
       decision: "ok",
       state_snapshot_seq: snapshotSeq,
     });
+    if (await maybeInjectPlansOnPlanModeEntry(input, encoder, sessionDir)) return;
     const out = encoder.encodeOk("SessionStart");
     await exitAfterFlush(out.exitCode, out.stdout);
     return;
@@ -111,6 +140,7 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
     decision: "ok",
     state_snapshot_seq: snapshotSeq,
   });
+  if (await maybeInjectPlansOnPlanModeEntry(input, encoder, sessionDir)) return;
   const out = encoder.encodeOk("SessionStart");
   await exitAfterFlush(out.exitCode, out.stdout);
 }

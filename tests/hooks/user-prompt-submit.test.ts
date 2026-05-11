@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AdapterEncoder } from "../../src/adapter/types.js";
 
 vi.mock("../../src/utils/hook-bootstrap.js", async () => {
@@ -44,12 +44,24 @@ const encoder: AdapterEncoder = {
 describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
   let tempDir: string;
   let transcriptPath: string;
+  let prevSessionDir: string | undefined;
 
   beforeEach(() => {
     vi.clearAllMocks();
+    prevSessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR;
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "user-prompt-submit-test-"));
+    process.env.AGENT_FRAMEWORK_SESSION_DIR = path.join(tempDir, "session");
     transcriptPath = path.join(tempDir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    if (prevSessionDir === undefined) {
+      delete process.env.AGENT_FRAMEWORK_SESSION_DIR;
+    } else {
+      process.env.AGENT_FRAMEWORK_SESSION_DIR = prevSessionDir;
+    }
   });
 
   it("skips UserPromptSubmit rules for direct agent-framework slash commands", async () => {
@@ -105,5 +117,42 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
 
     expect(mockEvaluateRulesForUserPromptSubmit).toHaveBeenCalledTimes(1);
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "ok");
+  });
+
+  it("injects PLANS.md only on inactive-to-active plan-mode transition", async () => {
+    fs.writeFileSync(path.join(tempDir, "PLANS.md"), "# Planning Contract\n\nFollow it.");
+    const encoderWithContext: AdapterEncoder = {
+      ...encoder,
+      encodeContext: (_event, message: string) => ({ exitCode: 0, stdout: `ctx:${message}` }),
+    };
+
+    await mainUserPromptSubmit(
+      {
+        session_id: "session-plan",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        permission_mode: "plan",
+        prompt: "please plan this",
+      },
+      encoderWithContext,
+    );
+
+    expect(mockExitAfterFlush).toHaveBeenLastCalledWith(
+      0,
+      expect.stringContaining("ctx:The session just entered plan mode."),
+    );
+
+    await mainUserPromptSubmit(
+      {
+        session_id: "session-plan",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        permission_mode: "plan",
+        prompt: "continue planning",
+      },
+      encoderWithContext,
+    );
+
+    expect(mockExitAfterFlush).toHaveBeenLastCalledWith(0, "ok");
   });
 });

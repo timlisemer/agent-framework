@@ -23,6 +23,7 @@
  * @module commit
  */
 
+import { execFileSync } from "child_process";
 import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { COMMIT_AGENT } from "../../utils/agent-configs.js";
@@ -34,6 +35,22 @@ import { runConfirmAgent } from "./confirm.js";
 
 import { activeSpec } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("commit"); }
+
+function runGit(args: string[], cwd: string): { output: string; exitCode: number } {
+  try {
+    const output = execFileSync("git", args, {
+      cwd,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    return { output, exitCode: 0 };
+  } catch (err) {
+    const error = err as { stdout?: string | Buffer; stderr?: string | Buffer; status?: number };
+    const stdout = error.stdout ? error.stdout.toString() : "";
+    const stderr = error.stderr ? error.stderr.toString() : "";
+    return { output: stdout + stderr, exitCode: error.status ?? 1 };
+  }
+}
 
 /**
  * Parse the LLM response to extract size and message.
@@ -134,9 +151,23 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
   // TS authoritative on size — override whatever the LLM emitted.
   parsed.size = tsSize.size;
 
-  // Execute the commit
-  const commitCmd = `git add -A && git commit -m ${JSON.stringify(parsed.message)}`;
-  const commit = runCommand(commitCmd, workingDir);
+  // Execute the commit. Use argv-based git calls so shell-active commit
+  // message text like backticks, $(), or <proposed_plan> stays literal.
+  const add = runGit(["add", "-A"], workingDir);
+  if (add.exitCode !== 0) {
+    logAgentResult(result, {
+      agent: "commit",
+      hookName: getHookName(),
+      toolName: getHookName(),
+      workingDir,
+      executionType: EXECUTION_TYPES.LLM,
+      decisionOverride: "ERROR",
+      decisionReason: `Git add failed: ${add.output}`,
+    });
+    return `ERROR: Git add failed: ${add.output}`;
+  }
+
+  const commit = runGit(["commit", "-m", parsed.message], workingDir);
 
   if (commit.exitCode !== 0) {
     logAgentResult(result, {

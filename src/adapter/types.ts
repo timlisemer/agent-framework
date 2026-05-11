@@ -30,6 +30,7 @@ export interface AdapterEncoder {
   encodeStopBlock(reason: string): EncodedOutput;
   encodeStopPass(): EncodedOutput;
   encodeOk(event: EventName): EncodedOutput;          // exit-code-only events
+  encodeContext?(event: EventName, message: string): EncodedOutput;
   encodeError(event: EventName, message: string): EncodedOutput;
 }
 

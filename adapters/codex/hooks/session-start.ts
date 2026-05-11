@@ -14,6 +14,8 @@ import { initCodexEnv, sessionId, transcriptPath, type CodexSessionStartInput } 
       source: raw.source ?? "startup",
       session_id: sessionId(raw),
       transcript_path: transcriptPath(raw),
+      cwd: raw.cwd,
+      permission_mode: raw.permission_mode ?? raw.permissionMode,
     },
     codexEncoder
   );

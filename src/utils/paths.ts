@@ -243,6 +243,10 @@ export function sessionToolLogFile(sessionDir: string): string {
   return path.join(sessionDir, "tool-log.jsonl");
 }
 
+export function sessionPlanModeStateFile(sessionDir: string): string {
+  return path.join(sessionDir, "plan-mode-state.json");
+}
+
 export function sessionGateReasoningFile(sessionDir: string): string {
   return path.join(sessionDir, "gate-reasoning.json");
 }

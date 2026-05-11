@@ -12,6 +12,7 @@ import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
 import { onEpochRotation, onUserPromptTurn } from "../scenario/lifecycle.js";
 import { activeSpec } from "../adapter/spec.js";
+import { detectPlanModeEntryAndBuildInjection } from "../utils/plan-mode-entry-state.js";
 
 /**
  * UserPromptSubmit Hook
@@ -86,6 +87,16 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
     state_snapshot_seq: snapshotSeq,
   });
 
-  const out = encoder.encodeOk("UserPromptSubmit");
+  const injection = await detectPlanModeEntryAndBuildInjection({
+    source: "UserPromptSubmit",
+    sessionDir,
+    transcriptPath: input.transcript_path,
+    projectDir,
+    permissionMode: input.permission_mode,
+  });
+
+  const out = injection.message && encoder.encodeContext
+    ? encoder.encodeContext("UserPromptSubmit", injection.message)
+    : encoder.encodeOk("UserPromptSubmit");
   await exitAfterFlush(out.exitCode, out.stdout);
 }

@@ -73,6 +73,10 @@ export const codexEncoder: AdapterEncoder = {
     return { stdout: "", exitCode: 0 };
   },
 
+  encodeContext(_event: EventName, message: string): EncodedOutput {
+    return { stdout: JSON.stringify({ systemMessage: message }), exitCode: 0 };
+  },
+
   encodeError(event: EventName, message: string): EncodedOutput {
     if (event === "Stop") {
       return { stdout: JSON.stringify({ continue: true, systemMessage: message }), exitCode: 0 };

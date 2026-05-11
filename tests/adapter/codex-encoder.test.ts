@@ -32,4 +32,12 @@ describe("codexEncoder", () => {
       reason: "continue with tests",
     });
   });
+
+  it("emits Codex context injection JSON", () => {
+    const out = codexEncoder.encodeContext?.("UserPromptSubmit", "read PLANS.md");
+    expect(out?.exitCode).toBe(0);
+    expect(JSON.parse(out?.stdout ?? "")).toEqual({
+      systemMessage: "read PLANS.md",
+    });
+  });
 });

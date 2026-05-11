@@ -23,6 +23,11 @@ the Claude slash-command workflows. The NixOS activation script creates real dir
 skill directories: Codex skill discovery does not follow symlinked skill
 directories reliably. Existing user and system skills remain intact.
 
+Codex planning uses repo-root `PLANS.md` as the plan-output contract. The Codex
+hooks inject this contract when a session enters plan mode, and
+`$agent-framework-plan1`, `$agent-framework-plan3`, and `$agent-framework-plan5`
+also read it before presenting `<proposed_plan>` output.
+
 `dotcodex/agents/*.toml` contains Codex custom-agent equivalents for the
 Claude subagent roles. The NixOS activation script links these as individual
 files under `~/.codex/agents/`.
