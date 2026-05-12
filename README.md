@@ -144,6 +144,15 @@ For manual MCP config (alternative to `claude mcp add`):
 
 The `PreToolUse` hook intercepts tool calls. To configure which tools trigger your hook, you need to know the exact tool names the host agent uses.
 
+### Bash Authorization vs Safety
+
+`prediction-block` handles user-intent authorization, not full Bash safety. If
+the latest user message clearly implies Bash (for example, asking the agent to
+check logs with Bash commands), prediction-block must not deny simply to demand
+a second Bash authorization. Separate safety layers still apply: deterministic
+blacklist checks run before prediction-block, and `tool-approve` evaluates the
+command afterward for task fit and policy violations.
+
 ### Tool Risk Categories
 
 | Risk Level     | Tools                                                                                                                                                                         | Notes                                      |

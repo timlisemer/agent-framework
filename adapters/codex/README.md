@@ -46,6 +46,12 @@ it is not a complete enforcement boundary. The adapter also registers
 `PermissionRequest`, `PostToolUse`, and `Stop` hooks so approval prompts and
 post-tool feedback still pass through the framework where Codex exposes them.
 
+For Bash, the shared policy keeps authorization and safety separate. If the
+latest user message already implies Bash, the Codex hook should not require a
+second permission request solely because the command head is outside the
+prediction-block read-only classifier. Deterministic blacklist checks and final
+tool approval still decide whether the specific command is safe and relevant.
+
 `apply_patch` arrives as `tool_name: "apply_patch"` with the patch in
 `tool_input.command`; the shared rules parse patch headers to recover edited
 paths.

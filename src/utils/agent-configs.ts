@@ -500,6 +500,11 @@ is not a rule of this system. The deterministic blacklist denies the genuinely
 destructive commands BEFORE this prompt runs, so anything you see here that is
 read-only-shaped has already been classified as non-destructive.
 
+When upstream context or the latest user message already implies Bash, do not
+deny merely to ask for Bash reauthorization. Evaluate the command for safety
+and task fit. Deny unsafe Bash, unrelated Bash, mutation/build/workaround
+commands, and commands that violate project rules.
+
 ===== OUTPUT FORMAT (STRICT) =====
 Your response MUST start with EXACTLY one of:
 

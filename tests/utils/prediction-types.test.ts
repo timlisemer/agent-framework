@@ -1315,7 +1315,28 @@ describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", ()
     expect(result.reason).toContain("class-level imperative");
   });
 
-  it("'investigate correctly' + mutating Bash -> deny despite class-level Bash inspection", () => {
+  it("fresh log-inspection request + journalctl pipeline -> allow via class-level Bash inspection", () => {
+    const pred = makeAngryLowStreak4({
+      mood: "neutral",
+      trust: "normal",
+      intent: "User instructs the AI to express or document a code comment in the ongoing implementation.",
+      explicitlyAllowedTools: ["Edit"],
+      userMessageSnippet: "\"when Xwayland has created its socket but the env import has not caught up yet\" so say that as a code comment",
+    });
+    const result = decidePrediction(
+      pred,
+      "Bash",
+      {
+        command: "journalctl -b --user --no-pager -o short-iso --since '2026-05-12 15:30' | rg -i 'astral|hyprland|steam|discord|easyeffects|error|failed'",
+      },
+      0,
+      "Please once again check all logs for unusuals.\n\nLike i said please use all kind of bash commands to look at the logs of our services",
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("class-level imperative");
+  });
+
+  it("'investigate correctly' + deterministically blocked Bash -> deny despite class-level Bash inspection", () => {
     const pred = makeAngryLowStreak4();
     const result = decidePrediction(
       pred,
@@ -1325,7 +1346,20 @@ describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", ()
       "do what i told you and investigate correctly",
     );
     expect(result.decision).toBe("deny");
-    expect(result.reason).toContain("limited to read-only Bash commands");
+    expect(result.reason).toContain("Bash safety policy blocks this command");
+  });
+
+  it("'investigate correctly' + high-risk workaround Bash -> deny despite class-level Bash inspection", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(
+      pred,
+      "Bash",
+      { command: "npx tsc --noEmit" },
+      4,
+      "do what i told you and investigate correctly",
+    );
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toContain("Bash safety policy blocks this command");
   });
 
   it("'stop. now implement.' + Edit -> allow (sentence boundary breaks revocation window)", () => {
@@ -1339,7 +1373,7 @@ describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", ()
     const pred = makeAngryLowStreak4();
     const result = decidePrediction(pred, "Bash", { command: "npx vitest" }, 4, "now run the tests, don't refactor that");
     expect(result.decision).toBe("deny");
-    expect(result.reason).toContain("limited to read-only Bash commands");
+    expect(result.reason).toContain("Bash safety policy blocks this command");
   });
 
   it("cross-class scoping: 'now run the tests, don't refactor that' + Edit -> deny (Edit mapped via EDIT_VERB_RE 'refactor'; verb-class guard finds 'don't' in window before 'refactor')", () => {

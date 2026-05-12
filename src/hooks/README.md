@@ -11,3 +11,12 @@ specific tool expects.
 
 This separation means the rule logic in `src/hooks/` is adapter-agnostic:
 adding a new AI coding tool only requires a new adapter, not changes here.
+
+## Bash Authorization
+
+The PreToolUse pipeline separates user authorization from command safety. A
+fresh user message that implies Bash use satisfies the prediction-block
+authorization check; prediction-block must not ask for another authorization
+just because the command is outside its narrow read-only classifier. Bash safety
+is still enforced by the surrounding rule pipeline: blacklist-style deterministic
+blocks run before prediction-block, and final tool approval runs afterward.

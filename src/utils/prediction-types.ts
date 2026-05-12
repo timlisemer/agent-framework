@@ -794,10 +794,19 @@ export function decidePrediction(
     // Path (a') — CLASS-LEVEL fresh imperative on the live transcript.
     if (latestUserMessage && latestUserMessageReauthorizesClass(latestUserMessage, toolName)) {
       if (toolName === "Bash") {
-        if (!bashClassification?.readOnly) {
+        if (!bashClassification) {
           return {
             decision: "deny",
-            reason: `User's latest transcript message implies Bash, but this deterministic reauthorization path is limited to read-only Bash commands. ${bashClassification?.reason ?? "No Bash command was provided."}`,
+            reason: "User's latest transcript message implies Bash, but no Bash command was provided.",
+          };
+        }
+        if (
+          bashClassification.riskClass === "blocked" ||
+          bashClassification.riskClass === "high-risk-workaround"
+        ) {
+          return {
+            decision: "deny",
+            reason: `User's latest transcript message implies Bash, but Bash safety policy blocks this command. ${bashClassification.reason ?? "command is blocked"}`,
           };
         }
       }
