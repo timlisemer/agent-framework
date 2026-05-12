@@ -1,7 +1,7 @@
 sandbox_mode = "danger-full-access"
 
 [features]
-codex_hooks = true
+hooks = true
 
 [plugins."github@openai-curated"]
 enabled = true
