@@ -53,13 +53,30 @@ function parseRecordsFromBuffer(buffer: Buffer): SessionInjectionRecord[] {
   return records;
 }
 
-function readLastSeq(filePath: string): number {
+function readTailBuffer(filePath: string, maxBytes = 64 * 1024): Buffer {
+  const fd = fs.openSync(filePath, "r");
   try {
-    const records = parseRecordsFromBuffer(fs.readFileSync(filePath));
-    return records.length > 0 ? records[records.length - 1].seq : 0;
-  } catch {
-    return 0;
+    const stat = fs.fstatSync(fd);
+    const length = Math.min(maxBytes, stat.size);
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, stat.size - length);
+    return buffer;
+  } finally {
+    fs.closeSync(fd);
   }
+}
+
+function readRecentRecords(filePath: string): SessionInjectionRecord[] {
+  try {
+    return parseRecordsFromBuffer(readTailBuffer(filePath));
+  } catch {
+    return [];
+  }
+}
+
+function readLastSeq(filePath: string): number {
+  const records = readRecentRecords(filePath);
+  return records.length > 0 ? records[records.length - 1].seq : 0;
 }
 
 export function appendSessionInjections(
@@ -72,8 +89,19 @@ export function appendSessionInjections(
   const filePath = sessionInjectionsFile(sessionDir);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   let seq = readLastSeq(filePath);
+  const recentKeys = new Set(
+    readRecentRecords(filePath).map((record) => `${record.id}:${record.message_hash}`),
+  );
+  const deduped = pending.filter((injection) => {
+    const key = `${injection.id}:${shortContentHash(injection.message)}`;
+    if (recentKeys.has(key)) return false;
+    recentKeys.add(key);
+    return true;
+  });
+  if (deduped.length === 0) return [];
+
   const ts = Date.now();
-  const records = pending.map((injection) => ({
+  const records = deduped.map((injection) => ({
     ...injection,
     seq: ++seq,
     ts,

@@ -1,10 +1,14 @@
 import path from "path";
-import { runCommand, runProcessCancellable } from "./command.js";
+import { runCommand, runProcessCancellable, type ProcessOutputLimits } from "./command.js";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
 
 const isWindows = process.platform === "win32";
 const NULL_DEVICE = isWindows ? "NUL" : "/dev/null";
 const SUPPRESS_STDERR = isWindows ? "2>NUL" : "2>/dev/null";
+const DEFAULT_GIT_STATUS_MAX_BYTES = 512 * 1024;
+const DEFAULT_GIT_DIFF_MAX_BYTES = 4 * 1024 * 1024;
+const DEFAULT_UNTRACKED_DIFF_MAX_BYTES = 2 * 1024 * 1024;
+const DEFAULT_UNTRACKED_FILE_LIMIT = 50;
 
 /**
  * Escape a file path for use in shell commands.
@@ -237,10 +241,45 @@ export function getUncommittedChanges(workingDir: string): GitChanges {
 async function runGit(
   args: string[],
   cwd: string,
-  options: CancellationOptions = {}
+  options: ProcessOutputLimits = {}
 ): Promise<{ output: string; exitCode: number }> {
   throwIfAborted(options.signal);
   return runProcessCancellable({ shell: false, file: "git", args }, cwd, options);
+}
+
+export async function getGitStatusCancellable(
+  workingDir: string,
+  options: CancellationOptions = {}
+): Promise<string> {
+  const status = await runGit(["status", "--porcelain"], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  return status.output || "";
+}
+
+function appendWithinLimit(
+  current: string,
+  addition: string,
+  limit: number,
+  marker: string,
+): { value: string; full: boolean } {
+  const used = Buffer.byteLength(current, "utf-8");
+  const remaining = Math.max(0, limit - used);
+  if (remaining <= 0) {
+    return { value: current + marker, full: true };
+  }
+
+  const additionBytes = Buffer.byteLength(addition, "utf-8");
+  if (additionBytes <= remaining) {
+    return { value: current + addition, full: false };
+  }
+
+  return {
+    value: current + Buffer.from(addition).subarray(0, remaining).toString("utf-8") + marker,
+    full: true,
+  };
 }
 
 /**
@@ -250,16 +289,56 @@ export async function getUncommittedChangesCancellable(
   workingDir: string,
   options: CancellationOptions = {}
 ): Promise<GitChanges> {
-  const status = await runGit(["status", "--porcelain"], workingDir, options);
-  const diffStat = await runGit(["diff", "--stat", "HEAD"], workingDir, options);
-  const trackedDiff = await runGit(["diff", "HEAD"], workingDir, options);
-  const untrackedFiles = await runGit(["ls-files", "--others", "--exclude-standard"], workingDir, options);
+  const status = await runGit(["status", "--porcelain"], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  const diffStat = await runGit(["diff", "--stat", "HEAD"], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  const trackedDiff = await runGit(["diff", "HEAD"], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_DIFF_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  const untrackedFiles = await runGit(["ls-files", "--others", "--exclude-standard"], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
 
   let untrackedDiff = "";
-  for (const file of (untrackedFiles.output || "").split("\n").filter(Boolean)) {
+  const files = (untrackedFiles.output || "").split("\n").filter(Boolean);
+  for (const file of files.slice(0, DEFAULT_UNTRACKED_FILE_LIMIT)) {
     throwIfAborted(options.signal);
-    const fileDiff = await runGit(["diff", "--no-index", NULL_DEVICE, file], workingDir, options);
-    untrackedDiff += fileDiff.output || "";
+    const remaining = Math.max(
+      0,
+      DEFAULT_UNTRACKED_DIFF_MAX_BYTES - Buffer.byteLength(untrackedDiff, "utf-8"),
+    );
+    if (remaining <= 0) {
+      untrackedDiff += `\n[agent-framework: untracked diff truncated after ${DEFAULT_UNTRACKED_DIFF_MAX_BYTES} bytes]\n`;
+      break;
+    }
+
+    const fileDiff = await runGit(["diff", "--no-index", NULL_DEVICE, file], workingDir, {
+      ...options,
+      maxStdoutBytes: remaining,
+      maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    });
+    const appended = appendWithinLimit(
+      untrackedDiff,
+      fileDiff.output || "",
+      DEFAULT_UNTRACKED_DIFF_MAX_BYTES,
+      `\n[agent-framework: untracked diff truncated after ${DEFAULT_UNTRACKED_DIFF_MAX_BYTES} bytes]\n`,
+    );
+    untrackedDiff = appended.value;
+    if (appended.full) break;
+  }
+  if (files.length > DEFAULT_UNTRACKED_FILE_LIMIT) {
+    untrackedDiff += `\n[agent-framework: skipped ${files.length - DEFAULT_UNTRACKED_FILE_LIMIT} untracked files after limit ${DEFAULT_UNTRACKED_FILE_LIMIT}]\n`;
   }
 
   return {

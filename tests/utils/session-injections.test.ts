@@ -48,4 +48,17 @@ describe("session-injections", () => {
     expect(readSessionInjectionsThroughOffset(tmpDir, offset).map((record) => record.id)).toEqual(["a"]);
     expect(readSessionInjectionsAfterOffset(tmpDir, offset).map((record) => record.id)).toEqual(["b"]);
   });
+
+  it("deduplicates repeated provider/message injections from recent history", () => {
+    const first = appendSessionInjections(tmpDir, "SessionStart", [
+      { id: "plans-md-plan-mode-entry", trigger: "plan-mode-entry", channel: "context", message: "same" },
+    ]);
+    const second = appendSessionInjections(tmpDir, "UserPromptSubmit", [
+      { id: "plans-md-plan-mode-entry", trigger: "plan-mode-entry", channel: "context", message: "same" },
+    ]);
+
+    expect(first).toHaveLength(1);
+    expect(second).toEqual([]);
+    expect(loadSessionInjectionsBySeq(tmpDir, [1]).map((record) => record.message)).toEqual(["same"]);
+  });
 });

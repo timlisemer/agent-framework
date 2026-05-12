@@ -86,6 +86,7 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
     transcriptPath: input.transcript_path,
     permissionMode: input.permission_mode,
   });
+  await commitPlanModeTransition(sessionDir, transition);
   const pendingInjections = await buildPendingContextInjections({
     projectDir,
     sourceEvent: "UserPromptSubmit",
@@ -96,7 +97,6 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
     "UserPromptSubmit",
     pendingInjections,
   );
-  await commitPlanModeTransition(sessionDir, transition);
 
   const latestState = await stateManager.load().catch(() => state);
   const snapshotSeq = appendStateSnapshot(sessionDir, latestState, input.transcript_path);

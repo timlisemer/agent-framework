@@ -57,11 +57,27 @@ function shortHash(data: string): string {
 }
 
 function fileHash(filePath: string): string | null {
+  let fd: number;
   try {
-    const content = fs.readFileSync(filePath, "utf-8");
-    return shortHash(content);
+    fd = fs.openSync(filePath, "r");
   } catch {
     return null;
+  }
+  try {
+    const hash = crypto.createHash("sha256");
+    const buffer = Buffer.alloc(64 * 1024);
+    let bytesRead = 0;
+    do {
+      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead > 0) {
+        hash.update(buffer.subarray(0, bytesRead));
+      }
+    } while (bytesRead > 0);
+    return hash.digest("hex").slice(0, 16);
+  } catch {
+    return null;
+  } finally {
+    fs.closeSync(fd);
   }
 }
 
@@ -95,9 +111,22 @@ function fileSize(filePath: string): number {
 
 const TRANSCRIPT_UUID_TAIL_COUNT = 20;
 
+function readTailBuffer(filePath: string, maxBytes = 256 * 1024): Buffer {
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const stat = fs.fstatSync(fd);
+    const length = Math.min(maxBytes, stat.size);
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, stat.size - length);
+    return buffer;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function readTranscriptUuidsTail(transcriptPath: string): string[] {
   try {
-    const raw = fs.readFileSync(transcriptPath, "utf-8");
+    const raw = readTailBuffer(transcriptPath).toString("utf-8");
     const lines = raw.split("\n").filter((l) => l.trim().length > 0);
     const uuids: string[] = [];
     for (const line of lines) {
@@ -118,7 +147,7 @@ function readTranscriptUuidsTail(transcriptPath: string): string[] {
 function loadLastSnapshot(filePath: string): StateSnapshot | null {
   let raw: string;
   try {
-    raw = fs.readFileSync(filePath, "utf-8");
+    raw = readTailBuffer(filePath).toString("utf-8");
   } catch {
     return null;
   }

@@ -49,7 +49,7 @@ import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CHECK_AGENT } from "../../utils/agent-configs.js";
 import { runProcessCancellable } from "../../utils/command.js";
-import { getUncommittedChangesCancellable, getRepoInfoCancellable } from "../../utils/git-utils.js";
+import { getGitStatusCancellable, getRepoInfoCancellable } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
@@ -332,7 +332,7 @@ export async function runCheckAgent(
   const mainRepo = repoInfo.mainRepo;
 
   // Step 1: Get uncommitted files info
-  const { status } = await getUncommittedChangesCancellable(workingDir, options);
+  const status = await getGitStatusCancellable(workingDir, options);
 
   // Step 2: Run linter if configured (check workingDir first, then main repo)
   let lintOutput = "";

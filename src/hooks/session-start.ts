@@ -51,13 +51,13 @@ async function computeSessionStartPlanMode(
     transcriptPath: input.transcript_path,
     permissionMode: input.permission_mode,
   });
+  await commitPlanModeTransition(sessionDir, transition);
   const pending = await buildPendingContextInjections({
     projectDir: host.projectDir,
     sourceEvent: "SessionStart",
     planModeTransition: transition,
   });
   const records = appendSessionInjections(sessionDir, "SessionStart", pending);
-  await commitPlanModeTransition(sessionDir, transition);
   return { transition, records };
 }
 

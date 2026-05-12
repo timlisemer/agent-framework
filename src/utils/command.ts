@@ -60,17 +60,54 @@ export type ProcessMode =
   | { shell: true; command: string }
   | { shell: false; file: string; args: string[] };
 
+export interface ProcessOutputLimits extends CancellationOptions {
+  maxStdoutBytes?: number;
+  maxStderrBytes?: number;
+}
+
+const DEFAULT_PROCESS_STREAM_LIMIT_BYTES = 2 * 1024 * 1024;
+
+function appendBoundedOutput(
+  current: string,
+  data: Buffer | string,
+  limit: number,
+  streamName: "stdout" | "stderr",
+): { value: string; truncated: boolean } {
+  const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data);
+  const used = Buffer.byteLength(current, "utf-8");
+  const remaining = Math.max(0, limit - used);
+
+  if (remaining <= 0) {
+    return { value: current, truncated: chunk.length > 0 };
+  }
+
+  if (chunk.length <= remaining) {
+    return { value: current + chunk.toString("utf-8"), truncated: false };
+  }
+
+  const marker = `\n[agent-framework: ${streamName} truncated after ${limit} bytes]\n`;
+  return {
+    value: current + chunk.subarray(0, remaining).toString("utf-8") + marker,
+    truncated: true,
+  };
+}
+
 export async function runProcessCancellable(
   mode: ProcessMode,
   cwd: string,
-  options: CancellationOptions = {}
+  options: ProcessOutputLimits = {}
 ): Promise<{ output: string; exitCode: number }> {
   throwIfAborted(options.signal);
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let closed = false;
     let stdout = "";
     let stderr = "";
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
+    const maxStdoutBytes = options.maxStdoutBytes ?? DEFAULT_PROCESS_STREAM_LIMIT_BYTES;
+    const maxStderrBytes = options.maxStderrBytes ?? DEFAULT_PROCESS_STREAM_LIMIT_BYTES;
 
     const child = mode.shell
       ? spawn(mode.command, {
@@ -107,7 +144,7 @@ export async function runProcessCancellable(
       }
 
       setTimeout(() => {
-        if (child.killed) {
+        if (closed) {
           return;
         }
         try {
@@ -131,10 +168,16 @@ export async function runProcessCancellable(
     options.signal?.addEventListener("abort", onAbort, { once: true });
 
     child.stdout?.on("data", (data: Buffer | string) => {
-      stdout += data.toString();
+      if (stdoutTruncated) return;
+      const next = appendBoundedOutput(stdout, data, maxStdoutBytes, "stdout");
+      stdout = next.value;
+      stdoutTruncated = next.truncated;
     });
     child.stderr?.on("data", (data: Buffer | string) => {
-      stderr += data.toString();
+      if (stderrTruncated) return;
+      const next = appendBoundedOutput(stderr, data, maxStderrBytes, "stderr");
+      stderr = next.value;
+      stderrTruncated = next.truncated;
     });
 
     child.on("error", (error) => {
@@ -147,6 +190,7 @@ export async function runProcessCancellable(
     });
 
     child.on("close", (code) => {
+      closed = true;
       if (settled) {
         return;
       }
