@@ -17,6 +17,7 @@ export interface SubagentStopHookInput {
   transcript_path: string;
   session_id: string;
   stop_hook_active: boolean;
+  permission_mode?: string;
 }
 
 export async function mainSubagentStop(input: SubagentStopHookInput, encoder: AdapterEncoder): Promise<void> {
@@ -37,6 +38,9 @@ export async function mainSubagentStop(input: SubagentStopHookInput, encoder: Ad
       parent_capture_seq: null,
       event: "SubagentStop",
       decision: "ok",
+      permission_mode: input.permission_mode ?? null,
+      injection_seqs: [],
+      injection_hashes: [],
       state_snapshot_seq: snapshotSeq,
     });
   }

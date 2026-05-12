@@ -19,6 +19,15 @@ export const codexSpec: AdapterSpec = {
   renderWorkflowInvocation:    WI.renderWorkflowInvocation,
   parseTranscript: PT.parseTranscript,
   isInterruptionMessage: IR.isInterruptionMessage,
+  extractContextMessage: (_event, stdout) => {
+    if (!stdout.trim()) return null;
+    try {
+      const parsed = JSON.parse(stdout) as { systemMessage?: unknown };
+      return typeof parsed.systemMessage === "string" ? parsed.systemMessage : null;
+    } catch {
+      return null;
+    }
+  },
   resolveHostContext:     HC.resolveHostContext,
   isEditIntentExemptPath: HC.isEditIntentExemptPath,
   materializeScenarioEntry: SM.materializeScenarioEntry,

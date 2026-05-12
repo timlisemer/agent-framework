@@ -38,6 +38,7 @@ const encoder: AdapterEncoder = {
   encodeStopBlock: (reason: string) => ({ exitCode: 2, stdout: reason }),
   encodeStopPass: () => ({ exitCode: 0, stdout: "" }),
   encodeOk: () => ({ exitCode: 0, stdout: "ok" }),
+  encodeContext: (_event, message: string) => ({ exitCode: 0, stdout: `ctx:${message}` }),
   encodeError: (_event, message: string) => ({ exitCode: 1, stdout: message }),
 };
 
@@ -121,11 +122,6 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
 
   it("injects PLANS.md only on inactive-to-active plan-mode transition", async () => {
     fs.writeFileSync(path.join(tempDir, "PLANS.md"), "# Planning Contract\n\nFollow it.");
-    const encoderWithContext: AdapterEncoder = {
-      ...encoder,
-      encodeContext: (_event, message: string) => ({ exitCode: 0, stdout: `ctx:${message}` }),
-    };
-
     await mainUserPromptSubmit(
       {
         session_id: "session-plan",
@@ -134,7 +130,7 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
         permission_mode: "plan",
         prompt: "please plan this",
       },
-      encoderWithContext,
+      encoder,
     );
 
     expect(mockExitAfterFlush).toHaveBeenLastCalledWith(
@@ -150,7 +146,7 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
         permission_mode: "plan",
         prompt: "continue planning",
       },
-      encoderWithContext,
+      encoder,
     );
 
     expect(mockExitAfterFlush).toHaveBeenLastCalledWith(0, "ok");

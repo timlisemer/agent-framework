@@ -247,6 +247,14 @@ export function sessionPlanModeStateFile(sessionDir: string): string {
   return path.join(sessionDir, "plan-mode-state.json");
 }
 
+export function sessionPlanModeEventsFile(sessionDir: string): string {
+  return path.join(sessionDir, "plan-mode-events.jsonl");
+}
+
+export function sessionInjectionsFile(sessionDir: string): string {
+  return path.join(sessionDir, "session-injections.jsonl");
+}
+
 export function sessionGateReasoningFile(sessionDir: string): string {
   return path.join(sessionDir, "gate-reasoning.json");
 }

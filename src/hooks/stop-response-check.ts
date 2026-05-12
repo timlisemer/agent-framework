@@ -58,6 +58,9 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
       parent_capture_seq: null,
       event: "Stop",
       decision: "pass",
+      permission_mode: input.permission_mode ?? null,
+      injection_seqs: [],
+      injection_hashes: [],
       state_snapshot_seq: snapshotSeq,
     });
     const out = encoder.encodeStopPass();
@@ -95,6 +98,9 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
       parent_capture_seq: null,
       event: "Stop",
       decision: "block",
+      permission_mode: input.permission_mode ?? null,
+      injection_seqs: [],
+      injection_hashes: [],
       state_snapshot_seq: snapshotSeq,
     });
     const out = encoder.encodeStopBlock(result.systemMessage);
@@ -109,6 +115,9 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
     parent_capture_seq: null,
     event: "Stop",
     decision: "pass",
+    permission_mode: input.permission_mode ?? null,
+    injection_seqs: [],
+    injection_hashes: [],
     state_snapshot_seq: snapshotSeq,
   });
   const out = encoder.encodeStopPass();

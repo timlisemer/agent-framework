@@ -14,8 +14,9 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { sessionStateSnapshotsFile, sessionToolLogFile, sessionGateReasoningFile, sessionDenialCacheFile } from "../utils/paths.js";
+import { sessionStateSnapshotsFile, sessionToolLogFile, sessionGateReasoningFile, sessionDenialCacheFile, sessionPlanModeStateFile, sessionInjectionsFile } from "../utils/paths.js";
 import type { SessionState } from "../utils/session-store.js";
+import type { PlanModeStoredState } from "../utils/plan-mode-entry-state.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,12 @@ export interface StateSnapshot {
   gate_reasoning_hash: string | null;
   /** SHA-256 (first 16 hex chars) of hook-denials.json content, or null when absent. */
   denials_hash: string | null;
+  /** Current persisted plan-mode sidecar state, or null when absent/corrupt. */
+  plan_mode_state: PlanModeStoredState | null;
+  /** Byte offset immediately after the most-recent session-injections entry. */
+  injection_log_offset: number;
+  /** SHA-256 (first 16 hex chars) of session-injections.jsonl content, or null when absent. */
+  injection_log_hash: string | null;
   /**
    * The last N UUIDs (parentUuid fields) seen in the transcript at snapshot
    * time. Used by epoch detection to identify rewind boundaries.
@@ -53,6 +60,26 @@ function fileHash(filePath: string): string | null {
   try {
     const content = fs.readFileSync(filePath, "utf-8");
     return shortHash(content);
+  } catch {
+    return null;
+  }
+}
+
+function readPlanModeState(filePath: string): PlanModeStoredState | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Partial<PlanModeStoredState>;
+    if (typeof parsed.active !== "boolean") return null;
+    return {
+      active: parsed.active,
+      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
+      lastSource: parsed.lastSource === "SessionStart" || parsed.lastSource === "UserPromptSubmit"
+        ? parsed.lastSource
+        : "UserPromptSubmit",
+      permission_mode: typeof parsed.permission_mode === "string" ? parsed.permission_mode : null,
+      detection_source: parsed.detection_source === "hook-input" || parsed.detection_source === "transcript-tail"
+        ? parsed.detection_source
+        : "transcript-tail",
+    };
   } catch {
     return null;
   }
@@ -128,11 +155,17 @@ export function appendStateSnapshot(
   const toolLogPath = sessionToolLogFile(sessionDir);
   const gateReasoningPath = sessionGateReasoningFile(sessionDir);
   const denialsPath = sessionDenialCacheFile(sessionDir);
+  const planModePath = sessionPlanModeStateFile(sessionDir);
+  const injectionsPath = sessionInjectionsFile(sessionDir);
 
   const stateHash = shortHash(JSON.stringify(state));
   const toolLogOffset = fileSize(toolLogPath);
   const gateReasoningHash = fileHash(gateReasoningPath);
   const denialsHash = fileHash(denialsPath);
+  const planModeState = readPlanModeState(planModePath);
+  const planModeStateHash = shortHash(JSON.stringify(planModeState));
+  const injectionLogOffset = fileSize(injectionsPath);
+  const injectionLogHash = fileHash(injectionsPath);
   const transcriptUuidsTail = readTranscriptUuidsTail(transcriptPath);
   const uuidsTailHash = shortHash(JSON.stringify(transcriptUuidsTail));
 
@@ -146,6 +179,9 @@ export function appendStateSnapshot(
       last.tool_log_offset === toolLogOffset &&
       last.gate_reasoning_hash === gateReasoningHash &&
       last.denials_hash === denialsHash &&
+      shortHash(JSON.stringify(last.plan_mode_state ?? null)) === planModeStateHash &&
+      (last.injection_log_offset ?? 0) === injectionLogOffset &&
+      (last.injection_log_hash ?? null) === injectionLogHash &&
       lastUuidsTailHash === uuidsTailHash;
     if (unchanged) {
       return last.seq;
@@ -160,6 +196,9 @@ export function appendStateSnapshot(
     tool_log_offset: toolLogOffset,
     gate_reasoning_hash: gateReasoningHash,
     denials_hash: denialsHash,
+    plan_mode_state: planModeState,
+    injection_log_offset: injectionLogOffset,
+    injection_log_hash: injectionLogHash,
     transcript_uuids_tail: transcriptUuidsTail,
   };
 

@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
+import { codexSpec } from "../../adapters/codex/index.js";
+import { claudeSpec } from "../../adapters/claude/index.js";
 
 describe("codexEncoder", () => {
   it("emits Codex PreToolUse deny JSON", () => {
@@ -34,10 +36,19 @@ describe("codexEncoder", () => {
   });
 
   it("emits Codex context injection JSON", () => {
-    const out = codexEncoder.encodeContext?.("UserPromptSubmit", "read PLANS.md");
-    expect(out?.exitCode).toBe(0);
-    expect(JSON.parse(out?.stdout ?? "")).toEqual({
+    const out = codexEncoder.encodeContext("UserPromptSubmit", "read PLANS.md");
+    expect(out.exitCode).toBe(0);
+    expect(JSON.parse(out.stdout)).toEqual({
       systemMessage: "read PLANS.md",
     });
+  });
+
+  it("extracts context messages from Codex and Claude stdout", () => {
+    const stdout = JSON.stringify({ systemMessage: "read PLANS.md" });
+    expect(codexSpec.extractContextMessage("UserPromptSubmit", stdout)).toBe("read PLANS.md");
+    expect(claudeSpec.extractContextMessage("SessionStart", stdout)).toBe("read PLANS.md");
+    expect(codexSpec.extractContextMessage("UserPromptSubmit", "")).toBeNull();
+    expect(claudeSpec.extractContextMessage("SessionStart", "{bad json")).toBeNull();
+    expect(codexSpec.extractContextMessage("UserPromptSubmit", JSON.stringify({ ok: true }))).toBeNull();
   });
 });

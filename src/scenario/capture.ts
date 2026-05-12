@@ -16,6 +16,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { sessionCapturesFile } from "../utils/paths.js";
+import type { PlanModeStoredState } from "../utils/plan-mode-entry-state.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +50,22 @@ export interface CapturePointer {
   transcript_anchor_uuid?: string;
   /** Hook decision string (e.g. "allow", "deny", "ok", "error", "pass", "block"). */
   decision: string;
+  /** Host permission_mode value observed by this hook. */
+  permission_mode?: string | null;
+  /** Plan-mode transition observed by this hook, when it ran the detector. */
+  plan_mode?: {
+    permission_mode: string | null;
+    detection_source: "hook-input" | "transcript-tail";
+    previous: PlanModeStoredState | null;
+    current: PlanModeStoredState;
+    active: boolean;
+    entered: boolean;
+    exited: boolean;
+  };
+  /** session-injections.jsonl seqs appended by this hook. */
+  injection_seqs?: number[];
+  /** session-injections.jsonl message hashes appended by this hook. */
+  injection_hashes?: string[];
   /**
    * seq of the state snapshot taken immediately before this hook fired.
    * Cross-references state-snapshots.jsonl.

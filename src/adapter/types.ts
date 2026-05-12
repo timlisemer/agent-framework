@@ -30,7 +30,7 @@ export interface AdapterEncoder {
   encodeStopBlock(reason: string): EncodedOutput;
   encodeStopPass(): EncodedOutput;
   encodeOk(event: EventName): EncodedOutput;          // exit-code-only events
-  encodeContext?(event: EventName, message: string): EncodedOutput;
+  encodeContext(event: EventName, message: string): EncodedOutput;
   encodeError(event: EventName, message: string): EncodedOutput;
 }
 
@@ -154,6 +154,9 @@ export interface AdapterSpec {
 
   /** True if a content string is an adapter-injected interruption message. */
   isInterruptionMessage(content: string): boolean;
+
+  /** Extract a context-injection message from adapter stdout, or null. */
+  extractContextMessage(event: EventName, stdout: string): string | null;
 
   // ── Path / config conventions ───────────────────────────────────────────
   /** Resolve host context (config root, plans root, instruction files).

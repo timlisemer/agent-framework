@@ -16,6 +16,7 @@ export interface SubagentStartHookInput {
   agent_type: string;
   transcript_path: string;
   session_id: string;
+  permission_mode?: string;
 }
 
 export async function mainSubagentStart(input: SubagentStartHookInput, encoder: AdapterEncoder): Promise<void> {
@@ -32,6 +33,9 @@ export async function mainSubagentStart(input: SubagentStartHookInput, encoder: 
       parent_capture_seq: null,
       event: "SubagentStart",
       decision: "ok",
+      permission_mode: input.permission_mode ?? null,
+      injection_seqs: [],
+      injection_hashes: [],
       state_snapshot_seq: snapshotSeq,
     });
   }

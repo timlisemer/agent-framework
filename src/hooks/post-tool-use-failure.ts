@@ -17,6 +17,7 @@ export interface PostToolUseFailureHookInput {
   error: string;
   is_interrupt: boolean;
   transcript_path: string;
+  permission_mode?: string;
 }
 
 export async function mainPostToolUseFailure(input: PostToolUseFailureHookInput, encoder: AdapterEncoder): Promise<void> {
@@ -47,6 +48,9 @@ export async function mainPostToolUseFailure(input: PostToolUseFailureHookInput,
       parent_capture_seq: null,
       event: "PostToolUseFailure",
       decision: "error",
+      permission_mode: input.permission_mode ?? null,
+      injection_seqs: [],
+      injection_hashes: [],
       state_snapshot_seq: snapshotSeq,
     });
   }

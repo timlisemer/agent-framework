@@ -36,6 +36,9 @@ export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, enco
         event: "PostToolUse",
         tool_use_id: (input as unknown as Record<string, string>).tool_use_id,
         decision: "ok",
+        permission_mode: input.permission_mode ?? null,
+        injection_seqs: [],
+        injection_hashes: [],
         state_snapshot_seq: snapshotSeq,
       });
     }

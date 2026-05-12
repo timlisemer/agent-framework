@@ -16,7 +16,13 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { scenarioLastRunFile, scenarioPlansDir, scenarioRunDir } from "../utils/paths.js";
+import {
+  scenarioLastRunFile,
+  scenarioPlansDir,
+  scenarioRunDir,
+  sessionInjectionsFile,
+  sessionPlanModeStateFile,
+} from "../utils/paths.js";
 import {
   type FanoutFireResult,
   type HookEventName,
@@ -49,6 +55,7 @@ import { scenarioDir } from "../agents/mcp/scenario-mcp-shared.js";
 import type { ScenarioSourceTag } from "../agents/mcp/scenario-mcp-shared.js";
 import { activeSpec } from "../adapter/spec.js";
 import type { ScenarioMaterializeCtx } from "../adapter/types.js";
+import { readSessionInjectionsAfterOffset, shortContentHash } from "../utils/session-injections.js";
 
 function getArg(name: string, required: boolean = false): string | undefined {
   const args = process.argv.slice(2);
@@ -318,6 +325,79 @@ function writeTranscriptSlice(
   fs.writeFileSync(transcriptPath, slice.join("\n") + (slice.length > 0 ? "\n" : ""));
 }
 
+function writeSetupFiles(cwd: string, scenario: Scenario): void {
+  for (const setup of scenario.setup_files ?? []) {
+    const targetPath = path.join(cwd, setup.path);
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, setup.content);
+  }
+}
+
+function seedSidecars(cacheDir: string, scenario: Scenario): void {
+  const sidecars = scenario.seed_sidecars;
+  if (!sidecars) return;
+  if (sidecars.plan_mode_state !== undefined) {
+    const statePath = sessionPlanModeStateFile(cacheDir);
+    if (sidecars.plan_mode_state === null) {
+      fs.rmSync(statePath, { force: true });
+    } else {
+      fs.writeFileSync(statePath, JSON.stringify(sidecars.plan_mode_state, null, 2) + "\n");
+    }
+  }
+  if (sidecars.injections !== undefined) {
+    const injectionsPath = sessionInjectionsFile(cacheDir);
+    fs.writeFileSync(
+      injectionsPath,
+      sidecars.injections.map((record) => JSON.stringify(record)).join("\n") +
+        (sidecars.injections.length > 0 ? "\n" : ""),
+    );
+  }
+}
+
+function fileSize(filePath: string): number {
+  try {
+    return fs.statSync(filePath).size;
+  } catch {
+    return 0;
+  }
+}
+
+function scoreInjectionExpectations(
+  cacheDir: string,
+  offset: number,
+  expect: { injections?: Array<{ id: string; trigger: string; channel: "context"; message_hash: string; message?: string }> },
+): Array<{ id: string; trigger: string; channel: "context"; message_hash: string; pass: boolean; reason?: string }> | undefined {
+  if (!expect.injections) return undefined;
+  const records = readSessionInjectionsAfterOffset(cacheDir, offset);
+  return expect.injections.map((wanted) => {
+    const matched = records.find((record) =>
+      record.id === wanted.id &&
+      record.trigger === wanted.trigger &&
+      record.channel === wanted.channel &&
+      record.message_hash === wanted.message_hash &&
+      (wanted.message === undefined || record.message === wanted.message)
+    );
+    return {
+      id: wanted.id,
+      trigger: wanted.trigger,
+      channel: wanted.channel,
+      message_hash: wanted.message_hash,
+      pass: matched !== undefined,
+      ...(matched === undefined ? { reason: "expected injection record was not appended by target hook" } : {}),
+    };
+  });
+}
+
+function scoreContextOutput(
+  hook: HookEventName,
+  stdout: string,
+  expect: { context_output_hash?: string },
+): { hash: string | null; pass: boolean } | undefined {
+  if (expect.context_output_hash === undefined) return undefined;
+  const message = activeSpec().extractContextMessage(hook, stdout);
+  const hash = message === null ? null : shortContentHash(message);
+  return { hash, pass: hash === expect.context_output_hash };
+}
 
 function resolveToolUseBlock(
   scenario: Scenario,
@@ -748,6 +828,8 @@ async function main() {
   }
 
   const cwd = scenario.env?.cwd ?? outputDir;
+  fs.mkdirSync(cwd, { recursive: true });
+  writeSetupFiles(cwd, scenario);
   const sessionId = "scenario-" + scenario.name;
   const transcriptBasename = scenario.env?.subagent
     ? `agent-${scenario.name}.jsonl`
@@ -800,11 +882,14 @@ async function main() {
             session_id: sessionId,
             transcript_path: transcriptPath,
             cwd,
-            permission_mode: scenario.env?.permission_mode ?? "default",
+            permission_mode: scenario.env?.session_start_permission_mode ?? "default",
           }),
           env: buildEnv(cacheDir, cwd, envExtras, scenarioAdapter),
           timeoutMs,
         });
+        seedSidecars(cacheDir, scenario);
+      } else {
+        seedSidecars(cacheDir, scenario);
       }
 
       // Capture tool-log.jsonl byte offset AFTER the session-start preamble
@@ -815,6 +900,7 @@ async function main() {
       const toolLogOffset = fs.existsSync(toolLogPath)
         ? fs.statSync(toolLogPath).size
         : 0;
+      const injectionLogOffset = fileSize(sessionInjectionsFile(cacheDir));
 
       const stdin = buildHookInput(scenario, {
         sessionId,
@@ -841,6 +927,8 @@ async function main() {
       const singleExpect = scenario.expect as {
         expected: string;
         by?: string;
+        injections?: Array<{ id: string; trigger: string; channel: "context"; message_hash: string; message?: string }>;
+        context_output_hash?: string;
       };
       const targetTool =
         scenario.target.hook === "PreToolUse" || scenario.target.hook === "PostToolUse"
@@ -851,6 +939,10 @@ async function main() {
         ? { sessionDir: cacheDir, toolName: targetTool.name, toolInput: targetTool.input, actualReason }
         : { actualReason };
       const scored = scoreRichExpectation(decision, gate, singleExpect, scoreCtx);
+      const injectionAssertions = scoreInjectionExpectations(cacheDir, injectionLogOffset, singleExpect);
+      const injectionsPass = injectionAssertions === undefined || injectionAssertions.every((a) => a.pass);
+      const contextScored = scoreContextOutput(scenario.target.hook, hookResult.stdout, singleExpect);
+      const contextPass = contextScored === undefined || contextScored.pass;
 
       let predictionAssertions: PredictionAssertionResult[] | undefined;
       let predictionsPass = true;
@@ -862,7 +954,7 @@ async function main() {
         predictionsPass = predictionAssertions.every((a) => a.pass);
       }
 
-      const pass = scored.pass && predictionsPass;
+      const pass = scored.pass && predictionsPass && injectionsPass && contextPass;
       const expectation_reality = computeExpectationReality(pass, sourceArg);
       const expectation_reality_last_run_at = new Date().toISOString();
 
@@ -883,6 +975,11 @@ async function main() {
         batch_visible_through: scenario.target.batch_visible_through,
         ...(predictionAssertions ? { prediction_assertions: predictionAssertions } : {}),
         ...(scored.reason_must_results ? { reason_must_results: scored.reason_must_results } : {}),
+        ...(injectionAssertions ? { injection_assertions: injectionAssertions } : {}),
+        ...(contextScored ? {
+          context_output_hash: contextScored.hash,
+          context_output_pass: contextScored.pass,
+        } : {}),
         ...(actualReason !== undefined ? { actual_reason: actualReason } : {}),
         ...(scenario.env?.llm_stubs ? { llm_stubs_used: scenario.env.llm_stubs } : {}),
         expectation_reality,
@@ -941,11 +1038,12 @@ async function main() {
           session_id: sessionId,
           transcript_path: transcriptPath,
           cwd,
-          permission_mode: scenario.env?.permission_mode ?? "default",
+          permission_mode: scenario.env?.session_start_permission_mode ?? "default",
         }),
         env: buildEnv(cacheDir, cwd, envExtras, scenarioAdapter),
         timeoutMs,
       });
+      seedSidecars(cacheDir, scenario);
 
       const toolLogPath = path.join(cacheDir, "tool-log.jsonl");
       const expectArray = scenario.expect as Array<{

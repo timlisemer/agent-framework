@@ -53,6 +53,10 @@ export const claudeEncoder: AdapterEncoder = {
     return { stdout: "", exitCode: 0 };
   },
 
+  encodeContext(_event: EventName, message: string): EncodedOutput {
+    return { stdout: JSON.stringify({ systemMessage: message }), exitCode: 0 };
+  },
+
   encodeError(_event: EventName, _message: string): EncodedOutput {
     return { stdout: "", exitCode: 1 };
   },

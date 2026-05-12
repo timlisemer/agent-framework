@@ -1093,6 +1093,7 @@ async function main(): Promise<void> {
   const env = buildEnv(sessionDir, cwd);
   const results: ReplayEvent[] = [];
   const toolUseMap = new Map<string, { name: string; input: unknown }>();
+  let permissionMode = "default";
 
   // 9. Fire session-start hook
   const sessionStartTime = Date.now();
@@ -1103,6 +1104,7 @@ async function main(): Promise<void> {
       session_id: sessionId,
       transcript_path: transcriptPath,
       cwd,
+      permission_mode: permissionMode,
     });
 
     const sessionStartResult = await runHook({
@@ -1144,6 +1146,16 @@ async function main(): Promise<void> {
     const parsed = lines[i];
     const rawLine = rawLines[i];
 
+    if (parsed.type === "permission-mode") {
+      if (typeof parsed.permissionMode === "string") {
+        permissionMode = parsed.permissionMode;
+      }
+      continue;
+    }
+    if (typeof parsed.permissionMode === "string") {
+      permissionMode = parsed.permissionMode;
+    }
+
     // Append line to temp transcript (subject to truncation cap).
     if (appendAllowed(i)) {
       fs.appendFileSync(transcriptPath, rawLine + "\n");
@@ -1165,6 +1177,7 @@ async function main(): Promise<void> {
           transcript_path: transcriptPath,
           session_id: sessionId,
           cwd,
+          permission_mode: permissionMode,
         });
 
         const hookResult = await runHook({
@@ -1235,6 +1248,7 @@ async function main(): Promise<void> {
               session_id: sessionId,
               transcript_path: transcriptPath,
               cwd,
+              permission_mode: permissionMode,
               tool_name: block.name,
               tool_input: block.input,
               tool_use_id: block.id,
@@ -1402,6 +1416,7 @@ async function main(): Promise<void> {
             session_id: sessionId,
             transcript_path: transcriptPath,
             cwd,
+            permission_mode: permissionMode,
             tool_name: toolName,
             tool_input: toolInput,
             tool_use_id: result.tool_use_id,
@@ -1453,6 +1468,7 @@ async function main(): Promise<void> {
           session_id: sessionId,
           transcript_path: transcriptPath,
           cwd,
+          permission_mode: permissionMode,
           stop_hook_active: true,
         });
 

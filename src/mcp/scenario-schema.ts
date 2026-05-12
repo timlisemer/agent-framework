@@ -19,6 +19,14 @@ export const reasonMustSchema = z.object({
   not_matches: z.array(z.string().min(1)).min(1).optional(),
 }).optional();
 
+const injectionExpectationSchema = z.object({
+  id: z.string(),
+  trigger: z.string(),
+  channel: z.literal("context"),
+  message_hash: z.string(),
+  message: z.string().optional(),
+});
+
 export const richExpectationSchema = z.object({
   expected: z.string().describe("The decision the hook must produce: allow/deny/pass/block (or INVESTIGATE placeholder)."),
   by: z.string().optional().describe("Rule/gate name the denial must come from (matches tool-log gate field)."),
@@ -26,6 +34,8 @@ export const richExpectationSchema = z.object({
   notes: z.string().optional().describe("Free-text explanation of why this expectation exists."),
   prediction: predictionAnnotationSchema.optional().describe("Set ONLY when expected='deny' AND by is one of {prediction-block, batch-sibling}."),
   reason_must: reasonMustSchema.describe("Reason-text assertion clauses. Only valid when expected is one of {deny, block}."),
+  injections: z.array(injectionExpectationSchema).optional(),
+  context_output_hash: z.string().optional(),
 });
 
 const scenarioBlockSchema = z.record(z.string(), z.unknown());
@@ -51,7 +61,7 @@ export const scenarioSchema = z.object({
     }),
   ])).min(1),
   target: z.object({
-    hook: z.enum(["PreToolUse", "PostToolUse", "Stop", "UserPromptSubmit", "SessionStart"]),
+    hook: z.enum(["PreToolUse", "PostToolUse", "Stop", "UserPromptSubmit", "SessionStart", "PostToolUseFailure", "SubagentStart", "SubagentStop"]),
     tool_use_ref: z.union([z.string(), z.literal("last")]).optional(),
     prompt_override: z.string().optional(),
     batch_visible_through: z.number().int().nonnegative().optional(),
@@ -59,10 +69,42 @@ export const scenarioSchema = z.object({
   }),
   env: z.object({
     permission_mode: z.enum(["default", "plan", "acceptEdits", "bypassPermissions", "dontAsk"]).optional(),
+    session_start_permission_mode: z.enum(["default", "plan", "acceptEdits", "bypassPermissions", "dontAsk"]).optional(),
     subagent: z.boolean().optional(),
     cwd: z.string().optional(),
     timeout_ms: z.number().optional(),
+    adapter: z.string().optional(),
     llm_stubs: z.record(z.string().min(1), z.string().min(1)).optional(),
+  }).optional(),
+  setup_files: z.array(z.object({
+    path: z.string().min(1),
+    content: z.string(),
+  })).optional(),
+  seed_sidecars: z.object({
+    plan_mode_state: z.object({
+      active: z.boolean(),
+      updatedAt: z.number(),
+      lastSource: z.enum(["SessionStart", "UserPromptSubmit"]),
+      permission_mode: z.string().nullable(),
+      detection_source: z.enum(["hook-input", "transcript-tail"]),
+    }).nullable().optional(),
+    injections: z.array(z.object({
+      seq: z.number(),
+      ts: z.number(),
+      event: z.string(),
+      id: z.string(),
+      trigger: z.string(),
+      channel: z.literal("context"),
+      message: z.string(),
+      message_hash: z.string(),
+      source_file: z.object({
+        kind: z.literal("file"),
+        path: z.string(),
+        content: z.string(),
+        content_hash: z.string(),
+      }).optional(),
+      metadata: z.record(z.string(), z.unknown()).optional(),
+    })).optional(),
   }).optional(),
   expect: z.union([
     z.object({
@@ -71,6 +113,8 @@ export const scenarioSchema = z.object({
       notes: z.string().optional(),
       prediction: predictionAnnotationSchema.optional(),
       reason_must: reasonMustSchema,
+      injections: z.array(injectionExpectationSchema).optional(),
+      context_output_hash: z.string().optional(),
     }),
     z.array(z.object({
       position: z.number().int().nonnegative(),

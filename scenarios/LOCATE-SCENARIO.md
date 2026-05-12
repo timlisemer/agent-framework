@@ -11,6 +11,8 @@ This file is a recipe for an agent session that has been asked **"find the scena
 | `~/.agent-framework/sessions/<encoded>/<dir>/state-snapshots.jsonl` | Append-only state snapshots referenced by capture pointers. |
 | `~/.agent-framework/sessions/<encoded>/<dir>/epochs.jsonl` | One line per epoch (session-start / compact / rewind / clear). |
 | `~/.agent-framework/sessions/<encoded>/<dir>/tool-log.jsonl` | Append-only tool-call log: `{ts, tool, toolUseId, status, gate, reason, ms}`. |
+| `~/.agent-framework/sessions/<encoded>/<dir>/plan-mode-events.jsonl` | Append-only plan-mode entered/exited transition log. |
+| `~/.agent-framework/sessions/<encoded>/<dir>/session-injections.jsonl` | Append-only generic injected-context log. File-backed injections include exact captured source content and hashes. |
 | `~/.agent-framework/sessions/<encoded>/<dir>/transcript-path.txt` | Sidecar: absolute path back to the corresponding `~/.claude/projects/` transcript. |
 
 The session dir name encodes time-of-creation; older subdirs are older sessions. `<encoded>` is the project path with `/` replaced by `-` (e.g. `home-tim-Coding-myproj`).
@@ -41,7 +43,7 @@ The matching `transcript-path.txt` lives inside the session dir you want. Call i
 jq -c . "$SESSION_DIR/captures.jsonl" | tail -50
 ```
 
-In practice: load `captures.jsonl`, `tool-log.jsonl`, and the transcript JSONL together. Use capture `event`, `tool_use_id`, `decision`, and nearby transcript ordering to pick the relevant hook fire. For a tool call, first find the `tool_use` block in the transcript, then match its `id` to `captures.jsonl` `tool_use_id`. For a text-only response, use the nearest `Stop` capture after the assistant text.
+In practice: load `captures.jsonl`, `tool-log.jsonl`, and the transcript JSONL together. Use capture `event`, `tool_use_id`, `decision`, and nearby transcript ordering to pick the relevant hook fire. For a tool call, first find the `tool_use` block in the transcript, then match its `id` to `captures.jsonl` `tool_use_id`. For a text-only response, use the nearest `Stop` capture after the assistant text. For plan-mode or context-injection behavior, also inspect `permission_mode`, `plan_mode`, `injection_seqs`, and `injection_hashes` on the capture; use `injection_seqs` to read the exact records from `session-injections.jsonl`.
 
 ```bash
 # 4. Materialize the full Scenario JSON from that capture.
@@ -67,6 +69,16 @@ If the quote is only the decision string (`allow`, `deny`, `block`, etc.) or hoo
 ```bash
 rg -n --no-heading --color=never "<QUOTE>" ~/.agent-framework/sessions/*/*/captures.jsonl | head -30
 ```
+
+If the quote is injected context, such as PLANS.md plan-mode guidance, search injection logs directly:
+
+```bash
+rg -n --no-heading --color=never "<QUOTE>" ~/.agent-framework/sessions/*/*/session-injections.jsonl | head -30
+```
+
+Each hit gives a session directory and injection `seq`. Cross-reference that
+`seq` with `captures.jsonl` `injection_seqs` to find the hook fire that emitted
+it.
 
 ### Branch C: Quote is a tool name + a fragment of input
 
@@ -103,6 +115,10 @@ Once located:
 1. Materialize → get a v2 Scenario JSON.
 2. Run it via `mcp__agent-framework__scenario_tester` action `run_scenario` to confirm it reproduces.
 3. If you want it as a permanent regression case, write the JSON to `scenarios/expected-to-pass/<slug>.json` (passes today), `scenarios/fixture-bug/<slug>.json` (the captured behavior is buggy and should be fixed), or `scenarios/expected-to-fail/<slug>.json` (codifies a known-missing feature). Filename stem must equal `scenario.name`. Set `expect.expected` to the CORRECT decision, not necessarily the captured one.
+
+Materialized plan-mode injection scenarios seed the prior plan-mode sidecar and
+write captured source files through `setup_files`. Do not replace those seeded
+values with the current repo files; they are part of the reproduction.
 
 ## Notes for the assistant reading this
 

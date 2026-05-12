@@ -10,6 +10,8 @@
 
 import type { Mood, ToolPrediction, Trust } from "../utils/prediction-types.js";
 import { registeredAdapterNames } from "../adapter/spec.js";
+import type { PlanModeStoredState } from "../utils/plan-mode-entry-state.js";
+import type { SessionInjectionRecord } from "../utils/session-injections.js";
 
 /** Which hook a scenario targets. */
 export type HookEventName =
@@ -192,6 +194,8 @@ export interface ScenarioEnv {
   /** Copied verbatim into hook input.permission_mode and onto every
    *  transcript entry's permissionMode field. */
   permission_mode?: PermissionMode;
+  /** Permission mode used only for the synthetic SessionStart preamble. */
+  session_start_permission_mode?: PermissionMode;
   /** When true, the materialized transcript filename is prefixed "agent-"
    *  so detectSubagent() returns true via the filename short-circuit. */
   subagent?: boolean;
@@ -233,6 +237,13 @@ export interface Scenario {
   target: ScenarioTarget;
   /** Optional setup flags. */
   env?: ScenarioEnv;
+  /** Files written under env.cwd before transcript materialization and hooks. */
+  setup_files?: Array<{ path: string; content: string }>;
+  /** Session sidecars seeded before the target hook. */
+  seed_sidecars?: {
+    plan_mode_state?: PlanModeStoredState | null;
+    injections?: SessionInjectionRecord[];
+  };
   /**
    * Scoring spec. Single form (reuses RichExpectation minus `at`) is used
    * when `target.fanout` is unset. Array form is used when
@@ -248,6 +259,14 @@ export interface Scenario {
         notes?: string;
         prediction?: PredictionAnnotation;
         reason_must?: ReasonMustExpectation;
+        injections?: Array<{
+          id: string;
+          trigger: string;
+          channel: "context";
+          message_hash: string;
+          message?: string;
+        }>;
+        context_output_hash?: string;
       }
     | Array<{
         position: number;
@@ -417,6 +436,16 @@ export type ScenarioResult =
        * the WHY this is a separate field from the overloaded `reason`.
        */
       actual_reason?: string;
+      injection_assertions?: Array<{
+        id: string;
+        trigger: string;
+        channel: "context";
+        message_hash: string;
+        pass: boolean;
+        reason?: string;
+      }>;
+      context_output_hash?: string | null;
+      context_output_pass?: boolean;
       /** Echoed scenario.env.llm_stubs for reproducibility. */
       llm_stubs_used?: Record<string, string>;
       /**
@@ -888,6 +917,20 @@ export function validateScenario(raw: unknown): Scenario {
         );
       }
     }
+    if (env.session_start_permission_mode !== undefined) {
+      const validModes: PermissionMode[] = [
+        "default",
+        "plan",
+        "acceptEdits",
+        "bypassPermissions",
+        "dontAsk",
+      ];
+      if (!validModes.includes(env.session_start_permission_mode as PermissionMode)) {
+        throw new Error(
+          `scenario.env.session_start_permission_mode must be one of ${validModes.join(", ")}`,
+        );
+      }
+    }
     if (env.subagent !== undefined && typeof env.subagent !== "boolean") {
       throw new Error("scenario.env.subagent must be a boolean");
     }
@@ -913,6 +956,8 @@ export function validateScenario(raw: unknown): Scenario {
     }
   }
 
+  validateSetupFiles(r);
+  validateSeedSidecars(r);
   validateScenarioSeedState(r);
 
   if (fanout === true) {
@@ -978,10 +1023,111 @@ export function validateScenario(raw: unknown): Scenario {
     }
     validateReasonMustExpectation("scenario.expect", expect.reason_must);
   }
+  validateInjectionExpectations("scenario.expect", expect);
+  if (expect.context_output_hash !== undefined && typeof expect.context_output_hash !== "string") {
+    throw new Error("scenario.expect.context_output_hash must be a string when set");
+  }
 
   validateScenarioPredictions(r);
 
   return raw as Scenario;
+}
+
+function validateSetupFiles(r: Record<string, unknown>): void {
+  if (r.setup_files === undefined) return;
+  if (!Array.isArray(r.setup_files)) {
+    throw new Error("scenario.setup_files must be an array when set");
+  }
+  for (let i = 0; i < r.setup_files.length; i++) {
+    const file = r.setup_files[i] as Record<string, unknown>;
+    if (!file || typeof file !== "object" || Array.isArray(file)) {
+      throw new Error(`scenario.setup_files[${i}] must be an object`);
+    }
+    if (typeof file.path !== "string" || file.path.length === 0) {
+      throw new Error(`scenario.setup_files[${i}].path must be a non-empty string`);
+    }
+    const segments = file.path.split(/[\\/]+/);
+    if (file.path.startsWith("/") || segments.includes("..")) {
+      throw new Error(`scenario.setup_files[${i}].path must be relative and must not contain parent references`);
+    }
+    if (typeof file.content !== "string") {
+      throw new Error(`scenario.setup_files[${i}].content must be a string`);
+    }
+  }
+}
+
+function validateSeedSidecars(r: Record<string, unknown>): void {
+  if (r.seed_sidecars === undefined) return;
+  if (!r.seed_sidecars || typeof r.seed_sidecars !== "object" || Array.isArray(r.seed_sidecars)) {
+    throw new Error("scenario.seed_sidecars must be an object when set");
+  }
+  const sidecars = r.seed_sidecars as Record<string, unknown>;
+  if (sidecars.plan_mode_state !== undefined && sidecars.plan_mode_state !== null) {
+    validatePlanModeStoredState("scenario.seed_sidecars.plan_mode_state", sidecars.plan_mode_state);
+  }
+  if (sidecars.injections !== undefined) {
+    if (!Array.isArray(sidecars.injections)) {
+      throw new Error("scenario.seed_sidecars.injections must be an array when set");
+    }
+    for (let i = 0; i < sidecars.injections.length; i++) {
+      validateInjectionRecord(`scenario.seed_sidecars.injections[${i}]`, sidecars.injections[i]);
+    }
+  }
+}
+
+function validatePlanModeStoredState(ctx: string, raw: unknown): void {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`${ctx} must be an object`);
+  }
+  const s = raw as Record<string, unknown>;
+  if (typeof s.active !== "boolean") throw new Error(`${ctx}.active must be a boolean`);
+  if (typeof s.updatedAt !== "number") throw new Error(`${ctx}.updatedAt must be a number`);
+  if (s.lastSource !== "SessionStart" && s.lastSource !== "UserPromptSubmit") {
+    throw new Error(`${ctx}.lastSource must be SessionStart or UserPromptSubmit`);
+  }
+  if (s.permission_mode !== null && typeof s.permission_mode !== "string") {
+    throw new Error(`${ctx}.permission_mode must be a string or null`);
+  }
+  if (s.detection_source !== "hook-input" && s.detection_source !== "transcript-tail") {
+    throw new Error(`${ctx}.detection_source must be hook-input or transcript-tail`);
+  }
+}
+
+function validateInjectionRecord(ctx: string, raw: unknown): void {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`${ctx} must be an object`);
+  }
+  const r = raw as Record<string, unknown>;
+  if (typeof r.seq !== "number") throw new Error(`${ctx}.seq must be a number`);
+  if (typeof r.ts !== "number") throw new Error(`${ctx}.ts must be a number`);
+  if (typeof r.id !== "string") throw new Error(`${ctx}.id must be a string`);
+  if (typeof r.trigger !== "string") throw new Error(`${ctx}.trigger must be a string`);
+  if (r.channel !== "context") throw new Error(`${ctx}.channel must be context`);
+  if (typeof r.message !== "string") throw new Error(`${ctx}.message must be a string`);
+  if (typeof r.message_hash !== "string") throw new Error(`${ctx}.message_hash must be a string`);
+  if (typeof r.event !== "string") throw new Error(`${ctx}.event must be a string`);
+}
+
+function validateInjectionExpectations(ctx: string, raw: Record<string, unknown>): void {
+  if (raw.injections === undefined) return;
+  if (!Array.isArray(raw.injections)) {
+    throw new Error(`${ctx}.injections must be an array when set`);
+  }
+  for (let i = 0; i < raw.injections.length; i++) {
+    const item = raw.injections[i] as Record<string, unknown>;
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new Error(`${ctx}.injections[${i}] must be an object`);
+    }
+    if (typeof item.id !== "string") throw new Error(`${ctx}.injections[${i}].id must be a string`);
+    if (typeof item.trigger !== "string") throw new Error(`${ctx}.injections[${i}].trigger must be a string`);
+    if (item.channel !== "context") throw new Error(`${ctx}.injections[${i}].channel must be context`);
+    if (typeof item.message_hash !== "string") {
+      throw new Error(`${ctx}.injections[${i}].message_hash must be a string`);
+    }
+    if (item.message !== undefined && typeof item.message !== "string") {
+      throw new Error(`${ctx}.injections[${i}].message must be a string when set`);
+    }
+  }
 }
 
 /**

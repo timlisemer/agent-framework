@@ -12,7 +12,12 @@ import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
 import { onEpochRotation, onUserPromptTurn } from "../scenario/lifecycle.js";
 import { activeSpec } from "../adapter/spec.js";
-import { detectPlanModeEntryAndBuildInjection } from "../utils/plan-mode-entry-state.js";
+import {
+  commitPlanModeTransition,
+  computePlanModeTransition,
+} from "../utils/plan-mode-entry-state.js";
+import { buildPendingContextInjections } from "../utils/context-injection-providers.js";
+import { appendSessionInjections, combineInjectionMessages } from "../utils/session-injections.js";
 
 /**
  * UserPromptSubmit Hook
@@ -75,6 +80,24 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
     await evaluateRulesForUserPromptSubmit(ALL_RULES, ctx);
   }
 
+  const transition = await computePlanModeTransition({
+    source: "UserPromptSubmit",
+    sessionDir,
+    transcriptPath: input.transcript_path,
+    permissionMode: input.permission_mode,
+  });
+  const pendingInjections = await buildPendingContextInjections({
+    projectDir,
+    sourceEvent: "UserPromptSubmit",
+    planModeTransition: transition,
+  });
+  const injectionRecords = appendSessionInjections(
+    sessionDir,
+    "UserPromptSubmit",
+    pendingInjections,
+  );
+  await commitPlanModeTransition(sessionDir, transition);
+
   const latestState = await stateManager.load().catch(() => state);
   const snapshotSeq = appendStateSnapshot(sessionDir, latestState, input.transcript_path);
   const epoch = loadCurrentEpoch(sessionDir);
@@ -84,19 +107,23 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
     parent_capture_seq: null,
     event: "UserPromptSubmit",
     decision: "ok",
+    permission_mode: input.permission_mode ?? null,
+    plan_mode: {
+      permission_mode: transition.permission_mode,
+      detection_source: transition.detection_source,
+      previous: transition.previous,
+      current: transition.current,
+      active: transition.active,
+      entered: transition.entered,
+      exited: transition.exited,
+    },
+    injection_seqs: injectionRecords.map((record) => record.seq),
+    injection_hashes: injectionRecords.map((record) => record.message_hash),
     state_snapshot_seq: snapshotSeq,
   });
 
-  const injection = await detectPlanModeEntryAndBuildInjection({
-    source: "UserPromptSubmit",
-    sessionDir,
-    transcriptPath: input.transcript_path,
-    projectDir,
-    permissionMode: input.permission_mode,
-  });
-
-  const out = injection.message && encoder.encodeContext
-    ? encoder.encodeContext("UserPromptSubmit", injection.message)
+  const out = injectionRecords.length > 0
+    ? encoder.encodeContext("UserPromptSubmit", combineInjectionMessages(injectionRecords))
     : encoder.encodeOk("UserPromptSubmit");
   await exitAfterFlush(out.exitCode, out.stdout);
 }

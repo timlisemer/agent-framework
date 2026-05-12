@@ -252,6 +252,9 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
         event: "PreToolUse",
         tool_use_id: input.tool_use_id,
         decision: exit.decision,
+        permission_mode: input.permission_mode ?? null,
+        injection_seqs: [],
+        injection_hashes: [],
         state_snapshot_seq: snapshotSeq,
       });
     }

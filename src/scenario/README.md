@@ -27,14 +27,30 @@ fires exactly one hook (or a fan-out batch), scores the result, and writes
 
 Every hook fire appends a `CapturePointer` to `captures.jsonl` and a
 `StateSnapshot` to `state-snapshots.jsonl`. Epoch boundaries (rewinds,
-compactions) are tracked in `epochs.jsonl`. These three files form an
-immutable forensic audit trail.
+compactions) are tracked in `epochs.jsonl`. These files form an immutable
+forensic audit trail.
+
+Plan-mode and injected-context reproducibility use additional session sidecars:
+- `plan-mode-state.json` stores the current plan-mode state used by hooks.
+- `plan-mode-events.jsonl` records entered/exited transitions.
+- `session-injections.jsonl` stores generic injected context records, including
+  exact file-backed source content such as repo-root `PLANS.md`.
+
+Captures include the hook's `permission_mode`, plan-mode transition metadata,
+and injection seq/hash pointers. Snapshots include plan-mode state and
+injection-log offset/hash metadata so materialized scenarios can replay from the
+same prior sidecar state.
 
 ## Materialize
 
 `materializeScenario(sessionDir, captureSeq)` reconstructs a `Scenario` from a
 live session's capture pointer. Useful for converting observed regressions into
 reproducible test fixtures.
+
+For plan-mode context injections, materialization seeds the target hook's prior
+`plan-mode-state.json`, writes captured file-backed sources through
+`setup_files`, and adds injection/context-output expectations for records
+referenced by the capture.
 
 **Round-trip caveat**: UUIDs are not preserved through
 materialization-then-replay. A replayed materialized scenario will have

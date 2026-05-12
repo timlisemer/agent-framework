@@ -10,7 +10,13 @@ import {
 } from "../utils/session-store.js";
 import type { AdapterEncoder } from "../adapter/types.js";
 import { resolveHostContext } from "../utils/host-context.js";
-import { detectPlanModeEntryAndBuildInjection } from "../utils/plan-mode-entry-state.js";
+import {
+  commitPlanModeTransition,
+  computePlanModeTransition,
+  type PlanModeTransition,
+} from "../utils/plan-mode-entry-state.js";
+import { buildPendingContextInjections } from "../utils/context-injection-providers.js";
+import { appendSessionInjections, combineInjectionMessages, type SessionInjectionRecord } from "../utils/session-injections.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
@@ -34,27 +40,35 @@ export interface SessionStartHookInput {
   permission_mode?: string;
 }
 
-async function maybeInjectPlansOnPlanModeEntry(
+async function computeSessionStartPlanMode(
   input: SessionStartHookInput,
-  encoder: AdapterEncoder,
   sessionDir: string,
-): Promise<boolean> {
+): Promise<{ transition: PlanModeTransition; records: SessionInjectionRecord[] }> {
   const host = resolveHostContext({ cwd: input.cwd });
-  const injection = await detectPlanModeEntryAndBuildInjection({
+  const transition = await computePlanModeTransition({
     source: "SessionStart",
     sessionDir,
     transcriptPath: input.transcript_path,
-    projectDir: host.projectDir,
     permissionMode: input.permission_mode,
   });
+  const pending = await buildPendingContextInjections({
+    projectDir: host.projectDir,
+    sourceEvent: "SessionStart",
+    planModeTransition: transition,
+  });
+  const records = appendSessionInjections(sessionDir, "SessionStart", pending);
+  await commitPlanModeTransition(sessionDir, transition);
+  return { transition, records };
+}
 
-  if (injection.message && encoder.encodeContext) {
-    const out = encoder.encodeContext("SessionStart", injection.message);
-    await exitAfterFlush(out.exitCode, out.stdout);
-    return true;
-  }
-
-  return false;
+async function exitSessionStart(
+  encoder: AdapterEncoder,
+  records: SessionInjectionRecord[],
+): Promise<void> {
+  const out = records.length > 0
+    ? encoder.encodeContext("SessionStart", combineInjectionMessages(records))
+    : encoder.encodeOk("SessionStart");
+  await exitAfterFlush(out.exitCode, out.stdout);
 }
 
 export async function mainSessionStart(input: SessionStartHookInput, encoder: AdapterEncoder): Promise<void> {
@@ -83,6 +97,7 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
     if (!fs.existsSync(statePath)) {
       await getSessionState(sessionDir).save(sessionStateDefaults());
     }
+    const { transition, records } = await computeSessionStartPlanMode(input, sessionDir);
     const state = await getSessionState(sessionDir).load().catch(() => sessionStateDefaults());
     const snapshotSeq = appendStateSnapshot(sessionDir, state, transcript_path);
     const epoch = loadCurrentEpoch(sessionDir);
@@ -92,11 +107,21 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
       parent_capture_seq: null,
       event: "SessionStart",
       decision: "ok",
+      permission_mode: input.permission_mode ?? null,
+      plan_mode: {
+        permission_mode: transition.permission_mode,
+        detection_source: transition.detection_source,
+        previous: transition.previous,
+        current: transition.current,
+        active: transition.active,
+        entered: transition.entered,
+        exited: transition.exited,
+      },
+      injection_seqs: records.map((record) => record.seq),
+      injection_hashes: records.map((record) => record.message_hash),
       state_snapshot_seq: snapshotSeq,
     });
-    if (await maybeInjectPlansOnPlanModeEntry(input, encoder, sessionDir)) return;
-    const out = encoder.encodeOk("SessionStart");
-    await exitAfterFlush(out.exitCode, out.stdout);
+    await exitSessionStart(encoder, records);
     return;
   }
 
@@ -112,6 +137,7 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
     // Compact: rotate epoch and reset derived caches.
     const newEpoch = rotateEpoch(sessionDir, "compact", null);
     await onEpochRotation(sessionDir, newEpoch);
+    const { transition, records } = await computeSessionStartPlanMode(input, sessionDir);
     const state = await getSessionState(sessionDir).load().catch(() => sessionStateDefaults());
     const snapshotSeq = appendStateSnapshot(sessionDir, state, transcript_path);
     appendCapture(sessionDir, {
@@ -120,15 +146,26 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
       parent_capture_seq: null,
       event: "SessionStart",
       decision: "ok",
+      permission_mode: input.permission_mode ?? null,
+      plan_mode: {
+        permission_mode: transition.permission_mode,
+        detection_source: transition.detection_source,
+        previous: transition.previous,
+        current: transition.current,
+        active: transition.active,
+        entered: transition.entered,
+        exited: transition.exited,
+      },
+      injection_seqs: records.map((record) => record.seq),
+      injection_hashes: records.map((record) => record.message_hash),
       state_snapshot_seq: snapshotSeq,
     });
-    if (await maybeInjectPlansOnPlanModeEntry(input, encoder, sessionDir)) return;
-    const out = encoder.encodeOk("SessionStart");
-    await exitAfterFlush(out.exitCode, out.stdout);
+    await exitSessionStart(encoder, records);
     return;
   }
 
   // resume: no-op. The host agent's native compaction handles transcript continuity.
+  const { transition, records } = await computeSessionStartPlanMode(input, sessionDir);
   const state = await getSessionState(sessionDir).load().catch(() => sessionStateDefaults());
   const snapshotSeq = appendStateSnapshot(sessionDir, state, transcript_path);
   const epoch = loadCurrentEpoch(sessionDir);
@@ -138,9 +175,19 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
     parent_capture_seq: null,
     event: "SessionStart",
     decision: "ok",
+    permission_mode: input.permission_mode ?? null,
+    plan_mode: {
+      permission_mode: transition.permission_mode,
+      detection_source: transition.detection_source,
+      previous: transition.previous,
+      current: transition.current,
+      active: transition.active,
+      entered: transition.entered,
+      exited: transition.exited,
+    },
+    injection_seqs: records.map((record) => record.seq),
+    injection_hashes: records.map((record) => record.message_hash),
     state_snapshot_seq: snapshotSeq,
   });
-  if (await maybeInjectPlansOnPlanModeEntry(input, encoder, sessionDir)) return;
-  const out = encoder.encodeOk("SessionStart");
-  await exitAfterFlush(out.exitCode, out.stdout);
+  await exitSessionStart(encoder, records);
 }

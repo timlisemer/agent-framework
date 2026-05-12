@@ -14,12 +14,14 @@
  */
 
 import * as fs from "fs";
+import * as path from "path";
 import type { Scenario, ScenarioEntry, ScenarioBlock, ScenarioUserEntry, ScenarioAssistantEntry } from "./types.js";
 import { loadCapturePointer } from "./capture.js";
 import { loadCurrentEpoch } from "./epoch.js";
 import { loadStateSnapshot } from "./snapshot.js";
 import { sessionToolLogFile } from "../utils/paths.js";
 import type { ToolLogEntry } from "../utils/session-store.js";
+import { combineInjectionMessages, loadSessionInjectionsBySeq, shortContentHash } from "../utils/session-injections.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -238,6 +240,16 @@ export async function materializeScenario(
   }
 
   const state = snapshot.state;
+  const injectionRecords = loadSessionInjectionsBySeq(sessionDir, pointer.injection_seqs ?? []);
+  const setupFiles = new Map<string, string>();
+  for (const record of injectionRecords) {
+    if (record.source_file?.kind === "file") {
+      const rel = path.isAbsolute(record.source_file.path)
+        ? path.basename(record.source_file.path)
+        : record.source_file.path;
+      setupFiles.set(rel, record.source_file.content);
+    }
+  }
   const toolLog = pointer.event === "PreToolUse"
     ? dropTargetPreToolUseLogEntry(
         readToolLogEntriesThroughOffset(sessionDir, snapshot.tool_log_offset),
@@ -258,7 +270,38 @@ export async function materializeScenario(
     },
     expect: {
       expected: pointer.decision,
+      ...(injectionRecords.length > 0
+        ? {
+            injections: injectionRecords.map((record) => ({
+              id: record.id,
+              trigger: record.trigger,
+              channel: record.channel,
+              message_hash: record.message_hash,
+              message: record.message,
+            })),
+            context_output_hash: shortContentHash(combineInjectionMessages(injectionRecords)),
+          }
+        : {}),
     },
+    env: {
+      permission_mode: (pointer.permission_mode ?? "default") as NonNullable<Scenario["env"]>["permission_mode"],
+      ...(pointer.event !== "SessionStart" ? { session_start_permission_mode: "default" as const } : {}),
+    },
+    ...(setupFiles.size > 0
+      ? {
+          setup_files: [...setupFiles.entries()].map(([setupPath, content]) => ({
+            path: setupPath,
+            content,
+          })),
+        }
+      : {}),
+    ...(pointer.plan_mode
+      ? {
+          seed_sidecars: {
+            plan_mode_state: pointer.plan_mode.previous,
+          },
+        }
+      : {}),
     seed_state: {
       currentPrediction: state.currentPrediction ?? {
         mood: "neutral",
