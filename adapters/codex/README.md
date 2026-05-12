@@ -28,6 +28,13 @@ hooks inject this contract when a session enters plan mode, and
 `$agent-framework-plan1`, `$agent-framework-plan3`, and `$agent-framework-plan5`
 also read it before presenting `<proposed_plan>` output.
 
+Codex plans are inline `<proposed_plan>...</proposed_plan>` blocks, not
+temporary plan files. The Stop hook validates a complete inline proposed plan
+before it is presented and stores the validated content in the session
+`current-plan.json` sidecar. When Codex later submits `Implement the plan.` or
+the clear-context implementation prompt, `UserPromptSubmit` validates the
+stored or embedded plan again before allowing implementation state to begin.
+
 `dotcodex/agents/*.toml` contains Codex custom-agent equivalents for the
 Claude subagent roles. The NixOS activation script links these as individual
 files under `~/.codex/agents/`.

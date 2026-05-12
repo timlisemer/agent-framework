@@ -24,12 +24,20 @@ vi.mock("../../src/rules/index.js", async () => {
   };
 });
 
+vi.mock("../../src/agents/hooks/plan-validate.js", () => ({
+  checkPlanIntent: vi.fn().mockResolvedValue({ approved: true }),
+}));
+
 import { mainUserPromptSubmit } from "../../src/hooks/user-prompt-submit.js";
 import { evaluateRulesForUserPromptSubmit } from "../../src/rules/index.js";
 import { exitAfterFlush } from "../../src/utils/hook-bootstrap.js";
+import { checkPlanIntent } from "../../src/agents/hooks/plan-validate.js";
+import { codexEncoder } from "../../adapters/codex/encoder.js";
+import { sessionCurrentPlanFile, sessionStateFile } from "../../src/utils/paths.js";
 
 const mockEvaluateRulesForUserPromptSubmit = vi.mocked(evaluateRulesForUserPromptSubmit);
 const mockExitAfterFlush = vi.mocked(exitAfterFlush);
+const mockCheckPlanIntent = vi.mocked(checkPlanIntent);
 
 const encoder: AdapterEncoder = {
   name: "test",
@@ -49,6 +57,7 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockCheckPlanIntent.mockResolvedValue({ approved: true });
     prevSessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR;
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "user-prompt-submit-test-"));
     process.env.AGENT_FRAMEWORK_SESSION_DIR = path.join(tempDir, "session");
@@ -150,5 +159,78 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
     );
 
     expect(mockExitAfterFlush).toHaveBeenLastCalledWith(0, "ok");
+  });
+
+  it("validates Codex Implement the plan prompts, writes implementation state, and skips sentiment", async () => {
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      fs.mkdirSync(process.env.AGENT_FRAMEWORK_SESSION_DIR!, { recursive: true });
+      fs.writeFileSync(
+        sessionCurrentPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!),
+        JSON.stringify({ kind: "inline", content: "## User Goal\nImplement x.", source: "test" }) + "\n",
+      );
+
+      await mainUserPromptSubmit(
+        {
+          session_id: "session-impl",
+          transcript_path: transcriptPath,
+          cwd: tempDir,
+          prompt: "Implement the plan.",
+        },
+        codexEncoder,
+      );
+
+      expect(mockEvaluateRulesForUserPromptSubmit).not.toHaveBeenCalled();
+      expect(mockCheckPlanIntent).toHaveBeenCalledWith(
+        null,
+        "Write",
+        { content: "## User Goal\nImplement x." },
+        expect.any(String),
+        transcriptPath,
+        tempDir,
+        "UserPromptSubmit",
+        "exit",
+      );
+      const state = JSON.parse(fs.readFileSync(sessionStateFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!), "utf-8")).data;
+      expect(state.currentEditIntent).toBe(true);
+      expect(state.currentPrediction.intent).toContain("implementation phase has begun");
+      expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "");
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      else process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+    }
+  });
+
+  it("blocks Codex implementation prompts when the stored plan fails validation", async () => {
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    mockCheckPlanIntent.mockResolvedValue({ approved: false, reason: "bad plan" });
+    try {
+      fs.mkdirSync(process.env.AGENT_FRAMEWORK_SESSION_DIR!, { recursive: true });
+      fs.writeFileSync(
+        sessionCurrentPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!),
+        JSON.stringify({ kind: "inline", content: "bad", source: "test" }) + "\n",
+      );
+
+      await mainUserPromptSubmit(
+        {
+          session_id: "session-impl-block",
+          transcript_path: transcriptPath,
+          cwd: tempDir,
+          prompt: "Implement the plan.",
+        },
+        codexEncoder,
+      );
+
+      expect(mockEvaluateRulesForUserPromptSubmit).not.toHaveBeenCalled();
+      expect(mockExitAfterFlush).toHaveBeenCalledWith(
+        0,
+        expect.stringContaining('"decision":"block"'),
+      );
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      else process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+    }
   });
 });

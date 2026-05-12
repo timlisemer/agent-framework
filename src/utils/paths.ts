@@ -239,6 +239,10 @@ export function sessionStateFile(sessionDir: string): string {
   return path.join(sessionDir, "state.json");
 }
 
+export function sessionCurrentPlanFile(sessionDir: string): string {
+  return path.join(sessionDir, "current-plan.json");
+}
+
 export function sessionToolLogFile(sessionDir: string): string {
   return path.join(sessionDir, "tool-log.jsonl");
 }

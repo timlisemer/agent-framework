@@ -83,4 +83,18 @@ export const codexEncoder: AdapterEncoder = {
     }
     return { stdout: JSON.stringify({ systemMessage: message }), exitCode: 0 };
   },
+
+  encodeUserPromptSubmitBlock(reason: string): EncodedOutput {
+    return {
+      stdout: JSON.stringify({
+        decision: "block",
+        reason,
+        hookSpecificOutput: {
+          hookEventName: "UserPromptSubmit",
+          additionalContext: reason,
+        },
+      }),
+      exitCode: 0,
+    };
+  },
 };

@@ -12,6 +12,9 @@ import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
 import { onEpochRotation, onUserPromptTurn } from "../scenario/lifecycle.js";
 import { activeSpec } from "../adapter/spec.js";
+import { validateCurrentPlanExit, writeCurrentPlanSidecar } from "../utils/plan-source.js";
+import { clearGateReasoning } from "../utils/gate-reasoning-cache.js";
+import { synthesizePostApprovalPrediction } from "../utils/plan-approval-detector.js";
 import {
   commitPlanModeTransition,
   computePlanModeTransition,
@@ -51,6 +54,70 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
   }
 
   const stateManager = getSessionState(sessionDir);
+  const spec = activeSpec();
+  if (spec.isPlanExit({ event: "UserPromptSubmit", prompt: input.prompt })) {
+    const state = await stateManager.load();
+    const validation = await validateCurrentPlanExit({
+      transcriptPath: input.transcript_path,
+      sessionDir,
+      projectDir,
+      hookName: "UserPromptSubmit",
+      prompt: input.prompt,
+    });
+    const epoch = loadCurrentEpoch(sessionDir);
+    if (!validation.approved) {
+      const reason = `Plan validation failed: ${validation.reason}`;
+      const snapshotSeq = appendStateSnapshot(sessionDir, state, input.transcript_path);
+      appendCapture(sessionDir, {
+        ts: Date.now(),
+        epoch_id: epoch?.id ?? "unknown",
+        parent_capture_seq: null,
+        event: "UserPromptSubmit",
+        decision: "block",
+        permission_mode: input.permission_mode ?? null,
+        injection_seqs: [],
+        injection_hashes: [],
+        state_snapshot_seq: snapshotSeq,
+      });
+      const out = encoder.encodeUserPromptSubmitBlock
+        ? encoder.encodeUserPromptSubmitBlock(reason)
+        : encoder.encodeContext("UserPromptSubmit", reason);
+      await exitAfterFlush(out.exitCode, out.stdout);
+      return;
+    }
+    if (validation.source?.kind === "inline") {
+      writeCurrentPlanSidecar(sessionDir, validation.source);
+    }
+    await stateManager.update((s) => ({
+      ...s,
+      previousEditIntent: s.currentEditIntent ?? null,
+      currentEditIntent: true,
+      editIntentTimestamp: Date.now(),
+      editIntentOverturnCount: 0,
+      respondFirstChecked: false,
+      currentPrediction: synthesizePostApprovalPrediction(input.prompt),
+      frustrationStreak: 0,
+    }));
+    await clearGateReasoning(sessionDir);
+
+    const latestState = await stateManager.load().catch(() => state);
+    const snapshotSeq = appendStateSnapshot(sessionDir, latestState, input.transcript_path);
+    appendCapture(sessionDir, {
+      ts: Date.now(),
+      epoch_id: epoch?.id ?? "unknown",
+      parent_capture_seq: null,
+      event: "UserPromptSubmit",
+      decision: "ok",
+      permission_mode: input.permission_mode ?? null,
+      injection_seqs: [],
+      injection_hashes: [],
+      state_snapshot_seq: snapshotSeq,
+    });
+    const out = encoder.encodeOk("UserPromptSubmit");
+    await exitAfterFlush(out.exitCode, out.stdout);
+    return;
+  }
+
   await onUserPromptTurn(sessionDir);
   const state = await stateManager.load();
 
@@ -75,7 +142,7 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
     subagent: false,
   };
 
-  const workflowInvocation = activeSpec().recognizeWorkflowInvocation(input.prompt);
+  const workflowInvocation = spec.recognizeWorkflowInvocation(input.prompt);
   if (workflowInvocation === null) {
     await evaluateRulesForUserPromptSubmit(ALL_RULES, ctx);
   }

@@ -60,4 +60,8 @@ export const claudeEncoder: AdapterEncoder = {
   encodeError(_event: EventName, _message: string): EncodedOutput {
     return { stdout: "", exitCode: 1 };
   },
+
+  encodeUserPromptSubmitBlock(reason: string): EncodedOutput {
+    return { stdout: JSON.stringify({ decision: "block", reason }), exitCode: 0 };
+  },
 };

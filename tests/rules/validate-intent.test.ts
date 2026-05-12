@@ -10,9 +10,8 @@ vi.mock("../../src/utils/git-utils.js", () => ({
   getUncommittedChanges: vi.fn(),
 }));
 
-vi.mock("../../src/utils/session-utils.js", () => ({
-  readPlanContent: vi.fn().mockResolvedValue(null),
-  resolvePlanPath: vi.fn().mockResolvedValue(null),
+vi.mock("../../src/utils/plan-source.js", () => ({
+  readCurrentPlanContent: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("../../src/utils/transcript.js", async () => {

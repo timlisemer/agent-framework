@@ -8,10 +8,7 @@ import { RESTRICTED_MCPS } from "../utils/slash-commands.js";
 import { activeSpec } from "../adapter/spec.js";
 import { classifyBashCommand } from "../utils/command-patterns.js";
 import { recordDenial, MAX_SIMILAR_DENIALS } from "../utils/denial-cache.js";
-import { resolvePlanPath, readPlanContent } from "../utils/session-utils.js";
-import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
-import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
-import { PLAN_VALIDATE_COUNTS } from "../utils/transcript-presets.js";
+import { validateCurrentPlanExit } from "../utils/plan-source.js";
 import { logFastPathDeny } from "../utils/logger.js";
 
 export const toolApproveRule: PreToolRule = {
@@ -34,35 +31,29 @@ export const toolApproveRule: PreToolRule = {
       }
     }
 
-    // ExitPlanMode: block if plan file doesn't exist or is empty
-    if (ctx.toolName === "ExitPlanMode") {
-      const planPath = await resolvePlanPath(ctx.transcriptPath);
-      if (!planPath || !(await fs.promises.stat(planPath)).size) {
-        logFastPathDeny("exit-plan-mode", "PreToolUse", ctx.toolName, ctx.projectDir, "Cannot exit plan mode without a plan.");
-        return { fastDeny: "Cannot exit plan mode without a plan." };
-      }
-
-      // Plan exists and is non-empty -- validate content before allowing exit
-      const planContent = await readPlanContent(ctx.transcriptPath);
-      const planResult = await readTranscriptExact(ctx.transcriptPath, PLAN_VALIDATE_COUNTS);
-      const conversationContext = formatTranscriptResult(planResult);
-      const exitValidation = await checkPlanIntent(
-        planContent,
-        ctx.toolName as "Write" | "Edit",
-        ctx.toolInput as { content?: string; old_string?: string; new_string?: string },
-        conversationContext,
-        ctx.transcriptPath,
-        ctx.projectDir,
-        "PreToolUse",
-        "exit"
-      );
+    if (activeSpec().isPlanExit({
+      event: "PreToolUse",
+      canonicalToolName: ctx.toolName,
+      rawToolName: ctx.rawToolName,
+      toolInput: ctx.toolInput,
+    })) {
+      const exitValidation = await validateCurrentPlanExit({
+        transcriptPath: ctx.transcriptPath,
+        sessionDir: ctx.sessionDir,
+        projectDir: ctx.projectDir,
+        hookName: "PreToolUse",
+      });
       if (!exitValidation.approved) {
+        if (exitValidation.reason === "Cannot exit plan mode without a plan.") {
+          logFastPathDeny("exit-plan-mode", "PreToolUse", ctx.toolName, ctx.projectDir, exitValidation.reason);
+          return { fastDeny: exitValidation.reason };
+        }
         return { fastDeny: `Plan validation failed: ${exitValidation.reason}` };
       }
       // Plan validation passed -- allow without LLM tool-approve check.
       // `return null` is insufficient: it passes to later rules (gate LLM)
-      // which incorrectly classify ExitPlanMode as an "implementation action" in plan mode.
-      return { fastAllow: "ExitPlanMode approved after plan validation" };
+      // which incorrectly classify plan exit as an "implementation action" in plan mode.
+      return { fastAllow: "Plan exit approved after plan validation" };
     }
 
     // Deterministic pre-checks for plan mode blocks

@@ -3,9 +3,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-vi.mock("../../src/utils/session-utils.js", () => ({
-  resolvePlanPath: vi.fn(),
-  readPlanContent: vi.fn(),
+vi.mock("../../src/utils/plan-source.js", () => ({
+  validateCurrentPlanExit: vi.fn(),
 }));
 
 vi.mock("../../src/agents/hooks/plan-validate.js", () => ({
@@ -32,13 +31,12 @@ vi.mock("../../src/utils/logger.js", () => ({
 }));
 
 import { toolApproveRule } from "../../src/rules/tool-approve.js";
-import { resolvePlanPath, readPlanContent } from "../../src/utils/session-utils.js";
+import { validateCurrentPlanExit } from "../../src/utils/plan-source.js";
 import { checkPlanIntent } from "../../src/agents/hooks/plan-validate.js";
 import { clearDenialCache, initDenialSession } from "../../src/utils/denial-cache.js";
 import type { RuleContext } from "../../src/rules/types.js";
 
-const mockResolvePlanPath = vi.mocked(resolvePlanPath);
-const mockReadPlanContent = vi.mocked(readPlanContent);
+const mockValidateCurrentPlanExit = vi.mocked(validateCurrentPlanExit);
 const mockCheckPlanIntent = vi.mocked(checkPlanIntent);
 
 describe("toolApproveRule ExitPlanMode short-circuit", () => {
@@ -49,8 +47,11 @@ describe("toolApproveRule ExitPlanMode short-circuit", () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tool-approve-test-"));
     planPath = path.join(tempDir, "plan.md");
     fs.writeFileSync(planPath, "# Plan\n\nSome content.\n");
-    mockResolvePlanPath.mockResolvedValue(planPath);
-    mockReadPlanContent.mockResolvedValue("# Plan\n\nSome content.\n");
+    mockValidateCurrentPlanExit.mockResolvedValue({
+      approved: true,
+      reason: "ok",
+      source: { kind: "file", path: planPath },
+    });
   });
 
   afterEach(() => {
@@ -77,19 +78,22 @@ describe("toolApproveRule ExitPlanMode short-circuit", () => {
   }
 
   it("returns fastAllow and does NOT invoke LLM when plan validation passes", async () => {
-    mockCheckPlanIntent.mockResolvedValue({ approved: true, reason: "ok" });
     const result = await toolApproveRule.check(makeCtx());
-    expect(result).toEqual({ fastAllow: "ExitPlanMode approved after plan validation" });
+    expect(result).toEqual({ fastAllow: "Plan exit approved after plan validation" });
+    expect(mockCheckPlanIntent).not.toHaveBeenCalled();
   });
 
   it("returns fastDeny when plan file is missing", async () => {
-    mockResolvePlanPath.mockResolvedValue(null);
+    mockValidateCurrentPlanExit.mockResolvedValue({
+      approved: false,
+      reason: "Cannot exit plan mode without a plan.",
+    });
     const result = await toolApproveRule.check(makeCtx());
     expect(result).toEqual({ fastDeny: "Cannot exit plan mode without a plan." });
   });
 
   it("returns fastDeny with plan-validation reason when checkPlanIntent rejects", async () => {
-    mockCheckPlanIntent.mockResolvedValue({ approved: false, reason: "missing section X" });
+    mockValidateCurrentPlanExit.mockResolvedValue({ approved: false, reason: "missing section X" });
     const result = await toolApproveRule.check(makeCtx());
     expect(result).toEqual({ fastDeny: "Plan validation failed: missing section X" });
   });

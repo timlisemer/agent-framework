@@ -1,9 +1,8 @@
 import * as path from "path";
 import * as fs from "fs";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
-import { readPlanContent } from "../utils/session-utils.js";
+import { validatePlanEdit } from "../utils/plan-source.js";
 import type { AdapterEncoder } from "../adapter/types.js";
 import { activeSpec } from "../adapter/spec.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
@@ -20,7 +19,6 @@ import {
 } from "../utils/transcript.js";
 import {
   APPEAL_COUNTS,
-  PLAN_VALIDATE_COUNTS,
 } from "../utils/transcript-presets.js";
 import { getPlanModeContext, isPlanModeFromInput, isPlanModeActive } from "../utils/plan-mode-detector.js";
 import {
@@ -67,6 +65,11 @@ interface PipelineExit {
   mirroredFromLeader?: boolean;
 }
 
+function syntheticToolSource(content: string): string | null {
+  const match = content.match(/^\[([^\]]+)\]/);
+  return match?.[1] ?? null;
+}
+
 export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
   const spec = activeSpec();
   const canonical = spec.canonicalizeToolCall(input.tool_name, input.tool_input);
@@ -94,6 +97,12 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   // Module-scoped variables for exitPipeline
   const toolName = canonical.toolName;     // canonical end-to-end downstream
   const toolInput = canonical.toolInput;
+  const planExit = spec.isPlanExit({
+    event: "PreToolUse",
+    canonicalToolName: toolName,
+    rawToolName,
+    toolInput,
+  });
   let currentGateNote: string | undefined;
   const startTime = Date.now();
 
@@ -175,7 +184,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
       await stateManager.update((s) => {
         const next = { ...s, toolCallCount: s.toolCallCount + 1 };
         assignedToolCallIndex = s.toolCallCount;
-        if (exit.decision === "allow" && toolName === "ExitPlanMode") {
+        if (exit.decision === "allow" && planExit) {
           next.currentEditIntent = true as const;
           next.previousEditIntent = s.currentEditIntent ?? null;
           next.editIntentTimestamp = Date.now();
@@ -205,11 +214,11 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
         }
       }
 
-      if (exit.decision === "allow" && toolName === "ExitPlanMode") {
+      if (exit.decision === "allow" && planExit) {
         await clearGateReasoning(sessionDir);
         if (!subagent) {
-          await writeTool(input.transcript_path, input.session_id, "ExitPlanMode", "Exiting plan mode.");
-          await writeUser(input.transcript_path, input.session_id, "ExitPlanMode", "Plan approved. Proceed with implementation.");
+          await writeTool(input.transcript_path, input.session_id, toolName, "Exiting plan mode.");
+          await writeUser(input.transcript_path, input.session_id, toolName, "Plan approved. Proceed with implementation.");
         }
       }
     }
@@ -273,22 +282,19 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
    */
   async function runPlanValidation(
     mode: "edit" | "exit",
+    currentPlan: string | null,
     overrideToolName?: string,
-    overrideToolInput?: unknown
+    overrideToolInput?: unknown,
   ): Promise<{ approved: boolean; reason?: string }> {
-    const planContent = await readPlanContent(input.transcript_path);
-    const planResult = await readTranscriptExact(input.transcript_path, PLAN_VALIDATE_COUNTS);
-    const conversationContext = formatTranscriptResult(planResult);
-    return checkPlanIntent(
-      planContent,
-      (overrideToolName ?? toolName) as "Write" | "Edit",
-      (overrideToolInput ?? toolInput) as { content?: string; old_string?: string; new_string?: string },
-      conversationContext,
-      input.transcript_path,
+    return validatePlanEdit({
+      currentPlan,
+      toolName: (overrideToolName ?? toolName) as "Write" | "Edit",
+      toolInput: (overrideToolInput ?? toolInput) as { content?: string; old_string?: string; new_string?: string },
+      transcriptPath: input.transcript_path,
       projectDir,
-      "PreToolUse",
-      mode
-    );
+      hookName: "PreToolUse",
+      mode,
+    });
   }
 
   if (batchInfo) {
@@ -426,25 +432,36 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
         (toolName === "Write" || toolName === "Edit") &&
         isPathInDirectory(filePath, host.plansRoot)
       ) {
-        // Skip validation if ExitPlanMode was recently approved
+        // Skip validation if the adapter's plan-exit tool was recently approved.
         const recentContext = await readTranscriptExact(
           input.transcript_path,
           APPEAL_COUNTS
         );
-        const hasExitPlanModeApproval = recentContext.tool.some(
-          (r) => r.content.startsWith("[ExitPlanMode]")
-        );
-        if (hasExitPlanModeApproval) {
-          logFastPathApproval("exit-plan-mode", "PreToolUse", toolName, projectDir, "ExitPlanMode previously approved");
+        const hasPlanExitApproval = recentContext.tool.some((r) => {
+          const source = syntheticToolSource(r.content);
+          return source !== null && spec.isPlanExit({
+            event: "PreToolUse",
+            canonicalToolName: source,
+            rawToolName: source,
+          });
+        });
+        if (hasPlanExitApproval) {
+          logFastPathApproval("plan-exit", "PreToolUse", toolName, projectDir, "Plan exit previously approved");
           await exitPipeline({
             decision: "allow",
-            agent: "exit-plan-mode",
-            reason: "ExitPlanMode previously approved",
+            agent: "plan-exit",
+            reason: "Plan exit previously approved",
           });
           return;
         }
 
-        const validation = await runPlanValidation("edit");
+        let currentPlan: string | null = null;
+        try {
+          currentPlan = await fs.promises.readFile(filePath, "utf-8");
+        } catch {
+          currentPlan = null;
+        }
+        const validation = await runPlanValidation("edit", currentPlan);
 
         if (!validation.approved) {
           // IMPORTANT: Do NOT remove this appeal call. Without it, user overrides

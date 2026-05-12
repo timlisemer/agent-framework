@@ -12,6 +12,8 @@ import type { RuleContext } from "../rules/types.js";
 import type { AdapterEncoder } from "../adapter/types.js";
 import type { FrameworkStopHookInput } from "./types.js";
 import { resolveHostContext } from "../utils/host-context.js";
+import { activeSpec } from "../adapter/spec.js";
+import { validateCurrentPlanExit, writeCurrentPlanSidecar } from "../utils/plan-source.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
@@ -49,6 +51,42 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
       : isPlanModeActive(input.transcript_path);
 
   const tx = await readTranscriptExact(input.transcript_path, FIRST_RESPONSE_STOP_COUNTS);
+  const assistantText = input.last_assistant_message ??
+    (tx.assistant.length > 0 ? getMostRecentMessage(tx.assistant).content : null);
+  const spec = activeSpec();
+  if (spec.isPlanExit({ event: "Stop", assistantText })) {
+    const validation = await validateCurrentPlanExit({
+      transcriptPath: input.transcript_path,
+      sessionDir,
+      projectDir: host.projectDir,
+      hookName: "Stop",
+      assistantText,
+    });
+    const epoch = loadCurrentEpoch(sessionDir);
+    if (!validation.approved) {
+      const reason = `Plan validation failed: ${validation.reason}`;
+      await writeTool(input.transcript_path, input.session_id, "plan-validate", reason);
+      const snapshotSeq = appendStateSnapshot(sessionDir, state, input.transcript_path);
+      appendCapture(sessionDir, {
+        ts: Date.now(),
+        epoch_id: epoch?.id ?? "unknown",
+        parent_capture_seq: null,
+        event: "Stop",
+        decision: "block",
+        permission_mode: input.permission_mode ?? null,
+        injection_seqs: [],
+        injection_hashes: [],
+        state_snapshot_seq: snapshotSeq,
+      });
+      const out = encoder.encodeStopBlock(reason);
+      await exitAfterFlush(out.exitCode, out.stdout);
+      return;
+    }
+    if (validation.source?.kind === "inline") {
+      writeCurrentPlanSidecar(sessionDir, validation.source);
+    }
+  }
+
   if (tx.user.length === 0 || tx.assistant.length === 0) {
     const snapshotSeq = appendStateSnapshot(sessionDir, state, input.transcript_path);
     const epoch = loadCurrentEpoch(sessionDir);
@@ -81,7 +119,7 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
     planMode,
     planModeCtx: getPlanModeContext(planMode),
     subagent: isSubagent(input.transcript_path),
-    assistantText: getMostRecentMessage(tx.assistant).content,
+    assistantText: assistantText ?? getMostRecentMessage(tx.assistant).content,
     userText: getMostRecentMessage(tx.user).content,
   };
 

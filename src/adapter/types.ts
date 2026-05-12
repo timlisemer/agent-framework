@@ -32,9 +32,26 @@ export interface AdapterEncoder {
   encodeOk(event: EventName): EncodedOutput;          // exit-code-only events
   encodeContext(event: EventName, message: string): EncodedOutput;
   encodeError(event: EventName, message: string): EncodedOutput;
+  encodeUserPromptSubmitBlock?(reason: string): EncodedOutput;
 }
 
 export interface EncodedOutput { stdout: string; exitCode: number; }
+
+export type PlanSourceDescriptor =
+  | { kind: "file"; path: string }
+  | { kind: "inline"; content: string; source: string };
+
+export type PlanExitDetectionInput =
+  | { event: "PreToolUse"; canonicalToolName?: string; rawToolName?: string; toolInput?: unknown }
+  | { event: "Stop"; assistantText?: string | null }
+  | { event: "UserPromptSubmit"; prompt: string };
+
+export interface PlanSourceLookupInput {
+  transcriptPath: string;
+  sessionDir?: string;
+  assistantText?: string | null;
+  prompt?: string;
+}
 
 // ── Canonical names ─────────────────────────────────────────────────────────
 
@@ -166,6 +183,13 @@ export interface AdapterSpec {
   /** True if a file path is exempt from edit-intent gating
    *  (plan files, memory files, instruction files for this adapter). */
   isEditIntentExemptPath(filePath: string): boolean;
+
+  // ── Plan source / exit conventions ─────────────────────────────────────
+  /** Resolve the current plan source using adapter-specific transcript/session conventions. */
+  findCurrentPlanSource(input: PlanSourceLookupInput): PlanSourceDescriptor | null | Promise<PlanSourceDescriptor | null>;
+
+  /** True if this adapter-specific event represents a plan-exit/approval boundary. */
+  isPlanExit(input: PlanExitDetectionInput): boolean;
 
   // ── Scenario materialization ────────────────────────────────────────────
   /** Convert one canonical ScenarioEntry into JSONL line(s) on disk

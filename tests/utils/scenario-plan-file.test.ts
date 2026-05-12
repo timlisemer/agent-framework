@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { resolvePlanPath } from "../../src/utils/session-utils.js";
+import { findCurrentPlanSource } from "../../adapters/claude/plan-source.js";
 
 const ORIG_HOME = process.env.HOME;
 let TMP_HOME: string;
@@ -37,7 +37,7 @@ describe("scenario plan-file materialization (HOME-scoped)", () => {
     fs.rmSync(TMP_HOME, { recursive: true, force: true });
   });
 
-  it("materializes plans dir + file, resolvePlanPath finds it via slug on JSONL", async () => {
+  it("materializes plans dir + file, Claude plan source finds it via slug on JSONL", async () => {
     const planDir = path.join(TMP_HOME, ".claude", "plans");
     fs.mkdirSync(planDir, { recursive: true });
     const slug = "test-slug-mat-1";
@@ -49,20 +49,20 @@ describe("scenario plan-file materialization (HOME-scoped)", () => {
     const jsonlPath = path.join(TMP_HOME, "transcript.jsonl");
     fs.writeFileSync(jsonlPath, makeJsonl(slug, "session-1"));
 
-    const resolved = await resolvePlanPath(jsonlPath);
-    expect(resolved).toBe(planPath);
+    const resolved = await findCurrentPlanSource({ transcriptPath: jsonlPath });
+    expect(resolved).toEqual({ kind: "file", path: planPath });
   });
 
-  it("resolvePlanPath returns null when slug points at a non-existent file", async () => {
+  it("Claude plan source returns null when slug points at a non-existent file", async () => {
     const slug = "test-slug-mat-2";
     const jsonlPath = path.join(TMP_HOME, "transcript.jsonl");
     fs.writeFileSync(jsonlPath, makeJsonl(slug, "session-2"));
 
-    const resolved = await resolvePlanPath(jsonlPath);
+    const resolved = await findCurrentPlanSource({ transcriptPath: jsonlPath });
     expect(resolved).toBeNull();
   });
 
-  it("resolvePlanPath returns null when no slug present on any line", async () => {
+  it("Claude plan source returns null when no slug present on any line", async () => {
     const jsonlPath = path.join(TMP_HOME, "transcript.jsonl");
     fs.writeFileSync(
       jsonlPath,
@@ -75,7 +75,7 @@ describe("scenario plan-file materialization (HOME-scoped)", () => {
       }) + "\n",
     );
 
-    const resolved = await resolvePlanPath(jsonlPath);
+    const resolved = await findCurrentPlanSource({ transcriptPath: jsonlPath });
     expect(resolved).toBeNull();
   });
 

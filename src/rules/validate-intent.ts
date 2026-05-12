@@ -5,7 +5,7 @@ import { MODEL_TIERS } from "../types.js";
 import { getUncommittedChanges } from "../utils/git-utils.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
 import { VALIDATE_INTENT_COUNTS } from "../utils/transcript-presets.js";
-import { readPlanContent } from "../utils/session-utils.js";
+import { readCurrentPlanContent } from "../utils/plan-source.js";
 
 /**
  * Verbatim copy of VALIDATE_INTENT_AGENT.systemPrompt from agent-configs.ts.
@@ -111,7 +111,10 @@ export const validateIntentRule: PreToolRule = {
     const { status, diff } = getUncommittedChanges(ctx.projectDir);
     if (!diff && !status) return null;
 
-    const plan = (await readPlanContent(ctx.transcriptPath).catch(() => null)) || "(no plan file for this session)";
+    const plan = (await readCurrentPlanContent({
+      transcriptPath: ctx.transcriptPath,
+      sessionDir: ctx.sessionDir,
+    }).catch(() => null)) || "(no plan file for this session)";
 
     const result = await runAgent(
       { ...VALIDATE_INTENT_AGENT_CONFIG, workingDir: ctx.projectDir },

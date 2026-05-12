@@ -7,6 +7,7 @@ import * as IR  from "./interruption.js";
 import * as HC  from "./host-context.js";
 import * as SM  from "./scenario-materializer.js";
 import * as PS  from "./prompt-strings.js";
+import * as PLS from "./plan-source.js";
 import type { AdapterSpec } from "../../src/adapter/types.js";
 
 export const claudeSpec: AdapterSpec = {
@@ -30,6 +31,8 @@ export const claudeSpec: AdapterSpec = {
   },
   resolveHostContext:     HC.resolveHostContext,
   isEditIntentExemptPath: HC.isEditIntentExemptPath,
+  findCurrentPlanSource:  PLS.findCurrentPlanSource,
+  isPlanExit:             PLS.isPlanExit,
   materializeScenarioEntry: SM.materializeScenarioEntry,
   renderCheckMcpHint:               PS.renderCheckMcpHint,
   renderWorkflowAuthorizationHint:  PS.renderWorkflowAuthorizationHint,
