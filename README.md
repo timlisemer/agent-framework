@@ -108,24 +108,69 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 # Install dependencies
 npm install
 
-# Build
-npm run build
+# Build TypeScript and refresh Codex hook trust hashes
+just build
 
 # Set env var (add to shell profile)
 export AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
 
-# Register MCP server with your AI coding tool (Claude Code shown)
-# For Claude Code:
+# Register MCP server with your AI coding tool
 claude mcp add agent-framework node $AGENT_FRAMEWORK_ROOT/dist/mcp/server.js
-
-# Register hooks (NixOS: declare in your NixOS config; other: symlink manually)
-# Hook scripts live under adapters/claude/dotclaude/ after build.
-# settings.json path: adapters/claude/dotclaude/settings.json
 ```
 
-On NixOS, symlinks into the host agent's config dir (`~/.claude/` for Claude Code) are managed declaratively. Run
-`nixos-rebuild switch` after `just build` to activate the new hook scripts.
-See [`adapters/claude/README.md`](adapters/claude/README.md) for details.
+`just build` compiles the TypeScript sources and rewrites the generated Codex
+hook trust block in `adapters/codex/dotcodex/config.toml`. Codex stores a
+`trusted_hash` for each unmanaged hook command so it can detect command changes
+and require review before running hooks. These hashes are not secrets; they are
+review fingerprints derived from `adapters/codex/dotcodex/hooks.json`.
+
+### Deploy Dotfolders
+
+The adapter dotfolders contain the host-agent configuration:
+
+- `adapters/claude/dotclaude/` maps to `~/.claude/`.
+- `adapters/codex/dotcodex/` maps to `~/.codex/`.
+
+Linux manual copy:
+
+```bash
+mkdir -p ~/.claude ~/.codex
+cp -a adapters/claude/dotclaude/. ~/.claude/
+cp -a adapters/codex/dotcodex/. ~/.codex/
+```
+
+Linux symlink mode:
+
+```bash
+mkdir -p ~/.claude ~/.codex
+ln -sfn "$PWD/adapters/claude/dotclaude/settings.json" ~/.claude/settings.json
+ln -sfn "$PWD/adapters/codex/dotcodex/config.toml" ~/.codex/config.toml
+ln -sfn "$PWD/adapters/codex/dotcodex/hooks.json" ~/.codex/hooks.json
+```
+
+For Codex, copy skill directories if you use agent-framework skills because
+Codex skill discovery does not reliably follow symlinked skill directories:
+
+```bash
+mkdir -p ~/.codex/skills ~/.codex/agents
+cp -a adapters/codex/dotcodex/skills/. ~/.codex/skills/
+ln -sfn "$PWD"/adapters/codex/dotcodex/agents/*.toml ~/.codex/agents/
+```
+
+Automated deployment:
+
+```bash
+# mcp-toolbox clones agent-framework, runs npm install && just build,
+# then exposes the built repo through its Docker volume.
+make -C /path/to/mcp-toolbox build
+make -C /path/to/mcp-toolbox run
+```
+
+On NixOS, symlinks into the host agent config dirs are normally managed
+declaratively. Run `nixos-rebuild switch` after `just build` to activate new
+hook scripts or regenerated Codex hook trust hashes. See
+[`adapters/claude/README.md`](adapters/claude/README.md) and
+[`adapters/codex/README.md`](adapters/codex/README.md) for adapter details.
 
 For manual MCP config (alternative to `claude mcp add`):
 ```json

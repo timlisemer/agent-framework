@@ -124,6 +124,20 @@ only a new adapter directory — the rule logic in `src/hooks/` is unchanged.
 See [`adapters/README.md`](adapters/README.md) for the adapter contract and
 how to add a new adapter.
 
+### Codex Hook Trust State
+
+Codex separates hook definition from hook review. `adapters/codex/dotcodex/hooks.json`
+defines the hook commands, while `adapters/codex/dotcodex/config.toml` stores
+`[features].hooks = true` and generated `[hooks.state]` entries. Each
+`trusted_hash` fingerprints one hook definition: event name, matcher, command,
+timeout, async flag, and status message. If the hook definition changes, the
+hash changes and Codex asks the user to review the hook again before it runs.
+
+The generated block in `config.toml` is owned by
+`scripts/update-codex-hook-state.mjs` and refreshed by `just build`. This keeps
+the Codex review state in the agent-framework repo so downstream builders such
+as mcp-toolbox only need to run the normal build command.
+
 ## Unified Agent Execution
 
 All agents use the unified `runAgent()` function from `utils/agent-runner.ts`. This provides a single interface regardless of whether the agent uses direct API calls or the host agent's SDK.

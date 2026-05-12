@@ -2,7 +2,7 @@
 
 This adapter integrates agent-framework hooks with Codex CLI.
 
-## Symlink Instructions (NixOS)
+## Deployment
 
 `dotcodex/config.toml` is intended to be symlinked into
 `~/.codex/config.toml` by the NixOS activation script. It owns the
@@ -10,7 +10,10 @@ agent-framework Codex feature flags, plugin settings, and MCP server
 configuration.
 
 `dotcodex/hooks.json` is intended to be symlinked into `~/.codex/hooks.json`.
-Do not create these symlinks manually in normal deployments.
+On Linux-only manual deployments, copy the full `dotcodex/` contents into
+`~/.codex/` or symlink `config.toml`, `hooks.json`, and `agents/*.toml`
+individually. Do not manually create or remove these symlinks on the NixOS
+deployment path; the activation script owns them.
 
 `dotcodex/skills/agent-framework-*` contains Codex-native skills
 (`$agent-framework-check`, `$agent-framework-commit`,
@@ -22,6 +25,19 @@ the Claude slash-command workflows. The NixOS activation script creates real dir
 `~/.codex/skills/` and copies each `SKILL.md` into place. Do not symlink these
 skill directories: Codex skill discovery does not follow symlinked skill
 directories reliably. Existing user and system skills remain intact.
+
+## Codex Hook Trust Hashes
+
+Codex requires unmanaged hooks to be reviewed before they run. The review state
+is stored in `dotcodex/config.toml` as generated `[hooks.state]` entries with a
+`trusted_hash` for each hook command definition. These hashes are not secrets;
+they fingerprint the event, matcher, command, timeout, async flag, and status
+message from `dotcodex/hooks.json`.
+
+Run `just build` from the repo root after changing Codex hook commands. The
+build runs `scripts/update-codex-hook-state.mjs`, regenerates the trust hashes,
+and keeps the generated block in `dotcodex/config.toml` in sync with
+`dotcodex/hooks.json`.
 
 Codex planning uses repo-root `PLANS.md` as the plan-output contract. The Codex
 hooks inject this contract when a session enters plan mode, and

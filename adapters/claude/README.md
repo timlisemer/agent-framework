@@ -9,6 +9,24 @@ The `dotclaude/` directory contains files that Claude Code expects under
 updates their NixOS configuration and runs `nixos-rebuild switch`. The
 implementer must never run `ln` manually.
 
+For a Linux-only manual deployment outside NixOS, either copy the dotfolder
+contents:
+
+```bash
+mkdir -p ~/.claude
+cp -a adapters/claude/dotclaude/. ~/.claude/
+```
+
+or symlink the settings file:
+
+```bash
+mkdir -p ~/.claude
+ln -sfn "$PWD/adapters/claude/dotclaude/settings.json" ~/.claude/settings.json
+```
+
+Claude does not need Codex-style hook trust hashes; `settings.json` directly
+declares the hook commands.
+
 Build-then-rebuild ordering:
 
 1. `just build` — compile TypeScript to `dist/`

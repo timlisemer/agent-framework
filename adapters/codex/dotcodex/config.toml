@@ -3,6 +3,36 @@ sandbox_mode = "danger-full-access"
 [features]
 hooks = true
 
+# BEGIN GENERATED CODEX HOOK TRUST STATE
+# Codex only runs unmanaged hooks after their current definition has been
+# reviewed. These entries are generated from adapters/codex/dotcodex/hooks.json.
+# Regenerate them with `just build` after changing Codex hook commands.
+
+[hooks.state."/home/tim/.codex/hooks.json:session_start:0:0"]
+enabled = true
+trusted_hash = "sha256:bc952b89e6c933b70f63dd016f7300502fade3bb482aa142ae2aadead93f5003"
+
+[hooks.state."/home/tim/.codex/hooks.json:user_prompt_submit:0:0"]
+enabled = true
+trusted_hash = "sha256:62a39c4172a840abe3edcc4afe039e01834e40008358318af94aef886efc3e51"
+
+[hooks.state."/home/tim/.codex/hooks.json:pre_tool_use:0:0"]
+enabled = true
+trusted_hash = "sha256:5b14cd9ecd5fa67f74cd79f59bbc1299fa91166de611e9277447282993c61dc8"
+
+[hooks.state."/home/tim/.codex/hooks.json:permission_request:0:0"]
+enabled = true
+trusted_hash = "sha256:8b4569fe440e2e31f3c0c7919cad1fdb063920777cb1e75408bc91c5786c4a70"
+
+[hooks.state."/home/tim/.codex/hooks.json:post_tool_use:0:0"]
+enabled = true
+trusted_hash = "sha256:5335994a8cca89dc04ead56fff5687aef264968ab43ba096be1187984d685adf"
+
+[hooks.state."/home/tim/.codex/hooks.json:stop:0:0"]
+enabled = true
+trusted_hash = "sha256:8de000c1d525a7e22c363004f9fd57dc47efcd706ae17dd70fc57c06e822a447"
+# END GENERATED CODEX HOOK TRUST STATE
+
 [plugins."github@openai-curated"]
 enabled = true
 
