@@ -46,6 +46,9 @@ import {
   type ScenarioSourceTag,
 } from "./scenario-mcp-shared.js";
 
+const SINGLE_SCENARIO_TIMEOUT_MS = 300_000;
+const ALL_SCENARIOS_TIMEOUT_MS = 3_600_000;
+
 // ─── Action Handlers ───────────────────────────────────────────────────────
 
 function handleFindWork(): string {
@@ -188,7 +191,7 @@ function handleRunScenario(
     const inputPath = path.join(outputDir, "scenario.json");
     return runScenarioCommand(
       ["--scenario", inputPath, "--source", "home"],
-      300000,
+      SINGLE_SCENARIO_TIMEOUT_MS,
       rootOverride,
     );
   }
@@ -209,7 +212,7 @@ function handleRunScenario(
   fs.mkdirSync(target.outputDir, { recursive: true });
   return runScenarioCommand(
     ["--scenario", target.inputPath, "--source", target.source],
-    300000,
+    SINGLE_SCENARIO_TIMEOUT_MS,
     rootOverride,
   );
 }
@@ -347,7 +350,7 @@ function handleRunScenarios(
       fs.mkdirSync(t.outputDir, { recursive: true });
       const raw = runScenarioCommand(
         ["--scenario", t.inputPath, "--source", t.source],
-        300000,
+        ALL_SCENARIOS_TIMEOUT_MS,
         rootOverride,
       );
       try {
