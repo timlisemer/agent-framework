@@ -7,7 +7,7 @@ This file is a recipe for an agent session that has been asked **"find the scena
 | Path | What's there |
 |------|--------------|
 | `~/.claude/projects/<encoded>/<session-id>.jsonl` | The raw Claude transcript — every user/assistant/tool_result line, the user's literal text, the assistant's literal text, tool inputs and outputs. (Claude-specific path; future adapters use their own transcript directories.) |
-| `~/.agent-framework/sessions/<encoded>/<yyyy-mm-dd-HHmm>_<hash>/captures.jsonl` | One ~200-byte pointer per hook fire: `{seq, ts, epoch_id, parent_capture_seq, event, tool_use_id, transcript_anchor_uuid, decision: {decision, by, reason}, state_snapshot_seq, raw_input_hash}`. The `decision.reason` field is the hook's verbatim deny/block message. |
+| `~/.agent-framework/sessions/<encoded>/<yyyy-mm-dd-HHmm>_<hash>/captures.jsonl` | One compact pointer per hook fire: `{seq, ts, epoch_id, parent_capture_seq, event, tool_use_id, decision, state_snapshot_seq}` plus optional forward-compatible fields. `decision` is a string such as `allow`, `deny`, `ok`, `pass`, `block`, or `error`; gate names and reason text live in `tool-log.jsonl`. |
 | `~/.agent-framework/sessions/<encoded>/<dir>/state-snapshots.jsonl` | Append-only state snapshots referenced by capture pointers. |
 | `~/.agent-framework/sessions/<encoded>/<dir>/epochs.jsonl` | One line per epoch (session-start / compact / rewind / clear). |
 | `~/.agent-framework/sessions/<encoded>/<dir>/tool-log.jsonl` | Append-only tool-call log: `{ts, tool, toolUseId, status, gate, reason, ms}`. |
@@ -31,22 +31,17 @@ Each hit gives you a transcript file path + line number. Open the JSONL line(s);
 ```bash
 # 2. Map that transcript to its agent-framework session dir.
 TRANSCRIPT_PATH="<the path from step 1>"
-grep -rl "$TRANSCRIPT_PATH" ~/.agent-framework/sessions/*/transcript-path.txt | head -1
+grep -rl "$TRANSCRIPT_PATH" ~/.agent-framework/sessions/*/*/transcript-path.txt | head -1
 ```
 
 The matching `transcript-path.txt` lives inside the session dir you want. Call its parent `SESSION_DIR`.
 
 ```bash
-# 3. Find captures whose anchor_uuid is at-or-before Q_UUID in the transcript.
-#    The most recent such capture is the scenario for "the hook fire that
-#    happened just before this line".
-jq -c 'select(.transcript_anchor_uuid)' "$SESSION_DIR/captures.jsonl" |
-  awk -F'"' -v target="$Q_UUID" '{ # naive: print every capture; user can match by ordering
-    # actually use a small Node/Python script; jq is fine too:
-  }'
+# 3. Inspect captures around the turn. Captures are ordered by seq.
+jq -c . "$SESSION_DIR/captures.jsonl" | tail -50
 ```
 
-In practice: load `captures.jsonl` and the transcript JSONL together; for each capture, find which transcript line UUID equals `transcript_anchor_uuid`, look up that line's index, pick the capture whose anchor index ≥ Q_UUID's transcript index but is closest from the right (i.e. the next capture after the quote). If you need the capture for the hook fire that PRODUCED a tool_use referenced by the quote, pick the closest capture from the LEFT instead.
+In practice: load `captures.jsonl`, `tool-log.jsonl`, and the transcript JSONL together. Use capture `event`, `tool_use_id`, `decision`, and nearby transcript ordering to pick the relevant hook fire. For a tool call, first find the `tool_use` block in the transcript, then match its `id` to `captures.jsonl` `tool_use_id`. For a text-only response, use the nearest `Stop` capture after the assistant text.
 
 ```bash
 # 4. Materialize the full Scenario JSON from that capture.
@@ -61,19 +56,17 @@ node -e "
 The quote is something a hook printed — a deny reason, a block message, a gate-name, "Use Read tool", "Workaround Bash command was denied earlier", etc.
 
 ```bash
-# Decision reasons live in captures.jsonl as decision.reason.
-rg -n --no-heading --color=never "<QUOTE>" ~/.agent-framework/sessions/*/captures.jsonl | head -30
+# Gate names and reason strings live in tool-log.jsonl.
+rg -n --no-heading --color=never "<QUOTE>" ~/.agent-framework/sessions/*/*/tool-log.jsonl | head -30
 ```
 
-Each hit gives you `<SESSION_DIR>/captures.jsonl:<line_no>:<the JSON line>`. Parse the line, extract `seq`, then materialize as in Branch A step 4.
+Each hit gives you `<SESSION_DIR>/tool-log.jsonl:<line_no>:<the JSON line>`. Parse `toolUseId`, then cross-reference that against `captures.jsonl` (`tool_use_id` field) in the same session to get the matching capture `seq`.
 
-If the quote is the `reason` text from a tool-log entry instead of a capture pointer, swap the file:
+If the quote is only the decision string (`allow`, `deny`, `block`, etc.) or hook event name, search captures directly:
 
 ```bash
-rg -n --no-heading --color=never "<QUOTE>" ~/.agent-framework/sessions/*/tool-log.jsonl | head -30
+rg -n --no-heading --color=never "<QUOTE>" ~/.agent-framework/sessions/*/*/captures.jsonl | head -30
 ```
-
-Each tool-log entry has a `toolUseId`. Cross-reference that against `captures.jsonl` (`tool_use_id` field) in the same session to get the matching capture seq.
 
 ### Branch C: Quote is a tool name + a fragment of input
 
@@ -98,9 +91,9 @@ A single user turn can produce many captures (PreToolUse + N PostToolUse + Stop)
 
 | User asked for... | Pick capture where... |
 |---|---|
-| "the decision that denied X" | `event === "PreToolUse" && decision.decision === "deny"` AND tool/input matches |
+| "the decision that denied X" | `event === "PreToolUse" && decision === "deny"` AND tool/input matches |
 | "what the hook said when Y happened" | `event` matches the lifecycle event (Stop, UserPromptSubmit, etc.) |
-| "the scenario right before/after the user said Z" | use the transcript-line ordering against `transcript_anchor_uuid` |
+| "the scenario right before/after the user said Z" | use transcript-line ordering plus nearby `UserPromptSubmit` / `Stop` captures |
 | "everything that happened in that turn" | all captures between two consecutive UserPromptSubmit captures |
 
 ## Promoting a captured scenario to a fixture
@@ -115,5 +108,5 @@ Once located:
 
 - Always ask the user for the most distinctive substring from their quote — short distinct phrases beat long ambiguous ones.
 - If grep returns more than ~10 hits, ask the user to narrow (date range? project? rough decision: allow vs deny?). Don't materialize 10 scenarios speculatively.
-- When in doubt, read the captures.jsonl line first (it's compact) before materializing — the `decision` and `transcript_anchor_uuid` fields usually disambiguate without the full Scenario.
+- When in doubt, read the captures.jsonl line first (it's compact) before materializing — the `event`, `tool_use_id`, `decision`, and `state_snapshot_seq` fields usually disambiguate without the full Scenario.
 - The `scenario_tester` MCP tool's `list_scenarios` action only enumerates committed fixtures under `scenarios/`. It does NOT walk live captures under `~/.agent-framework/sessions/`. For the recipe above, raw filesystem grep + materializer is the path; if cross-session search becomes a regular need, a future `scenario_find` MCP tool would be the right place to encapsulate it.

@@ -18,6 +18,8 @@ import type { Scenario, ScenarioEntry, ScenarioBlock, ScenarioUserEntry, Scenari
 import { loadCapturePointer } from "./capture.js";
 import { loadCurrentEpoch } from "./epoch.js";
 import { loadStateSnapshot } from "./snapshot.js";
+import { sessionToolLogFile } from "../utils/paths.js";
+import type { ToolLogEntry } from "../utils/session-store.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -39,6 +41,65 @@ function readJsonlLines(filePath: string): Record<string, unknown>[] {
     }
   }
   return lines;
+}
+
+function readToolLogEntriesThroughOffset(
+  sessionDir: string,
+  offset: number,
+): ToolLogEntry[] {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(sessionToolLogFile(sessionDir), "utf-8");
+  } catch {
+    return [];
+  }
+
+  const bounded = raw.slice(0, Math.max(0, Math.min(offset, raw.length)));
+  const entries: ToolLogEntry[] = [];
+  for (const line of bounded.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      entries.push(JSON.parse(trimmed) as ToolLogEntry);
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return entries;
+}
+
+function dropTargetPreToolUseLogEntry(
+  entries: ToolLogEntry[],
+  toolUseId: string | undefined,
+): ToolLogEntry[] {
+  if (!toolUseId || entries.length === 0) return entries;
+  const last = entries[entries.length - 1];
+  if (last.toolUseId !== toolUseId) return entries;
+  return entries.slice(0, -1);
+}
+
+function lineContainsToolUseId(line: Record<string, unknown>, toolUseId: string): boolean {
+  const message = line.message as Record<string, unknown> | undefined;
+  const content = message?.content;
+  if (!Array.isArray(content)) return false;
+  return content.some((raw) => {
+    const block = raw as Record<string, unknown>;
+    return block.type === "tool_use" && block.id === toolUseId;
+  });
+}
+
+function sliceLinesForCapture(
+  lines: Record<string, unknown>[],
+  event: string,
+  toolUseId: string | undefined,
+): Record<string, unknown>[] {
+  if ((event !== "PreToolUse" && event !== "PostToolUse") || !toolUseId) {
+    return lines;
+  }
+
+  const idx = lines.findIndex((line) => lineContainsToolUseId(line, toolUseId));
+  if (idx === -1) return lines;
+  return lines.slice(0, idx + 1);
 }
 
 function blocksFromContent(content: unknown): ScenarioBlock[] {
@@ -162,7 +223,11 @@ export async function materializeScenario(
     );
   }
 
-  const lines = readJsonlLines(transcriptPath);
+  const lines = sliceLinesForCapture(
+    readJsonlLines(transcriptPath),
+    pointer.event,
+    pointer.tool_use_id,
+  );
   const anchorUuid = pointer.transcript_anchor_uuid ?? epoch?.anchor_uuid ?? null;
   const entries = projectTranscriptToEntries(lines, anchorUuid);
 
@@ -173,6 +238,13 @@ export async function materializeScenario(
   }
 
   const state = snapshot.state;
+  const toolLog = pointer.event === "PreToolUse"
+    ? dropTargetPreToolUseLogEntry(
+        readToolLogEntriesThroughOffset(sessionDir, snapshot.tool_log_offset),
+        pointer.tool_use_id,
+      )
+    : readToolLogEntriesThroughOffset(sessionDir, snapshot.tool_log_offset);
+
   const scenario: Scenario = {
     schema_version: 2,
     name: `materialized-seq-${captureSeq}`,
@@ -180,6 +252,9 @@ export async function materializeScenario(
     transcript: entries,
     target: {
       hook: pointer.event as Scenario["target"]["hook"],
+      ...((pointer.event === "PreToolUse" || pointer.event === "PostToolUse") && pointer.tool_use_id
+        ? { tool_use_ref: pointer.tool_use_id }
+        : {}),
     },
     expect: {
       expected: pointer.decision,
@@ -197,6 +272,7 @@ export async function materializeScenario(
       forceCheckPending: state.forceCheckPending,
       frustrationStreak: state.frustrationStreak,
       currentWindowSize: state.currentWindowSize,
+      ...(toolLog.length > 0 ? { toolLog } : {}),
     },
   };
 
