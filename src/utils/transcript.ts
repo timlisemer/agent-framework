@@ -127,10 +127,11 @@ export interface TranscriptReadResult {
 }
 
 /**
- * One logical assistant API message, which Claude Code may split across
- * multiple jsonl lines sharing the same `message.id`. Under load those
- * sibling lines can be flushed to disk out of stream order (e.g. tool_use
- * before text), so the scanner must treat them as one unit.
+ * One logical assistant turn. Adapter materializers may write one visible
+ * turn as multiple adjacent assistant entries, sometimes with different
+ * message ids (for example text followed by parallel tool calls). The
+ * scanner treats each contiguous assistant run as one group, bounded by a
+ * non-meta user entry such as a user prompt or tool_result.
  */
 interface AssistantGroup {
   msgId: string;
@@ -143,26 +144,61 @@ interface AssistantGroup {
   entryCount: number;
 }
 
+function addAssistantEntryToGroup(
+  group: AssistantGroup,
+  entry: TranscriptEntry,
+  index: number,
+): void {
+  group.indices.push(index);
+  group.entryCount++;
+  if (index > group.lastIndex) group.lastIndex = index;
+
+  const content = entry.message?.content;
+  if (Array.isArray(content)) {
+    for (const block of content) {
+      if (block.type === "text" && block.text) {
+        group.text = group.text ? `${group.text} ${block.text}` : block.text;
+      } else if (block.type === "thinking") {
+        group.hasThinking = true;
+      } else if (block.type === "tool_use") {
+        group.hasToolUse = true;
+        if (block.id) group.toolUseIds.push(block.id);
+      }
+    }
+  } else if (typeof content === "string" && content) {
+    group.text = group.text ? `${group.text} ${content}` : content;
+  }
+}
+
 /**
- * Build a map from jsonl index -> AssistantGroup. Consecutive assistant
- * entries sharing a message.id collapse into one group; assistants without
- * an id each form a singleton group keyed by their index.
+ * Build a map from jsonl index -> AssistantGroup. Adjacent assistant entries
+ * in the same post-user run collapse into one group, even when adapter
+ * materialization assigns distinct message ids. Non-message/null/meta lines do
+ * not contribute and do not reset the active run; non-meta user entries do.
  */
 function buildAssistantGroups(
   parsedEntries: (TranscriptEntry | null)[]
 ): Map<number, AssistantGroup> {
-  const byMsgId = new Map<string, AssistantGroup>();
   const byIndex = new Map<number, AssistantGroup>();
+  let activeGroup: AssistantGroup | undefined;
 
   for (let i = 0; i < parsedEntries.length; i++) {
     const entry = parsedEntries[i];
-    if (!entry || !entry.message || entry.message.role !== "assistant") continue;
 
-    const msgId = entry.message.id ?? `__singleton_${i}`;
-    let group = byMsgId.get(msgId);
-    if (!group) {
-      group = {
-        msgId,
+    if (!entry || !entry.message) continue;
+
+    if (entry.message.role !== "assistant") {
+      if (entry.message.role === "user" && entry.isMeta !== true) {
+        activeGroup = undefined;
+      }
+      continue;
+    }
+
+    if (entry.isMeta === true) continue;
+
+    if (!activeGroup) {
+      activeGroup = {
+        msgId: entry.message.id ?? `__assistant_run_${i}`,
         indices: [],
         lastIndex: i,
         text: "",
@@ -171,30 +207,10 @@ function buildAssistantGroups(
         toolUseIds: [],
         entryCount: 0,
       };
-      byMsgId.set(msgId, group);
     }
 
-    group.indices.push(i);
-    group.entryCount++;
-    if (i > group.lastIndex) group.lastIndex = i;
-
-    const content = entry.message.content;
-    if (Array.isArray(content)) {
-      for (const block of content) {
-        if (block.type === "text" && block.text) {
-          group.text = group.text ? `${group.text} ${block.text}` : block.text;
-        } else if (block.type === "thinking") {
-          group.hasThinking = true;
-        } else if (block.type === "tool_use") {
-          group.hasToolUse = true;
-          if (block.id) group.toolUseIds.push(block.id);
-        }
-      }
-    } else if (typeof content === "string" && content) {
-      group.text = group.text ? `${group.text} ${content}` : content;
-    }
-
-    byIndex.set(i, group);
+    addAssistantEntryToGroup(activeGroup, entry, i);
+    byIndex.set(i, activeGroup);
   }
 
   return byIndex;
@@ -662,18 +678,24 @@ export async function currentTurnAssistantState(
 
   let current: AssistantGroup | undefined;
   const seen = new Set<AssistantGroup>();
-  for (const group of groups.values()) {
-    if (seen.has(group)) continue;
-    seen.add(group);
-    if (group.lastIndex <= lastUserIndex) continue;
-    if (!current || group.lastIndex > current.lastIndex) current = group;
-  }
-  if (!current && firingToolUseId) {
+  if (firingToolUseId) {
     for (const group of groups.values()) {
+      if (seen.has(group)) continue;
+      seen.add(group);
       if (group.toolUseIds.includes(firingToolUseId) && group.lastIndex > lastUserIndex) {
         current = group;
         break;
       }
+    }
+  }
+
+  if (!current) {
+    seen.clear();
+    for (const group of groups.values()) {
+      if (seen.has(group)) continue;
+      seen.add(group);
+      if (group.lastIndex <= lastUserIndex) continue;
+      if (!current || group.lastIndex > current.lastIndex) current = group;
     }
   }
   if (!current) {

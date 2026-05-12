@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
+  currentTurnAssistantState,
   detectParallelBatch,
   readTranscriptExact,
   resolveActiveSlashCommandAllowedTools,
@@ -303,6 +304,173 @@ describe("detectParallelBatch", () => {
         process.env.AGENT_FRAMEWORK_ADAPTER = prev;
       }
     }
+  });
+});
+
+describe("currentTurnAssistantState", () => {
+  let tempDir: string;
+  let prevAdapter: string | undefined;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "transcript-current-turn-test-"));
+    prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
+    delete process.env.AGENT_FRAMEWORK_ADAPTER;
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    if (prevAdapter === undefined) {
+      delete process.env.AGENT_FRAMEWORK_ADAPTER;
+    } else {
+      process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
+    }
+  });
+
+  function writeTranscript(entries: unknown[]): string {
+    const filePath = path.join(tempDir, "transcript.jsonl");
+    const content = entries.map((e) => typeof e === "string" ? e : JSON.stringify(e)).join("\n") + "\n";
+    fs.writeFileSync(filePath, content);
+    return filePath;
+  }
+
+  function userText(text: string) {
+    return {
+      message: {
+        role: "user",
+        content: [{ type: "text", text }],
+      },
+    };
+  }
+
+  function toolResult(toolUseId: string, content = "done") {
+    return {
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: toolUseId, content }],
+      },
+    };
+  }
+
+  function assistantText(id: string, text: string, isMeta = false) {
+    return {
+      isMeta,
+      message: {
+        id,
+        role: "assistant",
+        content: [{ type: "text", text }],
+      },
+    };
+  }
+
+  function assistantToolUse(id: string, toolUseId: string, name = "Bash") {
+    return {
+      message: {
+        id,
+        role: "assistant",
+        content: [{ type: "tool_use", id: toolUseId, name, input: {} }],
+      },
+    };
+  }
+
+  it("treats adjacent distinct-id assistant text and tool_use entries as one responded turn", async () => {
+    const filePath = writeTranscript([
+      userText("please dont ignore the Raspberry Pi bootloader removal"),
+      assistantText("msg_text", "You're right. I will use U-Boot/extlinux instead."),
+      assistantToolUse("msg_tools", "call_read_flake"),
+    ]);
+
+    const result = await currentTurnAssistantState(filePath, "call_read_flake");
+
+    expect(result).toEqual({
+      kind: "responded",
+      text: "You're right. I will use U-Boot/extlinux instead.",
+      toolUseIds: ["call_read_flake"],
+    });
+  });
+
+  it("keeps a tool-only assistant turn silent", async () => {
+    const filePath = writeTranscript([
+      userText("answer first"),
+      assistantToolUse("msg_tools", "call_search"),
+    ]);
+
+    const result = await currentTurnAssistantState(filePath, "call_search");
+
+    expect(result).toEqual({
+      kind: "silent",
+      toolUseIds: ["call_search"],
+    });
+  });
+
+  it("does not leak a reused message id across separate user turns", async () => {
+    const filePath = writeTranscript([
+      userText("first prompt"),
+      assistantText("msg_reused", "Answer to the first prompt."),
+      userText("second prompt"),
+      assistantToolUse("msg_reused", "call_second"),
+    ]);
+
+    const result = await currentTurnAssistantState(filePath, "call_second");
+
+    expect(result).toEqual({
+      kind: "silent",
+      toolUseIds: ["call_second"],
+    });
+  });
+
+  it("does not merge assistant text across a user tool_result boundary", async () => {
+    const filePath = writeTranscript([
+      userText("run this"),
+      assistantText("msg_text", "Running it now."),
+      toolResult("call_previous"),
+      assistantToolUse("msg_tools", "call_followup"),
+    ]);
+
+    const result = await currentTurnAssistantState(filePath, "call_followup");
+
+    expect(result).toEqual({
+      kind: "silent",
+      toolUseIds: ["call_followup"],
+    });
+  });
+
+  it("ignores malformed and meta lines without breaking an assistant run", async () => {
+    const filePath = writeTranscript([
+      userText("inspect this"),
+      assistantText("msg_text", "Checking the relevant files."),
+      "{not valid json",
+      { isMeta: true },
+      assistantText("msg_meta", "hidden metadata", true),
+      assistantToolUse("msg_tools", "call_inspect"),
+    ]);
+
+    const result = await currentTurnAssistantState(filePath, "call_inspect");
+
+    expect(result).toEqual({
+      kind: "responded",
+      text: "Checking the relevant files.",
+      toolUseIds: ["call_inspect"],
+    });
+  });
+
+  it("readTranscriptExact collects adjacent distinct-id assistant text entries as one message", async () => {
+    const filePath = writeTranscript([
+      userText("summarize"),
+      assistantText("msg_text_1", "First visible sentence."),
+      assistantText("msg_text_2", "Second visible sentence."),
+    ]);
+
+    const result = await readTranscriptExact(filePath, {
+      counts: { user: 1, assistant: 1 },
+    });
+
+    expect(result.assistant).toEqual([
+      {
+        role: "assistant",
+        content: "First visible sentence. Second visible sentence.",
+        index: 2,
+      },
+    ]);
   });
 });
 
