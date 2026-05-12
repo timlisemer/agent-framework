@@ -5,6 +5,7 @@ import type { PlanModeTransition } from "./plan-mode-entry-state.js";
 import { markPlansMdDelivered } from "./plan-mode-entry-state.js";
 import type { PendingInjection } from "./session-injections.js";
 import { shortContentHash } from "./session-injections.js";
+import { agentFrameworkRoot } from "./paths.js";
 
 export interface ContextInjectionProviderInput {
   projectDir: string;
@@ -19,7 +20,7 @@ export interface ContextInjectionProvider {
 
 function buildPlanModeInjectionMessage(plansContent: string): string {
   return [
-    "The session is in plan mode. The repo-root PLANS.md below applies to every final plan you produce in this session, including native or ordinary Codex plan-mode responses and any <proposed_plan> block.",
+    "The session is in plan mode. The agent-framework PLANS.md below applies to every final plan you produce in this session, including native or ordinary Codex plan-mode responses and any <proposed_plan> block.",
     "",
     "Final planning output must use exactly the 14 required level-two Markdown headings from PLANS.md, in order, with no extra ## headings. Ordinary ### subsections are allowed under those required headings.",
     "",
@@ -34,7 +35,7 @@ export const plansMdPlanModeEntryProvider: ContextInjectionProvider = {
     if (input.sourceEvent !== "UserPromptSubmit") return [];
     if (!input.planModeTransition.active) return [];
 
-    const plansPath = path.join(input.projectDir, "PLANS.md");
+    const plansPath = path.join(agentFrameworkRoot(), "PLANS.md");
     let plansContent: string;
     try {
       plansContent = await fs.promises.readFile(plansPath, "utf-8");

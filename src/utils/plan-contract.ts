@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { agentFrameworkRoot } from "./paths.js";
 
 export type PlanContractFindingKind =
   | "missing_required_heading"
@@ -36,8 +37,8 @@ const UNRESOLVED_RE = /\b(assuming|probably|likely|if needed|should be|might|may
 const LIVE_OPTION_RE = /\b(option|approach|alternative)\s+([A-Z]|\d+):/i;
 const SCHEDULE_RE = /\b(week|day|month)\s*\d+:|\b\d+(-\d+)?\s*(days?|weeks?|months?)\b/i;
 
-export function readRequiredFinalPlanHeadings(projectDir: string): string[] {
-  const plansPath = path.join(projectDir, "PLANS.md");
+export function readRequiredFinalPlanHeadings(_projectDir: string): string[] {
+  const plansPath = path.join(agentFrameworkRoot(), "PLANS.md");
   const content = fs.readFileSync(plansPath, "utf-8");
   return extractRequiredFinalPlanHeadings(content);
 }

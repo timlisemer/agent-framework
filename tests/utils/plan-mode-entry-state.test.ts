@@ -10,7 +10,7 @@ import {
   buildPendingContextInjections,
   contextInjectionProviders,
 } from "../../src/utils/context-injection-providers.js";
-import { sessionPlanModeEventsFile, sessionPlanModeStateFile } from "../../src/utils/paths.js";
+import { agentFrameworkRoot, sessionPlanModeEventsFile, sessionPlanModeStateFile } from "../../src/utils/paths.js";
 
 describe("plan-mode transition state", () => {
   let tempDir: string;
@@ -39,8 +39,7 @@ describe("plan-mode transition state", () => {
   });
 
   it("computes inactive-to-active and builds exact PLANS.md pending injection", async () => {
-    const plans = "# Planning Contract\n\nFollow this.\n";
-    fs.writeFileSync(path.join(projectDir, "PLANS.md"), plans);
+    const plans = fs.readFileSync(path.join(agentFrameworkRoot(), "PLANS.md"), "utf-8");
 
     const transition = await computePlanModeTransition({
       source: "UserPromptSubmit",
@@ -59,7 +58,7 @@ describe("plan-mode transition state", () => {
     expect(pending[0].message).toContain("The session is in plan mode.");
     expect(pending[0].source_file).toMatchObject({
       kind: "file",
-      path: path.join(projectDir, "PLANS.md"),
+      path: path.join(agentFrameworkRoot(), "PLANS.md"),
       content: plans,
     });
     expect(fs.existsSync(sessionPlanModeStateFile(sessionDir))).toBe(false);

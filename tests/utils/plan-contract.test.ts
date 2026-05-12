@@ -65,10 +65,11 @@ describe("plan contract", () => {
     ]);
   });
 
-  it("skips contract findings when project PLANS.md is not readable", () => {
+  it("uses agent-framework PLANS.md when project PLANS.md is not readable", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plan-contract-missing-"));
     try {
-      expect(validatePlanContract("## User Goal\n> Do it.", dir)).toEqual([]);
+      const kinds = validatePlanContract("## User Goal\n> Do it.", dir).map((f) => f.kind);
+      expect(kinds).toContain("missing_required_heading");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
