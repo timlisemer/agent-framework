@@ -20,7 +20,7 @@ import {
 import {
   APPEAL_COUNTS,
 } from "../utils/transcript-presets.js";
-import { getPlanModeContext, isPlanModeFromInput, isPlanModeActive } from "../utils/plan-mode-detector.js";
+import { getPlanModeContext } from "../utils/plan-mode-detector.js";
 import {
   findUnprocessedPlanApproval,
   synthesizePostApprovalPrediction,
@@ -106,9 +106,11 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   let currentGateNote: string | undefined;
   const startTime = Date.now();
 
-  const planMode = input.permission_mode !== undefined
-    ? isPlanModeFromInput(input)
-    : isPlanModeActive(input.transcript_path);
+  const planModeDetection = spec.detectPlanMode({
+    permissionMode: input.permission_mode,
+    transcriptPath: input.transcript_path,
+  });
+  const planMode = planModeDetection.active;
   const planModeCtx = getPlanModeContext(planMode);
   const subagent = isSubagent(input.transcript_path);
 
@@ -262,6 +264,11 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
         tool_use_id: input.tool_use_id,
         decision: exit.decision,
         permission_mode: input.permission_mode ?? null,
+        plan_mode: {
+          active: planModeDetection.active,
+          mode: planModeDetection.mode,
+          source: planModeDetection.source,
+        },
         injection_seqs: [],
         injection_hashes: [],
         state_snapshot_seq: snapshotSeq,

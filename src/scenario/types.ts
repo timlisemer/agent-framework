@@ -210,6 +210,8 @@ export interface ScenarioEnv {
    * adapter if omitted.
    */
   adapter?: string;
+  /** Codex-only: materialize native collaboration-mode transcript markers. */
+  codex_collaboration_mode?: "plan";
   /**
    * Per-agent LLM stub map: agent name (matching `telemetry.agent`) → exact
    * stubbed output text. Plumbed into the hook process via the
@@ -951,6 +953,9 @@ export function validateScenario(raw: unknown): Scenario {
         );
       }
     }
+    if (env.codex_collaboration_mode !== undefined && env.codex_collaboration_mode !== "plan") {
+      throw new Error('scenario.env.codex_collaboration_mode must be "plan" when set');
+    }
     if (env.llm_stubs !== undefined) {
       validateLlmStubs(env.llm_stubs);
     }
@@ -1085,11 +1090,22 @@ function validatePlanModeStoredState(ctx: string, raw: unknown): void {
   if (s.lastSource !== "SessionStart" && s.lastSource !== "UserPromptSubmit") {
     throw new Error(`${ctx}.lastSource must be SessionStart or UserPromptSubmit`);
   }
-  if (s.permission_mode !== null && typeof s.permission_mode !== "string") {
-    throw new Error(`${ctx}.permission_mode must be a string or null`);
+  if (s.mode !== null && typeof s.mode !== "string") {
+    throw new Error(`${ctx}.mode must be a string or null`);
   }
-  if (s.detection_source !== "hook-input" && s.detection_source !== "transcript-tail") {
-    throw new Error(`${ctx}.detection_source must be hook-input or transcript-tail`);
+  if (
+    s.detection_source !== "codex-collaboration-mode" &&
+    s.detection_source !== "hook-permission-mode" &&
+    s.detection_source !== "transcript-permission-mode" &&
+    s.detection_source !== "none"
+  ) {
+    throw new Error(`${ctx}.detection_source must be a valid plan-mode detector source`);
+  }
+  if (s.deliveredPlansMdHash !== undefined && s.deliveredPlansMdHash !== null && typeof s.deliveredPlansMdHash !== "string") {
+    throw new Error(`${ctx}.deliveredPlansMdHash must be a string or null`);
+  }
+  if (s.deliveredPlansMdAt !== undefined && s.deliveredPlansMdAt !== null && typeof s.deliveredPlansMdAt !== "number") {
+    throw new Error(`${ctx}.deliveredPlansMdAt must be a number or null`);
   }
 }
 

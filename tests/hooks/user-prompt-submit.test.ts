@@ -144,7 +144,7 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
 
     expect(mockExitAfterFlush).toHaveBeenLastCalledWith(
       0,
-      expect.stringContaining("ctx:The session just entered plan mode."),
+      expect.stringContaining("ctx:The session is in plan mode."),
     );
 
     await mainUserPromptSubmit(

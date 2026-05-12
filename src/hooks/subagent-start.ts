@@ -4,6 +4,7 @@ import type { AdapterEncoder } from "../adapter/types.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { loadCurrentEpoch } from "../scenario/epoch.js";
+import { activeSpec } from "../adapter/spec.js";
 
 /**
  * SubagentStart Hook
@@ -21,6 +22,10 @@ export interface SubagentStartHookInput {
 
 export async function mainSubagentStart(input: SubagentStartHookInput, encoder: AdapterEncoder): Promise<void> {
   const sessionDir = getSessionDir(input.transcript_path);
+  const planModeDetection = activeSpec().detectPlanMode({
+    permissionMode: input.permission_mode,
+    transcriptPath: input.transcript_path,
+  });
   incrementActiveSubagents(sessionDir, input.agent_id);
 
   const state = await getSessionState(sessionDir).load().catch(() => null);
@@ -34,6 +39,11 @@ export async function mainSubagentStart(input: SubagentStartHookInput, encoder: 
       event: "SubagentStart",
       decision: "ok",
       permission_mode: input.permission_mode ?? null,
+      plan_mode: {
+        active: planModeDetection.active,
+        mode: planModeDetection.mode,
+        source: planModeDetection.source,
+      },
       injection_seqs: [],
       injection_hashes: [],
       state_snapshot_seq: snapshotSeq,

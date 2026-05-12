@@ -91,10 +91,19 @@ function readPlanModeState(filePath: string): PlanModeStoredState | null {
       lastSource: parsed.lastSource === "SessionStart" || parsed.lastSource === "UserPromptSubmit"
         ? parsed.lastSource
         : "UserPromptSubmit",
-      permission_mode: typeof parsed.permission_mode === "string" ? parsed.permission_mode : null,
-      detection_source: parsed.detection_source === "hook-input" || parsed.detection_source === "transcript-tail"
+      mode: typeof parsed.mode === "string" ? parsed.mode : null,
+      detection_source: parsed.detection_source === "codex-collaboration-mode" ||
+        parsed.detection_source === "hook-permission-mode" ||
+        parsed.detection_source === "transcript-permission-mode" ||
+        parsed.detection_source === "none"
         ? parsed.detection_source
-        : "transcript-tail",
+        : "none",
+      deliveredPlansMdHash: typeof parsed.deliveredPlansMdHash === "string"
+        ? parsed.deliveredPlansMdHash
+        : null,
+      deliveredPlansMdAt: typeof parsed.deliveredPlansMdAt === "number"
+        ? parsed.deliveredPlansMdAt
+        : null,
     };
   } catch {
     return null;

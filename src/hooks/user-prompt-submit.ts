@@ -1,7 +1,7 @@
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
-import { isPlanModeActive, isPlanModeFromInput, getPlanModeContext } from "../utils/plan-mode-detector.js";
+import { getPlanModeContext } from "../utils/plan-mode-detector.js";
 import { evaluateRulesForUserPromptSubmit, ALL_RULES } from "../rules/index.js";
 import type { RuleContext } from "../rules/types.js";
 import type { AdapterEncoder } from "../adapter/types.js";
@@ -55,6 +55,10 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
 
   const stateManager = getSessionState(sessionDir);
   const spec = activeSpec();
+  const planModeDetection = spec.detectPlanMode({
+    permissionMode: input.permission_mode,
+    transcriptPath: input.transcript_path,
+  });
   if (spec.isPlanExit({ event: "UserPromptSubmit", prompt: input.prompt })) {
     const state = await stateManager.load();
     const validation = await validateCurrentPlanExit({
@@ -75,6 +79,11 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
         event: "UserPromptSubmit",
         decision: "block",
         permission_mode: input.permission_mode ?? null,
+        plan_mode: {
+          active: planModeDetection.active,
+          mode: planModeDetection.mode,
+          source: planModeDetection.source,
+        },
         injection_seqs: [],
         injection_hashes: [],
         state_snapshot_seq: snapshotSeq,
@@ -109,6 +118,11 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
       event: "UserPromptSubmit",
       decision: "ok",
       permission_mode: input.permission_mode ?? null,
+      plan_mode: {
+        active: planModeDetection.active,
+        mode: planModeDetection.mode,
+        source: planModeDetection.source,
+      },
       injection_seqs: [],
       injection_hashes: [],
       state_snapshot_seq: snapshotSeq,
@@ -121,10 +135,7 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
   await onUserPromptTurn(sessionDir);
   const state = await stateManager.load();
 
-  const planMode =
-    input.permission_mode !== undefined
-      ? isPlanModeFromInput(input)
-      : isPlanModeActive(input.transcript_path);
+  const planMode = planModeDetection.active;
 
   const ctx: RuleContext = {
     hookEvent: "UserPromptSubmit",
@@ -150,15 +161,14 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
   const transition = await computePlanModeTransition({
     source: "UserPromptSubmit",
     sessionDir,
-    transcriptPath: input.transcript_path,
-    permissionMode: input.permission_mode,
+    detection: planModeDetection,
   });
-  await commitPlanModeTransition(sessionDir, transition);
   const pendingInjections = await buildPendingContextInjections({
     projectDir,
     sourceEvent: "UserPromptSubmit",
     planModeTransition: transition,
   });
+  await commitPlanModeTransition(sessionDir, transition);
   const injectionRecords = appendSessionInjections(
     sessionDir,
     "UserPromptSubmit",
@@ -176,7 +186,8 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
     decision: "ok",
     permission_mode: input.permission_mode ?? null,
     plan_mode: {
-      permission_mode: transition.permission_mode,
+      mode: transition.mode,
+      source: transition.detection_source,
       detection_source: transition.detection_source,
       previous: transition.previous,
       current: transition.current,

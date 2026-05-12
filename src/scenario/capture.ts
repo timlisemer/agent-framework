@@ -54,13 +54,14 @@ export interface CapturePointer {
   permission_mode?: string | null;
   /** Plan-mode transition observed by this hook, when it ran the detector. */
   plan_mode?: {
-    permission_mode: string | null;
-    detection_source: "hook-input" | "transcript-tail";
-    previous: PlanModeStoredState | null;
-    current: PlanModeStoredState;
+    mode: string | null;
+    source: string;
+    detection_source?: string;
+    previous?: PlanModeStoredState | null;
+    current?: PlanModeStoredState;
     active: boolean;
-    entered: boolean;
-    exited: boolean;
+    entered?: boolean;
+    exited?: boolean;
   };
   /** session-injections.jsonl seqs appended by this hook. */
   injection_seqs?: number[];

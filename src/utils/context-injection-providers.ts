@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { EventName } from "../adapter/types.js";
 import type { PlanModeTransition } from "./plan-mode-entry-state.js";
+import { markPlansMdDelivered } from "./plan-mode-entry-state.js";
 import type { PendingInjection } from "./session-injections.js";
 import { shortContentHash } from "./session-injections.js";
 
@@ -18,7 +19,9 @@ export interface ContextInjectionProvider {
 
 function buildPlanModeInjectionMessage(plansContent: string): string {
   return [
-    "The session just entered plan mode. Follow this repository planning contract for all planning and <proposed_plan> output.",
+    "The session is in plan mode. The repo-root PLANS.md below applies to every final plan you produce in this session, including native or ordinary Codex plan-mode responses and any <proposed_plan> block.",
+    "",
+    "Final planning output must use exactly the 14 required level-two Markdown headings from PLANS.md, in order, with no extra ## headings. Ordinary ### subsections are allowed under those required headings.",
     "",
     plansContent.trim(),
   ].join("\n");
@@ -28,7 +31,8 @@ export const plansMdPlanModeEntryProvider: ContextInjectionProvider = {
   id: "plans-md-plan-mode-entry",
 
   async build(input: ContextInjectionProviderInput): Promise<PendingInjection[]> {
-    if (!input.planModeTransition.entered) return [];
+    if (input.sourceEvent !== "UserPromptSubmit") return [];
+    if (!input.planModeTransition.active) return [];
 
     const plansPath = path.join(input.projectDir, "PLANS.md");
     let plansContent: string;
@@ -38,6 +42,12 @@ export const plansMdPlanModeEntryProvider: ContextInjectionProvider = {
       return [];
     }
     if (!plansContent.trim()) return [];
+    const contentHash = shortContentHash(plansContent);
+    if (input.planModeTransition.current.deliveredPlansMdHash === contentHash) {
+      return [];
+    }
+
+    markPlansMdDelivered(input.planModeTransition, contentHash);
 
     return [
       {
@@ -49,12 +59,12 @@ export const plansMdPlanModeEntryProvider: ContextInjectionProvider = {
           kind: "file",
           path: plansPath,
           content: plansContent,
-          content_hash: shortContentHash(plansContent),
+          content_hash: contentHash,
         },
         metadata: {
           source_event: input.sourceEvent,
           detection_source: input.planModeTransition.detection_source,
-          permission_mode: input.planModeTransition.permission_mode,
+          mode: input.planModeTransition.mode,
         },
       },
     ];

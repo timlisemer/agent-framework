@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "name": "codex-native-plan-mode-plans-md-injection-and-validation",
+  "description": "Codex native collaboration-mode transcript markers activate plan mode and cause UserPromptSubmit to inject repo-root PLANS.md once.",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "$agent-framework-check"
+    }
+  ],
+  "target": {
+    "hook": "UserPromptSubmit"
+  },
+  "env": {
+    "adapter": "codex",
+    "permission_mode": "default",
+    "session_start_permission_mode": "default",
+    "codex_collaboration_mode": "plan"
+  },
+  "setup_files": [
+    {
+      "path": "PLANS.md",
+      "content": "# Planning Contract\n\nEvery final plan must follow this fixture contract.\n"
+    }
+  ],
+  "expect": {
+    "expected": "ok"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "Run the check workflow.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "$agent-framework-check"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 1
+  }
+}

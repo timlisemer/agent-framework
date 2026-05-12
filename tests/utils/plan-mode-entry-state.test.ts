@@ -45,8 +45,7 @@ describe("plan-mode transition state", () => {
     const transition = await computePlanModeTransition({
       source: "UserPromptSubmit",
       sessionDir,
-      transcriptPath,
-      permissionMode: "plan",
+      detection: { active: true, mode: "plan", source: "hook-permission-mode" },
     });
     const pending = await buildPendingContextInjections({
       projectDir,
@@ -57,7 +56,7 @@ describe("plan-mode transition state", () => {
     expect(transition.active).toBe(true);
     expect(transition.entered).toBe(true);
     expect(pending).toHaveLength(1);
-    expect(pending[0].message).toContain("The session just entered plan mode.");
+    expect(pending[0].message).toContain("The session is in plan mode.");
     expect(pending[0].source_file).toMatchObject({
       kind: "file",
       path: path.join(projectDir, "PLANS.md"),
@@ -70,16 +69,14 @@ describe("plan-mode transition state", () => {
     const first = await computePlanModeTransition({
       source: "UserPromptSubmit",
       sessionDir,
-      transcriptPath,
-      permissionMode: "plan",
+      detection: { active: true, mode: "plan", source: "hook-permission-mode" },
     });
     await commitPlanModeTransition(sessionDir, first);
 
     const second = await computePlanModeTransition({
       source: "UserPromptSubmit",
       sessionDir,
-      transcriptPath,
-      permissionMode: "plan",
+      detection: { active: true, mode: "plan", source: "hook-permission-mode" },
     });
     await commitPlanModeTransition(sessionDir, second);
 
@@ -95,15 +92,16 @@ describe("plan-mode transition state", () => {
       active: true,
       updatedAt: 1,
       lastSource: "UserPromptSubmit",
-      permission_mode: "plan",
-      detection_source: "hook-input",
+      mode: "plan",
+      detection_source: "hook-permission-mode",
+      deliveredPlansMdHash: null,
+      deliveredPlansMdAt: null,
     }));
 
     const transition = await computePlanModeTransition({
       source: "UserPromptSubmit",
       sessionDir,
-      transcriptPath,
-      permissionMode: "default",
+      detection: { active: false, mode: "default", source: "hook-permission-mode" },
     });
     const pending = await buildPendingContextInjections({
       projectDir,
@@ -125,8 +123,7 @@ describe("plan-mode transition state", () => {
     const transition = await computePlanModeTransition({
       source: "SessionStart",
       sessionDir,
-      transcriptPath,
-      permissionMode: "plan",
+      detection: { active: true, mode: "plan", source: "hook-permission-mode" },
     });
     const pending = await buildPendingContextInjections({
       projectDir,
@@ -136,6 +133,6 @@ describe("plan-mode transition state", () => {
 
     expect(transition.previous).toBeNull();
     expect(transition.entered).toBe(true);
-    expect(pending[0].message).toContain("# Planning Contract");
+    expect(pending).toEqual([]);
   });
 });

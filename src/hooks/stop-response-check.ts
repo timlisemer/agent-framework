@@ -2,7 +2,7 @@ import { setTranscriptPath } from "../utils/execution-context.js";
 import { writeTool } from "../utils/synthetic.js";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
-import { isPlanModeActive, isPlanModeFromInput, getPlanModeContext } from "../utils/plan-mode-detector.js";
+import { getPlanModeContext } from "../utils/plan-mode-detector.js";
 import { isSubagent } from "../utils/subagent-detector.js";
 import { readTranscriptExact } from "../utils/transcript.js";
 import { FIRST_RESPONSE_STOP_COUNTS } from "../utils/transcript-presets.js";
@@ -45,15 +45,16 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
   const stateManager = getSessionState(sessionDir);
   const state = await stateManager.load();
 
-  const planMode =
-    input.permission_mode !== undefined
-      ? isPlanModeFromInput(input)
-      : isPlanModeActive(input.transcript_path);
+  const spec = activeSpec();
+  const planModeDetection = spec.detectPlanMode({
+    permissionMode: input.permission_mode,
+    transcriptPath: input.transcript_path,
+  });
+  const planMode = planModeDetection.active;
 
   const tx = await readTranscriptExact(input.transcript_path, FIRST_RESPONSE_STOP_COUNTS);
   const assistantText = input.last_assistant_message ??
     (tx.assistant.length > 0 ? getMostRecentMessage(tx.assistant).content : null);
-  const spec = activeSpec();
   if (spec.isPlanExit({ event: "Stop", assistantText })) {
     const validation = await validateCurrentPlanExit({
       transcriptPath: input.transcript_path,
@@ -74,6 +75,11 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
         event: "Stop",
         decision: "block",
         permission_mode: input.permission_mode ?? null,
+        plan_mode: {
+          active: planModeDetection.active,
+          mode: planModeDetection.mode,
+          source: planModeDetection.source,
+        },
         injection_seqs: [],
         injection_hashes: [],
         state_snapshot_seq: snapshotSeq,
@@ -97,6 +103,11 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
       event: "Stop",
       decision: "pass",
       permission_mode: input.permission_mode ?? null,
+      plan_mode: {
+        active: planModeDetection.active,
+        mode: planModeDetection.mode,
+        source: planModeDetection.source,
+      },
       injection_seqs: [],
       injection_hashes: [],
       state_snapshot_seq: snapshotSeq,
@@ -137,6 +148,11 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
       event: "Stop",
       decision: "block",
       permission_mode: input.permission_mode ?? null,
+      plan_mode: {
+        active: planModeDetection.active,
+        mode: planModeDetection.mode,
+        source: planModeDetection.source,
+      },
       injection_seqs: [],
       injection_hashes: [],
       state_snapshot_seq: snapshotSeq,
@@ -154,6 +170,11 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
     event: "Stop",
     decision: "pass",
     permission_mode: input.permission_mode ?? null,
+    plan_mode: {
+      active: planModeDetection.active,
+      mode: planModeDetection.mode,
+      source: planModeDetection.source,
+    },
     injection_seqs: [],
     injection_hashes: [],
     state_snapshot_seq: snapshotSeq,

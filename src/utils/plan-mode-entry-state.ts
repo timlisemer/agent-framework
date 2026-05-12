@@ -1,17 +1,18 @@
 import * as fs from "fs";
 import * as path from "path";
-import { isPlanModeActive, isPlanModeFromInput } from "./plan-mode-detector.js";
+import type { PlanModeDetection, PlanModeDetectionSource } from "../adapter/types.js";
 import { sessionPlanModeEventsFile, sessionPlanModeStateFile } from "./paths.js";
 
 export type PlanModeEntrySource = "SessionStart" | "UserPromptSubmit";
-export type PlanModeDetectionSource = "hook-input" | "transcript-tail";
 
 export interface PlanModeStoredState {
   active: boolean;
   updatedAt: number;
   lastSource: PlanModeEntrySource;
-  permission_mode: string | null;
+  mode: string | null;
   detection_source: PlanModeDetectionSource;
+  deliveredPlansMdHash: string | null;
+  deliveredPlansMdAt: number | null;
 }
 
 export interface PlanModeTransition {
@@ -21,33 +22,30 @@ export interface PlanModeTransition {
   active: boolean;
   entered: boolean;
   exited: boolean;
-  permission_mode: string | null;
+  mode: string | null;
   detection_source: PlanModeDetectionSource;
 }
 
 export interface PlanModeEntryInput {
   source: PlanModeEntrySource;
   sessionDir: string;
-  transcriptPath: string;
-  permissionMode?: string;
+  detection: PlanModeDetection;
 }
 
 export async function computePlanModeTransition(
   input: PlanModeEntryInput,
 ): Promise<PlanModeTransition> {
   const previous = await readPlanModeEntryState(sessionPlanModeStateFile(input.sessionDir));
-  const detectionSource: PlanModeDetectionSource =
-    input.permissionMode !== undefined ? "hook-input" : "transcript-tail";
-  const active = input.permissionMode !== undefined
-    ? isPlanModeFromInput({ permission_mode: input.permissionMode })
-    : isPlanModeActive(input.transcriptPath);
-  const permissionMode = input.permissionMode ?? null;
+  const active = input.detection.active;
+  const sameEpisode = active && previous?.active === true;
   const current: PlanModeStoredState = {
     active,
     updatedAt: Date.now(),
     lastSource: input.source,
-    permission_mode: permissionMode,
-    detection_source: detectionSource,
+    mode: input.detection.mode,
+    detection_source: input.detection.source,
+    deliveredPlansMdHash: sameEpisode ? previous.deliveredPlansMdHash : null,
+    deliveredPlansMdAt: sameEpisode ? previous.deliveredPlansMdAt : null,
   };
 
   return {
@@ -57,9 +55,17 @@ export async function computePlanModeTransition(
     active,
     entered: active && previous?.active !== true,
     exited: !active && previous?.active === true,
-    permission_mode: permissionMode,
-    detection_source: detectionSource,
+    mode: input.detection.mode,
+    detection_source: input.detection.source,
   };
+}
+
+export function markPlansMdDelivered(
+  transition: PlanModeTransition,
+  contentHash: string,
+): void {
+  transition.current.deliveredPlansMdHash = contentHash;
+  transition.current.deliveredPlansMdAt = Date.now();
 }
 
 export async function commitPlanModeTransition(
@@ -84,7 +90,7 @@ export async function commitPlanModeTransition(
       ts: Date.now(),
       event: transition.entered ? "entered" : "exited",
       source: transition.source,
-      permission_mode: transition.permission_mode,
+      mode: transition.mode,
       detection_source: transition.detection_source,
       previous: transition.previous,
       current: transition.current,
@@ -108,12 +114,25 @@ async function readPlanModeEntryState(
       lastSource: parsed.lastSource === "SessionStart" || parsed.lastSource === "UserPromptSubmit"
         ? parsed.lastSource
         : "UserPromptSubmit",
-      permission_mode: typeof parsed.permission_mode === "string" ? parsed.permission_mode : null,
-      detection_source: parsed.detection_source === "hook-input" || parsed.detection_source === "transcript-tail"
+      mode: typeof parsed.mode === "string" ? parsed.mode : null,
+      detection_source: isPlanModeDetectionSource(parsed.detection_source)
         ? parsed.detection_source
-        : "transcript-tail",
+        : "none",
+      deliveredPlansMdHash: typeof parsed.deliveredPlansMdHash === "string"
+        ? parsed.deliveredPlansMdHash
+        : null,
+      deliveredPlansMdAt: typeof parsed.deliveredPlansMdAt === "number"
+        ? parsed.deliveredPlansMdAt
+        : null,
     };
   } catch {
     return null;
   }
+}
+
+function isPlanModeDetectionSource(raw: unknown): raw is PlanModeDetectionSource {
+  return raw === "codex-collaboration-mode" ||
+    raw === "hook-permission-mode" ||
+    raw === "transcript-permission-mode" ||
+    raw === "none";
 }

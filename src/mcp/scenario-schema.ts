@@ -74,6 +74,7 @@ export const scenarioSchema = z.object({
     cwd: z.string().optional(),
     timeout_ms: z.number().optional(),
     adapter: z.string().optional(),
+    codex_collaboration_mode: z.literal("plan").optional(),
     llm_stubs: z.record(z.string().min(1), z.string().min(1)).optional(),
   }).optional(),
   setup_files: z.array(z.object({
@@ -85,8 +86,10 @@ export const scenarioSchema = z.object({
       active: z.boolean(),
       updatedAt: z.number(),
       lastSource: z.enum(["SessionStart", "UserPromptSubmit"]),
-      permission_mode: z.string().nullable(),
-      detection_source: z.enum(["hook-input", "transcript-tail"]),
+      mode: z.string().nullable(),
+      detection_source: z.enum(["codex-collaboration-mode", "hook-permission-mode", "transcript-permission-mode", "none"]),
+      deliveredPlansMdHash: z.string().nullable(),
+      deliveredPlansMdAt: z.number().nullable(),
     }).nullable().optional(),
     injections: z.array(z.object({
       seq: z.number(),

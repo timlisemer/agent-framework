@@ -53,6 +53,23 @@ export interface PlanSourceLookupInput {
   prompt?: string;
 }
 
+export type PlanModeDetectionSource =
+  | "codex-collaboration-mode"
+  | "hook-permission-mode"
+  | "transcript-permission-mode"
+  | "none";
+
+export interface PlanModeDetectionInput {
+  permissionMode?: string;
+  transcriptPath?: string;
+}
+
+export interface PlanModeDetection {
+  active: boolean;
+  mode: string | null;
+  source: PlanModeDetectionSource;
+}
+
 // ── Canonical names ─────────────────────────────────────────────────────────
 
 export type CanonicalMcp =
@@ -86,6 +103,7 @@ export interface ScenarioMaterializeCtx {
   sessionId: string;
   cwd: string;
   permissionMode: string;
+  codexCollaborationMode?: "plan";
   prevUuid: string | null;
   baseTs: number;
 }
@@ -190,6 +208,9 @@ export interface AdapterSpec {
 
   /** True if this adapter-specific event represents a plan-exit/approval boundary. */
   isPlanExit(input: PlanExitDetectionInput): boolean;
+
+  /** Detect native plan mode using adapter-owned host signals. */
+  detectPlanMode(input: PlanModeDetectionInput): PlanModeDetection;
 
   // ── Scenario materialization ────────────────────────────────────────────
   /** Convert one canonical ScenarioEntry into JSONL line(s) on disk

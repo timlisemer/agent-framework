@@ -8,6 +8,7 @@ import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { loadCurrentEpoch } from "../scenario/epoch.js";
 import type { FrameworkPostToolUseHookInput } from "./types.js";
 import { extractPathOrCmd } from "../rules/utils.js";
+import { activeSpec } from "../adapter/spec.js";
 
 export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
   const subagent = isSubagent(input.transcript_path);
@@ -15,6 +16,10 @@ export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, enco
   if (!subagent) {
     // Log successful tool execution to JSONL
     const sessionDir = getSessionDir(input.transcript_path);
+    const planModeDetection = activeSpec().detectPlanMode({
+      permissionMode: input.permission_mode,
+      transcriptPath: input.transcript_path,
+    });
     await appendToolLog(sessionDir, {
       ts: Date.now(),
       tool: input.tool_name,
@@ -37,6 +42,11 @@ export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, enco
         tool_use_id: (input as unknown as Record<string, string>).tool_use_id,
         decision: "ok",
         permission_mode: input.permission_mode ?? null,
+        plan_mode: {
+          active: planModeDetection.active,
+          mode: planModeDetection.mode,
+          source: planModeDetection.source,
+        },
         injection_seqs: [],
         injection_hashes: [],
         state_snapshot_seq: snapshotSeq,

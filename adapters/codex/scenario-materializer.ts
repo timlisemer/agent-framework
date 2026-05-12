@@ -43,6 +43,12 @@ export function materializeScenarioEntry(
 
   const counter = { n: 0 };
   const ts = ctx.baseTs;
+  const prefix = ctx.prevUuid === null && ctx.codexCollaborationMode === "plan"
+    ? codexCollaborationModeMarkers(ctx, ts)
+    : [];
+  const entryCtx = prefix.length > 0
+    ? { ...ctx, prevUuid: prefix[prefix.length - 1].uuid, baseTs: ts + prefix.length }
+    : ctx;
 
   if (e.role === "user") {
     const content = e.content;
@@ -50,11 +56,11 @@ export function materializeScenarioEntry(
 
     // Emit a user message payload
     const line: Record<string, unknown> = {
-      parentUuid: ctx.prevUuid,
-      sessionId: ctx.sessionId,
-      cwd: ctx.cwd,
+      parentUuid: entryCtx.prevUuid,
+      sessionId: entryCtx.sessionId,
+      cwd: entryCtx.cwd,
       uuid,
-      timestamp: new Date(ts).toISOString(),
+      timestamp: new Date(entryCtx.baseTs).toISOString(),
       payload: {
         type: "message",
         role: "user",
@@ -66,16 +72,16 @@ export function materializeScenarioEntry(
     // Also emit tool_result blocks as function_call_output if content is array
     if (Array.isArray(content)) {
       const results: MaterializedScenarioLine[] = [];
-      let prevUuid = ctx.prevUuid;
+      let prevUuid = entryCtx.prevUuid;
       for (const block of content as ScenarioBlock[]) {
         if (block.type === "tool_result") {
           const resultUuid = crypto.randomUUID();
           const resultLine: Record<string, unknown> = {
             parentUuid: prevUuid,
-            sessionId: ctx.sessionId,
-            cwd: ctx.cwd,
+            sessionId: entryCtx.sessionId,
+            cwd: entryCtx.cwd,
             uuid: resultUuid,
-            timestamp: new Date(ts).toISOString(),
+            timestamp: new Date(entryCtx.baseTs).toISOString(),
             payload: {
               type: "function_call_output",
               call_id: block.tool_use_id,
@@ -88,10 +94,10 @@ export function materializeScenarioEntry(
           const textUuid = crypto.randomUUID();
           const textLine: Record<string, unknown> = {
             parentUuid: prevUuid,
-            sessionId: ctx.sessionId,
-            cwd: ctx.cwd,
+            sessionId: entryCtx.sessionId,
+            cwd: entryCtx.cwd,
             uuid: textUuid,
-            timestamp: new Date(ts).toISOString(),
+            timestamp: new Date(entryCtx.baseTs).toISOString(),
             payload: {
               type: "message",
               role: "user",
@@ -103,40 +109,74 @@ export function materializeScenarioEntry(
           prevUuid = textUuid;
         }
       }
-      if (results.length > 0) return results;
+      if (results.length > 0) return [...prefix, ...results];
     }
 
-    return [{ jsonl: JSON.stringify(line), uuid, toolUseIds: [] }];
+    return [...prefix, { jsonl: JSON.stringify(line), uuid, toolUseIds: [] }];
   }
 
   if (e.role === "assistant") {
     const blocks = (e.content ?? []) as ScenarioBlock[];
     assignToolUseIds(blocks, counter);
-    return emitAssistantBlocks(blocks, ctx, ts);
+    return [...prefix, ...emitAssistantBlocks(blocks, entryCtx, entryCtx.baseTs)];
   }
 
   if (e.role === "assistant_split") {
     const lines = (e.lines ?? []) as Array<{ blocks: ScenarioBlock[] }>;
     const results: MaterializedScenarioLine[] = [];
-    let prevUuid = ctx.prevUuid;
+    let prevUuid = entryCtx.prevUuid;
     for (let j = 0; j < lines.length; j++) {
       const subBlocks = lines[j].blocks;
       assignToolUseIds(subBlocks, counter);
       const subCtx: ScenarioMaterializeCtx = {
-        ...ctx,
+        ...entryCtx,
         prevUuid,
-        baseTs: ts + j * 10,
+        baseTs: entryCtx.baseTs + j * 10,
       };
-      const subResults = emitAssistantBlocks(subBlocks, subCtx, ts + j * 10);
+      const subResults = emitAssistantBlocks(subBlocks, subCtx, entryCtx.baseTs + j * 10);
       for (const r of subResults) {
         results.push(r);
         prevUuid = r.uuid;
       }
     }
-    return results;
+    return [...prefix, ...results];
   }
 
-  return [];
+  return prefix;
+}
+
+function codexCollaborationModeMarkers(
+  ctx: ScenarioMaterializeCtx,
+  ts: number,
+): MaterializedScenarioLine[] {
+  const firstUuid = crypto.randomUUID();
+  const secondUuid = crypto.randomUUID();
+  const first = {
+    parentUuid: ctx.prevUuid,
+    sessionId: ctx.sessionId,
+    cwd: ctx.cwd,
+    uuid: firstUuid,
+    timestamp: new Date(ts).toISOString(),
+    type: "event_msg",
+    payload: {
+      collaboration_mode_kind: ctx.codexCollaborationMode,
+    },
+  };
+  const second = {
+    parentUuid: firstUuid,
+    sessionId: ctx.sessionId,
+    cwd: ctx.cwd,
+    uuid: secondUuid,
+    timestamp: new Date(ts + 1).toISOString(),
+    type: "turn_context",
+    payload: {
+      collaboration_mode: { mode: ctx.codexCollaborationMode },
+    },
+  };
+  return [
+    { jsonl: JSON.stringify(first), uuid: firstUuid, toolUseIds: [] },
+    { jsonl: JSON.stringify(second), uuid: secondUuid, toolUseIds: [] },
+  ];
 }
 
 function emitAssistantBlocks(

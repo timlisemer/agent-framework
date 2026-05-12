@@ -703,30 +703,19 @@ UNREQUESTED PARAMETERS DRIFT (→ DRIFT):
 
 NOTE: Numbered task organization like "Phase 1:", "Step 1:", "Task 1:" is ALLOWED - these organize work sequentially, not estimate time
 
-STRUCTURAL DRIFT (for non-trivial multi-file plans → DRIFT):
-- Missing numbered file sections (Files to Create, Files to Modify with paths)
-- Missing Implementation Order with numbered steps
-- Missing Data Flow diagram for multi-component features
-- Prose-heavy without actionable structure
-
-Expected structure for non-trivial plans:
-  # Title
-  Description paragraph
-
-  ## Output Format (if applicable)
-
-  ## Files to Create
-  1. path/file.ts (NEW) - description
-
-  ## Files to Modify
-  2. path/file.ts - description
-
-  ## Data Flow
-  ASCII diagram showing relationships
-
-  ## Implementation Order
-  1. First step
-  2. Second step
+PLANS.md STRUCTURAL DRIFT (→ DRIFT):
+- Honor every [VIOLATION: ...] line in === VIOLATIONS DETECTED === as authoritative remediation input.
+- Final plans must use exactly the 14 repo PLANS.md ## headings, in order:
+  User Goal, Answered Assumptions, Goal In My Words, Approach, Data Flow, Files To Create, Files To Modify, Implementation Order, Assistant Verification, Manual User Verification, Approaches Decided Against, Possible Future Followups, Relevant Files, Files That Need Changes.
+- No extra ## headings are allowed. Ordinary ### subsections are allowed inside required sections.
+- User Goal must quote the user's relevant goal text verbatim.
+- Answered Assumptions must include the answer source for every assumption.
+- Non-trivial, multi-file, stateful, hook-based, or cross-module plans need an ASCII Data Flow diagram.
+- Assistant Verification must list only mcp__agent_framework__check with working_dir set to the repository path.
+- Manual User Verification must not list project check, lint, test, build, typecheck, format, or package-manager commands.
+- Do not present live option menus such as Option A:, Approach 1:, or Alternative 1:.
+- Do not include schedule buckets, timeline estimates, or unresolved assumption language.
+- Do not allow weak or vague required section bodies: empty, placeholder, extremely short, generic, or vague sections must be remediated.
 
 VAGUE PLAN DRIFT (→ DRIFT):
 - Plan says "modify X" without specifying HOW (what code changes)
@@ -747,16 +736,10 @@ REQUIRED SPECIFICITY FOR CODE CHANGES:
 - Where in the file (after which field, in which function)
 
 VERIFICATION STRUCTURE (→ DRIFT if wrong - CHECK THIS CAREFULLY):
-Plans with verification MUST use named subsections:
-- "Assistant Verification" - AI runs the agent-framework check MCP (automated)
-- "Manual User Verification" - USER runs after AI completes (ssh, curl, browser testing)
-
-Generic "Verification" heading without these subsections → DRIFT: "Rename to 'Assistant Verification' (for AI-executed checks like the agent-framework check MCP) or 'Manual User Verification' (for user-executed steps like ssh, curl, browser). A generic 'Verification' section is unclear about who executes what."
-This includes: "## Verification", "Verification Steps", "Testing", or any heading with verification content.
-Phrases like "After implementation, X should..." without subsection naming → DRIFT.
-
-It's OK to have only one subsection (e.g., just Assistant Verification if no user steps needed).
-A generic "Verification" heading with NO named subsections is NEVER acceptable → always DRIFT.
+- A generic "Verification", "Testing", or "Test Plan" heading is never acceptable.
+- "## Test Plan" is both a generic verification violation and an extra non-contract ## heading.
+- Assistant Verification is MCP-only: mcp__agent_framework__check with working_dir.
+- Manual User Verification is only for user-only checks outside AI-accessible verification.
 
 BLACKLIST COMMANDS IN PLANS:
 - Honor any \`[VIOLATION: ...]\` lines in \`=== VIOLATIONS DETECTED ===\` as authoritative.

@@ -182,6 +182,7 @@ function buildAllTranscriptLines(
           sessionId: ctx.sessionId,
           cwd: ctx.cwd,
           permissionMode,
+          codexCollaborationMode: scenario.env?.codex_collaboration_mode,
           prevUuid,
           baseTs: baseTs + i * 100 + j * 10,
         };
@@ -247,6 +248,7 @@ function buildAllTranscriptLines(
         sessionId: ctx.sessionId,
         cwd: ctx.cwd,
         permissionMode,
+        codexCollaborationMode: scenario.env?.codex_collaboration_mode,
         prevUuid,
         baseTs: baseTs + i * 100,
       };

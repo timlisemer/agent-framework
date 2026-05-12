@@ -3,7 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
-import { sessionCurrentPlanFile } from "../../src/utils/paths.js";
+import { sessionCapturesFile, sessionCurrentPlanFile } from "../../src/utils/paths.js";
 
 vi.mock("../../src/utils/hook-bootstrap.js", async () => {
   const actual = await vi.importActual<typeof import("../../src/utils/hook-bootstrap.js")>(
@@ -53,6 +53,10 @@ describe("mainStop Codex inline plan validation", () => {
 
   it("blocks invalid proposed plans before passing Stop", async () => {
     mockCheckPlanIntent.mockResolvedValue({ approved: false, reason: "missing section" });
+    fs.writeFileSync(
+      transcriptPath,
+      JSON.stringify({ type: "event_msg", payload: { collaboration_mode_kind: "plan" } }) + "\n",
+    );
 
     await mainStop(
       {
@@ -69,6 +73,14 @@ describe("mainStop Codex inline plan validation", () => {
       expect.stringContaining("Plan validation failed: missing section"),
     );
     expect(fs.existsSync(sessionCurrentPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!))).toBe(false);
+    const capture = JSON.parse(
+      fs.readFileSync(sessionCapturesFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!), "utf-8").trim(),
+    ) as { plan_mode?: { active?: boolean; mode?: string; source?: string } };
+    expect(capture.plan_mode).toMatchObject({
+      active: true,
+      mode: "plan",
+      source: "codex-collaboration-mode",
+    });
   });
 
   it("stores valid inline proposed plans in the current-plan sidecar", async () => {

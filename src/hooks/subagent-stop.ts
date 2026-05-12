@@ -4,6 +4,7 @@ import type { AdapterEncoder } from "../adapter/types.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { loadCurrentEpoch } from "../scenario/epoch.js";
+import { activeSpec } from "../adapter/spec.js";
 
 /**
  * SubagentStop Hook
@@ -22,6 +23,10 @@ export interface SubagentStopHookInput {
 
 export async function mainSubagentStop(input: SubagentStopHookInput, encoder: AdapterEncoder): Promise<void> {
   const sessionDir = getSessionDir(input.transcript_path);
+  const planModeDetection = activeSpec().detectPlanMode({
+    permissionMode: input.permission_mode,
+    transcriptPath: input.transcript_path,
+  });
   try {
     decrementActiveSubagents(sessionDir, input.agent_id);
   } catch (err) {
@@ -39,6 +44,11 @@ export async function mainSubagentStop(input: SubagentStopHookInput, encoder: Ad
       event: "SubagentStop",
       decision: "ok",
       permission_mode: input.permission_mode ?? null,
+      plan_mode: {
+        active: planModeDetection.active,
+        mode: planModeDetection.mode,
+        source: planModeDetection.source,
+      },
       injection_seqs: [],
       injection_hashes: [],
       state_snapshot_seq: snapshotSeq,

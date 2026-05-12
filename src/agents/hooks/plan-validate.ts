@@ -40,6 +40,7 @@ import {
   getRuleViolationHighlights,
   getVerificationStructureHighlights,
 } from "../../utils/content-patterns.js";
+import { validatePlanContract } from "../../utils/plan-contract.js";
 
 /**
  * Categories from `RULE_VIOLATION_PATTERNS` that ALWAYS hard-deny without
@@ -123,7 +124,17 @@ export async function checkPlanIntent(
     const blacklistHighlights = filteredBlacklistHits.map((h) => h.rendered);
     const ruleViolations = getRuleViolationHighlights(resultingPlan);
     const verificationViolations = getVerificationStructureHighlights(resultingPlan);
-    const allViolations = [...planClearingViolations, ...blacklistHighlights, ...ruleViolations, ...verificationViolations];
+    const contractFindings = validatePlanContract(resultingPlan, workingDir);
+    const contractViolations = contractFindings.map((finding) =>
+      `[VIOLATION: ${finding.kind}] ${finding.message}`,
+    );
+    const allViolations = [
+      ...planClearingViolations,
+      ...blacklistHighlights,
+      ...ruleViolations,
+      ...verificationViolations,
+      ...contractViolations,
+    ];
 
     // Hard-deny for schedule-bucket and solution-branching categories from
     // RULE_VIOLATION_PATTERNS — these are fully captured by regex and need
@@ -144,23 +155,6 @@ export async function checkPlanIntent(
       const feedback = blacklistHighlights
         .map((v) => v.replace(/^\[VIOLATION: [^\]]+\]\s*/, ""))
         .join(". ");
-      return { approved: false, reason: feedback };
-    }
-
-    // Deterministic deny for exit mode when regex violations exist — LLM unreliably ignores them
-    if (mode === "exit" && allViolations.length > 0) {
-      const feedback = allViolations.map(v =>
-        v.replace(/^\[VIOLATION: [^\]]+\]\s*/, "")
-      ).join(". ");
-      return { approved: false, reason: feedback };
-    }
-
-    // Deterministic deny for Write in edit mode when violations exist — Write replaces the
-    // entire file so violations in the result are definitive, not diff artifacts
-    if (mode === "edit" && allViolations.length > 0 && toolName === "Write") {
-      const feedback = allViolations.map(v =>
-        v.replace(/^\[VIOLATION: [^\]]+\]\s*/, "")
-      ).join(". ");
       return { approved: false, reason: feedback };
     }
 

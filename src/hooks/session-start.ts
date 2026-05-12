@@ -9,18 +9,17 @@ import {
   sessionStateDefaults,
 } from "../utils/session-store.js";
 import type { AdapterEncoder } from "../adapter/types.js";
-import { resolveHostContext } from "../utils/host-context.js";
 import {
   commitPlanModeTransition,
   computePlanModeTransition,
   type PlanModeTransition,
 } from "../utils/plan-mode-entry-state.js";
-import { buildPendingContextInjections } from "../utils/context-injection-providers.js";
-import { appendSessionInjections, combineInjectionMessages, type SessionInjectionRecord } from "../utils/session-injections.js";
+import { combineInjectionMessages, type SessionInjectionRecord } from "../utils/session-injections.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
 import { onEpochRotation } from "../scenario/lifecycle.js";
+import { activeSpec } from "../adapter/spec.js";
 
 /**
  * SessionStart Hook
@@ -44,21 +43,18 @@ async function computeSessionStartPlanMode(
   input: SessionStartHookInput,
   sessionDir: string,
 ): Promise<{ transition: PlanModeTransition; records: SessionInjectionRecord[] }> {
-  const host = resolveHostContext({ cwd: input.cwd });
+  const spec = activeSpec();
+  const detection = spec.detectPlanMode({
+    permissionMode: input.permission_mode,
+    transcriptPath: input.transcript_path,
+  });
   const transition = await computePlanModeTransition({
     source: "SessionStart",
     sessionDir,
-    transcriptPath: input.transcript_path,
-    permissionMode: input.permission_mode,
+    detection,
   });
   await commitPlanModeTransition(sessionDir, transition);
-  const pending = await buildPendingContextInjections({
-    projectDir: host.projectDir,
-    sourceEvent: "SessionStart",
-    planModeTransition: transition,
-  });
-  const records = appendSessionInjections(sessionDir, "SessionStart", pending);
-  return { transition, records };
+  return { transition, records: [] };
 }
 
 async function exitSessionStart(
@@ -109,7 +105,8 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
       decision: "ok",
       permission_mode: input.permission_mode ?? null,
       plan_mode: {
-        permission_mode: transition.permission_mode,
+        mode: transition.mode,
+        source: transition.detection_source,
         detection_source: transition.detection_source,
         previous: transition.previous,
         current: transition.current,
@@ -148,7 +145,8 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
       decision: "ok",
       permission_mode: input.permission_mode ?? null,
       plan_mode: {
-        permission_mode: transition.permission_mode,
+        mode: transition.mode,
+        source: transition.detection_source,
         detection_source: transition.detection_source,
         previous: transition.previous,
         current: transition.current,
@@ -177,7 +175,8 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
     decision: "ok",
     permission_mode: input.permission_mode ?? null,
     plan_mode: {
-      permission_mode: transition.permission_mode,
+      mode: transition.mode,
+      source: transition.detection_source,
       detection_source: transition.detection_source,
       previous: transition.previous,
       current: transition.current,
