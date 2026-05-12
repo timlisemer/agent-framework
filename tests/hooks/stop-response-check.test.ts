@@ -51,7 +51,7 @@ describe("mainStop Codex inline plan validation", () => {
     else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
   });
 
-  it("blocks invalid proposed plans before passing Stop", async () => {
+  it("stores invalid inline proposed plans before blocking Stop", async () => {
     mockCheckPlanIntent.mockResolvedValue({ approved: false, reason: "missing section" });
     fs.writeFileSync(
       transcriptPath,
@@ -72,7 +72,12 @@ describe("mainStop Codex inline plan validation", () => {
       0,
       expect.stringContaining("Plan validation failed: missing section"),
     );
-    expect(fs.existsSync(sessionCurrentPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!))).toBe(false);
+    const stored = JSON.parse(fs.readFileSync(sessionCurrentPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!), "utf-8"));
+    expect(stored).toEqual({
+      kind: "inline",
+      content: "## User Goal\nx",
+      source: "codex-proposed-plan",
+    });
     const capture = JSON.parse(
       fs.readFileSync(sessionCapturesFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!), "utf-8").trim(),
     ) as { plan_mode?: { active?: boolean; mode?: string; source?: string } };
