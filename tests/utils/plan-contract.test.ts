@@ -65,6 +65,15 @@ describe("plan contract", () => {
     ]);
   });
 
+  it("skips contract findings when project PLANS.md is not readable", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plan-contract-missing-"));
+    try {
+      expect(validatePlanContract("## User Goal\n> Do it.", dir)).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("accepts a plan with exact required headings", () => {
     withProject((projectDir) => {
       expect(validatePlanContract(validPlan(), projectDir)).toEqual([]);

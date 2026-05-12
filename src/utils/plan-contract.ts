@@ -60,7 +60,13 @@ export function extractRequiredFinalPlanHeadings(plansMd: string): string[] {
 }
 
 export function validatePlanContract(plan: string, projectDir: string): PlanContractFinding[] {
-  const required = readRequiredFinalPlanHeadings(projectDir);
+  let required: string[];
+  try {
+    required = readRequiredFinalPlanHeadings(projectDir);
+  } catch {
+    return [];
+  }
+  if (required.length === 0) return [];
   return validatePlanContractWithRequiredHeadings(plan, required);
 }
 
