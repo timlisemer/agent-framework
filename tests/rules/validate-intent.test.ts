@@ -58,7 +58,6 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
     stateManager: {} as RuleContext["stateManager"],
     planMode: false,
     planModeCtx: { active: false, contextString: "" },
-    subagent: false,
     ...overrides,
   };
 }

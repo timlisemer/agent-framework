@@ -25,7 +25,6 @@ export const planModeStepContextRule: PreToolRule = {
   promptSection: `If "PLAN MODE STEP AWARENESS" appears in context, plan mode is active and you must reason about which step the workflow is in. The block lists the appropriate next-step toolset. ExitPlanMode is the prescribed terminal step — APPROVE it when planning is done.`,
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.subagent) return null;
     if (!ctx.planModeCtx.active) return null;
     const prediction = ctx.state.currentPrediction;
     if (!prediction) return null;

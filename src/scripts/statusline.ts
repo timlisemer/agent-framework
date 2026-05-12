@@ -81,12 +81,6 @@ const AGENT_DISPLAY_NAMES: Record<string, string> = {
  * Get display name for an agent.
  */
 function getAgentDisplayName(agent: string): string {
-  // Handle subagent prefix: "sub:tool-approve" → "Sub Tool Approve"
-  if (agent.startsWith("sub:")) {
-    const baseAgent = agent.slice(4);
-    const baseName = AGENT_DISPLAY_NAMES[baseAgent] || capitalizeWords(baseAgent);
-    return `Sub ${baseName}`;
-  }
   return AGENT_DISPLAY_NAMES[agent] || capitalizeWords(agent);
 }
 

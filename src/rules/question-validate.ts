@@ -126,7 +126,6 @@ export const questionValidateRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.subagent) return null;
     if (ctx.toolName !== "AskUserQuestion") return null;
 
     const input = ctx.toolInput as AskUserQuestionInput;

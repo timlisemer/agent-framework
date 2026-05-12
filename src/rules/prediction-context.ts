@@ -13,7 +13,6 @@ You receive Tool Predictions: expected tools based on user intent analysis.
 If expected tools are listed and the current tool is NOT expected, consider why - a mismatch is NOT automatic denial; only DENY if it clearly contradicts user intent.`,
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.subagent) return null;
     const prediction = ctx.state.currentPrediction ?? null;
     if (!prediction) return null;
     return { llmContext: `PREDICTIONS:\n${formatPredictionContext(prediction)}` };

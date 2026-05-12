@@ -46,10 +46,18 @@ import {
   transcriptCacheDir,
   transcriptReplayPidFile,
 } from "../utils/paths.js";
-import { isProcessAlive } from "../utils/subagent-detector.js";
 import { writeJsonl } from "../utils/file-io.js";
 
 const MIN_PREFIX_LENGTH = 12;
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function transcriptSlug(transcriptPath: string): string {
   return path.basename(transcriptPath, ".jsonl");

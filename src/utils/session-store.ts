@@ -186,6 +186,3 @@ export function getSessionState(sessionDir: string): SessionStateManager {
     defaultData: sessionStateDefaults,
   });
 }
-
-// Active subagent counter — consolidated in subagent-detector.ts
-export { getActiveSubagentCount, incrementActiveSubagents, decrementActiveSubagents, resetActiveSubagents } from "./subagent-detector.js";

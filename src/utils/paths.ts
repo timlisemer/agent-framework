@@ -254,10 +254,6 @@ export function sessionStatuslineFile(sessionDir: string): string {
   return path.join(sessionDir, "statusline.json");
 }
 
-export function sessionSubagentCounterFile(sessionDir: string): string {
-  return path.join(sessionDir, "active-subagents.json");
-}
-
 /**
  * Path to the transcript-path sidecar file inside a session directory.
  */

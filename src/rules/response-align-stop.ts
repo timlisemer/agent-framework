@@ -261,8 +261,6 @@ export const responseAlignStopRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.subagent) return null;
-
     const assistantText = ctx.assistantText ?? "";
     const userText = ctx.userText ?? "";
 

@@ -61,7 +61,6 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
     stateManager: {} as RuleContext["stateManager"],
     planMode: false,
     planModeCtx: { active: false, contextString: "" },
-    subagent: false,
     assistantText: "I completed the task.",
     userText: "Fix the bug in foo.ts",
     ...overrides,
@@ -71,13 +70,6 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
 describe("responseAlignStopRule — deterministic null paths", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it("returns null when ctx.subagent is true", async () => {
-    const ctx = makeCtx({ subagent: true });
-    const result = await responseAlignStopRule.check(ctx);
-    expect(result).toBeNull();
-    expect(mockRunAgent).not.toHaveBeenCalled();
   });
 
   it("returns null when assistantText is empty", async () => {

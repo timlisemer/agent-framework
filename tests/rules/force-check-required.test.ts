@@ -20,7 +20,6 @@ function makeCtx(toolName: string, forceCheckPending = true): RuleContext {
     stateManager: {} as RuleContext["stateManager"],
     planMode: false,
     planModeCtx: { active: false, contextString: "" },
-    subagent: false,
   };
 }
 

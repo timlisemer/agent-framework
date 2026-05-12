@@ -1,5 +1,5 @@
 /**
- * Test Harness Labeler — MCP tool handler for the labeler subagent.
+ * Test Harness Labeler — MCP tool handler for the labeler agent role.
  *
  * Pure TypeScript + execFileSync. NO LLM calls. NO runAgent. NO Anthropic API.
  *

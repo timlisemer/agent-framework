@@ -25,7 +25,6 @@ import {
   findUnprocessedPlanApproval,
   synthesizePostApprovalPrediction,
 } from "../utils/plan-approval-detector.js";
-import { isSubagent } from "../utils/subagent-detector.js";
 import { logFastPathApproval } from "../utils/logger.js";
 import {
   getSessionDir,
@@ -112,7 +111,6 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   });
   const planMode = planModeDetection.active;
   const planModeCtx = getPlanModeContext(planMode);
-  const subagent = isSubagent(input.transcript_path);
 
   // Clear stale forceCheckPending when a fresh user turn has begun: the most
   // recent non-meta user-text message has no completed tool roundtrip after
@@ -121,7 +119,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   // fallback is necessary because the test harness fires only SessionStart +
   // the target hook for a PreToolUse target, and live sessions can compact
   // the originating errored tool_result out of the visible window.
-  if (state.forceCheckPending && !subagent) {
+  if (state.forceCheckPending) {
     const freshTurn = await userTurnIsFreshSinceLockout(input.transcript_path);
     if (freshTurn) {
       await stateManager.update((s) => ({ ...s, forceCheckPending: false }));
@@ -138,34 +136,32 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   // replay. The sentinel `lastProcessedPlanApprovalToolUseId` ensures the
   // synthesis fires at most once per approval; the next UserPromptSubmit
   // resets it to null so future approvals re-fire.
-  if (!subagent) {
-    const approval = await findUnprocessedPlanApproval(input.transcript_path)
-      .catch(() => null);
-    if (approval && approval.toolUseId !== state.lastProcessedPlanApprovalToolUseId) {
-      const fresh = synthesizePostApprovalPrediction(approval.approvalContent);
-      await stateManager.update((s) => ({
-        ...s,
-        currentPrediction: fresh,
-        lastProcessedPlanApprovalToolUseId: approval.toolUseId,
-        frustrationStreak: 0,
-        // Reset edit-intent bookkeeping the same way user-prompt-submit does
-        // on a fresh prediction. We deliberately set currentEditIntent to
-        // null (not true): the prior session's ExitPlanMode-allow path may
-        // have set it true, but the gate LLM will re-evaluate edits against
-        // the NEW synthesized intent. The edit-intent rule only fires on
-        // `=== false`, so null cleanly skips it; null vs true is a minor
-        // signal-strength downgrade in the gate context, not a correctness
-        // issue. Choosing null over true keeps the system honest about what
-        // it actually knows post-approval.
-        previousEditIntent: s.currentEditIntent ?? null,
-        currentEditIntent: null,
-        editIntentTimestamp: Date.now(),
-        editIntentOverturnCount: 0,
-        respondFirstChecked: false,
-      }));
-      state = await stateManager.load();
-      await clearGateReasoning(sessionDir);
-    }
+  const approval = await findUnprocessedPlanApproval(input.transcript_path)
+    .catch(() => null);
+  if (approval && approval.toolUseId !== state.lastProcessedPlanApprovalToolUseId) {
+    const fresh = synthesizePostApprovalPrediction(approval.approvalContent);
+    await stateManager.update((s) => ({
+      ...s,
+      currentPrediction: fresh,
+      lastProcessedPlanApprovalToolUseId: approval.toolUseId,
+      frustrationStreak: 0,
+      // Reset edit-intent bookkeeping the same way user-prompt-submit does
+      // on a fresh prediction. We deliberately set currentEditIntent to
+      // null (not true): the prior session's ExitPlanMode-allow path may
+      // have set it true, but the gate LLM will re-evaluate edits against
+      // the NEW synthesized intent. The edit-intent rule only fires on
+      // `=== false`, so null cleanly skips it; null vs true is a minor
+      // signal-strength downgrade in the gate context, not a correctness
+      // issue. Choosing null over true keeps the system honest about what
+      // it actually knows post-approval.
+      previousEditIntent: s.currentEditIntent ?? null,
+      currentEditIntent: null,
+      editIntentTimestamp: Date.now(),
+      editIntentOverturnCount: 0,
+      respondFirstChecked: false,
+    }));
+    state = await stateManager.load();
+    await clearGateReasoning(sessionDir);
   }
 
   // Fail open on any detection error — falls through to normal single-tool pipeline
@@ -194,7 +190,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
         return next;
       });
 
-      if (!subagent && assignedToolCallIndex >= 0) {
+      if (assignedToolCallIndex >= 0) {
         // assignedToolCallIndex === -1 indicates stateManager.update threw inside
         // its closure (CacheManager.update silently swallows errors per
         // cache-manager.ts:351-358). Writing an entry with toolCallIndex: -1
@@ -218,10 +214,8 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
 
       if (exit.decision === "allow" && planExit) {
         await clearGateReasoning(sessionDir);
-        if (!subagent) {
-          await writeTool(input.transcript_path, input.session_id, toolName, "Exiting plan mode.");
-          await writeUser(input.transcript_path, input.session_id, toolName, "Plan approved. Proceed with implementation.");
-        }
+        await writeTool(input.transcript_path, input.session_id, toolName, "Exiting plan mode.");
+        await writeUser(input.transcript_path, input.session_id, toolName, "Plan approved. Proceed with implementation.");
       }
     }
 
@@ -402,7 +396,6 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
     stateManager,
     planMode,
     planModeCtx,
-    subagent,
     outsideRootPath,
     latestUserMessage,
     recentUserMessages,
@@ -410,7 +403,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
     slashCommandAllowedTools,
   };
 
-  // Run all rules (respond-first, low-risk, plan-mode-block, subagent,
+  // Run all rules (respond-first, low-risk, plan-mode-block,
   // question-validate, prediction-block, drift-detect,
   // error-acknowledge, sensitive-path-block, edit-intent, style-drift, gate, tool-approve)
   const ruleResult = await evaluateRules(ALL_RULES, ctx, "PreToolUse");
@@ -521,7 +514,6 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
           currentContent,
           toolName as "Write" | "Edit",
           toolInput as { content?: string; old_string?: string; new_string?: string },
-          input.transcript_path,
           projectDir,
           "PreToolUse"
         );

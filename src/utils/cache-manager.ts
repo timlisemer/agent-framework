@@ -45,7 +45,7 @@ export interface CacheConfig<T> {
    * Return the (possibly mutated) data to accept it, or null to reset to
    * defaultData(). When null is returned the defaults are saved immediately
    * so subsequent loads don't re-trigger validation against the same stale
-   * data. Additive — unused until the deferred subagent-detector follow-up plan.
+   * data.
    */
   validate?: (data: T) => T | null;
 }

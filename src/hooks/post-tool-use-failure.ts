@@ -1,5 +1,4 @@
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { isSubagent } from "../utils/subagent-detector.js";
 import { getSessionDir, appendToolLog, getSessionState } from "../utils/session-store.js";
 import type { AdapterEncoder } from "../adapter/types.js";
 import { appendCapture } from "../scenario/capture.js";
@@ -22,8 +21,8 @@ export interface PostToolUseFailureHookInput {
 }
 
 export async function mainPostToolUseFailure(input: PostToolUseFailureHookInput, encoder: AdapterEncoder): Promise<void> {
-  // Skip subagents and interrupts
-  if (isSubagent(input.transcript_path) || input.is_interrupt) {
+  // Skip interrupts
+  if (input.is_interrupt) {
     const out = encoder.encodeOk("PostToolUseFailure");
     await exitAfterFlush(out.exitCode, out.stdout);
     return;

@@ -1,5 +1,5 @@
 /**
- * Test Harness Tester — MCP tool handler for the tester subagent.
+ * Test Harness Tester — MCP tool handler for the tester agent role.
  *
  * Pure TypeScript + execFileSync. NO LLM calls. NO runAgent. NO Anthropic API.
  *
@@ -801,7 +801,7 @@ Use run_scenario when ANY of the following is true:
   from other rules and real transcript state.
 - You want to catch a regression that no historical transcript happens
   to contain (e.g. "assistant goes straight from thinking to tool_use
-  with no text, in plan mode, in a subagent context").
+  with no text, in plan mode").
 - The bug report is a hypothetical ("what if X?") -- scenarios turn
   hypotheticals into executable tests.
 
@@ -809,7 +809,7 @@ DO NOT use scenarios when the behavior you care about depends on:
 - Multi-turn LLM reasoning outside the rule itself (use Workflow A).
 - Cached state that can only accumulate over a long session (use
   Workflow A or ask the user to extend the scenario schema).
-- Background processes, spawned subagents, or MCP-side I/O not covered
+- Background processes, spawned agents, or MCP-side I/O not covered
   by the scenario env flags (ask the user before expanding).
 
 ### B.2 Scenario-first workflow
@@ -1132,13 +1132,6 @@ existing fields. Report readers must dispatch on \`mode\`.
                     entry's \`permissionMode\` (read by isPlanModeActive's
                     file-scan fallback). Both detection paths agree.
 
-  subagent          Boolean. When true, the materialized transcript file
-                    is named agent-<name>.jsonl so detectSubagent() takes
-                    its filename short-circuit branch and returns
-                    isSubagent: true. When false, the cache dir contains
-                    an empty active-subagents.json counter file so the
-                    counter fallback deterministically returns false.
-
   cwd               Directory the hook runs in (passed as
                     CLAUDE_PROJECT_DIR and \`cwd\` in hook stdin). Defaults
                     to the scenario run dir under test-runs/scenarios/.
@@ -1351,9 +1344,8 @@ the same scenario JSON schema.
                                NOT place a scenario.json copy here).
      report-scenario.json      Last run's decision, gate, pass flag.
      cache/                    Ephemeral hook runtime files
-       <name>.jsonl            Materialized transcript (may be agent-*.jsonl)
+       scenario-<name>.jsonl   Materialized transcript
        tool-log.jsonl          Rule decisions from the last hook run
-       active-subagents.json   Empty counter file for deterministic subagent detection
        state.json              Seeded prior-turn session state
 
 2. Fixtures (repo-tracked, read-only source) -- three category subfolders:
@@ -1383,7 +1375,7 @@ a fixture are picked up on the very next run.
 ## Workflow C: ESCAPE HATCH -- expanding the MCP
 
 The scenario schema intentionally covers the common setup knobs:
-permission_mode, subagent, cwd, timeout_ms, and arbitrary transcript
+permission_mode, cwd, timeout_ms, and arbitrary transcript
 content. That is the minimum contract. If your test case needs a setup
 knob NOT in that list -- for example:
 

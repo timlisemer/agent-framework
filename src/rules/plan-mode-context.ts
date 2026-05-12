@@ -9,7 +9,6 @@ export const planModeContextRule: PreToolRule = {
   promptSection: `If "PLAN MODE ACTIVE" appears in context, the user's intent is exploration/planning. Read-only tools should be APPROVED. Edits to the active adapter's plan files, host instruction files, and memory files are also APPROVED — those are the planner's legitimate write targets in plan mode. Do not deny based on "user wants implementation."`,
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.subagent) return null;
     if (!ctx.planModeCtx.active) return null;
     return { llmContext: ctx.planModeCtx.contextString };
   },

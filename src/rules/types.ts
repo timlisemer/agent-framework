@@ -29,7 +29,6 @@ export interface RuleContext {
   stateManager: CacheManager<SessionState>;
   planMode: boolean;
   planModeCtx: { active: boolean; contextString: string };
-  subagent: boolean;
   /**
    * Set by pre-tool-use.ts when the current file tool call targets an
    * absolute path that is OUTSIDE projectDir AND is NOT an active adapter

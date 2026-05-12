@@ -187,7 +187,6 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
         "Write",
         { content: "## User Goal\nImplement x." },
         expect.any(String),
-        transcriptPath,
         tempDir,
         "UserPromptSubmit",
         "exit",

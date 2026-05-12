@@ -30,7 +30,6 @@ export const sentimentRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.subagent) return null;
     if (!ctx.userPrompt) return null;
 
     const userPrompt = ctx.userPrompt;

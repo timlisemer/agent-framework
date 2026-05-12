@@ -14,7 +14,6 @@ export const predictionBlockRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.subagent) return null;
     const prediction = ctx.state.currentPrediction ?? null;
     if (!prediction) return null;
 

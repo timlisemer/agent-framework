@@ -28,7 +28,6 @@ async function buildCtx(
   overrides: Partial<SessionState>,
   toolInput: unknown = { file_path: TARGET, old_string: "foo", new_string: "bar" },
   toolName: string = "Edit",
-  subagent: boolean = false,
 ): Promise<RuleContext> {
   const stateManager = getSessionState(sessionDir);
   const state: SessionState = { ...sessionStateDefaults(), ...overrides };
@@ -45,7 +44,6 @@ async function buildCtx(
     stateManager,
     planMode: false,
     planModeCtx: { active: false, contextString: "" },
-    subagent,
   };
 }
 
@@ -119,13 +117,6 @@ describe("driftDetectRule.check — end-to-end level behavior", () => {
     const { fastDeny } = result as { fastDeny: string };
     expect(fastDeny.startsWith(`12 edits to "${TARGET}"`)).toBe(true);
     expect(fastDeny).toContain("you are thrashing");
-  });
-
-  it("returns null for subagent context without reading tool log", async () => {
-    writeToolLog(sessionDir, [allowedEdit(), allowedEdit(), allowedEdit(), allowedEdit()]);
-    const ctx = await buildCtx(sessionDir, { driftState: {} }, undefined, "Edit", true);
-    const result = await driftDetectRule.check(ctx);
-    expect(result).toBeNull();
   });
 
   it("ignores log entries older than lastUserMessageTimestamp (per-turn reset)", async () => {

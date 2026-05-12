@@ -22,12 +22,12 @@ The framework implements 16 specialized agents organized into three categories:
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
 | validate_intent        | haiku  | Manual post-session review (requires transcript_path)        |
-| scenario_labeler   | -      | Test harness operations for the @labeler subagent            |
-| scenario_tester    | -      | Test harness operations for the @tester subagent             |
+| scenario_labeler   | -      | Test harness operations for the @labeler agent role          |
+| scenario_tester    | -      | Test harness operations for the @tester agent role           |
 
 **Note on validate_intent**: Unlike other MCP tools, `validate_intent` is not auto-triggered. It's a manual post-session review tool that analyzes a conversation transcript to check if the AI followed user intentions. Requires `transcript_path` parameter pointing to a `.jsonl` transcript file. Returns `ALIGNED` or `DRIFTED` verdict.
 
-**Note on scenario tools**: These are subagent-only tools that wrap scenario runner operations. The labeler tool handles transcript labeling workflows; the tester tool handles test execution and report reading. Neither makes LLM calls internally.
+**Note on scenario tools**: These tools wrap scenario runner operations for the labeler and tester workflows. The labeler tool handles transcript labeling workflows; the tester tool handles test execution and report reading. Neither makes LLM calls internally.
 
 ### Validation Agents (Hook-Triggered)
 
@@ -71,8 +71,7 @@ The `commit` agent enforces the complete verification chain before committing.
 ├─ Rule Pipeline (evaluateRules, sequential by priority):
 │  ├─ respond-first (5): AI must respond before tools (deterministic)
 │  ├─ plan-mode-block (15): Block writes in plan mode; fast-allow plan files
-│  ├─ subagent (20): Subagent tool approval
-│  ├─ background-agent-block (25): Deny Agent(run_in_background=true) from main session
+│  ├─ background-agent-block (25): Deny Agent(run_in_background=true)
 │  ├─ prediction-question-judge (28): Block stalling AskUserQuestion under frustration
 │  ├─ question-validate (30): Validate AskUserQuestion
 │  ├─ force-check-required (32): Lock to mcp__check after workaround denial
@@ -99,7 +98,7 @@ The `commit` agent enforces the complete verification chain before committing.
 
 ## Performance
 
-Every rule runs on every tool call. Rules short-circuit with `fastAllow` or `fastDeny` (pure TypeScript, <10ms) or contribute `llmContext`. Triggered `llmContext` rules are aggregated into a single rule-gate haiku LLM call. Subagents use a dedicated lightweight path via `subagentRule` with `skipLlmOnClean: true`.
+Every rule runs on every tool call. Rules short-circuit with `fastAllow` or `fastDeny` (pure TypeScript, <10ms) or contribute `llmContext`. Triggered `llmContext` rules are aggregated into a single rule-gate haiku LLM call. `background-agent-block` non-appealably denies `Agent(run_in_background=true)` so Agent work stays foregrounded.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details.
 

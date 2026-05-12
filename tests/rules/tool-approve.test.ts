@@ -72,7 +72,6 @@ describe("toolApproveRule ExitPlanMode short-circuit", () => {
       stateManager: {} as RuleContext["stateManager"],
       planMode: true,
       planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
-      subagent: false,
       ...overrides,
     };
   }
@@ -124,7 +123,6 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
       stateManager: {} as RuleContext["stateManager"],
       planMode: false,
       planModeCtx: { active: false, contextString: "" },
-      subagent: false,
       ...overrides,
     };
   }

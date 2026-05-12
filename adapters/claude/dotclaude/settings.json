@@ -84,28 +84,6 @@
           }
         ]
       }
-    ],
-    "SubagentStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/claude/hooks/subagent-start.js"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node $AGENT_FRAMEWORK_ROOT/dist/adapters/claude/hooks/subagent-stop.js"
-          }
-        ]
-      }
     ]
   }
 }

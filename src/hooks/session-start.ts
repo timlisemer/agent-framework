@@ -1,11 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { isSubagent } from "../utils/subagent-detector.js";
 import {
   getSessionDir,
   getSessionState,
-  resetActiveSubagents,
   sessionStateDefaults,
 } from "../utils/session-store.js";
 import type { AdapterEncoder } from "../adapter/types.js";
@@ -69,21 +67,6 @@ async function exitSessionStart(
 
 export async function mainSessionStart(input: SessionStartHookInput, encoder: AdapterEncoder): Promise<void> {
   const { source, transcript_path } = input;
-
-  // Reset subagent counter on startup -- leaked counters from crashed
-  // subagents must not poison the new session
-  if (source === "startup") {
-    try {
-      const earlySessionDir = getSessionDir(transcript_path);
-      resetActiveSubagents(earlySessionDir);
-    } catch {}
-  }
-
-  if (isSubagent(transcript_path)) {
-    const out = encoder.encodeOk("SessionStart");
-    await exitAfterFlush(out.exitCode, out.stdout);
-    return;
-  }
 
   const sessionDir = getSessionDir(transcript_path);
   const statePath = path.join(sessionDir, "state.json");

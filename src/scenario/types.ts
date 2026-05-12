@@ -20,9 +20,7 @@ export type HookEventName =
   | "Stop"
   | "UserPromptSubmit"
   | "SessionStart"
-  | "PostToolUseFailure"
-  | "SubagentStart"
-  | "SubagentStop";
+  | "PostToolUseFailure";
 
 /**
  * Reason-text assertion clauses. All present clauses must hold (AND); multiple
@@ -196,9 +194,6 @@ export interface ScenarioEnv {
   permission_mode?: PermissionMode;
   /** Permission mode used only for the synthetic SessionStart preamble. */
   session_start_permission_mode?: PermissionMode;
-  /** When true, the materialized transcript filename is prefixed "agent-"
-   *  so detectSubagent() returns true via the filename short-circuit. */
-  subagent?: boolean;
   /** CLAUDE_PROJECT_DIR / hook cwd. Defaults to the scenario run dir. */
   cwd?: string;
   /** Hook timeout in milliseconds. Defaults to 60000. */
@@ -576,8 +571,6 @@ export function validateScenario(raw: unknown): Scenario {
     "UserPromptSubmit",
     "SessionStart",
     "PostToolUseFailure",
-    "SubagentStart",
-    "SubagentStop",
   ];
   if (!validHooks.includes(target.hook as HookEventName)) {
     throw new Error(
@@ -933,9 +926,6 @@ export function validateScenario(raw: unknown): Scenario {
         );
       }
     }
-    if (env.subagent !== undefined && typeof env.subagent !== "boolean") {
-      throw new Error("scenario.env.subagent must be a boolean");
-    }
     if (env.cwd !== undefined && typeof env.cwd !== "string") {
       throw new Error("scenario.env.cwd must be a string");
     }
@@ -998,8 +988,6 @@ export function validateScenario(raw: unknown): Scenario {
     UserPromptSubmit: ["ok", "error"],
     SessionStart: ["ok", "error"],
     PostToolUseFailure: ["ok", "error"],
-    SubagentStart: ["ok", "error"],
-    SubagentStop: ["ok", "error"],
   };
   if (!vocab[hook].includes(expect.expected as string)) {
     throw new Error(

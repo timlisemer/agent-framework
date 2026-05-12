@@ -1,5 +1,4 @@
 import * as fs from "fs";
-import { isSubagent } from "./subagent-detector.js";
 import { getSessionDir, appendToolLog } from "./session-store.js";
 
 type MessageKind = "user" | "ai" | "tool";
@@ -69,9 +68,7 @@ async function writeSynthetic(
   const entry = buildEntry(kind, source, content);
   await fs.promises.appendFile(transcriptPath, JSON.stringify(entry) + "\n");
 
-  // 2. Append to tool log (main agent only)
-  if (isSubagent(transcriptPath)) return;
-
+  // 2. Append to tool log
   const sessionDir = getSessionDir(transcriptPath);
   await appendToolLog(sessionDir, {
     ts: Date.now(),

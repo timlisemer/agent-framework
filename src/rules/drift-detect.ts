@@ -13,10 +13,6 @@ export const driftDetectRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.subagent) {
-      return null;
-    }
-
     // Scope drift counting to the current user turn. Every UserPromptSubmit
     // bumps lastUserMessageTimestamp, so prior-turn allowed edits no longer
     // count toward the warning threshold — drift counters reset per turn.

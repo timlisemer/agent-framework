@@ -2,7 +2,6 @@ import type { PreToolRule } from "./types.js";
 import { respondFirstRule } from "./respond-first.js";
 import { lowRiskRule } from "./low-risk.js";
 import { planModeBlockRule } from "./plan-mode-block.js";
-import { subagentRule } from "./subagent.js";
 import { backgroundAgentBlockRule } from "./background-agent-block.js";
 import { questionValidateRule } from "./question-validate.js";
 import { forceCheckRequiredRule } from "./force-check-required.js";
@@ -33,7 +32,6 @@ export const ALL_RULES: PreToolRule[] = [
   respondFirstRule,
   lowRiskRule,
   planModeBlockRule,
-  subagentRule,
   backgroundAgentBlockRule,
   questionValidateRule,
   forceCheckRequiredRule,

@@ -424,7 +424,6 @@ server.registerTool(
       stateManager,
       planMode: false,
       planModeCtx: { active: false, contextString: "" },
-      subagent: false,
     };
     const result = await evaluateRules([validateIntentRule], ctx, "PreToolUse");
     const text =

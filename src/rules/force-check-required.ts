@@ -20,7 +20,6 @@ export const forceCheckRequiredRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.subagent) return null;
     if (!ctx.state.forceCheckPending) return null;
     const spec = activeSpec();
     const rawName = ctx.rawToolName ?? ctx.toolName;

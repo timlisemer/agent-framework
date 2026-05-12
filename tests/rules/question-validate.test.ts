@@ -61,7 +61,6 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
     stateManager: {} as RuleContext["stateManager"],
     planMode: false,
     planModeCtx: { active: false, contextString: "" },
-    subagent: false,
     ...overrides,
   };
 }
@@ -73,13 +72,6 @@ describe("questionValidateRule — deterministic null paths", () => {
 
   it("returns null when toolName is not AskUserQuestion", async () => {
     const ctx = makeCtx({ toolName: "Bash" });
-    const result = await questionValidateRule.check(ctx);
-    expect(result).toBeNull();
-    expect(mockRunAgent).not.toHaveBeenCalled();
-  });
-
-  it("returns null when subagent is true", async () => {
-    const ctx = makeCtx({ subagent: true });
     const result = await questionValidateRule.check(ctx);
     expect(result).toBeNull();
     expect(mockRunAgent).not.toHaveBeenCalled();

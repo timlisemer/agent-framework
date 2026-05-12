@@ -3,7 +3,6 @@ import { writeTool } from "../utils/synthetic.js";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
 import { getPlanModeContext } from "../utils/plan-mode-detector.js";
-import { isSubagent } from "../utils/subagent-detector.js";
 import { readTranscriptExact } from "../utils/transcript.js";
 import { FIRST_RESPONSE_STOP_COUNTS } from "../utils/transcript-presets.js";
 import { evaluateRulesForStop, ALL_RULES } from "../rules/index.js";
@@ -129,7 +128,6 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
     stateManager,
     planMode,
     planModeCtx: getPlanModeContext(planMode),
-    subagent: isSubagent(input.transcript_path),
     assistantText: assistantText ?? getMostRecentMessage(tx.assistant).content,
     userText: getMostRecentMessage(tx.user).content,
   };

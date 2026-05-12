@@ -4,7 +4,6 @@
  * for RESTRICTED_MCPS. Consumed (transitively) by:
  *  - isLowRiskTool (src/rules/utils.ts) — excludes from low-risk auto-approve
  *  - tool-approve  (src/rules/tool-approve.ts) — hard-deny without auth
- *  - subagent      (src/rules/subagent.ts)    — hard-deny without auth
  *
  * All keys and values are CANONICAL names. Adapter wire spellings live
  * only inside adapters/. Generic code never sees wire names.

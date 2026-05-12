@@ -24,7 +24,7 @@ export const respondFirstRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.subagent || ctx.state.respondFirstChecked) {
+    if (ctx.state.respondFirstChecked) {
       return null;
     }
 

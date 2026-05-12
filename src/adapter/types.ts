@@ -15,9 +15,7 @@ export type EventName =
   | "Stop"
   | "UserPromptSubmit"
   | "SessionStart"
-  | "PostToolUseFailure"
-  | "SubagentStart"
-  | "SubagentStop";
+  | "PostToolUseFailure";
 
 /** Provider-specific stdout shapes. */
 export interface AdapterEncoder {

@@ -32,7 +32,6 @@ import { runAgentWithRetryAndTelemetry } from "../../utils/agent-runner.js";
 import { PLAN_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
-import { isSubagent } from "../../utils/subagent-detector.js";
 import { getContentBlacklistHighlights } from "../../utils/command-patterns.js";
 import {
   filterBlacklistOutsideManualVerification,
@@ -57,14 +56,13 @@ const RULE_VIOLATION_CATEGORY_RE =
  * @param toolName - The tool being used (Write or Edit)
  * @param toolInput - The tool input with content or old_string/new_string
  * @param conversationContext - Formatted conversation context
- * @param transcriptPath - Path to the transcript file (for subagent detection)
  * @param workingDir - Working directory for context
  * @param hookName - Hook that triggered this check (for telemetry)
  * @returns Approval result with optional drift feedback
  *
  * @example
  * ```typescript
- * const result = await checkPlanIntent(currentPlan, "Edit", toolInput, context, transcriptPath, cwd, "PreToolUse");
+ * const result = await checkPlanIntent(currentPlan, "Edit", toolInput, context, cwd, "PreToolUse");
  * if (!result.approved) {
  *   console.log('Plan drift:', result.reason);
  * }
@@ -75,17 +73,10 @@ export async function checkPlanIntent(
   toolName: "Write" | "Edit",
   toolInput: { content?: string; old_string?: string; new_string?: string },
   conversationContext: string,
-  transcriptPath: string,
   workingDir: string,
   hookName: string,
   mode: "edit" | "exit" = "edit"
 ): Promise<{ approved: boolean; reason?: string }> {
-  // Skip plan validation for subagents (Task-spawned agents)
-  if (isSubagent(transcriptPath)) {
-    logFastPathApproval("plan-validate", hookName, toolName, workingDir, "Subagent skip");
-    return { approved: true };
-  }
-
   // No conversation yet - nothing to validate against
   if (!conversationContext.trim()) {
     logFastPathApproval("plan-validate", hookName, toolName, workingDir, "No conversation context");

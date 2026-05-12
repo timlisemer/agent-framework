@@ -23,7 +23,6 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
     } as unknown as RuleContext["stateManager"],
     planMode: false,
     planModeCtx: { active: false, contextString: "" },
-    subagent: false,
     ...overrides,
   };
 }

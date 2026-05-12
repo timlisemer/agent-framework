@@ -113,8 +113,8 @@ export function runConfirmPrefilter(
       // regexes are deliberately substring matchers; without this guard a
       // backtick-quoted shell command in a test fixture or a `//` comment
       // quoting a code example produces a false positive. Mirrors the same
-      // strip-then-test pattern used in src/utils/command-patterns.ts and
-      // src/rules/subagent.ts. Greedy non-nested replace is sufficient for
+      // strip-then-test pattern used in src/utils/command-patterns.ts.
+      // Greedy non-nested replace is sufficient for
       // the false-positive classes seen in practice; full parser-grade
       // quote handling is out of scope.
       const codeOnly = content

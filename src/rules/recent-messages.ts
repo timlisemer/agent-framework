@@ -10,7 +10,6 @@ export const recentMessagesRule: PreToolRule = {
   promptSection: `When RECENT USER MESSAGES contains 2+ entries, the newest may be a clarification or side-task nested under an earlier request. APPROVE a tool call that serves ANY listed message; only DENY if every message contradicts the tool call. Treat the latest as a replacement intent only when it explicitly retracts a prior task ("forget that", "never mind", "cancel that") or names a fundamentally different top-level task.`,
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.subagent) return null;
     const tx = await readTranscriptExact(ctx.transcriptPath, {
       counts: { user: 3 },
       excludeSlashCommandPrompts: true,

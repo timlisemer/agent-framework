@@ -34,10 +34,6 @@ DENY if:
 NO error can be ignored. Every denial must be acknowledged before moving on.`,
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (ctx.subagent) {
-      return null;
-    }
-
     // Read recent tool log for denials. A later successful framework
     // check/commit/push/confirm satisfies older workaround denials, matching
     // pre-tool-use's forceCheckPending clear semantics.

@@ -209,8 +209,8 @@ export function stripQuotedRegions(s: string): string {
   return s.replace(/'[^']*'|"[^"]*"/g, (m) => " ".repeat(m.length));
 }
 
-// Commands allowed for read-only Bash use. Shared by subagent gating and
-// prediction-block so the same inspection/navigation surface stays consistent.
+// Commands allowed for read-only Bash use. Shared by Bash policy callers so
+// the same inspection/navigation surface stays consistent.
 export const READ_ONLY_BASH_COMMANDS: ReadonlySet<string> = new Set([
   "ls", "tree", "pwd", "dirname", "basename", "realpath", "readlink",
   "cat", "grep", "rg", "find", "fd", "sed", "awk", "nl",
@@ -308,8 +308,8 @@ function validateReadOnlyCommandHead(tokens: string[]): { allowed: true } | { al
   if (firstToken.includes("=")) {
     return { allowed: false, reason: `inline env assignment not allowed: ${firstToken}` };
   }
-  // No relative paths (closes `./grep` laundering where a subagent drops an
-  // attacker-controlled binary named `grep` in cwd).
+  // No relative paths (closes `./grep` laundering where an attacker-controlled
+  // binary named `grep` is dropped in cwd).
   if (firstToken.includes("/") && !firstToken.startsWith("/")) {
     return { allowed: false, reason: `relative path execution not allowed: ${firstToken}` };
   }

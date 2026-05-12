@@ -61,7 +61,7 @@ export const scenarioSchema = z.object({
     }),
   ])).min(1),
   target: z.object({
-    hook: z.enum(["PreToolUse", "PostToolUse", "Stop", "UserPromptSubmit", "SessionStart", "PostToolUseFailure", "SubagentStart", "SubagentStop"]),
+    hook: z.enum(["PreToolUse", "PostToolUse", "Stop", "UserPromptSubmit", "SessionStart", "PostToolUseFailure"]),
     tool_use_ref: z.union([z.string(), z.literal("last")]).optional(),
     prompt_override: z.string().optional(),
     batch_visible_through: z.number().int().nonnegative().optional(),
@@ -70,7 +70,6 @@ export const scenarioSchema = z.object({
   env: z.object({
     permission_mode: z.enum(["default", "plan", "acceptEdits", "bypassPermissions", "dontAsk"]).optional(),
     session_start_permission_mode: z.enum(["default", "plan", "acceptEdits", "bypassPermissions", "dontAsk"]).optional(),
-    subagent: z.boolean().optional(),
     cwd: z.string().optional(),
     timeout_ms: z.number().optional(),
     adapter: z.string().optional(),

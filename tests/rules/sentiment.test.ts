@@ -114,7 +114,6 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
     stateManager,
     planMode: false,
     planModeCtx: { active: false, contextString: "" },
-    subagent: false,
     ...overrides,
   };
 }
@@ -128,13 +127,6 @@ describe("sentimentRule — metadata", () => {
 describe("sentimentRule — deterministic null paths", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it("returns null when ctx.subagent is true", async () => {
-    const ctx = makeCtx({ subagent: true });
-    const result = await sentimentRule.check(ctx);
-    expect(result).toBeNull();
-    expect(mockRunAgent).not.toHaveBeenCalled();
   });
 
   it("returns null when ctx.userPrompt is empty string", async () => {

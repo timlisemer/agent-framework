@@ -16,7 +16,7 @@ export const lowRiskRule: PreToolRule = {
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     // Synthetic message for entering plan mode (side effect before auto-approve)
-    if (ctx.toolName === "EnterPlanMode" && !ctx.subagent) {
+    if (ctx.toolName === "EnterPlanMode") {
       await writeTool(
         ctx.transcriptPath,
         ctx.sessionId,

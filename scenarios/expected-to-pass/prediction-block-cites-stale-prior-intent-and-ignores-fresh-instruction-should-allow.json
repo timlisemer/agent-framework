@@ -627,8 +627,7 @@
   },
   "env": {
     "cwd": "/home/tim/Coding/nixos",
-    "permission_mode": "plan",
-    "subagent": false
+    "permission_mode": "plan"
   },
   "seed_state": {
     "currentPrediction": {

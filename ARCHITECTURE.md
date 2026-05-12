@@ -37,7 +37,6 @@ src/                                # TypeScript source
     index.ts                        # ALL_RULES barrel export
     respond-first.ts                # Priority 5:   AI must respond before tools (deterministic)
     plan-mode-block.ts              # Priority 15:  Block writes in plan mode; fast-allow plan files
-    subagent.ts                     # Priority 20:  Subagent tool approval
     background-agent-block.ts       # Priority 25:  Deny Agent(run_in_background=true) from main session
     prediction-question-judge.ts    # Priority 28:  Block stalling AskUserQuestion under frustration
     question-validate.ts            # Priority 30:  Validate AskUserQuestion
@@ -66,8 +65,6 @@ src/                                # TypeScript source
     session-start.ts                # SessionStart hook (lifecycle)
     user-prompt-submit.ts           # UserPromptSubmit hook
     post-tool-use-failure.ts        # PostToolUseFailure hook
-    subagent-start.ts               # SubagentStart hook
-    subagent-stop.ts                # SubagentStop hook
 
   scenario/                         # Scenario testing + capture pipeline
     types.ts                        # Scenario schema + validateScenario
@@ -324,8 +321,7 @@ Tool call received
 ├─> Rule pipeline (evaluateRules):
 │   ├─> respond-first (5)     Fast deny if no text before tools (deterministic)
 │   ├─> plan-mode-block (15)  Fast deny writes in plan mode; fast-allow plan files
-│   ├─> subagent (20)         Subagent tool approval
-│   ├─> background-agent-block (25) Fast deny Agent(run_in_background=true) from main session
+│   ├─> background-agent-block (25) Fast deny Agent(run_in_background=true)
 │   ├─> prediction-question-judge (28) Block stalling AskUserQuestion under frustration
 │   ├─> question-validate (30) Validate AskUserQuestion
 │   ├─> force-check-required (32) Lock to mcp__check after workaround denial
@@ -364,7 +360,7 @@ add to `ALL_RULES` in `src/rules/index.ts`, add display name to statusline.
 
 ### Pipeline: one evaluator, one LLM call
 
-Every tool call runs every rule in `src/rules/index.ts`'s `ALL_RULES`. Rules either short-circuit with `fastAllow`/`fastDeny` (pure TypeScript, <10ms) or return `llmContext`. The evaluator aggregates every triggered rule's `llmContext` into a SINGLE rule-gate haiku call (`rules/evaluator.ts:99–135`). There is no sync-vs-lazy bifurcation — every rule participates on every call (except subagents, which use a dedicated lightweight path via `subagentRule` at priority 20 with `skipLlmOnClean: true`).
+Every tool call runs every rule in `src/rules/index.ts`'s `ALL_RULES`. Rules either short-circuit with `fastAllow`/`fastDeny` (pure TypeScript, <10ms) or return `llmContext`. The evaluator aggregates every triggered rule's `llmContext` into a SINGLE rule-gate haiku call (`rules/evaluator.ts:99–135`). There is no sync-vs-lazy bifurcation: every rule participates on every call.
 
 ## Shared Utilities
 
@@ -515,9 +511,9 @@ Hooks execute in this order during a session:
 | `PostToolUseFailure` | After a tool call fails | Log failure, track error patterns |
 | `Stop` | AI attempts to stop responding | Validate response completeness |
 
-### Subagent Isolation
+### Background Agent Policy
 
-Task-spawned subagents (detected via transcript path patterns) use a dedicated lightweight path through `subagentRule` at priority 20 with `skipLlmOnClean: true`.
+`background-agent-block` denies `Agent` calls with `run_in_background=true` as a non-appealable foreground-only Agent policy.
 
 ### Removed Components
 

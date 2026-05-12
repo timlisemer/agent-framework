@@ -7,7 +7,6 @@
 
 import { trackAgentExecution, extractDecision } from "./telemetry-tracker.js";
 import { getTranscriptPath } from "./execution-context.js";
-import { isSubagent } from "./subagent-detector.js";
 import {
   updateStatusLineState,
   markAgentStarted,
@@ -96,7 +95,7 @@ export interface AgentLog {
  */
 export function logAgentDecision(log: AgentLog): void {
   const transcriptPath = getTranscriptPath();
-  const agentName = transcriptPath && isSubagent(transcriptPath) ? `sub:${log.agent}` : log.agent;
+  const agentName = log.agent;
 
   trackAgentExecution({
     agentName,
@@ -517,7 +516,7 @@ export function logFastPathDeny(
  */
 export function logAgentStarted(agent: string, toolName: string): void {
   const transcriptPath = getTranscriptPath();
-  const agentName = transcriptPath && isSubagent(transcriptPath) ? `sub:${agent}` : agent;
+  const agentName = agent;
   if (transcriptPath) {
     const promise = markAgentStarted({
       agent: agentName,

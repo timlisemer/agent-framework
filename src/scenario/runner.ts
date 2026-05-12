@@ -78,8 +78,6 @@ function hookScriptName(event: HookEventName): string {
     UserPromptSubmit: "user-prompt-submit",
     SessionStart: "session-start",
     PostToolUseFailure: "post-tool-use-failure",
-    SubagentStart: "subagent-start",
-    SubagentStop: "subagent-stop",
   };
   return map[event];
 }
@@ -499,19 +497,6 @@ function buildHookInput(scenario: Scenario, ctx: BuildInputCtx): Record<string, 
         error: "",
         is_interrupt: false,
       };
-    case "SubagentStart":
-      return {
-        ...base,
-        agent_id: "scenario-agent",
-        agent_type: "scenario",
-      };
-    case "SubagentStop":
-      return {
-        ...base,
-        agent_id: "scenario-agent",
-        agent_transcript_path: ctx.transcriptPath,
-        stop_hook_active: false,
-      };
   }
 }
 
@@ -529,8 +514,6 @@ function parseDecisionForHook(
     case "UserPromptSubmit":
     case "SessionStart":
     case "PostToolUseFailure":
-    case "SubagentStart":
-    case "SubagentStop":
       return parseExitCodeDecision(hookResult, timeoutMs);
   }
 }
@@ -742,15 +725,6 @@ async function main() {
   fs.rmSync(cacheDir, { recursive: true, force: true });
   fs.mkdirSync(cacheDir, { recursive: true });
 
-  // Deterministic "no subagents active" state for checkCounterFallback. When
-  // env.subagent === true the filename short-circuit fires first and this
-  // file is ignored; when false the counter fallback reads this and returns
-  // {count:0, isSubagent:false}.
-  fs.writeFileSync(
-    path.join(cacheDir, "active-subagents.json"),
-    JSON.stringify({ agents: [] }),
-  );
-
   // Seed state.json from scenario.seed_state BEFORE session-start fires so the
   // hook pipeline observes the prior-turn session state. Validation guarantees
   // every required field is present; only currentPrediction.timestamp is
@@ -833,9 +807,7 @@ async function main() {
   fs.mkdirSync(cwd, { recursive: true });
   writeSetupFiles(cwd, scenario);
   const sessionId = "scenario-" + scenario.name;
-  const transcriptBasename = scenario.env?.subagent
-    ? `agent-${scenario.name}.jsonl`
-    : `scenario-${scenario.name}.jsonl`;
+  const transcriptBasename = `scenario-${scenario.name}.jsonl`;
   const transcriptPath = path.join(cacheDir, transcriptBasename);
 
   // Set the adapter for this scenario run. This must happen BEFORE

@@ -19,7 +19,6 @@ import { runAgentWithRetryAndTelemetry } from "../../utils/agent-runner.js";
 import { CLAUDE_MD_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
-import { isSubagent } from "../../utils/subagent-detector.js";
 import { getContentBlacklistHighlights } from "../../utils/command-patterns.js";
 import { getRuleViolationHighlights } from "../../utils/content-patterns.js";
 
@@ -29,14 +28,13 @@ import { getRuleViolationHighlights } from "../../utils/content-patterns.js";
  * @param currentContent - The full current file content (null if new file)
  * @param toolName - The tool being used (Write or Edit)
  * @param toolInput - The tool input with content or old_string/new_string
- * @param transcriptPath - Path to the transcript file (for subagent detection)
  * @param workingDir - Working directory for context
  * @param hookName - Hook that triggered this check (for telemetry)
  * @returns Validation result with approved status and optional reason
  *
  * @example
  * ```typescript
- * const result = await validateClaudeMd(currentContent, "Edit", toolInput, transcriptPath, cwd, "PreToolUse");
+ * const result = await validateClaudeMd(currentContent, "Edit", toolInput, cwd, "PreToolUse");
  * if (!result.approved) {
  *   console.log('CLAUDE.md drift:', result.reason);
  * }
@@ -46,16 +44,9 @@ export async function validateClaudeMd(
   currentContent: string | null,
   toolName: "Write" | "Edit",
   toolInput: { content?: string; old_string?: string; new_string?: string },
-  transcriptPath: string,
   workingDir: string,
   hookName: string
 ): Promise<{ approved: boolean; reason?: string }> {
-  // Skip CLAUDE.md validation for subagents (Task-spawned agents)
-  if (isSubagent(transcriptPath)) {
-    logFastPathApproval("claude-md-validate", hookName, toolName, workingDir, "Subagent skip");
-    return { approved: true };
-  }
-
   // Format proposed edit based on tool type
   const proposedEdit =
     toolName === "Write"

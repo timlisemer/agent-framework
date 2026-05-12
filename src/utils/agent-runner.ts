@@ -43,10 +43,8 @@
  *
  * ## SECURITY CONSIDERATIONS
  *
- * SDK mode is restricted to Read + classified read-only Bash. The pre-tool-use hook
- * treats SDK agents as subagents (via AGENT_FRAMEWORK_SDK_AGENT env marker)
- * and gates Bash through the same Bash policy classifier applied to Task-spawned
- * subagents in src/rules/subagent.ts:
+ * SDK mode is restricted to Read + classified read-only Bash. SDK tool calls
+ * flow through the normal hook and rule pipeline:
  * - Bash is allowed only for read-only search/navigation and safe read-only pipelines
  * - Mutation, execution, and network commands are denied deterministically
  * - No Write/Edit access - prevents file modifications
@@ -105,7 +103,7 @@ import {
  * These tools allow code investigation without modification:
  * - Read: Read file contents
  * - Bash: Classified read-only commands only. The pre-tool-use hook gates
- *   Bash through the subagent Bash policy classifier (ls, grep, rg, find,
+ *   Bash through the normal Bash policy classifier (ls, grep, rg, find,
  *   wc, sort, uniq, cut, tr, head, tail, file, stat, jq, echo, printf,
  *   safe read-only pipelines, and read-only-heavy nix-eval-jobs).
  *   Mutation, execution, build/compile, and network commands are denied deterministically.
@@ -204,11 +202,11 @@ export interface AgentConfig {
    *
    * By default, SDK mode has Read and read-only Bash.
    * Use this to enable additional tools like:
-   * - 'Task': Allow spawning built-in subagents (Explore, Plan, general-purpose)
+   * - 'Task': Allow spawning built-in agents (Explore, Plan, general-purpose)
    * - 'WebFetch': Fetch web content
    * - 'WebSearch': Search the web
    *
-   * @example extraTools: ['Task'] // Enable subagent spawning
+   * @example extraTools: ['Task'] // Enable agent spawning
    */
   extraTools?: string[];
 
@@ -538,7 +536,7 @@ async function runDirectAgent(
  * - Read: View file contents
  * - Bash: Classified read-only commands only (simple inspection,
  *   read-only-heavy evaluation such as nix-eval-jobs, and safe read-only
- *   pipelines). Gated by the pre-tool-use hook via the subagent Bash policy.
+ *   pipelines). Gated by the pre-tool-use hook via the normal Bash policy.
  *
  * Git data (status/diff/log/show) must be passed via the prompt context
  * rather than gathered via bash git commands -- those are denied by the hook.
@@ -569,12 +567,8 @@ async function runSdkAgent(
 
   // Prepare environment for subprocess
   // For subscription: pass OAuth token so Claude Code uses subscription auth
-  // AGENT_FRAMEWORK_SDK_AGENT: marker read by subagent-detector.ts (method 0)
-  // so SDK agents are treated as subagents by the pre-tool-use hook. Gates
-  // Bash through the subagent Bash policy classifier in src/rules/subagent.ts.
   const subprocessEnv = {
     ...process.env,
-    AGENT_FRAMEWORK_SDK_AGENT: config.name,
     // Clear OpenRouter-specific vars for subscription mode
     ...(provider.type === PROVIDER_TYPES.CLAUDE_SUBSCRIPTION
       ? {

@@ -68,8 +68,7 @@
   },
   "env": {
     "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default",
-    "subagent": false
+    "permission_mode": "default"
   },
   "seed_state": {
     "currentPrediction": {

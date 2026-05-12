@@ -1,5 +1,4 @@
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { isSubagent } from "../utils/subagent-detector.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
 import { getPlanModeContext } from "../utils/plan-mode-detector.js";
 import { evaluateRulesForUserPromptSubmit, ALL_RULES } from "../rules/index.js";
@@ -33,12 +32,6 @@ import { appendSessionInjections, combineInjectionMessages } from "../utils/sess
 export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookInput, encoder: AdapterEncoder): Promise<void> {
   const host = resolveHostContext(input);
   const projectDir = host.projectDir;
-
-  if (isSubagent(input.transcript_path)) {
-    const out = encoder.encodeOk("UserPromptSubmit");
-    await exitAfterFlush(out.exitCode, out.stdout);
-    return;
-  }
 
   const sessionDir = getSessionDir(input.transcript_path);
 
@@ -150,7 +143,6 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
     stateManager,
     planMode,
     planModeCtx: getPlanModeContext(planMode),
-    subagent: false,
   };
 
   const workflowInvocation = spec.recognizeWorkflowInvocation(input.prompt);
