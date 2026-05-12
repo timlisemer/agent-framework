@@ -353,7 +353,7 @@ Tool call received
 │
 ├─> Rewind detection (after rules, before validators)
 │
-├─> plan-validate (Sonnet) if writing to ~/.claude/plans/ (Claude-specific)
+├─> plan-validate (Sonnet) if writing to the active adapter's plans root
 ├─> claude-md-validate (Sonnet) for CLAUDE.md edits
 │
 └─> Post-allow bookkeeping (tool count, ExitPlanMode cleanup)

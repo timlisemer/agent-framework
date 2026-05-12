@@ -32,6 +32,14 @@ export function writeCurrentPlanSidecar(
   writeJson(sessionCurrentPlanFile(sessionDir), descriptor);
 }
 
+export async function readPlanFileContent(planPath: string): Promise<string | null> {
+  try {
+    return await fs.promises.readFile(planPath, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
 export async function readCurrentPlan(
   input: CurrentPlanLookupInput,
 ): Promise<PlanSourceDescriptor | null> {
@@ -54,11 +62,7 @@ export async function readCurrentPlanContent(
 
   if (source.kind === "inline") return source.content;
 
-  try {
-    return await fs.promises.readFile(source.path, "utf-8");
-  } catch {
-    return null;
-  }
+  return readPlanFileContent(source.path);
 }
 
 export async function validateCurrentPlanExit(input: {
@@ -74,7 +78,7 @@ export async function validateCurrentPlanExit(input: {
 
   const content = source.kind === "inline"
     ? source.content
-    : await fs.promises.readFile(source.path, "utf-8").catch(() => "");
+    : await readPlanFileContent(source.path) ?? "";
   if (!content.trim()) return { approved: false, reason: "Cannot exit plan mode without a plan." };
 
   const planResult = await readTranscriptExact(input.transcriptPath, PLAN_VALIDATE_COUNTS);

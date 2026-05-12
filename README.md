@@ -91,7 +91,7 @@ The `commit` agent enforces the complete verification chain before committing.
 │  whenever a higher-priority rule has emitted llmContext, so the rule-gate
 │  aggregator's judgment is always authoritative.
 │
-├─ plan-validate: Check for plan drift on ~/.claude/plans writes (Claude-specific)
+├─ plan-validate: Check for plan drift on active adapter plan writes
 ├─ claude-md-validate: Validate CLAUDE.md edits
 │
 └─ Post-allow bookkeeping (tool count, ExitPlanMode cleanup)

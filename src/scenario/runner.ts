@@ -812,11 +812,11 @@ async function main() {
 
   // Materialize plan file when seed_state.planFile is set.
   // Per-scenario plan files live under ~/.agent-framework/test-runs/scenarios/<name>/plans/
-  // (not in the global ~/.claude/plans/) to avoid cross-scenario pollution.
-  // AGENT_FRAMEWORK_PLAN_DIR is set in the env so session-utils.resolvePlanPath
-  // finds the file there instead of ~/.claude/plans/.
+  // (not in the active adapter's global plans root) to avoid cross-scenario
+  // pollution. AGENT_FRAMEWORK_PLAN_DIR is set in the env so adapter plan
+  // source lookup finds the file there.
   // The transcript's first synthesized JSONL line carries `slug: <slug>` (see
-  // buildAllTranscriptLines) so resolvePlanPath -> extractSlugFromSession finds it.
+  // buildAllTranscriptLines) so adapter plan-source lookup can find it.
   let planFileCleanupPath: string | null = null;
   if (scenario.seed_state.planFile) {
     const planDir = scenarioPlansDir(scenario.name);

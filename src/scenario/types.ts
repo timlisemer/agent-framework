@@ -344,10 +344,10 @@ export interface Scenario {
     >;
     /**
      * Optional plan-file materialization. When set, the harness writes
-     * `~/.claude/plans/<slug>.md` with `content` BEFORE session-start fires,
-     * stamps `slug: <slug>` onto the first synthesized JSONL transcript line so
-     * `extractSlugFromSession` finds it, and unlinks the file in the run's
-     * `finally` block. Slug uniqueness is the scenario author's
+     * `<scenario run>/plans/<slug>.md` with `content` BEFORE session-start
+     * fires, stamps `slug: <slug>` onto the first synthesized JSONL transcript
+     * line so adapter plan-source lookup can find it, and unlinks the file in
+     * the run's `finally` block. Slug uniqueness is the scenario author's
      * responsibility — convention is to include the scenario fixture's
      * filename root.
      */

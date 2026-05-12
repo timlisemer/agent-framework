@@ -2,7 +2,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
-import { validatePlanEdit } from "../utils/plan-source.js";
+import { readPlanFileContent, validatePlanEdit } from "../utils/plan-source.js";
 import type { AdapterEncoder } from "../adapter/types.js";
 import { activeSpec } from "../adapter/spec.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
@@ -329,8 +329,8 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   }
 
   // Deterministic outside-project-root classification.
-  // - Plan files (~/.claude/plans/*.md): handled by the existing plan-validate
-  //   block below; NOT flagged here.
+  // - Plan files under the active adapter's plans root: handled by the
+  //   existing plan-validate block below; NOT flagged here.
   // - In-project files: normal flow.
   // - Otherwise (true outside-project, e.g. /etc/hosts): flag the context so
   //   downstream LLM gates inject a harsh "be extra conservative" warning.
@@ -427,7 +427,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
       const filePath = extractFilePath(toolName, toolInput);
 
     if (filePath) {
-      // Plan-validate: Write/Edit to ~/.claude/plans/
+      // Plan-validate: Write/Edit to the active adapter's plans root.
       if (
         (toolName === "Write" || toolName === "Edit") &&
         isPathInDirectory(filePath, host.plansRoot)
@@ -455,12 +455,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
           return;
         }
 
-        let currentPlan: string | null = null;
-        try {
-          currentPlan = await fs.promises.readFile(filePath, "utf-8");
-        } catch {
-          currentPlan = null;
-        }
+        const currentPlan = await readPlanFileContent(filePath);
         const validation = await runPlanValidation("edit", currentPlan);
 
         if (!validation.approved) {

@@ -12,7 +12,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { execFileSync, spawnSync } from "child_process";
+import { execFileSync, spawn, spawnSync } from "child_process";
 import {
   validateScenario,
   validateReasonMustExpectation,
@@ -140,6 +140,12 @@ function getNpxPath(): string {
   }
 }
 
+function filterHarnessStderr(stderr: string): string {
+  return stderr.split("\n").filter(
+    (line) => !line.includes("fatal: not a git repository") && !line.includes("GIT_DISCOVERY_ACROSS_FILESYSTEM")
+  ).join("\n");
+}
+
 /**
  * Low-level helper: spawn `npx tsx <root>/<scriptRelPath>` with args.
  * Shared by runReplayCommand and runScenarioCommand.
@@ -171,9 +177,7 @@ export function runHarnessCommand(
 
   const stdout = result.stdout || "";
   // Filter git discovery noise from stderr (AGENT_FRAMEWORK_ROOT may not be a git repo)
-  const stderr = (result.stderr || "").split("\n").filter(
-    (line) => !line.includes("fatal: not a git repository") && !line.includes("GIT_DISCOVERY_ACROSS_FILESYSTEM")
-  ).join("\n");
+  const stderr = filterHarnessStderr(result.stderr || "");
 
   // Spawn-level failure (binary not found, signal killed, timeout)
   if (result.error) {
@@ -213,12 +217,111 @@ export function runHarnessCommand(
   return output;
 }
 
+/**
+ * Async variant used by batch scenario runs. It preserves the sync wrapper's
+ * stdout/stderr behavior while allowing multiple scenario child processes to
+ * run concurrently under one batch-level MCP request.
+ */
+export function runHarnessCommandAsync(
+  scriptRelPath: string,
+  args: string[],
+  timeoutMs: number = 600000,
+  rootOverride?: string,
+): Promise<string> {
+  const root = rootOverride || getAgentFrameworkRoot();
+  const npxPath = getNpxPath();
+  const scriptPath = path.join(root, scriptRelPath);
+  const fullArgs = ["tsx", scriptPath, ...args];
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(npxPath, fullArgs, {
+      cwd: root,
+      env: {
+        ...process.env,
+        AGENT_FRAMEWORK_ROOT: root,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
+
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      finish(() => {
+        reject(
+          new Error(
+            `${scriptRelPath} timed out after ${Math.round(timeoutMs / 1000)}s. ` +
+            `Partial output:\n${(filterHarnessStderr(stderr) || stdout || "(none)").slice(0, 500)}`
+          ),
+        );
+      });
+    }, timeoutMs);
+
+    child.stdout.setEncoding("utf-8");
+    child.stderr.setEncoding("utf-8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      finish(() => {
+        reject(new Error(`${scriptRelPath} spawn failed: ${error.message}`));
+      });
+    });
+    child.on("close", (code, signal) => {
+      finish(() => {
+        const filteredStderr = filterHarnessStderr(stderr);
+        if (signal) {
+          reject(
+            new Error(
+              `${scriptRelPath} was killed by signal ${signal}. ` +
+              `Partial output:\n${(filteredStderr || stdout || "(none)").slice(0, 500)}`
+            ),
+          );
+          return;
+        }
+        if (code !== null && code !== 0 && code !== 1) {
+          reject(
+            new Error(
+              `${scriptRelPath} exited with code ${code}: ` +
+              `${(filteredStderr || stdout || "(no output)").slice(0, 1000)}`
+            ),
+          );
+          return;
+        }
+
+        const output = (stdout + (filteredStderr ? "\n" + filteredStderr : "")).trim();
+        if (!output) {
+          reject(new Error(`${scriptRelPath} produced no output — command may have failed silently`));
+          return;
+        }
+        resolve(output);
+      });
+    });
+  });
+}
+
 export function runReplayCommand(args: string[], timeoutMs: number = 600000, rootOverride?: string): string {
   return runHarnessCommand("src/scenario/replay.ts", args, timeoutMs, rootOverride);
 }
 
 export function runScenarioCommand(args: string[], timeoutMs: number = 300000, rootOverride?: string): string {
   return runHarnessCommand("src/scenario/runner.ts", args, timeoutMs, rootOverride);
+}
+
+export function runScenarioCommandAsync(args: string[], timeoutMs: number = 300000, rootOverride?: string): Promise<string> {
+  return runHarnessCommandAsync("src/scenario/runner.ts", args, timeoutMs, rootOverride);
 }
 
 // ─── Version ──────────────────────────────────────────────────────────────

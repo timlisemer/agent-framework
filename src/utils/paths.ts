@@ -84,23 +84,6 @@ export function claudeProjectsRoot(): string {
 }
 
 /**
- * ~/.claude/plans directory.
- */
-export function claudePlansRoot(): string {
-  return path.join(os.homedir(), ".claude", "plans");
-}
-
-/**
- * Return absolute path to a specific plan file by slug.
- * Honors AGENT_FRAMEWORK_PLAN_DIR env var (used by scenario runner to
- * redirect plan files away from the global ~/.claude/plans/).
- */
-export function claudePlanFile(slug: string): string {
-  const planDir = process.env.AGENT_FRAMEWORK_PLAN_DIR ?? claudePlansRoot();
-  return path.join(planDir, `${slug}.md`);
-}
-
-/**
  * Active host-agent config root (~/.claude or ~/.codex).
  */
 export function hostConfigRoot(): string {

@@ -30,6 +30,7 @@ import {
   readTestRunFile,
   runReplayCommand,
   runScenarioCommand,
+  runScenarioCommandAsync,
   getVersion,
   checkAndIncrementRunLimit,
   rollbackRunLimit,
@@ -48,6 +49,7 @@ import {
 
 const SINGLE_SCENARIO_TIMEOUT_MS = 300_000;
 const ALL_SCENARIOS_TIMEOUT_MS = 3_600_000;
+const ALL_SCENARIOS_CONCURRENCY = 8;
 
 // ─── Action Handlers ───────────────────────────────────────────────────────
 
@@ -260,11 +262,11 @@ function handleListScenarios(
  * `sourceFilter` scopes the batch to one source; slug-uniqueness is enforced
  * across all four sources regardless.
  */
-function handleRunScenarios(
+async function handleRunScenarios(
   scenarioNames: string[] | undefined,
   rootOverride?: string,
   sourceFilter?: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home",
-): string {
+): Promise<string> {
   type ScenarioResult = {
     name: string;
     source?: ScenarioSourceTag;
@@ -330,27 +332,33 @@ function handleRunScenarios(
     );
   }
 
-  const results: ScenarioResult[] = [];
-  for (const t of targets) {
+  const startedAt = Date.now();
+  const results = new Array<ScenarioResult>(targets.length);
+
+  async function runOne(t: ScenarioSource | { missing: string }, index: number): Promise<void> {
     if ("missing" in t) {
       const inScope = sourceFilter
         ? `source "${sourceFilter}"`
         : "home or fixtures/{expected-to-pass,fixture-bug,expected-to-fail}";
-      results.push({
+      results[index] = {
         name: t.missing,
         error: `scenario "${t.missing}" not found in ${inScope}`,
-      });
-      continue;
+      };
+      return;
     }
     if (t.error) {
-      results.push({ name: t.name, source: t.source, error: t.error });
-      continue;
+      results[index] = { name: t.name, source: t.source, error: t.error };
+      return;
     }
     try {
       fs.mkdirSync(t.outputDir, { recursive: true });
-      const raw = runScenarioCommand(
+      const remainingMs = ALL_SCENARIOS_TIMEOUT_MS - (Date.now() - startedAt);
+      if (remainingMs <= 0) {
+        throw new Error(`run_scenarios batch timed out after ${Math.round(ALL_SCENARIOS_TIMEOUT_MS / 1000)}s`);
+      }
+      const raw = await runScenarioCommandAsync(
         ["--scenario", t.inputPath, "--source", t.source],
-        ALL_SCENARIOS_TIMEOUT_MS,
+        Math.min(SINGLE_SCENARIO_TIMEOUT_MS, remainingMs),
         rootOverride,
       );
       try {
@@ -364,7 +372,7 @@ function handleRunScenarios(
           expectation_reality?: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null;
           expectation_reality_last_run_at?: string;
         };
-        results.push({
+        results[index] = {
           name: t.name,
           source: t.source,
           pass: parsed.pass,
@@ -375,29 +383,45 @@ function handleRunScenarios(
           ms: parsed.ms,
           expectation_reality: parsed.expectation_reality,
           expectation_reality_last_run_at: parsed.expectation_reality_last_run_at,
-        });
+        };
       } catch {
-        results.push({
+        results[index] = {
           name: t.name,
           source: t.source,
           error: `non-JSON output: ${raw.slice(0, 200)}`,
-        });
+        };
       }
     } catch (err: unknown) {
-      results.push({
+      results[index] = {
         name: t.name,
         source: t.source,
         error: err instanceof Error ? err.message : String(err),
-      });
+      };
     }
   }
 
-  const passed = results.filter((r) => r.pass === true).length;
-  const failed = results.filter(
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (next < targets.length) {
+      const index = next++;
+      await runOne(targets[index], index);
+    }
+  }
+  await Promise.all(
+    Array.from(
+      { length: Math.min(ALL_SCENARIOS_CONCURRENCY, targets.length) },
+      () => worker(),
+    ),
+  );
+
+  const compactResults = results.filter((r): r is ScenarioResult => r !== undefined);
+
+  const passed = compactResults.filter((r) => r.pass === true).length;
+  const failed = compactResults.filter(
     (r) => r.pass === false || r.error !== undefined,
   ).length;
   return JSON.stringify(
-    { total: results.length, passed, failed, results },
+    { total: compactResults.length, passed, failed, results: compactResults },
     null,
     2,
   );
@@ -559,7 +583,7 @@ export async function handleScenarioTester(input: TesterInput): Promise<string> 
         return handleRunScenario(input.scenario_name, input.scenario, input.working_dir);
 
       case "run_scenarios":
-        return handleRunScenarios(input.scenario_names, input.working_dir, input.scenario_source);
+        return await handleRunScenarios(input.scenario_names, input.working_dir, input.scenario_source);
 
       case "list_scenarios":
         return handleListScenarios(input.working_dir, input.scenario_source as "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home" | undefined);

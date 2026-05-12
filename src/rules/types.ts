@@ -32,7 +32,8 @@ export interface RuleContext {
   subagent: boolean;
   /**
    * Set by pre-tool-use.ts when the current file tool call targets an
-   * absolute path that is OUTSIDE projectDir AND is NOT a Claude plan file.
+   * absolute path that is OUTSIDE projectDir AND is NOT an active adapter
+   * plan file.
    * Deterministic classification. Downstream LLM gates (tool-approve,
    * rule-gate) read this and inject a harsh "be extra conservative" warning
    * into their prompts. Undefined means in-project, a plan file, or not a
