@@ -392,7 +392,7 @@ These patterns are detected automatically and represent hard rules:
 - cd command → DENY (no exceptions, use --cwd flags instead)
 - build/check commands → DENY (AIs must not run build/compile shell commands. Use the agent-framework check MCP instead.)
 - git write operations → DENY
-- Code execution (python, node, ruby, perl) → DENY (add to Makefile check target, then use the agent-framework check MCP)
+- Code execution (python, node, ruby, perl) → DENY (scripting language execution is not allowed from Bash)
 
 Do NOT approve blacklisted patterns even if the command "makes sense" or "seems useful".
 The blacklist exists precisely because these commands should never be used.
@@ -401,13 +401,8 @@ The blacklist exists precisely because these commands should never be used.
 
 When denying python/node/ruby/perl commands (especially complex ones like benchmarks, tests, or verification scripts):
 1. DENY the direct execution
-2. Suggest: "Add this command to your Justfile/Makefile 'check' target, then use the agent-framework check MCP"
-3. The check MCP tool runs the project's Justfile/Makefile check target and will execute these commands properly
-
-Example: python -c "from module import test; test(10, 16)" should be added to Justfile/Makefile:
-  check:
-      python -c "from module import test; test(10, 16)"
-Then the AI uses the agent-framework check MCP to run it.
+2. Suggest using dedicated internal tools, file edits, and read-only Bash inspection commands instead
+3. Do not redirect bare scripting language execution to the check MCP
 
 === UNIVERSAL RULES ===
 

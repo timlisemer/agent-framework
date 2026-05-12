@@ -332,8 +332,9 @@ describe("detectWorkaroundPattern", () => {
     expect(detectWorkaroundPattern("Bash", { command: "npm install express" })).toBe("install");
   });
 
-  it("returns 'code-exec' for 'python ' command", () => {
-    expect(detectWorkaroundPattern("Bash", { command: "python script.py" })).toBe("code-exec");
+  it("does not treat scripting language execution as a check-MCP workaround", () => {
+    expect(detectWorkaroundPattern("Bash", { command: "python script.py" })).toBeNull();
+    expect(detectWorkaroundPattern("Bash", { command: "node" })).toBeNull();
   });
 
   it("returns null for clean Bash command", () => {
@@ -384,6 +385,15 @@ describe("getBlacklistHighlights path redaction regression", () => {
 
   it("does not false-fire 'node' on 'ls node_modules/'", () => {
     expect(getBlacklistHighlights("Bash", { command: "ls node_modules/" })).toEqual([]);
+  });
+
+  it("still blocks bare scripting language commands without check MCP redirect", () => {
+    for (const command of ["node", "python", "perl"]) {
+      const highlights = getBlacklistHighlights("Bash", { command });
+      expect(highlights.some((h) => h.includes(`[BLACKLIST: ${command}]`))).toBe(true);
+      expect(highlights.some((h) => h.includes("Scripting language execution denied"))).toBe(true);
+      expect(highlights.some((h) => h.includes("check MCP"))).toBe(false);
+    }
   });
 
   it("still fires 'test command' on 'cargo test'", () => {

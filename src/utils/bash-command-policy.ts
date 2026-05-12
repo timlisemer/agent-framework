@@ -15,6 +15,8 @@ function checkMcpAction(): string {
   return `You must run the ${activeSpec().renderCheckMcpHint()}`;
 }
 
+const scriptingLanguageAction = "Scripting language execution denied. Use dedicated internal tools and read-only Bash commands instead.";
+
 function gitWorkflowAlternative(): string {
   const spec = activeSpec();
   const commit = spec.renderWorkflowInvocation("commit");
@@ -90,10 +92,15 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bjust\s+build\b/, name: "just build", alternative: checkMcpAction, redactPaths: true },
   { pattern: /\bnpm\s+run\s+build\b/, name: "npm build", alternative: checkMcpAction, redactPaths: true },
   { pattern: /\bnpm\s+run\s+(check|typecheck)\b/, name: "npm check/typecheck", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bpnpm\s+(?:run\s+)?build\b/, name: "pnpm build", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bpnpm\s+(?:run\s+)?(?:check|typecheck)\b/, name: "pnpm check/typecheck", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\byarn\s+(?:run\s+)?build\b/, name: "yarn build", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\byarn\s+(?:run\s+)?(?:check|typecheck)\b/, name: "yarn check/typecheck", alternative: checkMcpAction, redactPaths: true },
   { pattern: /\bbun\s+run\s+build\b/, name: "bun build", alternative: checkMcpAction, redactPaths: true },
   { pattern: /\bbun\s+run\s+(check|typecheck)\b/, name: "bun check/typecheck", alternative: checkMcpAction, redactPaths: true },
   { pattern: /\bcargo\s+build\b/, name: "cargo build", alternative: checkMcpAction, redactPaths: true },
   { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\bcargo\s+clippy\b/, name: "cargo clippy", alternative: checkMcpAction, redactPaths: true },
   { pattern: /\b(tsc|npx\s+tsc)\b/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?(?:npx\s+)?tsc\b|\bnpx\s+tsc\b|\btsc\s+(?:-[\w-]+|<PATH>))/, name: "tsc", alternative: checkMcpAction, redactPaths: true },
 
   // Package install commands - dependency-modifying, should not be run by AI
@@ -105,6 +112,7 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bnpm\s+run\s+lint\b/, name: "npm lint", alternative: checkMcpAction, redactPaths: true },
   { pattern: /\bbun\s+run\s+lint\b/, name: "bun lint", alternative: checkMcpAction, redactPaths: true },
   { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /\byarn\s+(run\s+)?lint\b/, name: "yarn lint", alternative: checkMcpAction, redactPaths: true },
 
   // Test commands - tests may not exist, use check for build verification
   // bashOnly: dedicated runners are caught by their own bare names; bare-word
@@ -140,16 +148,16 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bcargo\s+run\b/, name: "cargo run", alternative: "Run commands not allowed", redactPaths: true },
   { pattern: /\bgo\s+run\b/, name: "go run", alternative: "Run commands not allowed", redactPaths: true },
 
-  // Code execution commands - should be added to Justfile/Makefile check target.
+  // Code execution commands - denied as shell scripting language execution.
   // node contentPattern matches when the verb is at line start (after optional
   // indent / bullet / numbered-list marker), OR when the next token is a flag
   // or redacted <PATH> argument. Bare-prose use ("submenu node with ...") no
   // longer fires.
-  { pattern: /\bpython\s+(-c\s+)?/, name: "python", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bpython3\s+(-c\s+)?/, name: "python3", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bnode\s+(-e\s+)?/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?node\s+\S|\bnode\s+(?:-[\w-]+|<PATH>))/, name: "node", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bruby\s+(-e\s+)?/, name: "ruby", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bperl\s+(-e\s+)?/, name: "perl", alternative: checkMcpAction, redactPaths: true },
+  { pattern: /(?:^|[\s;&|])python(?:$|\s)/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?python\s+\S|\bpython\s+(?:-[\w-]+|<PATH>))/, name: "python", alternative: scriptingLanguageAction, redactPaths: true },
+  { pattern: /(?:^|[\s;&|])python3(?:$|\s)/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?python3\s+\S|\bpython3\s+(?:-[\w-]+|<PATH>))/, name: "python3", alternative: scriptingLanguageAction, redactPaths: true },
+  { pattern: /(?:^|[\s;&|])node(?:$|\s)/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?node\s+\S|\bnode\s+(?:-[\w-]+|<PATH>))/, name: "node", alternative: scriptingLanguageAction, redactPaths: true },
+  { pattern: /(?:^|[\s;&|])ruby(?:$|\s)/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?ruby\s+\S|\bruby\s+(?:-[\w-]+|<PATH>))/, name: "ruby", alternative: scriptingLanguageAction, redactPaths: true },
+  { pattern: /(?:^|[\s;&|])perl(?:$|\s)/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?perl\s+\S|\bperl\s+(?:-[\w-]+|<PATH>))/, name: "perl", alternative: scriptingLanguageAction, redactPaths: true },
 ];
 
 /**
@@ -165,6 +173,14 @@ export const WORKAROUND_PATTERNS: Record<string, { variants: string[]; redactPat
       "npx tsc",
       "npm run check",
       "npm run typecheck",
+      "pnpm check",
+      "pnpm run check",
+      "pnpm typecheck",
+      "pnpm run typecheck",
+      "yarn check",
+      "yarn run check",
+      "yarn typecheck",
+      "yarn run typecheck",
       "bun run check",
       "bun run typecheck",
       "cargo check",
@@ -172,19 +188,15 @@ export const WORKAROUND_PATTERNS: Record<string, { variants: string[]; redactPat
     redactPaths: true,
   },
   build: {
-    variants: ["make build", "just build", "npm run build", "bun run build", "cargo build"],
+    variants: ["make build", "just build", "npm run build", "pnpm build", "pnpm run build", "yarn build", "yarn run build", "bun run build", "cargo build"],
     redactPaths: true,
   },
   lint: {
-    variants: ["eslint", "prettier", "npm run lint", "bun run lint", "alejandra"],
+    variants: ["eslint", "prettier", "npm run lint", "pnpm lint", "pnpm run lint", "yarn lint", "yarn run lint", "bun run lint", "cargo clippy", "alejandra"],
     redactPaths: true,
   },
   test: {
     variants: ["test", "vitest", "jest", "mocha", "pytest", "ava"],
-    redactPaths: true,
-  },
-  "code-exec": {
-    variants: ["python ", "python3 ", "node ", "ruby ", "perl "],
     redactPaths: true,
   },
   install: {
@@ -505,21 +517,22 @@ export const CHECK_EQUIVALENTS: Record<string, string[]> = {
   "just build": ["just build", "cargo check", "tsc"],
   "npm build": ["tsc", "npx tsc", "npm run build"],
   "npm check/typecheck": ["tsc", "npx tsc", "typecheck"],
+  "pnpm build": ["tsc", "pnpm build", "pnpm run build"],
+  "pnpm check/typecheck": ["tsc", "npx tsc", "typecheck"],
+  "yarn build": ["tsc", "yarn build", "yarn run build"],
+  "yarn check/typecheck": ["tsc", "npx tsc", "typecheck"],
   "bun build": ["tsc", "bun run build"],
   "bun check/typecheck": ["tsc", "typecheck"],
   "cargo build": ["cargo check", "cargo clippy"],
   "cargo check": ["cargo check", "cargo clippy"],
+  "cargo clippy": ["cargo clippy"],
   "tsc": ["tsc", "npx tsc"],
   "npm lint": ["eslint", "lint", "prettier"],
   "bun lint": ["eslint", "lint", "prettier"],
   "pnpm lint": ["eslint", "lint", "prettier"],
+  "yarn lint": ["eslint", "lint", "prettier"],
   "test command": ["vitest", "jest", "pytest", "cargo test", "test", "mocha", "ava"],
   "alejandra": ["alejandra"],
-  "python": ["python", "python3"],
-  "python3": ["python", "python3"],
-  "node": ["node"],
-  "ruby": ["ruby"],
-  "perl": ["perl"],
 };
 
 /**

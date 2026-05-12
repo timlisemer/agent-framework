@@ -37,16 +37,26 @@ describe("classifyBashCommand", () => {
     expect(classifyBashCommand("curl https://example.com").riskClass).toBe("non-read-only-non-workaround");
   });
 
-  it("classifies build/test/lint/typecheck/code-exec/install commands as high-risk-workaround", () => {
+  it("classifies build/test/lint/typecheck/install commands as high-risk-workaround", () => {
     for (const command of [
       "npm run build",
       "npm test",
       "npm run lint",
       "tsc --noEmit",
-      "python script.py",
       "npm install express",
     ]) {
       expect(classifyBashCommand(command).riskClass).toBe("high-risk-workaround");
+    }
+  });
+
+  it("blocks scripting language execution without treating it as check MCP workaround", () => {
+    for (const command of ["node", "node script.js", "python", "python3 -c 'print(1)'", "perl", "ruby -e 'puts 1'"]) {
+      const result = classifyBashCommand(command);
+      expect(result.riskClass).toBe("blocked");
+      expect(result.workaroundCategory).toBeUndefined();
+      expect(result.alternative).toContain("Scripting language execution denied");
+      expect(result.alternative).not.toContain("check MCP");
+      expect(result.alternative).not.toContain("agent-framework-check");
     }
   });
 
