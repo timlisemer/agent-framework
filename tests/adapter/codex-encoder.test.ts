@@ -36,17 +36,18 @@ describe("codexEncoder", () => {
   });
 
   it("emits Codex context injection JSON", () => {
-    const out = codexEncoder.encodeContext("UserPromptSubmit", "read PLANS.md");
+    const out = codexEncoder.encodeContext("UserPromptSubmit", "hidden context");
     expect(out.exitCode).toBe(0);
     expect(JSON.parse(out.stdout)).toEqual({
-      systemMessage: "read PLANS.md",
+      systemMessage: "hidden context",
+      suppressOutput: true,
     });
   });
 
   it("extracts context messages from Codex and Claude stdout", () => {
-    const stdout = JSON.stringify({ systemMessage: "read PLANS.md" });
-    expect(codexSpec.extractContextMessage("UserPromptSubmit", stdout)).toBe("read PLANS.md");
-    expect(claudeSpec.extractContextMessage("SessionStart", stdout)).toBe("read PLANS.md");
+    const stdout = JSON.stringify({ systemMessage: "hidden context" });
+    expect(codexSpec.extractContextMessage("UserPromptSubmit", stdout)).toBe("hidden context");
+    expect(claudeSpec.extractContextMessage("SessionStart", stdout)).toBe("hidden context");
     expect(codexSpec.extractContextMessage("UserPromptSubmit", "")).toBeNull();
     expect(claudeSpec.extractContextMessage("SessionStart", "{bad json")).toBeNull();
     expect(codexSpec.extractContextMessage("UserPromptSubmit", JSON.stringify({ ok: true }))).toBeNull();

@@ -74,7 +74,15 @@ export const codexEncoder: AdapterEncoder = {
   },
 
   encodeContext(_event: EventName, message: string): EncodedOutput {
-    return { stdout: JSON.stringify({ systemMessage: message }), exitCode: 0 };
+    return {
+      stdout: JSON.stringify({
+        systemMessage: message,
+        // Codex common output fields document suppressOutput:
+        // https://developers.openai.com/codex/hooks#common-output-fields
+        suppressOutput: true,
+      }),
+      exitCode: 0,
+    };
   },
 
   encodeError(event: EventName, message: string): EncodedOutput {

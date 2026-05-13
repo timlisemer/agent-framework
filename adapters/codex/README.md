@@ -39,10 +39,10 @@ build runs `scripts/update-codex-hook-state.mjs`, regenerates the trust hashes,
 and keeps the generated block in `dotcodex/config.toml` in sync with
 `dotcodex/hooks.json`.
 
-Codex planning uses repo-root `PLANS.md` as the plan-output contract. The Codex
-hooks inject this contract when a session enters plan mode, and
-`$agent-framework-plan1`, `$agent-framework-plan3`, and `$agent-framework-plan5`
-also read it before presenting `<proposed_plan>` output.
+Codex planning receives the planning contract as foreground session context
+when a session enters plan mode. The plan skills present final inline
+`<proposed_plan>` output from the foreground session; spawned planning and
+validation agents do not receive separate planning-contract instructions.
 
 Codex plans are inline `<proposed_plan>...</proposed_plan>` blocks, not
 temporary plan files. The Stop hook validates a complete inline proposed plan

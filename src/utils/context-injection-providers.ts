@@ -20,9 +20,9 @@ export interface ContextInjectionProvider {
 
 function buildPlanModeInjectionMessage(plansContent: string): string {
   return [
-    "The session is in plan mode. The agent-framework PLANS.md below applies to every final plan you produce in this session, including native or ordinary Codex plan-mode responses and any <proposed_plan> block.",
+    "The session is in plan mode. The planning contract below applies to every final plan you produce in this foreground session, including native or ordinary Codex plan-mode responses and any <proposed_plan> block.",
     "",
-    "Final planning output must use exactly the 14 required level-two Markdown headings from PLANS.md, in order, with no extra ## headings. Ordinary ### subsections are allowed under those required headings.",
+    "Final planning output must use exactly the 14 required level-two Markdown headings from the contract, in order, with no extra ## headings. Ordinary ### subsections are allowed under those required headings.",
     "",
     plansContent.trim(),
   ].join("\n");
