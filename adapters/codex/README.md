@@ -10,6 +10,9 @@ agent-framework Codex feature flags, plugin settings, and MCP server
 configuration.
 
 `dotcodex/hooks.json` is intended to be symlinked into `~/.codex/hooks.json`.
+`dotcodex/AGENTS.md` is intended to be symlinked into `~/.codex/AGENTS.md`;
+it carries the temporary global planning contract for Codex sessions while
+Codex hook `suppressOutput` is parsed but not yet applied.
 On Linux-only manual deployments, copy the full `dotcodex/` contents into
 `~/.codex/` or symlink `config.toml`, `hooks.json`, and `agents/*.toml`
 individually. Do not manually create or remove these symlinks on the NixOS
@@ -39,10 +42,12 @@ build runs `scripts/update-codex-hook-state.mjs`, regenerates the trust hashes,
 and keeps the generated block in `dotcodex/config.toml` in sync with
 `dotcodex/hooks.json`.
 
-Codex planning receives the planning contract as foreground session context
-when a session enters plan mode. The plan skills present final inline
-`<proposed_plan>` output from the foreground session; spawned planning and
-validation agents do not receive separate planning-contract instructions.
+Codex planning currently receives the planning contract from `~/.codex/AGENTS.md`
+as a temporary global workaround. The hook-based hidden context injection code is
+still present but disabled until Codex applies `suppressOutput` to hook output.
+The plan skills present final inline `<proposed_plan>` output from the
+foreground session; spawned planning and validation agents do not receive
+separate planning-contract instructions from those skills.
 
 Codex plans are inline `<proposed_plan>...</proposed_plan>` blocks, not
 temporary plan files. The Stop hook validates a complete inline proposed plan

@@ -18,6 +18,8 @@ export interface ContextInjectionProvider {
   build(input: ContextInjectionProviderInput): Promise<PendingInjection[]>;
 }
 
+const PLAN_MODE_CONTRACT_HOOK_INJECTION_ENABLED = false;
+
 function buildPlanModeInjectionMessage(plansContent: string): string {
   return [
     "The session is in plan mode. The planning contract below applies to every final plan you produce in this foreground session, including native or ordinary Codex plan-mode responses and any <proposed_plan> block.",
@@ -34,6 +36,10 @@ export const plansMdPlanModeEntryProvider: ContextInjectionProvider = {
   async build(input: ContextInjectionProviderInput): Promise<PendingInjection[]> {
     if (input.sourceEvent !== "UserPromptSubmit") return [];
     if (!input.planModeTransition.active) return [];
+    // Temporarily disabled while Codex parses but does not yet implement
+    // suppressOutput for hook context. The provider stays in place so the
+    // hidden hook injection path can be re-enabled when Codex supports it.
+    if (!PLAN_MODE_CONTRACT_HOOK_INJECTION_ENABLED) return [];
 
     const plansPath = path.join(agentFrameworkRoot(), "PLANS.md");
     let plansContent: string;

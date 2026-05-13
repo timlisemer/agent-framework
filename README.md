@@ -146,6 +146,7 @@ mkdir -p ~/.claude ~/.codex
 ln -sfn "$PWD/adapters/claude/dotclaude/settings.json" ~/.claude/settings.json
 ln -sfn "$PWD/adapters/codex/dotcodex/config.toml" ~/.codex/config.toml
 ln -sfn "$PWD/adapters/codex/dotcodex/hooks.json" ~/.codex/hooks.json
+ln -sfn "$PWD/adapters/codex/dotcodex/AGENTS.md" ~/.codex/AGENTS.md
 ```
 
 For Codex, copy skill directories if you use agent-framework skills because

@@ -129,7 +129,7 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "ok");
   });
 
-  it("injects PLANS.md only on inactive-to-active plan-mode transition", async () => {
+  it("does not inject PLANS.md while temporary hook injection is disabled", async () => {
     fs.writeFileSync(path.join(tempDir, "PLANS.md"), "# Planning Contract\n\nFollow it.");
     await mainUserPromptSubmit(
       {
@@ -142,10 +142,7 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
       encoder,
     );
 
-    expect(mockExitAfterFlush).toHaveBeenLastCalledWith(
-      0,
-      expect.stringContaining("ctx:The session is in plan mode."),
-    );
+    expect(mockExitAfterFlush).toHaveBeenLastCalledWith(0, "ok");
 
     await mainUserPromptSubmit(
       {
