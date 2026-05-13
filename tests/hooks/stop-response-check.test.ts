@@ -90,6 +90,10 @@ describe("mainStop Codex inline plan validation", () => {
 
   it("stores valid inline proposed plans in the current-plan sidecar", async () => {
     mockCheckPlanIntent.mockResolvedValue({ approved: true });
+    fs.writeFileSync(
+      transcriptPath,
+      JSON.stringify({ type: "event_msg", payload: { collaboration_mode_kind: "plan" } }) + "\n",
+    );
 
     await mainStop(
       {
@@ -108,5 +112,49 @@ describe("mainStop Codex inline plan validation", () => {
       source: "codex-proposed-plan",
     });
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
+  });
+
+  it("does not validate proposed_plan text embedded in ordinary Stop prose", async () => {
+    await mainStop(
+      {
+        session_id: "session-stop",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        last_assistant_message: "Use `<proposed_plan>...</proposed_plan>` for final plans.",
+      },
+      codexEncoder,
+    );
+
+    expect(mockCheckPlanIntent).not.toHaveBeenCalled();
+    expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
+  });
+
+  it("blocks whole-message proposed_plan blocks outside plan mode without validating stale sidecar", async () => {
+    mockCheckPlanIntent.mockResolvedValue({ approved: true });
+    const sessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR!;
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(
+      sessionCurrentPlanFile(sessionDir),
+      JSON.stringify({ kind: "inline", content: "stale plan", source: "test" }) + "\n",
+    );
+
+    await mainStop(
+      {
+        session_id: "session-stop",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        last_assistant_message: "<proposed_plan>\n## User Goal\nx\n</proposed_plan>",
+      },
+      codexEncoder,
+    );
+
+    expect(mockCheckPlanIntent).not.toHaveBeenCalled();
+    expect(mockExitAfterFlush).toHaveBeenCalledWith(
+      0,
+      JSON.stringify({
+        decision: "block",
+        reason: "Proposed plan block emitted outside plan mode.",
+      }),
+    );
   });
 });

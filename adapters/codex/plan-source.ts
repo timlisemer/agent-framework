@@ -10,12 +10,24 @@ export const CODEX_CLEAR_CONTEXT_IMPLEMENT_PLAN_PREFIX =
   "A previous agent produced the plan below to accomplish the user's task.\n" +
   "Implement the plan in a fresh context. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.";
 
-export function extractProposedPlanContent(text: string | null | undefined): string | null {
+export interface CodexProposedPlanBlock {
+  content: string;
+}
+
+const WHOLE_PROPOSED_PLAN_RE =
+  /^\s*<proposed_plan>\s*([\s\S]*?)\s*<\/proposed_plan>\s*$/;
+
+export function parseCodexProposedPlanBlock(
+  text: string | null | undefined,
+): CodexProposedPlanBlock | null {
   if (!text) return null;
-  const matches = [...text.matchAll(/<proposed_plan>\s*([\s\S]*?)\s*<\/proposed_plan>/g)];
-  const last = matches[matches.length - 1];
-  const content = last?.[1]?.trim();
-  return content ? content : null;
+  const match = text.match(WHOLE_PROPOSED_PLAN_RE);
+  const content = match?.[1]?.trim();
+  return content ? { content } : null;
+}
+
+export function extractProposedPlanContent(text: string | null | undefined): string | null {
+  return parseCodexProposedPlanBlock(text)?.content ?? null;
 }
 
 function isImplementationPrompt(prompt: string): boolean {
@@ -25,14 +37,14 @@ function isImplementationPrompt(prompt: string): boolean {
 }
 
 export function findCurrentPlanSource(input: PlanSourceLookupInput): PlanSourceDescriptor | null {
-  const assistantPlan = extractProposedPlanContent(input.assistantText);
+  const assistantPlan = parseCodexProposedPlanBlock(input.assistantText);
   if (assistantPlan) {
-    return { kind: "inline", content: assistantPlan, source: "codex-proposed-plan" };
+    return { kind: "inline", content: assistantPlan.content, source: "codex-proposed-plan" };
   }
 
-  const promptPlan = extractProposedPlanContent(input.prompt);
+  const promptPlan = parseCodexProposedPlanBlock(input.prompt);
   if (promptPlan) {
-    return { kind: "inline", content: promptPlan, source: "codex-implementation-prompt" };
+    return { kind: "inline", content: promptPlan.content, source: "codex-implementation-prompt" };
   }
 
   if (input.prompt?.trim().startsWith(CODEX_CLEAR_CONTEXT_IMPLEMENT_PLAN_PREFIX)) {
@@ -47,7 +59,7 @@ export function findCurrentPlanSource(input: PlanSourceLookupInput): PlanSourceD
 
 export function isPlanExit(input: PlanExitDetectionInput): boolean {
   if (input.event === "Stop") {
-    return extractProposedPlanContent(input.assistantText) !== null;
+    return parseCodexProposedPlanBlock(input.assistantText) !== null;
   }
   if (input.event === "UserPromptSubmit") {
     return isImplementationPrompt(input.prompt);

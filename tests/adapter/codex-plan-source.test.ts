@@ -5,13 +5,36 @@ import {
   extractProposedPlanContent,
   findCurrentPlanSource,
   isPlanExit,
+  parseCodexProposedPlanBlock,
 } from "../../adapters/codex/plan-source.js";
 
 describe("Codex plan source", () => {
-  it("extracts complete proposed_plan blocks", () => {
-    const text = "before\n<proposed_plan>\n## User Goal\nDo it.\n</proposed_plan>\nafter";
+  it("extracts whole-message proposed_plan blocks", () => {
+    const text = "  <proposed_plan>\n## User Goal\nDo it.\n</proposed_plan>\n";
+    expect(parseCodexProposedPlanBlock(text)).toEqual({
+      content: "## User Goal\nDo it.",
+    });
     expect(extractProposedPlanContent(text)).toBe("## User Goal\nDo it.");
     expect(isPlanExit({ event: "Stop", assistantText: text })).toBe(true);
+  });
+
+  it("ignores proposed_plan blocks embedded in surrounding prose", () => {
+    const text = "before\n<proposed_plan>\n## User Goal\nDo it.\n</proposed_plan>\nafter";
+    expect(parseCodexProposedPlanBlock(text)).toBeNull();
+    expect(extractProposedPlanContent(text)).toBeNull();
+    expect(isPlanExit({ event: "Stop", assistantText: text })).toBe(false);
+  });
+
+  it("ignores quoted or backticked proposed_plan examples", () => {
+    const text = "Use `<proposed_plan>...</proposed_plan>` for final plans.";
+    expect(extractProposedPlanContent(text)).toBeNull();
+    expect(isPlanExit({ event: "Stop", assistantText: text })).toBe(false);
+  });
+
+  it("ignores empty proposed_plan blocks", () => {
+    const text = "<proposed_plan>\n\n</proposed_plan>";
+    expect(extractProposedPlanContent(text)).toBeNull();
+    expect(isPlanExit({ event: "Stop", assistantText: text })).toBe(false);
   });
 
   it("ignores incomplete proposed_plan blocks", () => {

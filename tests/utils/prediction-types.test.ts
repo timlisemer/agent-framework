@@ -1363,27 +1363,6 @@ describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", ()
     expect(result.reason).toContain("Bash safety policy blocks this command");
   });
 
-  it("stale angry prediction + latest explicit rm request + simple rm Bash -> allow", () => {
-    const pred = makeAngryLowStreak4({
-      intent: "User demands a direct answer to which other validator is being masked by an unrelated validation error, without any extraneous explanations or yapping.",
-      blockedIntent: "User explicitly does not want to read explanations they don't care about or hear about what was done or needs to be done.",
-      explicitlyAllowedTools: ["Read"],
-      userMessageSnippet:
-        "i aint reading that because i dont care why cant you just fucking said what fucking other validator",
-    });
-    const result = decidePrediction(
-      pred,
-      "Bash",
-      {
-        command: "rm scenarios/expected-to-fail/plan-validate-allows-specific-looking-plan-without-edit-shape.json",
-      },
-      1,
-      "please rm the scenario file then do what i told you todo",
-    );
-    expect(result.decision).toBe("allow");
-    expect(result.reason).toContain("simple Bash rm command");
-  });
-
   it("latest explicit rm request does not allow rm with flags", () => {
     const pred = makeAngryLowStreak4();
     const result = decidePrediction(

@@ -54,7 +54,33 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
   const tx = await readTranscriptExact(input.transcript_path, FIRST_RESPONSE_STOP_COUNTS);
   const assistantText = input.last_assistant_message ??
     (tx.assistant.length > 0 ? getMostRecentMessage(tx.assistant).content : null);
-  if (spec.isPlanExit({ event: "Stop", assistantText })) {
+  const stopPlanExit = spec.isPlanExit({ event: "Stop", assistantText });
+  if (stopPlanExit && !planModeDetection.active) {
+    const reason = "Proposed plan block emitted outside plan mode.";
+    const epoch = loadCurrentEpoch(sessionDir);
+    const snapshotSeq = appendStateSnapshot(sessionDir, state, input.transcript_path);
+    appendCapture(sessionDir, {
+      ts: Date.now(),
+      epoch_id: epoch?.id ?? "unknown",
+      parent_capture_seq: null,
+      event: "Stop",
+      decision: "block",
+      permission_mode: input.permission_mode ?? null,
+      plan_mode: {
+        active: planModeDetection.active,
+        mode: planModeDetection.mode,
+        source: planModeDetection.source,
+      },
+      injection_seqs: [],
+      injection_hashes: [],
+      state_snapshot_seq: snapshotSeq,
+    });
+    const out = encoder.encodeStopBlock(reason);
+    await exitAfterFlush(out.exitCode, out.stdout);
+    return;
+  }
+
+  if (stopPlanExit) {
     const validation = await validateCurrentPlanExit({
       transcriptPath: input.transcript_path,
       sessionDir,
