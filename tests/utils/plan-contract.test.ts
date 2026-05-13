@@ -57,7 +57,7 @@ function validPlan(): string {
 }
 
 describe("plan contract", () => {
-  it("extracts required headings from PLANS.md numbered list", () => {
+  it("extracts required headings from the planning contract numbered list", () => {
     const text = "## Required Final Plan Structure\n\n1. `## User Goal`\n2. `## Answered Assumptions`\n\n## User Goal\n";
     expect(extractRequiredFinalPlanHeadings(text)).toEqual([
       "User Goal",
@@ -65,7 +65,7 @@ describe("plan contract", () => {
     ]);
   });
 
-  it("uses agent-framework PLANS.md when project PLANS.md is not readable", () => {
+  it("uses the agent-framework planning contract regardless of project files", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plan-contract-missing-"));
     try {
       const kinds = validatePlanContract("## User Goal\n> Do it.", dir).map((f) => f.kind);

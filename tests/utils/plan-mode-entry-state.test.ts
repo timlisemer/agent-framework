@@ -32,13 +32,13 @@ describe("plan-mode transition state", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("routes PLANS.md injection through the generic provider registry", () => {
+  it("routes planning-contract injection through the generic provider registry", () => {
     expect(contextInjectionProviders.map((provider) => provider.id)).toContain(
       "plans-md-plan-mode-entry",
     );
   });
 
-  it("keeps PLANS.md injection provider registered but temporarily disabled", async () => {
+  it("keeps planning-contract injection provider registered but temporarily disabled", async () => {
     const transition = await computePlanModeTransition({
       source: "UserPromptSubmit",
       sessionDir,

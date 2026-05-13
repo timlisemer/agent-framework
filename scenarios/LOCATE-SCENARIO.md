@@ -70,7 +70,7 @@ If the quote is only the decision string (`allow`, `deny`, `block`, etc.) or hoo
 rg -n --no-heading --color=never "<QUOTE>" ~/.agent-framework/sessions/*/*/captures.jsonl | head -30
 ```
 
-If the quote is injected context, such as PLANS.md plan-mode guidance, search injection logs directly:
+If the quote is injected context, such as plan-mode guidance, search injection logs directly:
 
 ```bash
 rg -n --no-heading --color=never "<QUOTE>" ~/.agent-framework/sessions/*/*/session-injections.jsonl | head -30

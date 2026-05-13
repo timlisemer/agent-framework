@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "codex-native-plan-mode-plans-md-injection-and-validation",
-  "description": "Codex native collaboration-mode transcript markers activate plan mode and cause UserPromptSubmit to inject repo-root PLANS.md once.",
+  "description": "Codex native collaboration-mode transcript markers activate plan mode and cause UserPromptSubmit to inject the planning contract once.",
   "transcript": [
     {
       "role": "user",

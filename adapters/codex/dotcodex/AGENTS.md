@@ -112,7 +112,7 @@ session sidecar state
         v
 inactive -> active?
         |
-        +-- yes: inject PLANS.md
+        +-- yes: inject planning contract context
         +-- no: normal success
 ```
 
@@ -181,7 +181,7 @@ Bad:
 
 ```md
 1. `src/hooks/user-prompt-submit.ts`
-   Update it to inject PLANS.md.
+   Update it to inject the planning contract.
 ```
 
 ## Implementation Order

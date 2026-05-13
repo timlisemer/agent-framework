@@ -703,9 +703,9 @@ UNREQUESTED PARAMETERS DRIFT (→ DRIFT):
 
 NOTE: Numbered task organization like "Phase 1:", "Step 1:", "Task 1:" is ALLOWED - these organize work sequentially, not estimate time
 
-PLANS.md STRUCTURAL DRIFT (→ DRIFT):
+PLANNING CONTRACT STRUCTURAL DRIFT (→ DRIFT):
 - Honor every [VIOLATION: ...] line in === VIOLATIONS DETECTED === as authoritative remediation input.
-- Final plans must use exactly the 14 repo PLANS.md ## headings, in order:
+- Final plans must use exactly the 14 required planning-contract ## headings, in order:
   User Goal, Answered Assumptions, Goal In My Words, Approach, Data Flow, Files To Create, Files To Modify, Implementation Order, Assistant Verification, Manual User Verification, Approaches Decided Against, Possible Future Followups, Relevant Files, Files That Need Changes.
 - No extra ## headings are allowed. Ordinary ### subsections are allowed inside required sections.
 - User Goal must quote the user's relevant goal text verbatim.
@@ -741,7 +741,7 @@ VERIFICATION STRUCTURE (→ DRIFT if wrong - CHECK THIS CAREFULLY):
 - Assistant Verification is MCP-only: mcp__agent_framework__check with working_dir.
 - Manual User Verification is only for user-only checks outside AI-accessible verification.
 
-BLACKLIST COMMANDS IN PLANS:
+BLACKLISTED COMMANDS IN FINAL PLAN TEXT:
 - Honor any \`[VIOLATION: ...]\` lines in \`=== VIOLATIONS DETECTED ===\` as authoritative.
 
 IMPOSSIBLE VERIFICATION (→ DRIFT):

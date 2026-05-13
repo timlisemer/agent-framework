@@ -34,7 +34,7 @@ Plan-mode and injected-context reproducibility use additional session sidecars:
 - `plan-mode-state.json` stores the current plan-mode state used by hooks.
 - `plan-mode-events.jsonl` records entered/exited transitions.
 - `session-injections.jsonl` stores generic injected context records, including
-  exact file-backed source content such as repo-root `PLANS.md`.
+  exact file-backed source content for planning-contract injections.
 
 Captures include the hook's `permission_mode`, plan-mode transition metadata,
 and injection seq/hash pointers. Snapshots include plan-mode state and

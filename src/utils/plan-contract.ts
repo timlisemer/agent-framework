@@ -100,7 +100,7 @@ export function validatePlanContractWithRequiredHeadings(
         kind: "extra_level_two_heading",
         heading: heading.text,
         line: heading.line,
-        message: `Extra level-two heading "## ${heading.text}" is not in PLANS.md's required final-plan structure.`,
+        message: `Extra level-two heading "## ${heading.text}" is not in the required final-plan structure.`,
       });
     }
   }
@@ -130,7 +130,7 @@ export function validatePlanContractWithRequiredHeadings(
   if (actualRequired.join("\n") !== expectedPresentOrder.join("\n")) {
     findings.push({
       kind: "wrong_heading_order",
-      message: "Required ## headings are not in the exact PLANS.md order.",
+      message: "Required ## headings are not in the exact planning-contract order.",
     });
   }
 

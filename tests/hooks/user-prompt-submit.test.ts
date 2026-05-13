@@ -129,7 +129,7 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "ok");
   });
 
-  it("does not inject PLANS.md while temporary hook injection is disabled", async () => {
+  it("does not inject the planning contract while temporary hook injection is disabled", async () => {
     fs.writeFileSync(path.join(tempDir, "PLANS.md"), "# Planning Contract\n\nFollow it.");
     await mainUserPromptSubmit(
       {
