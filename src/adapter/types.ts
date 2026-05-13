@@ -73,12 +73,12 @@ export interface PlanModeDetection {
 
 export type CanonicalMcp =
   | "check" | "commit" | "push" | "confirm"
-  | "transcript" | "validate_intent"
+  | "transcript" | "validate_intent" | "validate_plan"
   | "scenario_tester" | "scenario_labeler";
 
 export const CANONICAL_MCPS: readonly CanonicalMcp[] = [
   "check", "commit", "push", "confirm", "transcript",
-  "validate_intent", "scenario_tester", "scenario_labeler",
+  "validate_intent", "validate_plan", "scenario_tester", "scenario_labeler",
 ] as const;
 
 export type CanonicalWorkflow =

@@ -210,6 +210,36 @@ Structured verdict with ALIGNED or DRIFTED verdict and a short reason.
 - As a stop-hook check to detect drift from user intent
 - Any time you want an independent second opinion on "did I do the right thing"`;
 
+export const VALIDATE_PLAN_HELP = `# validate_plan -- Plan Contract Validator
+
+Validates an inline plan or plan file against the planning contract using the
+plan-validate agent. This validates the plan itself, not user-intent alignment.
+
+## Inputs
+
+- working_dir (optional): directory whose planning contract applies (defaults to cwd)
+- plan_file (optional): path to a plan file to validate
+- plan (optional): inline plan content to validate
+- transcript_path (optional): session transcript path, used only for statusLine
+
+Exactly one of plan_file or plan is required.
+
+## Output shape
+
+\`\`\`
+## Results
+- Status: PASS | FAIL
+
+## Reasons
+<none or concrete validation reasons>
+\`\`\`
+
+## When to use
+
+- Before returning a final plan to the user
+- After consolidating plan1/plan3/plan5 planner output and before launching verification agents
+- Any time an agent wants to check whether a plan is structurally valid and implementation-ready`;
+
 export const TRANSCRIPT_HELP = `# transcript -- Session Transcript Path Resolver
 
 Returns the absolute path to the current agent session's transcript .jsonl file and refreshes the transcript-path.txt sidecar under ~/.agent-framework/sessions/.

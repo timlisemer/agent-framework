@@ -1,5 +1,5 @@
 ---
-description: Spawn 5 plan agents (4 identical + 1 outside-the-box), consolidate, then 5 validation agents to refine
+description: Spawn 5 plan agents (4 identical + 1 outside-the-box), consolidate, then 5 verification agents to refine
 ---
 
 You are executing the /plan5 skill. The user's task description is:
@@ -34,7 +34,7 @@ Use model "sonnet" for the first 4 agents and model "opus" for the 5th outside-t
 The first 4 agents get the IDENTICAL prompt:
 
 ```
-Do NOT write a plan file. Report your plan directly to me.
+Do NOT write a plan file. Before reporting your plan directly to me, call `mcp__agent-framework__validate_plan` with your full inline plan. If it returns FAIL, revise the plan and call `mcp__agent-framework__validate_plan` again. Repeat until it returns PASS, then report the validated plan directly to me.
 
 Read all relevant files in the codebase first, then design a detailed implementation plan.
 
@@ -70,25 +70,27 @@ Write the consolidated plan to the plan file. Include:
 - An **Assistant Verification** section (run `mcp__agent-framework__check`)
 - A **Manual User Verification** section if applicable
 
-## Step 3: Launch 5 Validation agents in parallel
+After writing the consolidated plan content, call `mcp__agent-framework__validate_plan` with the full inline consolidated plan. If it returns FAIL, revise the consolidated plan and call it again. Repeat until it returns PASS. Only then proceed to verification agents.
+
+## Step 3: Launch 5 Verification agents in parallel
 
 Same rule as Step 1: you MUST call the Agent tool exactly 5 times in your SINGLE NEXT RESPONSE. All 5 in ONE message, running concurrently.
 
 Correct pattern (all 5 in one response):
-- Agent call 1: subagent_type "Plan", description "Plan validation agent 1 of 4", model "sonnet", prompt = (see below)
-- Agent call 2: subagent_type "Plan", description "Plan validation agent 2 of 4", model "sonnet", prompt = (same)
-- Agent call 3: subagent_type "Plan", description "Plan validation agent 3 of 4", model "sonnet", prompt = (same)
-- Agent call 4: subagent_type "Plan", description "Plan validation agent 4 of 4", model "sonnet", prompt = (same)
-- Agent call 5: subagent_type "Plan", description "Plan validation agent 5 alternative-approach", model "opus", prompt = (see alternative prompt below)
+- Agent call 1: subagent_type "Plan", description "Plan verification agent 1 of 4", model "sonnet", prompt = (see below)
+- Agent call 2: subagent_type "Plan", description "Plan verification agent 2 of 4", model "sonnet", prompt = (same)
+- Agent call 3: subagent_type "Plan", description "Plan verification agent 3 of 4", model "sonnet", prompt = (same)
+- Agent call 4: subagent_type "Plan", description "Plan verification agent 4 of 4", model "sonnet", prompt = (same)
+- Agent call 5: subagent_type "Plan", description "Plan verification agent 5 alternative-approach", model "opus", prompt = (see alternative prompt below)
 
-Use model "sonnet" for the first 4 validation agents and model "opus" for the 5th alternative-approach agent, unless the user explicitly requested a different tier.
+Use model "sonnet" for the first 4 verification agents and model "opus" for the 5th alternative-approach agent, unless the user explicitly requested a different tier.
 
-The first 4 validation agents get the IDENTICAL prompt:
+The first 4 verification agents get the IDENTICAL prompt:
 
 ```
-Do NOT write a plan file. Report your validation findings directly to me.
+Do NOT write a plan file. Report your verification findings directly to me.
 
-You are validating an implementation plan. Read all relevant source files to verify the plan's assumptions against the actual codebase. Ask yourself whether the plan is even correct and truly ready to implement.
+You are verifying an implementation plan for technical correctness against the source code. Read all relevant source files to verify the plan's assumptions against the actual codebase. Ask yourself whether the plan is even correct and truly ready to implement.
 
 The original task: {paste $ARGUMENTS here}
 
@@ -106,12 +108,12 @@ Flag any proposed change that treats symptoms instead of root causes (e.g. silen
 Flag any proposed change that adds backwards-compatibility shims, deprecated re-exports, or legacy fallbacks instead of cleanly replacing old code.
 ```
 
-The 5th validation agent gets this ALTERNATIVE prompt instead:
+The 5th verification agent gets this ALTERNATIVE prompt instead:
 
 ```
 Do NOT write a plan file. Report your findings directly to me.
 
-You are the alternative-approach validator. Read all relevant source files and the current plan carefully. Fully understand the plan and everything it does -- what it changes, why, and the behavior it produces.
+You are the alternative-approach verifier. Read all relevant source files and the current plan carefully. Fully understand the plan and everything it does -- what it changes, why, and the behavior it produces.
 
 Then set the existing plan aside and propose a COMPLETELY DIFFERENT approach that achieves the same goal better. Challenge the plan's core assumptions, architecture, and strategy. Do not incrementally critique the plan -- design an alternative from scratch.
 
@@ -131,10 +133,10 @@ Do not propose backwards-compatibility shims, deprecated re-exports, or legacy f
 
 ## Step 4: Consolidate Round 2
 
-After all 5 validation agents return:
-- Fix every issue that multiple validators flagged
-- Evaluate single-validator issues on merit
-- Seriously weigh the 5th validator's alternative approach against the current plan. If the alternative is genuinely better, replace the plan with it; if parts of it are better, incorporate those parts; otherwise keep the current plan and briefly note why.
+After all 5 verification agents return:
+- Fix every issue that multiple verifiers flagged
+- Evaluate single-verifier issues on merit
+- Seriously weigh the 5th verifier's alternative approach against the current plan. If the alternative is genuinely better, replace the plan with it; if parts of it are better, incorporate those parts; otherwise keep the current plan and briefly note why.
 - Update the plan file with corrections
 
 ## Step 5: Exit plan mode

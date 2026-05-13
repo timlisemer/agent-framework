@@ -1,5 +1,5 @@
 ---
-description: Spawn 3 plan agents, consolidate, then 3 validation agents to refine
+description: Spawn 3 plan agents, consolidate, then 3 verification agents to refine
 ---
 
 You are executing the /plan3 skill. The user's task description is:
@@ -32,7 +32,7 @@ Use model "sonnet" for all 3 agents unless the user explicitly requested a diffe
 All 3 agents get the IDENTICAL prompt:
 
 ```
-Do NOT write a plan file. Report your plan directly to me.
+Do NOT write a plan file. Before reporting your plan directly to me, call `mcp__agent-framework__validate_plan` with your full inline plan. If it returns FAIL, revise the plan and call `mcp__agent-framework__validate_plan` again. Repeat until it returns PASS, then report the validated plan directly to me.
 
 Read all relevant files in the codebase first, then design a detailed implementation plan.
 
@@ -61,14 +61,16 @@ Write the consolidated plan to the plan file. Include:
 - An **Assistant Verification** section (run `mcp__agent-framework__check`)
 - A **Manual User Verification** section if applicable
 
-## Step 3: Launch 3 Validation agents in parallel
+After writing the consolidated plan content, call `mcp__agent-framework__validate_plan` with the full inline consolidated plan. If it returns FAIL, revise the consolidated plan and call it again. Repeat until it returns PASS. Only then proceed to verification agents.
+
+## Step 3: Launch 3 Verification agents in parallel
 
 Same rule as Step 1: you MUST call the Agent tool exactly 3 times in your SINGLE NEXT RESPONSE. All 3 in ONE message, running concurrently. Each call uses subagent_type "Plan" with model "sonnet" (unless the user explicitly requested a different tier). Each agent gets the IDENTICAL prompt:
 
 ```
-Do NOT write a plan file. Report your validation findings directly to me.
+Do NOT write a plan file. Report your verification findings directly to me.
 
-You are validating an implementation plan. Read all relevant source files to verify the plan's assumptions against the actual codebase. Ask yourself whether the plan is even correct and truly ready to implement.
+You are verifying an implementation plan for technical correctness against the source code. Read all relevant source files to verify the plan's assumptions against the actual codebase. Ask yourself whether the plan is even correct and truly ready to implement.
 
 The original task: {paste $ARGUMENTS here}
 
@@ -88,9 +90,9 @@ Flag any proposed change that adds backwards-compatibility shims, deprecated re-
 
 ## Step 4: Consolidate Round 2
 
-After all 3 validation agents return:
-- Fix every issue that multiple validators flagged
-- Evaluate single-validator issues on merit
+After all 3 verification agents return:
+- Fix every issue that multiple verifiers flagged
+- Evaluate single-verifier issues on merit
 - Update the plan file with corrections
 
 ## Step 5: Exit plan mode

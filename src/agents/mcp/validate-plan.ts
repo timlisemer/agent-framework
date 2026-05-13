@@ -1,0 +1,176 @@
+/**
+ * Validate Plan MCP Agent
+ *
+ * Validates an inline plan or plan file against the planning contract using
+ * deterministic plan checks plus the existing plan-validate LLM.
+ *
+ * @module validate-plan
+ */
+
+import * as fs from "fs";
+import * as path from "path";
+import { EXECUTION_TYPES } from "../../types.js";
+import { runAgentWithRetryAndTelemetry } from "../../utils/agent-runner.js";
+import { PLAN_VALIDATE_AGENT } from "../../utils/agent-configs.js";
+import { startsWithAny } from "../../utils/retry.js";
+import { logAgentResult, logAgentStarted } from "../../utils/logger.js";
+import { setTranscriptPath } from "../../utils/execution-context.js";
+import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
+import { activeSpec } from "../../adapter/spec.js";
+import { collectPlanValidationViolations } from "../hooks/plan-validate.js";
+
+const VALIDATE_PLAN_SYSTEM_PROMPT = `You are a plan validator. Validate the PLAN CONTENT itself.
+
+You are NOT checking whether the plan matches a user's intent. You only check whether the plan is complete, concrete, structurally valid, and ready for implementation.
+
+Honor every [VIOLATION: ...] line in === VIOLATIONS DETECTED === as authoritative remediation input.
+
+Final plans must satisfy the planning contract:
+- Use exactly the required ## headings when a final plan is being validated.
+- Include concrete file paths, symbols, anchors, and implementation details.
+- Include enough detail that two independent implementers would make the same edits.
+- Include an Assistant Verification section using only the agent-framework check MCP with working_dir.
+- Include a Manual User Verification section only for checks the user must perform outside AI-accessible verification, or state that none is required.
+- Do not include generic verification headings like ## Verification, ## Testing, or ## Test Plan.
+- Do not include schedule buckets, time estimates, live option menus, unresolved assumptions, or vague required section bodies.
+- Do not invent behavioral numbers, thresholds, timeouts, or counts.
+- Do not include blacklisted commands outside Manual User Verification.
+
+Reply with EXACTLY:
+VALID
+or
+INVALID: <specific reason>`;
+
+export interface ValidatePlanInput {
+  workingDir: string;
+  plan?: string;
+  planFile?: string;
+  transcriptPath?: string;
+}
+
+function getHookName(): string { return activeSpec().mcpWireName("validate_plan"); }
+
+function formatResult(status: "PASS" | "FAIL", reasons: readonly string[]): string {
+  const body = reasons.length > 0 ? reasons.join("\n") : "(none)";
+  return `## Results
+- Status: ${status}
+
+## Reasons
+${body}`;
+}
+
+function stripViolationPrefix(text: string): string {
+  return text.replace(/^\[VIOLATION: [^\]]+\]\s*/, "");
+}
+
+function resolvePlanContent(input: ValidatePlanInput): { content?: string; error?: string } {
+  const hasInlinePlan = typeof input.plan === "string";
+  const hasPlanFile = typeof input.planFile === "string";
+
+  if (hasInlinePlan === hasPlanFile) {
+    return { error: "Provide exactly one of plan or plan_file." };
+  }
+
+  if (hasInlinePlan) {
+    return { content: input.plan ?? "" };
+  }
+
+  const file = input.planFile ?? "";
+  const resolved = path.isAbsolute(file) ? file : path.resolve(input.workingDir, file);
+  try {
+    return { content: fs.readFileSync(resolved, "utf-8") };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { error: `Could not read plan_file ${resolved}: ${msg}` };
+  }
+}
+
+export async function runValidatePlanAgent(
+  input: ValidatePlanInput,
+  options: CancellationOptions = {},
+): Promise<string> {
+  if (input.transcriptPath) {
+    setTranscriptPath(input.transcriptPath);
+  }
+  const hookName = getHookName();
+  logAgentStarted("plan-validate", hookName);
+
+  const source = resolvePlanContent(input);
+  if (source.error) {
+    return formatResult("FAIL", [source.error]);
+  }
+
+  const plan = source.content ?? "";
+  if (!plan.trim()) {
+    return formatResult("FAIL", ["Plan content is empty."]);
+  }
+
+  throwIfAborted(options.signal);
+  const findings = collectPlanValidationViolations(plan, input.workingDir);
+
+  if (findings.hardRuleViolations.length > 0) {
+    return formatResult("FAIL", findings.hardRuleViolations.map(stripViolationPrefix));
+  }
+
+  if (findings.filteredBlacklistHighlights.length > 0) {
+    return formatResult("FAIL", findings.blacklistHighlights.map(stripViolationPrefix));
+  }
+
+  if (findings.allViolations.length > 0) {
+    return formatResult("FAIL", findings.allViolations.map(stripViolationPrefix));
+  }
+
+  const result = await runAgentWithRetryAndTelemetry(
+    {
+      ...PLAN_VALIDATE_AGENT,
+      workingDir: input.workingDir,
+      systemPrompt: VALIDATE_PLAN_SYSTEM_PROMPT,
+    },
+    {
+      prompt: "Validate whether this plan satisfies the planning contract.",
+      context: `PLAN CONTENT:\n${plan}`,
+    },
+    {
+      formatValidator: (text) => text.trim() === "VALID" || startsWithAny(text, ["INVALID:"]),
+      formatReminder: "Reply with exactly: VALID or INVALID: <specific reason>",
+      maxTokens: 512,
+      context: `Validate plan MCP for: ${plan.substring(0, 100)}...`,
+    },
+    {
+      agent: "plan-validate",
+      hookName,
+      toolName: hookName,
+      workingDir: input.workingDir,
+      executionType: EXECUTION_TYPES.LLM,
+    },
+  );
+
+  if (result.output.trim() === "VALID") {
+    logAgentResult(result, {
+      agent: "plan-validate",
+      hookName,
+      toolName: hookName,
+      workingDir: input.workingDir,
+      executionType: EXECUTION_TYPES.LLM,
+      decisionOverride: "CONFIRM",
+      decisionReason: "Plan validation passed",
+    });
+    return formatResult("PASS", []);
+  }
+
+  if (result.output.startsWith("INVALID:")) {
+    const reason = result.output.replace("INVALID:", "").trim();
+    logAgentResult(result, {
+      agent: "plan-validate",
+      hookName,
+      toolName: hookName,
+      workingDir: input.workingDir,
+      executionType: EXECUTION_TYPES.LLM,
+      decisionOverride: "DENY",
+      decisionReason: reason,
+    });
+    return formatResult("FAIL", [reason || "Plan validation failed."]);
+  }
+
+  return formatResult("FAIL", ["Malformed plan-validate response - retry validation."]);
+}

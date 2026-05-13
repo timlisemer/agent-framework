@@ -49,6 +49,55 @@ import { validatePlanContract } from "../../utils/plan-contract.js";
 const RULE_VIOLATION_CATEGORY_RE =
   /^\[VIOLATION:\s*(timeline marker|solution branching)\]/i;
 
+export interface PlanValidationViolationSummary {
+  allViolations: string[];
+  hardRuleViolations: string[];
+  filteredBlacklistHighlights: ReturnType<typeof filterBlacklistOutsideManualVerification>;
+  blacklistHighlights: string[];
+}
+
+/**
+ * Collect deterministic plan-validation findings that are shared by the
+ * plan-edit hook and the validate_plan MCP.
+ */
+export function collectPlanValidationViolations(
+  resultingPlan: string,
+  workingDir: string,
+): PlanValidationViolationSummary {
+  // Blacklisted commands inside the "Manual User Verification" section are
+  // intentionally allowed (the user runs them, not the AI).
+  const planClearingViolations = getPlanClearingHighlights(resultingPlan);
+  const rawBlacklistHits = getContentBlacklistHighlights(resultingPlan);
+  const filteredBlacklistHighlights = filterBlacklistOutsideManualVerification(
+    rawBlacklistHits,
+    resultingPlan,
+  );
+  const blacklistHighlights = filteredBlacklistHighlights.map((h) => h.rendered);
+  const ruleViolations = getRuleViolationHighlights(resultingPlan);
+  const verificationViolations = getVerificationStructureHighlights(resultingPlan);
+  const contractFindings = validatePlanContract(resultingPlan, workingDir);
+  const contractViolations = contractFindings.map((finding) =>
+    `[VIOLATION: ${finding.kind}] ${finding.message}`,
+  );
+  const allViolations = [
+    ...planClearingViolations,
+    ...blacklistHighlights,
+    ...ruleViolations,
+    ...verificationViolations,
+    ...contractViolations,
+  ];
+  const hardRuleViolations = ruleViolations.filter((v) =>
+    RULE_VIOLATION_CATEGORY_RE.test(v),
+  );
+
+  return {
+    allViolations,
+    hardRuleViolations,
+    filteredBlacklistHighlights,
+    blacklistHighlights,
+  };
+}
+
 /**
  * Validate that a plan aligns with user intent.
  *
@@ -103,36 +152,19 @@ export async function checkPlanIntent(
       : toolInput.new_string ?? "";
 
   try {
-    // Check for violations in the full resulting plan.
-    // Blacklisted commands inside the "Manual User Verification" section are
-    // intentionally allowed (the user runs them, not the AI).
-    const planClearingViolations = getPlanClearingHighlights(resultingPlan);
-    const rawBlacklistHits = getContentBlacklistHighlights(resultingPlan);
-    const filteredBlacklistHits = filterBlacklistOutsideManualVerification(
-      rawBlacklistHits,
+    const {
+      allViolations,
+      hardRuleViolations,
+      filteredBlacklistHighlights,
+      blacklistHighlights,
+    } = collectPlanValidationViolations(
       resultingPlan,
+      workingDir,
     );
-    const blacklistHighlights = filteredBlacklistHits.map((h) => h.rendered);
-    const ruleViolations = getRuleViolationHighlights(resultingPlan);
-    const verificationViolations = getVerificationStructureHighlights(resultingPlan);
-    const contractFindings = validatePlanContract(resultingPlan, workingDir);
-    const contractViolations = contractFindings.map((finding) =>
-      `[VIOLATION: ${finding.kind}] ${finding.message}`,
-    );
-    const allViolations = [
-      ...planClearingViolations,
-      ...blacklistHighlights,
-      ...ruleViolations,
-      ...verificationViolations,
-      ...contractViolations,
-    ];
 
     // Hard-deny for schedule-bucket and solution-branching categories from
     // RULE_VIOLATION_PATTERNS — these are fully captured by regex and need
     // no LLM nuance.
-    const hardRuleViolations = ruleViolations.filter((v) =>
-      RULE_VIOLATION_CATEGORY_RE.test(v),
-    );
     if (hardRuleViolations.length > 0) {
       const feedback = hardRuleViolations
         .map((v) => v.replace(/^\[VIOLATION: [^\]]+\]\s*/, ""))
@@ -142,7 +174,7 @@ export async function checkPlanIntent(
 
     // Deterministic deny: blacklisted commands outside Manual User
     // Verification, in any mode (Edit or Write). LLM cannot improve on this.
-    if (filteredBlacklistHits.length > 0) {
+    if (filteredBlacklistHighlights.length > 0) {
       const feedback = blacklistHighlights
         .map((v) => v.replace(/^\[VIOLATION: [^\]]+\]\s*/, ""))
         .join(". ");

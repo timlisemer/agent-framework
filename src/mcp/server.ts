@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { runCheckAgent } from "../agents/mcp/check.js";
+import { runValidatePlanAgent } from "../agents/mcp/validate-plan.js";
 import { runConfirmAgent } from "../agents/mcp/confirm.js";
 import { runCommitAgent } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
@@ -20,6 +21,7 @@ import {
   PUSH_HELP,
   LIST_REPOS_HELP,
   VALIDATE_INTENT_HELP,
+  VALIDATE_PLAN_HELP,
   TRANSCRIPT_HELP,
 } from "./help-docs.js";
 import { getRepoInfo, getRepoInfoCancellable } from "../utils/git-utils.js";
@@ -77,6 +79,32 @@ server.registerTool(
   async (args, extra) => {
     const options = { signal: extra.signal };
     const result = await runCheckAgent(args.working_dir || process.cwd(), args.transcript_path, options);
+    return { content: [{ type: "text", text: result }] };
+  }
+);
+
+server.registerTool(
+  "validate_plan",
+  {
+    title: "Validate Plan",
+    description: "Validate an inline plan or plan file against the planning contract using the plan-validate agent.",
+    inputSchema: {
+      working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
+      plan_file: z.string().optional().describe("Path to a plan file to validate"),
+      plan: z.string().optional().describe("Inline plan content to validate"),
+      transcript_path: z.string().optional().describe("Session transcript path for statusLine")
+    }
+  },
+  async (args, extra) => {
+    const result = await runValidatePlanAgent(
+      {
+        workingDir: args.working_dir || process.cwd(),
+        plan: args.plan,
+        planFile: args.plan_file,
+        transcriptPath: args.transcript_path,
+      },
+      { signal: extra.signal },
+    );
     return { content: [{ type: "text", text: result }] };
   }
 );
@@ -554,6 +582,7 @@ const HELP_RESOURCES: Array<{
   { tool: "push", title: "push -- Help", summary: "Git push wrapper", body: PUSH_HELP },
   { tool: "list_repos", title: "list_repos -- Help", summary: "Repo + submodule status", body: LIST_REPOS_HELP },
   { tool: "validate_intent", title: "validate_intent -- Help", summary: "User intention alignment check", body: VALIDATE_INTENT_HELP },
+  { tool: "validate_plan", title: "validate_plan -- Help", summary: "Plan contract validator", body: VALIDATE_PLAN_HELP },
   { tool: "scenario_tester", title: "scenario_tester -- Help", summary: "Scenario tester (transcripts + scenarios)", body: TESTER_HELP },
   { tool: "scenario_labeler", title: "scenario_labeler -- Help", summary: "Scenario transcript labeler", body: LABELER_HELP },
   { tool: "transcript", title: "transcript -- Help", summary: "Session transcript path resolver", body: TRANSCRIPT_HELP },

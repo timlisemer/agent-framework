@@ -1,5 +1,5 @@
 ---
-description: Spawn 1 plan agent, consolidate, then 1 validation agent to refine
+description: Spawn 1 plan agent, consolidate, then 1 verification agent to refine
 ---
 
 You are executing the /plan1 skill. The user's task description is:
@@ -23,7 +23,7 @@ If the user's task description is something like "validate your theory" or "fix 
 Call the Agent tool once with subagent_type "Plan", description "Plan agent", model "sonnet" (unless the user explicitly requested a different tier), and the prompt below:
 
 ```
-Do NOT write a plan file. Report your plan directly to me.
+Do NOT write a plan file. Before reporting your plan directly to me, call `mcp__agent-framework__validate_plan` with your full inline plan. If it returns FAIL, revise the plan and call `mcp__agent-framework__validate_plan` again. Repeat until it returns PASS, then report the validated plan directly to me.
 
 Read all relevant files in the codebase first, then design a detailed implementation plan.
 
@@ -47,14 +47,14 @@ After the agent returns, write the plan to the plan file. Include:
 - An **Assistant Verification** section (run `mcp__agent-framework__check`)
 - A **Manual User Verification** section if applicable
 
-## Step 3: Launch 1 Validation agent
+## Step 3: Launch 1 Verification agent
 
-Call the Agent tool once with subagent_type "Plan", description "Plan validation agent", model "sonnet" (unless the user explicitly requested a different tier), and the prompt below:
+Call the Agent tool once with subagent_type "Plan", description "Plan verification agent", model "sonnet" (unless the user explicitly requested a different tier), and the prompt below:
 
 ```
-Do NOT write a plan file. Report your validation findings directly to me.
+Do NOT write a plan file. Report your verification findings directly to me.
 
-You are validating an implementation plan. Read all relevant source files to verify the plan's assumptions against the actual codebase. Ask yourself whether the plan is even correct and truly ready to implement.
+You are verifying an implementation plan for technical correctness against the source code. Read all relevant source files to verify the plan's assumptions against the actual codebase. Ask yourself whether the plan is even correct and truly ready to implement.
 
 The original task: {paste $ARGUMENTS here}
 
@@ -72,9 +72,9 @@ Flag any proposed change that treats symptoms instead of root causes (e.g. silen
 Flag any proposed change that adds backwards-compatibility shims, deprecated re-exports, or legacy fallbacks instead of cleanly replacing old code.
 ```
 
-## Step 4: Apply validation feedback
+## Step 4: Apply verification feedback
 
-After the validation agent returns, update the plan file with any corrections it identified.
+After the verification agent returns, update the plan file with any corrections it identified.
 
 ## Step 5: Exit plan mode
 
