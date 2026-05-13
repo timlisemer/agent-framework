@@ -58,15 +58,23 @@ function findPermissionMode(content: string): string | null {
   return lastValue;
 }
 
+function detectionFromCollaborationMode(mode: string): PlanModeDetection {
+  return {
+    active: mode === "plan",
+    mode,
+    source: "codex-collaboration-mode",
+  };
+}
+
 export function detectPlanMode(input: PlanModeDetectionInput): PlanModeDetection {
+  if (input.collaborationMode !== undefined) {
+    return detectionFromCollaborationMode(input.collaborationMode);
+  }
+
   const tail = input.transcriptPath ? readTranscriptTail(input.transcriptPath) : "";
   const collaborationMode = tail ? findCodexCollaborationMode(tail) : null;
   if (collaborationMode !== null) {
-    return {
-      active: collaborationMode === "plan",
-      mode: collaborationMode,
-      source: "codex-collaboration-mode",
-    };
+    return detectionFromCollaborationMode(collaborationMode);
   }
 
   if (input.permissionMode !== undefined) {

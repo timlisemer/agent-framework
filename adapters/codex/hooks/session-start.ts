@@ -4,7 +4,7 @@ initializeTelemetry();
 import { readStdinJson, exitAfterFlush } from "../../../src/utils/hook-bootstrap.js";
 import { mainSessionStart } from "../../../src/hooks/session-start.js";
 import { codexEncoder } from "../encoder.js";
-import { initCodexEnv, sessionId, transcriptPath, type CodexSessionStartInput } from "./input.js";
+import { codexCollaborationMode, initCodexEnv, sessionId, transcriptPath, type CodexSessionStartInput } from "./input.js";
 
 (async () => {
   const raw = await readStdinJson<CodexSessionStartInput>();
@@ -16,6 +16,7 @@ import { initCodexEnv, sessionId, transcriptPath, type CodexSessionStartInput } 
       transcript_path: transcriptPath(raw),
       cwd: raw.cwd,
       permission_mode: raw.permission_mode ?? raw.permissionMode,
+      collaboration_mode: codexCollaborationMode(raw),
     },
     codexEncoder
   );

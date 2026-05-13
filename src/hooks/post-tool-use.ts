@@ -8,13 +8,18 @@ import { loadCurrentEpoch } from "../scenario/epoch.js";
 import type { FrameworkPostToolUseHookInput } from "./types.js";
 import { extractPathOrCmd } from "../rules/utils.js";
 import { activeSpec } from "../adapter/spec.js";
+import { detectPlanModeForHook } from "../utils/plan-mode-detector.js";
 
 export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
   // Log successful tool execution to JSONL
   const sessionDir = getSessionDir(input.transcript_path);
-  const planModeDetection = activeSpec().detectPlanMode({
+  const spec = activeSpec();
+  const planModeDetection = await detectPlanModeForHook({
+    spec,
     permissionMode: input.permission_mode,
+    collaborationMode: input.collaboration_mode,
     transcriptPath: input.transcript_path,
+    sessionDir,
   });
   await appendToolLog(sessionDir, {
     ts: Date.now(),

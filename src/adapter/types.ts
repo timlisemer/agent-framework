@@ -59,6 +59,7 @@ export type PlanModeDetectionSource =
 
 export interface PlanModeDetectionInput {
   permissionMode?: string;
+  collaborationMode?: string;
   transcriptPath?: string;
 }
 

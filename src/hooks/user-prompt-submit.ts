@@ -50,6 +50,7 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
   const spec = activeSpec();
   const planModeDetection = spec.detectPlanMode({
     permissionMode: input.permission_mode,
+    collaborationMode: input.collaboration_mode,
     transcriptPath: input.transcript_path,
   });
   if (spec.isPlanExit({ event: "UserPromptSubmit", prompt: input.prompt })) {

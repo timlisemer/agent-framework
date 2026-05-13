@@ -101,6 +101,12 @@ export async function commitPlanModeTransition(
   );
 }
 
+export async function readPlanModeStoredState(
+  sessionDir: string,
+): Promise<PlanModeStoredState | null> {
+  return readPlanModeEntryState(sessionPlanModeStateFile(sessionDir));
+}
+
 async function readPlanModeEntryState(
   statePath: string,
 ): Promise<PlanModeStoredState | null> {

@@ -20,7 +20,7 @@ import {
 import {
   APPEAL_COUNTS,
 } from "../utils/transcript-presets.js";
-import { getPlanModeContext } from "../utils/plan-mode-detector.js";
+import { detectPlanModeForHook, getPlanModeContext } from "../utils/plan-mode-detector.js";
 import {
   findUnprocessedPlanApproval,
   synthesizePostApprovalPrediction,
@@ -105,9 +105,12 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   let currentGateNote: string | undefined;
   const startTime = Date.now();
 
-  const planModeDetection = spec.detectPlanMode({
+  const planModeDetection = await detectPlanModeForHook({
+    spec,
     permissionMode: input.permission_mode,
+    collaborationMode: input.collaboration_mode,
     transcriptPath: input.transcript_path,
+    sessionDir,
   });
   const planMode = planModeDetection.active;
   const planModeCtx = getPlanModeContext(planMode);

@@ -3,6 +3,7 @@ export interface BaseHookInput {
   transcript_path: string;
   cwd?: string;
   permission_mode?: string;
+  collaboration_mode?: string;
 }
 
 export interface FrameworkPreToolUseHookInput extends BaseHookInput {

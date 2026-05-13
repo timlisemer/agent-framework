@@ -5,6 +5,7 @@ import * as path from "path";
 import {
   commitPlanModeTransition,
   computePlanModeTransition,
+  readPlanModeStoredState,
 } from "../../src/utils/plan-mode-entry-state.js";
 import {
   buildPendingContextInjections,
@@ -125,5 +126,23 @@ describe("plan-mode transition state", () => {
     expect(transition.previous).toBeNull();
     expect(transition.entered).toBe(true);
     expect(pending).toEqual([]);
+  });
+
+  it("reads committed plan-mode state and returns null for invalid state", async () => {
+    const transition = await computePlanModeTransition({
+      source: "UserPromptSubmit",
+      sessionDir,
+      detection: { active: true, mode: "plan", source: "hook-permission-mode" },
+    });
+    await commitPlanModeTransition(sessionDir, transition);
+
+    await expect(readPlanModeStoredState(sessionDir)).resolves.toMatchObject({
+      active: true,
+      mode: "plan",
+      detection_source: "hook-permission-mode",
+    });
+
+    fs.writeFileSync(sessionPlanModeStateFile(sessionDir), "{not json");
+    await expect(readPlanModeStoredState(sessionDir)).resolves.toBeNull();
   });
 });

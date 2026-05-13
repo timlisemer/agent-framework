@@ -33,7 +33,7 @@ import { evaluateRulesForUserPromptSubmit } from "../../src/rules/index.js";
 import { exitAfterFlush } from "../../src/utils/hook-bootstrap.js";
 import { checkPlanIntent } from "../../src/agents/hooks/plan-validate.js";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
-import { sessionCurrentPlanFile, sessionStateFile } from "../../src/utils/paths.js";
+import { sessionCurrentPlanFile, sessionPlanModeStateFile, sessionStateFile } from "../../src/utils/paths.js";
 
 const mockEvaluateRulesForUserPromptSubmit = vi.mocked(evaluateRulesForUserPromptSubmit);
 const mockExitAfterFlush = vi.mocked(exitAfterFlush);
@@ -156,6 +156,36 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
     );
 
     expect(mockExitAfterFlush).toHaveBeenLastCalledWith(0, "ok");
+  });
+
+  it("commits Codex collaboration-mode plan state even when permission mode is default", async () => {
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      await mainUserPromptSubmit(
+        {
+          session_id: "session-plan",
+          transcript_path: transcriptPath,
+          cwd: tempDir,
+          permission_mode: "default",
+          collaboration_mode: "plan",
+          prompt: "please plan this",
+        },
+        encoder,
+      );
+
+      const state = JSON.parse(
+        fs.readFileSync(sessionPlanModeStateFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!), "utf-8"),
+      ) as { active: boolean; mode: string; detection_source: string };
+      expect(state).toMatchObject({
+        active: true,
+        mode: "plan",
+        detection_source: "codex-collaboration-mode",
+      });
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      else process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+    }
   });
 
   it("validates Codex Implement the plan prompts, writes implementation state, and skips sentiment", async () => {

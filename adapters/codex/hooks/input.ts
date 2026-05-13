@@ -17,8 +17,18 @@ interface CodexBaseInput {
   cwd?: string;
   permission_mode?: string;
   permissionMode?: string;
+  collaboration_mode?: CodexCollaborationModeValue;
+  collaborationMode?: CodexCollaborationModeValue;
+  collaboration_mode_kind?: CodexCollaborationModeValue;
+  collaborationModeKind?: CodexCollaborationModeValue;
   sandbox_mode?: string;
 }
+
+type CodexCollaborationModeValue =
+  | string
+  | { mode?: unknown; kind?: unknown }
+  | null
+  | undefined;
 
 export interface CodexToolInput extends CodexBaseInput {
   tool_name?: string;
@@ -67,6 +77,7 @@ export function toPreToolUse(input: CodexToolInput): FrameworkPreToolUseHookInpu
     transcript_path: transcriptPath(input),
     cwd: input.cwd,
     permission_mode: input.permission_mode ?? input.permissionMode,
+    collaboration_mode: codexCollaborationMode(input),
     tool_name: toolName,
     tool_input: input.tool_input ?? input.toolInput ?? input.input,
     tool_use_id: input.tool_use_id ?? input.toolUseId ?? `${toolName}-${Date.now()}`,
@@ -90,6 +101,7 @@ export function toUserPromptSubmit(input: CodexPromptInput): FrameworkUserPrompt
     transcript_path: transcriptPath(input),
     cwd: input.cwd,
     permission_mode: input.permission_mode ?? input.permissionMode,
+    collaboration_mode: codexCollaborationMode(input),
     prompt: input.prompt,
   };
 }
@@ -100,6 +112,7 @@ export function toStop(input: CodexStopInput): FrameworkStopHookInput {
     transcript_path: transcriptPath(input),
     cwd: input.cwd,
     permission_mode: input.permission_mode ?? input.permissionMode,
+    collaboration_mode: codexCollaborationMode(input),
     stop_hook_active: input.stop_hook_active,
     last_assistant_message: input.last_assistant_message,
   };
@@ -107,4 +120,20 @@ export function toStop(input: CodexStopInput): FrameworkStopHookInput {
 
 export function sessionId(input: CodexBaseInput): string {
   return input.session_id ?? input.sessionId ?? "unknown";
+}
+
+function normalizeCodexCollaborationModeValue(
+  value: CodexCollaborationModeValue,
+): string | undefined {
+  if (typeof value === "string") return value;
+  if (value && typeof value.mode === "string") return value.mode;
+  if (value && typeof value.kind === "string") return value.kind;
+  return undefined;
+}
+
+export function codexCollaborationMode(input: CodexBaseInput): string | undefined {
+  return normalizeCodexCollaborationModeValue(input.collaboration_mode) ??
+    normalizeCodexCollaborationModeValue(input.collaborationMode) ??
+    normalizeCodexCollaborationModeValue(input.collaboration_mode_kind) ??
+    normalizeCodexCollaborationModeValue(input.collaborationModeKind);
 }

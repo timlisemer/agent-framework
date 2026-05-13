@@ -5,6 +5,7 @@ import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { loadCurrentEpoch } from "../scenario/epoch.js";
 import { activeSpec } from "../adapter/spec.js";
+import { detectPlanModeForHook } from "../utils/plan-mode-detector.js";
 
 /**
  * PostToolUseFailure Hook
@@ -18,6 +19,7 @@ export interface PostToolUseFailureHookInput {
   is_interrupt: boolean;
   transcript_path: string;
   permission_mode?: string;
+  collaboration_mode?: string;
 }
 
 export async function mainPostToolUseFailure(input: PostToolUseFailureHookInput, encoder: AdapterEncoder): Promise<void> {
@@ -29,9 +31,13 @@ export async function mainPostToolUseFailure(input: PostToolUseFailureHookInput,
   }
 
   const sessionDir = getSessionDir(input.transcript_path);
-  const planModeDetection = activeSpec().detectPlanMode({
+  const spec = activeSpec();
+  const planModeDetection = await detectPlanModeForHook({
+    spec,
     permissionMode: input.permission_mode,
+    collaborationMode: input.collaboration_mode,
     transcriptPath: input.transcript_path,
+    sessionDir,
   });
   await appendToolLog(sessionDir, {
     ts: Date.now(),

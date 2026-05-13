@@ -14,6 +14,7 @@ import * as fs from "fs";
 import {
   sessionGateReasoningFile,
   sessionDenialCacheFile,
+  sessionPlanModeStateFile,
   sessionStatuslineFile,
 } from "../utils/paths.js";
 import { getSessionState, sessionStateDefaults } from "../utils/session-store.js";
@@ -44,6 +45,7 @@ export async function onEpochRotation(sessionDir: string, _epoch: Epoch): Promis
   const toUnlink = [
     sessionGateReasoningFile(sessionDir),
     sessionDenialCacheFile(sessionDir),
+    sessionPlanModeStateFile(sessionDir),
     sessionStatuslineFile(sessionDir),
   ];
   for (const filePath of toUnlink) {

@@ -30,6 +30,34 @@ describe("Codex plan-mode detection", () => {
     });
   });
 
+  it("uses direct collaboration mode before permission fallback", () => {
+    expect(detectPlanMode({ permissionMode: "default", collaborationMode: "plan" })).toEqual({
+      active: true,
+      mode: "plan",
+      source: "codex-collaboration-mode",
+    });
+    expect(detectPlanMode({ permissionMode: "plan", collaborationMode: "default" })).toEqual({
+      active: false,
+      mode: "default",
+      source: "codex-collaboration-mode",
+    });
+  });
+
+  it("reads real Codex task_started collaboration mode markers", () => {
+    withTranscript([
+      {
+        type: "event_msg",
+        payload: { type: "task_started", collaboration_mode_kind: "plan" },
+      },
+    ], (transcriptPath) => {
+      expect(detectPlanMode({ permissionMode: "default", transcriptPath })).toEqual({
+        active: true,
+        mode: "plan",
+        source: "codex-collaboration-mode",
+      });
+    });
+  });
+
   it("uses turn_context collaboration mode before permission fallback", () => {
     withTranscript([
       { permissionMode: "plan" },

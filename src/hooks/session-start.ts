@@ -35,6 +35,7 @@ export interface SessionStartHookInput {
   transcript_path: string;
   cwd?: string;
   permission_mode?: string;
+  collaboration_mode?: string;
 }
 
 async function computeSessionStartPlanMode(
@@ -44,6 +45,7 @@ async function computeSessionStartPlanMode(
   const spec = activeSpec();
   const detection = spec.detectPlanMode({
     permissionMode: input.permission_mode,
+    collaborationMode: input.collaboration_mode,
     transcriptPath: input.transcript_path,
   });
   const transition = await computePlanModeTransition({

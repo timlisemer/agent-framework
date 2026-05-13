@@ -3,7 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
-import { sessionCapturesFile, sessionCurrentPlanFile } from "../../src/utils/paths.js";
+import { sessionCapturesFile, sessionCurrentPlanFile, sessionPlanModeStateFile } from "../../src/utils/paths.js";
 
 vi.mock("../../src/utils/hook-bootstrap.js", async () => {
   const actual = await vi.importActual<typeof import("../../src/utils/hook-bootstrap.js")>(
@@ -156,5 +156,37 @@ describe("mainStop Codex inline plan validation", () => {
         reason: "Proposed plan block emitted outside plan mode.",
       }),
     );
+  });
+
+  it("uses stored active plan mode when Stop lacks a fresh Codex collaboration marker", async () => {
+    mockCheckPlanIntent.mockResolvedValue({ approved: true });
+    const sessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR!;
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(
+      sessionPlanModeStateFile(sessionDir),
+      JSON.stringify({
+        active: true,
+        updatedAt: Date.now(),
+        lastSource: "UserPromptSubmit",
+        mode: "plan",
+        detection_source: "codex-collaboration-mode",
+        deliveredPlansMdHash: null,
+        deliveredPlansMdAt: null,
+      }) + "\n",
+    );
+
+    await mainStop(
+      {
+        session_id: "session-stop",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        permission_mode: "default",
+        last_assistant_message: "<proposed_plan>\n## User Goal\nx\n</proposed_plan>",
+      },
+      codexEncoder,
+    );
+
+    expect(mockCheckPlanIntent).toHaveBeenCalledTimes(1);
+    expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 });

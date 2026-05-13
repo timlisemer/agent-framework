@@ -1,4 +1,6 @@
 import * as fs from "fs";
+import type { AdapterSpec, PlanModeDetection } from "../adapter/types.js";
+import { readPlanModeStoredState } from "./plan-mode-entry-state.js";
 
 export interface PlanModeContext {
   active: boolean;
@@ -34,6 +36,35 @@ export function getPlanModeContext(active: boolean): PlanModeContext {
 
 export function formatPlanModeContext(active: boolean): string {
   return getPlanModeContext(active).contextString;
+}
+
+export async function detectPlanModeForHook(input: {
+  spec: AdapterSpec;
+  permissionMode?: string;
+  collaborationMode?: string;
+  transcriptPath: string;
+  sessionDir?: string;
+}): Promise<PlanModeDetection> {
+  const direct = input.spec.detectPlanMode({
+    permissionMode: input.permissionMode,
+    collaborationMode: input.collaborationMode,
+    transcriptPath: input.transcriptPath,
+  });
+
+  if (direct.source === "codex-collaboration-mode" || direct.active || !input.sessionDir) {
+    return direct;
+  }
+
+  const stored = await readPlanModeStoredState(input.sessionDir);
+  if (stored?.active === true) {
+    return {
+      active: true,
+      mode: stored.mode,
+      source: stored.detection_source,
+    };
+  }
+
+  return direct;
 }
 
 /**

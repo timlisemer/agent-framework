@@ -2,7 +2,7 @@ import { setTranscriptPath } from "../utils/execution-context.js";
 import { writeTool } from "../utils/synthetic.js";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
-import { getPlanModeContext } from "../utils/plan-mode-detector.js";
+import { detectPlanModeForHook, getPlanModeContext } from "../utils/plan-mode-detector.js";
 import { readTranscriptExact } from "../utils/transcript.js";
 import { FIRST_RESPONSE_STOP_COUNTS } from "../utils/transcript-presets.js";
 import { evaluateRulesForStop, ALL_RULES } from "../rules/index.js";
@@ -45,9 +45,12 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
   const state = await stateManager.load();
 
   const spec = activeSpec();
-  const planModeDetection = spec.detectPlanMode({
+  const planModeDetection = await detectPlanModeForHook({
+    spec,
     permissionMode: input.permission_mode,
+    collaborationMode: input.collaboration_mode,
     transcriptPath: input.transcript_path,
+    sessionDir,
   });
   const planMode = planModeDetection.active;
 
