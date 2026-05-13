@@ -8,6 +8,7 @@ import {
   intentRevokesTarget,
   isHighFrictionPrediction,
   isSustainedFrustration,
+  latestUserMessageAuthorizesBashCommand,
   latestUserMessageReauthorizesClass,
   type ToolPrediction,
 } from "../../src/utils/prediction-types.js";
@@ -1362,6 +1363,51 @@ describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", ()
     expect(result.reason).toContain("Bash safety policy blocks this command");
   });
 
+  it("stale angry prediction + latest explicit rm request + simple rm Bash -> allow", () => {
+    const pred = makeAngryLowStreak4({
+      intent: "User demands a direct answer to which other validator is being masked by an unrelated validation error, without any extraneous explanations or yapping.",
+      blockedIntent: "User explicitly does not want to read explanations they don't care about or hear about what was done or needs to be done.",
+      explicitlyAllowedTools: ["Read"],
+      userMessageSnippet:
+        "i aint reading that because i dont care why cant you just fucking said what fucking other validator",
+    });
+    const result = decidePrediction(
+      pred,
+      "Bash",
+      {
+        command: "rm scenarios/expected-to-fail/plan-validate-allows-specific-looking-plan-without-edit-shape.json",
+      },
+      1,
+      "please rm the scenario file then do what i told you todo",
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("simple Bash rm command");
+  });
+
+  it("latest explicit rm request does not allow rm with flags", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(
+      pred,
+      "Bash",
+      { command: "rm -rf scenarios/expected-to-fail/foo.json" },
+      1,
+      "please rm the scenario file",
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("latest rm revocation does not authorize simple rm", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(
+      pred,
+      "Bash",
+      { command: "rm scenarios/expected-to-fail/foo.json" },
+      1,
+      "do not rm the scenario file",
+    );
+    expect(result.decision).toBe("deny");
+  });
+
   it("'stop. now implement.' + Edit -> allow (sentence boundary breaks revocation window)", () => {
     const pred = makeAngryLowStreak4();
     const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4, "stop. now implement.");
@@ -1428,6 +1474,35 @@ describe("latestUserMessageReauthorizesClass", () => {
 
   it("empty string -> Edit: false", () => {
     expect(latestUserMessageReauthorizesClass("", "Edit")).toBe(false);
+  });
+});
+
+describe("latestUserMessageAuthorizesBashCommand", () => {
+  it("allows a fresh explicit rm request for a simple rm command", () => {
+    expect(
+      latestUserMessageAuthorizesBashCommand(
+        "please rm the scenario file then do what i told you todo",
+        "rm scenarios/expected-to-fail/foo.json",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects negated rm requests", () => {
+    expect(
+      latestUserMessageAuthorizesBashCommand(
+        "do not rm the scenario file",
+        "rm scenarios/expected-to-fail/foo.json",
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects rm commands with flags", () => {
+    expect(
+      latestUserMessageAuthorizesBashCommand(
+        "please rm the scenario file",
+        "rm -rf scenarios/expected-to-fail/foo.json",
+      ),
+    ).toBe(false);
   });
 });
 

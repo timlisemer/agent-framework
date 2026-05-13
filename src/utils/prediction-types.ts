@@ -433,6 +433,33 @@ export function latestUserMessageReauthorizes(
   return true;
 }
 
+const SIMPLE_RM_COMMAND_RE = /^\s*rm\s+(?!-)[^\s;&|()]+(?:\s+[^\s;&|()]+)*\s*$/;
+const RM_AUTHORIZATION_RE = /\b(rm|remove|delete)\b/gi;
+const VERB_REVOCATION_PREFIX_RE =
+  /\b(stop|stops|stopped|stopping|don'?t|do\s+not|no\s+more|never|quit|cease|ceases|ceased|halt|halts|forbid|avoid)\b[^.!?]{0,40}$/i;
+
+function messageAuthorizesRm(message: string): boolean {
+  if (!message) return false;
+  if (EXPLICIT_PROHIBITION_RE.test(message)) return false;
+  for (const match of message.matchAll(RM_AUTHORIZATION_RE)) {
+    const idx = match.index ?? -1;
+    if (idx < 0) continue;
+    const before = message.slice(Math.max(0, idx - 40), idx);
+    if (VERB_REVOCATION_PREFIX_RE.test(before)) continue;
+    return true;
+  }
+  return false;
+}
+
+export function latestUserMessageAuthorizesBashCommand(
+  message: string,
+  command: string,
+): boolean {
+  if (!message || !command) return false;
+  if (!SIMPLE_RM_COMMAND_RE.test(command)) return false;
+  return messageAuthorizesRm(message);
+}
+
 /**
  * Map `toolName` to the verb-class regexes whose match would have produced
  * `toolName` via `deriveAllowedToolsFromIntent`. Used by
@@ -790,6 +817,30 @@ export function decidePrediction(
         decision: "allow",
         reason: `User's latest transcript message is a fresh positive imperative naming ${toolName} (cached prediction was stale); ${toolName} proceeds.`,
       };
+    }
+    if (toolName === "Bash" && latestUserMessage) {
+      const command = String((toolInput as { command?: unknown } | null | undefined)?.command ?? "");
+      if (latestUserMessageAuthorizesBashCommand(latestUserMessage, command)) {
+        if (!bashClassification) {
+          return {
+            decision: "deny",
+            reason: "User's latest transcript message authorizes Bash rm, but no Bash command was provided.",
+          };
+        }
+        if (
+          bashClassification.riskClass === "blocked" ||
+          bashClassification.riskClass === "high-risk-workaround"
+        ) {
+          return {
+            decision: "deny",
+            reason: `User's latest transcript message authorizes Bash rm, but Bash safety policy blocks this command. ${bashClassification.reason ?? "command is blocked"}`,
+          };
+        }
+        return {
+          decision: "allow",
+          reason: "User's latest transcript message explicitly authorizes this simple Bash rm command (cached prediction was stale); Bash proceeds.",
+        };
+      }
     }
     // Path (a') — CLASS-LEVEL fresh imperative on the live transcript.
     if (latestUserMessage && latestUserMessageReauthorizesClass(latestUserMessage, toolName)) {
