@@ -27,15 +27,13 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   }),
 }));
 
-// Spy-able mock for the Anthropic client. `messages.create` MUST NOT be
-// called when input is a sentinel — that's the contract of the format-
-// validation skip-on-sentinel branch.
-const messagesCreateSpy = vi.fn();
+// Spy-able mock for the direct provider boundary. It MUST NOT be called when
+// input is a sentinel — that's the contract of the format-validation
+// skip-on-sentinel branch.
+const runAnthropicApiSkinDirectSpy = vi.fn();
 
-vi.mock("../../src/utils/anthropic-client.js", () => ({
-  getAnthropicClient: vi.fn(() => ({
-    messages: { create: messagesCreateSpy },
-  })),
+vi.mock("../../src/providers/anthropic-api-skin.js", () => ({
+  runAnthropicApiSkinDirect: (...args: unknown[]) => runAnthropicApiSkinDirectSpy(...args),
 }));
 
 // Logger is unused here but agent-runner imports it transitively.
@@ -70,7 +68,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 
 describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry", () => {
   beforeEach(() => {
-    messagesCreateSpy.mockReset();
+    runAnthropicApiSkinDirectSpy.mockReset();
     (queryMock as unknown as { mockClear: () => void }).mockClear?.();
     queryArgs.length = 0;
     setQueryGenerators();
@@ -108,7 +106,7 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
     expect(result.output).toContain("lastType=none");
 
     // Retry-tier loop must not have been entered for sentinel inputs.
-    expect(messagesCreateSpy).not.toHaveBeenCalled();
+    expect(runAnthropicApiSkinDirectSpy).not.toHaveBeenCalled();
 
     // Sanity: success/errorCount reflect the failure path.
     expect(result.success).toBe(false);
@@ -221,10 +219,12 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
     expect(queryArgs[0].options?.abortController?.signal.aborted).toBe(false);
   });
 
-  it("passes AbortSignal to direct Anthropic requests", async () => {
-    messagesCreateSpy.mockResolvedValueOnce({
-      content: [{ type: "text", text: "OK" }],
+  it("passes AbortSignal to direct provider requests", async () => {
+    runAnthropicApiSkinDirectSpy.mockResolvedValueOnce({
+      text: "OK",
       usage: {},
+      provider: "openrouter",
+      modelName: "test-model",
     });
     const controller = new AbortController();
 
@@ -239,9 +239,10 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
       { signal: controller.signal },
     );
 
-    expect(messagesCreateSpy).toHaveBeenCalledWith(
-      expect.any(Object),
-      expect.objectContaining({ maxRetries: 0, signal: controller.signal }),
+    expect(runAnthropicApiSkinDirectSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({ signal: controller.signal }),
+      }),
     );
   });
 

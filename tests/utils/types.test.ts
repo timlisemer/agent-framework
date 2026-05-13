@@ -1,19 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getModelId, parseTierName, MODEL_TIERS, MODEL_IDS } from "../../src/types.js";
-
-describe("getModelId", () => {
-  it("returns correct model ID for HAIKU tier", () => {
-    expect(getModelId(MODEL_TIERS.HAIKU)).toBe(MODEL_IDS.haiku);
-  });
-
-  it("returns correct model ID for SONNET tier", () => {
-    expect(getModelId(MODEL_TIERS.SONNET)).toBe(MODEL_IDS.sonnet);
-  });
-
-  it("returns correct model ID for OPUS tier", () => {
-    expect(getModelId(MODEL_TIERS.OPUS)).toBe(MODEL_IDS.opus);
-  });
-});
+import { parseTierName, MODEL_TIERS } from "../../src/types.js";
 
 describe("parseTierName", () => {
   it("returns OPUS for undefined input", () => {

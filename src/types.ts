@@ -44,21 +44,13 @@ export const EXECUTION_TYPES = {
 // Re-export provider types from provider-config
 export {
   type ProviderType,
+  type ResolvedProvider,
+  type SdkRuntime,
   PROVIDER_TYPES,
   resolveProvider,
+  resolveProviderForType,
   requiresCostTracking,
 } from "./utils/provider-config.js";
-
-// Model IDs for OpenRouter (default provider). Update when new models available.
-export const MODEL_IDS: Record<ModelTierValue, string> = {
-  haiku: "x-ai/grok-4.1-fast",
-  sonnet: "google/gemini-3-flash-preview",
-  opus: "anthropic/claude-opus-4-6",
-};
-
-export function getModelId(tier: ModelTier): string {
-  return MODEL_IDS[tier as ModelTierValue];
-}
 
 /**
  * Parse a tier name string to a branded ModelTier.
@@ -77,12 +69,6 @@ export function parseTierName(name?: string): ModelTier {
       return MODEL_TIERS.OPUS;
   }
 }
-
-// Set SDK environment variables to use our model IDs
-// This ensures internal SDK sub-agents use our configured models
-process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL = MODEL_IDS.haiku;
-process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = MODEL_IDS.sonnet;
-process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = MODEL_IDS.opus;
 
 export interface AgentResult {
   success: boolean;
@@ -133,4 +119,3 @@ export interface ConversationContext {
   conversationSummary: string;
   lastAssistantMessage: string;
 }
-

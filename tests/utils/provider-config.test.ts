@@ -15,6 +15,14 @@ describe("requiresCostTracking", () => {
   it("returns false for CLAUDE_SUBSCRIPTION provider", () => {
     expect(requiresCostTracking(PROVIDER_TYPES.CLAUDE_SUBSCRIPTION)).toBe(false);
   });
+
+  it("returns false for OPENAI_SUBSCRIPTION provider", () => {
+    expect(requiresCostTracking(PROVIDER_TYPES.OPENAI_SUBSCRIPTION)).toBe(false);
+  });
+
+  it("returns false for OpenRouter SDK mode", () => {
+    expect(requiresCostTracking(PROVIDER_TYPES.OPENROUTER, "sdk")).toBe(false);
+  });
 });
 
 describe("resolveProvider", () => {
@@ -23,6 +31,7 @@ describe("resolveProvider", () => {
     "AGENT_FRAMEWORK_PROVIDER",
     "AGENT_FRAMEWORK_DIRECT_PROVIDER",
     "AGENT_FRAMEWORK_SDK_PROVIDER",
+    "AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME",
   ];
 
   beforeEach(() => {
@@ -58,6 +67,19 @@ describe("resolveProvider", () => {
     expect(result.type).toBe(PROVIDER_TYPES.CLAUDE_SUBSCRIPTION);
   });
 
+  it("respects openai-subscription provider", () => {
+    process.env.AGENT_FRAMEWORK_PROVIDER = "openai-subscription";
+    resetProviderConfig();
+    const haiku = resolveProvider(MODEL_TIERS.HAIKU, "direct");
+    const sonnet = resolveProvider(MODEL_TIERS.SONNET, "direct");
+    const opus = resolveProvider(MODEL_TIERS.OPUS, "direct");
+    expect(haiku.type).toBe(PROVIDER_TYPES.OPENAI_SUBSCRIPTION);
+    expect(haiku.modelId).toBe("gpt-5.4-mini");
+    expect(sonnet.modelId).toBe("gpt-5.5");
+    expect(opus.modelId).toBe("gpt-5.5");
+    expect(opus.reasoningEffort).toBe("xhigh");
+  });
+
   it("respects AGENT_FRAMEWORK_DIRECT_PROVIDER for direct mode", () => {
     process.env.AGENT_FRAMEWORK_DIRECT_PROVIDER = "claude-subscription";
     resetProviderConfig();
@@ -70,6 +92,23 @@ describe("resolveProvider", () => {
     resetProviderConfig();
     const result = resolveProvider(MODEL_TIERS.OPUS, "sdk");
     expect(result.type).toBe(PROVIDER_TYPES.CLAUDE_SUBSCRIPTION);
+  });
+
+  it("supports OpenRouter SDK mode with Claude runtime by default", () => {
+    process.env.AGENT_FRAMEWORK_SDK_PROVIDER = "openrouter";
+    resetProviderConfig();
+    const result = resolveProvider(MODEL_TIERS.OPUS, "sdk");
+    expect(result.type).toBe(PROVIDER_TYPES.OPENROUTER);
+    expect(result.sdkRuntime).toBe("claude");
+    expect(result.costTracking).toBe("none");
+  });
+
+  it("supports OpenRouter SDK mode with Codex runtime override", () => {
+    process.env.AGENT_FRAMEWORK_SDK_PROVIDER = "openrouter";
+    process.env.AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME = "codex";
+    resetProviderConfig();
+    const result = resolveProvider(MODEL_TIERS.OPUS, "sdk");
+    expect(result.sdkRuntime).toBe("codex");
   });
 
   it("mode-specific env var overrides global env var", () => {
@@ -94,11 +133,10 @@ describe("resolveProvider", () => {
     expect(result.modelId).toContain("claude-");
   });
 
-  it("invalid env var value falls through to default", () => {
+  it("throws for invalid env var value", () => {
     process.env.AGENT_FRAMEWORK_PROVIDER = "invalid-provider";
     resetProviderConfig();
-    const result = resolveProvider(MODEL_TIERS.HAIKU, "direct");
-    expect(result.type).toBe(PROVIDER_TYPES.OPENROUTER);
+    expect(() => resolveProvider(MODEL_TIERS.HAIKU, "direct")).toThrow(/Invalid provider/);
   });
 
   it("handles all three tiers", () => {

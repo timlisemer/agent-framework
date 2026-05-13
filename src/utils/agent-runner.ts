@@ -74,28 +74,23 @@
  * @module agent-runner
  */
 
-import { homedir } from "node:os";
-import { query } from "@anthropic-ai/claude-agent-sdk";
-import { getAnthropicClient } from "./anthropic-client.js";
 import {
-  getModelId,
   type ModelTier,
   type ExecutionType,
   type ProviderType,
-  PROVIDER_TYPES,
   MODEL_TIERS,
   resolveProvider,
+  resolveProviderForType,
 } from "../types.js";
-import { extractTextFromResponse } from "./response-parser.js";
 import { logAgentDecision, extractDecision, logAgentStarted } from "./logger.js";
 import type { DecisionType } from "../telemetry/types.js";
 import {
-  abortableDelay,
   isCancellationError,
-  linkAbortSignal,
   type CancellationOptions,
   throwIfAborted,
 } from "./cancellation.js";
+import { runProviderDirect, runProviderSdk } from "../providers/index.js";
+import type { ProviderExecutionResult } from "../providers/execution-types.js";
 
 /**
  * Tools available to SDK mode agents.
@@ -119,21 +114,7 @@ const SDK_TOOLS = ["Read", "Bash"] as const;
  * Internal result from agent execution functions.
  * Contains text output and optional usage data from LLM provider.
  */
-interface InternalAgentResult {
-  text: string;
-  usage?: {
-    promptTokens?: number;
-    completionTokens?: number;
-    totalTokens?: number;
-    cachedTokens?: number;
-    reasoningTokens?: number;
-    cost?: number;
-  };
-  /** OpenRouter generation ID - at top level to survive when usage is undefined */
-  generationId?: string;
-  /** Provider type used for this execution */
-  provider?: ProviderType;
-}
+type InternalAgentResult = ProviderExecutionResult;
 
 /**
  * Configuration for an agent.
@@ -151,7 +132,7 @@ export interface AgentConfig {
 
   /**
    * Model tier to use for this agent.
-   * Maps to actual model IDs via getModelId() from types.ts.
+   * Maps to provider-specific model IDs via provider resolution.
    *
    * Tier selection guidelines:
    * - haiku: Fast tasks, simple validation (<100ms target)
@@ -287,7 +268,7 @@ export interface AgentExecutionResult {
   cost?: number;
   /** OpenRouter generation ID for async cost fetching */
   generationId?: string;
-  /** Provider type used (openrouter or claude-subscription) */
+  /** Provider type used */
   provider?: ProviderType;
 }
 
@@ -375,22 +356,18 @@ export async function runAgent(
           result.text.startsWith("[SDK ERROR]");
 
         if (!isSentinelError) {
-          const client = getAnthropicClient();
           const retryTiers = getRetryTiers(config.tier);
+          const baseProvider = result.provider ?? resolveProvider(config.tier, "direct").type;
 
           for (const retryTier of retryTiers) {
-            const retryResponse = await client.messages.create({
-              model: getModelId(retryTier),
-              max_tokens: 500,
-              messages: [{
-                role: "user",
-                content: `Invalid format. ${formatReminder}\n\nOriginal output:\n${result.text.slice(0, 2000)}`,
-              }],
-            }, {
-              maxRetries: 0,
-              signal: options.signal,
+            const retryResolved = resolveProviderForType(baseProvider, retryTier, "direct");
+            const retryResult = await runProviderDirect({
+              config: { ...config, tier: retryTier, maxTokens: 500 },
+              prompt: `Invalid format. ${formatReminder}\n\nOriginal output:\n${result.text.slice(0, 2000)}`,
+              resolvedProvider: retryResolved,
+              options,
             });
-            result.text = extractTextFromResponse(retryResponse);
+            result = mergeRetryResult(result, retryResult);
 
             if (validator.test(result.text)) break;
           }
@@ -418,7 +395,7 @@ export async function runAgent(
     output: result.text,
     latencyMs,
     modelTier: config.tier,
-    modelName: getModelId(config.tier),
+    modelName: result.modelName ?? resolveProvider(config.tier, config.mode).modelId,
     success,
     errorCount,
     // Pass through usage data
@@ -450,77 +427,24 @@ async function runDirectAgent(
   options: CancellationOptions = {}
 ): Promise<InternalAgentResult> {
   throwIfAborted(options.signal);
-  // Resolve provider for direct mode (currently always openrouter)
-  const provider = resolveProvider(config.tier, "direct");
+  const resolvedProvider = resolveProvider(config.tier, "direct");
+  return runProviderDirect({ config, prompt, resolvedProvider, options });
+}
 
-  try {
-    const client = getAnthropicClient();
-
-    const response = await client.messages.create({
-      model: provider.modelId,
-      max_tokens: config.maxTokens ?? 2000,
-      system: config.systemPrompt,
-      messages: [{ role: "user", content: prompt }],
-      // OpenRouter: request usage/cost data in response
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...({ usage: { include: true } } as any),
-    }, {
-      // Disable SDK-level retries — framework's own retry loops (rule-gate,
-      // tool-appeal) handle retries with exponential backoff and fresh attempts.
-      // SDK retrying internally reuses the same connection pool, which just
-      // delays failure surfacing if the connection is broken.
-      maxRetries: 0,
-      signal: options.signal,
-    });
-
-    // Extract usage data from response
-    // OpenRouter returns: input_tokens, output_tokens, cache_read_input_tokens
-    // OpenAI-compatible returns: prompt_tokens, completion_tokens, total_tokens, cost
-    // Anthropic SDK returns: input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens
-    const rawUsage = (response as unknown as { usage?: Record<string, unknown> })
-      .usage as Record<string, unknown> | undefined;
-    let promptTokens = (rawUsage?.prompt_tokens ?? rawUsage?.input_tokens) as number | undefined;
-    let completionTokens = (rawUsage?.completion_tokens ?? rawUsage?.output_tokens) as number | undefined;
-    let cachedTokens = (rawUsage?.cache_read_input_tokens as number | undefined) ??
-      (rawUsage?.prompt_tokens_details as Record<string, unknown> | undefined)?.cached_tokens as number | undefined;
-    let reasoningTokens = (rawUsage?.completion_tokens_details as Record<string, unknown> | undefined)?.reasoning_tokens as number | undefined;
-    // Don't track cost for subscription (included in subscription)
-    let cost = provider.type !== PROVIDER_TYPES.CLAUDE_SUBSCRIPTION
-      ? (rawUsage?.cost as number | undefined)
-      : undefined;
-
-    // Extract generationId from OpenRouter response for async cost fetching
-    // Cost will be fetched by the telemetry server asynchronously
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const generationId = (response as any).id as string | undefined;
-
-    const usage = rawUsage ? {
-      promptTokens,
-      completionTokens,
-      // Calculate total if not provided
-      totalTokens: (rawUsage.total_tokens as number | undefined) ??
-        (promptTokens && completionTokens ? promptTokens + completionTokens : undefined),
-      cachedTokens: cachedTokens || undefined,
-      reasoningTokens: reasoningTokens || undefined,
-      cost,
-    } : undefined;
-
-    return {
-      text: extractTextFromResponse(response),
-      usage,
-      generationId,  // At top level, independent of usage
-      provider: provider.type,
-    };
-  } catch (error) {
-    if (isCancellationError(error)) {
-      throw error;
-    }
-    // Return error as string rather than throwing
-    // This allows the caller to handle it gracefully (matches runSdkAgent pattern)
-    const errorMessage =
-      error instanceof Error ? error.message : String(error);
-    return { text: `[DIRECT ERROR] ${errorMessage}`, provider: provider.type };
-  }
+function mergeRetryResult(
+  previous: InternalAgentResult,
+  retry: InternalAgentResult
+): InternalAgentResult {
+  const generationIds = [previous.generationId, retry.generationId]
+    .filter((id): id is string => typeof id === "string" && id.length > 0)
+    .join(",");
+  return {
+    text: retry.text,
+    usage: retry.usage ?? previous.usage,
+    generationId: generationIds || undefined,
+    provider: retry.provider ?? previous.provider,
+    modelName: retry.modelName ?? previous.modelName,
+  };
 }
 
 /**
@@ -558,418 +482,12 @@ async function runSdkAgent(
   options: CancellationOptions = {}
 ): Promise<InternalAgentResult> {
   throwIfAborted(options.signal);
-  // Validate workingDir for SDK mode
   if (!config.workingDir) {
     throw new Error(`SDK mode requires workingDir for agent '${config.name}'`);
   }
-
-  const provider = resolveProvider(config.tier, "sdk");
-
-  // Prepare environment for subprocess
-  // For subscription: pass OAuth token so Claude Code uses subscription auth
-  const subprocessEnv = {
-    ...process.env,
-    // Clear OpenRouter-specific vars for subscription mode
-    ...(provider.type === PROVIDER_TYPES.CLAUDE_SUBSCRIPTION
-      ? {
-          // Don't pass OpenRouter base URL to subprocess
-          ANTHROPIC_BASE_URL: undefined,
-        }
-      : {}),
-  };
-
-  // Enhance system prompt with tool guidance
-  const enhancedSystemPrompt = `${config.systemPrompt}
-
-## TOOLS AVAILABLE
-
-You have access to these tools for investigating code:
-- **Read**: View file contents.
-- **Bash**: Classified read-only commands only: simple inspection, read-only-heavy evaluation such as nix-eval-jobs, and safe read-only pipelines. Mutation, execution, installs, builds, network fetch, and git writes are denied.
-
-Use these tools when you need to:
-- Understand context around changed code
-- Verify patterns are followed consistently
-- Check if documentation matches implementation
-
-Git data (status/diff/log/show) is already provided in the prompt context -- do not invoke git from Bash.
-Your final response should be your complete analysis in the required format.`;
-
-  // Build tool list: base read-only tools + any extra tools
+  const resolvedProvider = resolveProvider(config.tier, "sdk");
   const tools = [...SDK_TOOLS, ...(config.extraTools ?? [])];
-
-  // Run a single SDK attempt, returning either a successful result text or
-  // the captured diagnostics needed to compose an enriched sentinel.
-  const runOnce = async (): Promise<SdkAttemptOutcome> => {
-    let stderrBuffer = "";
-
-    // Diagnostics tracked across the for-await loop. These let us produce an
-    // enriched "[SDK ERROR] No output received (...)" sentinel when the stream
-    // ends without a usable result, and let the retry helper decide whether
-    // re-attempting is warranted.
-    let messageCount = 0;
-    let lastMessageType: string | undefined;
-    let lastResultSubtype: string | undefined;
-    let lastResultIsError: boolean | undefined;
-    let lastResultErrors: string[] | undefined;
-    let lastResultTerminalReason: string | undefined;
-    let lastAssistantError: string | undefined;
-    let apiRetryCount = 0;
-    let lastApiRetryStatus: string | undefined;
-
-    let finalResult = "";
-    let lastAssistantContent = "";
-
-    // Accumulate usage across all messages
-    let totalPromptTokens = 0;
-    let totalCompletionTokens = 0;
-    let totalCachedTokens = 0;
-
-    try {
-      const abortController = new AbortController();
-      const unlinkAbortSignal = linkAbortSignal(options.signal, abortController);
-      // Create SDK query with configured tools
-      try {
-        const q = query({
-          prompt,
-          options: {
-            model: provider.modelId,
-            cwd: config.workingDir,
-            systemPrompt: enhancedSystemPrompt,
-            tools,
-            allowedTools: tools, // Auto-approve these tools
-            permissionMode: "bypassPermissions",
-            allowDangerouslySkipPermissions: true,
-            maxTurns: config.maxTurns ?? 10,
-            env: subprocessEnv, // Pass env to subprocess (cleared for subscription)
-            // SDK 0.2.x spawns a native Claude Code subprocess. Point at the
-            // user-installed binary at ~/.local/bin/claude instead of the
-            // bundled @anthropic-ai/claude-agent-sdk-linux-x64-musl/claude
-            // which isn't present in this deployment.
-            pathToClaudeCodeExecutable: `${homedir()}/.local/bin/claude`,
-            persistSession: false, // Don't create transcript files for SDK agents
-            abortController,
-            stderr: (data: string) => {
-              // Cap to last 2 KiB so a chatty subprocess can't blow memory.
-              stderrBuffer = (stderrBuffer + data).slice(-2048);
-            },
-          },
-        });
-
-        for await (const message of q) {
-        messageCount++;
-        lastMessageType = message.type;
-        const msgAny = message as Record<string, unknown>;
-
-        // api_retry system messages expose transient API retries (added in
-        // SDK v0.2.77). Surface counts so the enriched sentinel can show
-        // "apiRetries=N/last=<error>".
-        if (message.type === "system" && msgAny.subtype === "api_retry") {
-          apiRetryCount++;
-          if (typeof msgAny.error === "string") {
-            lastApiRetryStatus = msgAny.error;
-          }
-        }
-
-        // Prefer 'result' message type - this is the final output with aggregated data
-        if (message.type === "result") {
-          lastResultSubtype = (message as { subtype?: string }).subtype;
-          if ("is_error" in message && typeof message.is_error === "boolean") {
-            lastResultIsError = message.is_error;
-          }
-          if (
-            "terminal_reason" in message &&
-            typeof (message as { terminal_reason?: unknown }).terminal_reason === "string"
-          ) {
-            lastResultTerminalReason = (message as { terminal_reason: string }).terminal_reason;
-          }
-          if ("errors" in message && Array.isArray((message as { errors?: unknown }).errors)) {
-            lastResultErrors = (message as { errors: string[] }).errors;
-          }
-
-          // Extract usage from result message (aggregated token counts)
-          const resultUsage = msgAny.usage as Record<string, unknown> | undefined;
-          if (resultUsage) {
-            totalPromptTokens = (resultUsage.input_tokens ?? 0) as number;
-            totalCompletionTokens = (resultUsage.output_tokens ?? 0) as number;
-            // cache_read_input_tokens from BetaUsage
-            totalCachedTokens = (resultUsage.cache_read_input_tokens ?? 0) as number;
-          }
-
-          // Extract cached tokens from modelUsage (per-model breakdown)
-          // This has cacheReadInputTokens which we sum across all models
-          const modelUsage = msgAny.modelUsage as Record<string, Record<string, unknown>> | undefined;
-          if (modelUsage && totalCachedTokens === 0) {
-            // Sum cacheReadInputTokens across all models
-            for (const modelData of Object.values(modelUsage)) {
-              if (typeof modelData.cacheReadInputTokens === "number") {
-                totalCachedTokens += modelData.cacheReadInputTokens;
-              }
-            }
-          }
-
-          // Only treat the SDKResultSuccess subtype with is_error=false as a
-          // real result. Any error subtype (or success+is_error=true) leaves
-          // finalResult empty so the enriched sentinel fires.
-          if (
-            lastResultSubtype === "success" &&
-            lastResultIsError !== true &&
-            "result" in message &&
-            typeof message.result === "string"
-          ) {
-            finalResult = message.result;
-          }
-          break;
-        }
-
-        // Track assistant messages as fallback - but only if the assistant
-        // message itself is not flagged as errored. Per agentSdkTypes.d.ts,
-        // SDKAssistantMessage.error is set on rate_limit / server_error /
-        // billing_error / etc. Using error-tagged content as fallback would
-        // poison lastAssistantContent with partial garbage.
-        if (message.type === "assistant") {
-          const assistantError = (message as { error?: string }).error;
-          if (typeof assistantError === "string" && assistantError.length > 0) {
-            lastAssistantError = assistantError;
-            continue;
-          }
-
-          if ("message" in message) {
-            // Handle message object with content
-            const msg = message.message;
-            if (msg && typeof msg === "object" && "content" in msg) {
-              const content = msg.content;
-              if (typeof content === "string") {
-                lastAssistantContent = content;
-              } else if (Array.isArray(content)) {
-                // Extract text from content blocks
-                const textBlocks: string[] = [];
-                for (const block of content) {
-                  if (
-                    block &&
-                    typeof block === "object" &&
-                    "type" in block &&
-                    block.type === "text" &&
-                    "text" in block &&
-                    typeof block.text === "string"
-                  ) {
-                    textBlocks.push(block.text);
-                  }
-                }
-                if (textBlocks.length > 0) {
-                  lastAssistantContent = textBlocks.join("\n");
-                }
-              }
-            }
-          }
-        }
-        }
-      } finally {
-        unlinkAbortSignal();
-      }
-    } catch (error) {
-      if (isCancellationError(error)) {
-        throw error;
-      }
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      return {
-        kind: "thrown",
-        text: `[SDK ERROR] ${errorMessage}`,
-      };
-    }
-
-    // Build usage object - include all available token data
-    // Note: SDK mode does not track cost (unreliable) or reasoningTokens (not available)
-    const hasUsage = totalPromptTokens > 0 || totalCompletionTokens > 0 || totalCachedTokens > 0;
-    const usage = hasUsage ? {
-      promptTokens: totalPromptTokens || undefined,
-      completionTokens: totalCompletionTokens || undefined,
-      totalTokens: (totalPromptTokens + totalCompletionTokens) || undefined,
-      cachedTokens: totalCachedTokens || undefined,
-    } : undefined;
-
-    if (finalResult || lastAssistantContent) {
-      return {
-        kind: "ok",
-        text: finalResult || lastAssistantContent,
-        usage,
-      };
-    }
-
-    // No usable text. Compose enriched sentinel preserving the literal
-    // "[SDK ERROR] No output received" prefix so the upstream
-    // `startsWith("[SDK ERROR]")` checks (agent-runner.ts:348, :364-366)
-    // and the existing test assertion keep working.
-    return {
-      kind: "noOutput",
-      text: composeNoOutputSentinel({
-        messageCount,
-        lastMessageType,
-        lastResultSubtype,
-        lastResultIsError,
-        lastResultErrors,
-        lastResultTerminalReason,
-        lastAssistantError,
-        apiRetryCount,
-        lastApiRetryStatus,
-        stderrBuffer,
-      }),
-      usage,
-      diagnostics: {
-        messageCount,
-        lastResultSubtype,
-        lastResultIsError,
-      },
-    };
-  };
-
-  // First attempt
-  const first = await runOnce();
-  if (first.kind === "ok") {
-    return {
-      text: first.text,
-      usage: first.usage,
-      generationId: undefined,
-      provider: provider.type,
-    };
-  }
-
-  // Decide whether a single in-process retry is warranted. Conditions per the
-  // implementation plan:
-  //  (a) zero result messages — stream ended without any 'result' frame
-  //  (b) lastResultSubtype === "error_during_execution"
-  //  (c) lastResultIsError === true on a 'success' subtype
-  // Do NOT retry deterministic limits (error_max_turns / error_max_budget_usd /
-  // error_max_structured_output_retries) or thrown exceptions.
-  let shouldRetry = false;
-  if (first.kind === "noOutput") {
-    const d = first.diagnostics;
-    const sawNoResult = d.lastResultSubtype === undefined;
-    const transientErrorSubtype = d.lastResultSubtype === "error_during_execution";
-    const isErrorOnSuccess =
-      d.lastResultSubtype === "success" && d.lastResultIsError === true;
-    shouldRetry = sawNoResult || transientErrorSubtype || isErrorOnSuccess;
-  }
-
-  if (!shouldRetry) {
-    return {
-      text: first.text,
-      usage: first.kind === "noOutput" ? first.usage : undefined,
-      generationId: undefined,
-      provider: provider.type,
-    };
-  }
-
-  // 250 ms cool-off so any underlying HTTP/2 / TLS state has a chance to tear
-  // down — same-tick retries don't fix connection-pool failures.
-  await abortableDelay(250, options.signal);
-
-  const second = await runOnce();
-  if (second.kind === "ok") {
-    return {
-      text: second.text,
-      usage: second.usage,
-      generationId: undefined,
-      provider: provider.type,
-    };
-  }
-
-  // Retry also failed — return the enriched sentinel from the second attempt
-  // (or the thrown-error sentinel if the second attempt threw).
-  return {
-    text: second.text,
-    usage: second.kind === "noOutput" ? second.usage : undefined,
-    generationId: undefined,
-    provider: provider.type,
-  };
-}
-
-/**
- * Outcome of a single `runOnce` attempt inside `runSdkAgent`.
- *
- * - `ok`: stream produced usable text (either a successful result or a
- *   non-errored assistant fallback).
- * - `noOutput`: stream finished without usable text. Includes the enriched
- *   sentinel and the diagnostics needed by the retry decision.
- * - `thrown`: the SDK call threw. Wraps the error message in the
- *   `[SDK ERROR]` prefix; not eligible for retry.
- */
-type SdkAttemptOutcome =
-  | {
-      kind: "ok";
-      text: string;
-      usage?: InternalAgentResult["usage"];
-    }
-  | {
-      kind: "noOutput";
-      text: string;
-      usage?: InternalAgentResult["usage"];
-      diagnostics: {
-        messageCount: number;
-        lastResultSubtype: string | undefined;
-        lastResultIsError: boolean | undefined;
-      };
-    }
-  | {
-      kind: "thrown";
-      text: string;
-    };
-
-/**
- * Compose the enriched "[SDK ERROR] No output received" sentinel.
- *
- * The literal prefix MUST be preserved so the upstream sentinel detection at
- * `runAgent` (the `startsWith("[SDK ERROR]")` checks) and the existing test
- * assertion in `tests/utils/agent-runner-sdk-error-fallback.test.ts` continue
- * to work. The parenthetical contains whichever diagnostics are populated,
- * each capped so the line stays scannable.
- */
-function composeNoOutputSentinel(diag: {
-  messageCount: number;
-  lastMessageType: string | undefined;
-  lastResultSubtype: string | undefined;
-  lastResultIsError: boolean | undefined;
-  lastResultErrors: string[] | undefined;
-  lastResultTerminalReason: string | undefined;
-  lastAssistantError: string | undefined;
-  apiRetryCount: number;
-  lastApiRetryStatus: string | undefined;
-  stderrBuffer: string;
-}): string {
-  const parts: string[] = [];
-
-  parts.push(`messages=${diag.messageCount}`);
-  parts.push(`lastType=${diag.lastMessageType ?? "none"}`);
-
-  if (diag.lastResultSubtype !== undefined) {
-    parts.push(`subtype=${diag.lastResultSubtype}`);
-  }
-  if (diag.lastResultIsError !== undefined) {
-    parts.push(`isError=${diag.lastResultIsError}`);
-  }
-  if (diag.lastResultErrors && diag.lastResultErrors.length > 0) {
-    const joined = diag.lastResultErrors.slice(0, 3).join(" | ").slice(0, 300);
-    parts.push(`errors="${joined}"`);
-  }
-  if (diag.lastResultTerminalReason !== undefined) {
-    parts.push(`terminalReason=${diag.lastResultTerminalReason}`);
-  }
-  if (diag.apiRetryCount > 0) {
-    const status = diag.lastApiRetryStatus ?? "unknown";
-    parts.push(`apiRetries=${diag.apiRetryCount}/last=${status}`);
-  }
-  if (diag.lastAssistantError !== undefined) {
-    parts.push(`assistantError=${diag.lastAssistantError}`);
-  }
-  if (diag.stderrBuffer.length > 0) {
-    const tail = diag.stderrBuffer.slice(-200).replace(/\s+/g, " ").trim();
-    if (tail.length > 0) {
-      parts.push(`stderrTail=${tail}`);
-    }
-  }
-
-  return `[SDK ERROR] No output received (${parts.join(", ")})`;
+  return runProviderSdk({ config, prompt, resolvedProvider, options, tools });
 }
 
 /**
@@ -1055,47 +573,52 @@ export async function runAgentWithRetry(
     maxTokens = 100,
   } = retryOptions;
 
-  const client = getAnthropicClient();
   const contextDesc = context ?? input.prompt.slice(0, 100);
 
   let decision = initialResult.output;
   let retries = 0;
   let totalErrorCount = initialResult.errorCount;
+  let modelName = initialResult.modelName;
+  let usage = {
+    promptTokens: initialResult.promptTokens,
+    completionTokens: initialResult.completionTokens,
+    totalTokens: initialResult.totalTokens,
+    cachedTokens: initialResult.cachedTokens,
+    reasoningTokens: initialResult.reasoningTokens,
+    cost: initialResult.cost,
+  };
   // Collect generation IDs from initial + all retry attempts
   const generationIds: string[] = [];
   if (initialResult.generationId) {
     generationIds.push(initialResult.generationId);
   }
+  const baseProvider = initialResult.provider ?? resolveProvider(config.tier, "direct").type;
 
   while (!formatValidator(decision) && retries < maxRetries) {
     retries++;
 
     try {
-      const retryResponse = await client.messages.create({
-        model: getModelId(config.tier),
-        max_tokens: maxTokens,
-        messages: [
-          {
-            role: "user",
-            content: `Invalid format: "${decision}". You are evaluating: ${contextDesc}. ${formatReminder}`,
-          },
-        ],
-        // OpenRouter: request usage/cost data in response
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ...({ usage: { include: true } } as any),
-      }, {
-        maxRetries: 0,
-        signal: options.signal,
+      const retryResolved = resolveProviderForType(baseProvider, config.tier, "direct");
+      const retryResult = await runProviderDirect({
+        config: { ...config, maxTokens },
+        prompt: `Invalid format: "${decision}". You are evaluating: ${contextDesc}. ${formatReminder}`,
+        resolvedProvider: retryResolved,
+        options,
       });
 
-      // Capture generation ID from retry response
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const retryGenerationId = (retryResponse as any).id as string | undefined;
-      if (retryGenerationId) {
-        generationIds.push(retryGenerationId);
+      if (retryResult.generationId) {
+        generationIds.push(retryResult.generationId);
       }
-
-      decision = extractTextFromResponse(retryResponse);
+      decision = retryResult.text;
+      modelName = retryResult.modelName ?? modelName;
+      usage = {
+        promptTokens: retryResult.usage?.promptTokens ?? usage.promptTokens,
+        completionTokens: retryResult.usage?.completionTokens ?? usage.completionTokens,
+        totalTokens: retryResult.usage?.totalTokens ?? usage.totalTokens,
+        cachedTokens: retryResult.usage?.cachedTokens ?? usage.cachedTokens,
+        reasoningTokens: retryResult.usage?.reasoningTokens ?? usage.reasoningTokens,
+        cost: retryResult.usage?.cost ?? usage.cost,
+      };
     } catch (error) {
       if (isCancellationError(error)) {
         throw error;
@@ -1108,9 +631,10 @@ export async function runAgentWithRetry(
         output: `[RETRY ERROR] ${errorMessage}`,
         latencyMs: Date.now() - startTime,
         modelTier: config.tier,
-        modelName: getModelId(config.tier),
+        modelName,
         success: false,
         errorCount: totalErrorCount,
+        ...usage,
         generationId: generationIds.length > 0 ? generationIds.join(",") : undefined,
         provider: initialResult.provider,
       };
@@ -1121,9 +645,10 @@ export async function runAgentWithRetry(
     output: decision,
     latencyMs: Date.now() - startTime,
     modelTier: config.tier,
-    modelName: getModelId(config.tier),
+    modelName,
     success: true,
     errorCount: totalErrorCount,
+    ...usage,
     generationId: generationIds.length > 0 ? generationIds.join(",") : undefined,
     provider: initialResult.provider,
   };
@@ -1218,6 +743,7 @@ export async function runAgentWithTelemetry(
     workingDir: telemetry.workingDir,
     latencyMs: result.latencyMs,
     modelTier: result.modelTier,
+    modelName: result.modelName,
     success: result.success,
     errorCount: result.errorCount,
     decisionReason: telemetry.decisionReason ?? result.output.slice(0, 1000),
@@ -1266,6 +792,7 @@ export async function runAgentWithRetryAndTelemetry(
       workingDir: telemetry.workingDir,
       latencyMs: 0,
       modelTier: MODEL_TIERS.HAIKU,
+      modelName: "stub",
       success: true,
       errorCount: 0,
       decisionReason: telemetry.decisionReason ?? stubbedOutput.slice(0, 1000),
@@ -1297,6 +824,7 @@ export async function runAgentWithRetryAndTelemetry(
     workingDir: telemetry.workingDir,
     latencyMs: result.latencyMs,
     modelTier: result.modelTier,
+    modelName: result.modelName,
     success: result.success,
     errorCount: result.errorCount,
     decisionReason: telemetry.decisionReason ?? result.output.slice(0, 1000),

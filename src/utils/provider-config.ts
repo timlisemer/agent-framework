@@ -1,9 +1,7 @@
 /**
  * Provider Configuration System
  *
- * Allows flexible configuration of LLM providers per tier and mode:
- * - openrouter: Track costs via generation IDs, show on LLM cost dashboard
- * - claude-subscription: Track everything EXCEPT cost, exclude from LLM cost dashboard
+ * Allows flexible configuration of LLM providers per tier and mode.
  *
  * ## Configuration Priority
  *
@@ -16,6 +14,7 @@
  * - AGENT_FRAMEWORK_PROVIDER: Global default provider
  * - AGENT_FRAMEWORK_DIRECT_PROVIDER: Override for direct API mode
  * - AGENT_FRAMEWORK_SDK_PROVIDER: Override for SDK mode
+ * - AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME: claude | codex
  *
  * ## Config File Example
  *
@@ -33,19 +32,25 @@ import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { providerConfigPath } from "./paths.js";
 import type { ModelTier } from "../types.js";
+import {
+  PROVIDERS,
+  PROVIDER_TYPES,
+  parseProviderTypeStrict,
+  parseSdkRuntimeStrict,
+  providerKey,
+  tierKey,
+} from "../providers/registry.js";
+import type {
+  ProviderMode,
+  ProviderModelSpec,
+  ProviderType,
+  ProviderTypeValue,
+  ResolvedProvider,
+  SdkRuntime,
+} from "../providers/types.js";
 
-// Branded type to enforce using constants
-declare const ProviderTypeBrand: unique symbol;
-type ProviderTypeBranded = { readonly [ProviderTypeBrand]: never };
-
-type ProviderTypeValue = "openrouter" | "claude-subscription";
-
-export type ProviderType = ProviderTypeValue & ProviderTypeBranded;
-
-export const PROVIDER_TYPES = {
-  OPENROUTER: "openrouter" as ProviderType,
-  CLAUDE_SUBSCRIPTION: "claude-subscription" as ProviderType,
-} as const;
+export { PROVIDER_TYPES };
+export type { ProviderMode, ProviderType, ProviderTypeValue, ResolvedProvider, SdkRuntime };
 
 /**
  * Configuration file schema
@@ -70,29 +75,12 @@ interface ProviderConfigFile {
       sdk?: ProviderTypeValue;
     };
   };
+  providers?: {
+    openrouter?: {
+      sdkRuntime?: SdkRuntime;
+    };
+  };
 }
-
-/**
- * Resolved provider configuration for a specific tier+mode combination
- */
-export interface ResolvedProvider {
-  type: ProviderType;
-  modelId: string;
-}
-
-// Model IDs for Claude subscription (native Anthropic aliases)
-const SUBSCRIPTION_MODEL_IDS: Record<string, string> = {
-  haiku: "claude-haiku-4-5",
-  sonnet: "claude-sonnet-4-5",
-  opus: "claude-opus-4-5",
-};
-
-// Model IDs for OpenRouter (from types.ts, duplicated here to avoid circular deps)
-const OPENROUTER_MODEL_IDS: Record<string, string> = {
-  haiku: "x-ai/grok-4.1-fast",
-  sonnet: "google/gemini-3-flash-preview",
-  opus: "anthropic/claude-opus-4.5",
-};
 
 // Cached config to avoid re-reading file
 let cachedConfig: ProviderConfigFile | null = null;
@@ -118,10 +106,13 @@ function loadConfigFile(): ProviderConfigFile {
     if (existsSync(configPath)) {
       try {
         const content = readFileSync(configPath, "utf-8");
-        cachedConfig = JSON.parse(content) as ProviderConfigFile;
+        cachedConfig = validateConfigFile(JSON.parse(content), configPath);
         return cachedConfig;
-      } catch {
-        // Invalid JSON, continue to next path
+      } catch (err) {
+        if (err instanceof Error) {
+          throw new Error(`Invalid agent-framework provider config at ${configPath}: ${err.message}`);
+        }
+        throw err;
       }
     }
   }
@@ -139,20 +130,45 @@ export function resetProviderConfig(): void {
   cachedConfig = null;
 }
 
-/**
- * Parse a provider string into a branded ProviderType.
- * Returns null if invalid.
- */
-function parseProviderType(value: string | undefined): ProviderType | null {
-  if (!value) return null;
-  switch (value.toLowerCase()) {
-    case "openrouter":
-      return PROVIDER_TYPES.OPENROUTER;
-    case "claude-subscription":
-      return PROVIDER_TYPES.CLAUDE_SUBSCRIPTION;
-    default:
-      return null;
+function validateConfigFile(value: unknown, source: string): ProviderConfigFile {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("config must be a JSON object");
   }
+  const raw = value as ProviderConfigFile;
+  validateProviderValue(raw.default, `${source}.default`);
+  validateProviderValue(raw.modes?.direct, `${source}.modes.direct`);
+  validateProviderValue(raw.modes?.sdk, `${source}.modes.sdk`);
+  for (const tier of ["haiku", "sonnet", "opus"] as const) {
+    validateProviderValue(raw.tiers?.[tier]?.direct, `${source}.tiers.${tier}.direct`);
+    validateProviderValue(raw.tiers?.[tier]?.sdk, `${source}.tiers.${tier}.sdk`);
+  }
+  if (raw.providers?.openrouter?.sdkRuntime !== undefined) {
+    parseSdkRuntimeStrict(raw.providers.openrouter.sdkRuntime, `${source}.providers.openrouter.sdkRuntime`);
+  }
+  return raw;
+}
+
+function validateProviderValue(value: unknown, source: string): void {
+  if (value === undefined) return;
+  if (typeof value !== "string") {
+    throw new Error(`${source} must be a provider string`);
+  }
+  parseProviderTypeStrict(value, source);
+}
+
+function providerFromEnv(name: string): ProviderType | null {
+  const value = process.env[name];
+  return value ? parseProviderTypeStrict(value, name) : null;
+}
+
+function providerFromConfig(value: ProviderTypeValue | undefined, source: string): ProviderType | null {
+  return value ? parseProviderTypeStrict(value, source) : null;
+}
+
+function resolveOpenRouterSdkRuntime(config: ProviderConfigFile): SdkRuntime {
+  const envValue = process.env.AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME;
+  if (envValue) return parseSdkRuntimeStrict(envValue, "AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME");
+  return config.providers?.openrouter?.sdkRuntime ?? "claude";
 }
 
 /**
@@ -166,42 +182,42 @@ function parseProviderType(value: string | undefined): ProviderType | null {
  * 5. Config file default
  * 6. Hardcoded default (openrouter)
  *
- * @throws Error if SDK mode with openrouter (not supported)
+ * @throws Error if an environment or config provider value is invalid
  */
 export function resolveProvider(
   tier: ModelTier,
-  mode: "direct" | "sdk"
+  mode: ProviderMode
 ): ResolvedProvider {
   const config = loadConfigFile();
-  const tierKey = tier as string;
+  const tierName = tierKey(tier);
 
   // 1. Mode-specific env var
   const modeEnvKey = mode === "direct"
     ? "AGENT_FRAMEWORK_DIRECT_PROVIDER"
     : "AGENT_FRAMEWORK_SDK_PROVIDER";
-  let provider = parseProviderType(process.env[modeEnvKey]);
+  let provider = providerFromEnv(modeEnvKey);
 
   // 2. Config file tier+mode specific
   if (!provider && config.tiers) {
-    const tierConfig = config.tiers[tierKey as keyof typeof config.tiers];
+    const tierConfig = config.tiers[tierName];
     if (tierConfig) {
-      provider = parseProviderType(tierConfig[mode]);
+      provider = providerFromConfig(tierConfig[mode], `tiers.${tierName}.${mode}`);
     }
   }
 
   // 3. Config file mode specific
   if (!provider && config.modes) {
-    provider = parseProviderType(config.modes[mode]);
+    provider = providerFromConfig(config.modes[mode], `modes.${mode}`);
   }
 
   // 4. Global env var
   if (!provider) {
-    provider = parseProviderType(process.env.AGENT_FRAMEWORK_PROVIDER);
+    provider = providerFromEnv("AGENT_FRAMEWORK_PROVIDER");
   }
 
   // 5. Config file default
   if (!provider) {
-    provider = parseProviderType(config.default);
+    provider = providerFromConfig(config.default, "default");
   }
 
   // 6. Hardcoded default
@@ -209,20 +225,53 @@ export function resolveProvider(
     provider = PROVIDER_TYPES.OPENROUTER;
   }
 
-  // Get model ID based on provider
-  const modelId = provider === PROVIDER_TYPES.CLAUDE_SUBSCRIPTION
-    ? SUBSCRIPTION_MODEL_IDS[tierKey] ?? SUBSCRIPTION_MODEL_IDS.opus
-    : OPENROUTER_MODEL_IDS[tierKey] ?? OPENROUTER_MODEL_IDS.opus;
+  const definition = PROVIDERS[providerKey(provider)];
+  const model: ProviderModelSpec = definition.models[tierName] ?? definition.models.opus;
+  const sdkRuntime = mode === "sdk"
+    ? provider === PROVIDER_TYPES.OPENROUTER
+      ? resolveOpenRouterSdkRuntime(config)
+      : definition.defaultSdkRuntime
+    : undefined;
 
-  return { type: provider, modelId };
+  return {
+    type: provider,
+    mode,
+    modelId: model.id,
+    reasoningEffort: model.reasoningEffort,
+    sdkRuntime,
+    costTracking: mode === "direct" ? definition.costTracking : "none",
+  };
+}
+
+export function resolveProviderForType(
+  provider: ProviderType,
+  tier: ModelTier,
+  mode: ProviderMode
+): ResolvedProvider {
+  const config = loadConfigFile();
+  const definition = PROVIDERS[providerKey(provider)];
+  const model: ProviderModelSpec = definition.models[tierKey(tier)] ?? definition.models.opus;
+  const sdkRuntime = mode === "sdk"
+    ? provider === PROVIDER_TYPES.OPENROUTER
+      ? resolveOpenRouterSdkRuntime(config)
+      : definition.defaultSdkRuntime
+    : undefined;
+  return {
+    type: provider,
+    mode,
+    modelId: model.id,
+    reasoningEffort: model.reasoningEffort,
+    sdkRuntime,
+    costTracking: mode === "direct" ? definition.costTracking : "none",
+  };
 }
 
 /**
  * Check if a provider type requires cost tracking.
  *
- * - openrouter: Requires generation ID for async cost fetching
- * - claude-subscription: No cost tracking (included in subscription)
+ * - openrouter direct: Requires generation ID for async cost fetching
+ * - subscription providers and SDK mode: No provider-cost lookup
  */
-export function requiresCostTracking(provider: ProviderType): boolean {
-  return provider === PROVIDER_TYPES.OPENROUTER;
+export function requiresCostTracking(provider: ProviderType, mode: ProviderMode = "direct"): boolean {
+  return mode === "direct" && PROVIDERS[providerKey(provider)].costTracking === "openrouter-generation";
 }

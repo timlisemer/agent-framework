@@ -13,7 +13,6 @@ import type {
   ExecutionType,
 } from "../telemetry/types.js";
 import {
-  getModelId,
   type ModelTier,
   type ProviderType,
 } from "../types.js";
@@ -41,6 +40,8 @@ export interface TrackAgentParams {
   latencyMs: number;
   /** Model tier used (required when executionType="llm") */
   modelTier?: ModelTier;
+  /** Actual provider model name/ID */
+  modelName?: string;
   /** Whether the agent executed successfully (even if it DENIED) */
   success: boolean;
   /** Number of LLM errors encountered (defaults to 0) */
@@ -63,7 +64,7 @@ export interface TrackAgentParams {
   cost?: number;
   /** OpenRouter generation ID for async cost fetching */
   generationId?: string;
-  /** Provider type (openrouter or claude-subscription) */
+  /** Provider type */
   provider?: ProviderType;
 }
 
@@ -102,7 +103,7 @@ function determineEventType(
  * Track an agent execution with all required telemetry fields.
  *
  * This is the main entry point for tracking agent activity. It automatically
- * derives modelName from modelTier and determines the appropriate eventType.
+ * records the resolved provider model name and determines the appropriate eventType.
  *
  * @example
  * ```typescript
@@ -131,6 +132,7 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     workingDir,
     latencyMs,
     modelTier,
+    modelName,
     success,
     errorCount = 0,
     decisionReason,
@@ -170,7 +172,7 @@ export function trackAgentExecution(params: TrackAgentParams): void {
     ...(executionType === "llm" && modelTier
       ? {
           modelTier,
-          modelName: getModelId(modelTier),
+          modelName: modelName ?? modelTier,
           promptTokens,
           completionTokens,
           totalTokens,

@@ -17,7 +17,6 @@ import type { DecisionType } from "../telemetry/types.js";
 import {
   MODEL_TIERS,
   EXECUTION_TYPES,
-  getModelId,
   type ModelTier,
   type ExecutionType,
   type ProviderType,
@@ -44,6 +43,8 @@ export interface AgentLog {
   latencyMs: number;
   /** Model tier used (required when executionType="llm") */
   modelTier?: ModelTier;
+  /** Actual provider model name/ID */
+  modelName?: string;
   /** Whether the agent executed successfully */
   success: boolean;
   /** Number of LLM errors (defaults to 0) */
@@ -66,7 +67,7 @@ export interface AgentLog {
   cost?: number;
   /** OpenRouter generation ID for async cost fetching */
   generationId?: string;
-  /** Provider type (openrouter or claude-subscription) */
+  /** Provider type */
   provider?: ProviderType;
 }
 
@@ -107,6 +108,7 @@ export function logAgentDecision(log: AgentLog): void {
     workingDir: log.workingDir,
     latencyMs: log.latencyMs,
     modelTier: log.modelTier,
+    modelName: log.modelName,
     success: log.success,
     errorCount: log.errorCount,
     decisionReason: log.decisionReason,
@@ -179,6 +181,7 @@ export function logAgentResult(
     workingDir: context.workingDir,
     latencyMs: result.latencyMs,
     modelTier: result.modelTier,
+    modelName: result.modelName,
     success: result.success,
     errorCount: result.errorCount,
     decisionReason: context.decisionReason ?? result.output.slice(0, 1000),
@@ -216,6 +219,7 @@ export function logApprove(
     workingDir,
     latencyMs: result.latencyMs,
     modelTier: result.modelTier,
+    modelName: result.modelName,
     success: result.success,
     errorCount: result.errorCount,
     decisionReason: reason,
@@ -252,6 +256,7 @@ export function logDeny(
     workingDir,
     latencyMs: result.latencyMs,
     modelTier: result.modelTier,
+    modelName: result.modelName,
     success: result.success,
     errorCount: result.errorCount,
     decisionReason: reason,
@@ -288,6 +293,7 @@ export function logConfirm(
     workingDir,
     latencyMs: result.latencyMs,
     modelTier: result.modelTier,
+    modelName: result.modelName,
     success: result.success,
     errorCount: result.errorCount,
     decisionReason: reason,
@@ -324,6 +330,7 @@ export function logError(
     workingDir,
     latencyMs: result.latencyMs,
     modelTier: result.modelTier,
+    modelName: result.modelName,
     success: false,
     errorCount: result.errorCount,
     decisionReason: reason,
@@ -360,6 +367,7 @@ export function logContinue(
     workingDir,
     latencyMs: result.latencyMs,
     modelTier: result.modelTier,
+    modelName: result.modelName,
     success: result.success,
     errorCount: result.errorCount,
     decisionReason: reason,
@@ -399,7 +407,7 @@ export function logFastPathContinue(
       success: true,
       errorCount: 0,
       modelTier: MODEL_TIERS.HAIKU,
-      modelName: getModelId(MODEL_TIERS.HAIKU),
+      modelName: "typescript",
     },
     agent,
     hookName,
@@ -427,7 +435,7 @@ export function logFastPathContinue(
  * // Instead of:
  * logApprove(
  *   { output: "APPROVE", latencyMs: 0, success: true, errorCount: 0,
- *     modelTier: MODEL_TIERS.HAIKU, modelName: getModelId(MODEL_TIERS.HAIKU) },
+ *     modelTier: MODEL_TIERS.HAIKU, modelName: "typescript" },
  *   "response-align", hookName, toolName, workingDir, EXECUTION_TYPES.TYPESCRIPT, "Subagent skip"
  * );
  *
@@ -449,7 +457,7 @@ export function logFastPathApproval(
       success: true,
       errorCount: 0,
       modelTier: MODEL_TIERS.HAIKU,
-      modelName: getModelId(MODEL_TIERS.HAIKU),
+      modelName: "typescript",
     },
     agent,
     hookName,
@@ -484,7 +492,7 @@ export function logFastPathDeny(
       success: true,
       errorCount: 0,
       modelTier: MODEL_TIERS.HAIKU,
-      modelName: getModelId(MODEL_TIERS.HAIKU),
+      modelName: "typescript",
     },
     agent,
     hookName,

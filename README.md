@@ -241,22 +241,23 @@ Common matcher patterns:
 ## Environment Variables
 
 ```bash
-# Required
-ANTHROPIC_API_KEY=sk-ant-...
-
 # Required for hooks - avoids expensive filesystem traversal on every hook invocation
 AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
 
 # Optional - set by the host agent automatically
 CLAUDE_PROJECT_DIR=/path/to/project
 
-# Optional - alternative API endpoint (e.g., OpenRouter)
-# ANTHROPIC_BASE_URL=https://openrouter.ai/api
-# ANTHROPIC_AUTH_TOKEN=your-openrouter-api-key
-
 # Optional - provider configuration (see Provider Configuration section)
 # AGENT_FRAMEWORK_PROVIDER=openrouter
-# AGENT_FRAMEWORK_SDK_PROVIDER=claude-subscription
+# AGENT_FRAMEWORK_DIRECT_PROVIDER=openrouter
+# AGENT_FRAMEWORK_SDK_PROVIDER=openrouter
+# AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=claude # claude | codex
+
+# OpenRouter Anthropic skin
+# OPENROUTER_API_KEY=<your-openrouter-api-key>
+# ANTHROPIC_BASE_URL=https://openrouter.ai/api
+# ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY
+# ANTHROPIC_API_KEY= # Important: explicitly empty for OpenRouter Claude routing
 
 # Optional - telemetry (all three required if enabled)
 # TELEMETRY_HOST_ID=your-host-id
@@ -266,12 +267,15 @@ CLAUDE_PROJECT_DIR=/path/to/project
 
 ## Provider Configuration
 
-The framework supports two LLM providers:
+The framework supports three LLM providers for both direct and SDK execution:
 
-| Provider | Description | Cost Tracking |
-|----------|-------------|---------------|
-| `openrouter` | OpenRouter API (default) | Via generation IDs, shown on LLM cost dashboard |
-| `claude-subscription` | Claude Pro/Max subscription | Excluded from cost dashboard (included in subscription) |
+| Provider | Direct runtime | SDK runtime | Cost tracking |
+|----------|----------------|-------------|---------------|
+| `openrouter` | OpenRouter Anthropic API skin | Claude Agent SDK or Codex SDK | Direct calls use OpenRouter generation IDs |
+| `claude-subscription` | Claude Agent SDK, one turn, no tools | Claude Agent SDK | Excluded from cost dashboard |
+| `openai-subscription` | Codex SDK, one turn, no tools | Codex SDK | Excluded from cost dashboard |
+
+See [`providers/`](providers/README.md) for provider-specific setup, official links, and subscription compliance notes.
 
 ### Configuration Methods
 
@@ -282,7 +286,10 @@ export AGENT_FRAMEWORK_PROVIDER=openrouter
 
 # Per-mode overrides
 export AGENT_FRAMEWORK_DIRECT_PROVIDER=openrouter
-export AGENT_FRAMEWORK_SDK_PROVIDER=claude-subscription
+export AGENT_FRAMEWORK_SDK_PROVIDER=openai-subscription
+
+# OpenRouter SDK runtime choice
+export AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=claude # claude | codex
 ```
 
 **Config file** (`.agent-framework.json` in project root or `~/.config/agent-framework/config.json`):
@@ -290,19 +297,25 @@ export AGENT_FRAMEWORK_SDK_PROVIDER=claude-subscription
 {
   "default": "openrouter",
   "modes": {
-    "sdk": "claude-subscription"
+    "direct": "openrouter",
+    "sdk": "openai-subscription"
+  },
+  "providers": {
+    "openrouter": {
+      "sdkRuntime": "codex"
+    }
   }
 }
 ```
 
-### Provider Constraints
+### Provider Notes
 
-- **Direct mode**: Supports both `openrouter` and `claude-subscription`
-- **SDK mode**: Only supports `claude-subscription` (the host agent's SDK subprocess cannot use custom base URLs)
+- `openrouter` direct mode uses `https://openrouter.ai/api`, `ANTHROPIC_AUTH_TOKEN`, and an explicitly empty `ANTHROPIC_API_KEY`.
+- `openrouter` SDK mode uses `AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=claude|codex`.
+- `claude-subscription` scrubs API/OpenRouter env vars and sets `persistSession: false`.
+- `openai-subscription` uses a temporary `CODEX_HOME`, disables history persistence, and scrubs API env vars so Codex uses ChatGPT/Codex sign-in.
 
-### Recommended Setup
-
-Use OpenRouter for direct API agents (cheaper models like Grok, Gemini) and Claude subscription for SDK mode (confirm agent):
+### Example Setups
 
 ```json
 {
@@ -313,10 +326,11 @@ Use OpenRouter for direct API agents (cheaper models like Grok, Gemini) and Clau
 }
 ```
 
-This gives you:
-- Fast, cheap haiku/sonnet agents via OpenRouter
-- Unlimited confirm agent usage via Claude subscription
-- Full telemetry tracking (events tracked, just excluded from cost dashboard for subscription)
+```json
+{
+  "default": "openai-subscription"
+}
+```
 
 ## Usage
 

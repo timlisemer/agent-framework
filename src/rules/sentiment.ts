@@ -5,7 +5,7 @@ import { parseSentimentOutput } from "../utils/prediction-parser.js";
 import { readRecentUserMessages } from "../utils/transcript.js";
 import { stripQuotedAndPastedContent } from "../utils/quote-detection.js";
 import { logError } from "../utils/logger.js";
-import { MODEL_TIERS, EXECUTION_TYPES, getModelId } from "../types.js";
+import { MODEL_TIERS, EXECUTION_TYPES } from "../types.js";
 import {
   EXPLICIT_OVERRIDE_RE,
   classifyBlockAllTools,
@@ -193,7 +193,7 @@ export const sentimentRule: PreToolRule = {
           success: false,
           errorCount: 1,
           modelTier: MODEL_TIERS.HAIKU,
-          modelName: getModelId(MODEL_TIERS.HAIKU),
+          modelName: "timeout",
         };
         logError(
           telemetryResult,

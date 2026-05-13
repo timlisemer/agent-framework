@@ -9,12 +9,10 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
   query: queryMock,
 }));
 
-const messagesCreateSpy = vi.fn();
+const runAnthropicApiSkinDirectSpy = vi.fn();
 
-vi.mock("../../src/utils/anthropic-client.js", () => ({
-  getAnthropicClient: vi.fn(() => ({
-    messages: { create: messagesCreateSpy },
-  })),
+vi.mock("../../src/providers/anthropic-api-skin.js", () => ({
+  runAnthropicApiSkinDirect: (...args: unknown[]) => runAnthropicApiSkinDirectSpy(...args),
 }));
 
 const logAgentStartedSpy = vi.fn();
@@ -56,7 +54,7 @@ const baseTelemetry = {
 describe("runAgentWithRetryAndTelemetry — env-keyed LLM stub", () => {
   beforeEach(() => {
     queryMock.mockReset();
-    messagesCreateSpy.mockReset();
+    runAnthropicApiSkinDirectSpy.mockReset();
     logAgentStartedSpy.mockReset();
     logAgentDecisionSpy.mockReset();
     delete process.env.AGENT_FRAMEWORK_LLM_STUBS;
@@ -93,7 +91,7 @@ describe("runAgentWithRetryAndTelemetry — env-keyed LLM stub", () => {
     expect(result.errorCount).toBe(0);
     expect(result.modelName).toBe("stub");
     expect(queryMock).not.toHaveBeenCalled();
-    expect(messagesCreateSpy).not.toHaveBeenCalled();
+    expect(runAnthropicApiSkinDirectSpy).not.toHaveBeenCalled();
   });
 
   it("stubs rule-gate DENY output and synthesizes correct shape", async () => {

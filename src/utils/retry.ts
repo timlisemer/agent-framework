@@ -17,7 +17,7 @@
  * ```typescript
  * const decision = await retryUntilValid(
  *   client,
- *   getModelId('haiku'),
+ *   resolvedProvider.modelId,
  *   extractTextFromResponse(response),
  *   "Read tool with path /etc/passwd",
  *   {

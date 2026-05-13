@@ -60,10 +60,10 @@ export interface TelemetryEvent {
   // OpenRouter generation ID for async cost fetching
   generationId?: string;
 
-  // Provider type (openrouter or claude-subscription)
+  // Provider type
   // Telemetry server uses this to determine dashboard routing:
-  // - openrouter: Fetch cost from OpenRouter API, include in LLM cost dashboard
-  // - claude-subscription: Skip OpenRouter API call, exclude from LLM cost dashboard
+  // - openrouter direct: fetch cost from OpenRouter API when generationId exists
+  // - subscription providers and SDK calls: exclude from LLM cost dashboard
   //   (event is still fully tracked - tokens, latency, etc. - just not on cost dashboard)
   provider?: ProviderType;
 
