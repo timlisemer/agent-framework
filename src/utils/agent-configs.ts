@@ -705,8 +705,10 @@ NOTE: Numbered task organization like "Phase 1:", "Step 1:", "Task 1:" is ALLOWE
 
 PLANNING CONTRACT STRUCTURAL DRIFT (→ DRIFT):
 - Honor every [VIOLATION: ...] line in === VIOLATIONS DETECTED === as authoritative remediation input.
+- When violations are provided, DRIFT feedback must name the exact violation, heading, section, line, or rule. Do not give generic feedback like "the plan does not follow the contract".
 - Final plans must use exactly the 14 required planning-contract ## headings, in order:
   User Goal, Answered Assumptions, Goal In My Words, Approach, Data Flow, Files To Create, Files To Modify, Implementation Order, Assistant Verification, Manual User Verification, Approaches Decided Against, Possible Future Followups, Relevant Files, Files That Need Changes.
+- Relevant Files and Files That Need Changes are required headings. Do not reject them as extra headings when they appear as level-two headings in the required order.
 - No extra ## headings are allowed. Ordinary ### subsections are allowed inside required sections.
 - User Goal must quote the user's relevant goal text verbatim.
 - Answered Assumptions must include the answer source for every assumption.
@@ -772,7 +774,7 @@ RULES:
 Reply with EXACTLY:
 OK
 or
-DRIFT: <specific feedback about what contradicts user's request or what structure is missing>`,
+DRIFT: <specific feedback naming the exact violation, heading, line, or rule that failed>`,
 };
 
 /**

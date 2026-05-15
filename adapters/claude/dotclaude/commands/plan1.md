@@ -41,11 +41,10 @@ Do not plan for backwards compatibility. If something is replaced, remove the ol
 
 ## Step 2: Write the plan file
 
-After the agent returns, write the plan to the plan file. Include:
-- A **Context** section explaining the problem
-- Concrete changes with file paths, line numbers, and code
-- An **Assistant Verification** section (run `mcp__agent-framework__check`)
-- A **Manual User Verification** section if applicable
+After the agent returns, write the plan to the plan file using exactly the 14 required `PLANS.md` level-two headings in order:
+`User Goal`, `Answered Assumptions`, `Goal In My Words`, `Approach`, `Data Flow`, `Files To Create`, `Files To Modify`, `Implementation Order`, `Assistant Verification`, `Manual User Verification`, `Approaches Decided Against`, `Possible Future Followups`, `Relevant Files`, `Files That Need Changes`.
+
+Do not add non-contract `##` headings such as `## Context`, `## Verification`, `## Testing`, or `## Test Plan`. Include concrete changes with file paths, line numbers, and code inside the required sections. `Assistant Verification` must use only `mcp__agent-framework__check` with the repository `working_dir`; put only user-only checks in `Manual User Verification`, or state that none are required.
 
 ## Step 3: Launch 1 Verification agent
 

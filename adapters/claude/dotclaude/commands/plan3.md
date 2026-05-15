@@ -55,11 +55,10 @@ After all 3 agents return, analyze their responses:
 - Note where agents DIVERGE (flag for the user)
 - Pick the best concrete implementation from the consensus
 
-Write the consolidated plan to the plan file. Include:
-- A **Context** section explaining the problem
-- Concrete changes with file paths, line numbers, and code
-- An **Assistant Verification** section (run `mcp__agent-framework__check`)
-- A **Manual User Verification** section if applicable
+Write the consolidated plan to the plan file using exactly the 14 required `PLANS.md` level-two headings in order:
+`User Goal`, `Answered Assumptions`, `Goal In My Words`, `Approach`, `Data Flow`, `Files To Create`, `Files To Modify`, `Implementation Order`, `Assistant Verification`, `Manual User Verification`, `Approaches Decided Against`, `Possible Future Followups`, `Relevant Files`, `Files That Need Changes`.
+
+Do not add non-contract `##` headings such as `## Context`, `## Verification`, `## Testing`, or `## Test Plan`. Include concrete changes with file paths, line numbers, and code inside the required sections. `Assistant Verification` must use only `mcp__agent-framework__check` with the repository `working_dir`; put only user-only checks in `Manual User Verification`, or state that none are required.
 
 After writing the consolidated plan content, call `mcp__agent-framework__validate_plan` with the full inline consolidated plan. If it returns FAIL, revise the consolidated plan and call it again. Repeat until it returns PASS. Only then proceed to verification agents.
 

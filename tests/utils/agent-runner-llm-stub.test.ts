@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { clearProviderEnvForTest } from "../helpers/provider-env.js";
 
 // Spy that should NEVER be called when AGENT_FRAMEWORK_LLM_STUBS targets the
 // telemetry agent. The stub must short-circuit at runAgentWithRetryAndTelemetry
@@ -52,7 +53,10 @@ const baseTelemetry = {
 };
 
 describe("runAgentWithRetryAndTelemetry — env-keyed LLM stub", () => {
+  let restoreProviderEnv: (() => void) | undefined;
+
   beforeEach(() => {
+    restoreProviderEnv = clearProviderEnvForTest();
     queryMock.mockReset();
     runAnthropicApiSkinDirectSpy.mockReset();
     logAgentStartedSpy.mockReset();
@@ -64,6 +68,8 @@ describe("runAgentWithRetryAndTelemetry — env-keyed LLM stub", () => {
   afterEach(() => {
     vi.clearAllMocks();
     delete process.env.AGENT_FRAMEWORK_LLM_STUBS;
+    restoreProviderEnv?.();
+    restoreProviderEnv = undefined;
   });
 
   it("stubs tool-appeal output, never calls runAgent / runAgentWithRetry", async () => {

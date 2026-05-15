@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { clearProviderEnvForTest } from "../helpers/provider-env.js";
+import { extractDecision as realExtractDecision } from "../../src/utils/telemetry-tracker.js";
 
 // Programmable mock for the Claude SDK `query()`. Each test installs the
 // generator(s) it wants the mock to yield via `setQueryGenerators()`. The
@@ -67,7 +69,10 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 }
 
 describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry", () => {
+  let restoreProviderEnv: (() => void) | undefined;
+
   beforeEach(() => {
+    restoreProviderEnv = clearProviderEnvForTest();
     runAnthropicApiSkinDirectSpy.mockReset();
     (queryMock as unknown as { mockClear: () => void }).mockClear?.();
     queryArgs.length = 0;
@@ -76,6 +81,8 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
 
   afterEach(() => {
     vi.clearAllMocks();
+    restoreProviderEnv?.();
+    restoreProviderEnv = undefined;
   });
 
   it("substitutes fallbackOutput for [SDK ERROR] sentinel and skips the retry tier", async () => {
@@ -343,10 +350,6 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
     // regression test is to confirm that the enriched parenthetical embedded
     // inside the `## Raw Output` block does NOT shift this classification —
     // the value must be the same as what the bare-template envelope produces.
-    const { extractDecision: realExtractDecision } = await vi.importActual<
-      typeof import("../../src/utils/telemetry-tracker.js")
-    >("../../src/utils/telemetry-tracker.js");
-
     setQueryGenerators(
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       async function* (_stderr) {

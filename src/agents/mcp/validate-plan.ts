@@ -26,7 +26,9 @@ You are NOT checking whether the plan matches a user's intent. You only check wh
 Honor every [VIOLATION: ...] line in === VIOLATIONS DETECTED === as authoritative remediation input.
 
 Final plans must satisfy the planning contract:
-- Use exactly the required ## headings when a final plan is being validated.
+- Use exactly the 14 required ## headings when a final plan is being validated, in this order:
+  User Goal, Answered Assumptions, Goal In My Words, Approach, Data Flow, Files To Create, Files To Modify, Implementation Order, Assistant Verification, Manual User Verification, Approaches Decided Against, Possible Future Followups, Relevant Files, Files That Need Changes.
+- Relevant Files and Files That Need Changes are required headings. Do not reject them as extra headings when they appear as level-two headings in the required order.
 - Include concrete file paths, symbols, anchors, and implementation details.
 - Include enough detail that two independent implementers would make the same edits.
 - Include an Assistant Verification section using only the agent-framework check MCP with working_dir.
@@ -39,7 +41,9 @@ Final plans must satisfy the planning contract:
 Reply with EXACTLY:
 VALID
 or
-INVALID: <specific reason>`;
+INVALID: <specific heading, line, or rule that failed>
+
+INVALID reasons must be actionable. Name the exact heading, section, line, or contract rule. Do not reply with generic reasons like "the plan does not follow the contract" or "missing required structure".`;
 
 export interface ValidatePlanInput {
   workingDir: string;
@@ -61,6 +65,14 @@ ${body}`;
 
 function stripViolationPrefix(text: string): string {
   return text.replace(/^\[VIOLATION: [^\]]+\]\s*/, "");
+}
+
+function hasSpecificInvalidReason(text: string): boolean {
+  const reason = text.replace(/^INVALID:\s*/i, "").trim();
+  if (!reason) return false;
+  if (/^(the plan|plan)\s+(does not|doesn't|fails to)\s+(follow|satisfy|meet)/i.test(reason)) return false;
+  if (/\b(missing|required|extra|duplicate|heading|section|line|rule|contract|verification|specific|vague|unresolved|schedule|option|blacklisted)\b/i.test(reason)) return true;
+  return /##\s+\S+|\b(User Goal|Answered Assumptions|Goal In My Words|Approach|Data Flow|Files To Create|Files To Modify|Implementation Order|Assistant Verification|Manual User Verification|Approaches Decided Against|Possible Future Followups|Relevant Files|Files That Need Changes)\b/i.test(reason);
 }
 
 function resolvePlanContent(input: ValidatePlanInput): { content?: string; error?: string } {
@@ -132,7 +144,7 @@ export async function runValidatePlanAgent(
     },
     {
       formatValidator: (text) => text.trim() === "VALID" || startsWithAny(text, ["INVALID:"]),
-      formatReminder: "Reply with exactly: VALID or INVALID: <specific reason>",
+      formatReminder: "Reply with exactly: VALID or INVALID: <specific heading, line, or rule that failed>",
       maxTokens: 512,
       context: `Validate plan MCP for: ${plan.substring(0, 100)}...`,
     },
@@ -160,6 +172,9 @@ export async function runValidatePlanAgent(
 
   if (result.output.startsWith("INVALID:")) {
     const reason = result.output.replace("INVALID:", "").trim();
+    if (!hasSpecificInvalidReason(result.output)) {
+      return formatResult("FAIL", ["Malformed plan-validate response - retry validation with a specific heading, line, or rule."]);
+    }
     logAgentResult(result, {
       agent: "plan-validate",
       hookName,

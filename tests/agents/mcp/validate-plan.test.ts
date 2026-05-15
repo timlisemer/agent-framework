@@ -115,6 +115,27 @@ describe("runValidatePlanAgent", () => {
     expect(result).toContain("## Reasons\n(none)");
   });
 
+  it("accepts Relevant Files and Files That Need Changes as required headings", async () => {
+    const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
+    const result = await runValidatePlanAgent({
+      workingDir: process.cwd(),
+      plan: validPlan(),
+    });
+    expect(result).toContain("- Status: PASS");
+    expect(result).not.toContain("Extra level-two heading \"## Relevant Files\"");
+    expect(result).not.toContain("Extra level-two heading \"## Files That Need Changes\"");
+  });
+
+  it("names non-contract level-two headings in deterministic failures", async () => {
+    const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
+    const result = await runValidatePlanAgent({
+      workingDir: process.cwd(),
+      plan: validPlan().replace("## Approach", "## Context\n\nContext details.\n\n## Approach"),
+    });
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("Extra level-two heading \"## Context\"");
+  });
+
   it("fails with the LLM reason when plan-validate returns INVALID", async () => {
     const runValidatePlanAgent = await loadRunValidatePlanAgent("INVALID: Missing concrete file paths.");
     const result = await runValidatePlanAgent({
@@ -123,6 +144,27 @@ describe("runValidatePlanAgent", () => {
     });
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain("Missing concrete file paths.");
+  });
+
+  it("rejects vague LLM invalid reasons as malformed", async () => {
+    const runValidatePlanAgent = await loadRunValidatePlanAgent("INVALID: The plan does not follow the contract.");
+    const result = await runValidatePlanAgent({
+      workingDir: process.cwd(),
+      plan: validPlan(),
+    });
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("specific heading, line, or rule");
+    expect(result).not.toContain("The plan does not follow the contract.");
+  });
+
+  it("surfaces specific LLM invalid reasons", async () => {
+    const runValidatePlanAgent = await loadRunValidatePlanAgent("INVALID: Missing required heading \"## Relevant Files\".");
+    const result = await runValidatePlanAgent({
+      workingDir: process.cwd(),
+      plan: validPlan(),
+    });
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("Missing required heading \"## Relevant Files\".");
   });
 
   it("reads plan_file relative to working_dir", async () => {
