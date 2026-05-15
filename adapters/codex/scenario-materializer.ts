@@ -43,7 +43,7 @@ export function materializeScenarioEntry(
 
   const counter = { n: 0 };
   const ts = ctx.baseTs;
-  const prefix = ctx.prevUuid === null && ctx.codexCollaborationMode === "plan"
+  const prefix = ctx.prevUuid === null && ctx.codexCollaborationMode !== undefined
     ? codexCollaborationModeMarkers(ctx, ts)
     : [];
   const entryCtx = prefix.length > 0

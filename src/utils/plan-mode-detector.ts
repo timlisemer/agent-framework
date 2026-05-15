@@ -51,7 +51,11 @@ export async function detectPlanModeForHook(input: {
     transcriptPath: input.transcriptPath,
   });
 
-  if (direct.source === "codex-collaboration-mode" || direct.active || !input.sessionDir) {
+  if (input.spec.name === "codex") {
+    return direct;
+  }
+
+  if (direct.active || !input.sessionDir) {
     return direct;
   }
 

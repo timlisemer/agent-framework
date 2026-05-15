@@ -206,7 +206,7 @@ export interface ScenarioEnv {
    */
   adapter?: string;
   /** Codex-only: materialize native collaboration-mode transcript markers. */
-  codex_collaboration_mode?: "plan";
+  codex_collaboration_mode?: "plan" | "default";
   /**
    * Per-agent LLM stub map: agent name (matching `telemetry.agent`) → exact
    * stubbed output text. Plumbed into the hook process via the
@@ -943,8 +943,12 @@ export function validateScenario(raw: unknown): Scenario {
         );
       }
     }
-    if (env.codex_collaboration_mode !== undefined && env.codex_collaboration_mode !== "plan") {
-      throw new Error('scenario.env.codex_collaboration_mode must be "plan" when set');
+    if (
+      env.codex_collaboration_mode !== undefined &&
+      env.codex_collaboration_mode !== "plan" &&
+      env.codex_collaboration_mode !== "default"
+    ) {
+      throw new Error('scenario.env.codex_collaboration_mode must be "plan" or "default" when set');
     }
     if (env.llm_stubs !== undefined) {
       validateLlmStubs(env.llm_stubs);

@@ -158,7 +158,7 @@ describe("mainStop Codex inline plan validation", () => {
     );
   });
 
-  it("uses stored active plan mode when Stop lacks a fresh Codex collaboration marker", async () => {
+  it("ignores stored active plan mode when Stop lacks a fresh Codex collaboration marker", async () => {
     mockCheckPlanIntent.mockResolvedValue({ approved: true });
     const sessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR!;
     fs.mkdirSync(sessionDir, { recursive: true });
@@ -186,7 +186,13 @@ describe("mainStop Codex inline plan validation", () => {
       codexEncoder,
     );
 
-    expect(mockCheckPlanIntent).toHaveBeenCalledTimes(1);
-    expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
+    expect(mockCheckPlanIntent).not.toHaveBeenCalled();
+    expect(mockExitAfterFlush).toHaveBeenCalledWith(
+      0,
+      JSON.stringify({
+        decision: "block",
+        reason: "Proposed plan block emitted outside plan mode.",
+      }),
+    );
   });
 });

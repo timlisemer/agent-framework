@@ -102,7 +102,7 @@ export interface ScenarioMaterializeCtx {
   sessionId: string;
   cwd: string;
   permissionMode: string;
-  codexCollaborationMode?: "plan";
+  codexCollaborationMode?: "plan" | "default";
   prevUuid: string | null;
   baseTs: number;
 }

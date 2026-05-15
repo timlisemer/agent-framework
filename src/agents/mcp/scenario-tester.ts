@@ -1132,6 +1132,10 @@ existing fields. Report readers must dispatch on \`mode\`.
                     entry's \`permissionMode\` (read by isPlanModeActive's
                     file-scan fallback). Both detection paths agree.
 
+  codex_collaboration_mode
+                    Codex-only. One of "plan" | "default". Materializes
+                    native Codex collaboration-mode transcript markers.
+
   cwd               Directory the hook runs in (passed as
                     CLAUDE_PROJECT_DIR and \`cwd\` in hook stdin). Defaults
                     to the scenario run dir under test-runs/scenarios/.

@@ -73,7 +73,7 @@ export const scenarioSchema = z.object({
     cwd: z.string().optional(),
     timeout_ms: z.number().optional(),
     adapter: z.string().optional(),
-    codex_collaboration_mode: z.literal("plan").optional(),
+    codex_collaboration_mode: z.enum(["plan", "default"]).optional(),
     llm_stubs: z.record(z.string().min(1), z.string().min(1)).optional(),
   }).optional(),
   setup_files: z.array(z.object({
