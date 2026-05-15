@@ -57,7 +57,7 @@ describe("errorAcknowledgeRule", () => {
     appendToolLog({
       tool: "Bash",
       status: "denied",
-      reason: "test command covered by just check (via vitest). You must run mcp__agent-framework__check",
+      reason: "test command is covered by the agent-framework check MCP (matched check target entry: vitest). You must run mcp__agent-framework__check",
     });
     appendToolLog({
       tool: "mcp__agent_framework__check",
@@ -75,12 +75,12 @@ describe("errorAcknowledgeRule", () => {
     appendToolLog({
       tool: "Bash",
       status: "denied",
-      reason: "test command covered by just check (via vitest). You must run mcp__agent-framework__check",
+      reason: "test command is covered by the agent-framework check MCP (matched check target entry: vitest). You must run mcp__agent-framework__check",
     });
 
     const result = await errorAcknowledgeRule.check(makeCtx());
     expect(result).toEqual({
-      fastDeny: 'Previous tool "Bash" was denied: test command covered by just check (via vitest). You must run mcp__agent-framework__check. You must acknowledge the error before proceeding with a different tool.',
+      fastDeny: 'Previous tool "Bash" was denied: test command is covered by the agent-framework check MCP (matched check target entry: vitest). You must run mcp__agent-framework__check. You must acknowledge the error before proceeding with a different tool.',
     });
   });
 });

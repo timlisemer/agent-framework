@@ -114,4 +114,17 @@ describe("plan contract", () => {
       expect(kinds).toContain("unresolved_assumption_language");
     });
   });
+
+  it("reports the exact unresolved assumption language", () => {
+    withProject((projectDir) => {
+      const plan = validPlan().replace(
+        "This section contains concrete repository-specific details for Approach with `src/file.ts` references.",
+        "Update `src/file.ts` if needed and probably adjust `tests/file.test.ts`.",
+      );
+      const finding = validatePlanContract(plan, projectDir).find((f) => f.kind === "unresolved_assumption_language");
+      expect(finding?.message).toContain('"if needed"');
+      expect(finding?.message).toContain('"probably"');
+      expect(finding?.message).toContain("Line ");
+    });
+  });
 });

@@ -91,6 +91,20 @@ describe("runValidatePlanAgent", () => {
     expect(result).toContain("generic verification");
   });
 
+  it("names unresolved assumption language in deterministic failures", async () => {
+    const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
+    const result = await runValidatePlanAgent({
+      workingDir: process.cwd(),
+      plan: validPlan().replace(
+        "This section contains concrete repository-specific details for Approach with `src/file.ts` references.",
+        "Update `src/file.ts` if needed and probably adjust `tests/file.test.ts`.",
+      ),
+    });
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain('"if needed"');
+    expect(result).toContain('"probably"');
+  });
+
   it("passes when the plan-validate LLM returns VALID", async () => {
     const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
     const result = await runValidatePlanAgent({

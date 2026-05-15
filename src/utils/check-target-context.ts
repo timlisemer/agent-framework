@@ -123,6 +123,10 @@ function getAction(): string {
   return `You must run ${activeSpec().renderCheckMcpHint()}`;
 }
 
+function isDirectCheckRunnerCommand(patternName: string): boolean {
+  return patternName === "just check" || patternName === "make check";
+}
+
 /**
  * Produce a context-aware error message for a blocked command.
  *
@@ -145,18 +149,20 @@ export function resolveCheckMessage(
     return `No Justfile/Makefile found. ${action}`;
   }
 
-  const runnerCmd = ctx.runner === "just" ? "just check" : "make check";
-
   if (!ctx.hasCheckTarget) {
     return `${ctx.runner === "just" ? "Justfile" : "Makefile"} found but no check target. ${action}`;
+  }
+
+  if (isDirectCheckRunnerCommand(patternName)) {
+    return `${patternName} shell command is blocked. ${action}`;
   }
 
   const body = ctx.checkBody.toLowerCase();
   const matched = equivalents.find((eq) => body.includes(eq.toLowerCase()));
 
   if (!matched) {
-    return `${patternName} not covered by ${runnerCmd}. ${action}`;
+    return `${patternName} is not covered by the detected check target. ${action}`;
   }
 
-  return `${patternName} covered by ${runnerCmd} (via ${matched}). ${action}`;
+  return `${patternName} is covered by the agent-framework check MCP (matched check target entry: ${matched}). ${action}`;
 }

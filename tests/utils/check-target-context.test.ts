@@ -154,8 +154,9 @@ describe("resolveCheckMessage", () => {
     const dir = createTempDir();
     fs.writeFileSync(path.join(dir, "Justfile"), "check:\n  tsc --noEmit\n");
     const msg = resolveCheckMessage("cargo build", ["cargo check", "cargo clippy"], dir);
-    expect(msg).toContain("cargo build not covered by just check");
+    expect(msg).toContain("cargo build is not covered by the detected check target");
     expect(msg).toContain("mcp__agent-framework__check");
+    expect(msg).not.toContain("run just check");
     fs.rmSync(dir, { recursive: true });
   });
 
@@ -163,17 +164,29 @@ describe("resolveCheckMessage", () => {
     const dir = createTempDir();
     fs.writeFileSync(path.join(dir, "Justfile"), "check:\n  cargo clippy\n  cargo test\n");
     const msg = resolveCheckMessage("cargo build", ["cargo check", "cargo clippy"], dir);
-    expect(msg).toContain("cargo build covered by just check");
-    expect(msg).toContain("via cargo clippy");
+    expect(msg).toContain("cargo build is covered by the agent-framework check MCP");
+    expect(msg).toContain("matched check target entry: cargo clippy");
     expect(msg).toContain("mcp__agent-framework__check");
+    expect(msg).not.toContain("run just check");
     fs.rmSync(dir, { recursive: true });
   });
 
-  it("uses make runner for Makefile", () => {
+  it("uses Makefile context without recommending make check", () => {
     const dir = createTempDir();
     fs.writeFileSync(path.join(dir, "Makefile"), "check:\n\tcargo clippy\n");
     const msg = resolveCheckMessage("cargo build", ["cargo check", "cargo clippy"], dir);
-    expect(msg).toContain("make check");
+    expect(msg).toContain("agent-framework check MCP");
+    expect(msg).not.toContain("run make check");
+    fs.rmSync(dir, { recursive: true });
+  });
+
+  it("blocks direct check runner shell commands in favor of the check MCP", () => {
+    const dir = createTempDir();
+    fs.writeFileSync(path.join(dir, "Justfile"), "check:\n  tsc --noEmit\n");
+    const msg = resolveCheckMessage("just check", ["check"], dir);
+    expect(msg).toContain("just check shell command is blocked");
+    expect(msg).toContain("mcp__agent-framework__check");
+    expect(msg).not.toContain("covered by");
     fs.rmSync(dir, { recursive: true });
   });
 

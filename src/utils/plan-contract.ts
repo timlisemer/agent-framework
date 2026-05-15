@@ -34,6 +34,7 @@ interface Heading {
 const PROJECT_COMMAND_RE =
   /\b(npm|pnpm|yarn|bun|cargo|pytest|vitest|jest|tsc|eslint|prettier|make|just)\b|\bgo\s+test\b|\bmvn\s+test\b/i;
 const UNRESOLVED_RE = /\b(assuming|probably|likely|if needed|should be|might|maybe|to be determined|tbd|unknown)\b/i;
+const UNRESOLVED_MATCH_RE = /\b(assuming|probably|likely|if needed|should be|might|maybe|to be determined|tbd|unknown)\b/gi;
 const LIVE_OPTION_RE = /\b(option|approach|alternative)\s+([A-Z]|\d+):/i;
 const SCHEDULE_RE = /\b(week|day|month)\s*\d+:|\b\d+(-\d+)?\s*(days?|weeks?|months?)\b/i;
 
@@ -210,10 +211,11 @@ export function validatePlanContractWithRequiredHeadings(
       });
     }
     if (UNRESOLVED_RE.test(line)) {
+      const matches = unresolvedAssumptionMatches(line);
       findings.push({
         kind: "unresolved_assumption_language",
         line: index + 1,
-        message: "Final plans must not contain unresolved assumption language.",
+        message: `Final plans must not contain unresolved assumption language. Line ${index + 1} contains ${formatQuotedList(matches)}.`,
       });
     }
   }
@@ -269,6 +271,17 @@ function hasSubstantiveBody(body: string): boolean {
   const trimmed = body.trim();
   if (!trimmed) return false;
   return !/^not applicable\b/i.test(trimmed) && !/^no\b.*required\b/i.test(trimmed);
+}
+
+function unresolvedAssumptionMatches(line: string): string[] {
+  return [...new Set([...line.matchAll(UNRESOLVED_MATCH_RE)].map((match) => match[1]))];
+}
+
+function formatQuotedList(values: readonly string[]): string {
+  if (values.length === 0) return "a banned unresolved-assumption phrase";
+  if (values.length === 1) return `"${values[0]}"`;
+  const quoted = values.map((value) => `"${value}"`);
+  return `${quoted.slice(0, -1).join(", ")} and ${quoted[quoted.length - 1]}`;
 }
 
 function weakSectionReason(heading: string, body: string): string | null {

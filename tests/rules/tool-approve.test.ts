@@ -193,9 +193,10 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
 
     const result = await toolApproveRule.check(ctx);
     expect(result).toEqual({
-      fastDeny: expect.stringContaining("cargo fmt covered by just check"),
+      fastDeny: expect.stringContaining("cargo fmt is covered by the agent-framework check MCP"),
     });
     expect((result as { fastDeny: string }).fastDeny).toContain("agent-framework");
+    expect((result as { fastDeny: string }).fastDeny).not.toContain("run just check");
   });
 
   it("does not set forceCheckPending for denied nix-eval-jobs", async () => {
