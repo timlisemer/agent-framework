@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
   BLACKLIST_PATTERNS,
+  CHECK_EQUIVALENTS,
+  CHECK_ROUTED_COMMAND_POLICIES,
   READ_ONLY_BASH_COMMANDS,
   READ_ONLY_HEAVY_BASH_COMMANDS,
   WORKAROUND_PATTERNS,
   classifyBashCommand,
   getContentBlacklistHighlights,
+  getCheckRoutedCommandHighlights,
 } from "../../src/utils/bash-command-policy.js";
 
 describe("classifyBashCommand", () => {
@@ -37,12 +40,14 @@ describe("classifyBashCommand", () => {
     expect(classifyBashCommand("curl https://example.com").riskClass).toBe("non-read-only-non-workaround");
   });
 
-  it("classifies build/test/lint/typecheck/install commands as high-risk-workaround", () => {
+  it("classifies build/test/lint/typecheck/format/install commands as high-risk-workaround", () => {
     for (const command of [
       "npm run build",
       "npm test",
       "npm run lint",
       "tsc --noEmit",
+      "cargo fmt --check",
+      "prettier --check src",
       "npm install express",
     ]) {
       expect(classifyBashCommand(command).riskClass).toBe("high-risk-workaround");
@@ -97,6 +102,52 @@ describe("bash command policy invariants", () => {
       const result = classifyBashCommand(representative);
       expect(result.riskClass).toBe("high-risk-workaround");
       expect(result.workaroundCategory).toBe(category);
+    }
+  });
+
+  it("provides equivalents and workaround variants for every check-routed policy", () => {
+    for (const policy of CHECK_ROUTED_COMMAND_POLICIES) {
+      expect(policy.equivalents.length).toBeGreaterThan(0);
+      expect(CHECK_EQUIVALENTS[policy.name]).toEqual(policy.equivalents);
+      expect(WORKAROUND_PATTERNS[policy.category].variants).toEqual(
+        expect.arrayContaining(policy.variants),
+      );
+    }
+  });
+
+  it("routes formatter commands through check-routed policy", () => {
+    for (const command of [
+      "cargo fmt --check",
+      "rustfmt --check src/lib.rs",
+      "prettier --check src",
+      "npx prettier --check src",
+      "npm run format",
+      "pnpm fmt",
+      "yarn run format",
+      "bun run fmt",
+      "make format",
+      "just fmt",
+      "biome check src",
+      "dprint check",
+      "treefmt --fail-on-change",
+      "nix fmt",
+      "alejandra .",
+    ]) {
+      const highlights = getCheckRoutedCommandHighlights("Bash", { command });
+      expect(highlights.length).toBeGreaterThan(0);
+      expect(highlights[0]).toContain("[CHECK-ROUTED:");
+    }
+  });
+
+  it("does not route formatter names in read-only search text or filenames", () => {
+    for (const command of [
+      `rg prettier src`,
+      `rg "cargo fmt" src`,
+      `find . -name "*fmt*"`,
+      "cat prettier.config.js",
+      "ls format-report.txt",
+    ]) {
+      expect(getCheckRoutedCommandHighlights("Bash", { command })).toEqual([]);
     }
   });
 

@@ -6,6 +6,7 @@ import {
   getBlacklistHighlights,
   detectWorkaroundPattern,
   checkReadOnlyBashAllowlist,
+  getCheckRoutedCommandHighlights,
 } from "../../src/utils/command-patterns.js";
 import { redactPathTokens } from "../../src/utils/path-redaction.js";
 
@@ -163,9 +164,10 @@ describe("getBlacklistHighlights", () => {
     expect(getBlacklistHighlights("Bash", { command: "cat /etc/passwd" })).toEqual([]);
   });
 
-  it("detects 'tsc' in Bash command", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "tsc --noEmit" });
+  it("routes 'tsc' Bash command through check-routed policy", () => {
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "tsc --noEmit" });
     expect(highlights.length).toBeGreaterThan(0);
+    expect(getBlacklistHighlights("Bash", { command: "tsc --noEmit" })).toEqual([]);
   });
 
   it("detects 'nix eval' in Bash command and points to nix-eval-jobs", () => {
@@ -206,20 +208,20 @@ describe("getBlacklistHighlights", () => {
     ).toEqual([]);
   });
 
-  it("detects 'vitest' in Bash command", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "npx vitest run" });
+  it("routes 'vitest' Bash command through check-routed policy", () => {
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "npx vitest run" });
     expect(highlights.length).toBeGreaterThan(0);
     expect(highlights[0]).toContain("test command");
   });
 
-  it("detects 'jest' in Bash command", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "npx jest --coverage" });
+  it("routes 'jest' Bash command through check-routed policy", () => {
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "npx jest --coverage" });
     expect(highlights.length).toBeGreaterThan(0);
     expect(highlights[0]).toContain("test command");
   });
 
-  it("detects 'pytest' in Bash command", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "pytest tests/" });
+  it("routes 'pytest' Bash command through check-routed policy", () => {
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "pytest tests/" });
     expect(highlights.length).toBeGreaterThan(0);
     expect(highlights[0]).toContain("test command");
   });
@@ -396,24 +398,24 @@ describe("getBlacklistHighlights path redaction regression", () => {
     }
   });
 
-  it("still fires 'test command' on 'cargo test'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "cargo test" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  it("routes 'test command' on 'cargo test'", () => {
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "cargo test" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
-  it("still fires 'test command' on 'npm test'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "npm test" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  it("routes 'test command' on 'npm test'", () => {
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "npm test" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
-  it("still fires 'test command' on 'npx vitest run'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "npx vitest run" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  it("routes 'test command' on 'npx vitest run'", () => {
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "npx vitest run" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
-  it("still fires 'test command' on 'pytest tests/unit/test_foo.py'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "pytest tests/unit/test_foo.py" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+  it("routes 'test command' on 'pytest tests/unit/test_foo.py'", () => {
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "pytest tests/unit/test_foo.py" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
   it("still fires 'cd' on 'cd test-harness/' (path-sensitive pattern)", () => {
@@ -434,85 +436,85 @@ describe("getBlacklistHighlights path redaction regression", () => {
   // Negative cases: find/grep with *.test.ts arguments must NOT fire "test command"
   it("does not false-fire 'test command' on find with *.test.ts argument (failing scenario exact command)", () => {
     const cmd = `find /home/tim/Coding/public_repos/agent-framework/src -name "*.test.ts" -path "*/src/*" | xargs grep -l "..."`;
-    const highlights = getBlacklistHighlights("Bash", { command: cmd });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(false);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: cmd });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(false);
   });
 
   it("does not false-fire 'test command' on 'find . -name \"foo.test.ts\"'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: `find . -name "foo.test.ts"` });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(false);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: `find . -name "foo.test.ts"` });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(false);
   });
 
   it("does not false-fire 'test command' on 'ls my-test.txt'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "ls my-test.txt" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(false);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "ls my-test.txt" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(false);
   });
 
   it("does not false-fire 'test command' on 'grep -rn \"test\" .'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: `grep -rn "test" .` });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(false);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: `grep -rn "test" .` });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(false);
   });
 
   // Positive cases: npm-family package manager forms must still fire
   it("still fires 'test command' on 'npm run test'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "npm run test" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "npm run test" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
   it("still fires 'test command' on 'yarn test'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "yarn test" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "yarn test" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
   it("still fires 'test command' on 'yarn run test'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "yarn run test" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "yarn run test" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
   it("still fires 'test command' on 'pnpm test'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "pnpm test" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "pnpm test" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
   it("still fires 'test command' on 'pnpm run test'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "pnpm run test" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "pnpm run test" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
   it("still fires 'test command' on 'bun test'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "bun test" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "bun test" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
   it("still fires 'test command' on 'bun run test'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "bun run test" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "bun run test" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
   it("still fires 'test command' on 'npx test'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "npx test" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "npx test" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
   // Positive cases: bare runner binary names must still fire
   it("still fires 'test command' on 'vitest run'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "vitest run" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "vitest run" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
   it("still fires 'test command' on 'jest --coverage'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "jest --coverage" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "jest --coverage" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
   it("still fires 'test command' on 'mocha'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "mocha" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "mocha" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 
   it("still fires 'test command' on 'ava'", () => {
-    const highlights = getBlacklistHighlights("Bash", { command: "ava" });
-    expect(highlights.some((h) => h.includes("[BLACKLIST: test command]"))).toBe(true);
+    const highlights = getCheckRoutedCommandHighlights("Bash", { command: "ava" });
+    expect(highlights.some((h) => h.includes("[CHECK-ROUTED: test command]"))).toBe(true);
   });
 });
 

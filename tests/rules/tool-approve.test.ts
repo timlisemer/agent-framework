@@ -184,6 +184,20 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
     expect(result).toHaveProperty("fastDeny");
   });
 
+  it("fastDeny check-routed formatter commands before LLM context", async () => {
+    fs.writeFileSync(path.join(tempDir, "Justfile"), "check:\n  cargo fmt --check\n");
+    const ctx = makeCtx({
+      toolName: "Bash",
+      toolInput: { command: "cargo fmt --check" },
+    });
+
+    const result = await toolApproveRule.check(ctx);
+    expect(result).toEqual({
+      fastDeny: expect.stringContaining("cargo fmt covered by just check"),
+    });
+    expect((result as { fastDeny: string }).fastDeny).toContain("agent-framework");
+  });
+
   it("does not set forceCheckPending for denied nix-eval-jobs", async () => {
     const update = vi.fn();
     const ctx = makeCtx({

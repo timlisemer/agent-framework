@@ -42,6 +42,13 @@ describe("blacklistRule", () => {
     expect(result).toEqual({ fastDeny: "Use nix-eval-jobs instead" });
   });
 
+  it("does not own check-routed command denials", async () => {
+    const result = await blacklistRule.check(makeCtx({
+      toolInput: { command: "cargo fmt --check" },
+    }));
+    expect(result).toBeNull();
+  });
+
   it("sets forceCheckPending for denied workaround commands", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "blacklist-test-"));
     initDenialSession(tempDir);

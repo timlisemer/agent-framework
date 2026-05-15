@@ -2,6 +2,11 @@ Fixtures here describe behaviour that is INTENTIONALLY broken — the fixture it
 
 ## Recent changes
 
+2026-05-15 scenario reclassification at commit `4e4b851`:
+
+- Moved three nondeterministic fixtures here from `expected-to-pass/`: `gate-blocks-outside-project-edit-after-implicit-fix-authorization.json`, `stop-after-offering-options-when-user-complained-about-being-ignored-should-block.json`, and `tool-approve-plan-validation-misfires-on-plan-content-substrings.json`.
+- `codex-cargo-fmt-check-parallel-batch-allowed-before-later-deny.json` now lives in `expected-to-pass/` after the check-routed formatter policy fix.
+
 2026-05-13 scenario reclassification after three full `scenario_tester` runs:
 
 - Kept nondeterministic fixture `sentiment-agent-resets-anger-after-calm-directive.json` here after a fail/pass/pass pattern.

@@ -2,9 +2,10 @@
  * Shared Bash command policy, risk classification, blacklist highlights, and
  * workaround detection.
  *
- * BLACKLIST_PATTERNS: Used by tool-approve to highlight bad bash commands to the LLM
+ * BLACKLIST_PATTERNS: Hard safety denials owned by the blacklist rule
+ * CHECK_ROUTED_COMMAND_POLICIES: Commands routed to the check MCP by tool-approve
  * WORKAROUND_PATTERNS: Used by pre-tool-use to detect repeated denial attempts
- * CHECK_EQUIVALENTS: Maps pattern names to equivalent commands found in check targets
+ * CHECK_EQUIVALENTS: Maps check-routed policy names to equivalent check targets
  */
 
 import { resolveCheckMessage } from "./check-target-context.js";
@@ -40,6 +41,19 @@ export interface BlacklistPattern {
   redactPaths?: boolean;
 }
 
+export type CheckRoutedCategory = "type-check" | "build" | "lint" | "format" | "test";
+
+export interface CheckRoutedCommandPolicy {
+  pattern: RegExp;
+  contentPattern?: RegExp;
+  name: string;
+  category: CheckRoutedCategory;
+  variants: string[];
+  equivalents: string[];
+  bashOnly?: boolean;
+  redactPaths?: boolean;
+}
+
 /** Resolve a BlacklistPattern alternative to a string. */
 function resolveAlternative(alt: string | (() => string)): string {
   return typeof alt === "function" ? alt() : alt;
@@ -65,8 +79,9 @@ export interface BashCommandClassification {
 }
 
 /**
- * Patterns that should be blocked and their alternatives.
- * Used by tool-approve agent to highlight violations.
+ * Hard safety patterns that should be blocked by the blacklist rule.
+ * Check-MCP redirects live in CHECK_ROUTED_COMMAND_POLICIES so their
+ * PreToolUse attribution remains tool-approve instead of blacklist.
  */
 export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // grep/rg/find intentionally NOT blacklisted: native macOS/Linux Claude Code
@@ -85,54 +100,13 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /\bgit\s+(commit|push|add)\b/, name: 'git write op (MCP)', alternative: gitWorkflowAlternative },
   { pattern: /\bgit\s+(?:am|apply|bisect|checkout|cherry-pick|clean|clone|fetch|gc|merge|mv|pull|rebase|reflog|remote|reset|restore|revert|rm|stash|submodule|switch|tag|worktree)\b/, name: 'git write op', alternative: 'Git write operation denied' },
 
-  // Build/check commands - LLMs should NOT build, only verify with check tool
-  { pattern: /\bmake\s+check\b/, name: "make check", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bjust\s+check\b/, name: "just check", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bmake\s+build\b/, name: "make build", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bjust\s+build\b/, name: "just build", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bnpm\s+run\s+build\b/, name: "npm build", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bnpm\s+run\s+(check|typecheck)\b/, name: "npm check/typecheck", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bpnpm\s+(?:run\s+)?build\b/, name: "pnpm build", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bpnpm\s+(?:run\s+)?(?:check|typecheck)\b/, name: "pnpm check/typecheck", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\byarn\s+(?:run\s+)?build\b/, name: "yarn build", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\byarn\s+(?:run\s+)?(?:check|typecheck)\b/, name: "yarn check/typecheck", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bbun\s+run\s+build\b/, name: "bun build", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bbun\s+run\s+(check|typecheck)\b/, name: "bun check/typecheck", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bcargo\s+build\b/, name: "cargo build", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bcargo\s+check\b/, name: "cargo check", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bcargo\s+clippy\b/, name: "cargo clippy", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\b(tsc|npx\s+tsc)\b/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?(?:npx\s+)?tsc\b|\bnpx\s+tsc\b|\btsc\s+(?:-[\w-]+|<PATH>))/, name: "tsc", alternative: checkMcpAction, redactPaths: true },
-
   // Package install commands - dependency-modifying, should not be run by AI
   { pattern: /\bnpm\s+install\b/, name: "npm install", alternative: "LLMs should not modify project dependencies", redactPaths: true },
   { pattern: /\bbun\s+install\b/, name: "bun install", alternative: "LLMs should not modify project dependencies", redactPaths: true },
   { pattern: /\bpnpm\s+install\b/, name: "pnpm install", alternative: "LLMs should not modify project dependencies", redactPaths: true },
 
-  // Lint commands - should use check tool
-  { pattern: /\bnpm\s+run\s+lint\b/, name: "npm lint", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bbun\s+run\s+lint\b/, name: "bun lint", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\bpnpm\s+(run\s+)?lint\b/, name: "pnpm lint", alternative: checkMcpAction, redactPaths: true },
-  { pattern: /\byarn\s+(run\s+)?lint\b/, name: "yarn lint", alternative: checkMcpAction, redactPaths: true },
-
-  // Test commands - tests may not exist, use check for build verification
-  // bashOnly: dedicated runners are caught by their own bare names; bare-word
-  // "test" is only allowed when prefixed by a package manager (npm/yarn/pnpm/
-  // bun with optional `run`, or npx/cargo). The bare-word form was previously
-  // a bare alternation (\b(test|...)\b) which over-matched the literal "test"
-  // inside *.test.ts / foo.test.ts arguments to commands like
-  // `find -name "*.test.ts"` because path-redaction does not strip tokens
-  // whose only path signal is a trailing .ext-followed-by-quote
-  // (PATH_EXTENSION trails on $|:|,|; only). The (?:run\s+)? particle is the
-  // canonical npm/yarn/pnpm/bun form (the repo's own package.json uses
-  // `npm run test` via scripts.test) and mirrors the existing convention at
-  // lines 50/52/63/64 (npm run check/typecheck, bun run check/typecheck, etc.)
-  { pattern: /\b(?:vitest|jest|mocha|pytest|ava|(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test|(?:npx|cargo)\s+test)\b/, name: "test command", alternative: checkMcpAction, bashOnly: true, redactPaths: true },
-
   // Command chaining with cd - always deny
   { pattern: /\bcd\s+[^&]+&&/, name: 'cd && chain', alternative: 'Use --cwd flag or run from correct directory' },
-
-  // Nix formatting - should use check tool
-  { pattern: /\balejandra\b/, name: "alejandra", alternative: checkMcpAction, redactPaths: true },
 
   // Nix evaluation - use batch evaluator instead of ad hoc shell evals
   { pattern: /\bnix\s+eval\b/, name: "nix eval", alternative: "Use nix-eval-jobs instead", redactPaths: true },
@@ -160,50 +134,71 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   { pattern: /(?:^|[\s;&|])perl(?:$|\s)/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?perl\s+\S|\bperl\s+(?:-[\w-]+|<PATH>))/, name: "perl", alternative: scriptingLanguageAction, redactPaths: true },
 ];
 
+export const CHECK_ROUTED_COMMAND_POLICIES: CheckRoutedCommandPolicy[] = [
+  { pattern: /^make\s+check\b/, name: "make check", category: "type-check", variants: ["make check"], equivalents: ["check"], redactPaths: true },
+  { pattern: /^just\s+check\b/, name: "just check", category: "type-check", variants: ["just check"], equivalents: ["check"], redactPaths: true },
+  { pattern: /^npm\s+run\s+(?:check|typecheck)\b/, name: "npm check/typecheck", category: "type-check", variants: ["npm run check", "npm run typecheck"], equivalents: ["tsc", "npx tsc", "typecheck"], redactPaths: true },
+  { pattern: /^pnpm\s+(?:run\s+)?(?:check|typecheck)\b/, name: "pnpm check/typecheck", category: "type-check", variants: ["pnpm check", "pnpm run check", "pnpm typecheck", "pnpm run typecheck"], equivalents: ["tsc", "npx tsc", "typecheck"], redactPaths: true },
+  { pattern: /^yarn\s+(?:run\s+)?(?:check|typecheck)\b/, name: "yarn check/typecheck", category: "type-check", variants: ["yarn check", "yarn run check", "yarn typecheck", "yarn run typecheck"], equivalents: ["tsc", "npx tsc", "typecheck"], redactPaths: true },
+  { pattern: /^bun\s+run\s+(?:check|typecheck)\b/, name: "bun check/typecheck", category: "type-check", variants: ["bun run check", "bun run typecheck"], equivalents: ["tsc", "typecheck"], redactPaths: true },
+  { pattern: /^cargo\s+check\b/, name: "cargo check", category: "type-check", variants: ["cargo check"], equivalents: ["cargo check", "cargo clippy"], redactPaths: true },
+  { pattern: /^(?:npx\s+)?tsc\b/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?(?:npx\s+)?tsc\b|\bnpx\s+tsc\b|\btsc\s+(?:-[\w-]+|<PATH>))/, name: "tsc", category: "type-check", variants: ["tsc", "npx tsc"], equivalents: ["tsc", "npx tsc"], redactPaths: true },
+
+  { pattern: /^make\s+build\b/, name: "make build", category: "build", variants: ["make build"], equivalents: ["make build", "cargo check", "tsc"], redactPaths: true },
+  { pattern: /^just\s+build\b/, name: "just build", category: "build", variants: ["just build"], equivalents: ["just build", "cargo check", "tsc"], redactPaths: true },
+  { pattern: /^npm\s+run\s+build\b/, name: "npm build", category: "build", variants: ["npm run build"], equivalents: ["tsc", "npx tsc", "npm run build"], redactPaths: true },
+  { pattern: /^pnpm\s+(?:run\s+)?build\b/, name: "pnpm build", category: "build", variants: ["pnpm build", "pnpm run build"], equivalents: ["tsc", "pnpm build", "pnpm run build"], redactPaths: true },
+  { pattern: /^yarn\s+(?:run\s+)?build\b/, name: "yarn build", category: "build", variants: ["yarn build", "yarn run build"], equivalents: ["tsc", "yarn build", "yarn run build"], redactPaths: true },
+  { pattern: /^bun\s+run\s+build\b/, name: "bun build", category: "build", variants: ["bun run build"], equivalents: ["tsc", "bun run build"], redactPaths: true },
+  { pattern: /^cargo\s+build\b/, name: "cargo build", category: "build", variants: ["cargo build"], equivalents: ["cargo check", "cargo clippy"], redactPaths: true },
+
+  { pattern: /^cargo\s+clippy\b/, name: "cargo clippy", category: "lint", variants: ["cargo clippy"], equivalents: ["cargo clippy"], redactPaths: true },
+  { pattern: /^(?:npm\s+run|pnpm(?:\s+run)?|yarn(?:\s+run)?|bun\s+run)\s+lint\b/, name: "lint command", category: "lint", variants: ["npm run lint", "pnpm lint", "pnpm run lint", "yarn lint", "yarn run lint", "bun run lint"], equivalents: ["eslint", "lint", "prettier"], redactPaths: true },
+  { pattern: /^eslint\b/, name: "eslint", category: "lint", variants: ["eslint"], equivalents: ["eslint", "lint"], redactPaths: true },
+
+  { pattern: /^(?:(?:npx\s+)?(?:vitest|jest|mocha|ava)|pytest|(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test|(?:npx|cargo)\s+test)\b/, name: "test command", category: "test", variants: ["test", "vitest", "npx vitest", "jest", "npx jest", "mocha", "npx mocha", "pytest", "ava", "npx ava", "npm test", "npm run test", "yarn test", "yarn run test", "pnpm test", "pnpm run test", "bun test", "bun run test", "npx test", "cargo test"], equivalents: ["vitest", "jest", "pytest", "cargo test", "test", "mocha", "ava"], bashOnly: true, redactPaths: true },
+
+  { pattern: /^cargo\s+fmt\b/, name: "cargo fmt", category: "format", variants: ["cargo fmt"], equivalents: ["cargo fmt", "rustfmt", "fmt", "format", "check"], redactPaths: true },
+  { pattern: /^rustfmt\b/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?rustfmt\b|\brustfmt\s+(?:-[\w-]+|<PATH>))/, name: "rustfmt", category: "format", variants: ["rustfmt"], equivalents: ["rustfmt", "cargo fmt", "fmt", "format", "check"], redactPaths: true },
+  { pattern: /^(?:npx\s+)?prettier\b/, contentPattern: /(?:^\s*(?:[-*+>]\s+|\d+\.\s+)?(?:npx\s+)?prettier\b|\bprettier\s+(?:-[\w-]+|<PATH>))/, name: "prettier", category: "format", variants: ["prettier", "npx prettier"], equivalents: ["prettier", "format", "fmt", "check"], redactPaths: true },
+  { pattern: /^(?:npm\s+run|pnpm(?:\s+run)?|yarn(?:\s+run)?|bun\s+run)\s+(?:fmt|format)\b/, name: "format command", category: "format", variants: ["npm run fmt", "npm run format", "pnpm fmt", "pnpm run fmt", "pnpm format", "pnpm run format", "yarn fmt", "yarn run fmt", "yarn format", "yarn run format", "bun run fmt", "bun run format"], equivalents: ["prettier", "format", "fmt", "check"], redactPaths: true },
+  { pattern: /^(?:make|just)\s+(?:fmt|format)\b/, name: "make/just format", category: "format", variants: ["make fmt", "make format", "just fmt", "just format"], equivalents: ["fmt", "format", "check"], redactPaths: true },
+  { pattern: /^(?:npx\s+)?biome\s+(?:format|check)\b/, name: "biome format/check", category: "format", variants: ["biome format", "biome check", "npx biome format", "npx biome check"], equivalents: ["biome format", "biome check", "format", "fmt", "check"], redactPaths: true },
+  { pattern: /^dprint\b/, name: "dprint", category: "format", variants: ["dprint"], equivalents: ["dprint", "format", "fmt", "check"], redactPaths: true },
+  { pattern: /^treefmt\b/, name: "treefmt", category: "format", variants: ["treefmt"], equivalents: ["treefmt", "format", "fmt", "check"], redactPaths: true },
+  { pattern: /^nix\s+fmt\b/, name: "nix fmt", category: "format", variants: ["nix fmt"], equivalents: ["nix fmt", "format", "fmt", "check"], redactPaths: true },
+  { pattern: /^alejandra\b/, name: "alejandra", category: "format", variants: ["alejandra"], equivalents: ["alejandra", "format", "fmt", "check"], redactPaths: true },
+];
+
+function checkRoutedToBlacklistPattern(policy: CheckRoutedCommandPolicy): BlacklistPattern {
+  return {
+    pattern: policy.pattern,
+    contentPattern: policy.contentPattern,
+    name: policy.name,
+    alternative: checkMcpAction,
+    bashOnly: policy.bashOnly,
+    redactPaths: policy.redactPaths,
+  };
+}
+
+const CHECK_ROUTED_CONTENT_PATTERNS = CHECK_ROUTED_COMMAND_POLICIES.map(checkRoutedToBlacklistPattern);
+
 /**
  * Patterns for detecting workaround attempts (retrying denied commands).
  * Maps pattern category to command substrings that match.
  */
-export const WORKAROUND_PATTERNS: Record<string, { variants: string[]; redactPaths?: boolean }> = {
-  "type-check": {
-    variants: [
-      "make check",
-      "just check",
-      "tsc",
-      "npx tsc",
-      "npm run check",
-      "npm run typecheck",
-      "pnpm check",
-      "pnpm run check",
-      "pnpm typecheck",
-      "pnpm run typecheck",
-      "yarn check",
-      "yarn run check",
-      "yarn typecheck",
-      "yarn run typecheck",
-      "bun run check",
-      "bun run typecheck",
-      "cargo check",
-    ],
-    redactPaths: true,
-  },
-  build: {
-    variants: ["make build", "just build", "npm run build", "pnpm build", "pnpm run build", "yarn build", "yarn run build", "bun run build", "cargo build"],
-    redactPaths: true,
-  },
-  lint: {
-    variants: ["eslint", "prettier", "npm run lint", "pnpm lint", "pnpm run lint", "yarn lint", "yarn run lint", "bun run lint", "cargo clippy", "alejandra"],
-    redactPaths: true,
-  },
-  test: {
-    variants: ["test", "vitest", "jest", "mocha", "pytest", "ava"],
-    redactPaths: true,
-  },
-  install: {
-    variants: ["npm install", "bun install", "pnpm install"],
-    redactPaths: true,
-  },
-};
+export const WORKAROUND_PATTERNS: Record<string, { variants: string[]; redactPaths?: boolean }> = CHECK_ROUTED_COMMAND_POLICIES
+  .reduce<Record<string, { variants: string[]; redactPaths?: boolean }>>((acc, policy) => {
+    const existing = acc[policy.category] ?? { variants: [], redactPaths: true };
+    existing.variants.push(...policy.variants);
+    acc[policy.category] = existing;
+    return acc;
+  }, {
+    install: {
+      variants: ["npm install", "bun install", "pnpm install"],
+      redactPaths: true,
+    },
+  });
 
 export function stripQuotedRegions(s: string): string {
   return s.replace(/'[^']*'|"[^"]*"/g, (m) => " ".repeat(m.length));
@@ -367,6 +362,39 @@ function splitShellSegments(command: string): {
   return { segments, hasComplexOperator, backgrounded };
 }
 
+function contentCommandCandidate(line: string): string {
+  return line.trim()
+    .replace(/^(?:[-*+>]\s+|\d+\.\s+)/, "")
+    .replace(/^(?:run|execute|use)\s+/i, "");
+}
+
+function policyTarget(command: string, redactPaths?: boolean): string {
+  const quoteStrippedCommand = stripQuotedRegions(command);
+  return redactPaths ? redactPathTokens(quoteStrippedCommand) : quoteStrippedCommand;
+}
+
+function matchPolicyInCommand(command: string, policy: Pick<CheckRoutedCommandPolicy, "pattern" | "redactPaths">): boolean {
+  const target = policyTarget(command, policy.redactPaths);
+  return splitShellSegments(target).segments.some((segment) => policy.pattern.test(segment.trim()));
+}
+
+function matchPatternInCommand(command: string, pattern: BlacklistPattern): boolean {
+  const target = policyTarget(command, pattern.redactPaths);
+  return pattern.pattern.test(target);
+}
+
+function matchPolicyInContent(line: string, policy: CheckRoutedCommandPolicy, redactedLine: string): boolean {
+  const rawCandidate = contentCommandCandidate(line);
+  const redactedCandidate = contentCommandCandidate(redactedLine);
+  const target = policy.redactPaths ? redactedCandidate : rawCandidate;
+  const afterRun = target.replace(/^.*?\brun\s+/i, "");
+  const re = policy.contentPattern ?? policy.pattern;
+  return re.test(target) ||
+    re.test(afterRun) ||
+    splitShellSegments(target).segments.some((segment) => policy.pattern.test(segment.trim())) ||
+    splitShellSegments(afterRun).segments.some((segment) => policy.pattern.test(segment.trim()));
+}
+
 function firstCommandHead(command: string): string | undefined {
   const firstSegment = splitShellSegments(command).segments.find((s) => s.trim());
   if (!firstSegment) return undefined;
@@ -419,19 +447,12 @@ export function classifyBashCommand(command: string, workingDir?: string): BashC
     return base("blocked", { reason: "empty command" });
   }
 
-  const quoteStrippedCommand = stripQuotedRegions(trimmed);
-  const redactedCommand = redactPathTokens(quoteStrippedCommand);
-  const matchingPatterns = BLACKLIST_PATTERNS.filter(({ pattern, redactPaths: shouldRedact }) => {
-    const target = shouldRedact ? redactedCommand : quoteStrippedCommand;
-    return pattern.test(target);
+  const matchingPatterns = BLACKLIST_PATTERNS.filter((pattern) => matchPatternInCommand(trimmed, pattern));
+  const hardBlacklistHighlights = matchingPatterns.map(({ name, alternative }) => {
+    return `[BLACKLIST: ${name}] ${resolveAlternative(alternative)}`;
   });
-  const blacklistHighlights = matchingPatterns.map(({ name, alternative }) => {
-    const equivalents = CHECK_EQUIVALENTS[name];
-    const msg = equivalents && workingDir
-      ? resolveCheckMessage(name, equivalents, workingDir)
-      : resolveAlternative(alternative);
-    return `[BLACKLIST: ${name}] ${msg}`;
-  });
+  const checkRoutedHighlights = getCheckRoutedCommandHighlights("Bash", { command }, workingDir);
+  const blacklistHighlights = [...hardBlacklistHighlights, ...checkRoutedHighlights];
 
   const workaroundCategory = detectWorkaroundCommand(trimmed);
   if (workaroundCategory) {
@@ -496,10 +517,8 @@ function containsCommandVariant(command: string, variant: string): boolean {
 }
 
 export function detectWorkaroundCommand(command: string): string | null {
-  const quoteStrippedCommand = stripQuotedRegions(command);
-  const redacted = redactPathTokens(quoteStrippedCommand);
   for (const [category, { variants, redactPaths: shouldRedact }] of Object.entries(WORKAROUND_PATTERNS)) {
-    const target = shouldRedact ? redacted : quoteStrippedCommand;
+    const target = policyTarget(command, shouldRedact);
     if (variants.some((v) => containsCommandVariant(target, v))) return category;
   }
   return null;
@@ -510,37 +529,18 @@ export function detectWorkaroundCommand(command: string): string | null {
  * Only patterns that redirect to the agent-framework check MCP need entries here.
  * Used by getBlacklistHighlights to produce context-aware error messages.
  */
-export const CHECK_EQUIVALENTS: Record<string, string[]> = {
-  "make check": ["check"],
-  "just check": ["check"],
-  "make build": ["make build", "cargo check", "tsc"],
-  "just build": ["just build", "cargo check", "tsc"],
-  "npm build": ["tsc", "npx tsc", "npm run build"],
-  "npm check/typecheck": ["tsc", "npx tsc", "typecheck"],
-  "pnpm build": ["tsc", "pnpm build", "pnpm run build"],
-  "pnpm check/typecheck": ["tsc", "npx tsc", "typecheck"],
-  "yarn build": ["tsc", "yarn build", "yarn run build"],
-  "yarn check/typecheck": ["tsc", "npx tsc", "typecheck"],
-  "bun build": ["tsc", "bun run build"],
-  "bun check/typecheck": ["tsc", "typecheck"],
-  "cargo build": ["cargo check", "cargo clippy"],
-  "cargo check": ["cargo check", "cargo clippy"],
-  "cargo clippy": ["cargo clippy"],
-  "tsc": ["tsc", "npx tsc"],
-  "npm lint": ["eslint", "lint", "prettier"],
-  "bun lint": ["eslint", "lint", "prettier"],
-  "pnpm lint": ["eslint", "lint", "prettier"],
-  "yarn lint": ["eslint", "lint", "prettier"],
-  "test command": ["vitest", "jest", "pytest", "cargo test", "test", "mocha", "ava"],
-  "alejandra": ["alejandra"],
-};
+export const CHECK_EQUIVALENTS: Record<string, string[]> = Object.fromEntries(
+  CHECK_ROUTED_COMMAND_POLICIES.map((policy) => [policy.name, policy.equivalents]),
+);
 
 /**
  * Generate formatted blacklist text for injection into agent prompts.
  * Used by plan-validate and claude-md-validate to share rules with tool-approve.
  */
 export function getBlacklistDescription(): string {
-  return BLACKLIST_PATTERNS.map(({ name, alternative }) => `- ${name} → ${resolveAlternative(alternative)}`).join("\n");
+  return [...BLACKLIST_PATTERNS, ...CHECK_ROUTED_CONTENT_PATTERNS]
+    .map(({ name, alternative }) => `- ${name} → ${resolveAlternative(alternative)}`)
+    .join("\n");
 }
 
 export interface BlacklistHighlight {
@@ -631,9 +631,31 @@ export function getContentBlacklistHighlights(
         break;
       }
     }
+
+    for (const policy of CHECK_ROUTED_COMMAND_POLICIES) {
+      if (policy.bashOnly) continue;
+      if (matchPolicyInContent(target, policy, redactedTarget)) {
+        const altStr = checkMcpAction();
+        const rendered = `[VIOLATION: ${policy.name}] "${line.trim()}" → ${altStr}`;
+        highlights.push({
+          lineIndex: i,
+          line,
+          message: altStr,
+          rendered,
+        });
+        break;
+      }
+    }
   }
 
   return highlights;
+}
+
+export function getPolicyContentBlacklistHighlights(
+  content: string,
+  opts: ContentBlacklistOptions = {},
+): BlacklistHighlight[] {
+  return getContentBlacklistHighlights(content, opts);
 }
 
 /**
@@ -658,21 +680,11 @@ export function getBlacklistHighlights(toolName: string, toolInput: unknown, wor
   const command = (toolInput as { command?: string }).command;
   if (!command) return [];
 
-  const quoteStrippedCommand = stripQuotedRegions(command);
-  const redactedCommand = redactPathTokens(quoteStrippedCommand);
-
-  const matchingPatterns = BLACKLIST_PATTERNS.filter(({ pattern, redactPaths: shouldRedact }) => {
-    const target = shouldRedact ? redactedCommand : quoteStrippedCommand;
-    return pattern.test(target);
-  });
+  const matchingPatterns = BLACKLIST_PATTERNS.filter((pattern) => matchPatternInCommand(command, pattern));
 
   const highlights = matchingPatterns
     .map(({ name, alternative }) => {
-      const equivalents = CHECK_EQUIVALENTS[name];
-      const msg = equivalents && workingDir
-        ? resolveCheckMessage(name, equivalents, workingDir)
-        : resolveAlternative(alternative);
-      return `[BLACKLIST: ${name}] ${msg}`;
+      return `[BLACKLIST: ${name}] ${resolveAlternative(alternative)}`;
     });
   if (highlights.length > 0) return highlights;
 
@@ -680,10 +692,30 @@ export function getBlacklistHighlights(toolName: string, toolInput: unknown, wor
   if (classification.riskClass === "blocked") {
     return [`[BLACKLIST: bash blocked] ${classification.alternative ?? classification.reason ?? "Bash command blocked"}`];
   }
-  if (classification.riskClass === "high-risk-workaround") {
-    return [`[BLACKLIST: ${classification.workaroundCategory ?? "workaround"}] ${checkMcpAction()}`];
-  }
   return [];
+}
+
+export function getHardBlacklistHighlights(toolName: string, toolInput: unknown, workingDir?: string): string[] {
+  return getBlacklistHighlights(toolName, toolInput, workingDir);
+}
+
+export function getCheckRoutedCommandHighlights(toolName: string, toolInput: unknown, workingDir?: string): string[] {
+  if (toolName !== "Bash") return [];
+  const command = (toolInput as { command?: string }).command;
+  if (!command) return [];
+
+  return CHECK_ROUTED_COMMAND_POLICIES
+    .filter((policy) => matchPolicyInCommand(command, policy))
+    .map((policy) => {
+      const msg = workingDir
+        ? resolveCheckMessage(policy.name, policy.equivalents, workingDir)
+        : checkMcpAction();
+      return `[CHECK-ROUTED: ${policy.name}] ${msg}`;
+    });
+}
+
+export function detectCheckRoutedWorkaroundCommand(command: string): string | null {
+  return detectWorkaroundCommand(command);
 }
 
 /**

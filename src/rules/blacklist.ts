@@ -1,7 +1,7 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import {
   classifyBashCommand,
-  getBlacklistHighlights,
+  getHardBlacklistHighlights,
 } from "../utils/command-patterns.js";
 import { MAX_SIMILAR_DENIALS, recordDenial } from "../utils/denial-cache.js";
 
@@ -14,7 +14,7 @@ export const blacklistRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    const highlights = getBlacklistHighlights(ctx.toolName, ctx.toolInput, ctx.projectDir);
+    const highlights = getHardBlacklistHighlights(ctx.toolName, ctx.toolInput, ctx.projectDir);
     if (highlights.length === 0) return null;
 
     const reason = highlights

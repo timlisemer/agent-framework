@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "stop-after-offering-options-when-user-complained-about-being-ignored-should-block",
-  "description": "The plan agents ran without the system intervening, which is correct behavior — slashcommands have a bypass. The real issue is the stalling: the user was clear what they wanted, the ai didn't do it, the user complained, and the ai responded by stopping and asking plain-text questions about what the user wants. The stop hook now blocks this with 'Do not ask questions in plain text. Use the AskUserQuestion tool to present structured options to the user.' This scenario regression-tests that block.",
+  "description": "Nondeterministic as of commit 4e4b851: it still blocks, but the reason can miss the expected `Resume the task` substring. The variance is which stop-hook rationale wins for the same stalled response.",
   "transcript": [
     {
       "role": "user",
