@@ -1350,7 +1350,7 @@ describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", ()
     expect(result.reason).toContain("Bash safety policy blocks this command");
   });
 
-  it("'investigate correctly' + high-risk workaround Bash -> deny despite class-level Bash inspection", () => {
+  it("'investigate correctly' + check-routed Bash -> allow within prediction; blacklist owns the actual deny", () => {
     const pred = makeAngryLowStreak4();
     const result = decidePrediction(
       pred,
@@ -1358,6 +1358,19 @@ describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", ()
       { command: "npx tsc --noEmit" },
       4,
       "do what i told you and investigate correctly",
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("class-level imperative");
+  });
+
+  it("'run setup' + non-check-routed high-risk workaround Bash -> deny inside prediction", () => {
+    const pred = makeAngryLowStreak4();
+    const result = decidePrediction(
+      pred,
+      "Bash",
+      { command: "npm install" },
+      4,
+      "now run setup",
     );
     expect(result.decision).toBe("deny");
     expect(result.reason).toContain("Bash safety policy blocks this command");
@@ -1394,11 +1407,11 @@ describe("step 3.7 path (a'): class-level fresh-imperative re-authorization", ()
     expect(result.reason).toContain("class-level imperative");
   });
 
-  it("cross-class scoping: 'now run the tests, don't refactor that' + non-read-only Bash -> deny (class reauthorization is bounded by read-only Bash)", () => {
+  it("cross-class scoping: 'now run the tests, don't refactor that' + check-routed Bash -> allow within prediction; blacklist owns the actual deny", () => {
     const pred = makeAngryLowStreak4();
     const result = decidePrediction(pred, "Bash", { command: "npx vitest" }, 4, "now run the tests, don't refactor that");
-    expect(result.decision).toBe("deny");
-    expect(result.reason).toContain("Bash safety policy blocks this command");
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("class-level imperative");
   });
 
   it("cross-class scoping: 'now run the tests, don't refactor that' + Edit -> deny (Edit mapped via EDIT_VERB_RE 'refactor'; verb-class guard finds 'don't' in window before 'refactor')", () => {

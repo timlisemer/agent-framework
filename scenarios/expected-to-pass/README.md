@@ -4,7 +4,7 @@ Fixtures here describe behaviour the framework already implements correctly. A r
 
 2026-05-15 scenario reclassification at commit `4e4b851`:
 
-- Promoted `codex-cargo-fmt-check-parallel-batch-allowed-before-later-deny.json` into this folder after generic check-routed formatter policy made it pass as `deny` by `tool-approve`.
+- Promoted `codex-cargo-fmt-check-parallel-batch-allowed-before-later-deny.json` into this folder after generic check-routed formatter policy made it pass as `deny` by `blacklist`.
 - Moved nondeterministic fixtures to `fixture-bug/`: `gate-blocks-outside-project-edit-after-implicit-fix-authorization.json`, `stop-after-offering-options-when-user-complained-about-being-ignored-should-block.json`, and `tool-approve-plan-validation-misfires-on-plan-content-substrings.json`.
 
 2026-05-13 scenario reclassification after three full `scenario_tester` runs:

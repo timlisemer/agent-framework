@@ -22,7 +22,7 @@ import {
   CHECK_VERB_RE,
   READ_VERB_RE,
 } from "./edit-intent.js";
-import { classifyBashCommand } from "./command-patterns.js";
+import { classifyBashCommand, type BashCommandClassification } from "./command-patterns.js";
 
 export type Mood = "angry" | "frustrated" | "neutral" | "satisfied" | "happy";
 export type Trust = "low" | "normal" | "high";
@@ -75,6 +75,14 @@ export interface ToolPrediction {
    * read a single source of truth.
    */
   hasExplicitOverride?: boolean;
+}
+
+function bashSafetyBlocksPredictionOverride(
+  classification: BashCommandClassification,
+): boolean {
+  if (classification.riskClass === "blocked") return true;
+  if (classification.riskClass !== "high-risk-workaround") return false;
+  return !classification.blacklistHighlights.some((h) => h.startsWith("[CHECK-ROUTED:"));
 }
 
 export interface PredictionDecision {
@@ -827,10 +835,7 @@ export function decidePrediction(
             reason: "User's latest transcript message authorizes Bash rm, but no Bash command was provided.",
           };
         }
-        if (
-          bashClassification.riskClass === "blocked" ||
-          bashClassification.riskClass === "high-risk-workaround"
-        ) {
+        if (bashSafetyBlocksPredictionOverride(bashClassification)) {
           return {
             decision: "deny",
             reason: `User's latest transcript message authorizes Bash rm, but Bash safety policy blocks this command. ${bashClassification.reason ?? "command is blocked"}`,
@@ -851,10 +856,7 @@ export function decidePrediction(
             reason: "User's latest transcript message implies Bash, but no Bash command was provided.",
           };
         }
-        if (
-          bashClassification.riskClass === "blocked" ||
-          bashClassification.riskClass === "high-risk-workaround"
-        ) {
+        if (bashSafetyBlocksPredictionOverride(bashClassification)) {
           return {
             decision: "deny",
             reason: `User's latest transcript message implies Bash, but Bash safety policy blocks this command. ${bashClassification.reason ?? "command is blocked"}`,

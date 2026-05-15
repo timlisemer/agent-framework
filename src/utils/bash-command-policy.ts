@@ -3,7 +3,7 @@
  * workaround detection.
  *
  * BLACKLIST_PATTERNS: Hard safety denials owned by the blacklist rule
- * CHECK_ROUTED_COMMAND_POLICIES: Commands routed to the check MCP by tool-approve
+ * CHECK_ROUTED_COMMAND_POLICIES: Commands routed to the check MCP by blacklist
  * WORKAROUND_PATTERNS: Used by pre-tool-use to detect repeated denial attempts
  * CHECK_EQUIVALENTS: Maps check-routed policy names to equivalent check targets
  */
@@ -80,8 +80,8 @@ export interface BashCommandClassification {
 
 /**
  * Hard safety patterns that should be blocked by the blacklist rule.
- * Check-MCP redirects live in CHECK_ROUTED_COMMAND_POLICIES so their
- * PreToolUse attribution remains tool-approve instead of blacklist.
+ * Check-MCP redirects live in CHECK_ROUTED_COMMAND_POLICIES so they keep
+ * check-specific wording while still denying at blacklist priority.
  */
 export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // grep/rg/find intentionally NOT blacklisted: native macOS/Linux Claude Code
@@ -687,6 +687,9 @@ export function getBlacklistHighlights(toolName: string, toolInput: unknown, wor
       return `[BLACKLIST: ${name}] ${resolveAlternative(alternative)}`;
     });
   if (highlights.length > 0) return highlights;
+
+  const checkRoutedHighlights = getCheckRoutedCommandHighlights(toolName, toolInput, workingDir);
+  if (checkRoutedHighlights.length > 0) return checkRoutedHighlights;
 
   const classification = classifyBashCommand(command, workingDir);
   if (classification.riskClass === "blocked") {

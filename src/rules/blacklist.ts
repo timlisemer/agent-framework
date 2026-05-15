@@ -18,7 +18,7 @@ export const blacklistRule: PreToolRule = {
     if (highlights.length === 0) return null;
 
     const reason = highlights
-      .map((h) => h.replace(/^\[BLACKLIST: [^\]]+\]\s*/, ""))
+      .map((h) => h.replace(/^\[(?:BLACKLIST|CHECK-ROUTED): [^\]]+\]\s*/, ""))
       .join(". ");
     return { fastDeny: reason };
   },

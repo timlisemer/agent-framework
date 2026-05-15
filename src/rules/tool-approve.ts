@@ -6,11 +6,7 @@ import { FILE_TOOLS, extractFilePaths, isPlanFile } from "./utils.js";
 import { planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
 import { RESTRICTED_MCPS } from "../utils/slash-commands.js";
 import { activeSpec } from "../adapter/spec.js";
-import {
-  classifyBashCommand,
-  getCheckRoutedCommandHighlights,
-} from "../utils/command-patterns.js";
-import { recordDenial, MAX_SIMILAR_DENIALS } from "../utils/denial-cache.js";
+import { classifyBashCommand } from "../utils/command-patterns.js";
 import { validateCurrentPlanExit } from "../utils/plan-source.js";
 import { logFastPathDeny } from "../utils/logger.js";
 
@@ -81,15 +77,6 @@ export const toolApproveRule: PreToolRule = {
       }
     }
 
-    const checkRouted = getCheckRoutedCommandHighlights(ctx.toolName, ctx.toolInput, ctx.projectDir);
-    if (checkRouted.length > 0) {
-      return {
-        fastDeny: checkRouted
-          .map((h) => h.replace(/^\[CHECK-ROUTED: [^\]]+\]\s*/, ""))
-          .join(". "),
-      };
-    }
-
     // Contribute aggregator context — host instruction files + tool target.
     const host = ctx.host;
     const instructionFiles = host?.instructionFiles ?? [path.join(ctx.projectDir, "CLAUDE.md")];
@@ -119,20 +106,4 @@ export const toolApproveRule: PreToolRule = {
     };
   },
 
-  async onDenialConfirmed(ctx: RuleContext, _reason: string): Promise<void> {
-    // Track workaround patterns for escalation. The force-check-required rule
-    // (priority 32) consumes state.forceCheckPending to deny all subsequent
-    // tools except the agent-framework check MCP / ToolSearch.
-    if (ctx.toolName !== "Bash") return;
-    const command = (ctx.toolInput as { command?: string }).command ?? "";
-    const classification = classifyBashCommand(command, ctx.projectDir);
-    if (classification.riskClass === "high-risk-workaround" && classification.workaroundCategory) {
-      const count = await recordDenial(classification.workaroundCategory);
-      if (count >= MAX_SIMILAR_DENIALS) {
-        // Note: reason is modified by the evaluator based on this count
-      }
-
-      await ctx.stateManager.update((s) => ({ ...s, forceCheckPending: true }));
-    }
-  },
 };

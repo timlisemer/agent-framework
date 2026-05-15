@@ -167,7 +167,7 @@ describe("getBlacklistHighlights", () => {
   it("routes 'tsc' Bash command through check-routed policy", () => {
     const highlights = getCheckRoutedCommandHighlights("Bash", { command: "tsc --noEmit" });
     expect(highlights.length).toBeGreaterThan(0);
-    expect(getBlacklistHighlights("Bash", { command: "tsc --noEmit" })).toEqual([]);
+    expect(getBlacklistHighlights("Bash", { command: "tsc --noEmit" })).toEqual(highlights);
   });
 
   it("detects 'nix eval' in Bash command and points to nix-eval-jobs", () => {

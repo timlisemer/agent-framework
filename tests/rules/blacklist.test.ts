@@ -42,11 +42,22 @@ describe("blacklistRule", () => {
     expect(result).toEqual({ fastDeny: "Use nix-eval-jobs instead" });
   });
 
-  it("does not own check-routed command denials", async () => {
+  it("owns check-routed command denials with check MCP wording", async () => {
     const result = await blacklistRule.check(makeCtx({
       toolInput: { command: "cargo fmt --check" },
     }));
-    expect(result).toBeNull();
+    expect(result).toEqual({
+      fastDeny: expect.stringContaining("agent-framework check MCP"),
+    });
+  });
+
+  it("fast-denies check-routed Bash before prediction-block priority", async () => {
+    const result = await blacklistRule.check(makeCtx({
+      toolInput: { command: "npx vitest run tests/utils/prediction-types.test.ts" },
+    }));
+    expect(result).toEqual({
+      fastDeny: expect.stringContaining("agent-framework check MCP"),
+    });
   });
 
   it("sets forceCheckPending for denied workaround commands", async () => {

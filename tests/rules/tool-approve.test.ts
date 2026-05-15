@@ -33,7 +33,6 @@ vi.mock("../../src/utils/logger.js", () => ({
 import { toolApproveRule } from "../../src/rules/tool-approve.js";
 import { validateCurrentPlanExit } from "../../src/utils/plan-source.js";
 import { checkPlanIntent } from "../../src/agents/hooks/plan-validate.js";
-import { clearDenialCache, initDenialSession } from "../../src/utils/denial-cache.js";
 import type { RuleContext } from "../../src/rules/types.js";
 
 const mockValidateCurrentPlanExit = vi.mocked(validateCurrentPlanExit);
@@ -184,44 +183,4 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
     expect(result).toHaveProperty("fastDeny");
   });
 
-  it("fastDeny check-routed formatter commands before LLM context", async () => {
-    fs.writeFileSync(path.join(tempDir, "Justfile"), "check:\n  cargo fmt --check\n");
-    const ctx = makeCtx({
-      toolName: "Bash",
-      toolInput: { command: "cargo fmt --check" },
-    });
-
-    const result = await toolApproveRule.check(ctx);
-    expect(result).toEqual({
-      fastDeny: expect.stringContaining("cargo fmt is covered by the agent-framework check MCP"),
-    });
-    expect((result as { fastDeny: string }).fastDeny).toContain("agent-framework");
-    expect((result as { fastDeny: string }).fastDeny).not.toContain("run just check");
-  });
-
-  it("does not set forceCheckPending for denied nix-eval-jobs", async () => {
-    const update = vi.fn();
-    const ctx = makeCtx({
-      toolName: "Bash",
-      toolInput: { command: "nix-eval-jobs --flake .#checks.x86_64-linux --workers 1" },
-      stateManager: { update } as unknown as RuleContext["stateManager"],
-    });
-
-    await toolApproveRule.onDenialConfirmed?.(ctx, "denied by tool approve");
-    expect(update).not.toHaveBeenCalled();
-  });
-
-  it("sets forceCheckPending only for high-risk workaround Bash denials", async () => {
-    initDenialSession(tempDir);
-    await clearDenialCache();
-    const update = vi.fn();
-    const ctx = makeCtx({
-      toolName: "Bash",
-      toolInput: { command: "npm run build" },
-      stateManager: { update } as unknown as RuleContext["stateManager"],
-    });
-
-    await toolApproveRule.onDenialConfirmed?.(ctx, "denied by tool approve");
-    expect(update).toHaveBeenCalledOnce();
-  });
 });
