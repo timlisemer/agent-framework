@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   detectEmojiAddition,
   detectUserDirectedQuestions,
+  excludeMarkdownSectionBodies,
+  findMarkdownSectionRange,
   getVerificationStructureHighlights,
   getRuleViolationHighlights,
   detectStyleChanges,
@@ -140,6 +142,27 @@ describe("getVerificationStructureHighlights", () => {
   it("returns empty when 'Manual Verification' (without User) exists", () => {
     const content = "## Verification\n### Manual Verification\nDo stuff";
     expect(getVerificationStructureHighlights(content)).toEqual([]);
+  });
+});
+
+describe("Markdown section exclusion", () => {
+  it("finds a section range using generic heading matching", () => {
+    const content = "## User Goal\n> Option A: 5 days if needed\n## Approach\nChosen path";
+    const range = findMarkdownSectionRange(content, "User Goal");
+    expect(range).not.toBeNull();
+    expect(content.slice(range!.start, range!.bodyStart)).toBe("## User Goal\n");
+    expect(content.slice(range!.bodyStart, range!.end)).toContain("Option A");
+    expect(content.slice(range!.bodyStart, range!.end)).not.toContain("Chosen path");
+  });
+
+  it("removes selected section bodies from checked content without shifting lines", () => {
+    const content = "## User Goal\n> Option A: 5 days if needed\n## Approach\nOption A: still invalid";
+    const checked = excludeMarkdownSectionBodies(content, ["User Goal"]);
+    expect(checked).toContain("## User Goal");
+    expect(checked).toContain("## Approach");
+    expect(checked).not.toContain("> Option A: 5 days if needed");
+    expect(checked).toContain("Option A: still invalid");
+    expect(checked.split("\n")).toHaveLength(content.split("\n").length);
   });
 });
 

@@ -105,6 +105,34 @@ describe("runValidatePlanAgent", () => {
     expect(result).toContain('"probably"');
   });
 
+  it("allows scanner-prohibited text inside quoted User Goal", async () => {
+    const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
+    const result = await runValidatePlanAgent({
+      workingDir: process.cwd(),
+      plan: validPlan().replace(
+        '> "Implement validate plan MCP."',
+        [
+          '> "Option A: run make build over 5 days if needed."',
+          '> "## Testing is quoted user text."',
+        ].join("\n"),
+      ),
+    });
+    expect(result).toContain("- Status: PASS");
+  });
+
+  it("still fails scanner-prohibited text outside excluded sections", async () => {
+    const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
+    const result = await runValidatePlanAgent({
+      workingDir: process.cwd(),
+      plan: validPlan().replace(
+        "This section contains concrete repository-specific details for Approach with `src/file.ts` references.",
+        "Option A: run make build over 5 days if needed.",
+      ),
+    });
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("Option A");
+  });
+
   it("passes when the plan-validate LLM returns VALID", async () => {
     const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
     const result = await runValidatePlanAgent({

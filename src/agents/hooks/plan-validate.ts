@@ -34,7 +34,7 @@ import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
 import { getContentBlacklistHighlights } from "../../utils/command-patterns.js";
 import {
-  filterBlacklistOutsideManualVerification,
+  excludeMarkdownSectionBodies,
   getPlanClearingHighlights,
   getRuleViolationHighlights,
   getVerificationStructureHighlights,
@@ -52,9 +52,12 @@ const RULE_VIOLATION_CATEGORY_RE =
 export interface PlanValidationViolationSummary {
   allViolations: string[];
   hardRuleViolations: string[];
-  filteredBlacklistHighlights: ReturnType<typeof filterBlacklistOutsideManualVerification>;
+  filteredBlacklistHighlights: ReturnType<typeof getContentBlacklistHighlights>;
   blacklistHighlights: string[];
 }
+
+const USER_GOAL_SECTION = "User Goal";
+const MANUAL_USER_VERIFICATION_SECTION = /manual\s+(user\s+)?verification/i;
 
 /**
  * Collect deterministic plan-validation findings that are shared by the
@@ -64,18 +67,21 @@ export function collectPlanValidationViolations(
   resultingPlan: string,
   workingDir: string,
 ): PlanValidationViolationSummary {
-  // Blacklisted commands inside the "Manual User Verification" section are
-  // intentionally allowed (the user runs them, not the AI).
+  const planForContentChecks = excludeMarkdownSectionBodies(resultingPlan, [
+    USER_GOAL_SECTION,
+  ]);
+  const planForBlacklistChecks = excludeMarkdownSectionBodies(resultingPlan, [
+    USER_GOAL_SECTION,
+    MANUAL_USER_VERIFICATION_SECTION,
+  ]);
   const planClearingViolations = getPlanClearingHighlights(resultingPlan);
-  const rawBlacklistHits = getContentBlacklistHighlights(resultingPlan);
-  const filteredBlacklistHighlights = filterBlacklistOutsideManualVerification(
-    rawBlacklistHits,
-    resultingPlan,
-  );
+  const filteredBlacklistHighlights = getContentBlacklistHighlights(planForBlacklistChecks);
   const blacklistHighlights = filteredBlacklistHighlights.map((h) => h.rendered);
-  const ruleViolations = getRuleViolationHighlights(resultingPlan);
-  const verificationViolations = getVerificationStructureHighlights(resultingPlan);
-  const contractFindings = validatePlanContract(resultingPlan, workingDir);
+  const ruleViolations = getRuleViolationHighlights(planForContentChecks);
+  const verificationViolations = getVerificationStructureHighlights(planForContentChecks);
+  const contractFindings = validatePlanContract(resultingPlan, workingDir, {
+    excludedContentSections: [USER_GOAL_SECTION],
+  });
   const contractViolations = contractFindings.map((finding) =>
     `[VIOLATION: ${finding.kind}] ${finding.message}`,
   );

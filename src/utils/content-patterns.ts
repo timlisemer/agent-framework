@@ -55,58 +55,77 @@ const VERIFICATION_HEADING_REGEX = /^#{1,3}\s*(verification|testing|test plan)\b
 const ASSISTANT_VERIFICATION_REGEX = /assistant\s+verification/i;
 const MANUAL_VERIFICATION_REGEX = /manual\s+(user\s+)?verification/i;
 
-/**
- * Heading-anchored "Manual (User) Verification" regex. Used to delimit the
- * carve-out section where blacklisted commands are allowed (the user runs
- * them, not the AI). Matches headings of any depth; the section ends at the
- * next heading of equal-or-shallower depth, or end-of-file.
- */
-export const MANUAL_VERIFICATION_HEADING_RE =
-  /^(#{1,6})\s+.*manual\s+(user\s+)?verification.*$/im;
-
-/**
- * Find the byte range [start, end) of the Manual (User) Verification section
- * in `content`. Returns null when no such heading exists.
- */
-export function findManualVerificationRange(
-  content: string,
-): { start: number; end: number } | null {
-  const m = content.match(MANUAL_VERIFICATION_HEADING_RE);
-  if (!m) return null;
-  const headingLevel = m[1].length;
-  const start = content.indexOf(m[0]);
-  // Section ends at next heading of same-or-shallower depth, or EOF.
-  const after = content.slice(start + m[0].length);
-  const nextHeadingRe = new RegExp(`^#{1,${headingLevel}}\\s`, "m");
-  const next = after.match(nextHeadingRe);
-  const end =
-    next?.index !== undefined
-      ? start + m[0].length + next.index
-      : content.length;
-  return { start, end };
+export interface MarkdownSectionRange {
+  /** Byte offset of the heading line start. */
+  start: number;
+  /** Byte offset immediately after the heading line. */
+  bodyStart: number;
+  /** Byte offset where the section ends. */
+  end: number;
 }
 
-/**
- * Filter out blacklist hits whose source line lies inside the Manual (User)
- * Verification section. Used by plan validation to honor the existing carve-
- * out (blacklisted commands are allowed in the user-runs-it section). The
- * input `hits` are the BlacklistHighlight objects returned by
- * `getContentBlacklistHighlights`.
- */
-export function filterBlacklistOutsideManualVerification<
-  T extends { lineIndex: number },
->(hits: T[], content: string): T[] {
-  const range = findManualVerificationRange(content);
-  if (!range) return hits;
-  // Convert lineIndex to byte offset by walking lines.
-  const lineStarts: number[] = [0];
-  for (let i = 0; i < content.length; i++) {
-    if (content[i] === "\n") lineStarts.push(i + 1);
+export type MarkdownHeadingMatcher = string | RegExp | ((heading: string) => boolean);
+
+export function matchesMarkdownHeading(heading: string, matcher: MarkdownHeadingMatcher): boolean {
+  if (typeof matcher === "string") return heading.toLowerCase() === matcher.toLowerCase();
+  if (matcher instanceof RegExp) return matcher.test(heading);
+  return matcher(heading);
+}
+
+export function findMarkdownSectionRange(
+  content: string,
+  matcher: MarkdownHeadingMatcher,
+): MarkdownSectionRange | null {
+  let inFence = false;
+  let matched: { level: number; start: number; bodyStart: number } | null = null;
+
+  for (const lineMatch of content.matchAll(/^.*(?:\n|$)/gm)) {
+    const line = lineMatch[0];
+    if (!line) continue;
+    const offset = lineMatch.index ?? 0;
+    const lineText = line.endsWith("\n") ? line.slice(0, -1) : line;
+    const trimmed = lineText.trimStart();
+    if (/^(```|~~~)/.test(trimmed)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || trimmed.startsWith(">")) continue;
+
+    const heading = lineText.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (!heading) continue;
+
+    const level = heading[1].length;
+    if (matched && level <= matched.level) {
+      return { ...matched, end: offset };
+    }
+    if (!matched && matchesMarkdownHeading(heading[2].trim(), matcher)) {
+      matched = {
+        level,
+        start: offset,
+        bodyStart: offset + line.length,
+      };
+    }
   }
-  return hits.filter((h) => {
-    const offset = lineStarts[h.lineIndex] ?? content.length;
-    return offset < range.start || offset >= range.end;
-  });
+
+  return matched ? { ...matched, end: content.length } : null;
+}
+
+export function excludeMarkdownSectionBodies(
+  content: string,
+  matchers: readonly MarkdownHeadingMatcher[],
+): string {
+  const chars = content.split("");
+  const ranges = matchers
+    .map((matcher) => findMarkdownSectionRange(content, matcher))
+    .filter((range): range is MarkdownSectionRange => range !== null);
+
+  for (const range of ranges) {
+    for (let i = range.bodyStart; i < range.end; i++) {
+      if (chars[i] !== "\n") chars[i] = " ";
+    }
+  }
+
+  return chars.join("");
 }
 
 /**

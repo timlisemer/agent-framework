@@ -127,4 +127,44 @@ describe("plan contract", () => {
       expect(finding?.message).toContain("Line ");
     });
   });
+
+  it("excludes User Goal body from content checks while preserving structure checks", () => {
+    withProject((projectDir) => {
+      const plan = validPlan().replace(
+        '> "Implement the requested hook change."',
+        [
+          '> "Option A: run this over 5 days if needed."',
+          '> "## Testing is quoted user text."',
+        ].join("\n"),
+      );
+      const kinds = validatePlanContract(plan, projectDir).map((f) => f.kind);
+      expect(kinds).not.toContain("live_option_menu");
+      expect(kinds).not.toContain("schedule_bucket");
+      expect(kinds).not.toContain("unresolved_assumption_language");
+      expect(kinds).not.toContain("generic_verification_heading");
+    });
+  });
+
+  it("still requires User Goal to use blockquote syntax", () => {
+    withProject((projectDir) => {
+      const plan = validPlan().replace(
+        '> "Implement the requested hook change."',
+        "Implement the requested hook change.",
+      );
+      const kinds = validatePlanContract(plan, projectDir).map((f) => f.kind);
+      expect(kinds).toContain("missing_user_goal_quote");
+    });
+  });
+
+  it("honors regex section exclusions for weak required section bodies", () => {
+    const kinds = validatePlanContract(
+      validPlan().replace(
+        "This section contains concrete repository-specific details for Approach with `src/file.ts` references.",
+        "Too short.",
+      ),
+      process.cwd(),
+      { excludedContentSections: [/^Approach$/] },
+    ).map((f) => f.kind);
+    expect(kinds).not.toContain("weak_or_vague_section_body");
+  });
 });

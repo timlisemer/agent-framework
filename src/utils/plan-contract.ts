@@ -1,6 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
 import { agentFrameworkRoot } from "./paths.js";
+import {
+  type MarkdownHeadingMatcher,
+  excludeMarkdownSectionBodies,
+  matchesMarkdownHeading,
+} from "./content-patterns.js";
 
 export type PlanContractFindingKind =
   | "missing_required_heading"
@@ -29,6 +34,10 @@ interface Heading {
   level: number;
   text: string;
   line: number;
+}
+
+export interface PlanContractValidationOptions {
+  excludedContentSections?: readonly MarkdownHeadingMatcher[];
 }
 
 const PROJECT_COMMAND_RE =
@@ -61,7 +70,13 @@ export function extractRequiredFinalPlanHeadings(plansMd: string): string[] {
   return headings;
 }
 
-export function validatePlanContract(plan: string, projectDir: string): PlanContractFinding[] {
+const DEFAULT_EXCLUDED_CONTENT_SECTIONS: readonly MarkdownHeadingMatcher[] = ["User Goal"];
+
+export function validatePlanContract(
+  plan: string,
+  projectDir: string,
+  options: PlanContractValidationOptions = {},
+): PlanContractFinding[] {
   let required: string[];
   try {
     required = readRequiredFinalPlanHeadings(projectDir);
@@ -69,15 +84,20 @@ export function validatePlanContract(plan: string, projectDir: string): PlanCont
     return [];
   }
   if (required.length === 0) return [];
-  return validatePlanContractWithRequiredHeadings(plan, required);
+  return validatePlanContractWithRequiredHeadings(plan, required, options);
 }
 
 export function validatePlanContractWithRequiredHeadings(
   plan: string,
   required: readonly string[],
+  options: PlanContractValidationOptions = {},
 ): PlanContractFinding[] {
   const findings: PlanContractFinding[] = [];
   const headings = parseMarkdownHeadings(plan);
+  const excludedContentSections =
+    options.excludedContentSections ?? DEFAULT_EXCLUDED_CONTENT_SECTIONS;
+  const contentCheckedPlan = excludeMarkdownSectionBodies(plan, excludedContentSections);
+  const contentCheckedHeadings = parseMarkdownHeadings(contentCheckedPlan);
   const requiredSet = new Set(required);
   const levelTwo = headings.filter((h) => h.level === 2);
   const seen = new Map<string, Heading[]>();
@@ -159,7 +179,7 @@ export function validatePlanContractWithRequiredHeadings(
     }
   }
 
-  for (const heading of headings) {
+  for (const heading of contentCheckedHeadings) {
     if (/^(verification|testing|test plan)\b/i.test(heading.text)) {
       findings.push({
         kind: "generic_verification_heading",
@@ -195,7 +215,7 @@ export function validatePlanContractWithRequiredHeadings(
     });
   }
 
-  for (const [index, line] of plan.split("\n").entries()) {
+  for (const [index, line] of contentCheckedPlan.split("\n").entries()) {
     if (LIVE_OPTION_RE.test(line)) {
       findings.push({
         kind: "live_option_menu",
@@ -221,6 +241,9 @@ export function validatePlanContractWithRequiredHeadings(
   }
 
   for (const requiredHeading of required) {
+    if (excludedContentSections.some((section) => matchesMarkdownHeading(requiredHeading, section))) {
+      continue;
+    }
     const body = sections.get(requiredHeading);
     if (body === undefined) continue;
     const weakReason = weakSectionReason(requiredHeading, body);

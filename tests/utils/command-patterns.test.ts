@@ -567,18 +567,18 @@ describe("getContentBlacklistHighlights path redaction", () => {
   });
 });
 
-describe("filterBlacklistOutsideManualVerification + heading helpers", () => {
+describe("generic section exclusion for blacklist scans", () => {
   // Imported here to avoid touching unrelated imports above.
   // Using dynamic require would be cleaner but vitest handles ESM fine.
-  it("findManualVerificationRange returns null when no heading", async () => {
-    const { findManualVerificationRange } = await import(
+  it("findMarkdownSectionRange returns null when no heading matches", async () => {
+    const { findMarkdownSectionRange } = await import(
       "../../src/utils/content-patterns.js"
     );
-    expect(findManualVerificationRange("# Plan\n\n## Implementation\n")).toBeNull();
+    expect(findMarkdownSectionRange("# Plan\n\n## Implementation\n", /manual\s+(user\s+)?verification/i)).toBeNull();
   });
 
-  it("findManualVerificationRange spans to next same-level heading", async () => {
-    const { findManualVerificationRange } = await import(
+  it("findMarkdownSectionRange spans to next same-level heading", async () => {
+    const { findMarkdownSectionRange } = await import(
       "../../src/utils/content-patterns.js"
     );
     const md = `# Plan
@@ -589,65 +589,63 @@ make build
 ## Notes
 hello
 `;
-    const range = findManualVerificationRange(md);
+    const range = findMarkdownSectionRange(md, /manual\s+(user\s+)?verification/i);
     expect(range).not.toBeNull();
     expect(md.slice(range!.start, range!.end)).toContain("make build");
     expect(md.slice(range!.start, range!.end)).not.toContain("hello");
   });
 
-  it("filterBlacklistOutsideManualVerification removes hits inside the section", async () => {
+  it("excludeMarkdownSectionBodies removes Manual User Verification before blacklist scanning", async () => {
     const {
-      filterBlacklistOutsideManualVerification,
+      excludeMarkdownSectionBodies,
     } = await import("../../src/utils/content-patterns.js");
     const md = `# Plan
 ## Manual User Verification
 make build
 `;
-    const hits = getContentBlacklistHighlights(md);
-    const filtered = filterBlacklistOutsideManualVerification(hits, md);
-    expect(filtered).toEqual([]);
+    const checked = excludeMarkdownSectionBodies(md, [/manual\s+(user\s+)?verification/i]);
+    expect(getContentBlacklistHighlights(checked)).toEqual([]);
   });
 
-  it("filterBlacklistOutsideManualVerification keeps hits outside the section", async () => {
+  it("excludeMarkdownSectionBodies keeps blacklist hits outside the excluded section", async () => {
     const {
-      filterBlacklistOutsideManualVerification,
+      excludeMarkdownSectionBodies,
     } = await import("../../src/utils/content-patterns.js");
     const md = `# Plan
 make build now
 ## Manual User Verification
 ssh server uptime
 `;
-    const hits = getContentBlacklistHighlights(md);
-    const filtered = filterBlacklistOutsideManualVerification(hits, md);
-    expect(filtered.length).toBe(1);
-    expect(filtered[0].rendered).toContain("make build");
+    const checked = excludeMarkdownSectionBodies(md, [/manual\s+(user\s+)?verification/i]);
+    const hits = getContentBlacklistHighlights(checked);
+    expect(hits.length).toBe(1);
+    expect(hits[0].rendered).toContain("make build");
   });
 
   it("EOF-terminated section is recognized correctly", async () => {
     const {
-      findManualVerificationRange,
-      filterBlacklistOutsideManualVerification,
+      findMarkdownSectionRange,
+      excludeMarkdownSectionBodies,
     } = await import("../../src/utils/content-patterns.js");
     const md = `# Plan
 ## Manual User Verification
 make build at the end
 `;
-    const range = findManualVerificationRange(md);
+    const range = findMarkdownSectionRange(md, /manual\s+(user\s+)?verification/i);
     expect(range).not.toBeNull();
     expect(range!.end).toBe(md.length);
-    const hits = getContentBlacklistHighlights(md);
-    const filtered = filterBlacklistOutsideManualVerification(hits, md);
-    expect(filtered).toEqual([]);
+    const checked = excludeMarkdownSectionBodies(md, [/manual\s+(user\s+)?verification/i]);
+    expect(getContentBlacklistHighlights(checked)).toEqual([]);
   });
 
   it("matches Manual Verification (without User) heading per existing regex", async () => {
-    const { findManualVerificationRange } = await import(
+    const { findMarkdownSectionRange } = await import(
       "../../src/utils/content-patterns.js"
     );
     const md = `## Manual Verification
 make build
 `;
-    const range = findManualVerificationRange(md);
+    const range = findMarkdownSectionRange(md, /manual\s+(user\s+)?verification/i);
     expect(range).not.toBeNull();
   });
 });
