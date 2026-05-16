@@ -158,7 +158,7 @@ describe("mainStop Codex inline plan validation", () => {
     );
   });
 
-  it("ignores stored active plan mode when Stop lacks a fresh Codex collaboration marker", async () => {
+  it("uses stored active plan mode when Stop lacks a fresh Codex collaboration marker", async () => {
     mockCheckPlanIntent.mockResolvedValue({ approved: true });
     const sessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR!;
     fs.mkdirSync(sessionDir, { recursive: true });
@@ -186,13 +186,52 @@ describe("mainStop Codex inline plan validation", () => {
       codexEncoder,
     );
 
-    expect(mockCheckPlanIntent).not.toHaveBeenCalled();
-    expect(mockExitAfterFlush).toHaveBeenCalledWith(
-      0,
+    expect(mockCheckPlanIntent).toHaveBeenCalledTimes(1);
+    expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
+  });
+
+  it("uses stored plan mode for inline plans when Codex transcript tail misses the plan marker", async () => {
+    mockCheckPlanIntent.mockResolvedValue({ approved: true });
+    const sessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR!;
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(
+      sessionPlanModeStateFile(sessionDir),
       JSON.stringify({
-        decision: "block",
-        reason: "Proposed plan block emitted outside plan mode.",
-      }),
+        active: true,
+        updatedAt: Date.now(),
+        lastSource: "SessionStart",
+        mode: "plan",
+        detection_source: "codex-collaboration-mode",
+        deliveredPlansMdHash: null,
+        deliveredPlansMdAt: null,
+      }) + "\n",
     );
+    fs.writeFileSync(
+      transcriptPath,
+      Array.from({ length: 120 }, (_, i) =>
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "reasoning",
+            encrypted_content: "x".repeat(600),
+            index: i,
+          },
+        })
+      ).join("\n") + "\n",
+    );
+
+    await mainStop(
+      {
+        session_id: "session-stop",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        permission_mode: "default",
+        last_assistant_message: "<proposed_plan>\n## User Goal\nx\n</proposed_plan>",
+      },
+      codexEncoder,
+    );
+
+    expect(mockCheckPlanIntent).toHaveBeenCalledTimes(1);
+    expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 });

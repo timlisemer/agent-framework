@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "name": "codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed",
+  "description": "Codex Stop hooks must allow inline proposed_plan responses when current Codex collaboration mode is plan, even when permission_mode is default.",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "Please investigate and produce a plan."
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "<proposed_plan>\n# Fix The Issue\n\n## Summary\nUse Codex collaboration-mode evidence to recognize Plan Mode even when permission_mode is default.\n\n## Key Changes\n- Keep explicit Codex collaboration markers authoritative.\n- Do not treat permission_mode=default alone as proof that collaboration mode is Default.\n\n## Tests\n- Add unit coverage for the Stop hook false-block regression.\n\n## Assumptions\n- Codex collaboration mode is the source of truth for Plan Mode when present.\n</proposed_plan>"
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "Stop"
+  },
+  "env": {
+    "adapter": "codex",
+    "cwd": "/home/tim/Coding/public_repos/agent-framework",
+    "permission_mode": "default",
+    "session_start_permission_mode": "default",
+    "codex_collaboration_mode": "plan",
+    "llm_stubs": {
+      "plan-validate": "OK"
+    }
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "User wants the assistant to investigate and produce a plan.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "blockAllTools": false,
+      "contextSwitch": "no",
+      "questionIsStalling": "n/a",
+      "userMessageSnippet": "Please investigate and produce a plan."
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
+  },
+  "expect": {
+    "expected": "pass",
+    "notes": "Codex plan mode is expressed through env.codex_collaboration_mode, not by seeding plan_mode_state."
+  }
+}

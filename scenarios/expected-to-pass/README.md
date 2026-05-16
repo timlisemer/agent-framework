@@ -5,7 +5,9 @@ Fixtures here describe behaviour the framework already implements correctly. A r
 2026-05-16 Codex plan-mode detection:
 
 - Added `codex-default-mode-ignores-stale-plan-sidecar-should-allow.json`.
-- Codex plan-mode detection is now stateless for hook decisions: current hook input and transcript collaboration-mode markers are authoritative, and stale `plan-mode-state.json` must not make default-mode Codex edits look like plan-mode edits.
+- Added `codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed.json` to cover Codex Stop inline-plan handling with current plan mode expressed via `env.codex_collaboration_mode`.
+- Codex plan-mode detection treats current hook input and transcript collaboration-mode markers as authoritative; when no fresh Codex collaboration marker is visible, hooks may fall back to stored `plan-mode-state.json`.
+- Stale `plan-mode-state.json` must not make explicit default-mode Codex edits look like plan-mode edits.
 - New Codex scenarios should prefer `env.codex_collaboration_mode` or `env.permission_mode` to express current mode. Do not seed `plan_mode_state` to make Codex appear to be in plan mode; sidecar state is only fixture context for stale-state regressions.
 
 2026-05-15 scenario reclassification at commit `4e4b851`:

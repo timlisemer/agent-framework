@@ -217,4 +217,28 @@ describe("Codex plan-mode detection", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("uses stored active plan mode when Codex has no fresh collaboration marker", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-plan-mode-hook-"));
+    try {
+      const sessionDir = path.join(dir, "session");
+      const transcriptPath = path.join(dir, "transcript.jsonl");
+      fs.mkdirSync(sessionDir, { recursive: true });
+      fs.writeFileSync(transcriptPath, "");
+      seedActivePlanModeSidecar(sessionDir);
+
+      await expect(detectPlanModeForHook({
+        spec: codexSpec,
+        permissionMode: "default",
+        transcriptPath,
+        sessionDir,
+      })).resolves.toEqual({
+        active: true,
+        mode: "plan",
+        source: "codex-collaboration-mode",
+      });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
