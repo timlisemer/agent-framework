@@ -33,7 +33,8 @@
   "env": {
     "adapter": "codex",
     "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default"
+    "permission_mode": "default",
+    "codex_collaboration_mode": "default"
   },
   "seed_sidecars": {
     "plan_mode_state": {

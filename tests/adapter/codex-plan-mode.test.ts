@@ -102,6 +102,26 @@ describe("Codex plan-mode detection", () => {
     });
   });
 
+  it("finds the latest collaboration marker outside the old transcript tail window", () => {
+    withTranscript([
+      { type: "event_msg", payload: { collaboration_mode_kind: "plan" } },
+      { type: "turn_context", payload: { collaboration_mode: { mode: "default" } } },
+      ...Array.from({ length: 120 }, (_, i) => ({
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: `filler-${i}-${"x".repeat(600)}`,
+        },
+      })),
+    ], (transcriptPath) => {
+      expect(detectPlanMode({ permissionMode: "default", transcriptPath })).toEqual({
+        active: false,
+        mode: "default",
+        source: "codex-collaboration-mode",
+      });
+    });
+  });
+
   it("falls back to hook permission mode and transcript permission mode", () => {
     expect(detectPlanMode({ permissionMode: "plan" })).toEqual({
       active: true,
@@ -201,6 +221,43 @@ describe("Codex plan-mode detection", () => {
           type: "turn_context",
           payload: { collaboration_mode: { mode: "default" } },
         }) + "\n",
+      );
+
+      await expect(detectPlanModeForHook({
+        spec: codexSpec,
+        permissionMode: "default",
+        transcriptPath,
+        sessionDir,
+      })).resolves.toEqual({
+        active: false,
+        mode: "default",
+        source: "codex-collaboration-mode",
+      });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let a stale sidecar override Codex transcript default mode outside the old tail window", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-plan-mode-hook-"));
+    try {
+      const sessionDir = path.join(dir, "session");
+      const transcriptPath = path.join(dir, "transcript.jsonl");
+      fs.mkdirSync(sessionDir, { recursive: true });
+      seedActivePlanModeSidecar(sessionDir);
+      fs.writeFileSync(
+        transcriptPath,
+        [
+          JSON.stringify({ type: "event_msg", payload: { collaboration_mode_kind: "plan" } }),
+          JSON.stringify({ type: "turn_context", payload: { collaboration_mode: { mode: "default" } } }),
+          ...Array.from({ length: 120 }, (_, i) => JSON.stringify({
+            payload: {
+              type: "message",
+              role: "assistant",
+              content: `filler-${i}-${"x".repeat(600)}`,
+            },
+          })),
+        ].join("\n") + "\n",
       );
 
       await expect(detectPlanModeForHook({
