@@ -27,6 +27,17 @@ export function extractPlanfileFooter(plan: string): { planFilePath: string; pla
   return { planFilePath: pathMatch[1], planName: nameMatch[1] };
 }
 
+export function formatPlanfileValidationWorkflow(planPath: string): string {
+  return `Iterate on the planfile using ${activeSpec().mcpWireName("validate_plan")} for ${planPath} until it passes, then present the finished plan using <proposed_plan>.`;
+}
+
+export function appendPlanfileValidationWorkflow(reason: string, planPath?: string | null): string {
+  if (!planPath) return reason;
+  const workflow = formatPlanfileValidationWorkflow(planPath);
+  if (reason.includes(workflow)) return reason;
+  return `${reason} ${workflow}`;
+}
+
 export async function getPathToPlanfile(input: NativePlanFileLookupInput): Promise<string | null> {
   if (input.planName) validatePlanName(input.planName);
   const native = await activeSpec().findNativePlanFile(input);

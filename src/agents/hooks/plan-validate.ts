@@ -41,6 +41,7 @@ import {
 } from "../../utils/content-patterns.js";
 import { validatePlanContract } from "../../utils/plan-contract.js";
 import { activeSpec } from "../../adapter/spec.js";
+import { appendPlanfileValidationWorkflow } from "../../utils/planfile.js";
 
 /**
  * Categories from `RULE_VIOLATION_PATTERNS` that ALWAYS hard-deny without
@@ -180,7 +181,7 @@ export async function checkPlanIntent(
       const feedback = hardRuleViolations
         .map((v) => v.replace(/^\[VIOLATION: [^\]]+\]\s*/, ""))
         .join(". ");
-      return { approved: false, reason: feedback };
+      return { approved: false, reason: appendPlanfileValidationWorkflow(feedback, planFilePath) };
     }
 
     // Deterministic deny: blacklisted commands outside Manual User
@@ -189,7 +190,7 @@ export async function checkPlanIntent(
       const feedback = blacklistHighlights
         .map((v) => v.replace(/^\[VIOLATION: [^\]]+\]\s*/, ""))
         .join(". ");
-      return { approved: false, reason: feedback };
+      return { approved: false, reason: appendPlanfileValidationWorkflow(feedback, planFilePath) };
     }
 
     const violationSection = allViolations.length > 0
@@ -225,15 +226,15 @@ export async function checkPlanIntent(
 
     if (result.output.startsWith("DRIFT:")) {
       const feedback = result.output.replace("DRIFT:", "").trim();
-      return { approved: false, reason: feedback };
+      return { approved: false, reason: appendPlanfileValidationWorkflow(feedback, planFilePath) };
     }
 
     // Fail closed if response is malformed after retries
-    return { approved: false, reason: "Malformed response - retry the edit" };
+    return { approved: false, reason: appendPlanfileValidationWorkflow("Malformed response - retry the edit", planFilePath) };
   } catch {
     // Fail closed on errors
     logFastPathApproval("plan-validate", hookName, toolName, workingDir, "Error path - fail closed");
-    return { approved: false, reason: "Error during validation - retry the edit" };
+    return { approved: false, reason: appendPlanfileValidationWorkflow("Error during validation - retry the edit", planFilePath) };
   }
 }
 

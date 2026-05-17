@@ -7,8 +7,13 @@ import { formatTranscriptResult, readTranscriptExact } from "./transcript.js";
 import { PLAN_VALIDATE_COUNTS } from "./transcript-presets.js";
 import { readJson, writeJson } from "./file-io.js";
 import { sessionCurrentPlanFile } from "./paths.js";
-import { getPathToPlanfile } from "./planfile.js";
-import { extractPlanName, extractPlanfileFooter } from "./planfile.js";
+import {
+  appendPlanfileValidationWorkflow,
+  extractPlanName,
+  extractPlanfileFooter,
+  formatPlanfileValidationWorkflow,
+  getPathToPlanfile,
+} from "./planfile.js";
 import { comparePlanContent } from "./plan-content-compare.js";
 import {
   hashPlanContent,
@@ -115,12 +120,8 @@ function stripViolationPrefix(text: string): string {
   return text.replace(/^\[VIOLATION: [^\]]+\]\s*/, "");
 }
 
-function validationFailureWorkflow(planPath: string): string {
-  return `Iterate on the planfile using mcp__agent_framework__validate_plan for ${planPath} until it passes, then present the finished plan using <proposed_plan>.`;
-}
-
 function mismatchWorkflow(planPath: string): string {
-  return `Update the planfile at ${planPath}, validate it with mcp__agent_framework__validate_plan, and then present the same validated plan using <proposed_plan>.`;
+  return `Update the planfile at ${planPath}, validate it with ${activeSpec().mcpWireName("validate_plan")}, and then present the same validated plan using <proposed_plan>.`;
 }
 
 function structureReasons(content: string, projectDir: string, planPath?: string): string[] {
@@ -140,17 +141,10 @@ async function reportInvalidExtractedProposalWithPlanfile(input: {
   structureReasons: string[];
 }): Promise<{ approved: false; reason: string }> {
   const planName = extractPlanName(input.extractedContent);
-  if (!planName || !input.sessionDir) {
-    return {
-      approved: false,
-      reason: `Extracted proposed plan is structurally invalid: ${input.structureReasons.join("; ") || "missing required plan structure."}`,
-    };
-  }
-
   const planPath = await getCurrentPlanfilePath({
     transcriptPath: input.transcriptPath,
     sessionDir: input.sessionDir,
-    planName,
+    planName: planName ?? undefined,
   });
   if (!planPath) {
     return {
@@ -163,20 +157,25 @@ async function reportInvalidExtractedProposalWithPlanfile(input: {
   if (!fileContent?.trim()) {
     return {
       approved: false,
-      reason: `Extracted proposed plan is structurally invalid: ${input.structureReasons.join("; ") || "missing required plan structure."}`,
+      reason: appendPlanfileValidationWorkflow(
+        `Extracted proposed plan is structurally invalid: ${input.structureReasons.join("; ") || "missing required plan structure."}`,
+        planPath,
+      ),
     };
   }
 
   const contentHash = hashPlanContent(fileContent);
-  const status = readPlanValidationStatus({
-    sessionDir: input.sessionDir,
-    planPath,
-    contentHash,
-  });
+  const status = input.sessionDir
+    ? readPlanValidationStatus({
+      sessionDir: input.sessionDir,
+      planPath,
+      contentHash,
+    })
+    : null;
   const statusText = status ? status.status : "no recorded pass/fail status";
   const statusInstruction = status?.status === "pass"
     ? "If this is the current plan, do not shrink or reduce details when presenting it in <proposed_plan>; present the same plan as the planfile."
-    : "If this is the current plan, iterate on the planfile using mcp__agent_framework__validate_plan until it passes, then present the finished plan using <proposed_plan>.";
+    : `If this is the current plan, ${formatPlanfileValidationWorkflow(planPath)}`;
   return {
     approved: false,
     reason: [
@@ -219,9 +218,13 @@ export async function validatePlanExitPresentation(input: {
   const extractedStructureReasons = structureReasons(extractedContent, input.projectDir);
   if (extractedStructureReasons.length > 0) {
     if (!extractedPlanName) {
+      const planPath = await getCurrentPlanfilePath(input);
       return {
         approved: false,
-        reason: `Extracted proposed plan is structurally invalid: ${extractedStructureReasons.join("; ")}`,
+        reason: appendPlanfileValidationWorkflow(
+          `Extracted proposed plan is structurally invalid: ${extractedStructureReasons.join("; ")}`,
+          planPath,
+        ),
       };
     }
     return reportInvalidExtractedProposalWithPlanfile({
@@ -290,7 +293,7 @@ export async function validatePlanExitPresentation(input: {
     }
     return {
       approved: false,
-      reason: `${validation.reasons.join("; ") || "Plan validation failed."} ${validationFailureWorkflow(resolvedPath)} Only present <proposed_plan> after mcp__agent_framework__validate_plan passes.`,
+      reason: `${appendPlanfileValidationWorkflow(validation.reasons.join("; ") || "Plan validation failed.", resolvedPath)} Only present <proposed_plan> after ${activeSpec().mcpWireName("validate_plan")} passes.`,
     };
   }
 
@@ -326,7 +329,7 @@ export async function validatePlanExitPresentation(input: {
   if (recorded?.status === "fail") {
     return {
       approved: false,
-      reason: `The exact current planfile content previously failed validation. The agent must iterate on the planfile using mcp__agent_framework__validate_plan and must not present the plan using <proposed_plan> unless mcp__agent_framework__validate_plan has passed for that exact planfile content.`,
+      reason: `The exact current planfile content previously failed validation. ${formatPlanfileValidationWorkflow(resolvedPath)} Do not present the plan using <proposed_plan> unless ${activeSpec().mcpWireName("validate_plan")} has passed for that exact planfile content.`,
     };
   }
 
@@ -343,7 +346,7 @@ export async function validatePlanExitPresentation(input: {
   }
   return {
     approved: false,
-    reason: `${validation.reasons.join("; ") || "Plan validation failed."} The agent must iterate on the planfile using mcp__agent_framework__validate_plan and must not present the plan using <proposed_plan> unless mcp__agent_framework__validate_plan has passed for that exact planfile content.`,
+    reason: `${appendPlanfileValidationWorkflow(validation.reasons.join("; ") || "Plan validation failed.", resolvedPath)} Do not present the plan using <proposed_plan> unless ${activeSpec().mcpWireName("validate_plan")} has passed for that exact planfile content.`,
   };
 }
 

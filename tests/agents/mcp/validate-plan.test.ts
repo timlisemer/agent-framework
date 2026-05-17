@@ -84,6 +84,8 @@ describe("runValidatePlanAgent", () => {
     const result = await runValidatePlanAgent({ workingDir: tempDir, planFile: "plan.md" });
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain("Plan content is empty.");
+    expect(result).toContain("Iterate on the planfile using");
+    expect(result).toContain(path.join(tempDir, "plan.md"));
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -230,8 +232,9 @@ describe("runValidatePlanAgent", () => {
       expect(Object.values(status)[0]).toMatchObject({
         status: "fail",
         planPath,
-        reasons: ["Missing required heading \"## Relevant Files\"."],
       });
+      expect((Object.values(status)[0] as { reasons: string[] }).reasons[0]).toContain("Missing required heading \"## Relevant Files\".");
+      expect((Object.values(status)[0] as { reasons: string[] }).reasons[0]).toContain("Iterate on the planfile using");
     } finally {
       if (prevSessionDir === undefined) delete process.env.AGENT_FRAMEWORK_SESSION_DIR;
       else process.env.AGENT_FRAMEWORK_SESSION_DIR = prevSessionDir;

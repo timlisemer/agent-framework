@@ -2,6 +2,7 @@ import * as path from "path";
 import { describe, expect, it } from "vitest";
 import { editIntentRule } from "../../src/rules/edit-intent.js";
 import { predictionBlockRule } from "../../src/rules/prediction-block.js";
+import { planModeBlockRule } from "../../src/rules/plan-mode-block.js";
 import type { RuleContext } from "../../src/rules/types.js";
 import { sessionPlanFile } from "../../src/utils/paths.js";
 
@@ -62,5 +63,35 @@ describe("session planfile rule exemptions", () => {
     }));
 
     expect(result).toBeNull();
+  });
+
+  it("plan-mode-block allows first creation of valid current session planfiles", async () => {
+    const sessionDir = path.join(process.cwd(), ".tmp-session");
+    const planPath = sessionPlanFile(sessionDir, "shared-ai-ui-runtime");
+    const result = await planModeBlockRule.check(makeCtx({
+      sessionDir,
+      planMode: true,
+      planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
+      toolName: "Write",
+      toolInput: { file_path: planPath, content: "Plan Name: shared-ai-ui-runtime\n" },
+    }));
+
+    expect(result).toEqual({
+      fastAllow: "Plan mode allows edits to plan files / host instruction files / memory files (path is exempt).",
+    });
+  });
+
+  it("plan-mode-block still blocks invalid session planfile-like paths", async () => {
+    const sessionDir = path.join(process.cwd(), ".tmp-session");
+    const invalidPlanPath = path.join(sessionDir, "plans", "Shared AI UI Runtime.md");
+    const result = await planModeBlockRule.check(makeCtx({
+      sessionDir,
+      planMode: true,
+      planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
+      toolName: "Write",
+      toolInput: { file_path: invalidPlanPath, content: "bad" },
+    }));
+
+    expect(result).toMatchObject({ fastDeny: expect.stringContaining("Plan mode is active") });
   });
 });

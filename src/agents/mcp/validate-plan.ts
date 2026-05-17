@@ -23,6 +23,7 @@ import {
   recordPlanValidationStatus,
 } from "../../utils/plan-validation-status.js";
 import { getSessionDir } from "../../utils/session-store.js";
+import { appendPlanfileValidationWorkflow } from "../../utils/planfile.js";
 
 const VALIDATE_PLAN_SYSTEM_PROMPT = `You are a plan validator. Validate the PLAN CONTENT itself.
 
@@ -100,7 +101,7 @@ function resolvePlanContent(input: ValidatePlanInput): { content?: string; resol
     return { content: fs.readFileSync(resolved, "utf-8"), resolvedPath: resolved };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { error: `Could not read plan_file ${resolved}: ${msg}` };
+    return { error: `Could not read plan_file ${resolved}: ${msg}`, resolvedPath: resolved };
   }
 }
 
@@ -137,7 +138,11 @@ export async function validatePlanFileWithContract(
 
   const source = resolvePlanContent(input);
   if (source.error) {
-    return { status: "FAIL", reasons: [source.error] };
+    return {
+      status: "FAIL",
+      reasons: [appendPlanfileValidationWorkflow(source.error, source.resolvedPath)],
+      resolvedPath: source.resolvedPath,
+    };
   }
 
   const plan = source.content ?? "";
@@ -150,7 +155,7 @@ export async function validatePlanFileWithContract(
     const result: PlanValidationRunResult = {
       ...baseResult,
       status: "FAIL",
-      reasons: ["Plan content is empty."],
+      reasons: [appendPlanfileValidationWorkflow("Plan content is empty.", source.resolvedPath)],
     };
     recordValidationResult(input, result);
     return result;
@@ -163,7 +168,9 @@ export async function validatePlanFileWithContract(
     const result: PlanValidationRunResult = {
       ...baseResult,
       status: "FAIL",
-      reasons: findings.hardRuleViolations.map(stripViolationPrefix),
+      reasons: findings.hardRuleViolations
+        .map(stripViolationPrefix)
+        .map((reason) => appendPlanfileValidationWorkflow(reason, source.resolvedPath)),
     };
     recordValidationResult(input, result);
     return result;
@@ -173,7 +180,9 @@ export async function validatePlanFileWithContract(
     const result: PlanValidationRunResult = {
       ...baseResult,
       status: "FAIL",
-      reasons: findings.blacklistHighlights.map(stripViolationPrefix),
+      reasons: findings.blacklistHighlights
+        .map(stripViolationPrefix)
+        .map((reason) => appendPlanfileValidationWorkflow(reason, source.resolvedPath)),
     };
     recordValidationResult(input, result);
     return result;
@@ -183,7 +192,9 @@ export async function validatePlanFileWithContract(
     const result: PlanValidationRunResult = {
       ...baseResult,
       status: "FAIL",
-      reasons: findings.allViolations.map(stripViolationPrefix),
+      reasons: findings.allViolations
+        .map(stripViolationPrefix)
+        .map((reason) => appendPlanfileValidationWorkflow(reason, source.resolvedPath)),
     };
     recordValidationResult(input, result);
     return result;
@@ -239,7 +250,12 @@ export async function validatePlanFileWithContract(
       const validationResult: PlanValidationRunResult = {
         ...baseResult,
         status: "FAIL",
-        reasons: ["Malformed plan-validate response - retry validation with a specific heading, line, or rule."],
+        reasons: [
+          appendPlanfileValidationWorkflow(
+            "Malformed plan-validate response - retry validation with a specific heading, line, or rule.",
+            source.resolvedPath,
+          ),
+        ],
       };
       recordValidationResult(input, validationResult);
       return validationResult;
@@ -256,7 +272,7 @@ export async function validatePlanFileWithContract(
     const validationResult: PlanValidationRunResult = {
       ...baseResult,
       status: "FAIL",
-      reasons: [reason || "Plan validation failed."],
+      reasons: [appendPlanfileValidationWorkflow(reason || "Plan validation failed.", source.resolvedPath)],
     };
     recordValidationResult(input, validationResult);
     return validationResult;
@@ -265,7 +281,7 @@ export async function validatePlanFileWithContract(
   const validationResult: PlanValidationRunResult = {
     ...baseResult,
     status: "FAIL",
-    reasons: ["Malformed plan-validate response - retry validation."],
+    reasons: [appendPlanfileValidationWorkflow("Malformed plan-validate response - retry validation.", source.resolvedPath)],
   };
   recordValidationResult(input, validationResult);
   return validationResult;
