@@ -164,7 +164,9 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
     expect(output).toContain("Plan validation failed:");
     expect(output).toContain("Extracted proposed plan is structurally invalid");
-    expect(output).not.toContain(existingPath);
+    expect(output).toContain("Session planfiles directory:");
+    expect(output).toContain(existingPath);
+    expect(output).toContain("Existing session planfiles accepted for this session");
   });
 
   it("creates a missing planfile, runs shared validation, records status, writes current-plan, and allows silently on pass", async () => {
@@ -213,7 +215,10 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
 
     expect(fs.readFileSync(planPath, "utf-8")).toBe("  \n");
     expect(mockValidatePlanFileWithContract).not.toHaveBeenCalled();
-    expect(mockExitAfterFlush.mock.calls.at(-1)?.[1]).toContain("empty");
+    const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
+    expect(output).toContain("empty");
+    expect(output).toContain("Session planfiles directory:");
+    expect(output).toContain(planPath);
   });
 
   it("blocks existing unreadable planfiles without overwriting them", async () => {
@@ -230,7 +235,10 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
 
     expect(fs.readFileSync(planPath, "utf-8")).toBe("secret");
     expect(mockValidatePlanFileWithContract).not.toHaveBeenCalled();
-    expect(mockExitAfterFlush.mock.calls.at(-1)?.[1]).toContain("unreadable");
+    const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
+    expect(output).toContain("unreadable");
+    expect(output).toContain("Session planfiles directory:");
+    expect(output).toContain(planPath);
   });
 
   it("blocks footer path mismatches", async () => {
@@ -239,8 +247,10 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
 
     await runStop(transcriptPath, tempDir, validPlan(wrongPath));
 
-    expect(mockExitAfterFlush.mock.calls.at(-1)?.[1]).toContain("Plan validation failed:");
-    expect(mockExitAfterFlush.mock.calls.at(-1)?.[1]).toContain("must match the resolved current planfile path");
+    const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
+    expect(output).toContain("Plan validation failed:");
+    expect(output).toContain("must match the resolved current planfile path");
+    expect(output).toContain("Session planfiles directory:");
   });
 
   it("blocks material extracted/file differences and includes small raw diff output", async () => {

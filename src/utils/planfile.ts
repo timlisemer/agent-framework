@@ -1,3 +1,4 @@
+import * as fs from "fs";
 import * as path from "path";
 import { activeSpec } from "../adapter/spec.js";
 import type { NativePlanFileLookupInput } from "../adapter/types.js";
@@ -36,6 +37,27 @@ export function appendPlanfileValidationWorkflow(reason: string, planPath?: stri
   const workflow = formatPlanfileValidationWorkflow(planPath);
   if (reason.includes(workflow)) return reason;
   return `${reason} ${workflow}`;
+}
+
+export function listSessionPlanfiles(sessionDir?: string): string[] {
+  if (!sessionDir) return [];
+  const plansDir = sessionPlansDir(sessionDir);
+  try {
+    return fs.readdirSync(plansDir)
+      .filter((entry) => entry.endsWith(".md") && PLAN_NAME_RE.test(entry.slice(0, -3)))
+      .map((entry) => path.join(plansDir, entry))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+export function formatSessionPlanfilesForFeedback(sessionDir?: string): string {
+  if (!sessionDir) return "No session plans directory is available for this hook invocation.";
+  const plansDir = sessionPlansDir(sessionDir);
+  const planfiles = listSessionPlanfiles(sessionDir);
+  const listed = planfiles.length > 0 ? planfiles.join(", ") : "(none)";
+  return `Session planfiles directory: ${plansDir}. Existing session planfiles accepted for this session: ${listed}.`;
 }
 
 export async function getPathToPlanfile(input: NativePlanFileLookupInput): Promise<string | null> {

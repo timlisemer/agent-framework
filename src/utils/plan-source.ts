@@ -11,6 +11,7 @@ import {
   appendPlanfileValidationWorkflow,
   extractPlanName,
   extractPlanfileFooter,
+  formatSessionPlanfilesForFeedback,
   formatPlanfileValidationWorkflow,
   getPathToPlanfile,
 } from "./planfile.js";
@@ -124,6 +125,10 @@ function mismatchWorkflow(planPath: string): string {
   return `Update the planfile at ${planPath}, validate it with ${activeSpec().mcpWireName("validate_plan")}, and then present the same validated plan using <proposed_plan>.`;
 }
 
+function missingPlanfileWorkflow(sessionDir?: string): string {
+  return `The presented plan must use a Plan Name matching one of the accepted session planfiles, or create a new named session planfile first. ${formatSessionPlanfilesForFeedback(sessionDir)}`;
+}
+
 function structureReasons(content: string, projectDir: string, planPath?: string): string[] {
   const findings = collectPlanValidationViolations(content, projectDir, planPath);
   return findings.allViolations.map(stripViolationPrefix);
@@ -149,7 +154,7 @@ async function reportInvalidExtractedProposalWithPlanfile(input: {
   if (!planPath) {
     return {
       approved: false,
-      reason: `Extracted proposed plan is structurally invalid: ${input.structureReasons.join("; ") || "missing required plan structure."}`,
+      reason: `Extracted proposed plan is structurally invalid: ${input.structureReasons.join("; ") || "missing required plan structure."} ${missingPlanfileWorkflow(input.sessionDir)}`,
     };
   }
 
@@ -183,7 +188,7 @@ async function reportInvalidExtractedProposalWithPlanfile(input: {
       `A populated planfile already exists at ${planPath}.`,
       `Last known validation status for that exact content: ${statusText}.`,
       statusInstruction,
-      "If it is not the current plan, create a new named session planfile, validate that file with mcp__agent_framework__validate_plan until it passes, and then present the validated plan using <proposed_plan>.",
+      `If it is not the current plan, create a new named session planfile, validate that file with ${activeSpec().mcpWireName("validate_plan")} until it passes, and then present the validated plan using <proposed_plan>.`,
     ].join(" "),
   };
 }
@@ -218,13 +223,9 @@ export async function validatePlanExitPresentation(input: {
   const extractedStructureReasons = structureReasons(extractedContent, input.projectDir);
   if (extractedStructureReasons.length > 0) {
     if (!extractedPlanName) {
-      const planPath = await getCurrentPlanfilePath(input);
       return {
         approved: false,
-        reason: appendPlanfileValidationWorkflow(
-          `Extracted proposed plan is structurally invalid: ${extractedStructureReasons.join("; ")}`,
-          planPath,
-        ),
+        reason: `Extracted proposed plan is structurally invalid: ${extractedStructureReasons.join("; ")} ${missingPlanfileWorkflow(input.sessionDir)}`,
       };
     }
     return reportInvalidExtractedProposalWithPlanfile({
@@ -243,7 +244,7 @@ export async function validatePlanExitPresentation(input: {
     planName,
   });
   if (!resolvedPath) {
-    return { approved: false, reason: "Cannot exit plan mode without a planfile path." };
+    return { approved: false, reason: `Cannot exit plan mode without a planfile path for Plan Name "${planName}". ${missingPlanfileWorkflow(input.sessionDir)}` };
   }
 
   const footer = extractPlanfileFooter(extractedContent);
@@ -258,7 +259,7 @@ export async function validatePlanExitPresentation(input: {
   if (footerPath !== path.resolve(resolvedPath)) {
     return {
       approved: false,
-      reason: `Extracted proposed plan Planfile Path footer must match the resolved current planfile path. Footer path: ${footerPath}. Resolved path: ${path.resolve(resolvedPath)}.`,
+      reason: `Extracted proposed plan Planfile Path footer must match the resolved current planfile path. Footer path: ${footerPath}. Resolved path: ${path.resolve(resolvedPath)}. ${missingPlanfileWorkflow(input.sessionDir)}`,
     };
   }
 
@@ -272,7 +273,7 @@ export async function validatePlanExitPresentation(input: {
     if (code !== "ENOENT") {
       return {
         approved: false,
-        reason: `The matching planfile at ${resolvedPath} is unreadable. Populate, repair, or recreate it before presenting <proposed_plan>.`,
+        reason: `The matching planfile at ${resolvedPath} is unreadable. Populate, repair, or recreate it before presenting <proposed_plan>. ${missingPlanfileWorkflow(input.sessionDir)}`,
       };
     }
   }
@@ -300,7 +301,7 @@ export async function validatePlanExitPresentation(input: {
   if (!existingContent?.trim()) {
     return {
       approved: false,
-      reason: `The matching planfile at ${resolvedPath} is empty. Populate, repair, or recreate it before presenting <proposed_plan>.`,
+      reason: `The matching planfile at ${resolvedPath} is empty. Populate, repair, or recreate it before presenting <proposed_plan>. ${missingPlanfileWorkflow(input.sessionDir)}`,
     };
   }
 
