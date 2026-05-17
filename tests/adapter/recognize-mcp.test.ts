@@ -6,10 +6,14 @@ describe("adapter MCP recognition", () => {
   it("recognizes Claude validate_plan wire name", () => {
     expect(claudeMcp.recognizeMcp("mcp__agent-framework__validate_plan")).toBe("validate_plan");
     expect(claudeMcp.mcpWireName("validate_plan")).toBe("mcp__agent-framework__validate_plan");
+    expect(claudeMcp.recognizeMcp("mcp__agent-framework__create_planfile")).toBe("create_planfile");
+    expect(claudeMcp.mcpWireName("create_planfile")).toBe("mcp__agent-framework__create_planfile");
   });
 
   it("recognizes Codex validate_plan wire name", () => {
     expect(codexMcp.recognizeMcp("mcp__agent_framework__validate_plan")).toBe("validate_plan");
     expect(codexMcp.mcpWireName("validate_plan")).toBe("mcp__agent_framework__validate_plan");
+    expect(codexMcp.recognizeMcp("mcp__agent_framework__create_planfile")).toBe("create_planfile");
+    expect(codexMcp.mcpWireName("create_planfile")).toBe("mcp__agent_framework__create_planfile");
   });
 });

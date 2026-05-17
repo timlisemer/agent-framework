@@ -1,0 +1,49 @@
+import * as fs from "fs";
+import * as path from "path";
+import { getPathToPlanfile } from "../../utils/planfile.js";
+import { writeCurrentPlanSidecar } from "../../utils/plan-source.js";
+import { validatePlanFileWithContract } from "./validate-plan.js";
+
+export interface CreatePlanfileInput {
+  planName: string;
+  content: string;
+}
+
+function normalizePlanContent(planName: string, planPath: string, content: string): string {
+  let body = content.trim();
+  body = body.replace(/^\s*Plan Name:\s*[a-z0-9]+(?:-[a-z0-9]+)*\s*\n+/i, "");
+  body = body.replace(/\n+\s*Planfile Path:\s*.+\s*\n\s*Plan Name:\s*[a-z0-9]+(?:-[a-z0-9]+)*\s*$/i, "");
+  return `Plan Name: ${planName}\n\n${body.trim()}\n\nPlanfile Path: ${planPath}\nPlan Name: ${planName}\n`;
+}
+
+export async function runCreatePlanfileAgent(input: CreatePlanfileInput): Promise<string> {
+  const sessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR;
+  const planPath = await getPathToPlanfile({
+    transcriptPath: "",
+    sessionDir,
+    planName: input.planName,
+  });
+  if (!planPath) {
+    throw new Error(`Could not resolve planfile path for plan_name ${input.planName}`);
+  }
+
+  await fs.promises.mkdir(path.dirname(planPath), { recursive: true });
+  await fs.promises.writeFile(planPath, normalizePlanContent(input.planName, planPath, input.content), "utf-8");
+  const validation = await validatePlanFileWithContract({
+    workingDir: process.cwd(),
+    planFile: planPath,
+    sessionDir,
+  });
+  if (validation.status === "PASS" && sessionDir) {
+    writeCurrentPlanSidecar(sessionDir, { kind: "file", path: planPath, planName: input.planName });
+  }
+
+  const reasons = validation.reasons.length > 0 ? validation.reasons.join("\n") : "(none)";
+  return `Created planfile: ${planPath}
+
+## Results
+- Status: ${validation.status}
+
+## Reasons
+${reasons}`;
+}

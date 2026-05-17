@@ -40,8 +40,13 @@ describe("SLASH_COMMAND_ALLOWED_TOOLS canonical keys", () => {
     expect(SLASH_COMMAND_ALLOWED_TOOLS["check"]).toEqual(["mcp-check"]);
   });
 
-  it("plan3 maps to Agent and ExitPlanMode", () => {
-    expect(SLASH_COMMAND_ALLOWED_TOOLS["plan3"]).toEqual(["Agent", "ExitPlanMode"]);
+  it("plan3 maps to plan workflow tools", () => {
+    expect(SLASH_COMMAND_ALLOWED_TOOLS["plan3"]).toEqual([
+      "Agent",
+      "ExitPlanMode",
+      "mcp-create_planfile",
+      "mcp-validate_plan",
+    ]);
   });
 });
 
@@ -50,6 +55,7 @@ describe("RESTRICTED_MCPS", () => {
     expect(RESTRICTED_MCPS.has("commit")).toBe(true);
     expect(RESTRICTED_MCPS.has("push")).toBe(true);
     expect(RESTRICTED_MCPS.has("confirm")).toBe(true);
+    expect(RESTRICTED_MCPS.has("create_planfile")).toBe(false);
     expect(RESTRICTED_MCPS.has("check")).toBe(false);
   });
 });

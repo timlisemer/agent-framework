@@ -19,6 +19,7 @@ src/                                # TypeScript source
   agents/
     mcp/                            # MCP-exposed agents
       check.ts                      # Runs linter + make/just check
+      create-planfile.ts            # Writes named planfiles and runs validation
       confirm.ts                    # Code quality gate (SDK mode)
       commit.ts                     # Generates commit message + commits
       push.ts                       # Executes git push
@@ -388,13 +389,18 @@ Tool call received
 ```
 
 Planfile `Write` and `Edit` calls are not validated on every write. The
-file-backed planfile remains the source of truth, and validation happens either
-when the user or agent calls the `validate_plan` MCP tool explicitly or at the
-Codex Stop-hook acceptance boundary for a whole-message `<proposed_plan>`.
-That Stop path parses the inline presentation through the adapter, checks it
-against the plan contract and the matching planfile, uses session validation
-status keyed by plan path plus content hash, and updates `current-plan.json`
-when the exact presented plan is accepted.
+file-backed planfile remains the source of truth. Plan1/plan3/plan5
+consolidation creates the plan through the `create_planfile` MCP tool, which
+uses the shared planfile path helper, writes the named planfile, normalizes the
+`Plan Name` header and `Planfile Path` footer, then invokes the same
+`validate_plan` contract path for the written content. `validate_plan` remains
+available for explicit revalidation and is the tool named in failure
+remediation when the agent must iterate on an existing planfile. The Codex
+Stop-hook acceptance boundary for a whole-message `<proposed_plan>` parses the
+inline presentation through the adapter, checks it against the plan contract
+and the matching planfile, uses session validation status keyed by plan path
+plus content hash, and updates `current-plan.json` when the exact presented
+plan is accepted.
 
 Adding a new check: create `src/rules/my-rule.ts` implementing `PreToolRule`,
 add to `ALL_RULES` in `src/rules/index.ts`, add display name to statusline.
@@ -547,6 +553,9 @@ Plan-mode and reproducibility sidecars live in the same session directory:
 the active file-backed plan descriptor, and `plan-validation-status.json`
 records exact-content plan validation pass/fail status keyed by resolved
 planfile path plus content hash.
+
+`create_planfile` resolves `plans/<name>.md` under the current session and
+returns the planfile path together with the validation PASS/FAIL result.
 
 Compaction recovery relies on the host agent's native transcript compaction — no app-layer summary re-inject.
 

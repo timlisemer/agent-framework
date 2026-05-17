@@ -235,9 +235,25 @@ plan_file is required.
 
 ## When to use
 
-- Before returning a final plan to the user
-- After consolidating plan1/plan3/plan5 planner output and before launching verification agents
-- Any time an agent wants to check whether a plan is structurally valid and implementation-ready`;
+- When a validation failure tells the agent to iterate on an existing planfile
+- For explicit manual revalidation of an existing named planfile
+- Any time an agent wants to check whether an existing planfile is structurally valid and implementation-ready`;
+
+export const CREATE_PLANFILE_HELP = `# create_planfile -- Planfile Creator
+
+Creates or overwrites the current session planfile for a lowercase kebab-case plan name, then validates it.
+
+## Inputs
+
+- plan_name (required): lowercase kebab-case plan name
+- content (required): final plan body/content
+
+The tool resolves the current session planfile path, writes the file, normalizes the Plan Name header and Planfile Path footer, and returns the validate_plan result for the written file.
+
+## When to use
+
+- During plan1/plan3/plan5 consolidation
+- When creating the named planfile from consolidated planner output`;
 
 export const TRANSCRIPT_HELP = `# transcript -- Session Transcript Path Resolver
 

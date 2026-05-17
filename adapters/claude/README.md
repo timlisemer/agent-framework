@@ -47,6 +47,10 @@ Build-then-rebuild ordering:
   runner redirects writes to a temp dir via `AGENT_FRAMEWORK_PLAN_DIR`.
 - **named planfiles**: Final plans must start with `Plan Name: <name>` and end
   with `Planfile Path: <path>` followed by the same `Plan Name`.
+- **plan creation**: `/plan1`, `/plan3`, and `/plan5` call
+  `mcp__agent-framework__create_planfile` during consolidation. The tool
+  resolves the current session planfile path, writes the file, normalizes the
+  header/footer, and returns the validation result.
 
 ## Hook Entry Points
 

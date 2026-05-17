@@ -29,7 +29,7 @@ export function extractPlanfileFooter(plan: string): { planFilePath: string; pla
 }
 
 export function formatPlanfileValidationWorkflow(planPath: string): string {
-  return `Iterate on the planfile using ${activeSpec().mcpWireName("validate_plan")} for ${planPath} until it passes, then present the finished plan using <proposed_plan>.`;
+  return `Iterate on the planfile using ${activeSpec().mcpWireName("validate_plan")} for ${planPath} until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed. Then present the finished plan using <proposed_plan>.`;
 }
 
 export function appendPlanfileValidationWorkflow(reason: string, planPath?: string | null): string {

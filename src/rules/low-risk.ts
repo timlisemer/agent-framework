@@ -1,6 +1,12 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { isLowRiskTool } from "./utils.js";
 import { writeTool } from "../utils/synthetic.js";
+import { activeSpec } from "../adapter/spec.js";
+
+function isCreatePlanfileTool(toolName: string): boolean {
+  if (toolName === "mcp-create_planfile") return true;
+  return activeSpec().recognizeMcp(toolName) === "create_planfile";
+}
 
 export const lowRiskRule: PreToolRule = {
   name: "low-risk-bypass",
@@ -23,6 +29,10 @@ export const lowRiskRule: PreToolRule = {
         "EnterPlanMode",
         "Entering plan mode. All subsequent tool calls are read-only until ExitPlanMode."
       );
+    }
+
+    if (isCreatePlanfileTool(ctx.toolName) && !ctx.planMode) {
+      return { fastDeny: "create_planfile is only available while plan mode is active." };
     }
 
     if (isLowRiskTool(ctx.toolName)) {

@@ -2,7 +2,7 @@
 
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
-1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent`, `scenario_labeler`, `scenario_tester` agents (portable, works with any MCP client)
+1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent`, `create_planfile`, `validate_plan`, `scenario_labeler`, `scenario_tester` agents (portable, works with any MCP client)
 2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `style-drift`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
 3. **Stop Hook** - For `response-align-stop` and Codex `<proposed_plan>` acceptance validation
 4. **UserPromptSubmit Hook** - For `sentiment` rule (classifies user mood/intent before each tool call sequence)
@@ -11,7 +11,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
 
 ## Agents
 
-The framework implements 16 specialized agents organized into three categories:
+The framework implements 18 specialized agents and MCP tools organized into three categories:
 
 ### MCP Tools (User-Facing)
 
@@ -22,6 +22,8 @@ The framework implements 16 specialized agents organized into three categories:
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
 | validate_intent        | haiku  | Manual post-session review (requires transcript_path)        |
+| create_planfile        | -      | Create or overwrite a named planfile and validate it         |
+| validate_plan          | sonnet | Validate an existing planfile against the planning contract  |
 | scenario_labeler   | -      | Test harness operations for the @labeler agent role          |
 | scenario_tester    | -      | Test harness operations for the @tester agent role           |
 
@@ -95,12 +97,15 @@ The `commit` agent enforces the complete verification chain before committing.
 └─ Post-allow bookkeeping (tool count, ExitPlanMode cleanup)
 ```
 
-Planfile writes are no longer validated on every `Write` or `Edit`. Plan
-validation now happens through explicit `validate_plan` MCP calls and at the
-Codex Stop-hook acceptance boundary when a whole-message `<proposed_plan>` is
-presented. At that boundary the hook checks the inline presentation against the
-file-backed planfile, consults or records exact-content validation status, and
-updates the session current-plan sidecar on success.
+Planfile writes are no longer validated on every `Write` or `Edit`.
+Plan1/plan3/plan5 consolidation calls `create_planfile`, which resolves the
+current session planfile path, writes the named planfile, normalizes the
+header/footer, and runs the plan contract validator immediately. `validate_plan`
+remains available for explicit revalidation and for the remediation workflow
+shown in validation failures. Codex Stop-hook acceptance still validates a
+whole-message `<proposed_plan>` by comparing the inline presentation against
+the file-backed planfile, consulting or recording exact-content validation
+status, and updating the session current-plan sidecar on success.
 
 ## Performance
 

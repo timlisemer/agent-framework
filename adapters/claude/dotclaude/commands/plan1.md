@@ -1,5 +1,6 @@
 ---
 description: Spawn 1 plan agent, consolidate, then 1 verification agent to refine
+allowed-tools: Agent, ExitPlanMode, mcp__agent-framework__create_planfile, mcp__agent-framework__validate_plan
 ---
 
 You are executing the /plan1 skill. The user's task description is:
@@ -41,12 +42,12 @@ Do not plan for backwards compatibility. If something is replaced, remove the ol
 
 ## Step 2: Write the plan file
 
-After the agent returns, write the plan to the plan file using exactly the 14 required `PLANS.md` level-two headings in order:
+After the agent returns, consolidate its result into final plan content using exactly these 14 required level-two headings in order:
 `User Goal`, `Answered Assumptions`, `Goal In My Words`, `Approach`, `Data Flow`, `Files To Create`, `Files To Modify`, `Implementation Order`, `Assistant Verification`, `Manual User Verification`, `Approaches Decided Against`, `Possible Future Followups`, `Relevant Files`, `Files That Need Changes`.
 
-Do not add non-contract `##` headings such as `## Context`, `## Verification`, `## Testing`, or `## Test Plan`. Include concrete changes with file paths, line numbers, and code inside the required sections. `Assistant Verification` must use only `mcp__agent-framework__check` with the repository `working_dir`; put only user-only checks in `Manual User Verification`, or state that none are required. The file must begin with `Plan Name: <name>` and end with `Planfile Path: <path>` followed by `Plan Name: <same-name>`.
+Do not add non-contract `##` headings such as `## Context`, `## Verification`, `## Testing`, or `## Test Plan`. Include concrete changes with file paths, line numbers, and code inside the required sections. `Assistant Verification` must use only `mcp__agent-framework__check` with the repository `working_dir`; put only user-only checks in `Manual User Verification`, or state that none are required.
 
-Call `mcp__agent-framework__validate_plan` with `plan_file` set to the plan file path. If it returns FAIL, revise the plan file and call it again until it returns PASS.
+Call `mcp__agent-framework__create_planfile` with `plan_name` set to a lowercase kebab-case name and `content` set to the consolidated plan content. The tool writes the correct planfile, validates it, and returns the planfile path plus PASS or FAIL. If it returns FAIL, follow the tool feedback.
 
 ## Step 3: Launch 1 Verification agent
 

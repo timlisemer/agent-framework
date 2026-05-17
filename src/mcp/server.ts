@@ -5,6 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { runCheckAgent } from "../agents/mcp/check.js";
 import { runValidatePlanAgent } from "../agents/mcp/validate-plan.js";
+import { runCreatePlanfileAgent } from "../agents/mcp/create-planfile.js";
 import { runConfirmAgent } from "../agents/mcp/confirm.js";
 import { runCommitAgent } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
@@ -22,6 +23,7 @@ import {
   LIST_REPOS_HELP,
   VALIDATE_INTENT_HELP,
   VALIDATE_PLAN_HELP,
+  CREATE_PLANFILE_HELP,
   TRANSCRIPT_HELP,
 } from "./help-docs.js";
 import { getRepoInfo, getRepoInfoCancellable } from "../utils/git-utils.js";
@@ -103,6 +105,25 @@ server.registerTool(
       },
       { signal: extra.signal },
     );
+    return { content: [{ type: "text", text: result }] };
+  }
+);
+
+server.registerTool(
+  "create_planfile",
+  {
+    title: "Create Planfile",
+    description: "Create or overwrite the current session planfile for a lowercase kebab-case plan name, normalize Plan Name and Planfile Path footer, then validate it.",
+    inputSchema: {
+      plan_name: z.string().describe("Lowercase kebab-case plan name"),
+      content: z.string().describe("Plan body/content to write. The tool normalizes the Plan Name header and Planfile Path footer.")
+    }
+  },
+  async (args) => {
+    const result = await runCreatePlanfileAgent({
+      planName: args.plan_name,
+      content: args.content,
+    });
     return { content: [{ type: "text", text: result }] };
   }
 );
@@ -581,6 +602,7 @@ const HELP_RESOURCES: Array<{
   { tool: "list_repos", title: "list_repos -- Help", summary: "Repo + submodule status", body: LIST_REPOS_HELP },
   { tool: "validate_intent", title: "validate_intent -- Help", summary: "User intention alignment check", body: VALIDATE_INTENT_HELP },
   { tool: "validate_plan", title: "validate_plan -- Help", summary: "Plan contract validator", body: VALIDATE_PLAN_HELP },
+  { tool: "create_planfile", title: "create_planfile -- Help", summary: "Planfile creator", body: CREATE_PLANFILE_HELP },
   { tool: "scenario_tester", title: "scenario_tester -- Help", summary: "Scenario tester (transcripts + scenarios)", body: TESTER_HELP },
   { tool: "scenario_labeler", title: "scenario_labeler -- Help", summary: "Scenario transcript labeler", body: LABELER_HELP },
   { tool: "transcript", title: "transcript -- Help", summary: "Session transcript path resolver", body: TRANSCRIPT_HELP },

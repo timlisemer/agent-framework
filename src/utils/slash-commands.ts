@@ -32,9 +32,9 @@ export const SLASH_COMMAND_GATED_MCPS: Record<string, readonly CanonicalMcp[]> =
 export const SLASH_COMMAND_WORKFLOW_TOOLS: Record<string, readonly string[]> = {
   check:     ["mcp-check"],
   transcript: ["mcp-transcript"],
-  plan1:     ["Agent", "ExitPlanMode"],
-  plan3:     ["Agent", "ExitPlanMode"],
-  plan5:     ["Agent", "ExitPlanMode"],
+  plan1:     ["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
+  plan3:     ["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
+  plan5:     ["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
   implement: ["Agent"],
 };
 
@@ -51,9 +51,9 @@ export const SLASH_COMMAND_ALLOWED_TOOLS: Record<string, readonly string[]> = {
   confirm:   ["mcp-confirm"],
   check:     ["mcp-check"],
   transcript: ["mcp-transcript"],
-  plan1:     ["Agent", "ExitPlanMode"],
-  plan3:     ["Agent", "ExitPlanMode"],
-  plan5:     ["Agent", "ExitPlanMode"],
+  plan1:     ["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
+  plan3:     ["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
+  plan5:     ["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
   implement: ["Agent"],
 };
 

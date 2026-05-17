@@ -45,7 +45,9 @@ and keeps the generated block in `dotcodex/config.toml` in sync with
 Codex planning currently receives the planning contract from `~/.codex/AGENTS.md`
 as a temporary global workaround. The hook-based hidden context injection code is
 still present but disabled until Codex applies `suppressOutput` to hook output.
-The plan skills write named planfiles and validate them with `plan_file`.
+The plan skills call `mcp__agent_framework__create_planfile` during
+consolidation. That tool writes the named session planfile and immediately runs
+plan validation for the written content.
 
 Codex planfiles live under the agent-framework session `plans/` directory.
 The session `current-plan.json` sidecar stores only the active planfile
@@ -57,8 +59,8 @@ Stop hook treats that block as the plan presentation for user acceptance, not
 as a separate source of truth. The hook resolves the named session planfile,
 requires the footer path to match, compares the presented content with the
 planfile while tolerating whitespace-only differences, and validates through
-the same contract path used by the `validate_plan` MCP tool when no exact
-status is cached. Exact pass/fail results are stored in the session
+the same contract path used by `create_planfile` and the `validate_plan` MCP
+tool when no exact status is cached. Exact pass/fail results are stored in the session
 `plan-validation-status.json` sidecar by planfile path and content hash.
 
 `dotcodex/agents/*.toml` contains Codex custom-agent equivalents for the
