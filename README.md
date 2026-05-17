@@ -22,7 +22,7 @@ The framework implements 18 specialized agents and MCP tools organized into thre
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
 | validate_intent        | haiku  | Manual post-session review (requires transcript_path)        |
-| create_planfile        | -      | Create or overwrite a named planfile and validate it         |
+| create_planfile        | -      | Create a named planfile and validate it                     |
 | validate_plan          | sonnet | Validate an existing planfile against the planning contract  |
 | scenario_labeler   | -      | Test harness operations for the @labeler agent role          |
 | scenario_tester    | -      | Test harness operations for the @tester agent role           |

@@ -241,14 +241,14 @@ plan_file is required.
 
 export const CREATE_PLANFILE_HELP = `# create_planfile -- Planfile Creator
 
-Creates or overwrites the current session planfile for a lowercase kebab-case plan name, then validates it.
+Creates the current session planfile for a lowercase kebab-case plan name, then validates it.
 
 ## Inputs
 
 - plan_name (required): lowercase kebab-case plan name
 - content (required): final plan body/content
 
-The tool resolves the current session through the shared agent-framework session resolver, writes the file, normalizes the Plan Name header and Planfile Path footer, and returns the validate_plan result for the written file. MCP calls without an explicit transcript path use the latest transcript-path.txt sidecar for the active project.
+The tool resolves the current session through the shared agent-framework session resolver, creates the file, normalizes the Plan Name header and Planfile Path footer, and returns the validate_plan result for the written file. MCP calls without an explicit transcript path use the latest transcript-path.txt sidecar for the active project.
 
 ## When to use
 

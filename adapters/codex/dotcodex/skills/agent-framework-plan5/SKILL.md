@@ -59,7 +59,7 @@ Consolidate the planner output into final plan content using exactly these 14 re
 
 Do not add non-contract `##` headings such as `## Context`, `## Verification`, `## Testing`, or `## Test Plan`. Include concrete changes with file paths, line numbers or anchors, and code details inside the required sections. `Assistant Verification` must use only `mcp__agent_framework__check` with the repository `working_dir`; put only user-only checks in `Manual User Verification`, or state that none are required.
 
-Call `mcp__agent_framework__create_planfile` with `plan_name` set to a lowercase kebab-case name and `content` set to the consolidated plan content. The tool writes the correct planfile, validates it, and returns the planfile path plus PASS or FAIL. If it returns FAIL, follow the tool feedback. Only proceed to verification agents after it returns PASS.
+Call `mcp__agent_framework__create_planfile` with `plan_name` set to a lowercase kebab-case name and `content` set to the consolidated plan content. The tool writes the correct planfile, validates it, and returns the planfile path plus PASS. Only proceed to verification agents after it returns PASS.
 
 ## Step 3: Launch 5 Verification Agents In Parallel
 
@@ -115,7 +115,7 @@ Do not propose backwards-compatibility shims, deprecated re-exports, or legacy f
 
 Wait for all five verification agents. Fix every issue that multiple verifiers flagged. Evaluate single-verifier issues on merit and apply them when correct. Seriously weigh the fifth verifier's alternative approach against the current plan. If the alternative is genuinely better, replace the plan with it; if parts of it are better, incorporate those parts; otherwise keep the current plan and briefly note why under `Approaches Decided Against`.
 
-If corrections were made, call `mcp__agent_framework__create_planfile` again with the same `plan_name` and the corrected plan content; follow the tool feedback until it returns PASS.
+If corrections were made, edit the existing planfile directly and call `mcp__agent_framework__validate_plan` for that planfile until it returns PASS.
 
 ## Step 5: Report Result
 

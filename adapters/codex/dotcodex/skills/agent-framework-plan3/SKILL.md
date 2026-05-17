@@ -51,7 +51,7 @@ Consolidate the planner output into final plan content using exactly these 14 re
 
 Do not add non-contract `##` headings such as `## Context`, `## Verification`, `## Testing`, or `## Test Plan`. Include concrete changes with file paths, line numbers or anchors, and code details inside the required sections. `Assistant Verification` must use only `mcp__agent_framework__check` with the repository `working_dir`; put only user-only checks in `Manual User Verification`, or state that none are required.
 
-Call `mcp__agent_framework__create_planfile` with `plan_name` set to a lowercase kebab-case name and `content` set to the consolidated plan content. The tool writes the correct planfile, validates it, and returns the planfile path plus PASS or FAIL. If it returns FAIL, follow the tool feedback. Only proceed to verification agents after it returns PASS.
+Call `mcp__agent_framework__create_planfile` with `plan_name` set to a lowercase kebab-case name and `content` set to the consolidated plan content. The tool writes the correct planfile, validates it, and returns the planfile path plus PASS. Only proceed to verification agents after it returns PASS.
 
 ## Step 3: Launch 3 Verification Agents In Parallel
 
@@ -80,7 +80,7 @@ Flag any proposed change that adds backwards-compatibility shims, deprecated re-
 
 ## Step 4: Consolidate Round 2
 
-Wait for all three verification agents. Fix every issue that multiple verifiers flagged. Evaluate single-verifier issues on merit and apply them when correct. If corrections were made, call `mcp__agent_framework__create_planfile` again with the same `plan_name` and the corrected plan content; follow the tool feedback until it returns PASS.
+Wait for all three verification agents. Fix every issue that multiple verifiers flagged. Evaluate single-verifier issues on merit and apply them when correct. If corrections were made, edit the existing planfile directly and call `mcp__agent_framework__validate_plan` for that planfile until it returns PASS.
 
 ## Step 5: Report Result
 

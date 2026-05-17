@@ -108,8 +108,34 @@ describe("runCreatePlanfileAgent", () => {
 
       expect(result).toContain("- Status: FAIL");
       expect(result).toContain("Missing concrete file paths.");
+      expect(result).toContain("Do not call create_planfile again for this plan");
+      expect(result).toContain("mcp__agent_framework__validate_plan");
       expect(fs.existsSync(sessionPlanFile(sessionDir, "failing-plan"))).toBe(true);
       expect(fs.existsSync(sessionCurrentPlanFile(sessionDir))).toBe(false);
+    } finally {
+      if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses to overwrite an existing planfile with the same plan name", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-planfile-"));
+    let sessionDir = "";
+    try {
+      const transcriptPath = path.join(tempDir, "transcript.jsonl");
+      fs.writeFileSync(transcriptPath, "");
+      sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: process.cwd() });
+      const planPath = sessionPlanFile(sessionDir, "existing-plan");
+      fs.mkdirSync(path.dirname(planPath), { recursive: true });
+      fs.writeFileSync(planPath, "original planfile");
+      const runCreatePlanfileAgent = await loadRunCreatePlanfileAgent();
+
+      await expect(runCreatePlanfileAgent({
+        planName: "existing-plan",
+        content: planBody(),
+      })).rejects.toThrow(/Do not call create_planfile again for this plan/);
+
+      expect(fs.readFileSync(planPath, "utf-8")).toBe("original planfile");
     } finally {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
       fs.rmSync(tempDir, { recursive: true, force: true });

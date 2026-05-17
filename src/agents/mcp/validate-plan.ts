@@ -16,7 +16,7 @@ import { startsWithAny } from "../../utils/retry.js";
 import { logAgentResult, logAgentStarted } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
-import { activeSpec } from "../../adapter/spec.js";
+import { activeSpec, mcpWireNameForText } from "../../adapter/spec.js";
 import { collectPlanValidationViolations } from "../hooks/plan-validate.js";
 import {
   hashPlanContent,
@@ -147,6 +147,7 @@ export async function validatePlanFileWithContract(
   }
 
   const plan = source.content ?? "";
+  const validatePlanWireName = mcpWireNameForText("validate_plan", plan);
   const baseResult = {
     resolvedPath: source.resolvedPath,
     content: plan,
@@ -156,7 +157,7 @@ export async function validatePlanFileWithContract(
     const result: PlanValidationRunResult = {
       ...baseResult,
       status: "FAIL",
-      reasons: [appendPlanfileValidationWorkflow("Plan content is empty.", source.resolvedPath)],
+      reasons: [appendPlanfileValidationWorkflow("Plan content is empty.", source.resolvedPath, validatePlanWireName)],
     };
     recordValidationResult(input, result);
     return result;
@@ -171,7 +172,7 @@ export async function validatePlanFileWithContract(
       status: "FAIL",
       reasons: findings.hardRuleViolations
         .map(stripViolationPrefix)
-        .map((reason) => appendPlanfileValidationWorkflow(reason, source.resolvedPath)),
+        .map((reason) => appendPlanfileValidationWorkflow(reason, source.resolvedPath, validatePlanWireName)),
     };
     recordValidationResult(input, result);
     return result;
@@ -183,7 +184,7 @@ export async function validatePlanFileWithContract(
       status: "FAIL",
       reasons: findings.blacklistHighlights
         .map(stripViolationPrefix)
-        .map((reason) => appendPlanfileValidationWorkflow(reason, source.resolvedPath)),
+        .map((reason) => appendPlanfileValidationWorkflow(reason, source.resolvedPath, validatePlanWireName)),
     };
     recordValidationResult(input, result);
     return result;
@@ -195,7 +196,7 @@ export async function validatePlanFileWithContract(
       status: "FAIL",
       reasons: findings.allViolations
         .map(stripViolationPrefix)
-        .map((reason) => appendPlanfileValidationWorkflow(reason, source.resolvedPath)),
+        .map((reason) => appendPlanfileValidationWorkflow(reason, source.resolvedPath, validatePlanWireName)),
     };
     recordValidationResult(input, result);
     return result;
@@ -255,6 +256,7 @@ export async function validatePlanFileWithContract(
           appendPlanfileValidationWorkflow(
             "Malformed plan-validate response - retry validation with a specific heading, line, or rule.",
             source.resolvedPath,
+            validatePlanWireName,
           ),
         ],
       };
@@ -273,7 +275,7 @@ export async function validatePlanFileWithContract(
     const validationResult: PlanValidationRunResult = {
       ...baseResult,
       status: "FAIL",
-      reasons: [appendPlanfileValidationWorkflow(reason || "Plan validation failed.", source.resolvedPath)],
+      reasons: [appendPlanfileValidationWorkflow(reason || "Plan validation failed.", source.resolvedPath, validatePlanWireName)],
     };
     recordValidationResult(input, validationResult);
     return validationResult;
@@ -282,7 +284,7 @@ export async function validatePlanFileWithContract(
   const validationResult: PlanValidationRunResult = {
     ...baseResult,
     status: "FAIL",
-    reasons: [appendPlanfileValidationWorkflow("Malformed plan-validate response - retry validation.", source.resolvedPath)],
+    reasons: [appendPlanfileValidationWorkflow("Malformed plan-validate response - retry validation.", source.resolvedPath, validatePlanWireName)],
   };
   recordValidationResult(input, validationResult);
   return validationResult;

@@ -10,7 +10,8 @@
  * @module adapter/spec
  */
 
-import type { AdapterSpec } from "./types.js";
+import type { AdapterSpec, CanonicalMcp } from "./types.js";
+import { CANONICAL_MCPS } from "./types.js";
 import { claudeSpec } from "../../adapters/claude/index.js";
 import { codexSpec }  from "../../adapters/codex/index.js";
 
@@ -26,6 +27,15 @@ export function activeSpec(): AdapterSpec {
   const spec = SPECS[name];
   if (!spec) throw new Error(`Unknown adapter: ${name}`);
   return spec;
+}
+
+export function mcpWireNameForText(canonical: CanonicalMcp, text: string): string {
+  for (const spec of Object.values(SPECS)) {
+    for (const known of CANONICAL_MCPS) {
+      if (text.includes(spec.mcpWireName(known))) return spec.mcpWireName(canonical);
+    }
+  }
+  return activeSpec().mcpWireName(canonical);
 }
 
 /** Registered adapter names — used by validateScenario to validate env.adapter. */

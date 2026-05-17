@@ -113,7 +113,7 @@ server.registerTool(
   "create_planfile",
   {
     title: "Create Planfile",
-    description: "Create or overwrite the current session planfile for a lowercase kebab-case plan name, resolving the session through transcript sidecars when needed, normalize Plan Name and Planfile Path footer, then validate it.",
+    description: "Create the current session planfile for a lowercase kebab-case plan name, resolving the session through transcript sidecars when needed, normalize Plan Name and Planfile Path footer, then validate it.",
     inputSchema: {
       plan_name: z.string().describe("Lowercase kebab-case plan name"),
       content: z.string().describe("Plan body/content to write. The tool normalizes the Plan Name header and Planfile Path footer.")

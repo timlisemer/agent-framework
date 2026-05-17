@@ -28,13 +28,13 @@ export function extractPlanfileFooter(plan: string): { planFilePath: string; pla
   return { planFilePath: pathMatch[1], planName: nameMatch[1] };
 }
 
-export function formatPlanfileValidationWorkflow(planPath: string): string {
-  return `Iterate on the planfile using ${activeSpec().mcpWireName("validate_plan")} for ${planPath} until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed. Then present the finished plan using <proposed_plan>.`;
+export function formatPlanfileValidationWorkflow(planPath: string, validatePlanWireName = activeSpec().mcpWireName("validate_plan")): string {
+  return `Iterate on the planfile using ${validatePlanWireName} for ${planPath} until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed. Then present the finished plan using <proposed_plan>.`;
 }
 
-export function appendPlanfileValidationWorkflow(reason: string, planPath?: string | null): string {
+export function appendPlanfileValidationWorkflow(reason: string, planPath?: string | null, validatePlanWireName?: string): string {
   if (!planPath) return reason;
-  const workflow = formatPlanfileValidationWorkflow(planPath);
+  const workflow = formatPlanfileValidationWorkflow(planPath, validatePlanWireName);
   if (reason.includes(workflow)) return reason;
   return `${reason} ${workflow}`;
 }

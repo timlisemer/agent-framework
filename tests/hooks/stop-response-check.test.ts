@@ -164,6 +164,7 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     expect(output).toContain("Session planfiles directory:");
     expect(output).toContain(existingPath);
     expect(output).toContain("Existing session planfiles accepted for this session");
+    expect(output).toContain("mcp__agent_framework__validate_plan");
   });
 
   it("creates a missing planfile, runs shared validation, records status, writes current-plan, and allows silently on pass", async () => {
@@ -214,7 +215,8 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     expect(mockValidatePlanFileWithContract).not.toHaveBeenCalled();
     const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
     expect(output).toContain("empty");
-    expect(output).toContain("Session planfiles directory:");
+    expect(output).toContain("Iterate on the planfile using");
+    expect(output).toContain("mcp__agent_framework__validate_plan");
     expect(output).toContain(planPath);
   });
 
@@ -234,7 +236,8 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     expect(mockValidatePlanFileWithContract).not.toHaveBeenCalled();
     const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
     expect(output).toContain("unreadable");
-    expect(output).toContain("Session planfiles directory:");
+    expect(output).toContain("Iterate on the planfile using");
+    expect(output).toContain("mcp__agent_framework__validate_plan");
     expect(output).toContain(planPath);
   });
 

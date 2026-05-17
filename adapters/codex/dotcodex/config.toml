@@ -72,5 +72,5 @@ command = "/run/current-system/sw/bin/bash"
 tool_timeout_sec = 300
 args = [
   "-lc",
-  "exec node /mnt/docker-data/volumes/mcp-toolbox/agent-framework/dist/src/mcp/server.js",
+  "export AGENT_FRAMEWORK_ADAPTER=codex; exec node /mnt/docker-data/volumes/mcp-toolbox/agent-framework/dist/src/mcp/server.js",
 ]

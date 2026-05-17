@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
-import { getPathToPlanfile } from "../../utils/planfile.js";
+import { mcpWireNameForText } from "../../adapter/spec.js";
+import { appendPlanfileValidationWorkflow, getPathToPlanfile } from "../../utils/planfile.js";
 import { writeCurrentPlanSidecar } from "../../utils/plan-source.js";
 import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
 import { validatePlanFileWithContract } from "./validate-plan.js";
@@ -27,6 +28,14 @@ export async function runCreatePlanfileAgent(input: CreatePlanfileInput): Promis
   if (!planPath) {
     throw new Error(`Could not resolve planfile path for plan_name ${input.planName}`);
   }
+  const validatePlanWireName = mcpWireNameForText("validate_plan", input.content);
+  if (fs.existsSync(planPath)) {
+    throw new Error(appendPlanfileValidationWorkflow(
+      `Planfile already exists for plan_name ${input.planName}: ${planPath}. Do not call create_planfile again for this plan; edit the existing planfile directly.`,
+      planPath,
+      validatePlanWireName,
+    ));
+  }
 
   await fs.promises.mkdir(path.dirname(planPath), { recursive: true });
   await fs.promises.writeFile(planPath, normalizePlanContent(input.planName, planPath, input.content), "utf-8");
@@ -40,11 +49,14 @@ export async function runCreatePlanfileAgent(input: CreatePlanfileInput): Promis
   }
 
   const reasons = validation.reasons.length > 0 ? validation.reasons.join("\n") : "(none)";
+  const failureReminder = validation.status === "FAIL"
+    ? `\n\n${appendPlanfileValidationWorkflow("Do not call create_planfile again for this plan; edit the created planfile directly.", planPath, validatePlanWireName)}`
+    : "";
   return `Created planfile: ${planPath}
 
 ## Results
 - Status: ${validation.status}
 
 ## Reasons
-${reasons}`;
+${reasons}${failureReminder}`;
 }
