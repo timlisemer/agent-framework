@@ -57,7 +57,14 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
   const tx = await readTranscriptExact(input.transcript_path, FIRST_RESPONSE_STOP_COUNTS);
   const assistantText = input.last_assistant_message ??
     (tx.assistant.length > 0 ? getMostRecentMessage(tx.assistant).content : null);
-  const stopPlanExit = spec.isPlanExit({ event: "Stop", assistantText });
+  const transcriptAssistantTexts = [...tx.assistant]
+    .sort((a, b) => b.index - a.index)
+    .map((message) => message.content);
+  const planExitText = [
+    input.last_assistant_message,
+    ...transcriptAssistantTexts,
+  ].find((candidate) => spec.isPlanExit({ event: "Stop", assistantText: candidate ?? null })) ?? null;
+  const stopPlanExit = planExitText !== null;
   if (stopPlanExit && !planModeDetection.active) {
     const reason = "Proposed plan block emitted outside plan mode.";
     const epoch = loadCurrentEpoch(sessionDir);
@@ -89,7 +96,7 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
       sessionDir,
       projectDir: host.projectDir,
       hookName: "Stop",
-      assistantText,
+      assistantText: planExitText,
     });
     const epoch = loadCurrentEpoch(sessionDir);
     if (!validation.approved) {

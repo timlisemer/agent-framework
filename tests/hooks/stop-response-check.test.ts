@@ -84,6 +84,22 @@ function seedPlanMode(transcriptPath: string): void {
   );
 }
 
+function appendCompletedPlan(transcriptPath: string, text: string): void {
+  fs.appendFileSync(
+    transcriptPath,
+    JSON.stringify({
+      type: "event_msg",
+      payload: {
+        type: "item_completed",
+        item: {
+          type: "Plan",
+          text,
+        },
+      },
+    }) + "\n",
+  );
+}
+
 async function runStop(transcriptPath: string, cwd: string, content: string): Promise<void> {
   await mainStop(
     {
@@ -165,6 +181,29 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     expect(output).toContain("Session planfiles directory:");
     expect(output).toContain(existingPath);
     expect(output).toContain("Existing session planfiles accepted for this session");
+  });
+
+  it("validates transcript completed Plan text when last_assistant_message is stripped", async () => {
+    seedPlanMode(transcriptPath);
+    const existingPath = sessionPlanFile(sessionDir, "existing-plan");
+    fs.mkdirSync(path.dirname(existingPath), { recursive: true });
+    fs.writeFileSync(existingPath, validPlan(existingPath, "existing-plan"));
+    appendCompletedPlan(transcriptPath, "## User Goal\nToo small.");
+
+    await mainStop(
+      {
+        session_id: "session-stop",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        last_assistant_message: "## User Goal\nToo small.",
+      },
+      codexEncoder,
+    );
+
+    expect(mockValidatePlanFileWithContract).not.toHaveBeenCalled();
+    const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
+    expect(output).toContain("Plan validation failed:");
+    expect(output).toContain("Cannot exit plan mode without a planfile path");
   });
 
   it("creates a missing planfile, runs shared validation, records status, writes current-plan, and allows silently on pass", async () => {

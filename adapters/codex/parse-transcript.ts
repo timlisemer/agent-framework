@@ -74,6 +74,18 @@ function eventMsgAgentMessageContent(payload: Record<string, unknown>): ContentB
   return [{ type: "text", text: payload.message }];
 }
 
+function eventMsgCompletedPlanContent(payload: Record<string, unknown>): ContentBlock[] | null {
+  if (payload.type !== "item_completed") return null;
+  const item = payload.item;
+  if (!item || typeof item !== "object") return null;
+
+  const plan = item as Record<string, unknown>;
+  if (plan.type !== "Plan") return null;
+  if (typeof plan.text !== "string" || plan.text.length === 0) return null;
+
+  return [{ type: "text", text: `<proposed_plan>\n${plan.text}\n</proposed_plan>` }];
+}
+
 interface RawEntry {
   isMeta?: boolean;
   type?: string;
@@ -125,6 +137,20 @@ export function parseTranscript(rawLines: readonly string[]): readonly (Transcri
     const payloadType = payload.type as string | undefined;
 
     if (raw.type === "event_msg") {
+      const completedPlanContent = eventMsgCompletedPlanContent(payload);
+      if (completedPlanContent) {
+        result.push({
+          isMeta: raw.isMeta,
+          message: {
+            id: typeof payload.id === "string" ? payload.id : undefined,
+            role: "assistant",
+            content: completedPlanContent,
+          },
+        });
+        i++;
+        continue;
+      }
+
       const contentBlocks = eventMsgAgentMessageContent(payload);
       if (contentBlocks) {
         const msgId = typeof payload.id === "string" ? payload.id : undefined;
