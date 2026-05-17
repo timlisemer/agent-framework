@@ -1,8 +1,6 @@
 import type {
   NativePlanFileLookupInput,
   PlanExitDetectionInput,
-  PlanSourceDescriptor,
-  PlanSourceLookupInput,
 } from "../../src/adapter/types.js";
 
 export const CODEX_IMPLEMENT_PLAN_PROMPT = "Implement the plan.";
@@ -39,11 +37,6 @@ function isImplementationPrompt(prompt: string): boolean {
   const trimmed = prompt.trim();
   return trimmed === CODEX_IMPLEMENT_PLAN_PROMPT ||
     trimmed.startsWith(CODEX_CLEAR_CONTEXT_IMPLEMENT_PLAN_PREFIX);
-}
-
-export function findCurrentPlanSource(input: PlanSourceLookupInput): PlanSourceDescriptor | null {
-  void input;
-  return null;
 }
 
 export function findNativePlanFile(_input: NativePlanFileLookupInput): string | null {

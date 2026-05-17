@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   isEditTool,
   isEditIntentExemptPath,
@@ -9,6 +9,18 @@ import {
   deriveAllowedToolsFromIntent,
 } from "../../src/utils/edit-intent.js";
 import type { ToolPrediction } from "../../src/utils/prediction-types.js";
+
+describe("Claude adapter edit-intent paths", () => {
+  const prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
+
+  beforeEach(() => {
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
+  });
+
+  afterEach(() => {
+    if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+    else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
+  });
 
 describe("isEditTool", () => {
   it("returns true for 'Edit'", () => {
@@ -186,6 +198,8 @@ describe("planModeBashBlock", () => {
   it("returns null for non-Bash tools", () => {
     expect(planModeBashBlock(true, "Edit", "anything")).toBeNull();
   });
+});
+
 });
 
 function makePrediction(overrides: Partial<ToolPrediction> = {}): ToolPrediction {

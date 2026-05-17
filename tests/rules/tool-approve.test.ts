@@ -33,6 +33,7 @@ vi.mock("../../src/utils/logger.js", () => ({
 import { toolApproveRule } from "../../src/rules/tool-approve.js";
 import { validateCurrentPlanExit } from "../../src/utils/plan-source.js";
 import { checkPlanIntent } from "../../src/agents/hooks/plan-validate.js";
+import { activeSpec } from "../../src/adapter/spec.js";
 import type { RuleContext } from "../../src/rules/types.js";
 
 const mockValidateCurrentPlanExit = vi.mocked(validateCurrentPlanExit);
@@ -41,8 +42,11 @@ const mockCheckPlanIntent = vi.mocked(checkPlanIntent);
 describe("toolApproveRule ExitPlanMode short-circuit", () => {
   let tempDir: string;
   let planPath: string;
+  let prevAdapter: string | undefined;
 
   beforeEach(() => {
+    prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tool-approve-test-"));
     planPath = path.join(tempDir, "plan.md");
     fs.writeFileSync(planPath, "# Plan\n\nSome content.\n");
@@ -55,6 +59,8 @@ describe("toolApproveRule ExitPlanMode short-circuit", () => {
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
+    if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+    else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
     vi.clearAllMocks();
   });
 
@@ -99,13 +105,18 @@ describe("toolApproveRule ExitPlanMode short-circuit", () => {
 
 describe("toolApproveRule deterministic fastDeny paths", () => {
   let tempDir: string;
+  let prevAdapter: string | undefined;
 
   beforeEach(() => {
+    prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tool-approve-det-"));
   });
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
+    if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+    else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
     vi.clearAllMocks();
   });
 
@@ -128,7 +139,7 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
 
   it("fastDeny for RESTRICTED_MCP_TOOLS when no CLAUDE.md", async () => {
     const ctx = makeCtx({
-      toolName: "mcp__agent-framework__commit",
+      toolName: activeSpec().mcpWireName("commit"),
       toolInput: {},
     });
     const result = await toolApproveRule.check(ctx);
@@ -139,10 +150,11 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
   });
 
   it("allows RESTRICTED_MCP_TOOLS when workflow authorization is active", async () => {
+    const commitTool = activeSpec().mcpWireName("commit");
     const ctx = makeCtx({
-      toolName: "mcp__agent-framework__commit",
+      toolName: commitTool,
       toolInput: {},
-      slashCommandAllowedTools: ["mcp__agent-framework__commit"],
+      slashCommandAllowedTools: [commitTool],
     });
     const result = await toolApproveRule.check(ctx);
     expect(result).toBeNull();

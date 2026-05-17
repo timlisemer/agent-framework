@@ -49,13 +49,6 @@ export type PlanExitDetectionInput =
   | { event: "Stop"; assistantText?: string | null }
   | { event: "UserPromptSubmit"; prompt: string };
 
-export interface PlanSourceLookupInput {
-  transcriptPath: string;
-  sessionDir?: string;
-  assistantText?: string | null;
-  prompt?: string;
-}
-
 export type PlanModeDetectionSource =
   | "codex-collaboration-mode"
   | "hook-permission-mode"
@@ -207,9 +200,6 @@ export interface AdapterSpec {
   isEditIntentExemptPath(filePath: string): boolean;
 
   // ── Plan source / exit conventions ─────────────────────────────────────
-  /** Resolve the current plan source using adapter-specific transcript/session conventions. */
-  findCurrentPlanSource(input: PlanSourceLookupInput): PlanSourceDescriptor | null | Promise<PlanSourceDescriptor | null>;
-
   /** Resolve an adapter-native plan file for a named/current plan, if one exists. */
   findNativePlanFile(input: NativePlanFileLookupInput): string | null | Promise<string | null>;
 

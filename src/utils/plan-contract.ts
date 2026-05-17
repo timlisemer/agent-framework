@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { activeSpec } from "../adapter/spec.js";
 import { agentFrameworkRoot } from "./paths.js";
 import { extractPlanName, extractPlanfileFooter, PLAN_NAME_RE } from "./planfile.js";
 import {
@@ -203,11 +204,12 @@ export function validatePlanContractWithRequiredHeadings(
   }
 
   const assistantVerification = sections.get("Assistant Verification") ?? "";
-  if (assistantVerification.trim() && !/mcp__agent_framework__check/.test(assistantVerification)) {
+  const checkWireName = activeSpec().mcpWireName("check");
+  if (assistantVerification.trim() && !assistantVerification.includes(checkWireName)) {
     findings.push({
       kind: "assistant_verification_not_mcp_check",
       heading: "Assistant Verification",
-      message: "Assistant Verification must use mcp__agent_framework__check with the repository working_dir.",
+      message: `Assistant Verification must use ${checkWireName} with the repository working_dir.`,
     });
   }
   if (PROJECT_COMMAND_RE.test(assistantVerification)) {

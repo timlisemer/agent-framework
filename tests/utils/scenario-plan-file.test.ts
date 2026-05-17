@@ -2,9 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { findCurrentPlanSource } from "../../adapters/claude/plan-source.js";
+import { getPathToPlanfile } from "../../src/utils/planfile.js";
+import { readCurrentPlanContent } from "../../src/utils/plan-source.js";
 
 const ORIG_HOME = process.env.HOME;
+const ORIG_ADAPTER = process.env.AGENT_FRAMEWORK_ADAPTER;
 let TMP_HOME: string;
 
 function makeJsonl(slug: string, sessionId: string): string {
@@ -30,14 +32,17 @@ describe("scenario plan-file materialization (HOME-scoped)", () => {
   beforeEach(() => {
     TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "scenario-plan-"));
     process.env.HOME = TMP_HOME;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
   });
 
   afterEach(() => {
     process.env.HOME = ORIG_HOME;
+    if (ORIG_ADAPTER === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+    else process.env.AGENT_FRAMEWORK_ADAPTER = ORIG_ADAPTER;
     fs.rmSync(TMP_HOME, { recursive: true, force: true });
   });
 
-  it("materializes plans dir + file, Claude plan source finds it via slug on JSONL", async () => {
+  it("materializes plans dir + file, generic planfile locator finds it via slug on JSONL", async () => {
     const planDir = path.join(TMP_HOME, ".claude", "plans");
     fs.mkdirSync(planDir, { recursive: true });
     const slug = "test-slug-mat-1";
@@ -49,20 +54,20 @@ describe("scenario plan-file materialization (HOME-scoped)", () => {
     const jsonlPath = path.join(TMP_HOME, "transcript.jsonl");
     fs.writeFileSync(jsonlPath, makeJsonl(slug, "session-1"));
 
-    const resolved = await findCurrentPlanSource({ transcriptPath: jsonlPath });
-    expect(resolved).toEqual({ kind: "file", path: planPath });
+    const resolved = await getPathToPlanfile({ transcriptPath: jsonlPath });
+    expect(resolved).toBe(planPath);
+    await expect(readCurrentPlanContent({ transcriptPath: jsonlPath })).resolves.toBe(planContent);
   });
 
-  it("Claude plan source returns null when slug points at a non-existent file", async () => {
+  it("generic current-plan content returns null when slug points at a non-existent file", async () => {
     const slug = "test-slug-mat-2";
     const jsonlPath = path.join(TMP_HOME, "transcript.jsonl");
     fs.writeFileSync(jsonlPath, makeJsonl(slug, "session-2"));
 
-    const resolved = await findCurrentPlanSource({ transcriptPath: jsonlPath });
-    expect(resolved).toBeNull();
+    await expect(readCurrentPlanContent({ transcriptPath: jsonlPath })).resolves.toBeNull();
   });
 
-  it("Claude plan source returns null when no slug present on any line", async () => {
+  it("generic planfile locator returns null when no slug present on any line", async () => {
     const jsonlPath = path.join(TMP_HOME, "transcript.jsonl");
     fs.writeFileSync(
       jsonlPath,
@@ -75,7 +80,7 @@ describe("scenario plan-file materialization (HOME-scoped)", () => {
       }) + "\n",
     );
 
-    const resolved = await findCurrentPlanSource({ transcriptPath: jsonlPath });
+    const resolved = await getPathToPlanfile({ transcriptPath: jsonlPath });
     expect(resolved).toBeNull();
   });
 

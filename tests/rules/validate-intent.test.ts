@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as os from "os";
 import * as path from "path";
 
@@ -34,6 +34,7 @@ vi.mock("../../src/utils/logger.js", () => ({
 }));
 
 import { validateIntentRule } from "../../src/rules/validate-intent.js";
+import { activeSpec } from "../../src/adapter/spec.js";
 import { runAgent } from "../../src/utils/agent-runner.js";
 import { getUncommittedChanges } from "../../src/utils/git-utils.js";
 import { readTranscriptExact } from "../../src/utils/transcript.js";
@@ -47,7 +48,7 @@ const tempDir = os.tmpdir();
 
 function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
   return {
-    toolName: "mcp__agent-framework__validate_intent",
+    toolName: activeSpec().mcpWireName("validate_intent"),
     toolInput: {},
     toolUseId: "toolu_test",
     projectDir: tempDir,
@@ -63,8 +64,16 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
 }
 
 describe("validateIntentRule — deterministic null paths", () => {
+  const prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
+
   beforeEach(() => {
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+    else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
   });
 
   it("returns null when toolName does not match validate_intent", async () => {
@@ -111,7 +120,10 @@ describe("validateIntentRule — deterministic null paths", () => {
 });
 
 describe("validateIntentRule — LLM-call path", () => {
+  const prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
+
   beforeEach(() => {
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
     vi.clearAllMocks();
     mockReadTranscriptExact.mockResolvedValue({
       user: [{ role: "user" as const, content: "fix the bug", index: 0 }],
@@ -125,6 +137,11 @@ describe("validateIntentRule — LLM-call path", () => {
       diffStat: " src/foo.ts | 1 +",
       untrackedDiff: "",
     });
+  });
+
+  afterEach(() => {
+    if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+    else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
   });
 
   it("returns fastDeny with the full runAgent output (preserving ## Verdict envelope)", async () => {

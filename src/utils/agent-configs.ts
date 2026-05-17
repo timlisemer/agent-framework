@@ -715,7 +715,7 @@ PLANNING CONTRACT STRUCTURAL DRIFT (→ DRIFT):
 - User Goal must quote the user's relevant goal text verbatim.
 - Answered Assumptions must include the answer source for every assumption.
 - Non-trivial, multi-file, stateful, hook-based, or cross-module plans need an ASCII Data Flow diagram.
-- Assistant Verification must list only mcp__agent_framework__check with working_dir set to the repository path.
+- Assistant Verification must list only ${activeSpec().mcpWireName("check")} with working_dir set to the repository path.
 - Manual User Verification must not list project check, lint, test, build, typecheck, format, or package-manager commands.
 - Do not present live option menus such as Option A:, Approach 1:, or Alternative 1:.
 - Do not include schedule buckets, timeline estimates, or unresolved assumption language.
@@ -742,7 +742,7 @@ REQUIRED SPECIFICITY FOR CODE CHANGES:
 VERIFICATION STRUCTURE (→ DRIFT if wrong - CHECK THIS CAREFULLY):
 - A generic "Verification", "Testing", or "Test Plan" heading is never acceptable.
 - "## Test Plan" is both a generic verification violation and an extra non-contract ## heading.
-- Assistant Verification is MCP-only: mcp__agent_framework__check with working_dir.
+- Assistant Verification is MCP-only: ${activeSpec().mcpWireName("check")} with working_dir.
 - Manual User Verification is only for user-only checks outside AI-accessible verification.
 
 BLACKLISTED COMMANDS IN FINAL PLAN TEXT:

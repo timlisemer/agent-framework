@@ -1,5 +1,6 @@
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { activeSpec } from "../../../src/adapter/spec.js";
 
 const required = [
   "User Goal",
@@ -28,7 +29,7 @@ function validPlan(planPath: string): string {
       return `## ${heading}\n\nHook failure\n  |\n  v\nPlan validator\n  |\n  v\nPath-specific feedback`;
     }
     if (heading === "Assistant Verification") {
-      return `## ${heading}\n\nRun \`mcp__agent_framework__check\` with \`working_dir\` set to \`/repo\`.`;
+      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\`.`;
     }
     if (heading === "Manual User Verification") {
       return `## ${heading}\n\nNo manual user verification is required.`;

@@ -589,13 +589,18 @@ describe("currentTurnAssistantState", () => {
 
 describe("resolveActiveSlashCommandAllowedTools", () => {
   let tempDir: string;
+  let prevAdapter: string | undefined;
 
   beforeEach(() => {
+    prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "transcript-slash-test-"));
   });
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
+    if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+    else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
   });
 
   function writeTranscript(entries: unknown[]): string {

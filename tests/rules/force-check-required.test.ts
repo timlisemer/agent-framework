@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { forceCheckRequiredRule } from "../../src/rules/force-check-required.js";
 import { sessionStateDefaults } from "../../src/utils/session-store.js";
+import { activeSpec } from "../../src/adapter/spec.js";
 import type { RuleContext } from "../../src/rules/types.js";
 
 function makeCtx(toolName: string, forceCheckPending = true): RuleContext {
@@ -29,21 +30,35 @@ describe("forceCheckRequiredRule", () => {
   });
 
   it("denies unrelated tools while check is pending (Claude adapter default)", async () => {
-    const result = await forceCheckRequiredRule.check(makeCtx("Bash"));
-    expect(result).toEqual({
-      fastDeny: "Workaround Bash command was denied earlier. You must run agent-framework check MCP (mcp__agent-framework__check) before any other tool.",
-    });
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
+    try {
+      const result = await forceCheckRequiredRule.check(makeCtx("Bash"));
+      expect(result).toEqual({
+        fastDeny: `Workaround Bash command was denied earlier. You must run ${activeSpec().renderCheckMcpHint()} before any other tool.`,
+      });
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      else process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+    }
   });
 
   it("allows Claude framework check MCP wire name while pending", async () => {
-    await expect(forceCheckRequiredRule.check(makeCtx("mcp__agent-framework__check"))).resolves.toBeNull();
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
+    try {
+      await expect(forceCheckRequiredRule.check(makeCtx(activeSpec().mcpWireName("check")))).resolves.toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      else process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+    }
   });
 
   it("allows Codex framework check MCP wire name while pending (codex adapter)", async () => {
     const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
     try {
-      await expect(forceCheckRequiredRule.check(makeCtx("mcp__agent_framework__check"))).resolves.toBeNull();
+      await expect(forceCheckRequiredRule.check(makeCtx(activeSpec().mcpWireName("check")))).resolves.toBeNull();
     } finally {
       if (prev === undefined) {
         delete process.env.AGENT_FRAMEWORK_ADAPTER;

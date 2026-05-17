@@ -32,7 +32,6 @@ export const codexSpec: AdapterSpec = {
   },
   resolveHostContext:     HC.resolveHostContext,
   isEditIntentExemptPath: HC.isEditIntentExemptPath,
-  findCurrentPlanSource:  PLS.findCurrentPlanSource,
   findNativePlanFile:     PLS.findNativePlanFile,
   isPlanExit:             PLS.isPlanExit,
   extractStopProposedPlan: PLS.extractStopProposedPlan,

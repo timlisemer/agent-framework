@@ -76,18 +76,25 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
   });
 
   it("skips UserPromptSubmit rules for direct agent-framework slash commands", async () => {
-    await mainUserPromptSubmit(
-      {
-        session_id: "session-slash",
-        transcript_path: transcriptPath,
-        cwd: tempDir,
-        prompt: "/quickpush",
-      },
-      encoder,
-    );
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
+    try {
+      await mainUserPromptSubmit(
+        {
+          session_id: "session-slash",
+          transcript_path: transcriptPath,
+          cwd: tempDir,
+          prompt: "/quickpush",
+        },
+        encoder,
+      );
 
-    expect(mockEvaluateRulesForUserPromptSubmit).not.toHaveBeenCalled();
-    expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "ok");
+      expect(mockEvaluateRulesForUserPromptSubmit).not.toHaveBeenCalled();
+      expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "ok");
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      else process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+    }
   });
 
   it("skips UserPromptSubmit rules for Codex agent-framework skill invocations", async () => {
@@ -189,7 +196,7 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
     }
   });
 
-  it("validates Codex Implement the plan prompts, writes implementation state, and skips sentiment", async () => {
+  it("accepts Codex Implement the plan prompts with a populated planfile, writes implementation state, and skips sentiment", async () => {
     const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
     try {
@@ -214,16 +221,7 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
       );
 
       expect(mockEvaluateRulesForUserPromptSubmit).not.toHaveBeenCalled();
-      expect(mockCheckPlanIntent).toHaveBeenCalledWith(
-        null,
-        "Write",
-        { content: planContent },
-        expect.any(String),
-        tempDir,
-        "UserPromptSubmit",
-        "exit",
-        planPath,
-      );
+      expect(mockCheckPlanIntent).not.toHaveBeenCalled();
       const state = JSON.parse(fs.readFileSync(sessionStateFile(sessionDir), "utf-8")).data;
       expect(state.currentEditIntent).toBe(true);
       expect(state.currentPrediction.intent).toContain("implementation phase has begun");
@@ -234,18 +232,17 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
     }
   });
 
-  it("blocks Codex implementation prompts when the stored plan fails validation", async () => {
+  it("blocks Codex implementation prompts when the stored planfile is empty", async () => {
     const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
-    mockCheckPlanIntent.mockResolvedValue({ approved: false, reason: "bad plan" });
     try {
       fs.mkdirSync(sessionDir, { recursive: true });
-      const planPath = sessionPlanFile(sessionDir, "bad-plan");
+      const planPath = sessionPlanFile(sessionDir, "empty-plan");
       fs.mkdirSync(path.dirname(planPath), { recursive: true });
-      fs.writeFileSync(planPath, "bad");
+      fs.writeFileSync(planPath, "  \n");
       fs.writeFileSync(
         sessionCurrentPlanFile(sessionDir),
-        JSON.stringify({ kind: "file", path: planPath, planName: "bad-plan" }) + "\n",
+        JSON.stringify({ kind: "file", path: planPath, planName: "empty-plan" }) + "\n",
       );
 
       await mainUserPromptSubmit(
@@ -259,6 +256,7 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
       );
 
       expect(mockEvaluateRulesForUserPromptSubmit).not.toHaveBeenCalled();
+      expect(mockCheckPlanIntent).not.toHaveBeenCalled();
       expect(mockExitAfterFlush).toHaveBeenCalledWith(
         0,
         expect.stringContaining('"decision":"block"'),

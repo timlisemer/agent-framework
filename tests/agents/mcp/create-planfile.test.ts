@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { activeSpec } from "../../../src/adapter/spec.js";
 import {
   getAgentFrameworkSessionDir,
   sessionCurrentPlanFile,
@@ -36,7 +37,7 @@ function planBody(): string {
       return `## ${heading}\n\nInput\n  |\n  v\nPlanfile creator\n  |\n  v\nValidated planfile`;
     }
     if (heading === "Assistant Verification") {
-      return `## ${heading}\n\nRun \`mcp__agent_framework__check\` with \`working_dir\` set to \`/repo\`.`;
+      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\`.`;
     }
     if (heading === "Manual User Verification") {
       return `## ${heading}\n\nNo manual user verification is required.`;

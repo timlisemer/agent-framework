@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { errorAcknowledgeRule } from "../../src/rules/error-acknowledge.js";
+import { activeSpec } from "../../src/adapter/spec.js";
 import type { RuleContext } from "../../src/rules/types.js";
 import { sessionStateDefaults } from "../../src/utils/session-store.js";
 import { appendJsonlEntrySync } from "../../src/utils/file-io.js";
@@ -21,7 +22,7 @@ describe("errorAcknowledgeRule", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  function makeCtx(toolName = "mcp__agent_framework__commit"): RuleContext {
+  function makeCtx(toolName = activeSpec().mcpWireName("commit")): RuleContext {
     return {
       toolName,
       toolInput: {},
@@ -60,7 +61,7 @@ describe("errorAcknowledgeRule", () => {
       reason: "test command is covered by the agent-framework check MCP (matched check target entry: vitest). You must run mcp__agent-framework__check",
     });
     appendToolLog({
-      tool: "mcp__agent_framework__check",
+      tool: activeSpec().mcpWireName("check"),
       status: "allowed",
     });
 
@@ -69,7 +70,7 @@ describe("errorAcknowledgeRule", () => {
 
   it("still denies when the newest relevant event is an unresolved denial", async () => {
     appendToolLog({
-      tool: "mcp__agent_framework__check",
+      tool: activeSpec().mcpWireName("check"),
       status: "allowed",
     });
     appendToolLog({

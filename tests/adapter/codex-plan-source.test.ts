@@ -4,7 +4,6 @@ import {
   CODEX_IMPLEMENT_PLAN_PROMPT,
   extractProposedPlanContent,
   extractStopProposedPlan,
-  findCurrentPlanSource,
   isPlanExit,
   parseCodexProposedPlanBlock,
 } from "../../adapters/codex/plan-source.js";
@@ -44,10 +43,9 @@ describe("Codex plan source", () => {
     expect(isPlanExit({ event: "Stop", assistantText: "<proposed_plan>\nmissing close" })).toBe(false);
   });
 
-  it("detects implementation prompts without returning proposed plan sources", () => {
+  it("detects implementation prompts", () => {
     expect(isPlanExit({ event: "UserPromptSubmit", prompt: CODEX_IMPLEMENT_PLAN_PROMPT })).toBe(true);
     const prompt = `${CODEX_CLEAR_CONTEXT_IMPLEMENT_PLAN_PREFIX}\n\n## User Goal\nImplement it.`;
     expect(isPlanExit({ event: "UserPromptSubmit", prompt })).toBe(true);
-    expect(findCurrentPlanSource({ transcriptPath: "x", prompt })).toBeNull();
   });
 });

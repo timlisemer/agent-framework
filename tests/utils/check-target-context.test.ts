@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -8,6 +8,7 @@ import {
   resolveCheckMessage,
   clearCheckTargetCache,
 } from "../../src/utils/check-target-context.js";
+import { activeSpec } from "../../src/adapter/spec.js";
 
 function createTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "check-ctx-test-"));
@@ -129,15 +130,27 @@ describe("getCheckTargetContext", () => {
 });
 
 describe("resolveCheckMessage", () => {
+  const prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
+
   beforeEach(() => {
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
     clearCheckTargetCache();
   });
+
+  afterEach(() => {
+    if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+    else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
+  });
+
+  function expectedCheckWireName(): string {
+    return activeSpec().mcpWireName("check");
+  }
 
   it("tier 1: no build file", () => {
     const dir = createTempDir();
     const msg = resolveCheckMessage("cargo build", ["cargo check", "cargo clippy"], dir);
     expect(msg).toContain("No Justfile/Makefile found");
-    expect(msg).toContain("mcp__agent-framework__check");
+    expect(msg).toContain(expectedCheckWireName());
     fs.rmSync(dir, { recursive: true });
   });
 
@@ -146,7 +159,7 @@ describe("resolveCheckMessage", () => {
     fs.writeFileSync(path.join(dir, "Justfile"), "build:\n  cargo build\n");
     const msg = resolveCheckMessage("cargo build", ["cargo check", "cargo clippy"], dir);
     expect(msg).toContain("Justfile found but no check target");
-    expect(msg).toContain("mcp__agent-framework__check");
+    expect(msg).toContain(expectedCheckWireName());
     fs.rmSync(dir, { recursive: true });
   });
 
@@ -155,7 +168,7 @@ describe("resolveCheckMessage", () => {
     fs.writeFileSync(path.join(dir, "Justfile"), "check:\n  tsc --noEmit\n");
     const msg = resolveCheckMessage("cargo build", ["cargo check", "cargo clippy"], dir);
     expect(msg).toContain("cargo build is not covered by the detected check target");
-    expect(msg).toContain("mcp__agent-framework__check");
+    expect(msg).toContain(expectedCheckWireName());
     expect(msg).not.toContain("run just check");
     fs.rmSync(dir, { recursive: true });
   });
@@ -166,7 +179,7 @@ describe("resolveCheckMessage", () => {
     const msg = resolveCheckMessage("cargo build", ["cargo check", "cargo clippy"], dir);
     expect(msg).toContain("cargo build is covered by the agent-framework check MCP");
     expect(msg).toContain("matched check target entry: cargo clippy");
-    expect(msg).toContain("mcp__agent-framework__check");
+    expect(msg).toContain(expectedCheckWireName());
     expect(msg).not.toContain("run just check");
     fs.rmSync(dir, { recursive: true });
   });
@@ -185,7 +198,7 @@ describe("resolveCheckMessage", () => {
     fs.writeFileSync(path.join(dir, "Justfile"), "check:\n  tsc --noEmit\n");
     const msg = resolveCheckMessage("just check", ["check"], dir);
     expect(msg).toContain("just check shell command is blocked");
-    expect(msg).toContain("mcp__agent-framework__check");
+    expect(msg).toContain(expectedCheckWireName());
     expect(msg).not.toContain("covered by");
     fs.rmSync(dir, { recursive: true });
   });
