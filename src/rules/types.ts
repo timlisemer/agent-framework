@@ -40,8 +40,8 @@ export interface RuleContext {
    */
   outsideRootPath?: string;
   /**
-   * The user's latest non-meta text message from the live transcript at
-   * PreToolUse entry, with quoted/pasted content stripped. Independent of
+   * The user's latest non-meta full text message from the live transcript at
+   * PreToolUse entry, without quote/paste stripping. Independent of
    * `state.currentPrediction.userMessageSnippet`, which can be stale when
    * sentiment refresh failed/timed out/anchored on a prior negative read,
    * and is also capped at 200 chars by user-prompt-submit. Optional so
@@ -54,8 +54,8 @@ export interface RuleContext {
    */
   latestUserMessage?: string;
   /**
-   * The last 5 non-meta, non-slash-command, quoted/pasted-stripped user-
-   * text turns from the transcript at PreToolUse entry, OLDEST-FIRST.
+   * The last 5 non-meta, non-slash-command full user-text turns from the
+   * transcript at PreToolUse entry, OLDEST-FIRST.
    * Read once in pre-tool-use.ts and threaded so prediction-block /
    * decidePrediction step 3.10 can scan for an outer user turn that
    * authorizes the firing tool when the cached prediction is anchored on
@@ -101,6 +101,9 @@ export interface AppealUserState {
   mood: Mood | null;
   trust: Trust | null;
   frustrationStreak: number;
+  /** Full user message used for appeal logic/context. */
+  userMessageFull: string;
+  /** Short display quote only. */
   userMessageSnippet: string;
   intent: string;
   blockedIntent: string;

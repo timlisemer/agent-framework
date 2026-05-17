@@ -61,9 +61,11 @@ export function shouldBlockEdit(
  *   2. any explicitlyAllowedTools entry is an edit tool → true
  *   3. any explicitlyBlockedSubstrings entry targets an edit tool → false
  *   4. blockedIntent contains a read-only or don't-edit verb → false
- *   5. intent contains an implementation verb → true
- *   6. intent contains a read-only verb → false
- *   7. otherwise → null (genuinely ambiguous)
+ *   5. full user message contains a don't-edit verb → false
+ *   6. full user message contains an implementation verb → true
+ *   7. intent contains an implementation verb → true
+ *   8. intent contains a read-only verb → false
+ *   9. otherwise → null (genuinely ambiguous)
  */
 export function deriveEditIntentFromPrediction(
   p: ToolPrediction,
@@ -75,6 +77,10 @@ export function deriveEditIntentFromPrediction(
   const blocked = p.blockedIntent.toLowerCase();
   if (/\b(read[-\s]?only|just\s+(explor\w*|read\w*|look\w*|investigat\w*|analy[sz]\w*|review\w*|check\w*|examin\w*))\b/.test(blocked)) return false;
   if (/\b(don'?t|do\s+not|no|never|stop|avoid)\s+(edit\w*|chang\w*|modif\w*|writ\w*|creat\w*|updat\w*|delet\w*|touch\w*|refactor\w*|add\w*|remov\w*|replac\w*)\b/.test(blocked)) return false;
+
+  const userMessage = (p.userMessageFull ?? p.userMessageSnippet).toLowerCase();
+  if (/\b(don'?t|do\s+not|no|never|stop|avoid)\s+(edit\w*|chang\w*|modif\w*|writ\w*|creat\w*|updat\w*|delet\w*|touch\w*|refactor\w*|add\w*|remov\w*|replac\w*)\b/.test(userMessage)) return false;
+  if (/\b(fix\w*|implement\w*|refactor\w*|add\w*|edit\w*|writ\w*|creat\w*|modif\w*|delet\w*|remov\w*|updat\w*|chang\w*|build\w*|set\s+up|setup|configur\w*|renam\w*|replac\w*|rewrit\w*|integrat\w*|migrat\w*|extract\w*|split\w*|merg\w*|introduc\w*|insert\w*|adjust\w*|tweak\w*|correct\w*|improv\w*|enhanc\w*|optimi[sz]\w*|appl\w*|patch\w*|restructur\w*|clean\s*up|hook\s*up|wire\s*up|tidy\w*|format\w*|simplif\w*|polish\w*|port\w*|rollback\w*|upgrad\w*|bump\w*|hotfix\w*|extend\w*|revert\w*|commit\w*|ship\w*|swap\w*)\b/.test(userMessage)) return true;
 
   const intent = p.intent.toLowerCase();
   // Stem-match implementation verbs to catch morphological variants

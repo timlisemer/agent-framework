@@ -8,6 +8,7 @@ export function buildAppealUserState(state: SessionState): AppealUserState {
     mood: p?.mood ?? null,
     trust: p?.trust ?? null,
     frustrationStreak: state.frustrationStreak,
+    userMessageFull: p ? (p.userMessageFull ?? p.userMessageSnippet) : "",
     userMessageSnippet: p?.userMessageSnippet ?? "",
     intent: p?.intent ?? "",
     blockedIntent: p?.blockedIntent ?? "",

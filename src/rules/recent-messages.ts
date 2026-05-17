@@ -18,7 +18,7 @@ export const recentMessagesRule: PreToolRule = {
     const oldestFirst = tx.user.slice().reverse();
     const block =
       "RECENT USER MESSAGES (oldest to newest):\n" +
-      oldestFirst.map((m, i) => `[${i}] ${String(m.content).slice(0, 200)}`).join("\n");
+      oldestFirst.map((m, i) => `[${i}] ${String(m.content)}`).join("\n");
     return { llmContext: block };
   },
 };

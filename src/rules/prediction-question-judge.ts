@@ -3,7 +3,7 @@ import { runAgent } from "../utils/agent-runner.js";
 import { SENTIMENT_AGENT } from "../utils/agent-configs.js";
 import { parseSentimentOutput } from "../utils/prediction-parser.js";
 import { readRecentUserMessages } from "../utils/transcript.js";
-import { formatPredictionContext } from "../utils/prediction-types.js";
+import { formatPredictionContext, predictionUserMessageForLogic } from "../utils/prediction-types.js";
 
 /**
  * Prediction Question Judge (priority 28)
@@ -62,7 +62,9 @@ export const predictionQuestionJudgeRule: PreToolRule = {
       ctx.transcriptPath,
       ctx.state.currentWindowSize ?? 2,
       true,
+      { stripQuoted: false },
     ).catch(() => "");
+    const userMessageForLogic = predictionUserMessageForLogic(prediction);
 
     const r = await runAgent(
       { ...SENTIMENT_AGENT, formatValidation: undefined, workingDir: ctx.projectDir },
@@ -73,7 +75,7 @@ export const predictionQuestionJudgeRule: PreToolRule = {
           `FRUSTRATION STREAK: ${ctx.state.frustrationStreak ?? 0}\n` +
           `CURRENT WINDOW SIZE: ${ctx.state.currentWindowSize ?? 2}\n\n` +
           `RECENT USER MESSAGES (with [Tn] indices, T0 = newest):\n${recent}\n\n` +
-          `LATEST USER MESSAGE:\n${prediction.userMessageSnippet}\n\n` +
+          `LATEST USER MESSAGE:\n${userMessageForLogic}\n\n` +
           `ASKUSERQUESTION CONTENT:\n${askPayload}`,
       },
     );

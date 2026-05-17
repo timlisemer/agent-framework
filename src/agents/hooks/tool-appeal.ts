@@ -160,7 +160,9 @@ Allowed tools: ${allowedToolsStr}
   }
 
   const userStateSection = renderUserStateSection(userState);
-  const lastUserMessageSection = renderLastUserMessageSection(userState.userMessageSnippet);
+  const lastUserMessageSection = renderLastUserMessageSection(
+    userState.userMessageFull || userState.userMessageSnippet,
+  );
 
   const maxRetries = 2;
   let lastError: unknown;

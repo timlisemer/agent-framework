@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "name": "full-user-message-edit-intent-after-snippet-boundary-should-allow",
+  "description": "Regression for intent logic using sliced user text. The seeded prediction display snippet is intentionally ambiguous, while the transcript contains the full user message with the explicit edit request after the old 200-character boundary. Prediction-block must use full transcript user text for logic and must not deny Edit as missing an explicit request.",
+  "transcript": [
+    {
+      "role": "user",
+      "isMeta": false,
+      "content": "I need to lay out context before the actual instruction. context context context context context context context context context context context context context context context context context context context context context context context context context context context context context context context context now edit README.md and replace Agent Framework with Agent Framework"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Editing the requested file."
+        },
+        {
+          "type": "tool_use",
+          "id": "toolu_full_message_edit",
+          "name": "Edit",
+          "input": {
+            "file_path": "README.md",
+            "old_string": "Agent Framework",
+            "new_string": "Agent Framework"
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "toolu_full_message_edit"
+  },
+  "env": {
+    "cwd": "/home/tim/Coding/public_repos/agent-framework",
+    "permission_mode": "default"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "angry",
+      "trust": "low",
+      "intent": "The user gave context before the actionable instruction.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "I need to lay out context before the actual instruction. context context context context context context context context context context context context context context context context context context context",
+      "blockAllTools": false
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 4,
+    "currentWindowSize": 4
+  },
+  "expect": {
+    "expected": "allow",
+    "notes": "The edit authorization appears only in the transcript user message after the old snippet boundary. Short display snippets are allowed for messages, but policy logic must use the full unstripped message from the transcript."
+  }
+}

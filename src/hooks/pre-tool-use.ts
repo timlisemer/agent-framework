@@ -331,6 +331,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   const recentUserMessages = await readRecentUserMessagesArray(
     input.transcript_path,
     5,
+    { stripQuoted: false },
   ).catch(() => []);
   const latestUserMessage =
     recentUserMessages.length > 0
@@ -343,12 +344,15 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   // may suppress the mood-driven step-4 deny when an older outer user
   // turn favorably names the firing tool.
   let cachedSnippetSideTaskDischarged = false;
-  const cachedSnippet = state.currentPrediction?.userMessageSnippet ?? "";
-  if (cachedSnippet) {
+  const cachedPredictionUserMessage =
+    state.currentPrediction?.userMessageFull ??
+    state.currentPrediction?.userMessageSnippet ??
+    "";
+  if (cachedPredictionUserMessage) {
     cachedSnippetSideTaskDischarged =
       await userTurnFollowedByCompletedToolRoundtrip(
         input.transcript_path,
-        cachedSnippet,
+        cachedPredictionUserMessage,
       ).catch(() => false);
   }
 

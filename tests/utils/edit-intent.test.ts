@@ -242,6 +242,24 @@ describe("deriveEditIntentFromPrediction", () => {
     expect(deriveEditIntentFromPrediction(p)).toBe(true);
   });
 
+  it("returns true when full user message contains edit intent past the snippet boundary", () => {
+    const p = makePrediction({
+      intent: "hmm",
+      userMessageSnippet: "I need to explain context first.",
+      userMessageFull: `${"context ".repeat(35)}now edit src/foo.ts and fix the parser`,
+    });
+    expect(deriveEditIntentFromPrediction(p)).toBe(true);
+  });
+
+  it("returns false when full user message forbids editing past the snippet boundary", () => {
+    const p = makePrediction({
+      intent: "fix the parser",
+      userMessageSnippet: "I need to explain context first.",
+      userMessageFull: `${"context ".repeat(35)}do not edit src/foo.ts`,
+    });
+    expect(deriveEditIntentFromPrediction(p)).toBe(false);
+  });
+
   it("returns false when intent contains read-only verb (priority 6)", () => {
     const p = makePrediction({
       intent: "explain how auth works",

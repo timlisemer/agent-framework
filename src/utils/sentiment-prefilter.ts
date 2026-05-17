@@ -107,8 +107,7 @@ export function extractDirectiveHint(stripped: string): string {
     }
   }
   if (directives.length === 0) return "";
-  const picked = directives[directives.length - 1];
-  return picked.length > 240 ? picked.slice(0, 240).trim() + "..." : picked;
+  return directives[directives.length - 1];
 }
 
 /**

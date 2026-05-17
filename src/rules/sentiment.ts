@@ -45,14 +45,15 @@ export const sentimentRule: PreToolRule = {
       ctx.transcriptPath,
       reloadedState.currentWindowSize ?? 2,
       true,
+      { stripQuoted: false },
     ).catch(() => "");
-    const stripped = stripQuotedAndPastedContent(userPrompt);
+    const strippedForPrefilter = stripQuotedAndPastedContent(userPrompt);
 
     const previousSummary = previousPrediction
       ? `User mood: ${previousPrediction.mood}\nUser trust: ${previousPrediction.trust}\nIntent: ${previousPrediction.intent}`
       : "(none)";
 
-    const moodPrefilter = preClassifyMood(stripped);
+    const moodPrefilter = preClassifyMood(strippedForPrefilter);
     const moodHintSection =
       moodPrefilter.hint || moodPrefilter.interruptCount > 0
         ? `MOOD HINT (regex pre-classifier — judge LATEST yourself; honor only when its first-person hostility is directed at you):\n` +
@@ -60,17 +61,14 @@ export const sentimentRule: PreToolRule = {
           `  interruptCount: ${moodPrefilter.interruptCount}\n\n`
         : "";
 
-    const directiveHint = extractDirectiveHint(stripped);
+    const directiveHint = extractDirectiveHint(strippedForPrefilter);
     const directiveHintSection = directiveHint
-      ? `DIRECTIVE HINT (regex pre-extractor — last imperative sentence in stripped LATEST; the user's directive should be reflected in INTENT):\n  ${JSON.stringify(directiveHint)}\n\n`
+      ? `DIRECTIVE HINT (regex pre-extractor — last imperative sentence in full LATEST; the user's directive should be reflected in INTENT):\n  ${JSON.stringify(directiveHint)}\n\n`
       : "";
 
-    const truncForSentiment = (s: string, cap: number, head: number, tail: number): string =>
-      s.length > cap
-        ? `${s.slice(0, head)}\n...[truncated for sentiment latency budget]...\n${s.slice(-tail)}`
-        : s;
-    const strippedForLLM = truncForSentiment(stripped, 400, 200, 200);
-    const recentForLLM = truncForSentiment(recent, 400, 200, 200);
+    const strippedHelperSection = strippedForPrefilter !== userPrompt
+      ? `LATEST USER MESSAGE WITH QUOTED/PASTED CONTENT REMOVED (helper only; raw message above is authoritative):\n${strippedForPrefilter}\n\n`
+      : "";
 
     const sentimentPromise = runAgent(
       { ...SENTIMENT_AGENT, workingDir: projectDir },
@@ -82,8 +80,9 @@ export const sentimentRule: PreToolRule = {
           `CURRENT WINDOW SIZE: ${reloadedState.currentWindowSize ?? 2}\n\n` +
           moodHintSection +
           directiveHintSection +
-          `RECENT USER MESSAGES (with [Tn] indices, T0 = newest):\n${recentForLLM}\n\n` +
-          `LATEST USER MESSAGE:\n${strippedForLLM}`,
+          `RECENT USER MESSAGES (with [Tn] indices, T0 = newest; full unstripped text):\n${recent}\n\n` +
+          `LATEST USER MESSAGE (authoritative full unstripped text):\n${userPrompt}\n\n` +
+          strippedHelperSection,
       }
     );
     const timeoutPromise = new Promise<null>((resolve) =>
@@ -98,11 +97,11 @@ export const sentimentRule: PreToolRule = {
         parsed.explicitlyAllowedTools = [
           ...new Set([
             ...parsed.explicitlyAllowedTools,
-            ...deriveAllowedToolsFromIntent(stripped),
+            ...deriveAllowedToolsFromIntent(userPrompt),
           ]),
         ];
 
-        const blockClass = classifyBlockAllTools(stripped);
+        const blockClass = classifyBlockAllTools(userPrompt);
         if (blockClass === "yes") parsed.blockAllTools = true;
         else if (blockClass === "no") parsed.blockAllTools = false;
 
@@ -114,7 +113,7 @@ export const sentimentRule: PreToolRule = {
           );
         }
 
-        if (preClassifyCalm(stripped, directiveHint)) {
+        if (preClassifyCalm(strippedForPrefilter, directiveHint)) {
           if (parsed.mood === "angry" || parsed.mood === "frustrated") {
             parsed.mood = "neutral";
           }
@@ -150,6 +149,7 @@ export const sentimentRule: PreToolRule = {
 
         const predictionForDerivation = {
           ...parsed,
+          userMessageFull: userPrompt,
           userMessageSnippet: userPrompt.slice(0, 200),
           timestamp: Date.now(),
         };
@@ -173,6 +173,7 @@ export const sentimentRule: PreToolRule = {
             ...parsed,
             mood: effectiveMood,
             trust: effectiveTrust,
+            userMessageFull: userPrompt,
             userMessageSnippet: userPrompt.slice(0, 200),
             timestamp: Date.now(),
             hasExplicitOverride,

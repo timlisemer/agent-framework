@@ -2,6 +2,10 @@ Fixtures here describe behaviour the framework already implements correctly. A r
 
 ## Recent changes
 
+2026-05-17 Full user-message intent logic:
+
+- Added `full-user-message-edit-intent-after-snippet-boundary-should-allow.json` for the regression where the display snippet is ambiguous but the full transcript user message contains an explicit edit request after the old snippet boundary. The fixture asserts that logic uses the full user message while keeping displayed evidence short.
+
 2026-05-17 Stop-hook corrective-promise stall detection:
 
 - Added `stop-after-apology-promises-helper-search-without-action-should-block.json` for the live helper-search repro where the assistant apologized, named the exact requested search, promised to stay on topic, and stopped without doing the search. The expected block reason is the deterministic `Resume the task` feedback.

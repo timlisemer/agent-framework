@@ -134,6 +134,33 @@ describe("decidePrediction", () => {
     expect(result.reason).toContain("trust: low");
   });
 
+  it("low trust/Edit -> allow when full user message requests edit past snippet boundary", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "hmm",
+      userMessageSnippet: "I need to explain context first.",
+      userMessageFull: `${"context ".repeat(35)}now edit src/foo.ts and fix the parser`,
+    });
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4);
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("edit intent");
+  });
+
+  it("low trust/Edit -> deny when full user message forbids edit past snippet boundary", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User has explicitly re-authorized the AI to proceed.",
+      userMessageSnippet: "I need to explain context first.",
+      userMessageFull: `${"context ".repeat(35)}do not edit src/foo.ts`,
+    });
+    const result = decidePrediction(pred, "Edit", { file_path: "src/foo.ts" }, 4);
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toContain("User appears angry");
+    expect(result.reason).toContain('User said: "I need to explain context first."');
+  });
+
   it("low trust/Read -> allow", () => {
     const pred = makePrediction({ mood: "neutral", trust: "low" });
     const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 0);

@@ -901,6 +901,7 @@ export async function readRecentUserMessages(
   transcriptPath: string,
   n: number,
   withIndices: boolean = false,
+  opts: { stripQuoted?: boolean } = {},
 ): Promise<string> {
   let raw: string;
   try {
@@ -939,9 +940,9 @@ export async function readRecentUserMessages(
       text = foundText;
     }
     if (!text) continue;
-    const stripped = stripQuotedAndPastedContent(text);
-    if (!stripped.trim()) continue;
-    collected.push(stripped);
+    const message = opts.stripQuoted === false ? text : stripQuotedAndPastedContent(text);
+    if (!message.trim()) continue;
+    collected.push(message);
   }
   const reversed = collected.reverse();
   const total = reversed.length;
@@ -956,6 +957,7 @@ export async function readRecentUserMessages(
 export async function readRecentUserMessagesArray(
   transcriptPath: string,
   n: number,
+  opts: { stripQuoted?: boolean } = {},
 ): Promise<string[]> {
   let raw: string;
   try {
@@ -994,9 +996,9 @@ export async function readRecentUserMessagesArray(
       text = foundText;
     }
     if (!text) continue;
-    const stripped = stripQuotedAndPastedContent(text);
-    if (!stripped.trim()) continue;
-    collected.push(stripped);
+    const message = opts.stripQuoted === false ? text : stripQuotedAndPastedContent(text);
+    if (!message.trim()) continue;
+    collected.push(message);
   }
   return collected.reverse();
 }

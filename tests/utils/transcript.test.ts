@@ -5,6 +5,8 @@ import * as path from "path";
 import {
   currentTurnAssistantState,
   detectParallelBatch,
+  readRecentUserMessages,
+  readRecentUserMessagesArray,
   readTranscriptExact,
   resolveActiveSlashCommandAllowedTools,
 } from "../../src/utils/transcript.js";
@@ -783,5 +785,26 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
     ]);
     const result = await resolveActiveSlashCommandAllowedTools(filePath);
     expect(result).toBeUndefined();
+  });
+
+  it("readRecentUserMessages preserves full quoted content when stripQuoted is false", async () => {
+    const message = `${"context ".repeat(40)}\"edit src/foo.ts\"`;
+    const filePath = writeTranscript([
+      userText("older"),
+      userText(message),
+    ]);
+
+    const result = await readRecentUserMessages(filePath, 1, false, { stripQuoted: false });
+    expect(result).toBe(message);
+
+    const arrayResult = await readRecentUserMessagesArray(filePath, 1, { stripQuoted: false });
+    expect(arrayResult).toEqual([message]);
+  });
+
+  it("readRecentUserMessages keeps legacy stripped behavior by default", async () => {
+    const filePath = writeTranscript([
+      userText('please do this "quoted text"'),
+    ]);
+    await expect(readRecentUserMessages(filePath, 1)).resolves.toBe("please do this");
   });
 });

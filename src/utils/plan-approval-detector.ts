@@ -191,6 +191,7 @@ export function synthesizePostApprovalPrediction(
     hasExplicitOverride: false,
     contextSwitch: "yes",
     questionIsStalling: "n/a",
+    userMessageFull: prefix + approvalContent,
     userMessageSnippet: snippet,
     timestamp: Date.now(),
   };

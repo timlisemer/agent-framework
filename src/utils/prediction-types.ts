@@ -12,6 +12,7 @@
 import { isLowRiskTool, isLowRiskInspectionTool } from "../rules/utils.js";
 import {
   isEditTool,
+  deriveEditIntentFromPrediction,
   deriveAllowedToolsFromIntent,
   EDIT_VERB_RE,
   RENAME_MOVE_VERB_RE,
@@ -56,6 +57,14 @@ export interface ToolPrediction {
    */
   blockAllTools?: boolean;
 
+  /**
+   * Full unstripped user message used for policy logic. Optional for
+   * backwards-compatible scenario seeds; logic must fall back to
+   * userMessageSnippet only when this is absent.
+   */
+  userMessageFull?: string;
+
+  /** Short display quote for denial text and reports. Do not use as logic. */
   userMessageSnippet: string;
   timestamp: number;
 
@@ -89,6 +98,10 @@ export interface PredictionDecision {
   decision: "allow" | "deny";
   reason?: string;
   matchedExplicit?: { tool: string; targetSubstring?: string; reason: string };
+}
+
+export function predictionUserMessageForLogic(prediction: ToolPrediction): string {
+  return prediction.userMessageFull ?? prediction.userMessageSnippet;
 }
 
 /**
@@ -660,6 +673,11 @@ export function decidePrediction(
 ): PredictionDecision {
   if (!prediction) return { decision: "allow" };
 
+  const userMessageForLogic = predictionUserMessageForLogic(prediction);
+  const fullMessageEditIntent =
+    prediction.userMessageFull !== undefined && isEditTool(toolName)
+      ? deriveEditIntentFromPrediction({ ...prediction, intent: "" })
+      : null;
   const inputStr = stringifyToolInput(toolInput);
   const bashClassification = toolName === "Bash"
     ? classifyBashCommand(String((toolInput as { command?: unknown })?.command ?? ""))
@@ -724,9 +742,7 @@ export function decidePrediction(
     // The userMessageSnippet guard prevents over-firing: a user who says
     // "stop. no tools. halt the stalling." has BOTH an explicit prohibition
     // AND incidental inaction language. The prohibition wins.
-    const userSaidProhibition = EXPLICIT_PROHIBITION_RE.test(
-      prediction.userMessageSnippet,
-    );
+    const userSaidProhibition = EXPLICIT_PROHIBITION_RE.test(userMessageForLogic);
     const blockedForThisTool = prediction.explicitlyBlockedSubstrings.some(
       (b) => matchesToolIdentity(b.tool),
     );
@@ -755,7 +771,7 @@ export function decidePrediction(
   // captured the verb in intent text but missed the structured authorization).
   // Step 2 (explicit blocks) and step 3 (blockAllTools) still win above.
   if (isEditTool(toolName)) {
-    const undoText = `${prediction.intent} ${prediction.userMessageSnippet}`;
+    const undoText = `${prediction.intent} ${userMessageForLogic}`;
     if (UNDO_INTENT_RE.test(undoText)) {
       return {
         decision: "allow",
@@ -774,11 +790,10 @@ export function decidePrediction(
   // says "freeze. no tools. now proceed." has BOTH a categorical
   // prohibition AND incidental authorization language; the prohibition
   // wins by the same logic as 3a's userSaidProhibition guard.
-  const userSaidProhibition = EXPLICIT_PROHIBITION_RE.test(
-    prediction.userMessageSnippet,
-  );
+  const userSaidProhibition = EXPLICIT_PROHIBITION_RE.test(userMessageForLogic);
   if (
     !userSaidProhibition &&
+    fullMessageEditIntent !== false &&
     RE_AUTHORIZATION_INTENT_RE.test(prediction.intent)
   ) {
     return {
@@ -814,7 +829,7 @@ export function decidePrediction(
     (b) => matchesToolIdentity(b.tool),
   );
   if (!blockedForThisToolByName) {
-    if (latestUserMessageFavorablyNamesTool(prediction.userMessageSnippet, toolName)) {
+    if (latestUserMessageFavorablyNamesTool(userMessageForLogic, toolName)) {
       return {
         decision: "allow",
         reason: `User's logged message names ${toolName} favorably (redirect to a previously-authorized tool, not a revocation); ${toolName} proceeds.`,
@@ -1039,6 +1054,23 @@ export function decidePrediction(
     };
   }
 
+  // 3.13. Full-message edit-intent consistency. The same full user message
+  // that is stored on the prediction must not be mood-denied as "unless
+  // explicitly requested" when that full text contains the edit request past
+  // the display-snippet boundary. Keep this after the narrower historical
+  // fallbacks so their reasons and ordering stay stable. Do not use prose
+  // `intent` here; that would broaden the mood policy beyond the full-message
+  // truncation fix.
+  if (
+    isEditTool(toolName) &&
+    fullMessageEditIntent === true
+  ) {
+    return {
+      decision: "allow",
+      reason: `Full user message expresses edit intent; ${toolName} is explicitly requested.`,
+    };
+  }
+
   // 4. Mood-driven default policy. Allow set mirrors `low-risk-bypass`
   // (single source of truth via isLowRiskTool) so the prediction system
   // doesn't artificially block tools the framework treats as always-safe
@@ -1123,6 +1155,7 @@ export function formatPredictionContext(p: ToolPrediction): string {
   const lines: string[] = [
     `User mood: ${p.mood}`,
     `User trust: ${p.trust}`,
+    `User message: ${predictionUserMessageForLogic(p)}`,
     `Intent: ${p.intent}`,
   ];
   if (p.blockedIntent) lines.push(`Blocked intent: ${p.blockedIntent}`);
