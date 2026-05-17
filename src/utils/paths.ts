@@ -226,6 +226,10 @@ export function sessionCurrentPlanFile(sessionDir: string): string {
   return path.join(sessionDir, "current-plan.json");
 }
 
+export function sessionPlanValidationStatusFile(sessionDir: string): string {
+  return path.join(sessionDir, "plan-validation-status.json");
+}
+
 export function sessionPlansDir(sessionDir: string): string {
   return path.join(sessionDir, "plans");
 }

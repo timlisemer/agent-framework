@@ -31,6 +31,10 @@ export function extractProposedPlanContent(text: string | null | undefined): str
   return parseCodexProposedPlanBlock(text)?.content ?? null;
 }
 
+export function extractStopProposedPlan(text: string | null | undefined): string | null {
+  return extractProposedPlanContent(text);
+}
+
 function isImplementationPrompt(prompt: string): boolean {
   const trimmed = prompt.trim();
   return trimmed === CODEX_IMPLEMENT_PLAN_PROMPT ||
@@ -47,6 +51,9 @@ export function findNativePlanFile(_input: NativePlanFileLookupInput): string | 
 }
 
 export function isPlanExit(input: PlanExitDetectionInput): boolean {
+  if (input.event === "Stop") {
+    return parseCodexProposedPlanBlock(input.assistantText) !== null;
+  }
   if (input.event === "UserPromptSubmit") {
     return isImplementationPrompt(input.prompt);
   }

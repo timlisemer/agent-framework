@@ -35,6 +35,7 @@ export const claudeSpec: AdapterSpec = {
   findCurrentPlanSource:  PLS.findCurrentPlanSource,
   findNativePlanFile:     PLS.findNativePlanFile,
   isPlanExit:             PLS.isPlanExit,
+  extractStopProposedPlan: PLS.extractStopProposedPlan,
   detectPlanMode:         PM.detectPlanMode,
   materializeScenarioEntry: SM.materializeScenarioEntry,
   renderCheckMcpHint:               PS.renderCheckMcpHint,

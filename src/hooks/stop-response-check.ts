@@ -12,7 +12,7 @@ import type { AdapterEncoder } from "../adapter/types.js";
 import type { FrameworkStopHookInput } from "./types.js";
 import { resolveHostContext } from "../utils/host-context.js";
 import { activeSpec } from "../adapter/spec.js";
-import { validateCurrentPlanExit, writeCurrentPlanSidecar } from "../utils/plan-source.js";
+import { validatePlanExitPresentation, writeCurrentPlanSidecar } from "../utils/plan-source.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
@@ -84,7 +84,7 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
   }
 
   if (stopPlanExit) {
-    const validation = await validateCurrentPlanExit({
+    const validation = await validatePlanExitPresentation({
       transcriptPath: input.transcript_path,
       sessionDir,
       projectDir: host.projectDir,

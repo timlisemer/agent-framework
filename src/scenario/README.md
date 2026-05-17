@@ -35,6 +35,11 @@ Plan-mode and injected-context reproducibility use additional session sidecars:
 - `plan-mode-events.jsonl` records entered/exited transitions.
 - `plans/<name>.md` stores named session planfiles for non-native adapters.
 - `current-plan.json` points at the active file-backed plan descriptor.
+- `plan-validation-status.json` caches exact-content plan validation results,
+  keyed by resolved planfile path plus content hash. Codex Stop-hook
+  `<proposed_plan>` acceptance and explicit `validate_plan` MCP calls share
+  this cache so a previously validated planfile does not need to be revalidated
+  unless its content changes.
 - `session-injections.jsonl` stores generic injected context records, including
   exact file-backed source content for planning-contract injections.
 

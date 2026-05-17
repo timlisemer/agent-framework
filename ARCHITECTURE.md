@@ -26,7 +26,7 @@ src/                                # TypeScript source
 
     hooks/                          # Hook-triggered agents
       tool-appeal.ts                # Reviews denials with user context
-      plan-validate.ts              # Checks plan drift
+      plan-validate.ts              # Shared plan contract / intent checks
       claude-md-validate.ts         # Validates CLAUDE.md edits
       index.ts                      # Barrel export
 
@@ -382,11 +382,19 @@ Tool call received
 │
 ├─> Rewind detection (after rules, before validators)
 │
-├─> plan-validate (Sonnet) if writing to the active adapter's plans root
 ├─> claude-md-validate (Sonnet) for CLAUDE.md edits
 │
 └─> Post-allow bookkeeping (tool count, ExitPlanMode cleanup)
 ```
+
+Planfile `Write` and `Edit` calls are not validated on every write. The
+file-backed planfile remains the source of truth, and validation happens either
+when the user or agent calls the `validate_plan` MCP tool explicitly or at the
+Codex Stop-hook acceptance boundary for a whole-message `<proposed_plan>`.
+That Stop path parses the inline presentation through the adapter, checks it
+against the plan contract and the matching planfile, uses session validation
+status keyed by plan path plus content hash, and updates `current-plan.json`
+when the exact presented plan is accepted.
 
 Adding a new check: create `src/rules/my-rule.ts` implementing `PreToolRule`,
 add to `ALL_RULES` in `src/rules/index.ts`, add display name to statusline.
@@ -528,11 +536,17 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 
 ## Session State Persistence
 
-Each session persists three files under `~/.agent-framework/sessions/{project}/{hash}/`:
+Each session persists core state files under `~/.agent-framework/sessions/{project}/{hash}/`:
 
 1. **`state.json`** — SessionState (prediction, edit-intent, force-check lockout, frustration streak, window size, tool count).
 2. **`gate-reasoning.json`** — priority-evicted denial memory with NOTE/WARNING/appeal outcomes.
 3. **`tool-log.jsonl`** — append-only audit trail consumed by drift-detect, error-acknowledge, pre-tool-use, gate-reasoning, and the test-harness.
+
+Plan-mode and reproducibility sidecars live in the same session directory:
+`plans/<name>.md` stores named session planfiles, `current-plan.json` stores
+the active file-backed plan descriptor, and `plan-validation-status.json`
+records exact-content plan validation pass/fail status keyed by resolved
+planfile path plus content hash.
 
 Compaction recovery relies on the host agent's native transcript compaction — no app-layer summary re-inject.
 

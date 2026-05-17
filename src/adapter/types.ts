@@ -216,6 +216,9 @@ export interface AdapterSpec {
   /** True if this adapter-specific event represents a plan-exit/approval boundary. */
   isPlanExit(input: PlanExitDetectionInput): boolean;
 
+  /** Extract adapter-specific proposed plan content from a Stop response, if any. */
+  extractStopProposedPlan(assistantText: string | null | undefined): string | null;
+
   /** Detect native plan mode using adapter-owned host signals. */
   detectPlanMode(input: PlanModeDetectionInput): PlanModeDetection;
 

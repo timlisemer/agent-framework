@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { sessionPlanValidationStatusFile } from "../../../src/utils/paths.js";
 
 const required = [
   "User Goal",
@@ -178,6 +179,62 @@ describe("runValidatePlanAgent", () => {
       });
       expect(result).toContain("- Status: PASS");
     } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("records PASS validation status when session context is available", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "validate-plan-"));
+    const prevSessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR;
+    try {
+      const sessionDir = path.join(tempDir, "session");
+      process.env.AGENT_FRAMEWORK_SESSION_DIR = sessionDir;
+      const transcriptPath = path.join(tempDir, "transcript.jsonl");
+      fs.writeFileSync(transcriptPath, "");
+      const planPath = path.join(tempDir, "plan.md");
+      fs.writeFileSync(planPath, validPlan(planPath));
+      const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
+      const result = await runValidatePlanAgent({
+        workingDir: tempDir,
+        planFile: planPath,
+        transcriptPath,
+      });
+      expect(result).toContain("- Status: PASS");
+      const status = JSON.parse(fs.readFileSync(sessionPlanValidationStatusFile(sessionDir), "utf-8"));
+      expect(Object.values(status)[0]).toMatchObject({ status: "pass", planPath });
+    } finally {
+      if (prevSessionDir === undefined) delete process.env.AGENT_FRAMEWORK_SESSION_DIR;
+      else process.env.AGENT_FRAMEWORK_SESSION_DIR = prevSessionDir;
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("records FAIL validation status when session context is available", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "validate-plan-"));
+    const prevSessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR;
+    try {
+      const sessionDir = path.join(tempDir, "session");
+      process.env.AGENT_FRAMEWORK_SESSION_DIR = sessionDir;
+      const transcriptPath = path.join(tempDir, "transcript.jsonl");
+      fs.writeFileSync(transcriptPath, "");
+      const planPath = path.join(tempDir, "plan.md");
+      fs.writeFileSync(planPath, validPlan(planPath));
+      const runValidatePlanAgent = await loadRunValidatePlanAgent("INVALID: Missing required heading \"## Relevant Files\".");
+      const result = await runValidatePlanAgent({
+        workingDir: tempDir,
+        planFile: planPath,
+        transcriptPath,
+      });
+      expect(result).toContain("- Status: FAIL");
+      const status = JSON.parse(fs.readFileSync(sessionPlanValidationStatusFile(sessionDir), "utf-8"));
+      expect(Object.values(status)[0]).toMatchObject({
+        status: "fail",
+        planPath,
+        reasons: ["Missing required heading \"## Relevant Files\"."],
+      });
+    } finally {
+      if (prevSessionDir === undefined) delete process.env.AGENT_FRAMEWORK_SESSION_DIR;
+      else process.env.AGENT_FRAMEWORK_SESSION_DIR = prevSessionDir;
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });

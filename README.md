@@ -3,8 +3,8 @@
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
 1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent`, `scenario_labeler`, `scenario_tester` agents (portable, works with any MCP client)
-2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `plan-validate`, `style-drift`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
-3. **Stop Hook** - For `response-align-stop` rule (validates stop responses)
+2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `style-drift`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
+3. **Stop Hook** - For `response-align-stop` and Codex `<proposed_plan>` acceptance validation
 4. **UserPromptSubmit Hook** - For `sentiment` rule (classifies user mood/intent before each tool call sequence)
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
@@ -35,7 +35,7 @@ The framework implements 16 specialized agents organized into three categories:
 | ---------------- | ------ | ----------- | ---------------------------------------------- |
 | rule-gate           | haiku  | PreToolUse        | Combined evaluator for triggered rule contexts |
 | error-acknowledge   | haiku  | PreToolUse        | Require error acknowledgment before proceeding |
-| plan-validate       | sonnet | PreToolUse        | Detect plan drift from user intent             |
+| plan-validate       | sonnet | Stop / MCP helper | Validate plan contract and user-intent fit     |
 | style-drift         | haiku  | PreToolUse        | Detect unrequested cosmetic/style changes (aggregator) |
 | claude-md-validate  | sonnet | PreToolUse        | Validate CLAUDE.md edits against conventions   |
 | question-validate   | haiku  | PreToolUse        | Validate AskUserQuestion before showing to user (side-effect) |
@@ -90,11 +90,17 @@ The `commit` agent enforces the complete verification chain before committing.
 │  whenever a higher-priority rule has emitted llmContext, so the rule-gate
 │  aggregator's judgment is always authoritative.
 │
-├─ plan-validate: Check for plan drift on active adapter plan writes
 ├─ claude-md-validate: Validate CLAUDE.md edits
 │
 └─ Post-allow bookkeeping (tool count, ExitPlanMode cleanup)
 ```
+
+Planfile writes are no longer validated on every `Write` or `Edit`. Plan
+validation now happens through explicit `validate_plan` MCP calls and at the
+Codex Stop-hook acceptance boundary when a whole-message `<proposed_plan>` is
+presented. At that boundary the hook checks the inline presentation against the
+file-backed planfile, consults or records exact-content validation status, and
+updates the session current-plan sidecar on success.
 
 ## Performance
 

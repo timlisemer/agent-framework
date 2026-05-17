@@ -3,6 +3,7 @@ import {
   CODEX_CLEAR_CONTEXT_IMPLEMENT_PLAN_PREFIX,
   CODEX_IMPLEMENT_PLAN_PROMPT,
   extractProposedPlanContent,
+  extractStopProposedPlan,
   findCurrentPlanSource,
   isPlanExit,
   parseCodexProposedPlanBlock,
@@ -15,7 +16,8 @@ describe("Codex plan source", () => {
       content: "## User Goal\nDo it.",
     });
     expect(extractProposedPlanContent(text)).toBe("## User Goal\nDo it.");
-    expect(isPlanExit({ event: "Stop", assistantText: text })).toBe(false);
+    expect(extractStopProposedPlan(text)).toBe("## User Goal\nDo it.");
+    expect(isPlanExit({ event: "Stop", assistantText: text })).toBe(true);
   });
 
   it("ignores proposed_plan blocks embedded in surrounding prose", () => {
@@ -42,7 +44,7 @@ describe("Codex plan source", () => {
     expect(isPlanExit({ event: "Stop", assistantText: "<proposed_plan>\nmissing close" })).toBe(false);
   });
 
-  it("detects implementation prompts without returning inline plan sources", () => {
+  it("detects implementation prompts without returning proposed plan sources", () => {
     expect(isPlanExit({ event: "UserPromptSubmit", prompt: CODEX_IMPLEMENT_PLAN_PROMPT })).toBe(true);
     const prompt = `${CODEX_CLEAR_CONTEXT_IMPLEMENT_PLAN_PREFIX}\n\n## User Goal\nImplement it.`;
     expect(isPlanExit({ event: "UserPromptSubmit", prompt })).toBe(true);

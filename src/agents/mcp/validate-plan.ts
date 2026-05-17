@@ -18,6 +18,11 @@ import { setTranscriptPath } from "../../utils/execution-context.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 import { activeSpec } from "../../adapter/spec.js";
 import { collectPlanValidationViolations } from "../hooks/plan-validate.js";
+import {
+  hashPlanContent,
+  recordPlanValidationStatus,
+} from "../../utils/plan-validation-status.js";
+import { getSessionDir } from "../../utils/session-store.js";
 
 const VALIDATE_PLAN_SYSTEM_PROMPT = `You are a plan validator. Validate the PLAN CONTENT itself.
 
@@ -51,6 +56,15 @@ export interface ValidatePlanInput {
   workingDir: string;
   planFile: string;
   transcriptPath?: string;
+  sessionDir?: string;
+}
+
+export interface PlanValidationRunResult {
+  status: "PASS" | "FAIL";
+  reasons: string[];
+  resolvedPath?: string;
+  content?: string;
+  contentHash?: string;
 }
 
 function getHookName(): string { return activeSpec().mcpWireName("validate_plan"); }
@@ -94,6 +108,27 @@ export async function runValidatePlanAgent(
   input: ValidatePlanInput,
   options: CancellationOptions = {},
 ): Promise<string> {
+  const result = await validatePlanFileWithContract(input, options);
+  return formatResult(result.status, result.reasons);
+}
+
+function recordValidationResult(input: ValidatePlanInput, result: PlanValidationRunResult): void {
+  if (!result.resolvedPath || result.contentHash === undefined) return;
+  const sessionDir = input.sessionDir ?? (input.transcriptPath ? getSessionDir(input.transcriptPath) : undefined);
+  if (!sessionDir) return;
+  recordPlanValidationStatus({
+    sessionDir,
+    planPath: result.resolvedPath,
+    contentHash: result.contentHash,
+    status: result.status === "PASS" ? "pass" : "fail",
+    reasons: result.reasons,
+  });
+}
+
+export async function validatePlanFileWithContract(
+  input: ValidatePlanInput,
+  options: CancellationOptions = {},
+): Promise<PlanValidationRunResult> {
   if (input.transcriptPath) {
     setTranscriptPath(input.transcriptPath);
   }
@@ -102,27 +137,56 @@ export async function runValidatePlanAgent(
 
   const source = resolvePlanContent(input);
   if (source.error) {
-    return formatResult("FAIL", [source.error]);
+    return { status: "FAIL", reasons: [source.error] };
   }
 
   const plan = source.content ?? "";
+  const baseResult = {
+    resolvedPath: source.resolvedPath,
+    content: plan,
+    contentHash: hashPlanContent(plan),
+  };
   if (!plan.trim()) {
-    return formatResult("FAIL", ["Plan content is empty."]);
+    const result: PlanValidationRunResult = {
+      ...baseResult,
+      status: "FAIL",
+      reasons: ["Plan content is empty."],
+    };
+    recordValidationResult(input, result);
+    return result;
   }
 
   throwIfAborted(options.signal);
   const findings = collectPlanValidationViolations(plan, input.workingDir, source.resolvedPath);
 
   if (findings.hardRuleViolations.length > 0) {
-    return formatResult("FAIL", findings.hardRuleViolations.map(stripViolationPrefix));
+    const result: PlanValidationRunResult = {
+      ...baseResult,
+      status: "FAIL",
+      reasons: findings.hardRuleViolations.map(stripViolationPrefix),
+    };
+    recordValidationResult(input, result);
+    return result;
   }
 
   if (findings.filteredBlacklistHighlights.length > 0) {
-    return formatResult("FAIL", findings.blacklistHighlights.map(stripViolationPrefix));
+    const result: PlanValidationRunResult = {
+      ...baseResult,
+      status: "FAIL",
+      reasons: findings.blacklistHighlights.map(stripViolationPrefix),
+    };
+    recordValidationResult(input, result);
+    return result;
   }
 
   if (findings.allViolations.length > 0) {
-    return formatResult("FAIL", findings.allViolations.map(stripViolationPrefix));
+    const result: PlanValidationRunResult = {
+      ...baseResult,
+      status: "FAIL",
+      reasons: findings.allViolations.map(stripViolationPrefix),
+    };
+    recordValidationResult(input, result);
+    return result;
   }
 
   const result = await runAgentWithRetryAndTelemetry(
@@ -160,13 +224,25 @@ export async function runValidatePlanAgent(
       decisionOverride: "CONFIRM",
       decisionReason: "Plan validation passed",
     });
-    return formatResult("PASS", []);
+    const validationResult: PlanValidationRunResult = {
+      ...baseResult,
+      status: "PASS",
+      reasons: [],
+    };
+    recordValidationResult(input, validationResult);
+    return validationResult;
   }
 
   if (result.output.startsWith("INVALID:")) {
     const reason = result.output.replace("INVALID:", "").trim();
     if (!hasSpecificInvalidReason(result.output)) {
-      return formatResult("FAIL", ["Malformed plan-validate response - retry validation with a specific heading, line, or rule."]);
+      const validationResult: PlanValidationRunResult = {
+        ...baseResult,
+        status: "FAIL",
+        reasons: ["Malformed plan-validate response - retry validation with a specific heading, line, or rule."],
+      };
+      recordValidationResult(input, validationResult);
+      return validationResult;
     }
     logAgentResult(result, {
       agent: "plan-validate",
@@ -177,8 +253,20 @@ export async function runValidatePlanAgent(
       decisionOverride: "DENY",
       decisionReason: reason,
     });
-    return formatResult("FAIL", [reason || "Plan validation failed."]);
+    const validationResult: PlanValidationRunResult = {
+      ...baseResult,
+      status: "FAIL",
+      reasons: [reason || "Plan validation failed."],
+    };
+    recordValidationResult(input, validationResult);
+    return validationResult;
   }
 
-  return formatResult("FAIL", ["Malformed plan-validate response - retry validation."]);
+  const validationResult: PlanValidationRunResult = {
+    ...baseResult,
+    status: "FAIL",
+    reasons: ["Malformed plan-validate response - retry validation."],
+  };
+  recordValidationResult(input, validationResult);
+  return validationResult;
 }

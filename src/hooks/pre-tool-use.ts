@@ -2,7 +2,6 @@ import * as path from "path";
 import * as fs from "fs";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
-import { readPlanFileContent, validatePlanEdit } from "../utils/plan-source.js";
 import type { AdapterEncoder } from "../adapter/types.js";
 import { activeSpec } from "../adapter/spec.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
@@ -55,7 +54,6 @@ import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, loadCurrentEpoch, rotateEpoch } from "../scenario/epoch.js";
 import { onEpochRotation } from "../scenario/lifecycle.js";
-import { sessionPlansDir } from "../utils/paths.js";
 
 interface PipelineExit {
   decision: "allow" | "deny";
@@ -63,11 +61,6 @@ interface PipelineExit {
   reason: string;
   usesLlm?: boolean;
   mirroredFromLeader?: boolean;
-}
-
-function syntheticToolSource(content: string): string | null {
-  const match = content.match(/^\[([^\]]+)\]/);
-  return match?.[1] ?? null;
 }
 
 export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
@@ -281,29 +274,6 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
     return exitAfterFlush(out.exitCode, out.stdout);
   }
 
-  /**
-   * Shared plan-validate helper: reads plan content + transcript, calls checkPlanIntent,
-   * and returns the validation result. Does NOT call exitPipeline -- caller decides.
-   */
-  async function runPlanValidation(
-    mode: "edit" | "exit",
-    currentPlan: string | null,
-    overrideToolName?: string,
-    overrideToolInput?: unknown,
-    planFilePath?: string,
-  ): Promise<{ approved: boolean; reason?: string }> {
-    return validatePlanEdit({
-      currentPlan,
-      toolName: (overrideToolName ?? toolName) as "Write" | "Edit",
-      toolInput: (overrideToolInput ?? toolInput) as { content?: string; old_string?: string; new_string?: string },
-      transcriptPath: input.transcript_path,
-      projectDir,
-      hookName: "PreToolUse",
-      mode,
-      planFilePath,
-    });
-  }
-
   if (batchInfo) {
     // Leader (position 0) always runs the full pipeline.
     // Siblings (position > 0) poll tool-log.jsonl for the leader's decision
@@ -433,74 +403,6 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
       const filePath = extractFilePath(toolName, toolInput);
 
     if (filePath) {
-      // Plan-validate: Write/Edit to the active adapter's plans root.
-      if (
-        (toolName === "Write" || toolName === "Edit") &&
-        (isPathInDirectory(filePath, host.plansRoot) || isPathInDirectory(filePath, sessionPlansDir(sessionDir)))
-      ) {
-        // Skip validation if the adapter's plan-exit tool was recently approved.
-        const recentContext = await readTranscriptExact(
-          input.transcript_path,
-          APPEAL_COUNTS
-        );
-        const hasPlanExitApproval = recentContext.tool.some((r) => {
-          const source = syntheticToolSource(r.content);
-          return source !== null && spec.isPlanExit({
-            event: "PreToolUse",
-            canonicalToolName: source,
-            rawToolName: source,
-          });
-        });
-        if (hasPlanExitApproval) {
-          logFastPathApproval("plan-exit", "PreToolUse", toolName, projectDir, "Plan exit previously approved");
-          await exitPipeline({
-            decision: "allow",
-            agent: "plan-exit",
-            reason: "Plan exit previously approved",
-          });
-          return;
-        }
-
-        const currentPlan = await readPlanFileContent(filePath);
-        const validation = await runPlanValidation("edit", currentPlan, undefined, undefined, filePath);
-
-        if (!validation.approved) {
-          // IMPORTANT: Do NOT remove this appeal call. Without it, user overrides
-          // are ignored and plan writes get stuck in an infinite deny loop.
-          const planTranscript = formatTranscriptResult(recentContext);
-
-          const appeal = await appealHelper(
-            toolName,
-            `${toolName} to plan file ${filePath}`,
-            planTranscript,
-            validation.reason || "Plan validation failed",
-            projectDir,
-            "PreToolUse",
-            buildAppealUserState(state),
-            `plan-validate blocked: ${validation.reason}`
-          );
-
-          if (!appeal.overturned) {
-            await exitPipeline({
-              decision: "deny",
-              agent: "plan-validate",
-              reason: `Plan drift detected: ${validation.reason}`,
-              usesLlm: true,
-            });
-            return;
-          }
-          currentGateNote = appeal.gateNote;
-        }
-
-        await exitPipeline({
-          decision: "allow",
-          agent: "plan-validate",
-          reason: "Plan validation passed",
-          usesLlm: true,
-        });
-        return;
-      }
-
       // Host instruction-file validate: Write/Edit to any of the active
       // adapter's instruction files (Claude: CLAUDE.md; Codex: AGENTS.md and
       // CLAUDE.md). The validator handles all of them with the same prompt.

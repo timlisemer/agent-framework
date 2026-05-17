@@ -56,3 +56,7 @@ export function isPlanExit(input: PlanExitDetectionInput): boolean {
   if (input.event !== "PreToolUse") return false;
   return input.canonicalToolName === "ExitPlanMode" || input.rawToolName === "ExitPlanMode";
 }
+
+export function extractStopProposedPlan(_text: string | null | undefined): string | null {
+  return null;
+}

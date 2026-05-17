@@ -1,13 +1,20 @@
 import * as fs from "fs";
+import * as path from "path";
 import { activeSpec } from "../adapter/spec.js";
 import type { PlanSourceDescriptor } from "../adapter/types.js";
-import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
+import { checkPlanIntent, collectPlanValidationViolations } from "../agents/hooks/plan-validate.js";
 import { formatTranscriptResult, readTranscriptExact } from "./transcript.js";
 import { PLAN_VALIDATE_COUNTS } from "./transcript-presets.js";
 import { readJson, writeJson } from "./file-io.js";
 import { sessionCurrentPlanFile } from "./paths.js";
 import { getPathToPlanfile } from "./planfile.js";
-import { extractPlanName } from "./planfile.js";
+import { extractPlanName, extractPlanfileFooter } from "./planfile.js";
+import { comparePlanContent } from "./plan-content-compare.js";
+import {
+  hashPlanContent,
+  readPlanValidationStatus,
+} from "./plan-validation-status.js";
+import { validatePlanFileWithContract } from "../agents/mcp/validate-plan.js";
 
 export interface CurrentPlanLookupInput {
   transcriptPath: string;
@@ -102,6 +109,242 @@ export async function validateCurrentPlanExit(input: {
     pathToPlanfile,
   );
   return { ...result, source: { kind: "file", path: pathToPlanfile, planName: extractPlanName(content) ?? undefined } };
+}
+
+function stripViolationPrefix(text: string): string {
+  return text.replace(/^\[VIOLATION: [^\]]+\]\s*/, "");
+}
+
+function validationFailureWorkflow(planPath: string): string {
+  return `Iterate on the planfile using mcp__agent_framework__validate_plan for ${planPath} until it passes, then present the finished plan using <proposed_plan>.`;
+}
+
+function mismatchWorkflow(planPath: string): string {
+  return `Update the planfile at ${planPath}, validate it with mcp__agent_framework__validate_plan, and then present the same validated plan using <proposed_plan>.`;
+}
+
+function structureReasons(content: string, projectDir: string, planPath?: string): string[] {
+  const findings = collectPlanValidationViolations(content, projectDir, planPath);
+  return findings.allViolations.map(stripViolationPrefix);
+}
+
+function resolveFooterPath(projectDir: string, footerPath: string): string {
+  return path.isAbsolute(footerPath) ? path.resolve(footerPath) : path.resolve(projectDir, footerPath);
+}
+
+async function reportInvalidExtractedProposalWithPlanfile(input: {
+  extractedContent: string;
+  transcriptPath: string;
+  sessionDir?: string;
+  projectDir: string;
+  structureReasons: string[];
+}): Promise<{ approved: false; reason: string }> {
+  const planName = extractPlanName(input.extractedContent);
+  if (!planName || !input.sessionDir) {
+    return {
+      approved: false,
+      reason: `Extracted proposed plan is structurally invalid: ${input.structureReasons.join("; ") || "missing required plan structure."}`,
+    };
+  }
+
+  const planPath = await getCurrentPlanfilePath({
+    transcriptPath: input.transcriptPath,
+    sessionDir: input.sessionDir,
+    planName,
+  });
+  if (!planPath) {
+    return {
+      approved: false,
+      reason: `Extracted proposed plan is structurally invalid: ${input.structureReasons.join("; ") || "missing required plan structure."}`,
+    };
+  }
+
+  const fileContent = await readPlanFileContent(planPath);
+  if (!fileContent?.trim()) {
+    return {
+      approved: false,
+      reason: `Extracted proposed plan is structurally invalid: ${input.structureReasons.join("; ") || "missing required plan structure."}`,
+    };
+  }
+
+  const contentHash = hashPlanContent(fileContent);
+  const status = readPlanValidationStatus({
+    sessionDir: input.sessionDir,
+    planPath,
+    contentHash,
+  });
+  const statusText = status ? status.status : "no recorded pass/fail status";
+  const statusInstruction = status?.status === "pass"
+    ? "If this is the current plan, do not shrink or reduce details when presenting it in <proposed_plan>; present the same plan as the planfile."
+    : "If this is the current plan, iterate on the planfile using mcp__agent_framework__validate_plan until it passes, then present the finished plan using <proposed_plan>.";
+  return {
+    approved: false,
+    reason: [
+      `Extracted proposed plan is structurally invalid: ${input.structureReasons.join("; ") || "missing required plan structure."}`,
+      `A populated planfile already exists at ${planPath}.`,
+      `Last known validation status for that exact content: ${statusText}.`,
+      statusInstruction,
+      "If it is not the current plan, create a new named session planfile, validate that file with mcp__agent_framework__validate_plan until it passes, and then present the validated plan using <proposed_plan>.",
+    ].join(" "),
+  };
+}
+
+async function runSharedValidation(input: {
+  planPath: string;
+  transcriptPath: string;
+  sessionDir?: string;
+  projectDir: string;
+}) {
+  return validatePlanFileWithContract({
+    workingDir: input.projectDir,
+    planFile: input.planPath,
+    transcriptPath: input.transcriptPath,
+    sessionDir: input.sessionDir,
+  });
+}
+
+export async function validatePlanExitPresentation(input: {
+  transcriptPath: string;
+  sessionDir?: string;
+  projectDir: string;
+  hookName: string;
+  assistantText?: string | null;
+}): Promise<{ approved: boolean; reason?: string; source?: PlanSourceDescriptor }> {
+  void input.hookName;
+  const spec = activeSpec();
+  const extractedContent = spec.extractStopProposedPlan(input.assistantText);
+  if (!extractedContent) return validateCurrentPlanExit(input);
+
+  const extractedPlanName = extractPlanName(extractedContent);
+  const extractedStructureReasons = structureReasons(extractedContent, input.projectDir);
+  if (extractedStructureReasons.length > 0) {
+    if (!extractedPlanName) {
+      return {
+        approved: false,
+        reason: `Extracted proposed plan is structurally invalid: ${extractedStructureReasons.join("; ")}`,
+      };
+    }
+    return reportInvalidExtractedProposalWithPlanfile({
+      extractedContent,
+      transcriptPath: input.transcriptPath,
+      sessionDir: input.sessionDir,
+      projectDir: input.projectDir,
+      structureReasons: extractedStructureReasons,
+    });
+  }
+
+  const planName = extractedPlanName!;
+  const resolvedPath = await getCurrentPlanfilePath({
+    transcriptPath: input.transcriptPath,
+    sessionDir: input.sessionDir,
+    planName,
+  });
+  if (!resolvedPath) {
+    return { approved: false, reason: "Cannot exit plan mode without a planfile path." };
+  }
+
+  const footer = extractPlanfileFooter(extractedContent);
+  if (!footer) {
+    return { approved: false, reason: "Extracted proposed plan is structurally invalid: missing Planfile Path footer." };
+  }
+  if (footer.planName !== planName) {
+    return { approved: false, reason: "Extracted proposed plan footer Plan Name does not match the plan name." };
+  }
+
+  const footerPath = resolveFooterPath(input.projectDir, footer.planFilePath);
+  if (footerPath !== path.resolve(resolvedPath)) {
+    return {
+      approved: false,
+      reason: `Extracted proposed plan Planfile Path footer must match the resolved current planfile path. Footer path: ${footerPath}. Resolved path: ${path.resolve(resolvedPath)}.`,
+    };
+  }
+
+  let existingContent: string | null = null;
+  let exists = false;
+  try {
+    existingContent = await fs.promises.readFile(resolvedPath, "utf-8");
+    exists = true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      return {
+        approved: false,
+        reason: `The matching planfile at ${resolvedPath} is unreadable. Populate, repair, or recreate it before presenting <proposed_plan>.`,
+      };
+    }
+  }
+
+  if (!exists) {
+    await fs.promises.mkdir(path.dirname(resolvedPath), { recursive: true });
+    await fs.promises.writeFile(resolvedPath, extractedContent + "\n", "utf-8");
+    const validation = await runSharedValidation({
+      planPath: resolvedPath,
+      transcriptPath: input.transcriptPath,
+      sessionDir: input.sessionDir,
+      projectDir: input.projectDir,
+    });
+    if (validation.status === "PASS") {
+      const source = { kind: "file" as const, path: resolvedPath, planName };
+      if (input.sessionDir) writeCurrentPlanSidecar(input.sessionDir, source);
+      return { approved: true, source };
+    }
+    return {
+      approved: false,
+      reason: `${validation.reasons.join("; ") || "Plan validation failed."} ${validationFailureWorkflow(resolvedPath)} Only present <proposed_plan> after mcp__agent_framework__validate_plan passes.`,
+    };
+  }
+
+  if (!existingContent?.trim()) {
+    return {
+      approved: false,
+      reason: `The matching planfile at ${resolvedPath} is empty. Populate, repair, or recreate it before presenting <proposed_plan>.`,
+    };
+  }
+
+  const comparison = comparePlanContent(extractedContent, existingContent);
+  if (!comparison.equal) {
+    const detail = comparison.tooLong
+      ? "The extracted proposed plan is a different or heavily changed plan."
+      : `Raw diff:\n${comparison.rawDiff}`;
+    return {
+      approved: false,
+      reason: `${detail}\n${mismatchWorkflow(resolvedPath)}`,
+    };
+  }
+
+  const contentHash = hashPlanContent(existingContent);
+  const recorded = input.sessionDir
+    ? readPlanValidationStatus({ sessionDir: input.sessionDir, planPath: resolvedPath, contentHash })
+    : null;
+
+  if (recorded?.status === "pass") {
+    const source = { kind: "file" as const, path: resolvedPath, planName };
+    if (input.sessionDir) writeCurrentPlanSidecar(input.sessionDir, source);
+    return { approved: true, source };
+  }
+
+  if (recorded?.status === "fail") {
+    return {
+      approved: false,
+      reason: `The exact current planfile content previously failed validation. The agent must iterate on the planfile using mcp__agent_framework__validate_plan and must not present the plan using <proposed_plan> unless mcp__agent_framework__validate_plan has passed for that exact planfile content.`,
+    };
+  }
+
+  const validation = await runSharedValidation({
+    planPath: resolvedPath,
+    transcriptPath: input.transcriptPath,
+    sessionDir: input.sessionDir,
+    projectDir: input.projectDir,
+  });
+  if (validation.status === "PASS") {
+    const source = { kind: "file" as const, path: resolvedPath, planName };
+    if (input.sessionDir) writeCurrentPlanSidecar(input.sessionDir, source);
+    return { approved: true, source };
+  }
+  return {
+    approved: false,
+    reason: `${validation.reasons.join("; ") || "Plan validation failed."} The agent must iterate on the planfile using mcp__agent_framework__validate_plan and must not present the plan using <proposed_plan> unless mcp__agent_framework__validate_plan has passed for that exact planfile content.`,
+  };
 }
 
 export async function validatePlanEdit(input: {
