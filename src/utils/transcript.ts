@@ -144,6 +144,16 @@ interface AssistantGroup {
   entryCount: number;
 }
 
+function appendAssistantText(group: AssistantGroup, text: string): void {
+  if (!text) return;
+  if (group.text === text) return;
+
+  const existingParts = group.text.split("\n").map((part) => part.trim()).filter(Boolean);
+  if (existingParts.includes(text.trim())) return;
+
+  group.text = group.text ? `${group.text} ${text}` : text;
+}
+
 function addAssistantEntryToGroup(
   group: AssistantGroup,
   entry: TranscriptEntry,
@@ -157,7 +167,7 @@ function addAssistantEntryToGroup(
   if (Array.isArray(content)) {
     for (const block of content) {
       if (block.type === "text" && block.text) {
-        group.text = group.text ? `${group.text} ${block.text}` : block.text;
+        appendAssistantText(group, block.text);
       } else if (block.type === "thinking") {
         group.hasThinking = true;
       } else if (block.type === "tool_use") {
@@ -166,15 +176,27 @@ function addAssistantEntryToGroup(
       }
     }
   } else if (typeof content === "string" && content) {
-    group.text = group.text ? `${group.text} ${content}` : content;
+    appendAssistantText(group, content);
   }
+}
+
+function userEntryHasHumanText(entry: TranscriptEntry): boolean {
+  if (entry.message?.role !== "user" || entry.isMeta === true) return false;
+
+  const content = entry.message.content;
+  if (typeof content === "string") {
+    return content.length > 0;
+  }
+  if (!Array.isArray(content)) return false;
+
+  return content.some((block) => block.type === "text" && (block.text ?? "").length > 0);
 }
 
 /**
  * Build a map from jsonl index -> AssistantGroup. Adjacent assistant entries
  * in the same post-user run collapse into one group, even when adapter
  * materialization assigns distinct message ids. Non-message/null/meta lines do
- * not contribute and do not reset the active run; non-meta user entries do.
+ * not contribute and do not reset the active run; human user prompts do.
  */
 function buildAssistantGroups(
   parsedEntries: (TranscriptEntry | null)[]
@@ -188,7 +210,7 @@ function buildAssistantGroups(
     if (!entry || !entry.message) continue;
 
     if (entry.message.role !== "assistant") {
-      if (entry.message.role === "user" && entry.isMeta !== true) {
+      if (userEntryHasHumanText(entry)) {
         activeGroup = undefined;
       }
       continue;
@@ -665,8 +687,7 @@ export async function currentTurnAssistantState(
   let lastUserIndex = -1;
   for (let i = parsedEntries.length - 1; i >= 0; i--) {
     const entry = parsedEntries[i];
-    if (!entry || !entry.message || entry.message.role !== "user") continue;
-    if (entry.isMeta === true) continue;
+    if (!entry || !entry.message || !userEntryHasHumanText(entry)) continue;
     lastUserIndex = i;
     break;
   }

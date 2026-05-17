@@ -2,6 +2,10 @@ Fixtures here describe behaviour the framework already implements correctly. A r
 
 ## Recent changes
 
+2026-05-17 Codex subagent respond-first detection:
+
+- Promoted `codex-subagent-respond-first-misses-commentary-before-tools-after-update-plan-should-allow.json` after Codex transcript normalization started treating subagent `event_msg` `agent_message` commentary as assistant-authored text and current-turn grouping stopped treating `function_call_output` as a fresh human prompt.
+
 2026-05-16 Codex plan-mode detection:
 
 - Added `codex-default-mode-ignores-stale-plan-sidecar-should-allow.json`.

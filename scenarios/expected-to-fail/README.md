@@ -2,6 +2,10 @@ Fixtures here describe behaviour the framework does not yet implement. A run wit
 
 ## Recent changes
 
+2026-05-17 Codex subagent respond-first detection:
+
+- Promoted `codex-subagent-respond-first-misses-commentary-before-tools-after-update-plan-should-allow.json` out to `expected-to-pass/` after Codex subagent visible commentary and intervening `function_call_output` no longer make respond-first miss assistant text before the firing tool call.
+
 2026-05-13 scenario reclassification after three full `scenario_tester` runs:
 
 - Demoted stable expected-to-pass regressions into this folder: `appeal-overturns-tool-approve-deny-when-user-named-bash-command-with-flags.json`, `appeal-upholds-tool-approve-deny-when-user-named-different-action.json`, `appeal-upholds-tool-approve-deny-when-user-only-said-go-ahead.json`, `bash-cd-cat-head-chain-blocked-by-tool-approve-should-deny.json`, `bash-npx-tsc-blocked-wrong-reason.json`, `codex-apply-patch-angry-explicit-edit-should-allow.json`, `codex-force-check-uses-codex-wire-name.json`, `drift-free-edit-post-warning.json`, `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message.json`, `read-unasked-file-instead-of-doing-task-should-deny.json`, `sentiment-explicit-forbid-push.json`, and `tool-approve-fails-to-block-cd-cat-head-bash-violations.json`.

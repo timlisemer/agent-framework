@@ -372,6 +372,52 @@ describe("currentTurnAssistantState", () => {
     };
   }
 
+  function codexEventAgentMessage(text: string) {
+    return {
+      type: "event_msg",
+      payload: {
+        type: "agent_message",
+        message: text,
+        phase: "commentary",
+      },
+    };
+  }
+
+  function codexAssistantMessage(text: string) {
+    return {
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text }],
+        phase: "commentary",
+      },
+    };
+  }
+
+  function codexFunctionCall(id: string, name = "exec_command") {
+    return {
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        call_id: id,
+        name,
+        arguments: "{}",
+      },
+    };
+  }
+
+  function codexFunctionCallOutput(id: string, output = "done") {
+    return {
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: id,
+        output,
+      },
+    };
+  }
+
   it("treats adjacent distinct-id assistant text and tool_use entries as one responded turn", async () => {
     const filePath = writeTranscript([
       userText("please dont ignore the Raspberry Pi bootloader removal"),
@@ -418,7 +464,7 @@ describe("currentTurnAssistantState", () => {
     });
   });
 
-  it("does not merge assistant text across a user tool_result boundary", async () => {
+  it("keeps assistant text across a tool_result boundary in the same human turn", async () => {
     const filePath = writeTranscript([
       userText("run this"),
       assistantText("msg_text", "Running it now."),
@@ -429,8 +475,73 @@ describe("currentTurnAssistantState", () => {
     const result = await currentTurnAssistantState(filePath, "call_followup");
 
     expect(result).toEqual({
-      kind: "silent",
+      kind: "responded",
+      text: "Running it now.",
       toolUseIds: ["call_followup"],
+    });
+  });
+
+  it("counts Codex event_msg agent_message before a tool call as assistant text", async () => {
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    const filePath = writeTranscript([
+      {
+        type: "response_item",
+        payload: { type: "message", role: "user", content: "inspect this" },
+      },
+      codexEventAgentMessage("I will inspect the relevant files read-only."),
+      codexFunctionCall("call_inspect"),
+    ]);
+
+    const result = await currentTurnAssistantState(filePath, "call_inspect");
+
+    expect(result).toEqual({
+      kind: "responded",
+      text: "I will inspect the relevant files read-only.",
+      toolUseIds: ["call_inspect"],
+    });
+  });
+
+  it("deduplicates paired Codex event_msg and assistant response_item text before a tool call", async () => {
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    const text = "I will inspect the relevant files read-only.";
+    const filePath = writeTranscript([
+      {
+        type: "response_item",
+        payload: { type: "message", role: "user", content: "inspect this" },
+      },
+      codexEventAgentMessage(text),
+      codexAssistantMessage(text),
+      codexFunctionCall("call_inspect"),
+    ]);
+
+    const result = await currentTurnAssistantState(filePath, "call_inspect");
+
+    expect(result).toEqual({
+      kind: "responded",
+      text,
+      toolUseIds: ["call_inspect"],
+    });
+  });
+
+  it("does not let Codex function_call_output reset prior assistant text", async () => {
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    const filePath = writeTranscript([
+      {
+        type: "response_item",
+        payload: { type: "message", role: "user", content: "inspect this" },
+      },
+      codexEventAgentMessage("I will inspect the relevant files read-only."),
+      codexFunctionCall("call_plan", "update_plan"),
+      codexFunctionCallOutput("call_plan", "Plan updated"),
+      codexFunctionCall("call_inspect"),
+    ]);
+
+    const result = await currentTurnAssistantState(filePath, "call_inspect");
+
+    expect(result).toEqual({
+      kind: "responded",
+      text: "I will inspect the relevant files read-only.",
+      toolUseIds: ["call_plan", "call_inspect"],
     });
   });
 

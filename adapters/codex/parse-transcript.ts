@@ -52,8 +52,31 @@ function normalizeToolName(payload: Record<string, unknown>): string {
   return `${namespace}${name}`;
 }
 
+function assistantMessageContent(payload: Record<string, unknown>): ContentBlock[] {
+  const rawContent = payload.content;
+  const contentBlocks: ContentBlock[] = [];
+
+  if (typeof rawContent === "string") {
+    if (rawContent) contentBlocks.push({ type: "text", text: rawContent });
+  } else if (Array.isArray(rawContent)) {
+    for (const b of rawContent) {
+      const normalized = normalizeContentBlock(b);
+      if (normalized) contentBlocks.push(normalized);
+    }
+  }
+
+  return contentBlocks;
+}
+
+function eventMsgAgentMessageContent(payload: Record<string, unknown>): ContentBlock[] | null {
+  if (payload.type !== "agent_message") return null;
+  if (typeof payload.message !== "string" || payload.message.length === 0) return null;
+  return [{ type: "text", text: payload.message }];
+}
+
 interface RawEntry {
   isMeta?: boolean;
+  type?: string;
   payload?: Record<string, unknown>;
   message?: unknown;
 }
@@ -101,6 +124,44 @@ export function parseTranscript(rawLines: readonly string[]): readonly (Transcri
 
     const payloadType = payload.type as string | undefined;
 
+    if (raw.type === "event_msg") {
+      const contentBlocks = eventMsgAgentMessageContent(payload);
+      if (contentBlocks) {
+        const msgId = typeof payload.id === "string" ? payload.id : undefined;
+        i++;
+
+        while (i < parsed.length) {
+          const next = parsed[i].raw;
+          if (!next?.payload || typeof next.payload !== "object") break;
+          const nextPayload = next.payload;
+          const nextType = nextPayload.type as string | undefined;
+          if (nextType === "message" && nextPayload.role === "assistant") {
+            contentBlocks.push(...assistantMessageContent(nextPayload));
+            i++;
+            continue;
+          }
+          if (nextType !== "function_call" && nextType !== "custom_tool_call") break;
+
+          contentBlocks.push({
+            type: "tool_use",
+            id: typeof nextPayload.call_id === "string" ? nextPayload.call_id : undefined,
+            name: normalizeToolName(nextPayload),
+          });
+          i++;
+        }
+
+        result.push({
+          isMeta: raw.isMeta,
+          message: {
+            id: msgId,
+            role: "assistant",
+            content: contentBlocks,
+          },
+        });
+        continue;
+      }
+    }
+
     // Assistant text message — open an assistant turn and greedily collect
     // subsequent function_call lines into the same canonical entry.
     if (payloadType === "message") {
@@ -108,17 +169,7 @@ export function parseTranscript(rawLines: readonly string[]): readonly (Transcri
 
       if (role === "assistant") {
         // Collect text content from this message line
-        const rawContent = payload.content;
-        const contentBlocks: ContentBlock[] = [];
-
-        if (typeof rawContent === "string") {
-          if (rawContent) contentBlocks.push({ type: "text", text: rawContent });
-        } else if (Array.isArray(rawContent)) {
-          for (const b of rawContent) {
-            const normalized = normalizeContentBlock(b);
-            if (normalized) contentBlocks.push(normalized);
-          }
-        }
+        const contentBlocks = assistantMessageContent(payload);
 
         const msgId = typeof payload.id === "string" ? payload.id : undefined;
 
