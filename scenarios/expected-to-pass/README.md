@@ -2,6 +2,10 @@ Fixtures here describe behaviour the framework already implements correctly. A r
 
 ## Recent changes
 
+2026-05-17 Stop-hook corrective-promise stall detection:
+
+- Added `stop-after-apology-promises-helper-search-without-action-should-block.json` for the live helper-search repro where the assistant apologized, named the exact requested search, promised to stay on topic, and stopped without doing the search. The expected block reason is the deterministic `Resume the task` feedback.
+
 2026-05-17 Codex subagent respond-first detection:
 
 - Promoted `codex-subagent-respond-first-misses-commentary-before-tools-after-update-plan-should-allow.json` after Codex transcript normalization started treating subagent `event_msg` `agent_message` commentary as assistant-authored text and current-turn grouping stopped treating `function_call_output` as a fresh human prompt.

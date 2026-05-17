@@ -38,6 +38,9 @@ export const ANNOUNCEMENT_WITHOUT_ACTION_RE =
 export const BLOCKED_INTENT_NAMES_ANNOUNCEMENT_WITHOUT_ACTION_RE =
   /\b(?:announc\w*|promis\w*|declar\w*|stat\w*|say\w*|commit\w*\s+to|claim\w*\s+to|forward[-\s]?looking)\b[^.;!?]{0,80}\b(?:without|instead\s+of|but\s+not|rather\s+than|in\s+place\s+of)\b[^.;!?]{0,80}\b(?:do(?:ing)?|produc\w*|deliver\w*|creat\w*|mak\w*|writ\w*|perform\w*|execut\w*|run\w*|build\w*|implement\w*|finish\w*|complet\w*|author\w*|provid\w*|generat\w*|action|payload|deliverable|scenario|file|fix|change|edit|patch|diff|content|output|result)\b/i;
 
+const CORRECTIVE_COMMITMENT_WITHOUT_ACTION_RE =
+  /\b(?:i(?:['\u2019]m|\s+am)\s+sorry|you\s+told\s+me|you\s+asked\s+me|you\s+wanted\s+me)\b[\s\S]{0,500}\bi(?:['\u2019]ll|\s+will)\s+(?:stay|keep|focus|return|stick)\b[^.!?]{0,180}\b(?:topic|task|helper|search|request|instruction)\b[^.!?]{0,220}\b(?:identify|use|search|find|locate|fix|implement|change|update|do|handle)\b/i;
+
 export function isHostileContext(
   prediction: ToolPrediction | null,
   frustrationStreak: number,
@@ -55,6 +58,7 @@ export function detectStallShape(
 
   const concreteActionMarkers = [
     /\bhere (?:is|are) the (?:results?|output|answer|fix|changes?|diff|file)\b/i,
+    /\bi (?:found|identified|located) (?:the|an|a|that)\b/i,
     /\b(?:ran|executed|completed|finished) (?:the|your|all)\b/i,
     /\b(?:pushed|committed|merged|deployed|published) (?:the|it|this|these|to|changes?|commits?)\b/i,
     /\btest(?:s)? (?:passed|failed|results?)\b/i,
@@ -89,6 +93,10 @@ export function detectStallShape(
 
   const apologyCount = (stripped.match(/\b(?:i(?:'| a)m sorry|i apologi[sz]e|sorry for)\b/gi) || []).length;
   if (apologyCount >= 3) return "apology-dominant stop without concrete action";
+
+  if (CORRECTIVE_COMMITMENT_WITHOUT_ACTION_RE.test(stripped)) {
+    return "corrective commitment without concrete action";
+  }
 
   const selfAnalysisMarkers = [
     /\bi (?:invented|fabricated|substituted|boxed myself|dodged|misrepresent)/i,
