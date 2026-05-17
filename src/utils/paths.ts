@@ -19,7 +19,7 @@ import { resolveHostContext } from "./host-context.js";
 /**
  * In-memory cache of resolved session directories.
  * Avoids repeated readdirSync calls within the same process lifetime.
- * Keyed by transcript hash.
+ * Keyed by project plus transcript hash.
  */
 const sessionDirCache = new Map<string, string>();
 
@@ -27,6 +27,12 @@ const sessionDirCache = new Map<string, string>();
  * Per-process sidecar-written tracking — each dirPath written at most once.
  */
 const sidecarWrittenForDir = new Set<string>();
+
+export interface AgentFrameworkSessionDirInput {
+  transcriptPath?: string;
+  projectDir?: string;
+  explicitSessionDir?: string;
+}
 
 // ─── Roots ────────────────────────────────────────────────────────────────
 
@@ -148,33 +154,52 @@ export function formatTimestamp(date: Date = new Date()): string {
 // ─── Per-session paths ────────────────────────────────────────────────────
 
 /**
- * Get the session-scoped directory for a transcript.
+ * Get the agent-framework session directory for hooks, MCP tools, scenarios,
+ * replay, and tests.
  *
- * PRESERVES AGENT_FRAMEWORK_SESSION_DIR short-circuit (for synthetic
- * transcript paths in scenario runner that have no live ~/.claude/projects/ file).
+ * With a transcript path, real sessions are keyed under
+ * ~/.agent-framework/sessions/<project>/<timestamp>_<hash>/ and the transcript
+ * sidecar is refreshed. Transcript paths inside ~/.agent-framework/test-runs/
+ * use their containing cache directory as the session directory.
  *
- * For real transcripts: folder name is `{yyyy-mm-dd-HHmm}_{hash}` where
- * the timestamp is set once at creation time. Discovery scans the parent
- * dir for an existing folder ending with `_{hash}`.
- *
- * Also writes a transcript-path.txt sidecar on all non-bypass return paths,
- * idempotently (skipped if content already matches, at most once per process
- * per dirPath).
+ * Without a transcript path, the most recent transcript-path.txt sidecar for
+ * the project selects the current session. explicitSessionDir is for tests and
+ * in-process harness code that already owns an isolated session directory.
  */
-export function sessionDir(transcriptPath: string): string {
-  if (process.env.AGENT_FRAMEWORK_SESSION_DIR) {
-    fs.mkdirSync(process.env.AGENT_FRAMEWORK_SESSION_DIR, { recursive: true });
-    return process.env.AGENT_FRAMEWORK_SESSION_DIR;
+export function getAgentFrameworkSessionDir(input: AgentFrameworkSessionDirInput = {}): string {
+  if (input.explicitSessionDir) {
+    fs.mkdirSync(input.explicitSessionDir, { recursive: true });
+    if (input.transcriptPath) writeSidecarIfNeeded(input.explicitSessionDir, input.transcriptPath);
+    return input.explicitSessionDir;
   }
 
+  if (!input.transcriptPath) return resolveCurrentSessionDirFromSidecar(input.projectDir);
+
+  const testRunDir = testRunSessionDirForTranscript(input.transcriptPath);
+  if (testRunDir) {
+    fs.mkdirSync(testRunDir, { recursive: true });
+    writeSidecarIfNeeded(testRunDir, input.transcriptPath);
+    return testRunDir;
+  }
+
+  return sessionDirForTranscript(input.transcriptPath, input.projectDir);
+}
+
+export function sessionDir(transcriptPath: string): string {
+  return getAgentFrameworkSessionDir({ transcriptPath });
+}
+
+function sessionDirForTranscript(transcriptPath: string, projectDir?: string): string {
   const hash = hashString(transcriptPath);
-  const cached = sessionDirCache.get(hash);
+  const projectKey = encodeAgentFrameworkProjectDir(projectDir);
+  const cacheKey = `${projectKey}:${hash}`;
+  const cached = sessionDirCache.get(cacheKey);
   if (cached) {
     writeSidecarIfNeeded(cached, transcriptPath);
     return cached;
   }
 
-  const parentDir = path.join(runtimeRoot(), "sessions", encodeAgentFrameworkProjectDir());
+  const parentDir = path.join(runtimeRoot(), "sessions", projectKey);
   fs.mkdirSync(parentDir, { recursive: true });
 
   const suffix = `_${hash}`;
@@ -194,9 +219,51 @@ export function sessionDir(transcriptPath: string): string {
     fs.mkdirSync(dirPath, { recursive: true });
   }
 
-  sessionDirCache.set(hash, dirPath);
+  sessionDirCache.set(cacheKey, dirPath);
   writeSidecarIfNeeded(dirPath, transcriptPath);
   return dirPath;
+}
+
+function testRunSessionDirForTranscript(transcriptPath: string): string | null {
+  const resolved = path.resolve(transcriptPath);
+  const root = path.resolve(testRunsRoot());
+  if (!(resolved.startsWith(root + path.sep) || resolved === root)) return null;
+  return path.dirname(resolved);
+}
+
+export function isTestRunSessionDir(sessionDirPath: string): boolean {
+  const resolved = path.resolve(sessionDirPath);
+  const root = path.resolve(testRunsRoot());
+  return resolved.startsWith(root + path.sep) || resolved === root;
+}
+
+function resolveCurrentSessionDirFromSidecar(projectDir?: string): string {
+  const parentDir = path.join(runtimeRoot(), "sessions", encodeAgentFrameworkProjectDir(projectDir));
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(parentDir);
+  } catch {
+    throw new Error(`no session directory found at ${parentDir} - has any hook fired yet?`);
+  }
+  const candidates = entries
+    .map((name) => {
+      const sessionDirPath = path.join(parentDir, name);
+      const sidecar = sessionTranscriptPathSidecar(sessionDirPath);
+      try {
+        const stat = fs.statSync(sidecar);
+        const transcriptPath = fs.readFileSync(sidecar, "utf-8").trim();
+        if (!transcriptPath || !fs.existsSync(transcriptPath)) return undefined;
+        return { sessionDirPath, mtimeMs: stat.mtimeMs };
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((c): c is { sessionDirPath: string; mtimeMs: number } => c !== undefined)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  if (candidates.length === 0) {
+    throw new Error(`no transcript-path.txt sidecar found under ${parentDir}`);
+  }
+  return candidates[0].sessionDirPath;
 }
 
 function writeSidecarIfNeeded(dirPath: string, transcriptPath: string): void {

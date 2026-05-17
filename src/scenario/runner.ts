@@ -831,7 +831,6 @@ async function main() {
     cwd,
   });
 
-  process.env.AGENT_FRAMEWORK_SESSION_DIR = cacheDir;
   const timeoutMs = scenario.env?.timeout_ms ?? 60000;
   const fanout = scenario.target.fanout === true;
 

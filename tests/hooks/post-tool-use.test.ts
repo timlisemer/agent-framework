@@ -4,7 +4,7 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
 import { mainPostToolUse } from "../../src/hooks/post-tool-use.js";
-import { sessionCurrentPlanFile, sessionPlanFile } from "../../src/utils/paths.js";
+import { getAgentFrameworkSessionDir, sessionCurrentPlanFile, sessionPlanFile } from "../../src/utils/paths.js";
 
 vi.mock("../../src/utils/hook-bootstrap.js", async () => {
   const actual = await vi.importActual<typeof import("../../src/utils/hook-bootstrap.js")>(
@@ -19,29 +19,26 @@ vi.mock("../../src/utils/hook-bootstrap.js", async () => {
 describe("mainPostToolUse planfile sidecar", () => {
   let tempDir: string;
   let transcriptPath: string;
-  let prevSessionDir: string | undefined;
+  let sessionDir: string;
   let prevAdapter: string | undefined;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "post-tool-use-plan-"));
     transcriptPath = path.join(tempDir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
-    prevSessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR;
+    sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
     prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
-    process.env.AGENT_FRAMEWORK_SESSION_DIR = path.join(tempDir, "session");
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
   });
 
   afterEach(() => {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
     fs.rmSync(tempDir, { recursive: true, force: true });
-    if (prevSessionDir === undefined) delete process.env.AGENT_FRAMEWORK_SESSION_DIR;
-    else process.env.AGENT_FRAMEWORK_SESSION_DIR = prevSessionDir;
     if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
     else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
   });
 
   it("records the active current-plan sidecar after a successful session planfile write", async () => {
-    const sessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR!;
     const planPath = sessionPlanFile(sessionDir, "named-plan");
     fs.mkdirSync(path.dirname(planPath), { recursive: true });
     fs.writeFileSync(

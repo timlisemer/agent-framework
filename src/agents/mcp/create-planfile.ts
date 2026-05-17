@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getPathToPlanfile } from "../../utils/planfile.js";
 import { writeCurrentPlanSidecar } from "../../utils/plan-source.js";
+import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
 import { validatePlanFileWithContract } from "./validate-plan.js";
 
 export interface CreatePlanfileInput {
@@ -17,7 +18,7 @@ function normalizePlanContent(planName: string, planPath: string, content: strin
 }
 
 export async function runCreatePlanfileAgent(input: CreatePlanfileInput): Promise<string> {
-  const sessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR;
+  const sessionDir = getAgentFrameworkSessionDir();
   const planPath = await getPathToPlanfile({
     transcriptPath: "",
     sessionDir,
@@ -34,7 +35,7 @@ export async function runCreatePlanfileAgent(input: CreatePlanfileInput): Promis
     planFile: planPath,
     sessionDir,
   });
-  if (validation.status === "PASS" && sessionDir) {
+  if (validation.status === "PASS") {
     writeCurrentPlanSidecar(sessionDir, { kind: "file", path: planPath, planName: input.planName });
   }
 

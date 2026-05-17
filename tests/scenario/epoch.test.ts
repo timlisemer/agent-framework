@@ -3,26 +3,20 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../../src/scenario/epoch.js";
+import { transcriptCacheDir } from "../../src/utils/paths.js";
 
 describe("epoch", () => {
   let tmpDir: string;
   let transcriptPath: string;
-  const ORIG_SESSION_DIR = process.env.AGENT_FRAMEWORK_SESSION_DIR;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "af-epoch-test-"));
     transcriptPath = path.join(tmpDir, "transcript.jsonl");
-    // Ensure we're not in replay context
-    delete process.env.AGENT_FRAMEWORK_SESSION_DIR;
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
-    if (ORIG_SESSION_DIR !== undefined) {
-      process.env.AGENT_FRAMEWORK_SESSION_DIR = ORIG_SESSION_DIR;
-    } else {
-      delete process.env.AGENT_FRAMEWORK_SESSION_DIR;
-    }
+    fs.rmSync(transcriptCacheDir("epoch-test-replay-context"), { recursive: true, force: true });
   });
 
   it("detectEpochChange returns rotated:false on a fresh session (no snapshots)", () => {
@@ -32,9 +26,12 @@ describe("epoch", () => {
     expect(result.rotated).toBe(false);
   });
 
-  it("detectEpochChange returns rotated:false when replay context is set", () => {
-    process.env.AGENT_FRAMEWORK_SESSION_DIR = tmpDir;
-    const result = detectEpochChange(tmpDir, transcriptPath);
+  it("detectEpochChange returns rotated:false for replay/test-run sessions", () => {
+    const replayDir = transcriptCacheDir("epoch-test-replay-context");
+    fs.mkdirSync(replayDir, { recursive: true });
+    const replayTranscriptPath = path.join(replayDir, "transcript.jsonl");
+    fs.writeFileSync(replayTranscriptPath, "");
+    const result = detectEpochChange(replayDir, replayTranscriptPath);
     expect(result.rotated).toBe(false);
   });
 

@@ -33,7 +33,13 @@ import { evaluateRulesForUserPromptSubmit } from "../../src/rules/index.js";
 import { exitAfterFlush } from "../../src/utils/hook-bootstrap.js";
 import { checkPlanIntent } from "../../src/agents/hooks/plan-validate.js";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
-import { sessionCurrentPlanFile, sessionPlanFile, sessionPlanModeStateFile, sessionStateFile } from "../../src/utils/paths.js";
+import {
+  getAgentFrameworkSessionDir,
+  sessionCurrentPlanFile,
+  sessionPlanFile,
+  sessionPlanModeStateFile,
+  sessionStateFile,
+} from "../../src/utils/paths.js";
 
 const mockEvaluateRulesForUserPromptSubmit = vi.mocked(evaluateRulesForUserPromptSubmit);
 const mockExitAfterFlush = vi.mocked(exitAfterFlush);
@@ -53,25 +59,20 @@ const encoder: AdapterEncoder = {
 describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
   let tempDir: string;
   let transcriptPath: string;
-  let prevSessionDir: string | undefined;
+  let sessionDir: string;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheckPlanIntent.mockResolvedValue({ approved: true });
-    prevSessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR;
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "user-prompt-submit-test-"));
-    process.env.AGENT_FRAMEWORK_SESSION_DIR = path.join(tempDir, "session");
     transcriptPath = path.join(tempDir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
+    sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
   });
 
   afterEach(() => {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
     fs.rmSync(tempDir, { recursive: true, force: true });
-    if (prevSessionDir === undefined) {
-      delete process.env.AGENT_FRAMEWORK_SESSION_DIR;
-    } else {
-      process.env.AGENT_FRAMEWORK_SESSION_DIR = prevSessionDir;
-    }
   });
 
   it("skips UserPromptSubmit rules for direct agent-framework slash commands", async () => {
@@ -175,7 +176,7 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
       );
 
       const state = JSON.parse(
-        fs.readFileSync(sessionPlanModeStateFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!), "utf-8"),
+        fs.readFileSync(sessionPlanModeStateFile(sessionDir), "utf-8"),
       ) as { active: boolean; mode: string; detection_source: string };
       expect(state).toMatchObject({
         active: true,
@@ -192,13 +193,13 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
     const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
     try {
-      fs.mkdirSync(process.env.AGENT_FRAMEWORK_SESSION_DIR!, { recursive: true });
-      const planPath = sessionPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!, "test-plan");
+      fs.mkdirSync(sessionDir, { recursive: true });
+      const planPath = sessionPlanFile(sessionDir, "test-plan");
       fs.mkdirSync(path.dirname(planPath), { recursive: true });
       const planContent = `Plan Name: test-plan\n\n## User Goal\nImplement x.\n\nPlanfile Path: ${planPath}\nPlan Name: test-plan`;
       fs.writeFileSync(planPath, planContent);
       fs.writeFileSync(
-        sessionCurrentPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!),
+        sessionCurrentPlanFile(sessionDir),
         JSON.stringify({ kind: "file", path: planPath, planName: "test-plan" }) + "\n",
       );
 
@@ -223,7 +224,7 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
         "exit",
         planPath,
       );
-      const state = JSON.parse(fs.readFileSync(sessionStateFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!), "utf-8")).data;
+      const state = JSON.parse(fs.readFileSync(sessionStateFile(sessionDir), "utf-8")).data;
       expect(state.currentEditIntent).toBe(true);
       expect(state.currentPrediction.intent).toContain("implementation phase has begun");
       expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "");
@@ -238,12 +239,12 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
     mockCheckPlanIntent.mockResolvedValue({ approved: false, reason: "bad plan" });
     try {
-      fs.mkdirSync(process.env.AGENT_FRAMEWORK_SESSION_DIR!, { recursive: true });
-      const planPath = sessionPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!, "bad-plan");
+      fs.mkdirSync(sessionDir, { recursive: true });
+      const planPath = sessionPlanFile(sessionDir, "bad-plan");
       fs.mkdirSync(path.dirname(planPath), { recursive: true });
       fs.writeFileSync(planPath, "bad");
       fs.writeFileSync(
-        sessionCurrentPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!),
+        sessionCurrentPlanFile(sessionDir),
         JSON.stringify({ kind: "file", path: planPath, planName: "bad-plan" }) + "\n",
       );
 

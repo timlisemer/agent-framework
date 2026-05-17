@@ -40,6 +40,11 @@ Plan-mode and injected-context reproducibility use additional session sidecars:
   `<proposed_plan>` acceptance and explicit `validate_plan` MCP calls share
   this cache so a previously validated planfile does not need to be revalidated
   unless its content changes.
+
+Scenario and replay transcripts are written under their test-run cache
+directory, and the shared session resolver treats that containing cache
+directory as the session directory. The harness does not use a session-dir
+environment override.
 - `session-injections.jsonl` stores generic injected context records, including
   exact file-backed source content for planning-contract injections.
 

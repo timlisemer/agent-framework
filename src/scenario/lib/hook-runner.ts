@@ -67,7 +67,7 @@ export function hookScript(name: string, adapter?: string): string {
 }
 
 /**
- * Build the environment Claude Code hooks expect when spawned by the harness.
+ * Build the environment hooks expect when spawned by the harness.
  *
  * `extra` merges additional env vars on top of the defaults — used by
  * scenario.ts to plumb `AGENT_FRAMEWORK_LLM_STUBS` into the hook process so
@@ -82,10 +82,10 @@ export function buildEnv(
   extra?: Record<string, string>,
   adapter?: string,
 ): Record<string, string> {
+  void sessionDir;
   return {
     AGENT_FRAMEWORK_ROOT: REPO_ROOT,
     CLAUDE_PROJECT_DIR: cwd,
-    AGENT_FRAMEWORK_SESSION_DIR: sessionDir,
     ...(adapter ? { AGENT_FRAMEWORK_ADAPTER: adapter } : {}),
     ...(extra ?? {}),
   };

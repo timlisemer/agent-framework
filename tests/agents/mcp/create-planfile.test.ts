@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import {
+  getAgentFrameworkSessionDir,
   sessionCurrentPlanFile,
   sessionPlanFile,
   sessionPlanValidationStatusFile,
@@ -54,15 +55,16 @@ async function loadRunCreatePlanfileAgent(stub = "VALID") {
 describe("runCreatePlanfileAgent", () => {
   afterEach(() => {
     delete process.env.AGENT_FRAMEWORK_LLM_STUBS;
-    delete process.env.AGENT_FRAMEWORK_SESSION_DIR;
     vi.resetModules();
   });
 
   it("writes a normalized session planfile, validates it, and records current-plan on PASS", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-planfile-"));
+    let sessionDir = "";
     try {
-      const sessionDir = path.join(tempDir, "session");
-      process.env.AGENT_FRAMEWORK_SESSION_DIR = sessionDir;
+      const transcriptPath = path.join(tempDir, "transcript.jsonl");
+      fs.writeFileSync(transcriptPath, "");
+      sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: process.cwd() });
       const runCreatePlanfileAgent = await loadRunCreatePlanfileAgent();
 
       const result = await runCreatePlanfileAgent({
@@ -85,15 +87,18 @@ describe("runCreatePlanfileAgent", () => {
       const status = JSON.parse(fs.readFileSync(sessionPlanValidationStatusFile(sessionDir), "utf-8"));
       expect(Object.values(status)[0]).toMatchObject({ status: "pass", planPath });
     } finally {
+      if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
   it("does not update current-plan when validation fails", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-planfile-"));
+    let sessionDir = "";
     try {
-      const sessionDir = path.join(tempDir, "session");
-      process.env.AGENT_FRAMEWORK_SESSION_DIR = sessionDir;
+      const transcriptPath = path.join(tempDir, "transcript.jsonl");
+      fs.writeFileSync(transcriptPath, "");
+      sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: process.cwd() });
       const runCreatePlanfileAgent = await loadRunCreatePlanfileAgent("INVALID: Missing concrete file paths.");
 
       const result = await runCreatePlanfileAgent({
@@ -106,6 +111,7 @@ describe("runCreatePlanfileAgent", () => {
       expect(fs.existsSync(sessionPlanFile(sessionDir, "failing-plan"))).toBe(true);
       expect(fs.existsSync(sessionCurrentPlanFile(sessionDir))).toBe(false);
     } finally {
+      if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });

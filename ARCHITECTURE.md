@@ -542,7 +542,11 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 
 ## Session State Persistence
 
-Each session persists core state files under `~/.agent-framework/sessions/{project}/{hash}/`:
+Each live session persists core state files under
+`~/.agent-framework/sessions/{project}/{timestamp}_{hash}/`. The shared
+agent-framework session resolver maps hook transcript paths to these directories
+and writes `transcript-path.txt`; MCP tools without a transcript path use the
+latest sidecar for the active project as the current session.
 
 1. **`state.json`** — SessionState (prediction, edit-intent, force-check lockout, frustration streak, window size, tool count).
 2. **`gate-reasoning.json`** — priority-evicted denial memory with NOTE/WARNING/appeal outcomes.
@@ -554,8 +558,11 @@ the active file-backed plan descriptor, and `plan-validation-status.json`
 records exact-content plan validation pass/fail status keyed by resolved
 planfile path plus content hash.
 
-`create_planfile` resolves `plans/<name>.md` under the current session and
-returns the planfile path together with the validation PASS/FAIL result.
+`create_planfile` resolves `plans/<name>.md` under the current session via the
+shared resolver and returns the planfile path together with the validation
+PASS/FAIL result. Scenario and replay transcripts under
+`~/.agent-framework/test-runs/` use their containing cache directory as the
+session directory so test artifacts stay isolated.
 
 Compaction recovery relies on the host agent's native transcript compaction — no app-layer summary re-inject.
 

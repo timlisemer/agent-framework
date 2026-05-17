@@ -3,7 +3,12 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { CacheManager, getSessionDir } from "../../src/utils/cache-manager.js";
-import { formatTimestamp } from "../../src/utils/paths.js";
+import {
+  formatTimestamp,
+  getAgentFrameworkSessionDir,
+  sessionTranscriptPathSidecar,
+  transcriptCacheDir,
+} from "../../src/utils/paths.js";
 
 interface TestEntry {
   id: string;
@@ -219,5 +224,30 @@ describe("getSessionDir", () => {
     const second = getSessionDir("/tmp/test-transcript-discovery.jsonl");
     expect(second).toBe(first);
     fs.rmSync(first, { recursive: true, force: true });
+  });
+
+  it("resolves the most recent project session from transcript sidecars", () => {
+    const transcriptPath = "/tmp/test-transcript-sidecar-current.jsonl";
+    fs.writeFileSync(transcriptPath, "");
+    const sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: process.cwd() });
+    try {
+      expect(getAgentFrameworkSessionDir({ projectDir: process.cwd() })).toBe(sessionDir);
+    } finally {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+      fs.rmSync(transcriptPath, { force: true });
+    }
+  });
+
+  it("uses test-run transcript containing directories as session dirs", () => {
+    const sessionDir = transcriptCacheDir("resolver-test-run");
+    const transcriptPath = path.join(sessionDir, "transcript.jsonl");
+    fs.mkdirSync(sessionDir, { recursive: true });
+    fs.writeFileSync(transcriptPath, "");
+    try {
+      expect(getAgentFrameworkSessionDir({ transcriptPath })).toBe(sessionDir);
+      expect(fs.readFileSync(sessionTranscriptPathSidecar(sessionDir), "utf-8").trim()).toBe(transcriptPath);
+    } finally {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+    }
   });
 });

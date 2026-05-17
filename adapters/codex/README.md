@@ -46,8 +46,11 @@ Codex planning currently receives the planning contract from `~/.codex/AGENTS.md
 as a temporary global workaround. The hook-based hidden context injection code is
 still present but disabled until Codex applies `suppressOutput` to hook output.
 The plan skills call `mcp__agent_framework__create_planfile` during
-consolidation. That tool writes the named session planfile and immediately runs
-plan validation for the written content.
+consolidation. That tool resolves the current session through the shared
+agent-framework session resolver, writes the named session planfile, and
+immediately runs plan validation for the written content. When the MCP call does
+not include a transcript path, the resolver uses the latest
+`transcript-path.txt` sidecar for the active project.
 
 Codex planfiles live under the agent-framework session `plans/` directory.
 The session `current-plan.json` sidecar stores only the active planfile

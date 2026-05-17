@@ -99,13 +99,16 @@ The `commit` agent enforces the complete verification chain before committing.
 
 Planfile writes are no longer validated on every `Write` or `Edit`.
 Plan1/plan3/plan5 consolidation calls `create_planfile`, which resolves the
-current session planfile path, writes the named planfile, normalizes the
-header/footer, and runs the plan contract validator immediately. `validate_plan`
-remains available for explicit revalidation and for the remediation workflow
-shown in validation failures. Codex Stop-hook acceptance still validates a
-whole-message `<proposed_plan>` by comparing the inline presentation against
-the file-backed planfile, consulting or recording exact-content validation
-status, and updating the session current-plan sidecar on success.
+current session through the shared agent-framework session resolver, writes the
+named planfile, normalizes the header/footer, and runs the plan contract
+validator immediately. MCP calls without a transcript path recover the current
+session from the latest `transcript-path.txt` sidecar for the active project.
+`validate_plan` remains available for explicit revalidation and for the
+remediation workflow shown in validation failures. Codex Stop-hook acceptance
+still validates a whole-message `<proposed_plan>` by comparing the inline
+presentation against the file-backed planfile, consulting or recording
+exact-content validation status, and updating the session current-plan sidecar
+on success.
 
 ## Performance
 

@@ -22,7 +22,7 @@ import {
   hashPlanContent,
   recordPlanValidationStatus,
 } from "../../utils/plan-validation-status.js";
-import { getSessionDir } from "../../utils/session-store.js";
+import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
 import { appendPlanfileValidationWorkflow } from "../../utils/planfile.js";
 
 const VALIDATE_PLAN_SYSTEM_PROMPT = `You are a plan validator. Validate the PLAN CONTENT itself.
@@ -115,7 +115,8 @@ export async function runValidatePlanAgent(
 
 function recordValidationResult(input: ValidatePlanInput, result: PlanValidationRunResult): void {
   if (!result.resolvedPath || result.contentHash === undefined) return;
-  const sessionDir = input.sessionDir ?? (input.transcriptPath ? getSessionDir(input.transcriptPath) : undefined);
+  const sessionDir = input.sessionDir ??
+    (input.transcriptPath ? getAgentFrameworkSessionDir({ transcriptPath: input.transcriptPath }) : undefined);
   if (!sessionDir) return;
   recordPlanValidationStatus({
     sessionDir,

@@ -113,7 +113,7 @@ server.registerTool(
   "create_planfile",
   {
     title: "Create Planfile",
-    description: "Create or overwrite the current session planfile for a lowercase kebab-case plan name, normalize Plan Name and Planfile Path footer, then validate it.",
+    description: "Create or overwrite the current session planfile for a lowercase kebab-case plan name, resolving the session through transcript sidecars when needed, normalize Plan Name and Planfile Path footer, then validate it.",
     inputSchema: {
       plan_name: z.string().describe("Lowercase kebab-case plan name"),
       content: z.string().describe("Plan body/content to write. The tool normalizes the Plan Name header and Planfile Path footer.")
@@ -485,7 +485,7 @@ server.registerTool(
   "transcript",
   {
     title: "Transcript",
-    description: "Return the absolute path to the current agent session's transcript .jsonl file. Used by the /transcript slash command. Resolves the path from the most recent transcript-path.txt sidecar under ~/.agent-framework/sessions/<project>/ when called with no arguments.",
+    description: "Return the absolute path to the current agent session's transcript .jsonl file. Used by the /transcript slash command. Uses the shared session resolver and the most recent transcript-path.txt sidecar under ~/.agent-framework/sessions/<project> when called with no arguments.",
     inputSchema: {
       transcript_path: z.string().optional().describe("Optional explicit transcript file path. Omit to auto-resolve from the most recent session sidecar.")
     }

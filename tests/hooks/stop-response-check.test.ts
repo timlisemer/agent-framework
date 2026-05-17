@@ -4,6 +4,7 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
 import {
+  getAgentFrameworkSessionDir,
   sessionCurrentPlanFile,
   sessionPlanFile,
   sessionPlanValidationStatusFile,
@@ -98,7 +99,6 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
   let tempDir: string;
   let transcriptPath: string;
   let sessionDir: string;
-  let prevSessionDir: string | undefined;
   let prevAdapter: string | undefined;
 
   beforeEach(() => {
@@ -106,10 +106,8 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "stop-plan-test-"));
     transcriptPath = path.join(tempDir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
-    sessionDir = path.join(tempDir, "session");
-    prevSessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR;
+    sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
     prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
-    process.env.AGENT_FRAMEWORK_SESSION_DIR = sessionDir;
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
     mockValidatePlanFileWithContract.mockImplementation(async (input) => {
       const content = fs.readFileSync(input.planFile, "utf-8");
@@ -134,9 +132,8 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
   });
 
   afterEach(() => {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
     fs.rmSync(tempDir, { recursive: true, force: true });
-    if (prevSessionDir === undefined) delete process.env.AGENT_FRAMEWORK_SESSION_DIR;
-    else process.env.AGENT_FRAMEWORK_SESSION_DIR = prevSessionDir;
     if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
     else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
   });

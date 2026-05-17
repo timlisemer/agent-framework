@@ -22,7 +22,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { sessionEpochsFile } from "../utils/paths.js";
+import { isTestRunSessionDir, sessionEpochsFile } from "../utils/paths.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -121,7 +121,7 @@ function loadSnapshotUuidsTail(sessionDir: string): string[] {
  *
  * Returns `{rotated: false}` in any of these conditions:
  * - No prior state snapshot exists (fresh session, nothing to detect against).
- * - Running under replay (AGENT_FRAMEWORK_SESSION_DIR is set by replay.ts).
+ * - Running under scenario/replay test-runs cache sessions.
  * - All prior UUIDs are still present in the live transcript.
  *
  * Returns `{rotated: true, reason, anchorUuid}` when a rewind is detected or
@@ -132,8 +132,8 @@ export function detectEpochChange(
   transcriptPath: string,
   hookHint?: { sessionStartSource?: string },
 ): EpochChangeResult {
-  // Skip detection in replay context — the session dir is synthetic.
-  if (process.env.AGENT_FRAMEWORK_SESSION_DIR) {
+  // Skip detection in replay/scenario context — the session dir is synthetic.
+  if (isTestRunSessionDir(sessionDir)) {
     return { rotated: false };
   }
 
@@ -205,10 +205,10 @@ export function rotateEpoch(
  * exists for this session (writes the "initial" epoch on first call).
  * Called from `hook-bootstrap.ts:initHookProcess` on every hook start.
  *
- * No-op when AGENT_FRAMEWORK_SESSION_DIR is set (replay context).
+ * No-op for scenario/replay test-runs cache sessions.
  */
 export function initEpochSession(sessionDir: string): void {
-  if (process.env.AGENT_FRAMEWORK_SESSION_DIR) return;
+  if (isTestRunSessionDir(sessionDir)) return;
   if (initialized) return;
   initialized = true;
 

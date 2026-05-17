@@ -1088,14 +1088,11 @@ async function main(): Promise<void> {
   const replayPidFile = transcriptReplayPidFile(transcriptSlug(config.transcript));
   fs.writeFileSync(replayPidFile, String(process.pid));
 
-  // 6. Set AGENT_FRAMEWORK_SESSION_DIR
-  process.env.AGENT_FRAMEWORK_SESSION_DIR = sessionDir;
-
-  // 7. Create empty temp transcript (filename must NOT start with "agent-")
+  // 6. Create empty temp transcript (filename must NOT start with "agent-")
   const transcriptPath = path.join(sessionDir, "transcript.jsonl");
   writeJsonl(transcriptPath, []);
 
-  // 8. Generate session ID
+  // 7. Generate session ID
   const sessionId = "replay-" + transcriptSlug(config.transcript);
 
   const env = buildEnv(sessionDir, cwd);
