@@ -33,6 +33,8 @@ forensic audit trail.
 Plan-mode and injected-context reproducibility use additional session sidecars:
 - `plan-mode-state.json` stores the current plan-mode state used by hooks.
 - `plan-mode-events.jsonl` records entered/exited transitions.
+- `plans/<name>.md` stores named session planfiles for non-native adapters.
+- `current-plan.json` points at the active file-backed plan descriptor.
 - `session-injections.jsonl` stores generic injected context records, including
   exact file-backed source content for planning-contract injections.
 

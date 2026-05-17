@@ -15,7 +15,7 @@ describe("Codex plan source", () => {
       content: "## User Goal\nDo it.",
     });
     expect(extractProposedPlanContent(text)).toBe("## User Goal\nDo it.");
-    expect(isPlanExit({ event: "Stop", assistantText: text })).toBe(true);
+    expect(isPlanExit({ event: "Stop", assistantText: text })).toBe(false);
   });
 
   it("ignores proposed_plan blocks embedded in surrounding prose", () => {
@@ -42,14 +42,10 @@ describe("Codex plan source", () => {
     expect(isPlanExit({ event: "Stop", assistantText: "<proposed_plan>\nmissing close" })).toBe(false);
   });
 
-  it("detects implementation prompts and embedded clear-context plans", () => {
+  it("detects implementation prompts without returning inline plan sources", () => {
     expect(isPlanExit({ event: "UserPromptSubmit", prompt: CODEX_IMPLEMENT_PLAN_PROMPT })).toBe(true);
     const prompt = `${CODEX_CLEAR_CONTEXT_IMPLEMENT_PLAN_PREFIX}\n\n## User Goal\nImplement it.`;
     expect(isPlanExit({ event: "UserPromptSubmit", prompt })).toBe(true);
-    expect(findCurrentPlanSource({ transcriptPath: "x", prompt })).toEqual({
-      kind: "inline",
-      content: "## User Goal\nImplement it.",
-      source: "codex-clear-context-implementation-prompt",
-    });
+    expect(findCurrentPlanSource({ transcriptPath: "x", prompt })).toBeNull();
   });
 });

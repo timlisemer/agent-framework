@@ -59,9 +59,7 @@ describe("validateScenario seed_state.planFile", () => {
       slug: "../etc",
       content: "x",
     };
-    expect(() => validateScenario(s)).toThrow(
-      /planFile.slug must match \[A-Za-z0-9._-\]\+/,
-    );
+    expect(() => validateScenario(s)).toThrow(/planFile.slug must match lowercase kebab-case/);
   });
 
   it("rejects slug with space", () => {
@@ -70,9 +68,7 @@ describe("validateScenario seed_state.planFile", () => {
       slug: "has space",
       content: "x",
     };
-    expect(() => validateScenario(s)).toThrow(
-      /planFile.slug must match \[A-Za-z0-9._-\]\+/,
-    );
+    expect(() => validateScenario(s)).toThrow(/planFile.slug must match lowercase kebab-case/);
   });
 
   it("rejects missing slug field", () => {

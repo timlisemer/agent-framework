@@ -22,7 +22,7 @@ const PLAN_MODE_CONTRACT_HOOK_INJECTION_ENABLED = false;
 
 function buildPlanModeInjectionMessage(plansContent: string): string {
   return [
-    "The session is in plan mode. The planning contract below applies to every final plan you produce in this foreground session, including native or ordinary Codex plan-mode responses and any <proposed_plan> block.",
+    "The session is in plan mode. The planning contract below applies to every final named planfile you produce in this foreground session.",
     "",
     "Final planning output must use exactly the 14 required level-two Markdown headings from the contract, in order, with no extra ## headings. Ordinary ### subsections are allowed under those required headings.",
     "",

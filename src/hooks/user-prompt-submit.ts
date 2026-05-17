@@ -88,7 +88,7 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
       await exitAfterFlush(out.exitCode, out.stdout);
       return;
     }
-    if (validation.source?.kind === "inline") {
+    if (validation.source?.kind === "file") {
       writeCurrentPlanSidecar(sessionDir, validation.source);
     }
     await stateManager.update((s) => ({

@@ -18,7 +18,7 @@ export const editIntentRule: PreToolRule = {
       (ctx.toolInput as { file_path?: string }).file_path ||
       (ctx.toolInput as { path?: string }).path || "";
 
-    if (!filePath || isEditIntentExemptPath(filePath)) {
+    if (!filePath || isEditIntentExemptPath(filePath, ctx.sessionDir)) {
       return null;
     }
 

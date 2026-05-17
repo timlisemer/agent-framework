@@ -26,7 +26,7 @@ export const toolApproveRule: PreToolRule = {
     if (FILE_TOOLS.includes(ctx.toolName)) {
       for (const fp of extractFilePaths(ctx.toolName, ctx.toolInput)) {
         const abs = path.isAbsolute(fp) ? fp : path.resolve(ctx.projectDir, fp);
-        if (isPlanFile(abs)) return null;
+        if (isPlanFile(abs, ctx.sessionDir)) return null;
       }
     }
 
@@ -59,7 +59,7 @@ export const toolApproveRule: PreToolRule = {
     if (ctx.planModeCtx.contextString) {
       const input = ctx.toolInput as Record<string, unknown>;
       for (const filePath of extractFilePaths(ctx.toolName, ctx.toolInput)) {
-        const editBlock = planModeEditBlock(true, ctx.toolName, filePath);
+        const editBlock = planModeEditBlock(true, ctx.toolName, filePath, ctx.sessionDir);
         if (editBlock) return { fastDeny: editBlock };
       }
       const bashBlock = planModeBashBlock(true, ctx.toolName, (input?.command as string) ?? "");

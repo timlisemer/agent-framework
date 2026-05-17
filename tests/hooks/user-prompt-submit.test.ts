@@ -33,7 +33,7 @@ import { evaluateRulesForUserPromptSubmit } from "../../src/rules/index.js";
 import { exitAfterFlush } from "../../src/utils/hook-bootstrap.js";
 import { checkPlanIntent } from "../../src/agents/hooks/plan-validate.js";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
-import { sessionCurrentPlanFile, sessionPlanModeStateFile, sessionStateFile } from "../../src/utils/paths.js";
+import { sessionCurrentPlanFile, sessionPlanFile, sessionPlanModeStateFile, sessionStateFile } from "../../src/utils/paths.js";
 
 const mockEvaluateRulesForUserPromptSubmit = vi.mocked(evaluateRulesForUserPromptSubmit);
 const mockExitAfterFlush = vi.mocked(exitAfterFlush);
@@ -193,9 +193,13 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
     try {
       fs.mkdirSync(process.env.AGENT_FRAMEWORK_SESSION_DIR!, { recursive: true });
+      const planPath = sessionPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!, "test-plan");
+      fs.mkdirSync(path.dirname(planPath), { recursive: true });
+      const planContent = `Plan Name: test-plan\n\n## User Goal\nImplement x.\n\nPlanfile Path: ${planPath}\nPlan Name: test-plan`;
+      fs.writeFileSync(planPath, planContent);
       fs.writeFileSync(
         sessionCurrentPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!),
-        JSON.stringify({ kind: "inline", content: "## User Goal\nImplement x.", source: "test" }) + "\n",
+        JSON.stringify({ kind: "file", path: planPath, planName: "test-plan" }) + "\n",
       );
 
       await mainUserPromptSubmit(
@@ -212,11 +216,12 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
       expect(mockCheckPlanIntent).toHaveBeenCalledWith(
         null,
         "Write",
-        { content: "## User Goal\nImplement x." },
+        { content: planContent },
         expect.any(String),
         tempDir,
         "UserPromptSubmit",
         "exit",
+        planPath,
       );
       const state = JSON.parse(fs.readFileSync(sessionStateFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!), "utf-8")).data;
       expect(state.currentEditIntent).toBe(true);
@@ -234,9 +239,12 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
     mockCheckPlanIntent.mockResolvedValue({ approved: false, reason: "bad plan" });
     try {
       fs.mkdirSync(process.env.AGENT_FRAMEWORK_SESSION_DIR!, { recursive: true });
+      const planPath = sessionPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!, "bad-plan");
+      fs.mkdirSync(path.dirname(planPath), { recursive: true });
+      fs.writeFileSync(planPath, "bad");
       fs.writeFileSync(
         sessionCurrentPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!),
-        JSON.stringify({ kind: "inline", content: "bad", source: "test" }) + "\n",
+        JSON.stringify({ kind: "file", path: planPath, planName: "bad-plan" }) + "\n",
       );
 
       await mainUserPromptSubmit(

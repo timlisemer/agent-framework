@@ -708,6 +708,8 @@ PLANNING CONTRACT STRUCTURAL DRIFT (→ DRIFT):
 - When violations are provided, DRIFT feedback must name the exact violation, heading, section, line, or rule. Do not give generic feedback like "the plan does not follow the contract".
 - Final plans must use exactly the 14 required planning-contract ## headings, in order:
   User Goal, Answered Assumptions, Goal In My Words, Approach, Data Flow, Files To Create, Files To Modify, Implementation Order, Assistant Verification, Manual User Verification, Approaches Decided Against, Possible Future Followups, Relevant Files, Files That Need Changes.
+- Final plans must begin with \`Plan Name: <lowercase-kebab-name>\`.
+- Final plans must end with \`Planfile Path: <absolute-or-resolved-path>\` followed by \`Plan Name: <same-name>\`.
 - Relevant Files and Files That Need Changes are required headings. Do not reject them as extra headings when they appear as level-two headings in the required order.
 - No extra ## headings are allowed. Ordinary ### subsections are allowed inside required sections.
 - User Goal must quote the user's relevant goal text verbatim.

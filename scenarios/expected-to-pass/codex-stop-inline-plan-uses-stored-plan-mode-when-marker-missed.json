@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed",
-  "description": "Codex Stop hooks must allow inline proposed_plan responses when current Codex collaboration mode is plan, even when permission_mode is default.",
+  "description": "Codex Stop hooks must allow ordinary planfile status responses when current Codex collaboration mode is plan, even when permission_mode is default.",
   "transcript": [
     {
       "role": "user",
@@ -12,7 +12,7 @@
       "content": [
         {
           "type": "text",
-          "text": "<proposed_plan>\n# Fix The Issue\n\n## Summary\nUse Codex collaboration-mode evidence to recognize Plan Mode even when permission_mode is default.\n\n## Key Changes\n- Keep explicit Codex collaboration markers authoritative.\n- Do not treat permission_mode=default alone as proof that collaboration mode is Default.\n\n## Tests\n- Add unit coverage for the Stop hook false-block regression.\n\n## Assumptions\n- Codex collaboration mode is the source of truth for Plan Mode when present.\n</proposed_plan>"
+          "text": "Wrote the named planfile for the requested investigation."
         }
       ]
     }

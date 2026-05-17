@@ -9,6 +9,10 @@ import type { FrameworkPostToolUseHookInput } from "./types.js";
 import { extractPathOrCmd } from "../rules/utils.js";
 import { activeSpec } from "../adapter/spec.js";
 import { detectPlanModeForHook } from "../utils/plan-mode-detector.js";
+import { extractPlanName } from "../utils/planfile.js";
+import { readPlanFileContent, writeCurrentPlanSidecar } from "../utils/plan-source.js";
+import { extractFilePath, isPlanFile } from "../rules/utils.js";
+import * as path from "path";
 
 export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
   // Log successful tool execution to JSONL
@@ -30,6 +34,22 @@ export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, enco
     gate: "post-tool-use",
     ms: 0,
   });
+
+  const canonical = spec.canonicalizeToolCall(input.tool_name, input.tool_input);
+  if (canonical.toolName === "Write" || canonical.toolName === "Edit") {
+    const filePath = extractFilePath(canonical.toolName, canonical.toolInput);
+    if (filePath && isPlanFile(filePath, sessionDir)) {
+      const content = await readPlanFileContent(filePath);
+      if (content?.trim()) {
+        const planName = extractPlanName(content) ?? path.basename(filePath, ".md");
+        writeCurrentPlanSidecar(sessionDir, {
+          kind: "file",
+          path: filePath,
+          planName,
+        });
+      }
+    }
+  }
 
   const state = await getSessionState(sessionDir).load().catch(() => null);
   if (state) {

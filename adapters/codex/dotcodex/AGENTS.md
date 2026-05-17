@@ -8,7 +8,7 @@ Use Markdown headings, numbered lists, bullet lists, and fenced code blocks. Do 
 
 ## Required Final Plan Structure
 
-Final plans must use this section order:
+Final plans must start with `Plan Name: <lowercase-kebab-name>`, then use this section order:
 
 1. `## User Goal`
 2. `## Answered Assumptions`
@@ -26,6 +26,8 @@ Final plans must use this section order:
 14. `## Files That Need Changes`
 
 If a section is not applicable, include the heading and state why it is not applicable. Do not omit required headings.
+
+Final plans must end with `Planfile Path: <path>` followed by `Plan Name: <same-name>`.
 
 ## User Goal
 
@@ -275,7 +277,7 @@ Every followup must make clear that it is not required for the current task.
 Good:
 
 ```md
-- A Stop-hook validator for `<proposed_plan>` output could be added later. This is not required for the current task because the current task is plan-mode entry injection.
+- Non-native adapters write named session planfiles under the agent-framework session `plans/` directory.
 ```
 
 Bad:

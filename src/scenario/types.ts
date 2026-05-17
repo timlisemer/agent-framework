@@ -1574,7 +1574,7 @@ function validateLlmStubs(value: unknown): void {
 
 /**
  * Validate the optional `scenario.seed_state.planFile` block. `slug` must
- * match `[A-Za-z0-9._-]+`; `content` is a string (may be empty); unknown
+ * match lowercase kebab-case plan names; `content` is a string (may be empty); unknown
  * sub-fields are rejected.
  */
 function validateSeedPlanFile(value: unknown): void {
@@ -1584,9 +1584,9 @@ function validateSeedPlanFile(value: unknown): void {
     );
   }
   const p = value as Record<string, unknown>;
-  if (typeof p.slug !== "string" || !/^[A-Za-z0-9._-]+$/.test(p.slug)) {
+  if (typeof p.slug !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(p.slug)) {
     throw new Error(
-      `scenario.seed_state.planFile.slug must match [A-Za-z0-9._-]+, got ${JSON.stringify(p.slug)}`,
+      `scenario.seed_state.planFile.slug must match lowercase kebab-case, got ${JSON.stringify(p.slug)}`,
     );
   }
   if (typeof p.content !== "string") {

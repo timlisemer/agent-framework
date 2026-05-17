@@ -1,5 +1,6 @@
 import * as path from "path";
-import { hostConfigRoot, hostPlansRoot } from "../utils/paths.js";
+import { hostConfigRoot, hostPlansRoot, sessionPlansDir } from "../utils/paths.js";
+import { isSessionPlanfilePath } from "../utils/planfile.js";
 import { RESTRICTED_MCPS } from "../utils/slash-commands.js";
 import { activeSpec } from "../adapter/spec.js";
 import type { CanonicalMcp } from "../adapter/types.js";
@@ -133,8 +134,14 @@ export function extractPathOrCmd(toolInput: unknown): { path?: string; cmd?: str
 /**
  * True iff filePath (resolved absolute) is inside the host plans root.
  */
-export function isPlanFile(filePath: string): boolean {
-  return isPathInDirectory(filePath, hostPlansRoot());
+export function isPlanFile(filePath: string, sessionDir?: string): boolean {
+  return isPathInDirectory(filePath, hostPlansRoot()) ||
+    (sessionDir ? isSessionPlanfilePath(filePath, sessionDir) : false);
+}
+
+export function isPlanFileForSession(filePath: string, sessionDir: string): boolean {
+  return isPathInDirectory(filePath, hostPlansRoot()) ||
+    isPathInDirectory(filePath, sessionPlansDir(sessionDir));
 }
 
 /**

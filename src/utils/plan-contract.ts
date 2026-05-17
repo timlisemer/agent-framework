@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { agentFrameworkRoot } from "./paths.js";
+import { extractPlanName, extractPlanfileFooter, PLAN_NAME_RE } from "./planfile.js";
 import {
   type MarkdownHeadingMatcher,
   excludeMarkdownSectionBodies,
@@ -8,6 +9,11 @@ import {
 } from "./content-patterns.js";
 
 export type PlanContractFindingKind =
+  | "missing_plan_name"
+  | "invalid_plan_name"
+  | "missing_planfile_footer"
+  | "plan_name_footer_mismatch"
+  | "planfile_path_mismatch"
   | "missing_required_heading"
   | "wrong_heading_order"
   | "duplicate_required_heading"
@@ -38,6 +44,8 @@ interface Heading {
 
 export interface PlanContractValidationOptions {
   excludedContentSections?: readonly MarkdownHeadingMatcher[];
+  expectedPlanFile?: string;
+  pathBaseDir?: string;
 }
 
 const PROJECT_COMMAND_RE =
@@ -84,7 +92,10 @@ export function validatePlanContract(
     return [];
   }
   if (required.length === 0) return [];
-  return validatePlanContractWithRequiredHeadings(plan, required, options);
+  return validatePlanContractWithRequiredHeadings(plan, required, {
+    ...options,
+    pathBaseDir: options.pathBaseDir ?? projectDir,
+  });
 }
 
 export function validatePlanContractWithRequiredHeadings(
@@ -93,6 +104,7 @@ export function validatePlanContractWithRequiredHeadings(
   options: PlanContractValidationOptions = {},
 ): PlanContractFinding[] {
   const findings: PlanContractFinding[] = [];
+  findings.push(...validatePlanfileMetadata(plan, options.expectedPlanFile, options.pathBaseDir));
   const headings = parseMarkdownHeadings(plan);
   const excludedContentSections =
     options.excludedContentSections ?? DEFAULT_EXCLUDED_CONTENT_SECTIONS;
@@ -257,6 +269,69 @@ export function validatePlanContractWithRequiredHeadings(
   }
 
   return findings;
+}
+
+function validatePlanfileMetadata(
+  plan: string,
+  expectedPlanFile?: string,
+  pathBaseDir: string = process.cwd(),
+): PlanContractFinding[] {
+  const findings: PlanContractFinding[] = [];
+  const firstName = extractPlanName(plan);
+  const firstNonEmptyLine = firstNonEmptyLineNumber(plan);
+  if (!firstName) {
+    const firstNonEmpty = plan.split(/\r?\n/).find((line) => line.trim().length > 0)?.trim() ?? "";
+    findings.push({
+      kind: firstNonEmpty.startsWith("Plan Name:") ? "invalid_plan_name" : "missing_plan_name",
+      line: firstNonEmptyLine,
+      message: "First non-empty line must be `Plan Name: <name>` using lowercase kebab-case.",
+    });
+  } else if (!PLAN_NAME_RE.test(firstName)) {
+    findings.push({
+      kind: "invalid_plan_name",
+      line: firstNonEmptyLine,
+      message: `Invalid plan name "${firstName}"; use lowercase kebab-case.`,
+    });
+  }
+
+  const footer = extractPlanfileFooter(plan);
+  if (!footer) {
+    findings.push({
+      kind: "missing_planfile_footer",
+      message: "Final two non-empty lines must be `Planfile Path: <path>` and `Plan Name: <same-name>`.",
+    });
+    return findings;
+  }
+
+  if (firstName && footer.planName !== firstName) {
+    findings.push({
+      kind: "plan_name_footer_mismatch",
+      message: `Footer plan name "${footer.planName}" must match top plan name "${firstName}".`,
+    });
+  }
+
+  if (
+    expectedPlanFile &&
+    resolvePlanfileFooterPath(footer.planFilePath, pathBaseDir) !==
+      resolvePlanfileFooterPath(expectedPlanFile, pathBaseDir)
+  ) {
+    findings.push({
+      kind: "planfile_path_mismatch",
+      message: `Footer planfile path "${footer.planFilePath}" must match "${expectedPlanFile}".`,
+    });
+  }
+
+  return findings;
+}
+
+function resolvePlanfileFooterPath(planPath: string, baseDir: string): string {
+  return path.resolve(path.isAbsolute(planPath) ? planPath : path.join(baseDir, planPath));
+}
+
+function firstNonEmptyLineNumber(plan: string): number | undefined {
+  const lines = plan.split(/\r?\n/);
+  const index = lines.findIndex((line) => line.trim().length > 0);
+  return index >= 0 ? index + 1 : undefined;
 }
 
 function parseMarkdownHeadings(markdown: string): Heading[] {

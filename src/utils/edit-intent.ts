@@ -11,6 +11,7 @@
 import type { ToolPrediction } from "./prediction-types.js";
 import { PLAN_MODE_BASH_WRITE_PATTERNS } from "./bash-command-policy.js";
 import { activeSpec } from "../adapter/spec.js";
+import { isSessionPlanfilePath } from "./planfile.js";
 
 // Tools that modify files (apply_patch is handled by Codex adapter → Edit before rules run)
 const EDIT_TOOLS = ["Write", "Edit", "NotebookEdit"];
@@ -26,8 +27,9 @@ export function isEditTool(toolName: string): boolean {
  * Check if a file path is exempt from edit intent blocking.
  * Delegates to the active adapter spec which knows its own exempt paths.
  */
-export function isEditIntentExemptPath(filePath: string): boolean {
-  return activeSpec().isEditIntentExemptPath(filePath);
+export function isEditIntentExemptPath(filePath: string, sessionDir?: string): boolean {
+  return activeSpec().isEditIntentExemptPath(filePath) ||
+    (sessionDir ? isSessionPlanfilePath(filePath, sessionDir) : false);
 }
 
 /**
@@ -42,11 +44,12 @@ export function isEditIntentExemptPath(filePath: string): boolean {
 export function shouldBlockEdit(
   editIntent: boolean | null,
   toolName: string,
-  filePath: string
+  filePath: string,
+  sessionDir?: string,
 ): boolean {
   if (editIntent !== false) return false;
   if (!isEditTool(toolName)) return false;
-  if (isEditIntentExemptPath(filePath)) return false;
+  if (isEditIntentExemptPath(filePath, sessionDir)) return false;
   return true;
 }
 
@@ -97,11 +100,12 @@ const PLAN_MODE_SCRATCH_GUIDANCE =
 export function planModeEditBlock(
   planMode: boolean,
   toolName: string,
-  filePath: string
+  filePath: string,
+  sessionDir?: string,
 ): string | null {
   if (!planMode) return null;
   if (!isEditTool(toolName)) return null;
-  if (isEditIntentExemptPath(filePath)) return null;
+  if (isEditIntentExemptPath(filePath, sessionDir)) return null;
   return `Plan mode is active - file edits are blocked. Only plan files may be modified. Target: ${filePath}. ${PLAN_MODE_SCRATCH_GUIDANCE}`;
 }
 

@@ -32,7 +32,7 @@ Use model "sonnet" for all 3 agents unless the user explicitly requested a diffe
 All 3 agents get the IDENTICAL prompt:
 
 ```
-Do NOT write a plan file. Before reporting your plan directly to me, call `mcp__agent-framework__validate_plan` with your full inline plan. If it returns FAIL, revise the plan and call `mcp__agent-framework__validate_plan` again. Repeat until it returns PASS, then report the validated plan directly to me.
+Draft the plan directly in your response. Do not call validate_plan; the consolidated named planfile will be validated after it is written.
 
 Read all relevant files in the codebase first, then design a detailed implementation plan.
 
@@ -58,9 +58,9 @@ After all 3 agents return, analyze their responses:
 Write the consolidated plan to the plan file using exactly the 14 required `PLANS.md` level-two headings in order:
 `User Goal`, `Answered Assumptions`, `Goal In My Words`, `Approach`, `Data Flow`, `Files To Create`, `Files To Modify`, `Implementation Order`, `Assistant Verification`, `Manual User Verification`, `Approaches Decided Against`, `Possible Future Followups`, `Relevant Files`, `Files That Need Changes`.
 
-Do not add non-contract `##` headings such as `## Context`, `## Verification`, `## Testing`, or `## Test Plan`. Include concrete changes with file paths, line numbers, and code inside the required sections. `Assistant Verification` must use only `mcp__agent-framework__check` with the repository `working_dir`; put only user-only checks in `Manual User Verification`, or state that none are required.
+Do not add non-contract `##` headings such as `## Context`, `## Verification`, `## Testing`, or `## Test Plan`. Include concrete changes with file paths, line numbers, and code inside the required sections. `Assistant Verification` must use only `mcp__agent-framework__check` with the repository `working_dir`; put only user-only checks in `Manual User Verification`, or state that none are required. The file must begin with `Plan Name: <name>` and end with `Planfile Path: <path>` followed by `Plan Name: <same-name>`.
 
-After writing the consolidated plan content, call `mcp__agent-framework__validate_plan` with the full inline consolidated plan. If it returns FAIL, revise the consolidated plan and call it again. Repeat until it returns PASS. Only then proceed to verification agents.
+After writing the consolidated plan content, call `mcp__agent-framework__validate_plan` with `plan_file` set to the plan file path. If it returns FAIL, revise the consolidated plan and call it again. Repeat until it returns PASS. Only then proceed to verification agents.
 
 ## Step 3: Launch 3 Verification agents in parallel
 

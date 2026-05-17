@@ -798,7 +798,13 @@ async function main() {
     const planDir = scenarioPlansDir(scenario.name);
     fs.mkdirSync(planDir, { recursive: true });
     const planPath = path.join(planDir, `${scenario.seed_state.planFile.slug}.md`);
-    fs.writeFileSync(planPath, scenario.seed_state.planFile.content);
+    const content = scenario.seed_state.planFile.content;
+    const hasTopName = /^\s*Plan Name:/m.test(content);
+    const hasFooter = /Planfile Path:[\s\S]*\nPlan Name:\s*[a-z0-9]+(?:-[a-z0-9]+)*\s*$/m.test(content.trim());
+    const materializedContent = hasTopName && hasFooter
+      ? content
+      : `Plan Name: ${scenario.seed_state.planFile.slug}\n\n${content.trim()}\n\nPlanfile Path: ${planPath}\nPlan Name: ${scenario.seed_state.planFile.slug}\n`;
+    fs.writeFileSync(planPath, materializedContent);
     planFileCleanupPath = planPath;
     process.env.AGENT_FRAMEWORK_PLAN_DIR = planDir;
   }

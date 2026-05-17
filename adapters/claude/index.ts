@@ -33,6 +33,7 @@ export const claudeSpec: AdapterSpec = {
   resolveHostContext:     HC.resolveHostContext,
   isEditIntentExemptPath: HC.isEditIntentExemptPath,
   findCurrentPlanSource:  PLS.findCurrentPlanSource,
+  findNativePlanFile:     PLS.findNativePlanFile,
   isPlanExit:             PLS.isPlanExit,
   detectPlanMode:         PM.detectPlanMode,
   materializeScenarioEntry: SM.materializeScenarioEntry,

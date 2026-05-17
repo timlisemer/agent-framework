@@ -1,7 +1,7 @@
 /**
  * Validate Plan MCP Agent
  *
- * Validates an inline plan or plan file against the planning contract using
+ * Validates a plan file against the planning contract using
  * deterministic plan checks plus the existing plan-validate LLM.
  *
  * @module validate-plan
@@ -28,6 +28,8 @@ Honor every [VIOLATION: ...] line in === VIOLATIONS DETECTED === as authoritativ
 Final plans must satisfy the planning contract:
 - Use exactly the 14 required ## headings when a final plan is being validated, in this order:
   User Goal, Answered Assumptions, Goal In My Words, Approach, Data Flow, Files To Create, Files To Modify, Implementation Order, Assistant Verification, Manual User Verification, Approaches Decided Against, Possible Future Followups, Relevant Files, Files That Need Changes.
+- Begin with \`Plan Name: <lowercase-kebab-name>\`.
+- End with \`Planfile Path: <absolute-or-resolved-path>\` followed by \`Plan Name: <same-name>\`.
 - Relevant Files and Files That Need Changes are required headings. Do not reject them as extra headings when they appear as level-two headings in the required order.
 - Include concrete file paths, symbols, anchors, and implementation details.
 - Include enough detail that two independent implementers would make the same edits.
@@ -47,8 +49,7 @@ INVALID reasons must be actionable. Name the exact heading, section, line, or co
 
 export interface ValidatePlanInput {
   workingDir: string;
-  plan?: string;
-  planFile?: string;
+  planFile: string;
   transcriptPath?: string;
 }
 
@@ -75,22 +76,14 @@ function hasSpecificInvalidReason(text: string): boolean {
   return /##\s+\S+|\b(User Goal|Answered Assumptions|Goal In My Words|Approach|Data Flow|Files To Create|Files To Modify|Implementation Order|Assistant Verification|Manual User Verification|Approaches Decided Against|Possible Future Followups|Relevant Files|Files That Need Changes)\b/i.test(reason);
 }
 
-function resolvePlanContent(input: ValidatePlanInput): { content?: string; error?: string } {
-  const hasInlinePlan = typeof input.plan === "string";
-  const hasPlanFile = typeof input.planFile === "string";
-
-  if (hasInlinePlan === hasPlanFile) {
-    return { error: "Provide exactly one of plan or plan_file." };
+function resolvePlanContent(input: ValidatePlanInput): { content?: string; resolvedPath?: string; error?: string } {
+  if (typeof input.planFile !== "string" || !input.planFile.trim()) {
+    return { error: "plan_file is required." };
   }
-
-  if (hasInlinePlan) {
-    return { content: input.plan ?? "" };
-  }
-
-  const file = input.planFile ?? "";
+  const file = input.planFile;
   const resolved = path.isAbsolute(file) ? file : path.resolve(input.workingDir, file);
   try {
-    return { content: fs.readFileSync(resolved, "utf-8") };
+    return { content: fs.readFileSync(resolved, "utf-8"), resolvedPath: resolved };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { error: `Could not read plan_file ${resolved}: ${msg}` };
@@ -118,7 +111,7 @@ export async function runValidatePlanAgent(
   }
 
   throwIfAborted(options.signal);
-  const findings = collectPlanValidationViolations(plan, input.workingDir);
+  const findings = collectPlanValidationViolations(plan, input.workingDir, source.resolvedPath);
 
   if (findings.hardRuleViolations.length > 0) {
     return formatResult("FAIL", findings.hardRuleViolations.map(stripViolationPrefix));

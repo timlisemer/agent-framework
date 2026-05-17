@@ -185,7 +185,7 @@ export const scenarioSchema = z.object({
       }),
     ).optional(),
     planFile: z.object({
-      slug: z.string().min(1).regex(/^[A-Za-z0-9._-]+$/),
+      slug: z.string().min(1).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
       content: z.string(),
     }).optional(),
   }),

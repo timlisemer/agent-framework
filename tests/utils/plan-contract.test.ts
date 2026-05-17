@@ -37,8 +37,8 @@ function withProject(fn: (projectDir: string) => void): void {
   }
 }
 
-function validPlan(): string {
-  return required.map((heading) => {
+function validPlan(planPath = "/tmp/test-plan.md", planName = "test-plan"): string {
+  const body = required.map((heading) => {
     if (heading === "User Goal") return `## ${heading}\n\n> "Implement the requested hook change."`;
     if (heading === "Answered Assumptions") {
       return `## ${heading}\n\n1. The repo path is known. Answer: It is /repo. Source: User text.`;
@@ -54,6 +54,7 @@ function validPlan(): string {
     }
     return `## ${heading}\n\nThis section contains concrete repository-specific details for ${heading} with \`src/file.ts\` references.`;
   }).join("\n\n");
+  return `Plan Name: ${planName}\n\n${body}\n\nPlanfile Path: ${planPath}\nPlan Name: ${planName}`;
 }
 
 describe("plan contract", () => {
@@ -69,6 +70,7 @@ describe("plan contract", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plan-contract-missing-"));
     try {
       const kinds = validatePlanContract("## User Goal\n> Do it.", dir).map((f) => f.kind);
+      expect(kinds).toContain("missing_plan_name");
       expect(kinds).toContain("missing_required_heading");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -78,6 +80,27 @@ describe("plan contract", () => {
   it("accepts a plan with exact required headings", () => {
     withProject((projectDir) => {
       expect(validatePlanContract(validPlan(), projectDir)).toEqual([]);
+    });
+  });
+
+  it("flags footer plan name mismatches", () => {
+    withProject((projectDir) => {
+      const kinds = validatePlanContract(validPlan("/tmp/test-plan.md", "test-plan").replace(/Plan Name: test-plan$/, "Plan Name: other-plan"), projectDir).map((f) => f.kind);
+      expect(kinds).toContain("plan_name_footer_mismatch");
+    });
+  });
+
+  it("flags expected planfile path mismatches", () => {
+    withProject((projectDir) => {
+      const kinds = validatePlanContract(validPlan("/tmp/test-plan.md"), projectDir, { expectedPlanFile: "/tmp/other-plan.md" }).map((f) => f.kind);
+      expect(kinds).toContain("planfile_path_mismatch");
+    });
+  });
+
+  it("resolves relative footer planfile paths against the validator working directory", () => {
+    withProject((projectDir) => {
+      const planPath = path.join(projectDir, "plans", "test-plan.md");
+      expect(validatePlanContract(validPlan("plans/test-plan.md"), projectDir, { expectedPlanFile: planPath })).toEqual([]);
     });
   });
 

@@ -226,6 +226,14 @@ export function sessionCurrentPlanFile(sessionDir: string): string {
   return path.join(sessionDir, "current-plan.json");
 }
 
+export function sessionPlansDir(sessionDir: string): string {
+  return path.join(sessionDir, "plans");
+}
+
+export function sessionPlanFile(sessionDir: string, planName: string): string {
+  return path.join(sessionPlansDir(sessionDir), `${planName}.md`);
+}
+
 export function sessionToolLogFile(sessionDir: string): string {
   return path.join(sessionDir, "tool-log.jsonl");
 }

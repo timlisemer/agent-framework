@@ -35,9 +35,14 @@ export interface AdapterEncoder {
 
 export interface EncodedOutput { stdout: string; exitCode: number; }
 
+export interface NativePlanFileLookupInput {
+  transcriptPath: string;
+  sessionDir?: string;
+  planName?: string;
+}
+
 export type PlanSourceDescriptor =
-  | { kind: "file"; path: string }
-  | { kind: "inline"; content: string; source: string };
+  { kind: "file"; path: string; planName?: string };
 
 export type PlanExitDetectionInput =
   | { event: "PreToolUse"; canonicalToolName?: string; rawToolName?: string; toolInput?: unknown }
@@ -204,6 +209,9 @@ export interface AdapterSpec {
   // ── Plan source / exit conventions ─────────────────────────────────────
   /** Resolve the current plan source using adapter-specific transcript/session conventions. */
   findCurrentPlanSource(input: PlanSourceLookupInput): PlanSourceDescriptor | null | Promise<PlanSourceDescriptor | null>;
+
+  /** Resolve an adapter-native plan file for a named/current plan, if one exists. */
+  findNativePlanFile(input: NativePlanFileLookupInput): string | null | Promise<string | null>;
 
   /** True if this adapter-specific event represents a plan-exit/approval boundary. */
   isPlanExit(input: PlanExitDetectionInput): boolean;

@@ -40,6 +40,7 @@ import {
   getVerificationStructureHighlights,
 } from "../../utils/content-patterns.js";
 import { validatePlanContract } from "../../utils/plan-contract.js";
+import { activeSpec } from "../../adapter/spec.js";
 
 /**
  * Categories from `RULE_VIOLATION_PATTERNS` that ALWAYS hard-deny without
@@ -66,6 +67,7 @@ const MANUAL_USER_VERIFICATION_SECTION = /manual\s+(user\s+)?verification/i;
 export function collectPlanValidationViolations(
   resultingPlan: string,
   workingDir: string,
+  planFilePath?: string,
 ): PlanValidationViolationSummary {
   const planForContentChecks = excludeMarkdownSectionBodies(resultingPlan, [
     USER_GOAL_SECTION,
@@ -81,6 +83,7 @@ export function collectPlanValidationViolations(
   const verificationViolations = getVerificationStructureHighlights(planForContentChecks);
   const contractFindings = validatePlanContract(resultingPlan, workingDir, {
     excludedContentSections: [USER_GOAL_SECTION],
+    expectedPlanFile: planFilePath,
   });
   const contractViolations = contractFindings.map((finding) =>
     `[VIOLATION: ${finding.kind}] ${finding.message}`,
@@ -130,7 +133,8 @@ export async function checkPlanIntent(
   conversationContext: string,
   workingDir: string,
   hookName: string,
-  mode: "edit" | "exit" = "edit"
+  mode: "edit" | "exit" = "edit",
+  planFilePath?: string,
 ): Promise<{ approved: boolean; reason?: string }> {
   // No conversation yet - nothing to validate against
   if (!conversationContext.trim()) {
@@ -166,6 +170,7 @@ export async function checkPlanIntent(
     } = collectPlanValidationViolations(
       resultingPlan,
       workingDir,
+      planFilePath,
     );
 
     // Hard-deny for schedule-bucket and solution-branching categories from
@@ -203,7 +208,7 @@ export async function checkPlanIntent(
       { ...PLAN_VALIDATE_AGENT },
       {
         prompt: "Check if this plan aligns with the user request.",
-        context: `${violationSection}CONVERSATION:\n${conversationContext}\n\nCURRENT PLAN:\n${resultingPlan}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}`,
+        context: `${violationSection}CONVERSATION:\n${conversationContext}\n\nVALIDATE PLAN TOOL:\n${activeValidatePlanGuidance(planFilePath)}\n\nCURRENT PLAN:\n${resultingPlan}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}`,
       },
       {
         formatValidator: (text) => startsWithAny(text, ["OK", "DRIFT:"]),
@@ -230,4 +235,10 @@ export async function checkPlanIntent(
     logFastPathApproval("plan-validate", hookName, toolName, workingDir, "Error path - fail closed");
     return { approved: false, reason: "Error during validation - retry the edit" };
   }
+}
+
+function activeValidatePlanGuidance(planFilePath?: string): string {
+  return planFilePath
+    ? `Call ${activeSpec().mcpWireName("validate_plan")} with plan_file: ${planFilePath}.`
+    : `Call ${activeSpec().mcpWireName("validate_plan")} with plan_file.`;
 }

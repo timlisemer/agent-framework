@@ -55,6 +55,7 @@ import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, loadCurrentEpoch, rotateEpoch } from "../scenario/epoch.js";
 import { onEpochRotation } from "../scenario/lifecycle.js";
+import { sessionPlansDir } from "../utils/paths.js";
 
 interface PipelineExit {
   decision: "allow" | "deny";
@@ -289,6 +290,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
     currentPlan: string | null,
     overrideToolName?: string,
     overrideToolInput?: unknown,
+    planFilePath?: string,
   ): Promise<{ approved: boolean; reason?: string }> {
     return validatePlanEdit({
       currentPlan,
@@ -298,6 +300,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
       projectDir,
       hookName: "PreToolUse",
       mode,
+      planFilePath,
     });
   }
 
@@ -343,7 +346,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   if (FILE_TOOLS.includes(toolName)) {
     for (const raw of extractFilePaths(toolName, toolInput)) {
       const abs = path.isAbsolute(raw) ? raw : path.resolve(projectDir, raw);
-      if (!isPathInDirectory(abs, projectDir) && !isPlanFile(abs)) {
+      if (!isPathInDirectory(abs, projectDir) && !isPlanFile(abs, sessionDir)) {
         outsideRootPath = abs;
         break;
       }
@@ -433,7 +436,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
       // Plan-validate: Write/Edit to the active adapter's plans root.
       if (
         (toolName === "Write" || toolName === "Edit") &&
-        isPathInDirectory(filePath, host.plansRoot)
+        (isPathInDirectory(filePath, host.plansRoot) || isPathInDirectory(filePath, sessionPlansDir(sessionDir)))
       ) {
         // Skip validation if the adapter's plan-exit tool was recently approved.
         const recentContext = await readTranscriptExact(
@@ -459,7 +462,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
         }
 
         const currentPlan = await readPlanFileContent(filePath);
-        const validation = await runPlanValidation("edit", currentPlan);
+        const validation = await runPlanValidation("edit", currentPlan, undefined, undefined, filePath);
 
         if (!validation.approved) {
           // IMPORTANT: Do NOT remove this appeal call. Without it, user overrides

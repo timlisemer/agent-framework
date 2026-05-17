@@ -92,9 +92,6 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
       assistantText,
     });
     const epoch = loadCurrentEpoch(sessionDir);
-    if (validation.source?.kind === "inline") {
-      writeCurrentPlanSidecar(sessionDir, validation.source);
-    }
     if (!validation.approved) {
       const reason = `Plan validation failed: ${validation.reason}`;
       await writeTool(input.transcript_path, input.session_id, "plan-validate", reason);
@@ -118,6 +115,9 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
       const out = encoder.encodeStopBlock(reason);
       await exitAfterFlush(out.exitCode, out.stdout);
       return;
+    }
+    if (validation.source?.kind === "file") {
+      writeCurrentPlanSidecar(sessionDir, validation.source);
     }
   }
 

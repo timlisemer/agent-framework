@@ -6,6 +6,8 @@ import { formatTranscriptResult, readTranscriptExact } from "./transcript.js";
 import { PLAN_VALIDATE_COUNTS } from "./transcript-presets.js";
 import { readJson, writeJson } from "./file-io.js";
 import { sessionCurrentPlanFile } from "./paths.js";
+import { getPathToPlanfile } from "./planfile.js";
+import { extractPlanName } from "./planfile.js";
 
 export interface CurrentPlanLookupInput {
   transcriptPath: string;
@@ -17,7 +19,6 @@ export interface CurrentPlanLookupInput {
 export function readStoredCurrentPlan(sessionDir: string): PlanSourceDescriptor | null {
   try {
     const parsed = readJson<PlanSourceDescriptor>(sessionCurrentPlanFile(sessionDir));
-    if (parsed.kind === "inline" && typeof parsed.content === "string") return parsed;
     if (parsed.kind === "file" && typeof parsed.path === "string") return parsed;
   } catch {
     return null;
@@ -60,9 +61,18 @@ export async function readCurrentPlanContent(
   const source = await readCurrentPlan(input);
   if (!source) return null;
 
-  if (source.kind === "inline") return source.content;
-
   return readPlanFileContent(source.path);
+}
+
+export async function getCurrentPlanfilePath(input: CurrentPlanLookupInput & { planName?: string }): Promise<string | null> {
+  const pathToPlanfile = await getPathToPlanfile({
+    transcriptPath: input.transcriptPath,
+    sessionDir: input.sessionDir,
+    planName: input.planName,
+  });
+  if (pathToPlanfile) return pathToPlanfile;
+  const stored = input.sessionDir ? readStoredCurrentPlan(input.sessionDir) : null;
+  return stored?.path ?? null;
 }
 
 export async function validateCurrentPlanExit(input: {
@@ -73,12 +83,10 @@ export async function validateCurrentPlanExit(input: {
   assistantText?: string | null;
   prompt?: string;
 }): Promise<{ approved: boolean; reason?: string; source?: PlanSourceDescriptor }> {
-  const source = await readCurrentPlan(input);
-  if (!source) return { approved: false, reason: "Cannot exit plan mode without a plan." };
+  const pathToPlanfile = await getCurrentPlanfilePath(input);
+  if (!pathToPlanfile) return { approved: false, reason: "Cannot exit plan mode without a plan." };
 
-  const content = source.kind === "inline"
-    ? source.content
-    : await readPlanFileContent(source.path) ?? "";
+  const content = await readPlanFileContent(pathToPlanfile) ?? "";
   if (!content.trim()) return { approved: false, reason: "Cannot exit plan mode without a plan." };
 
   const planResult = await readTranscriptExact(input.transcriptPath, PLAN_VALIDATE_COUNTS);
@@ -91,8 +99,9 @@ export async function validateCurrentPlanExit(input: {
     input.projectDir,
     input.hookName,
     "exit",
+    pathToPlanfile,
   );
-  return { ...result, source };
+  return { ...result, source: { kind: "file", path: pathToPlanfile, planName: extractPlanName(content) ?? undefined } };
 }
 
 export async function validatePlanEdit(input: {
@@ -103,6 +112,7 @@ export async function validatePlanEdit(input: {
   projectDir: string;
   hookName: string;
   mode?: "edit" | "exit";
+  planFilePath?: string;
 }): Promise<{ approved: boolean; reason?: string }> {
   const planResult = await readTranscriptExact(input.transcriptPath, PLAN_VALIDATE_COUNTS);
   const conversationContext = formatTranscriptResult(planResult);
@@ -114,5 +124,6 @@ export async function validatePlanEdit(input: {
     input.projectDir,
     input.hookName,
     input.mode ?? "edit",
+    input.planFilePath,
   );
 }

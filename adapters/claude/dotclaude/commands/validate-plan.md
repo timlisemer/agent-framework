@@ -1,13 +1,12 @@
 ---
 disable-model-invocation: true
-description: Validate an inline plan or plan file using the agent-framework validate-plan MCP
+description: Validate a named planfile using the agent-framework validate-plan MCP
 allowed-tools: mcp__agent-framework__validate_plan
 ---
 
 1. IMMEDIATELY call mcp__agent-framework__validate_plan.
 
-   - Pass `plan_file` when the user supplied a path.
-   - Pass `plan` when the user supplied inline plan text.
+   - Pass `plan_file` with the named planfile path.
    - Do NOT run any Bash commands.
    - Do NOT read files or gather context first.
    - Do NOT critique the plan yourself before calling the MCP.

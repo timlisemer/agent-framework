@@ -45,6 +45,8 @@ Build-then-rebuild ordering:
   write rules.
 - **plan-file root**: Plan files live under `~/.claude/plans/`. The scenario
   runner redirects writes to a temp dir via `AGENT_FRAMEWORK_PLAN_DIR`.
+- **named planfiles**: Final plans must start with `Plan Name: <name>` and end
+  with `Planfile Path: <path>` followed by the same `Plan Name`.
 
 ## Hook Entry Points
 

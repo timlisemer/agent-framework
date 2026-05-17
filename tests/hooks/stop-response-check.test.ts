@@ -26,7 +26,7 @@ import { exitAfterFlush } from "../../src/utils/hook-bootstrap.js";
 const mockCheckPlanIntent = vi.mocked(checkPlanIntent);
 const mockExitAfterFlush = vi.mocked(exitAfterFlush);
 
-describe("mainStop Codex inline plan validation", () => {
+describe("mainStop Codex file-backed plan validation", () => {
   let tempDir: string;
   let transcriptPath: string;
   let prevSessionDir: string | undefined;
@@ -51,7 +51,7 @@ describe("mainStop Codex inline plan validation", () => {
     else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
   });
 
-  it("stores invalid inline proposed plans before blocking Stop", async () => {
+  it("does not treat whole-message proposed_plan blocks as Stop plan exits", async () => {
     mockCheckPlanIntent.mockResolvedValue({ approved: false, reason: "missing section" });
     fs.writeFileSync(
       transcriptPath,
@@ -68,16 +68,8 @@ describe("mainStop Codex inline plan validation", () => {
       codexEncoder,
     );
 
-    expect(mockExitAfterFlush).toHaveBeenCalledWith(
-      0,
-      expect.stringContaining("Plan validation failed: missing section"),
-    );
-    const stored = JSON.parse(fs.readFileSync(sessionCurrentPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!), "utf-8"));
-    expect(stored).toEqual({
-      kind: "inline",
-      content: "## User Goal\nx",
-      source: "codex-proposed-plan",
-    });
+    expect(mockCheckPlanIntent).not.toHaveBeenCalled();
+    expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
     const capture = JSON.parse(
       fs.readFileSync(sessionCapturesFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!), "utf-8").trim(),
     ) as { plan_mode?: { active?: boolean; mode?: string; source?: string } };
@@ -88,7 +80,7 @@ describe("mainStop Codex inline plan validation", () => {
     });
   });
 
-  it("stores valid inline proposed plans in the current-plan sidecar", async () => {
+  it("does not write a current-plan sidecar for proposed_plan Stop text", async () => {
     mockCheckPlanIntent.mockResolvedValue({ approved: true });
     fs.writeFileSync(
       transcriptPath,
@@ -105,12 +97,7 @@ describe("mainStop Codex inline plan validation", () => {
       codexEncoder,
     );
 
-    const stored = JSON.parse(fs.readFileSync(sessionCurrentPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!), "utf-8"));
-    expect(stored).toEqual({
-      kind: "inline",
-      content: "## User Goal\nx",
-      source: "codex-proposed-plan",
-    });
+    expect(fs.existsSync(sessionCurrentPlanFile(process.env.AGENT_FRAMEWORK_SESSION_DIR!))).toBe(false);
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 
@@ -129,13 +116,13 @@ describe("mainStop Codex inline plan validation", () => {
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 
-  it("blocks whole-message proposed_plan blocks outside plan mode without validating stale sidecar", async () => {
+  it("allows whole-message proposed_plan blocks outside plan mode without validating stale sidecar", async () => {
     mockCheckPlanIntent.mockResolvedValue({ approved: true });
     const sessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR!;
     fs.mkdirSync(sessionDir, { recursive: true });
     fs.writeFileSync(
       sessionCurrentPlanFile(sessionDir),
-      JSON.stringify({ kind: "inline", content: "stale plan", source: "test" }) + "\n",
+      JSON.stringify({ kind: "file", path: path.join(sessionDir, "plans", "stale-plan.md"), planName: "stale-plan" }) + "\n",
     );
 
     await mainStop(
@@ -149,16 +136,10 @@ describe("mainStop Codex inline plan validation", () => {
     );
 
     expect(mockCheckPlanIntent).not.toHaveBeenCalled();
-    expect(mockExitAfterFlush).toHaveBeenCalledWith(
-      0,
-      JSON.stringify({
-        decision: "block",
-        reason: "Proposed plan block emitted outside plan mode.",
-      }),
-    );
+    expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 
-  it("uses stored active plan mode when Stop lacks a fresh Codex collaboration marker", async () => {
+  it("does not validate proposed_plan Stop text when stored active plan mode exists", async () => {
     mockCheckPlanIntent.mockResolvedValue({ approved: true });
     const sessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR!;
     fs.mkdirSync(sessionDir, { recursive: true });
@@ -186,11 +167,11 @@ describe("mainStop Codex inline plan validation", () => {
       codexEncoder,
     );
 
-    expect(mockCheckPlanIntent).toHaveBeenCalledTimes(1);
+    expect(mockCheckPlanIntent).not.toHaveBeenCalled();
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 
-  it("uses stored plan mode for inline plans when Codex transcript tail misses the plan marker", async () => {
+  it("does not validate inline plans when Codex transcript tail misses the plan marker", async () => {
     mockCheckPlanIntent.mockResolvedValue({ approved: true });
     const sessionDir = process.env.AGENT_FRAMEWORK_SESSION_DIR!;
     fs.mkdirSync(sessionDir, { recursive: true });
@@ -231,7 +212,7 @@ describe("mainStop Codex inline plan validation", () => {
       codexEncoder,
     );
 
-    expect(mockCheckPlanIntent).toHaveBeenCalledTimes(1);
+    expect(mockCheckPlanIntent).not.toHaveBeenCalled();
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 });

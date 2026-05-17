@@ -1,4 +1,5 @@
 import type {
+  NativePlanFileLookupInput,
   PlanExitDetectionInput,
   PlanSourceDescriptor,
   PlanSourceLookupInput,
@@ -37,30 +38,15 @@ function isImplementationPrompt(prompt: string): boolean {
 }
 
 export function findCurrentPlanSource(input: PlanSourceLookupInput): PlanSourceDescriptor | null {
-  const assistantPlan = parseCodexProposedPlanBlock(input.assistantText);
-  if (assistantPlan) {
-    return { kind: "inline", content: assistantPlan.content, source: "codex-proposed-plan" };
-  }
+  void input;
+  return null;
+}
 
-  const promptPlan = parseCodexProposedPlanBlock(input.prompt);
-  if (promptPlan) {
-    return { kind: "inline", content: promptPlan.content, source: "codex-implementation-prompt" };
-  }
-
-  if (input.prompt?.trim().startsWith(CODEX_CLEAR_CONTEXT_IMPLEMENT_PLAN_PREFIX)) {
-    const content = input.prompt.trim().slice(CODEX_CLEAR_CONTEXT_IMPLEMENT_PLAN_PREFIX.length).trim();
-    if (content) {
-      return { kind: "inline", content, source: "codex-clear-context-implementation-prompt" };
-    }
-  }
-
+export function findNativePlanFile(_input: NativePlanFileLookupInput): string | null {
   return null;
 }
 
 export function isPlanExit(input: PlanExitDetectionInput): boolean {
-  if (input.event === "Stop") {
-    return parseCodexProposedPlanBlock(input.assistantText) !== null;
-  }
   if (input.event === "UserPromptSubmit") {
     return isImplementationPrompt(input.prompt);
   }

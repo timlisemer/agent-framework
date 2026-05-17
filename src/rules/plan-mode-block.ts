@@ -23,7 +23,7 @@ export const planModeBlockRule: PreToolRule = {
       const filePaths = extractFilePaths(ctx.toolName, ctx.toolInput);
       const firstFilePath = filePaths[0] ?? "";
       for (const filePath of filePaths) {
-        const editBlock = planModeEditBlock(ctx.planMode, ctx.toolName, filePath);
+        const editBlock = planModeEditBlock(ctx.planMode, ctx.toolName, filePath, ctx.sessionDir);
         if (editBlock) {
           return { fastDeny: editBlock };
         }
@@ -32,7 +32,7 @@ export const planModeBlockRule: PreToolRule = {
       // are the planner's legitimate write targets in plan mode. Stop here
       // before the rule-gate LLM (gate, priority 70) speculates a denial
       // with hallucinated reasoning about post-validation approval.
-      if (firstFilePath && filePaths.every(isEditIntentExemptPath)) {
+      if (firstFilePath && filePaths.every((filePath) => isEditIntentExemptPath(filePath, ctx.sessionDir))) {
         return {
           fastAllow:
             "Plan mode allows edits to plan files / host instruction files / memory files (path is exempt).",

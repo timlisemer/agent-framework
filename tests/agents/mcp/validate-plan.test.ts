@@ -20,8 +20,8 @@ const required = [
   "Files That Need Changes",
 ];
 
-function validPlan(): string {
-  return required.map((heading) => {
+function validPlan(planPath = "/tmp/validate-plan.md", planName = "validate-plan"): string {
+  const body = required.map((heading) => {
     if (heading === "User Goal") return `## ${heading}\n\n> "Implement validate plan MCP."`;
     if (heading === "Answered Assumptions") {
       return `## ${heading}\n\n1. The repo path is known. Answer: It is /repo. Source: User text.`;
@@ -37,6 +37,7 @@ function validPlan(): string {
     }
     return `## ${heading}\n\nThis section contains concrete repository-specific details for ${heading} with \`src/file.ts\` references.`;
   }).join("\n\n");
+  return `Plan Name: ${planName}\n\n${body}\n\nPlanfile Path: ${planPath}\nPlan Name: ${planName}`;
 }
 
 async function loadRunValidatePlanAgent(stub?: string) {
@@ -50,147 +51,117 @@ async function loadRunValidatePlanAgent(stub?: string) {
   return mod.runValidatePlanAgent;
 }
 
+async function validatePlanText(plan: string, stub = "VALID"): Promise<string> {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "validate-plan-"));
+  try {
+    const planPath = path.join(tempDir, "plan.md");
+    fs.writeFileSync(planPath, plan.replaceAll("/tmp/validate-plan.md", planPath));
+    const runValidatePlanAgent = await loadRunValidatePlanAgent(stub);
+    return await runValidatePlanAgent({ workingDir: tempDir, planFile: "plan.md" });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
 describe("runValidatePlanAgent", () => {
   afterEach(() => {
     delete process.env.AGENT_FRAMEWORK_LLM_STUBS;
     vi.resetModules();
   });
 
-  it("fails when both inline plan and plan file are provided", async () => {
-    const runValidatePlanAgent = await loadRunValidatePlanAgent();
-    const result = await runValidatePlanAgent({
-      workingDir: process.cwd(),
-      plan: "## Plan",
-      planFile: "plan.md",
-    });
-    expect(result).toContain("- Status: FAIL");
-    expect(result).toContain("Provide exactly one of plan or plan_file.");
-  });
-
   it("fails when no plan source is provided", async () => {
     const runValidatePlanAgent = await loadRunValidatePlanAgent();
-    const result = await runValidatePlanAgent({ workingDir: process.cwd() });
+    const result = await runValidatePlanAgent({ workingDir: process.cwd(), planFile: "" });
     expect(result).toContain("- Status: FAIL");
-    expect(result).toContain("Provide exactly one of plan or plan_file.");
+    expect(result).toContain("plan_file is required.");
   });
 
-  it("fails when inline plan is empty", async () => {
+  it("fails when plan file is empty", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "validate-plan-"));
+    fs.writeFileSync(path.join(tempDir, "plan.md"), "  \n");
     const runValidatePlanAgent = await loadRunValidatePlanAgent();
-    const result = await runValidatePlanAgent({ workingDir: process.cwd(), plan: "  \n" });
+    const result = await runValidatePlanAgent({ workingDir: tempDir, planFile: "plan.md" });
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain("Plan content is empty.");
+    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("fails deterministic planning-contract violations", async () => {
-    const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
-    const result = await runValidatePlanAgent({
-      workingDir: process.cwd(),
-      plan: "## Test Plan\n\nRun tests.",
-    });
+    const result = await validatePlanText("## Test Plan\n\nRun tests.");
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain("generic verification");
   });
 
   it("names unresolved assumption language in deterministic failures", async () => {
-    const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
-    const result = await runValidatePlanAgent({
-      workingDir: process.cwd(),
-      plan: validPlan().replace(
+    const result = await validatePlanText(
+      validPlan().replace(
         "This section contains concrete repository-specific details for Approach with `src/file.ts` references.",
         "Update `src/file.ts` if needed and probably adjust `tests/file.test.ts`.",
       ),
-    });
+    );
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain('"if needed"');
     expect(result).toContain('"probably"');
   });
 
   it("allows scanner-prohibited text inside quoted User Goal", async () => {
-    const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
-    const result = await runValidatePlanAgent({
-      workingDir: process.cwd(),
-      plan: validPlan().replace(
+    const result = await validatePlanText(
+      validPlan().replace(
         '> "Implement validate plan MCP."',
         [
           '> "Option A: run make build over 5 days if needed."',
           '> "## Testing is quoted user text."',
         ].join("\n"),
       ),
-    });
+    );
     expect(result).toContain("- Status: PASS");
   });
 
   it("still fails scanner-prohibited text outside excluded sections", async () => {
-    const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
-    const result = await runValidatePlanAgent({
-      workingDir: process.cwd(),
-      plan: validPlan().replace(
+    const result = await validatePlanText(
+      validPlan().replace(
         "This section contains concrete repository-specific details for Approach with `src/file.ts` references.",
         "Option A: run make build over 5 days if needed.",
       ),
-    });
+    );
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain("Option A");
   });
 
   it("passes when the plan-validate LLM returns VALID", async () => {
-    const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
-    const result = await runValidatePlanAgent({
-      workingDir: process.cwd(),
-      plan: validPlan(),
-    });
+    const result = await validatePlanText(validPlan());
     expect(result).toContain("- Status: PASS");
     expect(result).toContain("## Reasons\n(none)");
   });
 
   it("accepts Relevant Files and Files That Need Changes as required headings", async () => {
-    const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
-    const result = await runValidatePlanAgent({
-      workingDir: process.cwd(),
-      plan: validPlan(),
-    });
+    const result = await validatePlanText(validPlan());
     expect(result).toContain("- Status: PASS");
     expect(result).not.toContain("Extra level-two heading \"## Relevant Files\"");
     expect(result).not.toContain("Extra level-two heading \"## Files That Need Changes\"");
   });
 
   it("names non-contract level-two headings in deterministic failures", async () => {
-    const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
-    const result = await runValidatePlanAgent({
-      workingDir: process.cwd(),
-      plan: validPlan().replace("## Approach", "## Context\n\nContext details.\n\n## Approach"),
-    });
+    const result = await validatePlanText(validPlan().replace("## Approach", "## Context\n\nContext details.\n\n## Approach"));
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain("Extra level-two heading \"## Context\"");
   });
 
   it("fails with the LLM reason when plan-validate returns INVALID", async () => {
-    const runValidatePlanAgent = await loadRunValidatePlanAgent("INVALID: Missing concrete file paths.");
-    const result = await runValidatePlanAgent({
-      workingDir: process.cwd(),
-      plan: validPlan(),
-    });
+    const result = await validatePlanText(validPlan(), "INVALID: Missing concrete file paths.");
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain("Missing concrete file paths.");
   });
 
   it("rejects vague LLM invalid reasons as malformed", async () => {
-    const runValidatePlanAgent = await loadRunValidatePlanAgent("INVALID: The plan does not follow the contract.");
-    const result = await runValidatePlanAgent({
-      workingDir: process.cwd(),
-      plan: validPlan(),
-    });
+    const result = await validatePlanText(validPlan(), "INVALID: The plan does not follow the contract.");
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain("specific heading, line, or rule");
     expect(result).not.toContain("The plan does not follow the contract.");
   });
 
   it("surfaces specific LLM invalid reasons", async () => {
-    const runValidatePlanAgent = await loadRunValidatePlanAgent("INVALID: Missing required heading \"## Relevant Files\".");
-    const result = await runValidatePlanAgent({
-      workingDir: process.cwd(),
-      plan: validPlan(),
-    });
+    const result = await validatePlanText(validPlan(), "INVALID: Missing required heading \"## Relevant Files\".");
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain("Missing required heading \"## Relevant Files\".");
   });
@@ -198,7 +169,8 @@ describe("runValidatePlanAgent", () => {
   it("reads plan_file relative to working_dir", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "validate-plan-"));
     try {
-      fs.writeFileSync(path.join(tempDir, "plan.md"), validPlan());
+      const planPath = path.join(tempDir, "plan.md");
+      fs.writeFileSync(planPath, validPlan(planPath));
       const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
       const result = await runValidatePlanAgent({
         workingDir: tempDir,

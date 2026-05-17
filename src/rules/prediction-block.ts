@@ -20,7 +20,7 @@ export const predictionBlockRule: PreToolRule = {
     const filePath =
       (ctx.toolInput as { file_path?: string }).file_path ||
       (ctx.toolInput as { path?: string }).path || "";
-    if (isEditTool(ctx.toolName) && isEditIntentExemptPath(filePath)) {
+    if (isEditTool(ctx.toolName) && isEditIntentExemptPath(filePath, ctx.sessionDir)) {
       return null;
     }
 

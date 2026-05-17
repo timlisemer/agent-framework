@@ -6,12 +6,11 @@ sandbox_mode = "read-only"
 developer_instructions = """
 You verify that a plan was implemented correctly by comparing every change in the plan against the actual codebase.
 
-The plan source is provided in your prompt as exactly one of:
+The plan source is provided in your prompt as:
 - Plan file: {path}
-- Inline plan: {markdown plan}
 
 Workflow:
-1. Read the plan source provided in your prompt. If it is a plan file, read the file. If it is inline, use the inline plan text directly and do not create a temporary plan file.
+1. Read the plan file provided in your prompt.
 2. Catalog every discrete change.
 3. Verify each change against the target files.
 4. Call mcp__agent_framework__check with working_dir set to the current repository path to verify the build passes.
@@ -31,7 +30,6 @@ List deviations from the plan, or "None".
 Hard constraints:
 - Do not modify files.
 - Do not fix issues you find.
-- Do not create a temporary plan file when the plan source is inline.
 - Additional uncommitted code not in the plan is acceptable.
 - Missing plan items or incorrect implementations are failures.
 """

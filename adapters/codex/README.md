@@ -45,16 +45,12 @@ and keeps the generated block in `dotcodex/config.toml` in sync with
 Codex planning currently receives the planning contract from `~/.codex/AGENTS.md`
 as a temporary global workaround. The hook-based hidden context injection code is
 still present but disabled until Codex applies `suppressOutput` to hook output.
-The plan skills present final inline `<proposed_plan>` output from the
-foreground session; spawned planning and validation agents do not receive
-separate planning-contract instructions from those skills.
+The plan skills write named planfiles and validate them with `plan_file`.
 
-Codex plans are inline `<proposed_plan>...</proposed_plan>` blocks, not
-temporary plan files. The Stop hook validates a complete inline proposed plan
-before it is presented and stores the validated content in the session
-`current-plan.json` sidecar. When Codex later submits `Implement the plan.` or
-the clear-context implementation prompt, `UserPromptSubmit` validates the
-stored or embedded plan again before allowing implementation state to begin.
+Codex planfiles live under the agent-framework session `plans/` directory.
+The session `current-plan.json` sidecar stores only the active planfile
+descriptor, not plan content. Implementation workflows resolve that planfile
+path and pass it to implementer and validator agents as `Plan file: <path>`.
 
 `dotcodex/agents/*.toml` contains Codex custom-agent equivalents for the
 Claude subagent roles. The NixOS activation script links these as individual

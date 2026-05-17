@@ -87,11 +87,10 @@ server.registerTool(
   "validate_plan",
   {
     title: "Validate Plan",
-    description: "Validate an inline plan or plan file against the planning contract using the plan-validate agent.",
+    description: "Validate a plan file against the planning contract using the plan-validate agent.",
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
-      plan_file: z.string().optional().describe("Path to a plan file to validate"),
-      plan: z.string().optional().describe("Inline plan content to validate"),
+      plan_file: z.string().describe("Path to a plan file to validate"),
       transcript_path: z.string().optional().describe("Session transcript path for statusLine")
     }
   },
@@ -99,7 +98,6 @@ server.registerTool(
     const result = await runValidatePlanAgent(
       {
         workingDir: args.working_dir || process.cwd(),
-        plan: args.plan,
         planFile: args.plan_file,
         transcriptPath: args.transcript_path,
       },

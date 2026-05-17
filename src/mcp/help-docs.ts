@@ -212,17 +212,16 @@ Structured verdict with ALIGNED or DRIFTED verdict and a short reason.
 
 export const VALIDATE_PLAN_HELP = `# validate_plan -- Plan Contract Validator
 
-Validates an inline plan or plan file against the planning contract using the
+Validates a plan file against the planning contract using the
 plan-validate agent. This validates the plan itself, not user-intent alignment.
 
 ## Inputs
 
 - working_dir (optional): directory whose planning contract applies (defaults to cwd)
-- plan_file (optional): path to a plan file to validate
-- plan (optional): inline plan content to validate
+- plan_file (required): path to a plan file to validate
 - transcript_path (optional): session transcript path, used only for statusLine
 
-Exactly one of plan_file or plan is required.
+plan_file is required.
 
 ## Output shape
 
