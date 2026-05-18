@@ -24,6 +24,7 @@ import type { ToolLogEntry } from "../utils/session-store.js";
 import { combineInjectionMessages, loadSessionInjectionsBySeq, shortContentHash } from "../utils/session-injections.js";
 import { activeSpec, adapterSpecByName } from "../adapter/spec.js";
 import type { ContentBlock, TranscriptEntry } from "../adapter/types.js";
+import type { ToolPrediction } from "../utils/prediction-types.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -267,6 +268,37 @@ function rawAnchorStartIndex(
   return idx === -1 ? 0 : idx;
 }
 
+function seedCurrentPrediction(
+  prediction: ToolPrediction | null,
+): Scenario["seed_state"]["currentPrediction"] {
+  const fallback: Scenario["seed_state"]["currentPrediction"] = {
+    mood: "neutral",
+    trust: "normal",
+    intent: "",
+    blockedIntent: "",
+    explicitlyAllowedTools: [],
+    explicitlyBlockedSubstrings: [],
+    userMessageSnippet: "",
+  };
+  if (!prediction) return fallback;
+
+  return {
+    mood: prediction.mood,
+    trust: prediction.trust,
+    intent: prediction.intent,
+    blockedIntent: prediction.blockedIntent,
+    explicitlyAllowedTools: prediction.explicitlyAllowedTools,
+    explicitlyBlockedSubstrings: prediction.explicitlyBlockedSubstrings,
+    userMessageSnippet: prediction.userMessageSnippet,
+    ...(prediction.blockAllTools !== undefined ? { blockAllTools: prediction.blockAllTools } : {}),
+    ...(prediction.timestamp !== undefined ? { timestamp: prediction.timestamp } : {}),
+    ...(prediction.contextSwitch !== undefined ? { contextSwitch: prediction.contextSwitch } : {}),
+    ...(prediction.questionIsStalling !== undefined
+      ? { questionIsStalling: prediction.questionIsStalling }
+      : {}),
+  };
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -418,15 +450,7 @@ export async function materializeScenario(
         }
       : {}),
     seed_state: {
-      currentPrediction: state.currentPrediction ?? {
-        mood: "neutral",
-        trust: "normal",
-        intent: "",
-        blockedIntent: "",
-        explicitlyAllowedTools: [],
-        explicitlyBlockedSubstrings: [],
-        userMessageSnippet: "",
-      },
+      currentPrediction: seedCurrentPrediction(state.currentPrediction),
       forceCheckPending: state.forceCheckPending,
       frustrationStreak: state.frustrationStreak,
       currentWindowSize: state.currentWindowSize,
