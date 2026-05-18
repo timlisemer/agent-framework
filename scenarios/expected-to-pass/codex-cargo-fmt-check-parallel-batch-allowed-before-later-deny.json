@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "codex-cargo-fmt-check-parallel-batch-allowed-before-later-deny",
-  "description": "Live repro from ~/.agent-framework/sessions/home-tim-Coding-private_repos-astral/2026-05-14-2336_7e83dcb8 capture seq 134 / toolUseId call_7JKj00Sjko6bERPNToJoi70L. In the live Codex transcript, after the user authorized only Edit/Write work ('please edit all files as long as you are doing what i earlier told you to do'), the assistant said 'The core behavior is now wired...' and issued a parallel Bash batch. The leader command `cargo fmt --check` was allowed by all-rules even though a later `cargo fmt` and another `cargo fmt --check` were correctly denied by tool-approve as build/check commands duplicating the project Justfile. Correct behavior: the first `cargo fmt --check` should also be denied by tool-approve.",
+  "description": "Live repro from ~/.agent-framework/sessions/home-tim-Coding-private_repos-astral/2026-05-14-2336_7e83dcb8 capture seq 134 / toolUseId call_7JKj00Sjko6bERPNToJoi70L. In the live Codex transcript, after the user authorized only Edit/Write work ('please edit all files as long as you are doing what i earlier told you to do'), the assistant said 'The core behavior is now wired...' and issued a parallel Bash batch. The leader command `cargo fmt --check` was allowed by all-rules even though a later `cargo fmt` and another `cargo fmt --check` were correctly denied as build/check commands duplicating the project Justfile. Correct behavior: the first `cargo fmt --check` should also be denied by the deterministic blacklist/check-routed rule.",
   "transcript": [
     {
       "role": "user",
@@ -59,10 +59,7 @@
     "adapter": "codex",
     "cwd": "/home/tim/Coding/private_repos/astral",
     "permission_mode": "default",
-    "timeout_ms": 60000,
-    "llm_stubs": {
-      "rule-gate": "APPROVE"
-    }
+    "timeout_ms": 60000
   },
   "seed_state": {
     "currentPrediction": {
@@ -88,13 +85,13 @@
   },
   "expect": {
     "expected": "deny",
-    "by": "tool-approve",
+    "by": "blacklist",
     "reason_must": {
       "contains": [
         "cargo fmt",
         "agent-framework check"
       ]
     },
-    "notes": "`cargo fmt --check` is a build/check/format command and, in the live Astral repo, duplicates the Justfile check path. The first firing should be denied by tool-approve just like the later live `cargo fmt` / `cargo fmt --check` firings, not allowed by all-rules."
+    "notes": "`cargo fmt --check` is a build/check/format command and, in the live Astral repo, duplicates the Justfile check path. The first firing should be denied by the deterministic blacklist/check-routed rule just like the later live `cargo fmt` / `cargo fmt --check` firings, not allowed by all-rules."
   }
 }

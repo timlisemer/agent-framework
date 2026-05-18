@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { activeSpec } from "../adapter/spec.js";
-import { agentFrameworkRoot } from "./paths.js";
+import * as url from "url";
 import { extractPlanName, extractPlanfileFooter, PLAN_NAME_RE } from "./planfile.js";
 import {
   type MarkdownHeadingMatcher,
@@ -44,6 +43,7 @@ interface Heading {
 }
 
 export interface PlanContractValidationOptions {
+  checkMcpWireName?: string;
   excludedContentSections?: readonly MarkdownHeadingMatcher[];
   expectedPlanFile?: string;
   pathBaseDir?: string;
@@ -55,11 +55,31 @@ const UNRESOLVED_RE = /\b(assuming|probably|likely|if needed|should be|might|may
 const UNRESOLVED_MATCH_RE = /\b(assuming|probably|likely|if needed|should be|might|maybe|to be determined|tbd|unknown)\b/gi;
 const LIVE_OPTION_RE = /\b(option|approach|alternative)\s+([A-Z]|\d+):/i;
 const SCHEDULE_RE = /\b(week|day|month)\s*\d+:|\b\d+(-\d+)?\s*(days?|weeks?|months?)\b/i;
+export function readRequiredFinalPlanHeadings(projectDir: string): string[] {
+  void projectDir;
+  const envRoot = process.env.AGENT_FRAMEWORK_ROOT;
+  if (envRoot) {
+    return extractRequiredFinalPlanHeadings(
+      fs.readFileSync(path.join(envRoot, "PLANS.md"), "utf-8"),
+    );
+  }
 
-export function readRequiredFinalPlanHeadings(_projectDir: string): string[] {
-  const plansPath = path.join(agentFrameworkRoot(), "PLANS.md");
+  const thisFile = url.fileURLToPath(import.meta.url);
+  const plansPath = findAgentFrameworkPlansFile(path.dirname(thisFile));
   const content = fs.readFileSync(plansPath, "utf-8");
   return extractRequiredFinalPlanHeadings(content);
+}
+
+function findAgentFrameworkPlansFile(startDir: string): string {
+  let current = path.resolve(startDir);
+  while (true) {
+    const candidate = path.join(current, "PLANS.md");
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return path.resolve(startDir, "..", "..", "PLANS.md");
 }
 
 export function extractRequiredFinalPlanHeadings(plansMd: string): string[] {
@@ -77,6 +97,29 @@ export function extractRequiredFinalPlanHeadings(plansMd: string): string[] {
     if (match) headings.push(match[1].trim());
   }
   return headings;
+}
+
+export function extractMarkdownPlanPresentation(text: string | null | undefined): string | null {
+  const trimmed = text?.trim();
+  if (!trimmed) return null;
+
+  const withoutApprovalQuestion = trimmed.replace(
+    /\s*(?:Implement|Approve|Proceed with|Use|Accept)\s+(?:this\s+)?plan\?\s*$/i,
+    "",
+  ).trim();
+  if (withoutApprovalQuestion === trimmed) return null;
+
+  const headings = parseMarkdownHeadings(withoutApprovalQuestion);
+  const headingTexts = new Set(headings.map((h) => h.text.toLowerCase()));
+  const hasPlanShape =
+    headings.some((h) => h.level <= 2 && /plan/i.test(h.text)) ||
+    headingTexts.has("summary") ||
+    headingTexts.has("key changes") ||
+    headingTexts.has("test plan") ||
+    headingTexts.has("assumptions") ||
+    headingTexts.has("user goal");
+
+  return hasPlanShape ? withoutApprovalQuestion : null;
 }
 
 const DEFAULT_EXCLUDED_CONTENT_SECTIONS: readonly MarkdownHeadingMatcher[] = ["User Goal"];
@@ -204,12 +247,15 @@ export function validatePlanContractWithRequiredHeadings(
   }
 
   const assistantVerification = sections.get("Assistant Verification") ?? "";
-  const checkWireName = activeSpec().mcpWireName("check");
-  if (assistantVerification.trim() && !assistantVerification.includes(checkWireName)) {
+  if (
+    assistantVerification.trim() &&
+    options.checkMcpWireName &&
+    !assistantVerification.includes(options.checkMcpWireName)
+  ) {
     findings.push({
       kind: "assistant_verification_not_mcp_check",
       heading: "Assistant Verification",
-      message: `Assistant Verification must use ${checkWireName} with the repository working_dir.`,
+      message: "Assistant Verification must use the agent-framework check MCP with the repository working_dir.",
     });
   }
   if (PROJECT_COMMAND_RE.test(assistantVerification)) {

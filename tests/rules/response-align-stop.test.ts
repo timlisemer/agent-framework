@@ -291,6 +291,26 @@ describe("responseAlignStopRule — LLM classifier path", () => {
     expect(block.stopBlock).toContain("AskUserQuestion");
   });
 
+  it("blocks plain-text plan approval when classifier returns PLAN_APPROVAL", async () => {
+    mockRunAgent.mockResolvedValue({
+      output: "PLAN_APPROVAL",
+      success: true,
+      latencyMs: 80,
+      errorCount: 0,
+      modelTier: "haiku" as never,
+      modelName: "claude-haiku-4-5",
+    });
+    const ctx = makeCtx({
+      assistantText:
+        "Here is the implementation plan:\n\n1. Update the parser.\n2. Add tests.\n3. Run checks.\n\nDoes this plan look good?",
+      userText: "Fix the parser",
+    });
+    const result = await responseAlignStopRule.check(ctx);
+    expect(result).toEqual({
+      stopBlock: expect.stringContaining("Do not ask for plan approval in plain text"),
+    });
+  });
+
   it("verifyIsActualQuestion suppresses false positive on relative clause ('handle what is being said')", async () => {
     // verifyIsActualQuestion returns NOT_QUESTION for relative clauses
     mockRunAgent.mockResolvedValue({

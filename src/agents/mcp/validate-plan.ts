@@ -80,7 +80,7 @@ ${body}`;
 }
 
 function stripViolationPrefix(text: string): string {
-  return text.replace(/^\[VIOLATION: [^\]]+\]\s*/, "");
+  return text.replace(/^\[VIOLATION: ([^\]]+)\]\s*/, "$1: ");
 }
 
 function hasSpecificInvalidReason(text: string): boolean {
@@ -139,9 +139,10 @@ export async function validatePlanFileWithContract(
 
   const source = resolvePlanContent(input);
   if (source.error) {
+    const validatePlanWireName = mcpWireNameForText("validate_plan", source.error);
     return {
       status: "FAIL",
-      reasons: [appendPlanfileValidationWorkflow(source.error, source.resolvedPath)],
+      reasons: [appendPlanfileValidationWorkflow(source.error, source.resolvedPath, validatePlanWireName)],
       resolvedPath: source.resolvedPath,
     };
   }

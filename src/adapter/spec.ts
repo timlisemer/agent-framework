@@ -15,22 +15,24 @@ import { CANONICAL_MCPS } from "./types.js";
 import { claudeSpec } from "../../adapters/claude/index.js";
 import { codexSpec }  from "../../adapters/codex/index.js";
 
-const SPECS: Readonly<Record<string, AdapterSpec>> = Object.freeze({
-  [claudeSpec.name]: claudeSpec,
-  [codexSpec.name]:  codexSpec,
-});
-
 const DEFAULT_ADAPTER = claudeSpec.name;
+
+function specs(): Readonly<Record<string, AdapterSpec>> {
+  return Object.freeze({
+    [claudeSpec.name]: claudeSpec,
+    [codexSpec.name]:  codexSpec,
+  });
+}
 
 export function activeSpec(): AdapterSpec {
   const name = process.env.AGENT_FRAMEWORK_ADAPTER ?? DEFAULT_ADAPTER;
-  const spec = SPECS[name];
+  const spec = specs()[name];
   if (!spec) throw new Error(`Unknown adapter: ${name}`);
   return spec;
 }
 
 export function mcpWireNameForText(canonical: CanonicalMcp, text: string): string {
-  for (const spec of Object.values(SPECS)) {
+  for (const spec of Object.values(specs())) {
     for (const known of CANONICAL_MCPS) {
       if (text.includes(spec.mcpWireName(known))) return spec.mcpWireName(canonical);
     }
@@ -40,5 +42,5 @@ export function mcpWireNameForText(canonical: CanonicalMcp, text: string): strin
 
 /** Registered adapter names — used by validateScenario to validate env.adapter. */
 export function registeredAdapterNames(): readonly string[] {
-  return Object.keys(SPECS);
+  return Object.keys(specs());
 }

@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "name": "bash-rg-escaped-quote-pattern-should-allow",
+  "description": "Live repro from ~/.agent-framework/sessions/home-tim-Coding-iocto-hmi-pc-scripts-iocto/2026-05-18-0929_cba0c5de, capture seq 17, tool call call_Dm171OzyxAAHvFZjRfdBk78d. The assistant ran a benign read-only rg search: `rg -n \"href: '/config'|/config|Config'|Config\\\"|routes/config|configStore\" iocto-website/src`. The PreToolUse hook denied it with `relative path execution not allowed: routes/config`. Root cause: bash-command-policy strips quoted regions with a regex that does not understand escaped double quotes, so the `Config\\\"` fragment prematurely ends the quoted region and leaves the subsequent `|routes/config` alternative visible to shell-segment parsing. The parser then treats `routes/config` as a command head and applies the relative-path-execution guard. Correct behavior: the entire rg pattern is one quoted argument, so `routes/config` is search text, not an executable path. Expected: allow.",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "I will search for remaining config route references."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_Dm171OzyxAAHvFZjRfdBk78d",
+          "name": "Bash",
+          "input": {
+            "command": "rg -n \"href: '/config'|/config|Config'|Config\\\"|routes/config|configStore\" iocto-website/src",
+            "description": "Search config route references"
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "call_Dm171OzyxAAHvFZjRfdBk78d"
+  },
+  "env": {
+    "permission_mode": "default",
+    "cwd": "/home/tim/Coding/public_repos/agent-framework"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "blockAllTools": false,
+      "userMessageSnippet": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
+      "timestamp": 1
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
+  },
+  "expect": {
+    "expected": "allow",
+    "notes": "The command is a read-only rg search. `routes/config` is inside the quoted regex argument and must not be classified as a relative executable path."
+  }
+}

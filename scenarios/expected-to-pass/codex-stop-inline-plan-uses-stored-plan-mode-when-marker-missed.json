@@ -25,10 +25,7 @@
     "cwd": "/home/tim/Coding/public_repos/agent-framework",
     "permission_mode": "default",
     "session_start_permission_mode": "default",
-    "codex_collaboration_mode": "plan",
-    "llm_stubs": {
-      "plan-validate": "OK"
-    }
+    "codex_collaboration_mode": "plan"
   },
   "seed_state": {
     "currentPrediction": {

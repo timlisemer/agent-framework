@@ -201,7 +201,39 @@ export const WORKAROUND_PATTERNS: Record<string, { variants: string[]; redactPat
   });
 
 export function stripQuotedRegions(s: string): string {
-  return s.replace(/'[^']*'|"[^"]*"/g, (m) => " ".repeat(m.length));
+  let out = "";
+  let quote: "'" | "\"" | null = null;
+  let escaped = false;
+
+  for (const ch of s) {
+    if (quote === "'") {
+      out += " ";
+      if (ch === "'") quote = null;
+      continue;
+    }
+
+    if (quote === "\"") {
+      out += " ";
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "\"") {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (ch === "'" || ch === "\"") {
+      quote = ch;
+      out += " ";
+      continue;
+    }
+
+    out += ch;
+  }
+
+  return out;
 }
 
 // Commands allowed for read-only Bash use. Shared by Bash policy callers so

@@ -61,6 +61,6 @@
         "node not covered by just check"
       ]
     },
-    "notes": "Exercises the reason_must harness assertion: deny reason MUST contain 'node not covered by just check' and MUST NOT contain 'Use Read tool with offset'. The upstream src/utils/command-patterns.ts head-command scoping fix removes the bogus 'Use Read tool with offset' suffix; the appeal-LLM tightening in src/utils/agent-configs.ts (Rule 4 trumps Rules 2/3, Rule 2 NEVER-OVERTURN extended for node/python/ruby/perl, Rule 3 precondition narrowed) plus the denied-command-token surfacing in src/agents/hooks/tool-appeal.ts ensures the deterministic fastDeny is no longer overturned. No env.llm_stubs needed — the appeal correctly UPHOLDs on real LLM calls."
+    "notes": "Exercises the reason_must harness assertion: deny reason MUST contain 'node not covered by just check' and MUST NOT contain 'Use Read tool with offset'. The upstream src/utils/command-patterns.ts head-command scoping fix removes the bogus 'Use Read tool with offset' suffix; the appeal-LLM tightening in src/utils/agent-configs.ts (Rule 4 trumps Rules 2/3, Rule 2 NEVER-OVERTURN extended for node/python/ruby/perl, Rule 3 precondition narrowed) plus the denied-command-token surfacing in src/agents/hooks/tool-appeal.ts ensures the deterministic fastDeny is no longer overturned."
   }
 }

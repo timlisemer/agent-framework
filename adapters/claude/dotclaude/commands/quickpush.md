@@ -13,3 +13,5 @@ You MUST use the MCP tools listed in allowed-tools above. Under NO circumstances
    - auto_push: true
 
 2. Report the commit and push results to the user.
+   - If the result is DECLINED or contains errors, you MUST spell out the specific errors returned by the MCP.
+   - If multiple errors are returned, list the multiple errors; do not replace them with only a vague count or summary such as "check failed with N errors".

@@ -55,7 +55,7 @@ export async function readCurrentPlan(
     transcriptPath: input.transcriptPath,
     sessionDir: input.sessionDir,
     planName,
-  });
+  }, (lookup) => activeSpec().findNativePlanFile(lookup));
   if (pathToPlanfile) {
     return { kind: "file", path: pathToPlanfile, planName };
   }
@@ -76,7 +76,7 @@ export async function getCurrentPlanfilePath(input: CurrentPlanLookupInput & { p
     transcriptPath: input.transcriptPath,
     sessionDir: input.sessionDir,
     planName: input.planName,
-  });
+  }, (lookup) => activeSpec().findNativePlanFile(lookup));
   if (pathToPlanfile) return pathToPlanfile;
   const stored = input.sessionDir ? readStoredCurrentPlan(input.sessionDir) : null;
   return stored?.path ?? null;
@@ -145,7 +145,11 @@ export async function validatePlanExitPresentation(input: {
     if (code !== "ENOENT") {
       return {
         approved: false,
-        reason: appendPlanfileValidationWorkflow(`The matching planfile at ${resolvedPath} is unreadable. Repair it before presenting <proposed_plan>.`, resolvedPath),
+        reason: appendPlanfileValidationWorkflow(
+          `The matching planfile at ${resolvedPath} is unreadable. Repair it before presenting <proposed_plan>.`,
+          resolvedPath,
+          activeSpec().mcpWireName("validate_plan"),
+        ),
       };
     }
   }
@@ -158,6 +162,7 @@ export async function validatePlanExitPresentation(input: {
         reason: appendPlanfileValidationWorkflow(
           `The located planfile at ${resolvedPath} is for "${existingPlanName}", but the presented plan is "${planName}". Present or validate the matching planfile before exiting plan mode.`,
           resolvedPath,
+          activeSpec().mcpWireName("validate_plan"),
         ),
       };
     }
@@ -169,7 +174,11 @@ export async function validatePlanExitPresentation(input: {
   if (!extractedContent) {
     return {
       approved: false,
-      reason: appendPlanfileValidationWorkflow(`The matching planfile at ${resolvedPath} is empty. Populate it before exiting plan mode.`, resolvedPath),
+      reason: appendPlanfileValidationWorkflow(
+        `The matching planfile at ${resolvedPath} is empty. Populate it before exiting plan mode.`,
+        resolvedPath,
+        activeSpec().mcpWireName("validate_plan"),
+      ),
     };
   }
 
@@ -199,7 +208,11 @@ export async function validatePlanExitPresentation(input: {
       await restoreUnvalidatedPlanfile();
       return {
         approved: false,
-        reason: appendPlanfileValidationWorkflow(`The matching planfile at ${resolvedPath} is still empty after plan validation.`, resolvedPath),
+        reason: appendPlanfileValidationWorkflow(
+          `The matching planfile at ${resolvedPath} is still empty after plan validation.`,
+          resolvedPath,
+          activeSpec().mcpWireName("validate_plan"),
+        ),
       };
     }
     await restoreUnvalidatedPlanfile();

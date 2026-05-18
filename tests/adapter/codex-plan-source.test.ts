@@ -48,4 +48,24 @@ describe("Codex plan source", () => {
     const prompt = `${CODEX_CLEAR_CONTEXT_IMPLEMENT_PLAN_PREFIX}\n\n## User Goal\nImplement it.`;
     expect(isPlanExit({ event: "UserPromptSubmit", prompt })).toBe(true);
   });
+
+  it("extracts whole-message markdown plan approval text", () => {
+    const text = [
+      "# Remove Standalone Config Route",
+      "",
+      "## Summary",
+      "",
+      "Remove the old page.",
+      "",
+      "## Key Changes",
+      "",
+      "- Delete the route file.",
+      "",
+      "Implement this plan?",
+    ].join("\n");
+
+    expect(extractStopProposedPlan(text)).toContain("## Summary");
+    expect(extractStopProposedPlan(text)).not.toContain("Implement this plan?");
+    expect(isPlanExit({ event: "Stop", assistantText: text })).toBe(true);
+  });
 });

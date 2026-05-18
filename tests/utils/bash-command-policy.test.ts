@@ -9,6 +9,7 @@ import {
   classifyBashCommand,
   getContentBlacklistHighlights,
   getCheckRoutedCommandHighlights,
+  stripQuotedRegions,
 } from "../../src/utils/bash-command-policy.js";
 
 describe("classifyBashCommand", () => {
@@ -31,9 +32,21 @@ describe("classifyBashCommand", () => {
     expect(classifyBashCommand("rg -n foo src").riskClass).toBe("simple-read-only");
   });
 
+  it("classifies rg pattern with escaped quote and slash alternative as simple read-only", () => {
+    const command =
+      "rg -n \"href: '/config'|/config|Config'|Config\\\"|routes/config|configStore\" iocto-website/src";
+    expect(classifyBashCommand(command).riskClass).toBe("simple-read-only");
+  });
+
   it("classifies safe read-only pipelines as read-only-complex", () => {
     expect(classifyBashCommand("cat file | grep x | head -20").riskClass).toBe("read-only-complex");
     expect(classifyBashCommand("rg -n foo src | head -50").riskClass).toBe("read-only-complex");
+  });
+
+  it("still blocks real relative path execution in a shell segment", () => {
+    const result = classifyBashCommand("rg foo src | routes/config");
+    expect(result.riskClass).toBe("blocked");
+    expect(result.reason).toBe("relative path execution not allowed: routes/config");
   });
 
   it("classifies curl as non-read-only-non-workaround", () => {
@@ -149,6 +162,15 @@ describe("bash command policy invariants", () => {
     ]) {
       expect(getCheckRoutedCommandHighlights("Bash", { command })).toEqual([]);
     }
+  });
+
+  it("strips shell quoted regions with escaped double quotes before segment scanning", () => {
+    const stripped = stripQuotedRegions(
+      "rg -n \"href: '/config'|/config|Config'|Config\\\"|routes/config|configStore\" iocto-website/src",
+    );
+    expect(stripped).not.toContain("|routes/config");
+    expect(stripped).toContain("rg -n");
+    expect(stripped).toContain("iocto-website/src");
   });
 
   it("keeps content blacklist scanning semantics independent of Bash executable classification", () => {

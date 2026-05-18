@@ -207,17 +207,6 @@ export interface ScenarioEnv {
   adapter?: string;
   /** Codex-only: materialize native collaboration-mode transcript markers. */
   codex_collaboration_mode?: "plan" | "default";
-  /**
-   * Per-agent LLM stub map: agent name (matching `telemetry.agent`) → exact
-   * stubbed output text. Plumbed into the hook process via the
-   * `AGENT_FRAMEWORK_LLM_STUBS` env var (JSON-encoded). Stubbing happens at
-   * `runAgentWithRetryAndTelemetry`, so every agent that flows through the
-   * agent-runner LLM transport boundary (tool-appeal, rule-gate, style-drift,
-   * question-validate, edit-intent, plan-validate, etc.) can be made
-   * deterministic. Authors write what the LLM would have returned, e.g.
-   * `{ "tool-appeal": "UPHOLD" }` or `{ "rule-gate": "DENY: tool-approve: nope" }`.
-   */
-  llm_stubs?: Record<string, string>;
 }
 
 /** A complete synthetic test scenario for unit-testing a single hook rule. */
@@ -378,8 +367,6 @@ export interface FanoutFireResult {
    * reason) because per-hook-kind dispatch is non-obvious.
    */
   actual_reason?: string;
-  /** Echoed env.llm_stubs for reproducibility. */
-  llm_stubs_used?: Record<string, string>;
 }
 
 /**
@@ -443,8 +430,6 @@ export type ScenarioResult =
       }>;
       context_output_hash?: string | null;
       context_output_pass?: boolean;
-      /** Echoed scenario.env.llm_stubs for reproducibility. */
-      llm_stubs_used?: Record<string, string>;
       /**
        * Reality of this run relative to where the fixture lives:
        * - `"expected-to-pass"` when pass === true (fixture in expected-to-pass/ matched)
@@ -469,8 +454,6 @@ export type ScenarioResult =
       commit: string;
       /** Per-assertion results when scenario.predictions was set. */
       prediction_assertions?: PredictionAssertionResult[];
-      /** Echoed scenario.env.llm_stubs for reproducibility. */
-      llm_stubs_used?: Record<string, string>;
       /**
        * Reality of this run relative to where the fixture lives:
        * - `"expected-to-pass"` when pass === true
@@ -898,6 +881,19 @@ export function validateScenario(raw: unknown): Scenario {
     if (typeof env !== "object" || env === null) {
       throw new Error("scenario.env must be an object when set");
     }
+    const allowedEnvKeys = new Set([
+      "permission_mode",
+      "session_start_permission_mode",
+      "cwd",
+      "timeout_ms",
+      "adapter",
+      "codex_collaboration_mode",
+    ]);
+    for (const key of Object.keys(env)) {
+      if (!allowedEnvKeys.has(key)) {
+        throw new Error(`scenario.env.${key} is not allowed`);
+      }
+    }
     if (env.permission_mode !== undefined) {
       const validModes: PermissionMode[] = [
         "default",
@@ -949,9 +945,6 @@ export function validateScenario(raw: unknown): Scenario {
       env.codex_collaboration_mode !== "default"
     ) {
       throw new Error('scenario.env.codex_collaboration_mode must be "plan" or "default" when set');
-    }
-    if (env.llm_stubs !== undefined) {
-      validateLlmStubs(env.llm_stubs);
     }
   }
 
@@ -1545,30 +1538,6 @@ export function validateReasonMustExpectation(ctx: string, value: unknown): void
     throw new Error(
       `${ctx}.reason_must is set but every sub-array is missing — provide at least one of ${knownFields.join(", ")}`,
     );
-  }
-}
-
-/**
- * Validate the optional `scenario.env.llm_stubs` map. Keys are agent names
- * matching `telemetry.agent`; values are exact stubbed output strings the
- * agent-runner returns in lieu of an LLM call. Both keys and values must be
- * non-empty strings.
- */
-function validateLlmStubs(value: unknown): void {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("scenario.env.llm_stubs must be a non-null object when set");
-  }
-  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-    if (key.length === 0) {
-      throw new Error(
-        "scenario.env.llm_stubs keys must be non-empty strings (agent names)",
-      );
-    }
-    if (typeof val !== "string" || val.length === 0) {
-      throw new Error(
-        `scenario.env.llm_stubs[${JSON.stringify(key)}] must be a non-empty string (the exact stubbed output)`,
-      );
-    }
   }
 }
 

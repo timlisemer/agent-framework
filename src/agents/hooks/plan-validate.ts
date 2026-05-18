@@ -40,7 +40,7 @@ import {
   getVerificationStructureHighlights,
 } from "../../utils/content-patterns.js";
 import { validatePlanContract } from "../../utils/plan-contract.js";
-import { activeSpec } from "../../adapter/spec.js";
+import { activeSpec, mcpWireNameForText } from "../../adapter/spec.js";
 import { appendPlanfileValidationWorkflow } from "../../utils/planfile.js";
 
 /**
@@ -83,6 +83,7 @@ export function collectPlanValidationViolations(
   const ruleViolations = getRuleViolationHighlights(planForContentChecks);
   const verificationViolations = getVerificationStructureHighlights(planForContentChecks);
   const contractFindings = validatePlanContract(resultingPlan, workingDir, {
+    checkMcpWireName: mcpWireNameForText("check", resultingPlan),
     excludedContentSections: [USER_GOAL_SECTION],
     expectedPlanFile: planFilePath,
   });
@@ -181,7 +182,14 @@ export async function checkPlanIntent(
       const feedback = hardRuleViolations
         .map((v) => v.replace(/^\[VIOLATION: [^\]]+\]\s*/, ""))
         .join(". ");
-      return { approved: false, reason: appendPlanfileValidationWorkflow(feedback, planFilePath) };
+      return {
+        approved: false,
+        reason: appendPlanfileValidationWorkflow(
+          feedback,
+          planFilePath,
+          activeSpec().mcpWireName("validate_plan"),
+        ),
+      };
     }
 
     // Deterministic deny: blacklisted commands outside Manual User
@@ -190,7 +198,14 @@ export async function checkPlanIntent(
       const feedback = blacklistHighlights
         .map((v) => v.replace(/^\[VIOLATION: [^\]]+\]\s*/, ""))
         .join(". ");
-      return { approved: false, reason: appendPlanfileValidationWorkflow(feedback, planFilePath) };
+      return {
+        approved: false,
+        reason: appendPlanfileValidationWorkflow(
+          feedback,
+          planFilePath,
+          activeSpec().mcpWireName("validate_plan"),
+        ),
+      };
     }
 
     const violationSection = allViolations.length > 0
@@ -226,15 +241,36 @@ export async function checkPlanIntent(
 
     if (result.output.startsWith("DRIFT:")) {
       const feedback = result.output.replace("DRIFT:", "").trim();
-      return { approved: false, reason: appendPlanfileValidationWorkflow(feedback, planFilePath) };
+      return {
+        approved: false,
+        reason: appendPlanfileValidationWorkflow(
+          feedback,
+          planFilePath,
+          activeSpec().mcpWireName("validate_plan"),
+        ),
+      };
     }
 
     // Fail closed if response is malformed after retries
-    return { approved: false, reason: appendPlanfileValidationWorkflow("Malformed response - retry the edit", planFilePath) };
+    return {
+      approved: false,
+      reason: appendPlanfileValidationWorkflow(
+        "Malformed response - retry the edit",
+        planFilePath,
+        activeSpec().mcpWireName("validate_plan"),
+      ),
+    };
   } catch {
     // Fail closed on errors
     logFastPathApproval("plan-validate", hookName, toolName, workingDir, "Error path - fail closed");
-    return { approved: false, reason: appendPlanfileValidationWorkflow("Error during validation - retry the edit", planFilePath) };
+    return {
+      approved: false,
+      reason: appendPlanfileValidationWorkflow(
+        "Error during validation - retry the edit",
+        planFilePath,
+        activeSpec().mcpWireName("validate_plan"),
+      ),
+    };
   }
 }
 

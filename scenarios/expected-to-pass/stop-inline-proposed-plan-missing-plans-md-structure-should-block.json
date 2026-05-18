@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "name": "stop-inline-proposed-plan-missing-plans-md-structure-should-block",
+  "description": "Live repro from ~/.agent-framework/sessions/home-tim-Coding-iocto-hmi-pc-scripts-iocto/2026-05-18-0929_cba0c5de, Stop capture seq 33. The repository has PLANS.md, plan mode was active, and the assistant stopped with an inline `Proposed Plan` asking `Implement this plan?`. The plan omitted the required PLANS.md sections (`## User Goal`, `## Answered Assumptions`, `## Goal In My Words`, etc.) and bypassed the plan-file/ExitPlanMode path. The Stop hook returned pass. Correct behavior: Stop should block plain-text plan approval in plan mode and force the assistant to write/validate the plan through the proper plan workflow. Expected: block.",
+  "transcript": [
+    {
+      "role": "user",
+      "content": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard"
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "# Remove Standalone Config Route\n\n## Summary\n\nRemove the standalone SvelteKit /config page because configuration review/editing now lives in the first-run setup wizard's SetupStepConfig.\n\n## Key Changes\n\n- Delete iocto-website/src/routes/config/+page.svelte.\n- Remove the { href: '/config', label: 'Config' } item from the app layout navigation.\n- Remove '/config' from the Tauri publicPaths allowlist in iocto-website/src/routes/+layout.svelte.\n- Do not add a redirect, replacement page, or compatibility route; /config should no longer exist.\n- Leave shared config infrastructure intact, including ConfigForm, ImportConfigModal, configStore, and ApiService config methods, because they are still used by the setup wizard and task execution flow.\n\n## Public Interfaces\n\n- The public route /config is removed.\n- No API, store, Rust binding, or component interface changes are required.\n\n## Test Plan\n\n- Run npm run check in iocto-website to confirm SvelteKit route generation and type checking pass after route removal.\n- Run npm run test in iocto-website to confirm existing Vitest coverage still passes.\n- Optionally run npm run build in iocto-website for full production validation.\n\n## Assumptions\n\n- A missing /config route should resolve through SvelteKit's normal not-found behavior.\n- The setup wizard remains the only user-facing config review/editing path.\n- Existing config store/API code should stay until a separate cleanup confirms it is no longer used outside the deleted page.\n\nImplement this plan?"
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "Stop"
+  },
+  "env": {
+    "adapter": "codex",
+    "cwd": "/home/tim/Coding/iocto/hmi-pc-scripts-iocto",
+    "permission_mode": "plan",
+    "codex_collaboration_mode": "plan",
+    "timeout_ms": 60000
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "normal",
+      "intent": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
+      "blockedIntent": "The user explicitly does not want a replacement page or alternate config route.",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "blockAllTools": false,
+      "userMessageSnippet": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
+      "timestamp": 1
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 2
+  },
+  "expect": {
+    "expected": "block",
+    "reason_must": {
+      "contains": [
+        "Plan validation failed:"
+      ]
+    },
+    "notes": "Correct behavior is to treat the whole-message markdown plan approval as a Stop plan presentation and block through plan-validate / plan-source validation, not through response-align-stop."
+  }
+}

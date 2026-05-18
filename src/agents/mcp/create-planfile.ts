@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { mcpWireNameForText } from "../../adapter/spec.js";
+import { activeSpec, mcpWireNameForText } from "../../adapter/spec.js";
 import { appendPlanfileValidationWorkflow, getPathToPlanfile } from "../../utils/planfile.js";
 import { writeCurrentPlanSidecar } from "../../utils/plan-source.js";
 import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
@@ -24,7 +24,7 @@ export async function runCreatePlanfileAgent(input: CreatePlanfileInput): Promis
     transcriptPath: "",
     sessionDir,
     planName: input.planName,
-  });
+  }, (lookup) => activeSpec().findNativePlanFile(lookup));
   if (!planPath) {
     throw new Error(`Could not resolve planfile path for plan_name ${input.planName}`);
   }

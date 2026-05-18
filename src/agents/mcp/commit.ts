@@ -105,6 +105,8 @@ export async function runCommitAgent(
     options
   );
   if (confirmResult.includes("DECLINED")) {
+    // Preserve confirm output verbatim so check failures keep their concrete
+    // error list instead of collapsing to a vague decline summary.
     return confirmResult;
   }
 

@@ -2,7 +2,7 @@
  * CI fixture-purity check.
  *
  * Walks test-harness/fixtures/scenarios/**\/*.json and asserts that no fixture
- * contains the keys "expectation_reality" or "expectation_reality_last_run_at".
+ * contains runtime-only fields or LLM bypass hooks.
  * Those fields belong in the runtime sidecar (last-run.json) — not in the
  * committed fixture files.
  *
@@ -17,8 +17,11 @@ const thisFile = url.fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(thisFile), "..");
 const scenariosRoot = path.join(repoRoot, "scenarios");
 
-const BANNED_KEYS = ["expectation_reality", "expectation_reality_last_run_at"];
-
+const BANNED_KEYS = [
+  "expectation_reality",
+  "expectation_reality_last_run_at",
+  "llm_stubs",
+];
 function walkJsonFiles(dir: string): string[] {
   const results: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -35,19 +38,30 @@ function walkJsonFiles(dir: string): string[] {
 let violations = 0;
 
 for (const filePath of walkJsonFiles(scenariosRoot)) {
+  const raw = fs.readFileSync(filePath, "utf-8");
   let parsed: unknown;
   try {
-    parsed = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    parsed = JSON.parse(raw);
   } catch (err) {
     console.error(`ERROR: failed to parse ${filePath}: ${err}`);
     violations++;
     continue;
   }
   if (typeof parsed !== "object" || parsed === null) continue;
-  for (const key of BANNED_KEYS) {
-    if (key in (parsed as Record<string, unknown>)) {
-      console.error(`FIXTURE PURITY VIOLATION: "${key}" found in ${filePath}`);
-      violations++;
+  const stack: unknown[] = [parsed];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object") continue;
+    if (Array.isArray(current)) {
+      stack.push(...current);
+      continue;
+    }
+    for (const [key, value] of Object.entries(current as Record<string, unknown>)) {
+      if (BANNED_KEYS.includes(key)) {
+        console.error(`FIXTURE PURITY VIOLATION: "${key}" found in ${filePath}`);
+        violations++;
+      }
+      if (value && typeof value === "object") stack.push(value);
     }
   }
 }

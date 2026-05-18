@@ -4,6 +4,7 @@ import * as path from "path";
 import * as os from "os";
 import { getPathToPlanfile } from "../../src/utils/planfile.js";
 import { readCurrentPlanContent } from "../../src/utils/plan-source.js";
+import { activeSpec } from "../../src/adapter/spec.js";
 
 const ORIG_HOME = process.env.HOME;
 const ORIG_ADAPTER = process.env.AGENT_FRAMEWORK_ADAPTER;
@@ -54,7 +55,10 @@ describe("scenario plan-file materialization (HOME-scoped)", () => {
     const jsonlPath = path.join(TMP_HOME, "transcript.jsonl");
     fs.writeFileSync(jsonlPath, makeJsonl(slug, "session-1"));
 
-    const resolved = await getPathToPlanfile({ transcriptPath: jsonlPath });
+    const resolved = await getPathToPlanfile(
+      { transcriptPath: jsonlPath },
+      (lookup) => activeSpec().findNativePlanFile(lookup),
+    );
     expect(resolved).toBe(planPath);
     await expect(readCurrentPlanContent({ transcriptPath: jsonlPath })).resolves.toBe(planContent);
   });
@@ -80,7 +84,10 @@ describe("scenario plan-file materialization (HOME-scoped)", () => {
       }) + "\n",
     );
 
-    const resolved = await getPathToPlanfile({ transcriptPath: jsonlPath });
+    const resolved = await getPathToPlanfile(
+      { transcriptPath: jsonlPath },
+      (lookup) => activeSpec().findNativePlanFile(lookup),
+    );
     expect(resolved).toBeNull();
   });
 

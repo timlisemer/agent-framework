@@ -183,6 +183,34 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     expect(output).toContain("Existing session planfiles accepted for this session");
   });
 
+  it("routes whole-message markdown plan approval through plan validation", async () => {
+    seedPlanMode(transcriptPath);
+    const existingPath = sessionPlanFile(sessionDir, "existing-plan");
+    fs.mkdirSync(path.dirname(existingPath), { recursive: true });
+    fs.writeFileSync(existingPath, validPlan(existingPath, "existing-plan"));
+
+    await mainStop(
+      {
+        session_id: "session-stop",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        last_assistant_message:
+          "# Remove Standalone Config Route\n\n" +
+          "## Summary\n\n" +
+          "Remove the standalone route.\n\n" +
+          "## Key Changes\n\n" +
+          "- Delete the route file.\n\n" +
+          "Implement this plan?",
+      },
+      codexEncoder,
+    );
+
+    expect(mockValidatePlanFileWithContract).not.toHaveBeenCalled();
+    const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
+    expect(output).toContain("Plan validation failed:");
+    expect(output).toContain("Cannot exit plan mode without a planfile path");
+  });
+
   it("validates transcript completed Plan text when last_assistant_message is stripped", async () => {
     seedPlanMode(transcriptPath);
     const existingPath = sessionPlanFile(sessionDir, "existing-plan");

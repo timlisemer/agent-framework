@@ -41,6 +41,9 @@ export interface NativePlanFileLookupInput {
   planName?: string;
 }
 
+export type NativePlanFileLookup =
+  (input: NativePlanFileLookupInput) => Promise<string | null> | string | null;
+
 export type PlanSourceDescriptor =
   { kind: "file"; path: string; planName?: string };
 

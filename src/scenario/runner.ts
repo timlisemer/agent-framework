@@ -834,12 +834,6 @@ async function main() {
   const timeoutMs = scenario.env?.timeout_ms ?? 60000;
   const fanout = scenario.target.fanout === true;
 
-  // Build the optional env extras passed into hook subprocesses. Only set
-  // AGENT_FRAMEWORK_LLM_STUBS when the scenario declared the field.
-  const envExtras = scenario.env?.llm_stubs
-    ? { AGENT_FRAMEWORK_LLM_STUBS: JSON.stringify(scenario.env.llm_stubs) }
-    : undefined;
-
   // exitCode is mutated below by the body's success/failure paths and the
   // catch handler. process.exit is invoked exactly once after the finally
   // block, ensuring planFile cleanup runs regardless of how the run ended.
@@ -863,7 +857,7 @@ async function main() {
             cwd,
             permission_mode: scenario.env?.session_start_permission_mode ?? "default",
           }),
-          env: buildEnv(cacheDir, cwd, envExtras, scenarioAdapter),
+          env: buildEnv(cacheDir, cwd, undefined, scenarioAdapter),
           timeoutMs,
         });
         seedSidecars(cacheDir, scenario);
@@ -890,7 +884,7 @@ async function main() {
       const hookResult = await runHook({
         hookScript: hookScript(hookScriptName(scenario.target.hook), scenarioAdapter),
         inputJson: JSON.stringify(stdin),
-        env: buildEnv(cacheDir, cwd, envExtras, scenarioAdapter),
+        env: buildEnv(cacheDir, cwd, undefined, scenarioAdapter),
         timeoutMs,
       });
 
@@ -960,7 +954,6 @@ async function main() {
           context_output_pass: contextScored.pass,
         } : {}),
         ...(actualReason !== undefined ? { actual_reason: actualReason } : {}),
-        ...(scenario.env?.llm_stubs ? { llm_stubs_used: scenario.env.llm_stubs } : {}),
         expectation_reality,
         expectation_reality_last_run_at,
       };
@@ -1019,7 +1012,7 @@ async function main() {
           cwd,
           permission_mode: scenario.env?.session_start_permission_mode ?? "default",
         }),
-        env: buildEnv(cacheDir, cwd, envExtras, scenarioAdapter),
+        env: buildEnv(cacheDir, cwd, undefined, scenarioAdapter),
         timeoutMs,
       });
       seedSidecars(cacheDir, scenario);
@@ -1068,7 +1061,7 @@ async function main() {
         const hookResult = await runHook({
           hookScript: hookScript("pre-tool-use", scenarioAdapter),
           inputJson: JSON.stringify(stdin),
-          env: buildEnv(cacheDir, cwd, envExtras, scenarioAdapter),
+          env: buildEnv(cacheDir, cwd, undefined, scenarioAdapter),
           timeoutMs,
         });
         const parsed = parsePreToolUseDecision(hookResult, timeoutMs);
@@ -1120,7 +1113,6 @@ async function main() {
           asserted: expectEntry !== undefined,
           ...(scoredReasonMustResults ? { reason_must_results: scoredReasonMustResults } : {}),
           ...(fireActualReason !== undefined ? { actual_reason: fireActualReason } : {}),
-          ...(scenario.env?.llm_stubs ? { llm_stubs_used: scenario.env.llm_stubs } : {}),
         });
       }
 
@@ -1148,7 +1140,6 @@ async function main() {
         transcript_path: transcriptPath,
         commit: getVersion(),
         ...(predictionAssertions ? { prediction_assertions: predictionAssertions } : {}),
-        ...(scenario.env?.llm_stubs ? { llm_stubs_used: scenario.env.llm_stubs } : {}),
         expectation_reality,
         expectation_reality_last_run_at,
       };

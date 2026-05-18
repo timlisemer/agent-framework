@@ -2,6 +2,7 @@ import type {
   NativePlanFileLookupInput,
   PlanExitDetectionInput,
 } from "../../src/adapter/types.js";
+import { extractMarkdownPlanPresentation } from "../../src/utils/plan-contract.js";
 
 export const CODEX_IMPLEMENT_PLAN_PROMPT = "Implement the plan.";
 
@@ -30,7 +31,7 @@ export function extractProposedPlanContent(text: string | null | undefined): str
 }
 
 export function extractStopProposedPlan(text: string | null | undefined): string | null {
-  return extractProposedPlanContent(text);
+  return extractProposedPlanContent(text) ?? extractMarkdownPlanPresentation(text);
 }
 
 function isImplementationPrompt(prompt: string): boolean {
@@ -45,7 +46,7 @@ export function findNativePlanFile(_input: NativePlanFileLookupInput): string | 
 
 export function isPlanExit(input: PlanExitDetectionInput): boolean {
   if (input.event === "Stop") {
-    return parseCodexProposedPlanBlock(input.assistantText) !== null;
+    return extractStopProposedPlan(input.assistantText) !== null;
   }
   if (input.event === "UserPromptSubmit") {
     return isImplementationPrompt(input.prompt);

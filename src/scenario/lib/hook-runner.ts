@@ -69,9 +69,7 @@ export function hookScript(name: string, adapter?: string): string {
 /**
  * Build the environment hooks expect when spawned by the harness.
  *
- * `extra` merges additional env vars on top of the defaults — used by
- * scenario.ts to plumb `AGENT_FRAMEWORK_LLM_STUBS` into the hook process so
- * agent-runner can stub LLM calls deterministically.
+ * `extra` merges additional env vars on top of the defaults.
  *
  * When `adapter` is provided it is forwarded as `AGENT_FRAMEWORK_ADAPTER`
  * so the hook subprocess uses the correct adapter.

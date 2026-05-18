@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { activeSpec } from "../adapter/spec.js";
-import type { NativePlanFileLookupInput } from "../adapter/types.js";
+import type { NativePlanFileLookup, NativePlanFileLookupInput } from "../adapter/types.js";
 import { sessionPlanFile, sessionPlansDir } from "./paths.js";
 
 export const PLAN_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -28,12 +27,16 @@ export function extractPlanfileFooter(plan: string): { planFilePath: string; pla
   return { planFilePath: pathMatch[1], planName: nameMatch[1] };
 }
 
-export function formatPlanfileValidationWorkflow(planPath: string, validatePlanWireName = activeSpec().mcpWireName("validate_plan")): string {
+export function formatPlanfileValidationWorkflow(
+  planPath: string,
+  validatePlanWireName: string,
+): string {
   return `Iterate on the planfile using ${validatePlanWireName} for ${planPath} until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed. Then present the finished plan using <proposed_plan>.`;
 }
 
 export function appendPlanfileValidationWorkflow(reason: string, planPath?: string | null, validatePlanWireName?: string): string {
   if (!planPath) return reason;
+  if (!validatePlanWireName) return reason;
   const workflow = formatPlanfileValidationWorkflow(planPath, validatePlanWireName);
   if (reason.includes(workflow)) return reason;
   return `${reason} ${workflow}`;
@@ -60,9 +63,12 @@ export function formatSessionPlanfilesForFeedback(sessionDir?: string): string {
   return `Session planfiles directory: ${plansDir}. Existing session planfiles accepted for this session: ${listed}.`;
 }
 
-export async function getPathToPlanfile(input: NativePlanFileLookupInput): Promise<string | null> {
+export async function getPathToPlanfile(
+  input: NativePlanFileLookupInput,
+  findNativePlanFile?: NativePlanFileLookup,
+): Promise<string | null> {
   if (input.planName) validatePlanName(input.planName);
-  const native = await activeSpec().findNativePlanFile(input);
+  const native = await findNativePlanFile?.(input);
   if (native) return native;
 
   if (!input.sessionDir || !input.planName) return null;

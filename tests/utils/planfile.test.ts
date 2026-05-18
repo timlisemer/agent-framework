@@ -10,6 +10,7 @@ import {
   validatePlanName,
 } from "../../src/utils/planfile.js";
 import { sessionPlanFile, sessionPlansDir } from "../../src/utils/paths.js";
+import { activeSpec } from "../../src/adapter/spec.js";
 
 describe("planfile utilities", () => {
   const oldAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
@@ -27,7 +28,10 @@ describe("planfile utilities", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "planfile-"));
     const transcriptPath = path.join(dir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, JSON.stringify({ slug: "native-plan" }) + "\n");
-    const result = await getPathToPlanfile({ transcriptPath, sessionDir: "/tmp/session", planName: "native-plan" });
+    const result = await getPathToPlanfile(
+      { transcriptPath, sessionDir: "/tmp/session", planName: "native-plan" },
+      (lookup) => activeSpec().findNativePlanFile(lookup),
+    );
     expect(result).toBe("/tmp/native-plans/native-plan.md");
     fs.rmSync(dir, { recursive: true, force: true });
   });

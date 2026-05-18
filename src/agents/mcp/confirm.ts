@@ -29,6 +29,37 @@ import { type CancellationOptions, throwIfAborted } from "../../utils/cancellati
 import { activeSpec } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("confirm"); }
 
+function extractCheckErrors(checkResult: string): string {
+  const errorsMatch = checkResult.match(/## Errors\s*\n([\s\S]*?)(?=\n## |\s*$)/);
+  const errors = errorsMatch ? errorsMatch[1].trim() : "";
+  if (errors && errors !== "(none)") {
+    return errors;
+  }
+
+  const trimmed = checkResult.trim();
+  return trimmed || "(check failed, but no check output was returned)";
+}
+
+export function formatCheckFailure(checkResult: string, errorCount: number): string {
+  const checkErrors = extractCheckErrors(checkResult);
+
+  return `## Results
+- Files: SKIP
+- Code Quality: SKIP
+- Security: SKIP
+- Documentation: SKIP
+- Tests: SKIP
+
+## Check Failure
+- Errors: ${errorCount}
+
+## Check Errors
+${checkErrors}
+
+## Verdict
+DECLINED: check failed with ${errorCount} error(s); see Check Errors above.`;
+}
+
 /**
  * Run the confirm agent to evaluate code changes.
  *
@@ -62,18 +93,8 @@ export async function runConfirmAgent(
 
   // Step 2: If check failed, decline immediately
   if (checkStatus === "FAIL" || errorCount > 0) {
-    const declineReason = `check failed with ${errorCount} error(s)`;
-    const result = `## Results
-- Files: SKIP
-- Code Quality: SKIP
-- Security: SKIP
-- Documentation: SKIP
-
-## Verdict
-DECLINED: ${declineReason}`;
-
     // Note: No telemetry here since no LLM was called - check agent handles its own telemetry
-    return result;
+    return formatCheckFailure(checkResult, errorCount);
   }
 
   // Step 3: Get git data

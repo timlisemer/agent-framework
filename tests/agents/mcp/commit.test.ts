@@ -105,4 +105,30 @@ describe("runCommitAgent", () => {
     expect(git(repo, ["rev-parse", "HEAD"]).trim()).toBe(before);
     expect(git(repo, ["diff", "--cached", "--name-only"]).trim()).toBe("");
   });
+
+  it("returns declined confirm output verbatim with all listed check errors", async () => {
+    fs.writeFileSync(path.join(repo, "file.txt"), "content\n");
+    const declined = `## Results
+- Files: SKIP
+- Code Quality: SKIP
+- Security: SKIP
+- Documentation: SKIP
+- Tests: SKIP
+
+## Check Failure
+- Errors: 2
+
+## Check Errors
+src/foo.ts:12: Type 'string' is not assignable to type 'number'.
+src/bar.ts:8: 'unusedValue' is declared but its value is never read.
+
+## Verdict
+DECLINED: check failed with 2 error(s); see Check Errors above.`;
+    mocks.runConfirmAgent.mockResolvedValue(declined);
+
+    const result = await runCommitAgent(repo, "haiku");
+
+    expect(result).toBe(declined);
+    expect(mocks.runAgent).not.toHaveBeenCalled();
+  });
 });
