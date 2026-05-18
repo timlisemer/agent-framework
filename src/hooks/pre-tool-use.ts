@@ -54,6 +54,7 @@ import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, loadCurrentEpoch, rotateEpoch } from "../scenario/epoch.js";
 import { onEpochRotation } from "../scenario/lifecycle.js";
+import { stripQuotedAndPastedContent } from "../utils/quote-detection.js";
 
 interface PipelineExit {
   decision: "allow" | "deny";
@@ -337,6 +338,26 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
     recentUserMessages.length > 0
       ? recentUserMessages[recentUserMessages.length - 1]
       : "";
+  const latestUserLogicText = latestUserMessage
+    ? stripQuotedAndPastedContent(latestUserMessage)
+    : "";
+  const latestUserDisplaySource = latestUserLogicText || latestUserMessage;
+  const currentPredictionUserMessage =
+    state.currentPrediction?.userMessageFull ??
+    state.currentPrediction?.userMessageSnippet ??
+    "";
+  const latestUserTurn = latestUserMessage
+    ? {
+        rawText: latestUserMessage,
+        logicText: latestUserLogicText,
+        displaySnippet: latestUserDisplaySource.slice(0, 200),
+        matchesCachedPrediction:
+          latestUserMessage === currentPredictionUserMessage ||
+          (state.currentPrediction?.userMessageSnippet
+            ? latestUserMessage.includes(state.currentPrediction.userMessageSnippet)
+            : false),
+      }
+    : undefined;
 
   // Discharge probe: was the user-text turn that produced the cached
   // prediction's snippet followed by a completed non-error tool roundtrip?
@@ -345,9 +366,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   // turn favorably names the firing tool.
   let cachedSnippetSideTaskDischarged = false;
   const cachedPredictionUserMessage =
-    state.currentPrediction?.userMessageFull ??
-    state.currentPrediction?.userMessageSnippet ??
-    "";
+    currentPredictionUserMessage;
   if (cachedPredictionUserMessage) {
     cachedSnippetSideTaskDischarged =
       await userTurnFollowedByCompletedToolRoundtrip(
@@ -378,6 +397,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
     planModeCtx,
     outsideRootPath,
     latestUserMessage,
+    latestUserTurn,
     recentUserMessages,
     cachedSnippetSideTaskDischarged,
     slashCommandAllowedTools,

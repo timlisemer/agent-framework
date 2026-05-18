@@ -100,6 +100,17 @@ export interface PredictionDecision {
   matchedExplicit?: { tool: string; targetSubstring?: string; reason: string };
 }
 
+export interface LatestUserTurn {
+  /** Exact latest transcript user text. */
+  rawText: string;
+  /** Quote/paste-stripped text used for live authorization/prohibition logic. */
+  logicText: string;
+  /** Short display quote for denial text. */
+  displaySnippet: string;
+  /** Whether rawText appears to be the same user turn that populated currentPrediction. */
+  matchesCachedPrediction: boolean;
+}
+
 export function predictionUserMessageForLogic(prediction: ToolPrediction): string {
   return prediction.userMessageFull ?? prediction.userMessageSnippet;
 }
@@ -117,7 +128,7 @@ export function predictionUserMessageForLogic(prediction: ToolPrediction): strin
  * requested tool can edit, honor the prose instead of denying.
  */
 const UNDO_INTENT_RE =
-  /\b(undo\w*|revert\w*|restor\w*|rollback\w*|roll\s+back|put\s+back|rewrit\w*|redo\w*)\b/i;
+  /\b(undo\w*|undone|revert\w*|restor\w*|rollback\w*|roll\s+back|put\s+back|rewrit\w*|redo\w*)\b/i;
 
 /**
  * Cessation-verb + inactivity-noun morphology that semantically inverts
@@ -670,9 +681,13 @@ export function decidePrediction(
   recentUserMessages: string[] = [],
   cachedSnippetSideTaskDischarged: boolean = false,
   slashCommandAllowedTools: readonly string[] = [],
+  latestUserTurn?: LatestUserTurn,
 ): PredictionDecision {
   if (!prediction) return { decision: "allow" };
 
+  const liveLogicText = (latestUserTurn?.logicText ?? latestUserMessage).trim();
+  const liveDisplaySnippet = (latestUserTurn?.displaySnippet ?? "").trim();
+  const displayUserMessage = liveDisplaySnippet || prediction.userMessageSnippet;
   const userMessageForLogic = predictionUserMessageForLogic(prediction);
   const fullMessageEditIntent =
     prediction.userMessageFull !== undefined && isEditTool(toolName)
@@ -685,6 +700,43 @@ export function decidePrediction(
   const toolIdentities = bashClassification?.predictionIdentities ?? [toolName];
   const matchesToolIdentity = (candidate: string): boolean =>
     candidate === toolName || toolIdentities.includes(candidate);
+  const blockedForThisToolByName = prediction.explicitlyBlockedSubstrings.some(
+    (b) => matchesToolIdentity(b.tool),
+  );
+
+  const hasAuthoritativeLatestTurn = latestUserTurn !== undefined && liveLogicText.length > 0;
+  const liveAllowedTools = hasAuthoritativeLatestTurn ? deriveAllowedToolsFromIntent(liveLogicText) : [];
+  const liveAllowsToolClass =
+    hasAuthoritativeLatestTurn &&
+    toolName !== "Bash" &&
+    (
+      latestUserMessageReauthorizes(liveLogicText, toolName) ||
+      latestUserMessageReauthorizesClass(liveLogicText, toolName)
+    );
+  const liveAllowsSupportReadOnlyBash =
+    hasAuthoritativeLatestTurn &&
+    toolName === "Bash" &&
+    !!bashClassification &&
+    (
+      bashClassification.riskClass === "simple-read-only" ||
+      bashClassification.riskClass === "read-only-complex" ||
+      bashClassification.riskClass === "read-only-heavy"
+    ) &&
+    liveAllowedTools.some((t) => isEditTool(t) || t === "Read");
+
+  if (hasAuthoritativeLatestTurn && EXPLICIT_PROHIBITION_RE.test(liveLogicText)) {
+    return {
+      decision: "deny",
+      reason: `User explicitly asked for no tools right now. User said: "${displayUserMessage}". Intent: ${prediction.intent}`,
+    };
+  }
+
+  if (hasAuthoritativeLatestTurn && userMessageRevokesTool(liveLogicText, toolName)) {
+    return {
+      decision: "deny",
+      reason: `User explicitly revoked ${toolName} in their latest message. User said: "${displayUserMessage}". Intent: ${prediction.intent}`,
+    };
+  }
 
   // 1. Per-target explicit-block precedes explicit-allow. When the user
   // says "change the typo, but don't touch logic.ts" the LLM correctly
@@ -697,7 +749,7 @@ export function decidePrediction(
     if (blk.targetSubstring && !inputStr.includes(blk.targetSubstring)) continue;
     return {
       decision: "deny",
-      reason: `User explicitly forbade this in their last message: "${prediction.userMessageSnippet}". ${blk.reason}`,
+      reason: `User explicitly forbade this in their last message: "${displayUserMessage}". ${blk.reason}`,
       matchedExplicit: blk,
     };
   }
@@ -730,6 +782,31 @@ export function decidePrediction(
     return { decision: "allow" };
   }
 
+  // 2.2. Latest live user turn is authoritative over cached all-tools/mood
+  // state. The cached prediction may correctly preserve historical anger
+  // while the freshest transcript turn tells the AI to fix/remove/reuse/
+  // restore work now. If the latest quote-stripped text authorizes this tool
+  // class, do not fall through to stale blockAllTools or mood denial.
+  if (
+    hasAuthoritativeLatestTurn &&
+    !blockedForThisToolByName &&
+    !EXPLICIT_PROHIBITION_RE.test(liveLogicText)
+  ) {
+    if (liveAllowsToolClass) {
+      return {
+        decision: "allow",
+        reason: `Latest user message authorizes ${toolName}; cached prediction mood is historical context.`,
+      };
+    }
+
+    if (liveAllowsSupportReadOnlyBash) {
+      return {
+        decision: "allow",
+        reason: "Latest user message authorizes the active fix/edit work; read-only Bash inspection supports that live request.",
+      };
+    }
+  }
+
   // 3. blockAllTools handling.
   if (prediction.blockAllTools) {
     // 3a. Internal-consistency check: blockAllTools=true asserts "user
@@ -760,7 +837,7 @@ export function decidePrediction(
     // (step 1 already cleared explicitlyAllowedTools).
     return {
       decision: "deny",
-      reason: `User explicitly asked for no tools right now. User said: "${prediction.userMessageSnippet}". Intent: ${prediction.intent}`,
+      reason: `User explicitly asked for no tools right now. User said: "${displayUserMessage}". Intent: ${prediction.intent}`,
     };
   }
 
@@ -825,9 +902,6 @@ export function decidePrediction(
   // Both paths share strict prohibition/revocation/per-target-block guards:
   // a genuinely angry "stop using the tester" / "freeze" / "don't run X"
   // still denies via step 4.
-  const blockedForThisToolByName = prediction.explicitlyBlockedSubstrings.some(
-    (b) => matchesToolIdentity(b.tool),
-  );
   if (!blockedForThisToolByName) {
     if (latestUserMessageFavorablyNamesTool(userMessageForLogic, toolName)) {
       return {
@@ -1116,7 +1190,7 @@ export function decidePrediction(
 
     return {
       decision: "deny",
-      reason: `User appears ${prediction.mood} (trust: ${prediction.trust}, frustrationStreak: ${frustrationStreak}). Blocking ${toolName} unless explicitly requested. User said: "${prediction.userMessageSnippet}". Intent: ${prediction.intent}`,
+      reason: `User appears ${prediction.mood} (trust: ${prediction.trust}, frustrationStreak: ${frustrationStreak}). Blocking ${toolName} unless explicitly requested. User said: "${displayUserMessage}". Intent: ${prediction.intent}`,
     };
   }
 

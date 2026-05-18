@@ -141,7 +141,7 @@ export function planModeBashBlock(
 
 export const READ_VERB_RE = /\b(read|show|look\s+at|open|view|inspect|examin\w*)\b/i;
 export const EDIT_VERB_RE =
-  /\b(edit|chang\w*|fix\w*|implement(?:s|ing|ed)?|modif(?:y|ies|ying|ied)|refactor(?:s|ing|ed)?|patch(?:es|ing|ed)?|writ\w*|creat\w*|sav\w*|add\s+to\s+(?:file|the\s+file)|rewrit\w*|redo|undo|revert\w*|restor\w*|rollback|roll\s+back|put\s+back|delet\w*|remov\w*)\b/i;
+  /\b(edit|chang\w*|fix\w*|implement(?:s|ing|ed)?|modif(?:y|ies|ying|ied)|refactor(?:s|ing|ed)?|patch(?:es|ing|ed)?|writ\w*|creat\w*|sav\w*|add\s+to\s+(?:file|the\s+file)|rewrit\w*|redo|undo|undone|revert\w*|restor\w*|rollback|roll\s+back|put\s+back|delet\w*|remov\w*)\b/i;
 // Bounded distance so unrelated mentions of "file" don't pull in Bash.
 export const RENAME_MOVE_VERB_RE = /\b(renam\w*|mov\w*)\b[^.!?]{0,50}\b(file|files)\b/i;
 export const TEST_RUN_VERB_RE = /\b(test|tests|run\s+\w+)\b/i;

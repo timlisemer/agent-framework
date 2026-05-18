@@ -5,6 +5,7 @@ Fixtures here describe behaviour the framework already implements correctly. A r
 2026-05-18 scenario cleanup and new regressions:
 
 - Added `bash-rg-escaped-quote-pattern-should-allow.json` for the escaped-double-quote Bash parser regression where `routes/config` inside a quoted `rg` pattern was misread as a shell segment.
+- Added `prediction-block-latest-user-message-move-reuse-quote-should-allow.json` and `prediction-block-latest-user-message-plan-approval-code-quote-should-allow.json` for regressions where cached angry snippets overrode the latest quote-stripped user turn.
 - Added `stop-inline-proposed-plan-missing-plans-md-structure-should-block.json` for plain-text plan approval in plan mode; Stop now blocks and tells the assistant to write the plan file and use ExitPlanMode.
 - Removed scenario-level fake LLM outputs from committed fixtures. Scenario fixtures should exercise the normal hook/provider path; if a scenario only passes by forcing a fake agent answer, fix the rule path or the fixture shape instead.
 - Updated `codex-cargo-fmt-check-parallel-batch-allowed-before-later-deny.json` to expect the current deterministic `blacklist` gate for check-routed formatter commands.

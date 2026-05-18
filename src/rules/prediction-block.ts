@@ -33,6 +33,7 @@ export const predictionBlockRule: PreToolRule = {
       ctx.recentUserMessages ?? [],
       ctx.cachedSnippetSideTaskDischarged ?? false,
       ctx.slashCommandAllowedTools ?? [],
+      ctx.latestUserTurn,
     );
     if (decision.decision === "deny") {
       return { fastDeny: decision.reason ?? "Tool blocked by user-state prediction" };

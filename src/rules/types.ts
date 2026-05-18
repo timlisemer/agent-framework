@@ -1,6 +1,6 @@
 import type { SessionState } from "../utils/session-store.js";
 import type { CacheManager } from "../utils/cache-manager.js";
-import type { Mood, Trust } from "../utils/prediction-types.js";
+import type { LatestUserTurn, Mood, Trust } from "../utils/prediction-types.js";
 import type { HostContext } from "../utils/host-context.js";
 
 export type HookEvent = "PreToolUse" | "UserPromptSubmit" | "Stop";
@@ -53,6 +53,13 @@ export interface RuleContext {
    * instead of `state.currentPrediction.userMessageSnippet`.
    */
   latestUserMessage?: string;
+  /**
+   * Canonical latest live user turn from the transcript at PreToolUse entry.
+   * Unlike `state.currentPrediction`, this is not cached sentiment state.
+   * Prediction-block uses `logicText` as the authoritative current-turn
+   * authorization/prohibition input before falling back to historical mood.
+   */
+  latestUserTurn?: LatestUserTurn;
   /**
    * The last 5 non-meta, non-slash-command full user-text turns from the
    * transcript at PreToolUse entry, OLDEST-FIRST.
