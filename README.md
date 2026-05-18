@@ -25,11 +25,11 @@ The framework implements 18 specialized agents and MCP tools organized into thre
 | create_planfile        | -      | Create a named planfile and validate it                     |
 | validate_plan          | sonnet | Validate an existing planfile against the planning contract  |
 | scenario_labeler   | -      | Test harness operations for the @labeler agent role          |
-| scenario_tester    | -      | Test harness operations for the @tester agent role           |
+| scenario_tester    | -      | Scenario execution, reports, and capture materialization     |
 
 **Note on validate_intent**: Unlike other MCP tools, `validate_intent` is not auto-triggered. It's a manual post-session review tool that analyzes a conversation transcript to check if the AI followed user intentions. Requires `transcript_path` parameter pointing to a `.jsonl` transcript file. Returns `ALIGNED` or `DRIFTED` verdict.
 
-**Note on scenario tools**: These tools wrap scenario runner operations for the labeler and tester workflows. The labeler tool handles transcript labeling workflows; the tester tool handles test execution and report reading. Neither makes LLM calls internally.
+**Note on scenario tools**: These tools wrap scenario runner operations for the labeler and tester workflows. The labeler tool handles transcript labeling workflows; the tester tool handles test execution, report reading, and `materialize_scenario` for converting live capture pointers into stored scenario JSON. Neither makes LLM calls internally.
 
 ### Validation Agents (Hook-Triggered)
 
@@ -112,6 +112,14 @@ planfiles are validated instead of being accepted as-is; if overwrite validation
 fails, the previous populated content is restored. Missing or empty planfiles
 keep the extracted content so the remediation workflow has a concrete file to
 edit. The session current-plan sidecar is updated only after validation passes.
+
+Captured hook decisions can be reconstructed through the `scenario_tester` MCP
+action `materialize_scenario`. The materializer reads `transcript-path.txt`,
+parses the raw transcript through the inferred adapter (`/.claude/` or
+`/.codex/`, with active-adapter fallback), writes the scenario under
+`~/.agent-framework/test-runs/scenarios/`, and can immediately run it with
+`run_materialized: true`. Use this MCP action instead of `node -e` snippets in
+agent sessions.
 
 ## Performance
 

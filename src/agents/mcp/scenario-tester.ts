@@ -11,6 +11,7 @@
  *   expand          - Run replay.ts --list --expand (free)
  *   read_file       - Read report, labels, or notes
  *   append_notes    - Append to notes_and_questions.md
+ *   materialize_scenario - Materialize a live capture into a stored scenario
  *   run_scenario    - Execute a synthetic scenario (unit-test a single hook)
  *   list_scenarios  - List stored scenarios
  *   read_scenario   - Read scenario.json or report-scenario.json
@@ -46,6 +47,7 @@ import {
   type ScenarioSource,
   type ScenarioSourceTag,
 } from "./scenario-mcp-shared.js";
+import { materializeScenario } from "../../scenario/materialize.js";
 
 const SINGLE_SCENARIO_TIMEOUT_MS = 300_000;
 const ALL_SCENARIOS_TIMEOUT_MS = 3_600_000;
@@ -217,6 +219,43 @@ function handleRunScenario(
     SINGLE_SCENARIO_TIMEOUT_MS,
     rootOverride,
   );
+}
+
+async function handleMaterializeScenario(
+  sessionDir: string | undefined,
+  captureSeq: number | undefined,
+  scenarioName: string | undefined,
+  rootOverride: string | undefined,
+  runMaterialized: boolean | undefined,
+): Promise<string> {
+  if (!sessionDir) throw new Error("session_dir is required");
+  if (captureSeq === undefined) throw new Error("capture_seq is required");
+  if (!Number.isInteger(captureSeq) || captureSeq < 1) {
+    throw new Error(`capture_seq must be a positive integer, got ${captureSeq}`);
+  }
+
+  const scenario = validateScenario(await materializeScenario(sessionDir, captureSeq));
+  const name = scenarioName ?? scenario.name;
+  const storedScenario = { ...scenario, name };
+  writeScenarioFile(name, storedScenario);
+  const outputDir = scenarioDir(name);
+  const scenarioPath = path.join(outputDir, "scenario.json");
+
+  const payload: Record<string, unknown> = {
+    scenario_name: name,
+    scenario_path: scenarioPath,
+    scenario: storedScenario,
+  };
+
+  if (runMaterialized) {
+    payload.run = JSON.parse(runScenarioCommand(
+      ["--scenario", scenarioPath, "--source", "home"],
+      SINGLE_SCENARIO_TIMEOUT_MS,
+      rootOverride,
+    ));
+  }
+
+  return JSON.stringify(payload, null, 2);
 }
 
 function handleListScenarios(
@@ -484,6 +523,12 @@ export interface TesterInput {
   content?: string;
   working_dir?: string;
   hook_key?: string;
+  /** For materialize_scenario: agent-framework session directory. */
+  session_dir?: string;
+  /** For materialize_scenario: capture seq from captures.jsonl. */
+  capture_seq?: number;
+  /** For materialize_scenario: immediately run the stored scenario. */
+  run_materialized?: boolean;
   /**
    * For run_single_hook: optional 1-based transcript line cap. When set,
    * replay.ts appends only transcript entries whose 1-based line index is
@@ -579,6 +624,15 @@ export async function handleScenarioTester(input: TesterInput): Promise<string> 
         if (!input.content) throw new Error("content is required");
         return handleAppendNotes(input.transcript_name, input.content);
 
+      case "materialize_scenario":
+        return await handleMaterializeScenario(
+          input.session_dir,
+          input.capture_seq,
+          input.scenario_name,
+          input.working_dir,
+          input.run_materialized,
+        );
+
       case "run_scenario":
         return handleRunScenario(input.scenario_name, input.scenario, input.working_dir);
 
@@ -602,7 +656,7 @@ export async function handleScenarioTester(input: TesterInput): Promise<string> 
       default:
         throw new Error(
           `Unknown action: "${input.action}". ` +
-          "Valid actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, run_scenario, run_scenarios, list_scenarios, read_scenario, git_hash, help"
+          "Valid actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, materialize_scenario, run_scenario, run_scenarios, list_scenarios, read_scenario, git_hash, help"
         );
     }
   } catch (error: unknown) {
@@ -843,6 +897,22 @@ Step 5 -- Keep the scenario. Every scenario file under
   ~/.agent-framework/test-runs/scenarios/<name>/.
 
 ### B.3 Scenario actions
+
+**materialize_scenario** -- reconstruct a stored scenario from a live capture
+  Required: session_dir, capture_seq
+  Optional: scenario_name, working_dir, run_materialized
+  Behavior:
+    - Loads the capture pointer, state snapshot, transcript sidecar, tool-log
+      prefix, and injection records from the agent-framework session dir.
+    - Parses the transcript through the captured adapter when it can be
+      inferred from the transcript path (.codex or .claude), falling back to
+      the active adapter only when the path does not identify one.
+    - Writes the result to
+      ~/.agent-framework/test-runs/scenarios/<scenario_name or generated>/scenario.json.
+    - If run_materialized=true, immediately executes the written scenario and
+      returns both the materialized JSON and the run_scenario report JSON.
+  Use this instead of ad-hoc node -e calls when shell execution is blocked or
+  when you need a durable scenario artifact for a captured hook decision.
 
 **run_scenario** -- create and/or execute a SINGLE scenario
   Required: scenario_name OR scenario (inline JSON)

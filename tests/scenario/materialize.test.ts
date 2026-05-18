@@ -191,6 +191,203 @@ describe("materializeScenario", () => {
     ]);
   });
 
+  it("materializes Codex response_item transcripts through the adapter parser", async () => {
+    const codexDir = path.join(tmpDir, ".codex", "sessions", "2026", "05", "18");
+    fs.mkdirSync(codexDir, { recursive: true });
+    transcriptPath = path.join(codexDir, "rollout-codex.jsonl");
+    fs.writeFileSync(path.join(tmpDir, "transcript-path.txt"), transcriptPath + "\n");
+
+    const userLine = JSON.stringify({
+      timestamp: "2026-05-18T20:40:00.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "plan the popup fix" }],
+      },
+    });
+    const planLine = JSON.stringify({
+      timestamp: "2026-05-18T20:41:00.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [
+          {
+            type: "output_text",
+            text: "<proposed_plan>\n# Fix Popup\n\n## Summary\nDo it.\n</proposed_plan>",
+          },
+        ],
+        phase: "final_answer",
+      },
+    });
+    fs.writeFileSync(transcriptPath, `${userLine}\n${planLine}\n`);
+
+    const epoch = rotateEpoch(tmpDir, "initial", null);
+    const state = sessionStateDefaults();
+    const snapshotSeq = appendStateSnapshot(tmpDir, state, transcriptPath);
+
+    appendCapture(tmpDir, {
+      ts: Date.now(),
+      epoch_id: epoch.id,
+      parent_capture_seq: null,
+      event: "Stop",
+      decision: "pass",
+      permission_mode: "default",
+      plan_mode: {
+        active: true,
+        mode: "plan",
+        source: "codex-collaboration-mode",
+      },
+      state_snapshot_seq: snapshotSeq,
+    });
+
+    const scenario = await materializeScenario(tmpDir, 1);
+
+    expect(scenario.env?.adapter).toBe("codex");
+    expect(scenario.env?.codex_collaboration_mode).toBe("plan");
+    expect(scenario.transcript).toHaveLength(2);
+    expect(scenario.transcript[0]).toMatchObject({
+      role: "user",
+      content: [{ type: "text", text: "plan the popup fix" }],
+    });
+    expect(JSON.stringify(scenario.transcript[1])).toContain("<proposed_plan>");
+  });
+
+  it("anchors canonical transcript projection by raw transcript UUID", async () => {
+    const firstLine = JSON.stringify({
+      uuid: "raw-user-001",
+      type: "user",
+      message: {
+        id: "msg-user-001",
+        role: "user",
+        content: "old context",
+      },
+      parentUuid: null,
+    });
+    const anchorLine = JSON.stringify({
+      uuid: "raw-user-002",
+      type: "user",
+      message: {
+        id: "msg-user-002",
+        role: "user",
+        content: "surviving context",
+      },
+      parentUuid: "raw-user-001",
+    });
+    const assistantLine = JSON.stringify({
+      uuid: "raw-asst-003",
+      type: "assistant",
+      message: {
+        id: "msg-asst-003",
+        role: "assistant",
+        content: [{ type: "text", text: "final answer" }],
+      },
+      parentUuid: "raw-user-002",
+    });
+    fs.writeFileSync(
+      transcriptPath,
+      [firstLine, anchorLine, assistantLine].join("\n") + "\n",
+    );
+
+    const epoch = rotateEpoch(tmpDir, "rewind", "raw-user-002");
+    const state = sessionStateDefaults();
+    const snapshotSeq = appendStateSnapshot(tmpDir, state, transcriptPath);
+
+    appendCapture(tmpDir, {
+      ts: Date.now(),
+      epoch_id: epoch.id,
+      parent_capture_seq: null,
+      event: "Stop",
+      decision: "pass",
+      state_snapshot_seq: snapshotSeq,
+    });
+
+    const scenario = await materializeScenario(tmpDir, 1);
+
+    expect(scenario.transcript).toHaveLength(2);
+    expect(scenario.transcript[0]).toMatchObject({
+      role: "user",
+      content: "surviving context",
+    });
+    expect(scenario.transcript[1]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "final answer" }],
+    });
+  });
+
+  it("anchors coalesced Codex transcript projection by raw transcript UUID", async () => {
+    const codexDir = path.join(tmpDir, ".codex", "sessions", "2026", "05", "18");
+    fs.mkdirSync(codexDir, { recursive: true });
+    transcriptPath = path.join(codexDir, "rollout-codex-anchor.jsonl");
+    fs.writeFileSync(path.join(tmpDir, "transcript-path.txt"), transcriptPath + "\n");
+
+    const oldUserLine = JSON.stringify({
+      uuid: "raw-codex-user-001",
+      type: "response_item",
+      payload: {
+        id: "msg-old-user",
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "old context" }],
+      },
+    });
+    const anchorAssistantLine = JSON.stringify({
+      uuid: "raw-codex-asst-002",
+      type: "response_item",
+      payload: {
+        id: "msg-anchor-asst",
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "anchored text before tool" }],
+      },
+    });
+    const coalescedToolLine = JSON.stringify({
+      uuid: "raw-codex-tool-003",
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        call_id: "call_anchor",
+        name: "Read",
+        input: { file_path: "/tmp/a.txt" },
+      },
+    });
+    fs.writeFileSync(
+      transcriptPath,
+      [oldUserLine, anchorAssistantLine, coalescedToolLine].join("\n") + "\n",
+    );
+
+    const epoch = rotateEpoch(tmpDir, "rewind", "raw-codex-asst-002");
+    const state = sessionStateDefaults();
+    const snapshotSeq = appendStateSnapshot(tmpDir, state, transcriptPath);
+
+    appendCapture(tmpDir, {
+      ts: Date.now(),
+      epoch_id: epoch.id,
+      parent_capture_seq: null,
+      event: "PreToolUse",
+      tool_use_id: "call_anchor",
+      decision: "allow",
+      state_snapshot_seq: snapshotSeq,
+    });
+
+    const scenario = await materializeScenario(tmpDir, 1);
+
+    expect(scenario.env?.adapter).toBe("codex");
+    expect(scenario.transcript).toHaveLength(1);
+    expect(scenario.transcript[0]).toMatchObject({
+      role: "assistant",
+      content: [
+        { type: "text", text: "anchored text before tool" },
+        {
+          type: "tool_use",
+          id: "call_anchor",
+          input: { file_path: "/tmp/a.txt" },
+        },
+      ],
+    });
+  });
+
   it("throws when capture seq does not exist", async () => {
     await expect(materializeScenario(tmpDir, 999)).rejects.toThrow(
       /capture seq 999 not found/,

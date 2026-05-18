@@ -556,10 +556,10 @@ server.registerTool(
   "scenario_tester",
   {
     title: "Scenario Tester",
-    description: "Run test harness against labeled transcripts OR against synthetic scenarios. Actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, run_scenario, run_scenarios, list_scenarios, read_scenario, git_hash, help. Use help action for full documentation.",
+    description: "Run test harness against labeled transcripts OR against synthetic scenarios. Actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, materialize_scenario, run_scenario, run_scenarios, list_scenarios, read_scenario, git_hash, help. Use help action for full documentation.",
     inputSchema: {
       action: z.enum([
-        "find_work", "run_test", "run_single_hook", "list", "expand", "read_file", "append_notes",
+        "find_work", "run_test", "run_single_hook", "list", "expand", "read_file", "append_notes", "materialize_scenario",
         "run_scenario", "run_scenarios", "list_scenarios", "read_scenario",
         "git_hash", "help"
       ]).describe("The action to perform"),
@@ -569,6 +569,9 @@ server.registerTool(
       filename: z.string().optional().describe("For read_file: report.json, labels.json, labels.draft.json, or notes_and_questions.md. For read_scenario: scenario.json or report-scenario.json."),
       content: z.string().optional().describe("For append_notes: content to append"),
       hook_key: z.string().optional().describe("For run_single_hook: hook key to test (tool_use_id or stop:N from report failures)"),
+      session_dir: z.string().optional().describe("For materialize_scenario: agent-framework session directory containing captures.jsonl, state-snapshots.jsonl, and transcript-path.txt"),
+      capture_seq: z.number().optional().describe("For materialize_scenario: numeric capture seq from captures.jsonl"),
+      run_materialized: z.boolean().optional().describe("For materialize_scenario: immediately run the stored materialized scenario after writing it"),
       working_dir: z.string().optional().describe("Local repo path for run_test/run_single_hook/list/expand/run_scenario/run_scenarios/list_scenarios (overrides AGENT_FRAMEWORK_ROOT so edited code AND locally-edited fixture scenarios are used)"),
       truncate_to_line: z.number().optional().describe("For run_single_hook: 1-based line cap. When set, the harness appends only transcript lines <= truncate_to_line before firing the target hook. The hook still fires with its full tool_use_id because input is synthesized from the in-memory parsed lines. Use this to reproduce timing-sensitive states like pre-flush replay."),
       transcript_path: z.string().optional().describe("Absolute path to a transcript .jsonl file. Use when the transcript lives outside the default ~/.claude/projects/<encoded-project>/ directory (e.g. sessions from other project dirs). You may also pass a session folder name (e.g. '2025-01-15-1430_abc12345') and the resolver will look up the path via the session sidecar at ~/.agent-framework/sessions/. Only needed if the test-runs copy is not yet in place."),

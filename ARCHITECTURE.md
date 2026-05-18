@@ -81,7 +81,7 @@ src/                                # TypeScript source
     snapshot.ts                     # State snapshot JSONL
     epoch.ts                        # Epoch detection + rotation
     lifecycle.ts                    # Epoch-rotation side-effects
-    materialize.ts                  # Reconstruct Scenario from capture pointer
+    materialize.ts                  # Adapter-aware Scenario reconstruction from capture pointer
     lib/                            # Shared harness, classifier, hook-runner
 
   adapter/
@@ -557,6 +557,15 @@ Plan-mode and reproducibility sidecars live in the same session directory:
 the active file-backed plan descriptor, and `plan-validation-status.json`
 records exact-content plan validation pass/fail status keyed by resolved
 planfile path plus content hash.
+
+Captured hook decisions are converted back into executable scenarios by
+`src/scenario/materialize.ts`, usually through the `scenario_tester` MCP action
+`materialize_scenario`. The materializer reads the session's
+`transcript-path.txt`, infers the transcript adapter from paths such as
+`/.claude/` or `/.codex/`, parses through that adapter, and writes durable
+scenario JSON under `~/.agent-framework/test-runs/scenarios/`. Rewind anchors
+use raw transcript-line UUIDs, so adapter-normalized message IDs are not
+required to preserve the capture boundary.
 
 `create_planfile` resolves `plans/<name>.md` under the current session via the
 shared resolver and returns the planfile path together with the validation

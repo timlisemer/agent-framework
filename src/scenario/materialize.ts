@@ -22,28 +22,10 @@ import { loadStateSnapshot } from "./snapshot.js";
 import { sessionToolLogFile } from "../utils/paths.js";
 import type { ToolLogEntry } from "../utils/session-store.js";
 import { combineInjectionMessages, loadSessionInjectionsBySeq, shortContentHash } from "../utils/session-injections.js";
+import { activeSpec, adapterSpecByName } from "../adapter/spec.js";
+import type { ContentBlock, TranscriptEntry } from "../adapter/types.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function readJsonlLines(filePath: string): Record<string, unknown>[] {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(filePath, "utf-8");
-  } catch {
-    return [];
-  }
-  const lines: Record<string, unknown>[] = [];
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      lines.push(JSON.parse(trimmed) as Record<string, unknown>);
-    } catch {
-      // skip malformed lines
-    }
-  }
-  return lines;
-}
 
 function readToolLogEntriesThroughOffset(
   sessionDir: string,
@@ -90,6 +72,12 @@ function lineContainsToolUseId(line: Record<string, unknown>, toolUseId: string)
   });
 }
 
+function entryContainsToolUseId(entry: TranscriptEntry | null, toolUseId: string): boolean {
+  const content = entry?.message?.content;
+  if (!Array.isArray(content)) return false;
+  return content.some((block) => block.type === "tool_use" && block.id === toolUseId);
+}
+
 function sliceLinesForCapture(
   lines: Record<string, unknown>[],
   event: string,
@@ -102,6 +90,20 @@ function sliceLinesForCapture(
   const idx = lines.findIndex((line) => lineContainsToolUseId(line, toolUseId));
   if (idx === -1) return lines;
   return lines.slice(0, idx + 1);
+}
+
+function sliceEntriesForCapture(
+  entries: readonly (TranscriptEntry | null)[],
+  event: string,
+  toolUseId: string | undefined,
+): readonly (TranscriptEntry | null)[] {
+  if ((event !== "PreToolUse" && event !== "PostToolUse") || !toolUseId) {
+    return entries;
+  }
+
+  const idx = entries.findIndex((entry) => entryContainsToolUseId(entry, toolUseId));
+  if (idx === -1) return entries;
+  return entries.slice(0, idx + 1);
 }
 
 function blocksFromContent(content: unknown): ScenarioBlock[] {
@@ -126,6 +128,37 @@ function blocksFromContent(content: unknown): ScenarioBlock[] {
         tool_use_id: b.tool_use_id as string,
         content: b.content as string | unknown[],
         is_error: b.is_error as boolean | undefined,
+      });
+    }
+  }
+  return out;
+}
+
+function scenarioBlocksFromCanonicalContent(content: string | ContentBlock[]): ScenarioBlock[] {
+  if (typeof content === "string") {
+    return content ? [{ type: "text", text: content }] : [];
+  }
+  const out: ScenarioBlock[] = [];
+  for (const block of content) {
+    if (block.type === "text" && typeof block.text === "string") {
+      out.push({ type: "text", text: block.text });
+    } else if (block.type === "thinking" && typeof block.text === "string") {
+      out.push({ type: "thinking", thinking: block.text });
+    } else if (block.type === "thinking" && typeof (block as unknown as { thinking?: unknown }).thinking === "string") {
+      out.push({ type: "thinking", thinking: (block as unknown as { thinking: string }).thinking });
+    } else if (block.type === "tool_use") {
+      out.push({
+        type: "tool_use",
+        id: block.id,
+        name: block.name ?? "unknown",
+        input: block.input ?? {},
+      });
+    } else if (block.type === "tool_result" && typeof block.tool_use_id === "string") {
+      out.push({
+        type: "tool_result",
+        tool_use_id: block.tool_use_id,
+        content: block.content ?? "",
+        is_error: block.is_error,
       });
     }
   }
@@ -178,6 +211,62 @@ function projectTranscriptToEntries(
   return entries;
 }
 
+function projectCanonicalTranscriptToEntries(
+  parsedEntries: readonly (TranscriptEntry | null)[],
+  anchorUuid: string | null,
+): ScenarioEntry[] {
+  let startIdx = 0;
+  if (anchorUuid) {
+    const idx = parsedEntries.findIndex((entry) => entry?.message?.id === anchorUuid);
+    if (idx !== -1) startIdx = idx;
+  }
+
+  const entries: ScenarioEntry[] = [];
+  for (let i = startIdx; i < parsedEntries.length; i++) {
+    const entry = parsedEntries[i];
+    const message = entry?.message;
+    if (!message) continue;
+
+    if (message.role === "user") {
+      const content = message.content;
+      const userEntry: ScenarioUserEntry = {
+        role: "user",
+        content:
+          typeof content === "string"
+            ? content
+            : scenarioBlocksFromCanonicalContent(content),
+        isMeta: entry.isMeta === true ? true : undefined,
+      };
+      entries.push(userEntry);
+    } else if (message.role === "assistant") {
+      const blocks = scenarioBlocksFromCanonicalContent(message.content);
+      if (blocks.length > 0) {
+        const assistantEntry: ScenarioAssistantEntry = {
+          role: "assistant",
+          content: blocks,
+        };
+        entries.push(assistantEntry);
+      }
+    }
+  }
+  return entries;
+}
+
+function inferAdapterNameFromTranscriptPath(transcriptPath: string): string | null {
+  if (transcriptPath.includes(`${path.sep}.codex${path.sep}`)) return "codex";
+  if (transcriptPath.includes(`${path.sep}.claude${path.sep}`)) return "claude";
+  return null;
+}
+
+function rawAnchorStartIndex(
+  rawLines: readonly Record<string, unknown>[],
+  anchorUuid: string | null,
+): number {
+  if (!anchorUuid) return 0;
+  const idx = rawLines.findIndex((line) => line.uuid === anchorUuid);
+  return idx === -1 ? 0 : idx;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -225,15 +314,37 @@ export async function materializeScenario(
     );
   }
 
-  const lines = sliceLinesForCapture(
-    readJsonlLines(transcriptPath),
+  const adapterName = inferAdapterNameFromTranscriptPath(transcriptPath) ?? activeSpec().name;
+  const spec = adapterSpecByName(adapterName);
+  const rawTranscriptLines = fs.readFileSync(transcriptPath, "utf-8").split("\n").filter((line) => line.trim());
+  const rawJsonLines = rawTranscriptLines.map((line) => {
+    try {
+      return JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  });
+  const anchorUuid = pointer.transcript_anchor_uuid ?? epoch?.anchor_uuid ?? null;
+  const rawStartIdx = rawAnchorStartIndex(rawJsonLines, anchorUuid);
+  const anchoredRawTranscriptLines = rawTranscriptLines.slice(rawStartIdx);
+  const anchoredRawJsonLines = rawJsonLines.slice(rawStartIdx);
+  const parsedEntries = sliceEntriesForCapture(
+    spec.parseTranscript(anchoredRawTranscriptLines),
     pointer.event,
     pointer.tool_use_id,
   );
-  const anchorUuid = pointer.transcript_anchor_uuid ?? epoch?.anchor_uuid ?? null;
-  const entries = projectTranscriptToEntries(lines, anchorUuid);
+  const lines = sliceLinesForCapture(
+    anchoredRawJsonLines,
+    pointer.event,
+    pointer.tool_use_id,
+  );
+  const entries = projectCanonicalTranscriptToEntries(
+    parsedEntries,
+    rawStartIdx === 0 ? anchorUuid : null,
+  );
+  const fallbackEntries = entries.length > 0 ? entries : projectTranscriptToEntries(lines, anchorUuid);
 
-  if (entries.length === 0) {
+  if (fallbackEntries.length === 0) {
     throw new Error(
       `materializeScenario: transcript slice produced no entries (anchorUuid=${anchorUuid})`,
     );
@@ -261,7 +372,7 @@ export async function materializeScenario(
     schema_version: 2,
     name: `materialized-seq-${captureSeq}`,
     description: `Materialized from capture seq ${captureSeq} (epoch ${pointer.epoch_id})`,
-    transcript: entries,
+    transcript: fallbackEntries,
     target: {
       hook: pointer.event as Scenario["target"]["hook"],
       ...((pointer.event === "PreToolUse" || pointer.event === "PostToolUse") && pointer.tool_use_id
@@ -285,7 +396,11 @@ export async function materializeScenario(
     },
     env: {
       permission_mode: (pointer.permission_mode ?? "default") as NonNullable<Scenario["env"]>["permission_mode"],
+      adapter: adapterName,
       ...(pointer.event !== "SessionStart" ? { session_start_permission_mode: "default" as const } : {}),
+      ...(adapterName === "codex" && pointer.plan_mode?.active
+        ? { codex_collaboration_mode: "plan" as const }
+        : {}),
     },
     ...(setupFiles.size > 0
       ? {
@@ -298,7 +413,7 @@ export async function materializeScenario(
     ...(pointer.plan_mode
       ? {
           seed_sidecars: {
-            plan_mode_state: pointer.plan_mode.previous,
+            plan_mode_state: pointer.plan_mode.previous ?? snapshot.plan_mode_state,
           },
         }
       : {}),

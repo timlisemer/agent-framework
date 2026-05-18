@@ -52,6 +52,24 @@ function normalizeToolName(payload: Record<string, unknown>): string {
   return `${namespace}${name}`;
 }
 
+function normalizeToolInput(payload: Record<string, unknown>): Record<string, unknown> {
+  const input = payload.input ?? payload.arguments;
+  if (input && typeof input === "object" && !Array.isArray(input)) {
+    return input as Record<string, unknown>;
+  }
+  if (typeof input !== "string" || input.trim().length === 0) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(input) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 function assistantMessageContent(payload: Record<string, unknown>): ContentBlock[] {
   const rawContent = payload.content;
   const contentBlocks: ContentBlock[] = [];
@@ -172,6 +190,7 @@ export function parseTranscript(rawLines: readonly string[]): readonly (Transcri
             type: "tool_use",
             id: typeof nextPayload.call_id === "string" ? nextPayload.call_id : undefined,
             name: normalizeToolName(nextPayload),
+            input: normalizeToolInput(nextPayload),
           });
           i++;
         }
@@ -217,6 +236,7 @@ export function parseTranscript(rawLines: readonly string[]): readonly (Transcri
             type: "tool_use",
             id: callId,
             name: normalizeToolName(np),
+            input: normalizeToolInput(np),
           });
           i++;
         }

@@ -135,6 +135,7 @@ export interface ContentBlock {
   tool_use_id?: string;
   name?: string;
   id?: string;
+  input?: Record<string, unknown>;
   is_error?: boolean;
 }
 

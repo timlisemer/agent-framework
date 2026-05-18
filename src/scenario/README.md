@@ -14,7 +14,7 @@ The scenario system provides two complementary ways to exercise hook logic:
 | `snapshot.ts`     | Point-in-time state snapshots (StateSnapshot), written before each hook |
 | `epoch.ts`        | Transcript-continuity boundaries; detects rewinding / compaction |
 | `lifecycle.ts`    | Epoch-rotation side-effects (reset derived caches) |
-| `materialize.ts`  | Reconstruct a Scenario from a capture pointer |
+| `materialize.ts`  | Adapter-aware reconstruction of a Scenario from a capture pointer |
 | `lib/`            | Shared harness, classifier, hook-runner, replay-types |
 
 ## Runner
@@ -58,8 +58,17 @@ same prior sidecar state.
 ## Materialize
 
 `materializeScenario(sessionDir, captureSeq)` reconstructs a `Scenario` from a
-live session's capture pointer. Useful for converting observed regressions into
-reproducible test fixtures.
+live session's capture pointer. It reads `transcript-path.txt`, infers the
+adapter from the raw transcript path when possible (`/.claude/` or `/.codex/`),
+parses the transcript through that adapter's canonical parser, and falls back to
+the active adapter only when the path is not identifiable. Raw transcript UUIDs
+remain valid anchors for rewound sessions.
+
+Prefer the `scenario_tester` MCP action `materialize_scenario` for normal
+agent workflows. It validates the reconstructed scenario, writes it to
+`~/.agent-framework/test-runs/scenarios/<name>/scenario.json`, and can
+immediately execute it when `run_materialized` is true. This avoids ad-hoc
+`node -e` calls, which may be blocked by hooks.
 
 For plan-mode context injections, materialization seeds the target hook's prior
 `plan-mode-state.json`, writes captured file-backed sources through

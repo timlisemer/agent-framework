@@ -12,6 +12,13 @@ produce the output; the adapter owns the stdout JSON shape and exit code.
 
 See [`src/adapter/types.ts`](../src/adapter/types.ts) for the full interface.
 
+Adapters also own transcript normalization. The scenario materializer reads a
+live session's `transcript-path.txt`, infers the adapter from the raw transcript
+path when possible, then calls that adapter's `parseTranscript` before
+projecting a captured hook fire into scenario JSON. New adapters should keep
+all raw transcript shape knowledge inside their adapter parser so
+`src/scenario/materialize.ts` stays adapter-independent.
+
 ## Available Adapters
 
 | Directory       | Tool            | Status  |

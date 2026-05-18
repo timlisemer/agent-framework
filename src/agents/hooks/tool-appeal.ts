@@ -111,6 +111,40 @@ function renderLastUserMessageSection(snippet: string): string {
 `;
 }
 
+function stripExplicitQuoteBlocks(text: string): string {
+  return text.replace(/\bQUOTE\b[\s\S]*?\bQUOTE END\b/gi, " ");
+}
+
+function parseBashCommandFromDescription(toolName: string, toolDescription: string): string | null {
+  if (toolName !== "Bash") return null;
+  const match = toolDescription.match(/\bcommand=("(?:\\.|[^"\\])*")/);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]) as string;
+  } catch {
+    return null;
+  }
+}
+
+function shellPrefixUserNamed(command: string, userMessage: string): string | null {
+  const cleaned = stripExplicitQuoteBlocks(userMessage);
+  const tokens = command.trim().match(/(?:[^\s"'`]+|"[^"]*"|'[^']*')+/g) ?? [];
+  if (tokens.length < 2) return null;
+
+  const [head, firstArg] = tokens;
+  if (!firstArg.startsWith("-")) return null;
+
+  const prefix = `${head} ${firstArg}`;
+  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(?:^|[^\\w.-])${escaped}(?=$|[^\\w.-])`, "i");
+  const match = re.exec(cleaned);
+  if (!match) return null;
+
+  const before = cleaned.slice(Math.max(0, match.index - 80), match.index).toLowerCase();
+  const negatedMention = /(?:do\s+not|don't|dont|never|no|not|without|avoid|stop|refuse|forbid|forbidden|shouldn't|should\s+not)(?:\s+\w+){0,6}\s*$/.test(before);
+  return negatedMention ? null : prefix;
+}
+
 export async function appealHelper(
   toolName: string,
   toolDescription: string,
@@ -122,6 +156,27 @@ export async function appealHelper(
   additionalContext?: string,
   slashCommandContext?: SlashCommandContext
 ): Promise<{ overturned: boolean; gateNote?: string }> {
+  const bashCommand = parseBashCommandFromDescription(toolName, toolDescription);
+  if (bashCommand) {
+    const namedPrefix = shellPrefixUserNamed(
+      bashCommand,
+      userState.userMessageFull || userState.userMessageSnippet,
+    );
+    if (namedPrefix) {
+      logFastPathApproval(
+        "tool-appeal",
+        hookName,
+        toolName,
+        workingDir,
+        `User explicitly named Bash command prefix ${namedPrefix}`,
+      );
+      return {
+        overturned: true,
+        gateNote: `User explicitly named Bash command prefix ${namedPrefix}`,
+      };
+    }
+  }
+
   const contextSection = additionalContext
     ? `\n=== CALLER CONTEXT ===\n${additionalContext}\n=== END CONTEXT ===\n`
     : "";

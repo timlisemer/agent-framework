@@ -57,6 +57,12 @@ The session `current-plan.json` sidecar stores only the active planfile
 descriptor, not plan content. Implementation workflows resolve that planfile
 path and pass it to implementer and validator agents as `Plan file: <path>`.
 
+Scenario materialization for Codex sessions uses the shared `scenario_tester`
+MCP action `materialize_scenario`. The materializer infers Codex from
+`/.codex/` transcript paths and parses `response_item` / `event_msg` JSONL
+through `adapters/codex/parse-transcript.ts`, including normalized function-call
+inputs, before writing the stored scenario.
+
 When Codex stops with a whole-message `<proposed_plan>...</proposed_plan>`, the
 Stop hook treats that block as the plan presentation for user acceptance, not
 as a separate source of truth. The hook resolves the named session planfile

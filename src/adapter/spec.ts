@@ -31,6 +31,12 @@ export function activeSpec(): AdapterSpec {
   return spec;
 }
 
+export function adapterSpecByName(name: string): AdapterSpec {
+  const spec = specs()[name];
+  if (!spec) throw new Error(`Unknown adapter: ${name}`);
+  return spec;
+}
+
 export function mcpWireNameForText(canonical: CanonicalMcp, text: string): string {
   for (const spec of Object.values(specs())) {
     for (const known of CANONICAL_MCPS) {
