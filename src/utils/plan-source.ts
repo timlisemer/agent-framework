@@ -1,8 +1,8 @@
 import * as fs from "fs";
-import * as path from "path";
 import { activeSpec } from "../adapter/spec.js";
 import type { PlanSourceDescriptor } from "../adapter/types.js";
 import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
+import { createPlanfileAndValidate } from "../agents/mcp/create-planfile.js";
 import { formatTranscriptResult, readTranscriptExact } from "./transcript.js";
 import { PLAN_VALIDATE_COUNTS } from "./transcript-presets.js";
 import { readJson, writeJson } from "./file-io.js";
@@ -13,7 +13,6 @@ import {
   formatSessionPlanfilesForFeedback,
   getPathToPlanfile,
 } from "./planfile.js";
-import { validatePlanFileWithContract } from "../agents/mcp/validate-plan.js";
 
 export interface CurrentPlanLookupInput {
   transcriptPath: string;
@@ -103,20 +102,6 @@ function missingPlanfileWorkflow(sessionDir?: string): string {
   return `The presented plan must use a Plan Name matching one of the accepted session planfiles, or create a new named session planfile first. ${formatSessionPlanfilesForFeedback(sessionDir)} If one of the existing session planfiles is the current plan, edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed, then validate it with ${activeSpec().mcpWireName("validate_plan")} and present the finished plan using <proposed_plan>.`;
 }
 
-async function runSharedValidation(input: {
-  planPath: string;
-  transcriptPath: string;
-  sessionDir?: string;
-  projectDir: string;
-}) {
-  return validatePlanFileWithContract({
-    workingDir: input.projectDir,
-    planFile: input.planPath,
-    transcriptPath: input.transcriptPath,
-    sessionDir: input.sessionDir,
-  });
-}
-
 export async function validatePlanExitPresentation(input: {
   transcriptPath: string;
   sessionDir?: string;
@@ -128,6 +113,9 @@ export async function validatePlanExitPresentation(input: {
   const spec = activeSpec();
   const extractedContent = spec.extractStopProposedPlan(input.assistantText);
   const planName = extractedContent ? extractPlanName(extractedContent) ?? undefined : undefined;
+  if (!extractedContent || !planName) {
+    return { approved: false, reason: `Cannot exit plan mode without a planfile path. ${missingPlanfileWorkflow(input.sessionDir)}` };
+  }
   const resolvedPath = await getCurrentPlanfilePath({
     transcriptPath: input.transcriptPath,
     sessionDir: input.sessionDir,
@@ -166,61 +154,36 @@ export async function validatePlanExitPresentation(input: {
         ),
       };
     }
-    const source = { kind: "file" as const, path: resolvedPath, planName: existingPlanName ?? planName };
-    if (input.sessionDir) writeCurrentPlanSidecar(input.sessionDir, source);
-    return { approved: true, source };
   }
 
-  if (!extractedContent) {
+  const { planPath, validation } = await createPlanfileAndValidate({
+    planName,
+    content: extractedContent,
+    sessionDir: input.sessionDir,
+    workingDir: input.projectDir,
+    transcriptPath: input.transcriptPath,
+    existingPolicy: "overwrite",
+  });
+  if (validation.status === "PASS") {
+    const updatedContent = await readPlanFileContent(planPath);
+    if (updatedContent?.trim()) {
+      const source = { kind: "file" as const, path: planPath, planName: extractPlanName(updatedContent) ?? planName };
+      if (input.sessionDir) writeCurrentPlanSidecar(input.sessionDir, source);
+      return { approved: true, source };
+    }
     return {
       approved: false,
       reason: appendPlanfileValidationWorkflow(
-        `The matching planfile at ${resolvedPath} is empty. Populate it before exiting plan mode.`,
-        resolvedPath,
+        `The matching planfile at ${planPath} is still empty after plan validation.`,
+        planPath,
         activeSpec().mcpWireName("validate_plan"),
       ),
     };
   }
-
-  {
-    await fs.promises.mkdir(path.dirname(resolvedPath), { recursive: true });
-    await fs.promises.writeFile(resolvedPath, extractedContent + "\n", "utf-8");
-    const restoreUnvalidatedPlanfile = async () => {
-      if (existingContent === null) {
-        await fs.promises.unlink(resolvedPath).catch(() => undefined);
-      } else {
-        await fs.promises.writeFile(resolvedPath, existingContent, "utf-8");
-      }
-    };
-    const validation = await runSharedValidation({
-      planPath: resolvedPath,
-      transcriptPath: input.transcriptPath,
-      sessionDir: input.sessionDir,
-      projectDir: input.projectDir,
-    });
-    if (validation.status === "PASS") {
-      const updatedContent = await readPlanFileContent(resolvedPath);
-      if (updatedContent?.trim()) {
-        const source = { kind: "file" as const, path: resolvedPath, planName: extractPlanName(updatedContent) ?? planName };
-        if (input.sessionDir) writeCurrentPlanSidecar(input.sessionDir, source);
-        return { approved: true, source };
-      }
-      await restoreUnvalidatedPlanfile();
-      return {
-        approved: false,
-        reason: appendPlanfileValidationWorkflow(
-          `The matching planfile at ${resolvedPath} is still empty after plan validation.`,
-          resolvedPath,
-          activeSpec().mcpWireName("validate_plan"),
-        ),
-      };
-    }
-    await restoreUnvalidatedPlanfile();
-    return {
-      approved: false,
-      reason: validation.reasons.join("; ") || "Plan validation failed.",
-    };
-  }
+  return {
+    approved: false,
+    reason: validation.reasons.join("; ") || "Plan validation failed.",
+  };
 }
 
 export async function validatePlanEdit(input: {

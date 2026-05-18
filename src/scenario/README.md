@@ -37,9 +37,11 @@ Plan-mode and injected-context reproducibility use additional session sidecars:
 - `current-plan.json` points at the active file-backed plan descriptor.
 - `plan-validation-status.json` caches exact-content plan validation results,
   keyed by resolved planfile path plus content hash. Explicit `validate_plan`
-  MCP calls write this cache; plan-exit hooks now trust the populated planfile
-  itself and only delegate validation when the hook must populate a missing or
-  empty planfile from the extracted plan block.
+  MCP calls write this cache; Codex Stop plan-exit hooks still validate the
+  extracted plan through the shared planfile creator path instead of trusting a
+  populated planfile. If validation fails after overwriting a populated file,
+  the previous populated content is restored; missing or empty planfiles keep
+  the extracted content for remediation.
 
 Scenario and replay transcripts are written under their test-run cache
 directory, and the shared session resolver treats that containing cache

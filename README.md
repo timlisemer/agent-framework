@@ -105,11 +105,13 @@ validator immediately. MCP calls without a transcript path recover the current
 session from the latest `transcript-path.txt` sidecar for the active project.
 `validate_plan` remains available for explicit revalidation and for the
 remediation workflow shown in validation failures. Codex Stop-hook acceptance
-resolves the file-backed planfile through the shared planfile locator. A
-populated matching planfile is accepted without automatic revalidation, while a
-missing or empty planfile is populated from the extracted `<proposed_plan>` and
-delegated to `validate_plan`; the session current-plan sidecar is updated only
-after a populated planfile is accepted.
+resolves the file-backed planfile through the shared planfile locator, writes
+the extracted `<proposed_plan>` through the shared planfile creator path, and
+delegates to `validate_plan` before acceptance. Existing populated matching
+planfiles are validated instead of being accepted as-is; if overwrite validation
+fails, the previous populated content is restored. Missing or empty planfiles
+keep the extracted content so the remediation workflow has a concrete file to
+edit. The session current-plan sidecar is updated only after validation passes.
 
 ## Performance
 

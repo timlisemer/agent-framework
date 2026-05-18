@@ -60,11 +60,13 @@ path and pass it to implementer and validator agents as `Plan file: <path>`.
 When Codex stops with a whole-message `<proposed_plan>...</proposed_plan>`, the
 Stop hook treats that block as the plan presentation for user acceptance, not
 as a separate source of truth. The hook resolves the named session planfile
-through the shared planfile locator and allows the exit when that file is
-populated. If the resolved file is missing or empty, the hook writes the
-extracted block to the resolved planfile and delegates validation through the
-same contract path used by `validate_plan`; validation failures are surfaced
-directly.
+through the shared planfile locator, writes the extracted block through the
+shared planfile creator path, and delegates validation through the same
+contract path used by `validate_plan` before allowing exit. Existing populated
+planfiles are validated instead of trusted as-is; when overwrite validation
+fails, the previous populated content is restored. Missing or empty planfiles
+keep the extracted content so the validation remediation workflow has a
+concrete file to edit.
 
 `dotcodex/agents/*.toml` contains Codex custom-agent equivalents for the
 Claude subagent roles. The NixOS activation script links these as individual
