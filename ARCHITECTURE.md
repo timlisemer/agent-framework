@@ -22,6 +22,7 @@ src/                                # TypeScript source
       create-planfile.ts            # Writes named planfiles and runs validation
       confirm.ts                    # Code quality gate (SDK mode)
       commit.ts                     # Generates commit message + commits
+      locate-scenario.ts            # Locates captured scenarios from quotes
       push.ts                       # Executes git push
       index.ts                      # Barrel export
 
@@ -153,7 +154,7 @@ All agents use the unified `runAgent()` function from `utils/agent-runner.ts`. T
 
 | Mode   | Description                              | Used By                        |
 |--------|------------------------------------------|--------------------------------|
-| direct | Single API call, no tools, fast          | All hook agents, check, commit |
+| direct | Single API call, no tools, fast          | All hook agents, check, commit, locate_scenario |
 | sdk    | Multi-turn with Read/Glob/Grep tools     | confirm                        |
 
 ### Why Two Modes?
@@ -530,6 +531,7 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 | `check.ts` | 1 | `CONFIRM` | `direct` |
 | `confirm.ts` | 1 | `CONFIRM` | `direct` |
 | `commit.ts` | 3 | `CONFIRM`, `ERROR` | `direct` |
+| `locate-scenario.ts` | 1 on successful matches | `CONFIRM` | `direct` |
 | `src/rules/validate-intent.ts` | 1 | via `runAgent` in rule check | `direct` |
 | `evaluator.ts` (rule-gate) | 1 | `APPROVE`, `DENY` | `direct` |
 | `tool-appeal.ts` | 1 | `APPROVE`, `DENY` | `direct` |
@@ -566,6 +568,13 @@ Captured hook decisions are converted back into executable scenarios by
 scenario JSON under `~/.agent-framework/test-runs/scenarios/`. Rewind anchors
 use raw transcript-line UUIDs, so adapter-normalized message IDs are not
 required to preserve the capture boundary.
+
+Captured hook decisions can be located from user-provided quote substrings via
+the `locate_scenario` MCP before materialization. That tool runs fixed literal
+searches over raw Claude/Codex transcripts and session logs, cross-references
+tool and injection hits against `captures.jsonl`, and uses a haiku-level direct
+LLM call only to summarize successful findings. If no predefined search finds a
+candidate, it returns the manual fallback guidance instead of materializing.
 
 `create_planfile` resolves `plans/<name>.md` under the current session via the
 shared resolver and returns the planfile path together with the validation

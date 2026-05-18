@@ -51,6 +51,41 @@ Status is FAIL if Errors > 0, PASS otherwise.
 - Before running commit/confirm to fail fast on obvious errors
 - Any time you want a summary of project health without touching source code`;
 
+export const LOCATE_SCENARIO_HELP = `# locate_scenario -- Captured Scenario Locator
+
+Locates a captured scenario from one or more distinctive quote substrings.
+This replaces the manual \`scenarios/LOCATE-SCENARIO.md\` recipe up to the
+materialization point.
+
+## Inputs
+
+- quotes (required): one or more quote substrings
+- working_dir (optional): telemetry/context directory, defaults to cwd
+- transcript_path (optional): session transcript path for statusLine
+
+## Flow
+
+1. Search raw Claude and Codex transcripts for each quote.
+2. Search agent-framework \`tool-log.jsonl\`, \`captures.jsonl\`, and
+   \`session-injections.jsonl\` for each quote.
+3. Resolve raw transcript hits back to session directories through
+   \`transcript-path.txt\` sidecars.
+4. Cross-reference tool-log \`toolUseId\` and injection \`seq\` values against
+   \`captures.jsonl\` where possible.
+5. If no predefined search finds anything, return a user-facing failure notice
+   plus manual fallback guidance.
+6. If candidates are found, summarize them with a haiku-tier LLM and append
+   required next-step instructions.
+
+## Output
+
+On success, returns \`## Findings\` plus instructions to notify the user and
+only materialize through the active \`scenario_tester\` MCP if the user already
+requested materialization.
+
+On failure, returns \`## Locate Scenario Failed\`, the predefined commands tried,
+and manual guidance for locating scenarios by transcript/session logs.`;
+
 export const CONFIRM_HELP = `# confirm -- Code Quality Gate
 
 Binary gate that evaluates uncommitted changes for quality, security, and

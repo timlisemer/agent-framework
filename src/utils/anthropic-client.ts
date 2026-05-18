@@ -17,7 +17,7 @@
  * - Must be fast (<100ms) - validation should not delay tool execution
  * - Simple request/response pattern
  *
- * **MCP agents** (check, confirm, commit):
+ * **MCP agents/tools** (check, commit, locate_scenario, etc.):
  * - Commands are deterministic (linter, make/just check, git commands)
  * - No agent decision-making needed for tool selection
  * - Shell commands executed via execSync, then single API call to analyze

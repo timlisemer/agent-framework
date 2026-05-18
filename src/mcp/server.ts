@@ -10,6 +10,7 @@ import { runConfirmAgent } from "../agents/mcp/confirm.js";
 import { runCommitAgent } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
 import { runTranscriptAgent } from "../agents/mcp/transcript.js";
+import { runLocateScenarioMcp } from "../agents/mcp/locate-scenario.js";
 import { evaluateRules } from "../rules/index.js";
 import { validateIntentRule } from "../rules/validate-intent.js";
 import { getSessionDir, getSessionState } from "../utils/session-store.js";
@@ -25,6 +26,7 @@ import {
   VALIDATE_PLAN_HELP,
   CREATE_PLANFILE_HELP,
   TRANSCRIPT_HELP,
+  LOCATE_SCENARIO_HELP,
 } from "./help-docs.js";
 import { getRepoInfo, getRepoInfoCancellable } from "../utils/git-utils.js";
 import { throwIfAborted } from "../utils/cancellation.js";
@@ -494,6 +496,30 @@ server.registerTool(
 );
 
 server.registerTool(
+  "locate_scenario",
+  {
+    title: "Locate Scenario",
+    description: "Locate a captured scenario from one or more quote substrings. Runs predefined searches over adapter transcripts and agent-framework session logs, then summarizes candidate captures.",
+    inputSchema: {
+      quotes: z.array(z.string()).min(1).describe("One or more distinctive quote substrings to search for"),
+      working_dir: z.string().optional().describe("Working directory for telemetry/context (defaults to cwd)"),
+      transcript_path: z.string().optional().describe("Session transcript path for statusLine")
+    }
+  },
+  async (args, extra) => {
+    const result = await runLocateScenarioMcp(
+      {
+        quotes: args.quotes,
+        workingDir: args.working_dir,
+        transcriptPath: args.transcript_path,
+      },
+      { signal: extra.signal },
+    );
+    return { content: [{ type: "text", text: result }] };
+  }
+);
+
+server.registerTool(
   "scenario_labeler",
   {
     title: "Scenario Labeler",
@@ -609,6 +635,7 @@ const HELP_RESOURCES: Array<{
   { tool: "scenario_tester", title: "scenario_tester -- Help", summary: "Scenario tester (transcripts + scenarios)", body: TESTER_HELP },
   { tool: "scenario_labeler", title: "scenario_labeler -- Help", summary: "Scenario transcript labeler", body: LABELER_HELP },
   { tool: "transcript", title: "transcript -- Help", summary: "Session transcript path resolver", body: TRANSCRIPT_HELP },
+  { tool: "locate_scenario", title: "locate_scenario -- Help", summary: "Captured scenario locator", body: LOCATE_SCENARIO_HELP },
 ];
 
 for (const { tool, title, summary, body } of HELP_RESOURCES) {

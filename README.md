@@ -2,7 +2,7 @@
 
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
-1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent`, `create_planfile`, `validate_plan`, `scenario_labeler`, `scenario_tester` agents (portable, works with any MCP client)
+1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent`, `create_planfile`, `validate_plan`, `scenario_labeler`, `scenario_tester`, `locate_scenario` tools (portable, works with any MCP client)
 2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `style-drift`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
 3. **Stop Hook** - For `response-align-stop` and Codex `<proposed_plan>` acceptance validation
 4. **UserPromptSubmit Hook** - For `sentiment` rule (classifies user mood/intent before each tool call sequence)
@@ -11,7 +11,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
 
 ## Agents
 
-The framework implements 18 specialized agents and MCP tools organized into three categories:
+The framework implements 19 specialized agents and MCP tools organized into three categories:
 
 ### MCP Tools (User-Facing)
 
@@ -26,10 +26,13 @@ The framework implements 18 specialized agents and MCP tools organized into thre
 | validate_plan          | sonnet | Validate an existing planfile against the planning contract  |
 | scenario_labeler   | -      | Test harness operations for the @labeler agent role          |
 | scenario_tester    | -      | Scenario execution, reports, and capture materialization     |
+| locate_scenario    | haiku  | Locate captured scenario candidates from quote substrings    |
 
 **Note on validate_intent**: Unlike other MCP tools, `validate_intent` is not auto-triggered. It's a manual post-session review tool that analyzes a conversation transcript to check if the AI followed user intentions. Requires `transcript_path` parameter pointing to a `.jsonl` transcript file. Returns `ALIGNED` or `DRIFTED` verdict.
 
 **Note on scenario tools**: These tools wrap scenario runner operations for the labeler and tester workflows. The labeler tool handles transcript labeling workflows; the tester tool handles test execution, report reading, and `materialize_scenario` for converting live capture pointers into stored scenario JSON. Neither makes LLM calls internally.
+
+**Note on locate_scenario**: This tool replaces the manual `scenarios/LOCATE-SCENARIO.md` recipe. It accepts one or more quote substrings, runs predefined literal searches over raw Claude/Codex transcripts and agent-framework session logs, resolves candidate session directories/capture sequences where possible, and uses a haiku-level LLM only to summarize successful findings. If no predefined search matches, it returns a failure notice plus manual fallback guidance.
 
 ### Validation Agents (Hook-Triggered)
 
@@ -120,6 +123,12 @@ parses the raw transcript through the inferred adapter (`/.claude/` or
 `~/.agent-framework/test-runs/scenarios/`, and can immediately run it with
 `run_materialized: true`. Use this MCP action instead of `node -e` snippets in
 agent sessions.
+
+Captured scenario lookup should go through the `locate_scenario` MCP first. It
+searches quote substrings across raw adapter transcripts and live
+agent-framework session logs, summarizes found candidates, and tells the caller
+to materialize via the adapter-active `scenario_tester` MCP only when the user
+already requested materialization.
 
 ## Performance
 

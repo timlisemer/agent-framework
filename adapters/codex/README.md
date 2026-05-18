@@ -22,6 +22,7 @@ deployment path; the activation script owns them.
 (`$agent-framework-check`, `$agent-framework-commit`,
 `$agent-framework-confirm`, `$agent-framework-push`,
 `$agent-framework-quickpush`, `$agent-framework-transcript`,
+`$agent-framework-locate-scenario`,
 `$agent-framework-plan1`, `$agent-framework-plan3`,
 `$agent-framework-plan5`, and `$agent-framework-implement`). These mirror
 the Claude slash-command workflows. The NixOS activation script creates real directories under

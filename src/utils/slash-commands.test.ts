@@ -40,6 +40,10 @@ describe("SLASH_COMMAND_ALLOWED_TOOLS canonical keys", () => {
     expect(SLASH_COMMAND_ALLOWED_TOOLS["check"]).toEqual(["mcp-check"]);
   });
 
+  it("locate-scenario maps to canonical mcp-locate_scenario tool", () => {
+    expect(SLASH_COMMAND_ALLOWED_TOOLS["locate-scenario"]).toEqual(["mcp-locate_scenario"]);
+  });
+
   it("plan3 maps to plan workflow tools", () => {
     expect(SLASH_COMMAND_ALLOWED_TOOLS["plan3"]).toEqual([
       "Agent",
@@ -69,6 +73,7 @@ describe("claudeSpec.recognizeWorkflowInvocation", () => {
   it("detects direct slash prompts", () => {
     expect(claudeSpec.recognizeWorkflowInvocation("/quickpush")).toBe("quickpush");
     expect(claudeSpec.recognizeWorkflowInvocation("  /check now")).toBe("check");
+    expect(claudeSpec.recognizeWorkflowInvocation("  /locate-scenario \"quote\"")).toBe("locate-scenario");
   });
 
   it("ignores unknown commands", () => {
@@ -81,6 +86,7 @@ describe("codexSpec.recognizeWorkflowInvocation", () => {
   it("detects Codex skill mentions", () => {
     expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-quickpush")).toBe("quickpush");
     expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-transcript")).toBe("transcript");
+    expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-locate-scenario")).toBe("locate-scenario");
   });
 
   it("detects Codex skill context blocks", () => {
@@ -110,6 +116,14 @@ describe("resolveActiveSlashCommandAllowedTools (Claude adapter)", () => {
     ]);
 
     await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual(["mcp-check"]);
+  });
+
+  it("resolves locate-scenario command to canonical mcp-locate_scenario", async () => {
+    const transcript = await writeTranscript([
+      claudeUserEntry("/locate-scenario"),
+    ]);
+
+    await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual(["mcp-locate_scenario"]);
   });
 
   it("resolves quickpush to canonical mcp-push and mcp-commit", async () => {
