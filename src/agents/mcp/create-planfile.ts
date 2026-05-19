@@ -97,11 +97,15 @@ export async function runCreatePlanfileAgent(input: CreatePlanfileInput): Promis
   const failureReminder = validation.status === "FAIL"
     ? `\n\n${appendPlanfileValidationWorkflow("Do not call create_planfile again for this plan; edit the created planfile directly.", planPath, validatePlanWireName)}`
     : "";
+  const validationDetails = validation.status === "PASS" && validation.reasons.length === 0
+    ? `## Instructions
+Now present the finished plan using <proposed_plan>.`
+    : `## Reasons
+${reasons}${failureReminder}`;
   return `Created planfile: ${planPath}
 
 ## Results
 - Status: ${validation.status}
 
-## Reasons
-${reasons}${failureReminder}`;
+${validationDetails}`;
 }

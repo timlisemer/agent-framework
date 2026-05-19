@@ -71,6 +71,13 @@ export interface PlanValidationRunResult {
 function getHookName(): string { return activeSpec().mcpWireName("validate_plan"); }
 
 function formatResult(status: "PASS" | "FAIL", reasons: readonly string[]): string {
+  if (status === "PASS" && reasons.length === 0) {
+    return `## Results
+- Status: ${status}
+
+## Instructions
+Now present the finished plan using <proposed_plan>.`;
+  }
   const body = reasons.length > 0 ? reasons.join("\n") : "(none)";
   return `## Results
 - Status: ${status}

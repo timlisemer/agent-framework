@@ -265,7 +265,10 @@ plan_file is required.
 - Status: PASS | FAIL
 
 ## Reasons
-<none or concrete validation reasons>
+<concrete validation reasons on FAIL>
+
+## Instructions
+<next instruction on PASS>
 \`\`\`
 
 ## When to use

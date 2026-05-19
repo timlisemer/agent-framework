@@ -77,6 +77,8 @@ describe("runCreatePlanfileAgent", () => {
       const planPath = sessionPlanFile(sessionDir, "created-plan");
       expect(result).toContain(`Created planfile: ${planPath}`);
       expect(result).toContain("- Status: PASS");
+      expect(result).toContain("## Instructions\nNow present the finished plan using <proposed_plan>.");
+      expect(result).not.toContain("## Reasons\n(none)");
       const written = fs.readFileSync(planPath, "utf-8");
       expect(written).toMatch(/^Plan Name: created-plan/);
       expect(written).toContain(`Planfile Path: ${planPath}\nPlan Name: created-plan`);
