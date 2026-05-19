@@ -100,6 +100,57 @@ function appendCompletedPlan(transcriptPath: string, text: string): void {
   );
 }
 
+function appendCodexToolRoundTripAndFinalAssistantPlan(
+  transcriptPath: string,
+  planText: string,
+): void {
+  const entries = [
+    {
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "plan the fix" }],
+      },
+    },
+    {
+      type: "event_msg",
+      payload: {
+        type: "agent_message",
+        message: "I will inspect the implementation first.",
+        phase: "commentary",
+      },
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "function_call",
+        call_id: "call_inspect",
+        name: "exec_command",
+        arguments: "{}",
+      },
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "function_call_output",
+        call_id: "call_inspect",
+        output: "inspection complete",
+      },
+    },
+    {
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: proposedPlan(planText) }],
+        phase: "final_answer",
+      },
+    },
+  ];
+  fs.appendFileSync(transcriptPath, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+}
+
 async function runStop(transcriptPath: string, cwd: string, content: string): Promise<void> {
   await mainStop(
     {
@@ -232,6 +283,31 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
     expect(output).toContain("Plan validation failed:");
     expect(output).toContain("Cannot exit plan mode without a planfile path");
+  });
+
+  it("validates transcript response_item proposed plan after Codex tool output when Stop input is stripped", async () => {
+    seedPlanMode(transcriptPath);
+    const existingPath = sessionPlanFile(sessionDir, "existing-plan");
+    fs.mkdirSync(path.dirname(existingPath), { recursive: true });
+    fs.writeFileSync(existingPath, validPlan(existingPath, "existing-plan"));
+    appendCodexToolRoundTripAndFinalAssistantPlan(transcriptPath, "## User Goal\nToo small.");
+
+    await mainStop(
+      {
+        session_id: "session-stop",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        last_assistant_message: "",
+      },
+      codexEncoder,
+    );
+
+    expect(mockValidatePlanFileWithContract).not.toHaveBeenCalled();
+    const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
+    expect(output).toContain("Plan validation failed:");
+    expect(output).toContain("Cannot exit plan mode without a planfile path");
+    expect(output).not.toContain("response-align-stop");
+    expect(fs.readFileSync(transcriptPath, "utf-8")).toContain("plan-validate");
   });
 
   it("creates a missing planfile, runs shared validation, records status, writes current-plan, and allows silently on pass", async () => {

@@ -585,6 +585,42 @@ describe("currentTurnAssistantState", () => {
       },
     ]);
   });
+
+  it("readTranscriptExact keeps a Codex final proposed plan separate after tool output", async () => {
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    const planText = "<proposed_plan>\nPlan Name: codex-stop-regression\n\n## User Goal\nFix it.\n</proposed_plan>";
+    const filePath = writeTranscript([
+      {
+        type: "response_item",
+        payload: { type: "message", role: "user", content: "plan the fix" },
+      },
+      codexEventAgentMessage("I will inspect the existing implementation first."),
+      codexFunctionCall("call_inspect"),
+      codexFunctionCallOutput("call_inspect", "inspection complete"),
+      {
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: planText }],
+          phase: "final_answer",
+        },
+      },
+    ]);
+
+    const result = await readTranscriptExact(filePath, {
+      counts: { user: 1, assistant: 1, tool: 1 },
+    });
+
+    expect(result.assistant).toEqual([
+      {
+        role: "assistant",
+        content: planText,
+        index: 3,
+      },
+    ]);
+    expect(result.assistant[0].content).not.toContain("inspect the existing implementation");
+  });
 });
 
 describe("resolveActiveSlashCommandAllowedTools", () => {

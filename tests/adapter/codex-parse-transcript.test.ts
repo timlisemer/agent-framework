@@ -32,4 +32,39 @@ describe("Codex transcript parser", () => {
       },
     ]);
   });
+
+  it("keeps response_item assistant output_text proposed plans as assistant text", () => {
+    const entries = parseTranscript([
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "output_text",
+              text: "<proposed_plan>\nPlan Name: response-item-plan\n\n## User Goal\nParse response items.\n</proposed_plan>",
+            },
+          ],
+          phase: "final_answer",
+        },
+      }),
+    ]);
+
+    expect(entries).toEqual([
+      {
+        isMeta: undefined,
+        message: {
+          id: undefined,
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: "<proposed_plan>\nPlan Name: response-item-plan\n\n## User Goal\nParse response items.\n</proposed_plan>",
+            },
+          ],
+        },
+      },
+    ]);
+  });
 });

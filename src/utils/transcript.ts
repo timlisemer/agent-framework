@@ -144,6 +144,8 @@ interface AssistantGroup {
   entryCount: number;
 }
 
+type AssistantGroupBoundaryPolicy = "human-user-text" | "user-text-or-tool-result";
+
 function appendAssistantText(group: AssistantGroup, text: string): void {
   if (!text) return;
   if (group.text === text) return;
@@ -192,14 +194,35 @@ function userEntryHasHumanText(entry: TranscriptEntry): boolean {
   return content.some((block) => block.type === "text" && (block.text ?? "").length > 0);
 }
 
+function userEntryHasToolResult(entry: TranscriptEntry): boolean {
+  if (entry.message?.role !== "user" || entry.isMeta === true) return false;
+
+  const content = entry.message.content;
+  if (!Array.isArray(content)) return false;
+
+  return content.some((block) => block.type === "tool_result");
+}
+
+function userEntryResetsAssistantGroup(
+  entry: TranscriptEntry,
+  policy: AssistantGroupBoundaryPolicy,
+): boolean {
+  if (policy === "human-user-text") {
+    return userEntryHasHumanText(entry);
+  }
+  return userEntryHasHumanText(entry) || userEntryHasToolResult(entry);
+}
+
 /**
  * Build a map from jsonl index -> AssistantGroup. Adjacent assistant entries
  * in the same post-user run collapse into one group, even when adapter
  * materialization assigns distinct message ids. Non-message/null/meta lines do
- * not contribute and do not reset the active run; human user prompts do.
+ * not contribute and do not reset the active run. Callers choose whether
+ * user-role tool results reset assistant groups.
  */
 function buildAssistantGroups(
-  parsedEntries: (TranscriptEntry | null)[]
+  parsedEntries: (TranscriptEntry | null)[],
+  boundaryPolicy: AssistantGroupBoundaryPolicy = "human-user-text",
 ): Map<number, AssistantGroup> {
   const byIndex = new Map<number, AssistantGroup>();
   let activeGroup: AssistantGroup | undefined;
@@ -210,7 +233,7 @@ function buildAssistantGroups(
     if (!entry || !entry.message) continue;
 
     if (entry.message.role !== "assistant") {
-      if (userEntryHasHumanText(entry)) {
+      if (userEntryResetsAssistantGroup(entry, boundaryPolicy)) {
         activeGroup = undefined;
       }
       continue;
@@ -499,7 +522,7 @@ export async function readTranscriptExact(
     ...activeSpec().parseTranscript(allLines),
   ];
 
-  const assistantGroupByIndex = buildAssistantGroups(parsedEntries);
+  const assistantGroupByIndex = buildAssistantGroups(parsedEntries, "user-text-or-tool-result");
 
   // First pass: build tool_use ID map + extract slash command context
   for (const entry of parsedEntries) {
@@ -695,7 +718,7 @@ export async function currentTurnAssistantState(
     return { kind: "no-current-turn" };
   }
 
-  const groups = buildAssistantGroups(parsedEntries);
+  const groups = buildAssistantGroups(parsedEntries, "human-user-text");
 
   let current: AssistantGroup | undefined;
   const seen = new Set<AssistantGroup>();
