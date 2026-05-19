@@ -1,5 +1,6 @@
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { getSessionDir, getSessionState } from "../utils/session-store.js";
+import { getSessionState } from "../utils/session-store.js";
+import { getAgentFrameworkSessionDir } from "../utils/paths.js";
 import { getPlanModeContext } from "../utils/plan-mode-detector.js";
 import { evaluateRulesForUserPromptSubmit, ALL_RULES } from "../rules/index.js";
 import type { RuleContext } from "../rules/types.js";
@@ -33,7 +34,7 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
   const host = resolveHostContext(input);
   const projectDir = host.projectDir;
 
-  const sessionDir = getSessionDir(input.transcript_path);
+  const sessionDir = getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path });
 
   // Detect epoch change (transcript rewind) and reset derived caches when needed.
   const epochChange = detectEpochChange(sessionDir, input.transcript_path);

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { CacheManager, getSessionDir } from "../../src/utils/cache-manager.js";
+import { CacheManager } from "../../src/utils/cache-manager.js";
 import {
   formatTimestamp,
   getAgentFrameworkSessionDir,
@@ -207,9 +207,9 @@ describe("formatTimestamp", () => {
   });
 });
 
-describe("getSessionDir", () => {
+describe("getAgentFrameworkSessionDir", () => {
   it("creates a directory under ~/.agent-framework/sessions/ with timestamp prefix", () => {
-    const dir = getSessionDir("/tmp/test-transcript-for-unit-test.jsonl");
+    const dir = getAgentFrameworkSessionDir({ transcriptPath: "/tmp/test-transcript-for-unit-test.jsonl" });
     expect(dir).toContain(".agent-framework");
     expect(dir).toContain("sessions");
     // Folder name should be {timestamp}_{hash}
@@ -220,8 +220,8 @@ describe("getSessionDir", () => {
   });
 
   it("discovers existing session folder on subsequent calls", () => {
-    const first = getSessionDir("/tmp/test-transcript-discovery.jsonl");
-    const second = getSessionDir("/tmp/test-transcript-discovery.jsonl");
+    const first = getAgentFrameworkSessionDir({ transcriptPath: "/tmp/test-transcript-discovery.jsonl" });
+    const second = getAgentFrameworkSessionDir({ transcriptPath: "/tmp/test-transcript-discovery.jsonl" });
     expect(second).toBe(first);
     fs.rmSync(first, { recursive: true, force: true });
   });

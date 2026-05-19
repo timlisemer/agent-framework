@@ -26,11 +26,11 @@ import {
 } from "../utils/plan-approval-detector.js";
 import { logFastPathApproval } from "../utils/logger.js";
 import {
-  getSessionDir,
   getSessionState,
   appendToolLog,
   formatToolDetail,
 } from "../utils/session-store.js";
+import { getAgentFrameworkSessionDir } from "../utils/paths.js";
 import {
   addEntry,
   addPatternWarnings,
@@ -72,7 +72,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   const host = resolveHostContext(input);
   const projectDir = host.projectDir;
 
-  const sessionDir = getSessionDir(input.transcript_path);
+  const sessionDir = getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path });
 
   // Detect epoch change (transcript rewind) and reset derived caches when needed.
   const epochChange = detectEpochChange(sessionDir, input.transcript_path);

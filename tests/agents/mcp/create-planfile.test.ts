@@ -7,6 +7,7 @@ import {
   getAgentFrameworkSessionDir,
   sessionCurrentPlanFile,
   sessionPlanFile,
+  sessionTranscriptPathSidecar,
   sessionPlanValidationStatusFile,
 } from "../../../src/utils/paths.js";
 
@@ -91,6 +92,77 @@ describe("runCreatePlanfileAgent", () => {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it("uses the active session after a transcript-bound sidecar refresh", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-planfile-"));
+    const previousProjectDir = process.env.AGENT_FRAMEWORK_PROJECT_DIR;
+    let activeSessionDir = "";
+    let siblingSessionDir = "";
+    try {
+      const projectDir = path.join(tempDir, "project");
+      fs.mkdirSync(projectDir);
+      process.env.AGENT_FRAMEWORK_PROJECT_DIR = projectDir;
+      const activeTranscriptPath = path.join(tempDir, "active.jsonl");
+      const siblingTranscriptPath = path.join(tempDir, "sibling.jsonl");
+      fs.writeFileSync(activeTranscriptPath, "");
+      fs.writeFileSync(siblingTranscriptPath, "");
+      activeSessionDir = getAgentFrameworkSessionDir({ transcriptPath: activeTranscriptPath, projectDir });
+      siblingSessionDir = getAgentFrameworkSessionDir({ transcriptPath: siblingTranscriptPath, projectDir });
+
+      const activeSidecar = sessionTranscriptPathSidecar(activeSessionDir);
+      const siblingSidecar = sessionTranscriptPathSidecar(siblingSessionDir);
+      const older = new Date(Date.now() - 10_000);
+      const newer = new Date(Date.now() - 5_000);
+      fs.utimesSync(activeSidecar, older, older);
+      fs.utimesSync(siblingSidecar, newer, newer);
+      expect(getAgentFrameworkSessionDir({ projectDir })).toBe(siblingSessionDir);
+
+      getAgentFrameworkSessionDir({ transcriptPath: activeTranscriptPath, projectDir });
+      const runCreatePlanfileAgent = await loadRunCreatePlanfileAgent();
+
+      const result = await runCreatePlanfileAgent({
+        planName: "active-session-plan",
+        content: planBody(),
+      });
+
+      const activePlanPath = sessionPlanFile(activeSessionDir, "active-session-plan");
+      const siblingPlanPath = sessionPlanFile(siblingSessionDir, "active-session-plan");
+      expect(result).toContain(`Created planfile: ${activePlanPath}`);
+      expect(fs.existsSync(activePlanPath)).toBe(true);
+      expect(fs.existsSync(siblingPlanPath)).toBe(false);
+    } finally {
+      if (activeSessionDir) fs.rmSync(activeSessionDir, { recursive: true, force: true });
+      if (siblingSessionDir && siblingSessionDir !== activeSessionDir) {
+        fs.rmSync(siblingSessionDir, { recursive: true, force: true });
+      }
+      if (previousProjectDir === undefined) {
+        delete process.env.AGENT_FRAMEWORK_PROJECT_DIR;
+      } else {
+        process.env.AGENT_FRAMEWORK_PROJECT_DIR = previousProjectDir;
+      }
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not expose transcript_path on create_planfile", () => {
+    const serverSource = fs.readFileSync(path.join(process.cwd(), "src/mcp/server.ts"), "utf-8");
+    const start = serverSource.indexOf('server.registerTool(\n  "create_planfile"');
+    const end = serverSource.indexOf('server.registerTool(\n  "confirm"', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const createPlanfileBlock = serverSource.slice(
+      start,
+      end,
+    );
+    const createPlanfileSource = fs.readFileSync(
+      path.join(process.cwd(), "src/agents/mcp/create-planfile.ts"),
+      "utf-8",
+    );
+    const inputInterface = createPlanfileSource.match(/export interface CreatePlanfileInput \{[\s\S]*?\n\}/)?.[0] ?? "";
+
+    expect(createPlanfileBlock).not.toContain("transcript_path");
+    expect(inputInterface).not.toContain("transcriptPath");
   });
 
   it("does not update current-plan when validation fails", async () => {

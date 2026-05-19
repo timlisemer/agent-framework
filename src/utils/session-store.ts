@@ -12,7 +12,7 @@ import * as path from "path";
 import {
   CacheManager,
 } from "./cache-manager.js";
-import { sessionDir as pathsSessionDir, sessionToolLogFile, sessionStateFile } from "./paths.js";
+import { sessionToolLogFile, sessionStateFile } from "./paths.js";
 import { appendJsonlEntry, appendJsonlEntrySync, readJsonl } from "./file-io.js";
 import type { ToolPrediction } from "./prediction-types.js";
 
@@ -118,14 +118,6 @@ export function sessionStateDefaults(): SessionState {
 }
 
 type SessionStateManager = CacheManager<SessionState>;
-
-/**
- * Re-export sessionDir from paths as getSessionDir for backward compatibility.
- * All session files live under ~/.agent-framework/sessions/{project}/{hash}/.
- */
-export function getSessionDir(transcriptPath: string): string {
-  return pathsSessionDir(transcriptPath);
-}
 
 /**
  * Append a tool log entry to the session's JSONL tool log.

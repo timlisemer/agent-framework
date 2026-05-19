@@ -13,7 +13,8 @@ import { runTranscriptAgent } from "../agents/mcp/transcript.js";
 import { runLocateScenarioMcp } from "../agents/mcp/locate-scenario.js";
 import { evaluateRules } from "../rules/index.js";
 import { validateIntentRule } from "../rules/validate-intent.js";
-import { getSessionDir, getSessionState } from "../utils/session-store.js";
+import { getSessionState } from "../utils/session-store.js";
+import { getAgentFrameworkSessionDir } from "../utils/paths.js";
 import { handleScenarioLabeler, LABELER_HELP } from "../agents/mcp/scenario-labeler.js";
 import { handleScenarioTester, TESTER_HELP } from "../agents/mcp/scenario-tester.js";
 import {
@@ -456,7 +457,7 @@ server.registerTool(
   async (args) => {
     const projectDir = args.working_dir || process.cwd();
     const transcriptPath = args.transcript_path;
-    const sessionDir = getSessionDir(transcriptPath);
+    const sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
     const stateManager = getSessionState(sessionDir);
     const state = await stateManager.load();
     const ctx = {

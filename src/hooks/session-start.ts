@@ -2,10 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import {
-  getSessionDir,
   getSessionState,
   sessionStateDefaults,
 } from "../utils/session-store.js";
+import { getAgentFrameworkSessionDir } from "../utils/paths.js";
 import type { AdapterEncoder } from "../adapter/types.js";
 import {
   commitPlanModeTransition,
@@ -70,7 +70,7 @@ async function exitSessionStart(
 export async function mainSessionStart(input: SessionStartHookInput, encoder: AdapterEncoder): Promise<void> {
   const { source, transcript_path } = input;
 
-  const sessionDir = getSessionDir(transcript_path);
+  const sessionDir = getAgentFrameworkSessionDir({ transcriptPath: transcript_path });
   const statePath = path.join(sessionDir, "state.json");
 
   if (source === "startup") {

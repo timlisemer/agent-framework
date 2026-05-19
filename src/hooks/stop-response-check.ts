@@ -1,7 +1,8 @@
 import { setTranscriptPath } from "../utils/execution-context.js";
 import { writeTool } from "../utils/synthetic.js";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { getSessionDir, getSessionState } from "../utils/session-store.js";
+import { getSessionState } from "../utils/session-store.js";
+import { getAgentFrameworkSessionDir } from "../utils/paths.js";
 import { detectPlanModeForHook, getPlanModeContext } from "../utils/plan-mode-detector.js";
 import { readTranscriptExact } from "../utils/transcript.js";
 import { FIRST_RESPONSE_STOP_COUNTS } from "../utils/transcript-presets.js";
@@ -28,7 +29,7 @@ import { onEpochRotation } from "../scenario/lifecycle.js";
 export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEncoder): Promise<void> {
   const host = resolveHostContext(input);
   setTranscriptPath(input.transcript_path);
-  const sessionDir = getSessionDir(input.transcript_path);
+  const sessionDir = getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path });
 
   // Detect epoch change (transcript rewind) and reset derived caches when needed.
   const epochChange = detectEpochChange(sessionDir, input.transcript_path);

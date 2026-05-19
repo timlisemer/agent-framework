@@ -1,5 +1,6 @@
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { getSessionDir, appendToolLog, getSessionState } from "../utils/session-store.js";
+import { appendToolLog, getSessionState } from "../utils/session-store.js";
+import { getAgentFrameworkSessionDir } from "../utils/paths.js";
 import { writeUser, writeTool, formatTodoState, extractAskUserAnswer, type TodoItem } from "../utils/synthetic.js";
 import type { AdapterEncoder } from "../adapter/types.js";
 import { appendCapture } from "../scenario/capture.js";
@@ -16,7 +17,7 @@ import * as path from "path";
 
 export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
   // Log successful tool execution to JSONL
-  const sessionDir = getSessionDir(input.transcript_path);
+  const sessionDir = getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path });
   const spec = activeSpec();
   const planModeDetection = await detectPlanModeForHook({
     spec,

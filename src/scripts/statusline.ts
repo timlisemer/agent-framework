@@ -28,7 +28,7 @@ import {
   initStatuslineSession,
   type StatusLineEntry,
 } from "../utils/statusline-state.js";
-import { getSessionDir } from "../utils/cache-manager.js";
+import { getAgentFrameworkSessionDir } from "../utils/paths.js";
 
 /**
  * JSON input structure from the host agent's statusLine.
@@ -243,7 +243,7 @@ async function main(): Promise<void> {
     // Build right side: agent activity
     let rightSide = "";
     if (input.transcript_path) {
-      initStatuslineSession(getSessionDir(input.transcript_path));
+      initStatuslineSession(getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path }));
       const entries = await readStatusLineEntries();
 
       if (entries.length > 0) {

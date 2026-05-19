@@ -1,5 +1,6 @@
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { getSessionDir, appendToolLog, getSessionState } from "../utils/session-store.js";
+import { appendToolLog, getSessionState } from "../utils/session-store.js";
+import { getAgentFrameworkSessionDir } from "../utils/paths.js";
 import type { AdapterEncoder } from "../adapter/types.js";
 import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
@@ -30,7 +31,7 @@ export async function mainPostToolUseFailure(input: PostToolUseFailureHookInput,
     return;
   }
 
-  const sessionDir = getSessionDir(input.transcript_path);
+  const sessionDir = getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path });
   const spec = activeSpec();
   const planModeDetection = await detectPlanModeForHook({
     spec,

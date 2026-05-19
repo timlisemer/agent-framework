@@ -1,5 +1,6 @@
 import * as fs from "fs";
-import { getSessionDir, appendToolLog } from "./session-store.js";
+import { appendToolLog } from "./session-store.js";
+import { getAgentFrameworkSessionDir } from "./paths.js";
 
 type MessageKind = "user" | "ai" | "tool";
 
@@ -69,7 +70,7 @@ async function writeSynthetic(
   await fs.promises.appendFile(transcriptPath, JSON.stringify(entry) + "\n");
 
   // 2. Append to tool log
-  const sessionDir = getSessionDir(transcriptPath);
+  const sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
   await appendToolLog(sessionDir, {
     ts: Date.now(),
     tool: "Synthetic",

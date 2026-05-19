@@ -23,11 +23,6 @@ import { resolveHostContext } from "./host-context.js";
  */
 const sessionDirCache = new Map<string, string>();
 
-/**
- * Per-process sidecar-written tracking — each dirPath written at most once.
- */
-const sidecarWrittenForDir = new Set<string>();
-
 export interface AgentFrameworkSessionDirInput {
   transcriptPath?: string;
   projectDir?: string;
@@ -185,10 +180,6 @@ export function getAgentFrameworkSessionDir(input: AgentFrameworkSessionDirInput
   return sessionDirForTranscript(input.transcriptPath, input.projectDir);
 }
 
-export function sessionDir(transcriptPath: string): string {
-  return getAgentFrameworkSessionDir({ transcriptPath });
-}
-
 function sessionDirForTranscript(transcriptPath: string, projectDir?: string): string {
   const hash = hashString(transcriptPath);
   const projectKey = encodeAgentFrameworkProjectDir(projectDir);
@@ -267,8 +258,6 @@ function resolveCurrentSessionDirFromSidecar(projectDir?: string): string {
 }
 
 function writeSidecarIfNeeded(dirPath: string, transcriptPath: string): void {
-  if (sidecarWrittenForDir.has(dirPath)) return;
-  sidecarWrittenForDir.add(dirPath);
   try {
     const sidecarPath = sessionTranscriptPathSidecar(dirPath);
     let existing: string | undefined;
@@ -277,7 +266,10 @@ function writeSidecarIfNeeded(dirPath: string, transcriptPath: string): void {
     } catch {
       // file doesn't exist yet
     }
-    if (existing !== transcriptPath) {
+    if (existing === transcriptPath) {
+      const now = new Date();
+      fs.utimesSync(sidecarPath, now, now);
+    } else {
       fs.writeFileSync(sidecarPath, transcriptPath + "\n");
     }
   } catch {

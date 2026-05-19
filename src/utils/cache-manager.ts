@@ -1,17 +1,5 @@
 import * as fs from "fs";
-import { sessionDir as pathsSessionDir } from "./paths.js";
 import { hashString } from "./hash-utils.js";
-
-/**
- * Get the session-scoped directory for a transcript.
- * Delegates to paths.sessionDir which owns the implementation.
- *
- * @param transcriptPath - Path to the Claude Code transcript JSONL
- * @returns Full path to the session directory
- */
-export function getSessionDir(transcriptPath: string): string {
-  return pathsSessionDir(transcriptPath);
-}
 
 /**
  * Generic cache state wrapper with session and user message tracking.
