@@ -253,6 +253,40 @@ function projectCanonicalTranscriptToEntries(
   return entries;
 }
 
+function normalizeStopTranscriptEntries(entries: ScenarioEntry[]): ScenarioEntry[] {
+  const last = entries[entries.length - 1];
+  if (!last || last.role !== "assistant") return entries;
+  if (!Array.isArray(last.content)) return entries;
+
+  let lastToolUseIdx = -1;
+  for (let i = last.content.length - 1; i >= 0; i--) {
+    if (last.content[i]?.type === "tool_use") {
+      lastToolUseIdx = i;
+      break;
+    }
+  }
+  if (lastToolUseIdx === -1) return entries;
+
+  let trailingStartIdx = last.content.length;
+  while (
+    trailingStartIdx > 0 &&
+    (last.content[trailingStartIdx - 1]?.type === "text" ||
+      last.content[trailingStartIdx - 1]?.type === "thinking")
+  ) {
+    trailingStartIdx -= 1;
+  }
+  if (trailingStartIdx <= lastToolUseIdx || trailingStartIdx === last.content.length) return entries;
+
+  const trailingText = last.content.slice(trailingStartIdx);
+  const prefixBlocks = last.content.slice(0, trailingStartIdx);
+  const normalized = entries.slice(0, -1);
+  if (prefixBlocks.length > 0) {
+    normalized.push({ role: "assistant", content: prefixBlocks });
+  }
+  normalized.push({ role: "assistant", content: trailingText });
+  return normalized;
+}
+
 function inferAdapterNameFromTranscriptPath(transcriptPath: string): string | null {
   if (transcriptPath.includes(`${path.sep}.codex${path.sep}`)) return "codex";
   if (transcriptPath.includes(`${path.sep}.claude${path.sep}`)) return "claude";
@@ -375,8 +409,11 @@ export async function materializeScenario(
     rawStartIdx === 0 ? anchorUuid : null,
   );
   const fallbackEntries = entries.length > 0 ? entries : projectTranscriptToEntries(lines, anchorUuid);
+  const scenarioEntries = pointer.event === "Stop"
+    ? normalizeStopTranscriptEntries(fallbackEntries)
+    : fallbackEntries;
 
-  if (fallbackEntries.length === 0) {
+  if (scenarioEntries.length === 0) {
     throw new Error(
       `materializeScenario: transcript slice produced no entries (anchorUuid=${anchorUuid})`,
     );
@@ -404,7 +441,7 @@ export async function materializeScenario(
     schema_version: 2,
     name: `materialized-seq-${captureSeq}`,
     description: `Materialized from capture seq ${captureSeq} (epoch ${pointer.epoch_id})`,
-    transcript: fallbackEntries,
+    transcript: scenarioEntries,
     target: {
       hook: pointer.event as Scenario["target"]["hook"],
       ...((pointer.event === "PreToolUse" || pointer.event === "PostToolUse") && pointer.tool_use_id

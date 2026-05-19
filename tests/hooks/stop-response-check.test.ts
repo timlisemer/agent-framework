@@ -473,17 +473,18 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 
-  it("validates and overwrites populated located planfiles when extracted text differs", async () => {
+  it("validates populated located planfiles without overwriting them when extracted text differs", async () => {
     seedPlanMode(transcriptPath);
     const planPath = sessionPlanFile(sessionDir, "test-plan");
     const presentedPlan = validPlan(planPath, "test-plan", "presented");
+    const filePlan = validPlan(planPath, "test-plan", "file");
     fs.mkdirSync(path.dirname(planPath), { recursive: true });
-    fs.writeFileSync(planPath, validPlan(planPath, "test-plan", "file"));
+    fs.writeFileSync(planPath, filePlan);
 
     await runStop(transcriptPath, tempDir, presentedPlan);
 
     expect(mockValidatePlanFileWithContract).toHaveBeenCalledOnce();
-    expect(fs.readFileSync(planPath, "utf-8").trim()).toBe(presentedPlan);
+    expect(fs.readFileSync(planPath, "utf-8")).toBe(filePlan);
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 
@@ -502,21 +503,22 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     expect(output).toContain("validate_plan");
   });
 
-  it("validates large material differences when the located planfile is populated", async () => {
+  it("validates the file content when inline presentation has large material differences", async () => {
     seedPlanMode(transcriptPath);
     const planPath = sessionPlanFile(sessionDir, "test-plan");
     const presentedPlan = validPlan(planPath, "test-plan", "presented".repeat(200));
+    const filePlan = validPlan(planPath, "test-plan", "file".repeat(200));
     fs.mkdirSync(path.dirname(planPath), { recursive: true });
-    fs.writeFileSync(planPath, validPlan(planPath, "test-plan", "file".repeat(200)));
+    fs.writeFileSync(planPath, filePlan);
 
     await runStop(transcriptPath, tempDir, presentedPlan);
 
     expect(mockValidatePlanFileWithContract).toHaveBeenCalledOnce();
-    expect(fs.readFileSync(planPath, "utf-8").trim()).toBe(presentedPlan);
+    expect(fs.readFileSync(planPath, "utf-8")).toBe(filePlan);
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 
-  it("restores an existing populated planfile when overwrite validation fails", async () => {
+  it("leaves an existing populated planfile unchanged when file validation fails", async () => {
     seedPlanMode(transcriptPath);
     const planPath = sessionPlanFile(sessionDir, "test-plan");
     const originalPlan = validPlan(planPath, "test-plan", "original");
@@ -540,7 +542,7 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     expect(output).toContain("Missing concrete file path.");
   });
 
-  it("validates identical content even with recorded pass", async () => {
+  it("trusts exact recorded pass without revalidating", async () => {
     seedPlanMode(transcriptPath);
     const planPath = sessionPlanFile(sessionDir, "test-plan");
     const plan = validPlan(planPath);
@@ -556,7 +558,7 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
 
     await runStop(transcriptPath, tempDir, plan);
 
-    expect(mockValidatePlanFileWithContract).toHaveBeenCalledOnce();
+    expect(mockValidatePlanFileWithContract).not.toHaveBeenCalled();
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 

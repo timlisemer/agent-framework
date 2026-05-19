@@ -3,10 +3,15 @@ import { activeSpec } from "../adapter/spec.js";
 import type { PlanSourceDescriptor } from "../adapter/types.js";
 import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
 import { createPlanfileAndValidate } from "../agents/mcp/create-planfile.js";
+import { validatePlanFileWithContract } from "../agents/mcp/validate-plan.js";
 import { formatTranscriptResult, readTranscriptExact } from "./transcript.js";
 import { PLAN_VALIDATE_COUNTS } from "./transcript-presets.js";
 import { readJson, writeJson } from "./file-io.js";
 import { sessionCurrentPlanFile, sessionPlanFile } from "./paths.js";
+import {
+  hashPlanContent,
+  readPlanValidationStatus,
+} from "./plan-validation-status.js";
 import {
   appendPlanfileValidationWorkflow,
   extractPlanName,
@@ -161,6 +166,46 @@ async function createFirstInlinePlanfileAndBlock(input: {
   };
 }
 
+async function validateExistingPlanfileForStop(input: {
+  planPath: string;
+  planName: string;
+  content: string;
+  sessionDir?: string;
+  projectDir: string;
+  transcriptPath: string;
+}): Promise<{ approved: boolean; reason?: string; source?: PlanSourceDescriptor }> {
+  const source = { kind: "file" as const, path: input.planPath, planName: input.planName };
+  const contentHash = hashPlanContent(input.content);
+  const cached = input.sessionDir
+    ? readPlanValidationStatus({
+        sessionDir: input.sessionDir,
+        planPath: input.planPath,
+        contentHash,
+      })
+    : null;
+
+  if (cached?.status === "pass") {
+    if (input.sessionDir) writeCurrentPlanSidecar(input.sessionDir, source);
+    return { approved: true, source };
+  }
+
+  const validation = await validatePlanFileWithContract({
+    workingDir: input.projectDir,
+    planFile: input.planPath,
+    transcriptPath: input.transcriptPath,
+    sessionDir: input.sessionDir,
+  });
+  if (validation.status === "PASS") {
+    if (input.sessionDir) writeCurrentPlanSidecar(input.sessionDir, source);
+    return { approved: true, source };
+  }
+
+  return {
+    approved: false,
+    reason: validation.reasons.join("; ") || "Plan validation failed.",
+  };
+}
+
 export async function validatePlanExitPresentation(input: {
   transcriptPath: string;
   sessionDir?: string;
@@ -221,6 +266,18 @@ export async function validatePlanExitPresentation(input: {
         ),
       };
     }
+    // For populated session planfiles, the planfile is the source of truth.
+    // Stop transcript text can duplicate or drift from the validated file-backed
+    // plan, so validate or trust the existing file instead of overwriting it
+    // from inline <proposed_plan> content here.
+    return validateExistingPlanfileForStop({
+      planPath: resolvedPath,
+      planName,
+      content: existingContent,
+      sessionDir: input.sessionDir,
+      projectDir: input.projectDir,
+      transcriptPath: input.transcriptPath,
+    });
   }
 
   const { planPath, validation } = await createPlanfileAndValidate({

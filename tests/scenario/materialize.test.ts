@@ -6,6 +6,7 @@ import { appendCapture } from "../../src/scenario/capture.js";
 import { appendStateSnapshot } from "../../src/scenario/snapshot.js";
 import { rotateEpoch } from "../../src/scenario/epoch.js";
 import { materializeScenario } from "../../src/scenario/materialize.js";
+import { validateScenario } from "../../src/scenario/types.js";
 import { sessionStateDefaults } from "../../src/utils/session-store.js";
 
 describe("materializeScenario", () => {
@@ -252,6 +253,66 @@ describe("materializeScenario", () => {
       content: [{ type: "text", text: "plan the popup fix" }],
     });
     expect(JSON.stringify(scenario.transcript[1])).toContain("<proposed_plan>");
+  });
+
+  it("materializes coalesced Stop plans as a text-only final assistant entry", async () => {
+    transcriptPath = path.join(tmpDir, "coalesced-stop.jsonl");
+    fs.writeFileSync(path.join(tmpDir, "transcript-path.txt"), transcriptPath + "\n");
+
+    const entries = [
+      {
+        type: "user",
+        message: {
+          role: "user",
+          content: "plan the popup fix",
+        },
+      },
+      {
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "toolu_inspect",
+              name: "Bash",
+              input: { command: "rg popup" },
+            },
+            {
+              type: "text",
+              text: "<proposed_plan>\nPlan Name: popup-fix\n\n## User Goal\n> fix popup\n</proposed_plan>",
+            },
+          ],
+        },
+      },
+    ];
+    fs.writeFileSync(transcriptPath, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+
+    const epoch = rotateEpoch(tmpDir, "initial", null);
+    const state = sessionStateDefaults();
+    const snapshotSeq = appendStateSnapshot(tmpDir, state, transcriptPath);
+    appendCapture(tmpDir, {
+      ts: Date.now(),
+      epoch_id: epoch.id,
+      parent_capture_seq: null,
+      event: "Stop",
+      decision: "block",
+      permission_mode: "default",
+      plan_mode: {
+        active: true,
+        mode: "plan",
+        source: "codex-collaboration-mode",
+      },
+      state_snapshot_seq: snapshotSeq,
+    });
+
+    const scenario = validateScenario(await materializeScenario(tmpDir, 1));
+    const last = scenario.transcript.at(-1);
+
+    expect(JSON.stringify(scenario.transcript.at(-2))).toContain("tool_use");
+    expect(last?.role).toBe("assistant");
+    expect(JSON.stringify(last)).toContain("<proposed_plan>");
+    expect(JSON.stringify(last)).not.toContain("tool_use");
   });
 
   it("anchors canonical transcript projection by raw transcript UUID", async () => {

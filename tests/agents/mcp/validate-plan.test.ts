@@ -4,6 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { activeSpec } from "../../../src/adapter/spec.js";
 import { getAgentFrameworkSessionDir, sessionPlanValidationStatusFile } from "../../../src/utils/paths.js";
+import { hashPlanContent, planValidationStatusKey } from "../../../src/utils/plan-validation-status.js";
 
 const required = [
   "User Goal",
@@ -235,6 +236,33 @@ describe("runValidatePlanAgent", () => {
       expect((Object.values(status)[0] as { reasons: string[] }).reasons[0]).toContain("Iterate on the planfile using");
     } finally {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("records validation status in the active session when transcript_path is omitted", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "validate-plan-session-"));
+    try {
+      const transcriptPath = path.join(tempDir, "transcript.jsonl");
+      const planPath = path.join(tempDir, "plan.md");
+      const plan = validPlan(planPath);
+      fs.writeFileSync(transcriptPath, "");
+      fs.writeFileSync(planPath, plan);
+      const sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: tempDir });
+
+      const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
+      const result = await runValidatePlanAgent({
+        workingDir: tempDir,
+        planFile: "plan.md",
+      });
+
+      expect(result).toContain("- Status: PASS");
+      const statusStore = JSON.parse(fs.readFileSync(sessionPlanValidationStatusFile(sessionDir), "utf-8"));
+      expect(statusStore[planValidationStatusKey(planPath, hashPlanContent(plan))]).toMatchObject({
+        status: "pass",
+        planPath,
+      });
+    } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });

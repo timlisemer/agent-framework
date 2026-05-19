@@ -115,8 +115,17 @@ export async function runValidatePlanAgent(
 
 function recordValidationResult(input: ValidatePlanInput, result: PlanValidationRunResult): void {
   if (!result.resolvedPath || result.contentHash === undefined) return;
-  const sessionDir = input.sessionDir ??
-    (input.transcriptPath ? getAgentFrameworkSessionDir({ transcriptPath: input.transcriptPath }) : undefined);
+  let sessionDir = input.sessionDir ??
+    (input.transcriptPath
+      ? getAgentFrameworkSessionDir({ transcriptPath: input.transcriptPath })
+      : undefined);
+  if (!sessionDir) {
+    try {
+      sessionDir = getAgentFrameworkSessionDir({ projectDir: input.workingDir });
+    } catch {
+      sessionDir = undefined;
+    }
+  }
   if (!sessionDir) return;
   recordPlanValidationStatus({
     sessionDir,

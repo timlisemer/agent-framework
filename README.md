@@ -108,17 +108,16 @@ validator immediately. MCP calls without a transcript path recover the current
 session from the latest `transcript-path.txt` sidecar for the active project.
 `validate_plan` remains available for explicit revalidation and for the
 remediation workflow shown in validation failures. Codex Stop-hook acceptance
-resolves the file-backed planfile through the shared planfile locator, writes
-the extracted `<proposed_plan>` through the shared planfile creator path, and
-delegates to `validate_plan` before acceptance. Existing populated matching
-planfiles are validated instead of being accepted as-is; if overwrite validation
-fails, the previous populated content is restored. Missing or empty planfiles
-keep the extracted content so the remediation workflow has a concrete file to
-edit. If the first inline Codex plan has no valid `Plan Name` and the session
-has no accepted planfiles yet, the Stop hook derives a session planfile name,
-creates that planfile through the same creator path, validates it, and blocks
-with the created path plus validation feedback. The session current-plan
-sidecar is updated only after validation passes.
+resolves the file-backed planfile through the shared planfile locator. Existing
+populated matching planfiles are the source of truth: the Stop hook validates
+or trusts the exact file content instead of overwriting it from inline
+`<proposed_plan>` transcript text. Missing or empty planfiles keep the extracted
+content so the remediation workflow has a concrete file to edit. If the first
+inline Codex plan has no valid `Plan Name` and the session has no accepted
+planfiles yet, the Stop hook derives a session planfile name, creates that
+planfile through the same creator path, validates it, and blocks with the
+created path plus validation feedback. The session current-plan sidecar is
+updated only after validation passes.
 
 Captured hook decisions can be reconstructed through the `scenario_tester` MCP
 action `materialize_scenario`. The materializer reads `transcript-path.txt`,
