@@ -6,12 +6,13 @@ import { createPlanfileAndValidate } from "../agents/mcp/create-planfile.js";
 import { formatTranscriptResult, readTranscriptExact } from "./transcript.js";
 import { PLAN_VALIDATE_COUNTS } from "./transcript-presets.js";
 import { readJson, writeJson } from "./file-io.js";
-import { sessionCurrentPlanFile } from "./paths.js";
+import { sessionCurrentPlanFile, sessionPlanFile } from "./paths.js";
 import {
   appendPlanfileValidationWorkflow,
   extractPlanName,
   formatSessionPlanfilesForFeedback,
   getPathToPlanfile,
+  listSessionPlanfiles,
 } from "./planfile.js";
 
 export interface CurrentPlanLookupInput {
@@ -99,7 +100,65 @@ export async function validateCurrentPlanExit(input: {
 }
 
 function missingPlanfileWorkflow(sessionDir?: string): string {
-  return `The presented plan must use a Plan Name matching one of the accepted session planfiles, or create a new named session planfile first. ${formatSessionPlanfilesForFeedback(sessionDir)} If one of the existing session planfiles is the current plan, edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed, then validate it with ${activeSpec().mcpWireName("validate_plan")} and present the finished plan using <proposed_plan>.`;
+  const validatePlanWireName = activeSpec().mcpWireName("validate_plan");
+  const createPlanfileWireName = activeSpec().mcpWireName("create_planfile");
+  const planfiles = listSessionPlanfiles(sessionDir);
+  const existingGuidance = planfiles.length > 0
+    ? ` If this is your planfile ${planfiles.map((planfile) => `"${planfile}"`).join(", ")}, edit it directly even if plan mode is active, because planfile edits are explicitly allowed, then validate it with ${validatePlanWireName} and present the finished plan using <proposed_plan>. If this is a new planning phase, initialize it with ${createPlanfileWireName}.`
+    : ` If one of the existing session planfiles is the current plan, edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed, then validate it with ${validatePlanWireName} and present the finished plan using <proposed_plan>.`;
+  return `The presented plan must use a Plan Name matching one of the accepted session planfiles, or create a new named session planfile first. ${formatSessionPlanfilesForFeedback(sessionDir)}${existingGuidance}`;
+}
+
+function slugifyPlanName(source: string): string {
+  const slug = source
+    .toLowerCase()
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+  return slug || "inline-plan";
+}
+
+function derivePlanNameFromContent(content: string): string {
+  const heading = content
+    .split(/\r?\n/)
+    .map((line) => line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/)?.[1]?.trim())
+    .find((line): line is string => Boolean(line));
+  return slugifyPlanName(heading ?? "inline-plan");
+}
+
+function uniqueSessionPlanName(sessionDir: string, basePlanName: string): string {
+  let planName = basePlanName;
+  let suffix = 2;
+  while (listSessionPlanfiles(sessionDir).includes(sessionPlanFile(sessionDir, planName)) || fs.existsSync(sessionPlanFile(sessionDir, planName))) {
+    planName = `${basePlanName}-${suffix}`;
+    suffix += 1;
+  }
+  return planName;
+}
+
+async function createFirstInlinePlanfileAndBlock(input: {
+  transcriptPath: string;
+  sessionDir: string;
+  projectDir: string;
+  extractedContent: string;
+}): Promise<{ approved: false; reason: string }> {
+  const planName = uniqueSessionPlanName(input.sessionDir, derivePlanNameFromContent(input.extractedContent));
+  const { planPath, validation } = await createPlanfileAndValidate({
+    planName,
+    content: input.extractedContent,
+    sessionDir: input.sessionDir,
+    workingDir: input.projectDir,
+    transcriptPath: input.transcriptPath,
+    existingPolicy: "reject",
+  });
+  const validationResult = validation.status === "PASS"
+    ? "Validation passed. Present the plan again with the created planfile path."
+    : validation.reasons.join("; ") || "Plan validation failed.";
+  return {
+    approved: false,
+    reason: `Cannot exit plan mode without a planfile path. ${missingPlanfileWorkflow(input.sessionDir)} A planfile was created for you at ${planPath}. Validation resulted in the following ${validation.status === "PASS" ? "status" : "error"}: ${validationResult}`,
+  };
 }
 
 export async function validatePlanExitPresentation(input: {
@@ -114,6 +173,14 @@ export async function validatePlanExitPresentation(input: {
   const extractedContent = spec.extractStopProposedPlan(input.assistantText);
   const planName = extractedContent ? extractPlanName(extractedContent) ?? undefined : undefined;
   if (!extractedContent || !planName) {
+    if (extractedContent && input.sessionDir && listSessionPlanfiles(input.sessionDir).length === 0) {
+      return createFirstInlinePlanfileAndBlock({
+        transcriptPath: input.transcriptPath,
+        sessionDir: input.sessionDir,
+        projectDir: input.projectDir,
+        extractedContent,
+      });
+    }
     return { approved: false, reason: `Cannot exit plan mode without a planfile path. ${missingPlanfileWorkflow(input.sessionDir)}` };
   }
   const resolvedPath = await getCurrentPlanfilePath({

@@ -401,7 +401,11 @@ Stop-hook acceptance boundary for a whole-message `<proposed_plan>` parses the
 inline presentation through the adapter, checks it against the plan contract
 and the matching planfile, uses session validation status keyed by plan path
 plus content hash, and updates `current-plan.json` when the exact presented
-plan is accepted.
+plan is accepted. If the first inline Codex plan has no valid `Plan Name` and
+there are no accepted session planfiles yet, the Stop hook derives a session
+planfile name, creates the file through the shared creator path, validates it,
+and blocks with the created path plus validation feedback so the agent can
+iterate on the concrete planfile.
 
 Adding a new check: create `src/rules/my-rule.ts` implementing `PreToolRule`,
 add to `ALL_RULES` in `src/rules/index.ts`, add display name to statusline.

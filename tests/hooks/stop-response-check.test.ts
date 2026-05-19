@@ -232,6 +232,67 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     expect(output).toContain("Session planfiles directory:");
     expect(output).toContain(existingPath);
     expect(output).toContain("Existing session planfiles accepted for this session");
+    expect(output).toContain("mcp__agent_framework__validate_plan");
+    expect(output).toContain("mcp__agent_framework__create_planfile");
+  });
+
+  it("creates a first inline planfile for unnamed proposed plans, validates it, and blocks with the created path", async () => {
+    seedPlanMode(transcriptPath);
+    const planPath = sessionPlanFile(sessionDir, "user-goal");
+    mockValidatePlanFileWithContract.mockResolvedValueOnce({
+      status: "FAIL",
+      reasons: ["First non-empty line must be `Plan Name: <name>` using lowercase kebab-case."],
+      resolvedPath: planPath,
+      content: "",
+      contentHash: "hash",
+    });
+
+    await runStop(transcriptPath, tempDir, "## User Goal\nToo small.");
+
+    expect(mockValidatePlanFileWithContract).toHaveBeenCalledOnce();
+    expect(fs.existsSync(planPath)).toBe(true);
+    expect(fs.readFileSync(planPath, "utf-8")).toContain(`Planfile Path: ${planPath}`);
+    const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
+    expect(output).toContain("Plan validation failed:");
+    expect(output).toContain("Cannot exit plan mode without a planfile path");
+    expect(output).toContain(`Existing session planfiles accepted for this session: ${planPath}`);
+    expect(output).not.toContain("Existing session planfiles accepted for this session: (none)");
+    expect(output).toContain(`A planfile was created for you at ${planPath}`);
+    expect(output).toContain("Validation resulted in the following error:");
+    expect(output).toContain("First non-empty line must be `Plan Name: <name>` using lowercase kebab-case.");
+  });
+
+  it("uses inline-plan as the first inline planfile fallback name when no heading is present", async () => {
+    seedPlanMode(transcriptPath);
+    const planPath = sessionPlanFile(sessionDir, "inline-plan");
+    mockValidatePlanFileWithContract.mockResolvedValueOnce({
+      status: "FAIL",
+      reasons: ["Missing required plan sections."],
+      resolvedPath: planPath,
+      content: "",
+      contentHash: "hash",
+    });
+
+    await runStop(transcriptPath, tempDir, "Summary\n\nImplement this plan.");
+
+    expect(mockValidatePlanFileWithContract).toHaveBeenCalledOnce();
+    expect(fs.existsSync(planPath)).toBe(true);
+    const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
+    expect(output).toContain(`A planfile was created for you at ${planPath}`);
+    expect(output).toContain("Missing required plan sections.");
+  });
+
+  it("reports validation pass accurately when a first inline planfile validates but the presentation lacked a path", async () => {
+    seedPlanMode(transcriptPath);
+    const planPath = sessionPlanFile(sessionDir, "user-goal");
+
+    await runStop(transcriptPath, tempDir, "## User Goal\nToo small.");
+
+    expect(mockValidatePlanFileWithContract).toHaveBeenCalledOnce();
+    const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
+    expect(output).toContain(`A planfile was created for you at ${planPath}`);
+    expect(output).toContain("Validation resulted in the following status: Validation passed.");
+    expect(output).not.toContain("Validation resulted in the following error: Plan validation failed.");
   });
 
   it("routes whole-message markdown plan approval through plan validation", async () => {

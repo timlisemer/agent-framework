@@ -114,7 +114,11 @@ delegates to `validate_plan` before acceptance. Existing populated matching
 planfiles are validated instead of being accepted as-is; if overwrite validation
 fails, the previous populated content is restored. Missing or empty planfiles
 keep the extracted content so the remediation workflow has a concrete file to
-edit. The session current-plan sidecar is updated only after validation passes.
+edit. If the first inline Codex plan has no valid `Plan Name` and the session
+has no accepted planfiles yet, the Stop hook derives a session planfile name,
+creates that planfile through the same creator path, validates it, and blocks
+with the created path plus validation feedback. The session current-plan
+sidecar is updated only after validation passes.
 
 Captured hook decisions can be reconstructed through the `scenario_tester` MCP
 action `materialize_scenario`. The materializer reads `transcript-path.txt`,

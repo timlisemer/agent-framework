@@ -73,7 +73,10 @@ contract path used by `validate_plan` before allowing exit. Existing populated
 planfiles are validated instead of trusted as-is; when overwrite validation
 fails, the previous populated content is restored. Missing or empty planfiles
 keep the extracted content so the validation remediation workflow has a
-concrete file to edit.
+concrete file to edit. If the first inline Codex plan has no valid `Plan Name`
+and the session has no accepted planfiles yet, the Stop hook derives a session
+planfile name, creates that file through the shared creator path, validates it,
+and blocks with the created path plus validation feedback.
 
 `dotcodex/agents/*.toml` contains Codex custom-agent equivalents for the
 Claude subagent roles. The NixOS activation script links these as individual
