@@ -200,7 +200,7 @@ Do not use schedule buckets like "morning", "day 1", or "week 2".
 
 Assistant Verification is for AI-run verification only.
 
-For this project, Assistant Verification must use the Codex agent-framework check MCP:
+For this project, Assistant Verification must call the Codex agent-framework check MCP after each larger code change:
 
 ```text
 mcp__agent_framework__check
@@ -208,14 +208,14 @@ mcp__agent_framework__check
 
 Always include `working_dir` set to the repository path.
 
-Do not list shell check, lint, test, build, typecheck, format, or package-manager commands. The check MCP owns those.
+Treat the check MCP as the repository-level replacement for direct shell check, lint, test, build, typecheck, format, and package-manager commands. Do not instruct the assistant to run those shell commands directly, including targeted shell test commands before the MCP.
 
 Good:
 
 ```md
 ## Assistant Verification
 
-Run `mcp__agent_framework__check` with `working_dir` set to `/path/to/repo`.
+Run `mcp__agent_framework__check` with `working_dir` set to `/path/to/repo` after each larger code change.
 ```
 
 Bad:

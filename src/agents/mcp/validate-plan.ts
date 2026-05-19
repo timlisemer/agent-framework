@@ -39,7 +39,7 @@ Final plans must satisfy the planning contract:
 - Relevant Files and Files That Need Changes are required headings. Do not reject them as extra headings when they appear as level-two headings in the required order.
 - Include concrete file paths, symbols, anchors, and implementation details.
 - Include enough detail that two independent implementers would make the same edits.
-- Include an Assistant Verification section using only the agent-framework check MCP with working_dir.
+- Include an Assistant Verification section that calls the agent-framework check MCP with working_dir after each larger code change as the repository-level replacement for language-specific shell check and test commands. It must not tell the assistant to run targeted shell tests or package-manager test commands before the MCP.
 - Include a Manual User Verification section only for checks the user must perform outside AI-accessible verification, or state that none is required.
 - Do not include generic verification headings like ## Verification, ## Testing, or ## Test Plan.
 - Do not include schedule buckets, time estimates, live option menus, unresolved assumptions, or vague required section bodies.

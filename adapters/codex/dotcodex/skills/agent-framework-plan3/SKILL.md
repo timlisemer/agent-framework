@@ -49,7 +49,7 @@ Wait for all three planning agents to finish. Analyze their responses:
 Consolidate the planner output into final plan content using exactly these 14 required level-two headings in order:
 `User Goal`, `Answered Assumptions`, `Goal In My Words`, `Approach`, `Data Flow`, `Files To Create`, `Files To Modify`, `Implementation Order`, `Assistant Verification`, `Manual User Verification`, `Approaches Decided Against`, `Possible Future Followups`, `Relevant Files`, `Files That Need Changes`.
 
-Do not add non-contract `##` headings such as `## Context`, `## Verification`, `## Testing`, or `## Test Plan`. Include concrete changes with file paths, line numbers or anchors, and code details inside the required sections. `Assistant Verification` must use only `mcp__agent_framework__check` with the repository `working_dir`; put only user-only checks in `Manual User Verification`, or state that none are required.
+Do not add non-contract `##` headings such as `## Context`, `## Verification`, `## Testing`, or `## Test Plan`. Include concrete changes with file paths, line numbers or anchors, and code details inside the required sections. `Assistant Verification` must call `mcp__agent_framework__check` with the repository `working_dir` after each larger code change as the repository-level replacement for direct shell check and test commands, including targeted shell test runs; put only user-only checks in `Manual User Verification`, or state that none are required.
 
 Call `mcp__agent_framework__create_planfile` with `plan_name` set to a lowercase kebab-case name and `content` set to the consolidated plan content. The tool writes the correct planfile, validates it, and returns the planfile path plus PASS. Only proceed to verification agents after it returns PASS.
 

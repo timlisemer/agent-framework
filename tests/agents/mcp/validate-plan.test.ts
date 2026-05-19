@@ -122,6 +122,23 @@ describe("runValidatePlanAgent", () => {
     expect(result).toContain("- Status: PASS");
   });
 
+  it("passes Assistant Verification that uses scenario MCPs and the check MCP as shell-check replacement", async () => {
+    const assistantVerification = [
+      "## Assistant Verification",
+      "",
+      "Run `mcp__agent_framework__scenario_tester` with `working_dir` set to `/repo` and `scenario_name` set to `appeal-overturns-tool-approve-deny-when-user-literally-named-just-build`.",
+      "",
+      "Run `mcp__agent_framework__check` with `working_dir` set to `/repo` after each larger code change. Treat this MCP as the repository-level replacement for `cargo check`, `npm run check`, and other language-specific shell checks.",
+    ].join("\n");
+    const result = await validatePlanText(
+      validPlan().replace(
+        /## Assistant Verification[\s\S]*?(?=\n\n## Manual User Verification)/,
+        assistantVerification,
+      ),
+    );
+    expect(result).toContain("- Status: PASS");
+  });
+
   it("still fails scanner-prohibited text outside excluded sections", async () => {
     const result = await validatePlanText(
       validPlan().replace(

@@ -51,6 +51,12 @@ export interface PlanContractValidationOptions {
 
 const PROJECT_COMMAND_RE =
   /\b(npm|pnpm|yarn|bun|cargo|pytest|vitest|jest|tsc|eslint|prettier|make|just)\b|\bgo\s+test\b|\bmvn\s+test\b/i;
+const DIRECT_PROJECT_COMMAND_RE =
+  /^(?:\$+\s*)?(?:(?:npm|pnpm|yarn|bun)\s+(?:(?:run\s+)?(?:check|typecheck|build|lint|test|fmt|format)\b|(?:(?:run|exec|dlx|x)\s+)?(?:vitest|jest|mocha|ava|biome)\b)|cargo\s+(?:check|build|clippy|test|fmt)\b|(?:make|just)\s+(?:check|build|fmt|format)\b|(?:npx\s+)?(?:tsc|vitest|jest|mocha|ava|prettier|biome)\b|pytest\b|eslint\b|rustfmt\b|dprint\b|treefmt\b|nix\s+fmt\b|alejandra\b|go\s+test\b|mvn\s+test\b)/i;
+const DIRECT_PROJECT_COMMAND_AFTER_VERB_RE =
+  /\b(?:run|execute|use|invoke|call|perform|launch|start|rerun|re-run)\s+`?(?:(?:npm|pnpm|yarn|bun)\s+(?:(?:run\s+)?(?:check|typecheck|build|lint|test|fmt|format)\b|(?:(?:run|exec|dlx|x)\s+)?(?:vitest|jest|mocha|ava|biome)\b)|cargo\s+(?:check|build|clippy|test|fmt)\b|(?:make|just)\s+(?:check|build|fmt|format)\b|(?:npx\s+)?(?:tsc|vitest|jest|mocha|ava|prettier|biome)\b|pytest\b|eslint\b|rustfmt\b|dprint\b|treefmt\b|nix\s+fmt\b|alejandra\b|go\s+test\b|mvn\s+test\b)/i;
+const DIRECT_PROJECT_COMMAND_VERB_RE =
+  /^(?:run|execute|use|invoke|call|perform|launch|start|rerun|re-run)\s+/i;
 const UNRESOLVED_RE = /\b(assuming|probably|likely|if needed|should be|might|maybe|to be determined|tbd|unknown)\b/i;
 const UNRESOLVED_MATCH_RE = /\b(assuming|probably|likely|if needed|should be|might|maybe|to be determined|tbd|unknown)\b/gi;
 const LIVE_OPTION_RE = /\b(option|approach|alternative)\s+([A-Z]|\d+):/i;
@@ -258,11 +264,11 @@ export function validatePlanContractWithRequiredHeadings(
       message: "Assistant Verification must use the agent-framework check MCP with the repository working_dir.",
     });
   }
-  if (PROJECT_COMMAND_RE.test(assistantVerification)) {
+  if (hasDirectProjectCommandInstruction(assistantVerification)) {
     findings.push({
       kind: "assistant_verification_not_mcp_check",
       heading: "Assistant Verification",
-      message: "Assistant Verification must not list project shell commands; the MCP check owns verification.",
+      message: "Assistant Verification must not instruct direct project shell check, build, test, lint, or format commands; the MCP check owns repository-level verification.",
     });
   }
 
@@ -380,6 +386,40 @@ function firstNonEmptyLineNumber(plan: string): number | undefined {
   const lines = plan.split(/\r?\n/);
   const index = lines.findIndex((line) => line.trim().length > 0);
   return index >= 0 ? index + 1 : undefined;
+}
+
+function hasDirectProjectCommandInstruction(sectionBody: string): boolean {
+  const lines = sectionBody.split("\n");
+  let inFence = false;
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (trimmed.startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+
+    const candidate = markdownCommandCandidate(trimmed);
+    if (!candidate) continue;
+    if (DIRECT_PROJECT_COMMAND_RE.test(candidate)) return true;
+    if (DIRECT_PROJECT_COMMAND_AFTER_VERB_RE.test(candidate)) return true;
+
+    const withoutVerb = candidate.replace(DIRECT_PROJECT_COMMAND_VERB_RE, "");
+    if (withoutVerb !== candidate && DIRECT_PROJECT_COMMAND_RE.test(withoutVerb)) {
+      return true;
+    }
+
+    if (inFence && DIRECT_PROJECT_COMMAND_RE.test(trimmed)) return true;
+  }
+  return false;
+}
+
+function markdownCommandCandidate(line: string): string {
+  return line
+    .replace(/^(?:[-*+>]\s+|\d+\.\s+)/, "")
+    .replace(/^\[[ xX]\]\s+/, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^`([^`]+)`\.?$/, "$1")
+    .trim();
 }
 
 function parseMarkdownHeadings(markdown: string): Heading[] {

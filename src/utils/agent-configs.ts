@@ -719,7 +719,7 @@ PLANNING CONTRACT STRUCTURAL DRIFT (→ DRIFT):
 - User Goal must quote the user's relevant goal text verbatim.
 - Answered Assumptions must include the answer source for every assumption.
 - Non-trivial, multi-file, stateful, hook-based, or cross-module plans need an ASCII Data Flow diagram.
-- Assistant Verification must list only ${activeSpec().mcpWireName("check")} with working_dir set to the repository path.
+- Assistant Verification must call ${activeSpec().mcpWireName("check")} with working_dir set to the repository path after each larger code change as the repository-level replacement for language-specific shell check and test commands. It must not tell the assistant to run targeted shell tests or package-manager test commands before the MCP.
 - Manual User Verification must not list project check, lint, test, build, typecheck, format, or package-manager commands.
 - Do not present live option menus such as Option A:, Approach 1:, or Alternative 1:.
 - Do not include schedule buckets, timeline estimates, or unresolved assumption language.
@@ -746,7 +746,7 @@ REQUIRED SPECIFICITY FOR CODE CHANGES:
 VERIFICATION STRUCTURE (→ DRIFT if wrong - CHECK THIS CAREFULLY):
 - A generic "Verification", "Testing", or "Test Plan" heading is never acceptable.
 - "## Test Plan" is both a generic verification violation and an extra non-contract ## heading.
-- Assistant Verification is MCP-only: ${activeSpec().mcpWireName("check")} with working_dir.
+- Assistant Verification must include ${activeSpec().mcpWireName("check")} with working_dir for repository-level verification after each larger code change. It may include other MCP verification, but must not instruct direct project shell check/build/test commands or targeted shell test runs.
 - Manual User Verification is only for user-only checks outside AI-accessible verification.
 
 BLACKLISTED COMMANDS IN FINAL PLAN TEXT:
@@ -763,7 +763,7 @@ ALLOW (→ OK):
 - Plan provides specific file paths with locations
 - Plan shows actual code changes or clear descriptions of changes
 - Plan has numbered implementation steps
-- Assistant Verification uses the agent-framework check MCP
+- Assistant Verification uses the agent-framework check MCP after larger code changes instead of direct project shell check or test commands
 - Blacklisted commands in "Manual User Verification" section (user runs these, not AI)
 - Plan is work-in-progress (partial plans are fine, they are built iteratively)
 - Simple single-file changes that are self-explanatory

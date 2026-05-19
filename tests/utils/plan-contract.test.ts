@@ -84,6 +84,52 @@ describe("plan contract", () => {
     });
   });
 
+  it("allows Assistant Verification to describe shell checks as owned by the check MCP", () => {
+    withProject((projectDir) => {
+      const assistantVerification = [
+        "## Assistant Verification",
+        "",
+        "Run `mcp__agent_framework__scenario_tester` with `working_dir` set to `/repo` for the targeted scenario named `appeal-overturns-tool-approve-deny-when-user-literally-named-just-build`.",
+        "",
+        "Run `mcp__agent_framework__check` with `working_dir` set to `/repo` after each larger code change. Treat this MCP as the repository-level replacement for `cargo check`, `npm run check`, and other language-specific shell checks.",
+      ].join("\n");
+      const plan = validPlan().replace(
+        /## Assistant Verification[\s\S]*?(?=\n\n## Manual User Verification)/,
+        assistantVerification,
+      );
+      expect(validatePlanContract(plan, projectDir, {
+        checkMcpWireName: activeSpec().mcpWireName("check"),
+      })).toEqual([]);
+    });
+  });
+
+  it("rejects direct project shell commands in Assistant Verification", () => {
+    withProject((projectDir) => {
+      const directCommands = [
+        "Run `npm test`.",
+        "After that, run `cargo check` before continuing.",
+        "After the MCP, run `pnpm vitest` for the targeted suite.",
+        "Run `npm jest` before the MCP.",
+        "- `just check`",
+        "```sh\ncargo check\n```",
+      ];
+
+      for (const body of directCommands) {
+        const plan = validPlan().replace(
+          /Run `mcp__agent_framework__check` with `working_dir` set to `\/repo`\./,
+          [
+            "Run `mcp__agent_framework__check` with `working_dir` set to `/repo`.",
+            body,
+          ].join("\n"),
+        );
+        const kinds = validatePlanContract(plan, projectDir, {
+          checkMcpWireName: activeSpec().mcpWireName("check"),
+        }).map((f) => f.kind);
+        expect(kinds).toContain("assistant_verification_not_mcp_check");
+      }
+    });
+  });
+
   it("flags footer plan name mismatches", () => {
     withProject((projectDir) => {
       const kinds = validatePlanContract(validPlan("/tmp/test-plan.md", "test-plan").replace(/Plan Name: test-plan$/, "Plan Name: other-plan"), projectDir).map((f) => f.kind);
