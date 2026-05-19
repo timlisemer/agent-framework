@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "stop-after-offering-options-when-user-complained-about-being-ignored-should-block",
-  "description": "Nondeterministic as of commit 4e4b851: it still blocks, but the reason can miss the expected `Resume the task` substring. The variance is which stop-hook rationale wins for the same stalled response.",
+  "description": "Nondeterministic as of 2026-05-19 repeated scenario_tester runs: it always blocks, but the reason alternates between the expected `Resume the task` stall feedback and a block reason that misses that required substring. The variance is which stop-hook rationale wins for the same stalled response.",
   "transcript": [
     {
       "role": "user",

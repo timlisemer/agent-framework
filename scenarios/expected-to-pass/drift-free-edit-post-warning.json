@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "drift-free-edit-post-warning",
-  "description": "Post-Warning free-edit path: target is at level=1 with allowedSinceLevelChange=0 (Warning was issued once, no bypass edits yet). The next edit flows through without a drift-block denial; no other rule should fire.",
+  "description": "Promoted to expected-to-pass on 2026-05-19 after three scenario_tester sweeps consistently allowed this case. Post-Warning free-edit path: target is at level=1 with allowedSinceLevelChange=0 (Warning was issued once, no bypass edits yet). The next edit flows through without a drift-block denial; no other rule should fire.",
   "transcript": [
     {
       "role": "user",

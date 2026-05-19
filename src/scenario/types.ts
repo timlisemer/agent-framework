@@ -85,7 +85,7 @@ export interface ScenarioUserEntry {
    * must be explicitly stated by the author (true/false, present/absent,
    * value/[]). Optional-with-default hides intent and lets bugs slip in.
    * Migration requires adding the field to every existing fixture under
-   * test-harness/fixtures/scenarios/{working,broken,todo}/ and to every
+   * scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/ and to every
    * stored copy under ~/.agent-framework/test-runs/scenarios/.
    */
   isMeta?: boolean;
@@ -433,12 +433,12 @@ export type ScenarioResult =
       /**
        * Reality of this run relative to where the fixture lives:
        * - `"expected-to-pass"` when pass === true (fixture in expected-to-pass/ matched)
-       * - `"fixture-bug"` when pass === false and fixture is NOT in expected-to-fail/
+       * - `"non-deterministic"` when pass === false and fixture is NOT in expected-to-fail/
        * - `"expected-to-fail"` when pass === false and fixture IS in expected-to-fail/
        * - `null` for home-source scenarios on failure (no folder context)
        * Written to last-run.json sidecar, NOT back to the fixture file.
        */
-      expectation_reality: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null;
+      expectation_reality: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | null;
       /** ISO-8601 UTC timestamp of this run's reality. */
       expectation_reality_last_run_at: string;
     }
@@ -457,12 +457,12 @@ export type ScenarioResult =
       /**
        * Reality of this run relative to where the fixture lives:
        * - `"expected-to-pass"` when pass === true
-       * - `"fixture-bug"` when pass === false and not in expected-to-fail/
+       * - `"non-deterministic"` when pass === false and not in expected-to-fail/
        * - `"expected-to-fail"` when pass === false and in expected-to-fail/
        * - `null` for home-source scenarios on failure
        * Written to last-run.json sidecar, NOT back to the fixture file.
        */
-      expectation_reality: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null;
+      expectation_reality: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | null;
       /** ISO-8601 UTC timestamp of this run's reality. */
       expectation_reality_last_run_at: string;
     };

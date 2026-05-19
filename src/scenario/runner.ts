@@ -654,7 +654,7 @@ async function evaluateScenarioPredictions(
 function writeLastRun(
   name: string,
   scenarioPath: string,
-  expectation_reality: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null,
+  expectation_reality: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | null,
   expectation_reality_last_run_at: string,
 ): void {
   try {
@@ -680,25 +680,25 @@ function writeLastRun(
  * Compute the expectation_reality value for a run.
  * - pass === true -> "expected-to-pass"
  * - pass === false + source "expected-to-fail" -> "expected-to-fail"
- * - pass === false + source "fixture-bug" -> "fixture-bug"
+ * - pass === false + source "non-deterministic" -> "non-deterministic"
  * - pass === false + source "home" or unset -> null (no folder context)
- * - pass === false + source "expected-to-pass" -> "fixture-bug" (regression)
+ * - pass === false + source "expected-to-pass" -> "non-deterministic" (regression)
  */
 function computeExpectationReality(
   pass: boolean,
   source: ScenarioSourceTag | undefined,
-): "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null {
+): "expected-to-pass" | "non-deterministic" | "expected-to-fail" | null {
   if (pass) return "expected-to-pass";
   if (source === "expected-to-fail") return "expected-to-fail";
-  if (source === "fixture-bug") return "fixture-bug";
+  if (source === "non-deterministic") return "non-deterministic";
   if (source === "home" || source === undefined) return null;
   // source === "expected-to-pass" with pass===false is a regression
-  return "fixture-bug";
+  return "non-deterministic";
 }
 
 async function main() {
   const scenarioPath = getArg("scenario", true)!;
-  // --source is required: "home" | "expected-to-pass" | "fixture-bug" | "expected-to-fail"
+  // --source is required: "home" | "expected-to-pass" | "non-deterministic" | "expected-to-fail"
   const sourceArg = getArg("source", false) as ScenarioSourceTag | undefined;
   if (!fs.existsSync(scenarioPath)) {
     console.error(`scenario file not found: ${scenarioPath}`);

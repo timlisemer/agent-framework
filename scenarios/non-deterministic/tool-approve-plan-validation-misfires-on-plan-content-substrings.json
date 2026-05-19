@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "tool-approve-plan-validation-misfires-on-plan-content-substrings",
-  "description": "Nondeterministic as of commit 4e4b851: this usually allows, but the 2026-05-14 full expected-to-pass run denied ExitPlanMode with `Cannot exit plan mode without a plan.` The variance is no longer the original regex substring bug; it is intermittent plan-exit validation state.",
+  "description": "Nondeterministic as of 2026-05-19 repeated scenario_tester runs: this alternates between allowing and denying ExitPlanMode with `Cannot exit plan mode without a plan.` The variance is no longer the original regex substring bug; it is intermittent plan-exit validation state. Earlier 2026-05-14 runs showed the same intermittent denial.",
   "transcript": [
     {
       "role": "user",

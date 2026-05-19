@@ -202,12 +202,12 @@ function handleRunScenario(
     );
   }
 
-  // By-name lookup across all four sources (home + expected-to-pass + fixture-bug + expected-to-fail).
+  // By-name lookup across all four sources (home + expected-to-pass + non-deterministic + expected-to-fail).
   const all = listAllScenarios(rootOverride);
   const target = all.find((s) => s.name === scenarioName);
   if (!target) {
     throw new Error(
-      `scenario "${scenarioName}" not found under ~/.agent-framework/test-runs/scenarios/ or test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/. Pass 'scenario' inline to author a new one.`,
+      `scenario "${scenarioName}" not found under ~/.agent-framework/test-runs/scenarios/ or scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/. Pass 'scenario' inline to author a new one.`,
     );
   }
   if (target.error) {
@@ -264,22 +264,22 @@ async function handleMaterializeScenario(
 
 function handleListScenarios(
   rootOverride?: string,
-  sourceFilter?: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home",
+  sourceFilter?: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home",
 ): string {
   const all = listAllScenarios(rootOverride);
   const items = sourceFilter ? filterScenariosBySource(all, sourceFilter) : all;
   if (items.length === 0) {
     if (sourceFilter) {
       return `No scenarios in source "${sourceFilter}". ` +
-        (sourceFilter === "fixture-bug"
-          ? "An empty fixture-bug/ folder is the healthy state."
+        (sourceFilter === "non-deterministic"
+          ? "An empty non-deterministic/ folder is the healthy state."
           : sourceFilter === "expected-to-fail"
             ? "An empty expected-to-fail/ folder means every codified TODO feature has landed."
             : "");
     }
     return (
       "No scenarios. Use run_scenario with an inline 'scenario' object, " +
-      "or add a fixture at test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json."
+      "or add a fixture at scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/<name>.json."
     );
   }
   const lines = ["SCENARIOS:", ""];
@@ -297,8 +297,8 @@ function handleListScenarios(
 /**
  * Run several scenarios in one MCP call. Resolves names against the UNION
  * of ~/.agent-framework/test-runs/scenarios/ (home) and the three
- * repo-tracked fixture subfolders test-harness/fixtures/scenarios/
- * {expected-to-pass,fixture-bug,expected-to-fail}/. Slug collisions across
+ * repo-tracked fixture subfolders scenarios/
+ * {expected-to-pass,non-deterministic,expected-to-fail}/. Slug collisions across
  * any two sources are a hard error. With no names supplied, runs every
  * scenario across all four sources alphabetically. Fixtures run IN PLACE
  * from the repo; reports + cache always land under the home tree. The optional
@@ -308,7 +308,7 @@ function handleListScenarios(
 async function handleRunScenarios(
   scenarioNames: string[] | undefined,
   rootOverride?: string,
-  sourceFilter?: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home",
+  sourceFilter?: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home",
 ): Promise<string> {
   type ScenarioResult = {
     name: string;
@@ -320,7 +320,7 @@ async function handleRunScenarios(
     reason?: string;
     ms?: number;
     error?: string;
-    expectation_reality?: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null;
+    expectation_reality?: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | null;
     expectation_reality_last_run_at?: string;
   };
 
@@ -357,10 +357,10 @@ async function handleRunScenarios(
   if (targets.length === 0) {
     const scopeMsg = sourceFilter
       ? `No scenarios in source "${sourceFilter}"` +
-        (sourceFilter === "fixture-bug" || sourceFilter === "expected-to-fail"
+        (sourceFilter === "non-deterministic" || sourceFilter === "expected-to-fail"
           ? ` (empty ${sourceFilter}/ is the healthy state).`
           : ".")
-      : "No scenarios discoverable under ~/.agent-framework/test-runs/scenarios/ or test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/. " +
+      : "No scenarios discoverable under ~/.agent-framework/test-runs/scenarios/ or scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/. " +
         "Create one via run_scenario with an inline 'scenario' object, or add a fixture.";
     return JSON.stringify(
       {
@@ -384,7 +384,7 @@ async function handleRunScenarios(
     if ("missing" in t) {
       const inScope = sourceFilter
         ? `source "${sourceFilter}"`
-        : "home or fixtures/{expected-to-pass,fixture-bug,expected-to-fail}";
+        : "home or scenarios/{expected-to-pass,non-deterministic,expected-to-fail}";
       results[index] = {
         name: t.missing,
         error: `scenario "${t.missing}" not found in ${inScope}`,
@@ -414,7 +414,7 @@ async function handleRunScenarios(
           expected?: string;
           reason?: string;
           ms?: number;
-          expectation_reality?: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null;
+          expectation_reality?: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | null;
           expectation_reality_last_run_at?: string;
         };
         results[index] = {
@@ -555,7 +555,7 @@ export interface TesterInput {
    * For run_scenario / read_scenario: slug identifying a scenario. For
    * run_scenario the slug is resolved across the union of four sources:
    * ~/.agent-framework/test-runs/scenarios/<name>/scenario.json (home)
-   * and <root>/test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json
+   * and <root>/scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/<name>.json
    * (committed fixtures). A slug must be unique across all four sources.
    * read_scenario still only reads home (reports + inline-authored
    * scenario.json live there). Must match [A-Za-z0-9._-]+.
@@ -573,21 +573,21 @@ export interface TesterInput {
    * For run_scenarios (batch action): explicit list of scenario slugs to
    * run. Slugs are resolved against the UNION of four sources: home
    * (~/.agent-framework/test-runs/scenarios/) and the three fixture
-   * subfolders (test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/).
+   * subfolders (scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/).
    * A slug that exists in two or more sources is a hard error. Omit or
    * pass an empty array to run EVERY scenario across all four sources,
    * alphabetically by name. Per-result output shape:
-   *   {source: "home" | "expected-to-pass" | "fixture-bug" | "expected-to-fail"}.
+   *   {source: "home" | "expected-to-pass" | "non-deterministic" | "expected-to-fail"}.
    */
   scenario_names?: string[];
   /**
    * For run_scenarios / list_scenarios: restrict to ONE source tree.
-   * "expected-to-pass" | "fixture-bug" | "expected-to-fail" select fixture
+   * "expected-to-pass" | "non-deterministic" | "expected-to-fail" select fixture
    * subfolders; "home" selects ~/.agent-framework/test-runs/scenarios/. Omit
    * to include all four. Slug uniqueness is enforced across all four roots
    * regardless of this filter.
    */
-  scenario_source?: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home";
+  scenario_source?: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home";
 }
 
 export async function handleScenarioTester(input: TesterInput): Promise<string> {
@@ -646,7 +646,7 @@ export async function handleScenarioTester(input: TesterInput): Promise<string> 
         return await handleRunScenarios(input.scenario_names, input.working_dir, input.scenario_source);
 
       case "list_scenarios":
-        return handleListScenarios(input.working_dir, input.scenario_source as "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home" | undefined);
+        return handleListScenarios(input.working_dir, input.scenario_source as "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home" | undefined);
 
       case "read_scenario":
         if (!input.scenario_name) throw new Error("scenario_name is required");
@@ -893,9 +893,9 @@ Step 4 -- Iterate. If the hook decides wrong, fix the rule, rebuild
 
 Step 5 -- Keep the scenario. Every scenario file under
   ~/.agent-framework/test-runs/scenarios/ AND every committed fixture at
-  <repo>/test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json
+  <repo>/scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/<name>.json
   is a permanent regression test. Pick the subfolder per category:
-  expected-to-pass/ = passes today; fixture-bug/ = fixture itself is wrong;
+  expected-to-pass/ = passes today; non-deterministic/ = behavior is flaky;
   expected-to-fail/ = feature not yet implemented. See each subfolder's
   README.md for the full move policy. run_scenarios (no filter) runs the
   UNION of all four sources in one MCP call. Fixtures run in place from
@@ -929,20 +929,20 @@ Step 5 -- Keep the scenario. Every scenario file under
       scenario.name>/scenario.json (overwriting), then execute.
     - If only scenario_name is provided: resolve the slug against the
       UNION of four sources: home (~/.agent-framework/test-runs/scenarios/)
-      and fixtures (<repo>/test-harness/fixtures/scenarios/{expected-to-pass,
-      fixture-bug,expected-to-fail}/). Fixtures run in place; cache/ and
+      and fixtures (<repo>/scenarios/{expected-to-pass,
+      non-deterministic,expected-to-fail}/). Fixtures run in place; cache/ and
       report-scenario.json always land under
       ~/.agent-framework/test-runs/scenarios/<name>/.
     - Exit status: pass -> 0, fail -> 1, validation error -> 2.
     - Returned JSON (both single and fanout modes) carries
-      \`expectation_reality: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null\`
+      \`expectation_reality: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | null\`
       and \`expectation_reality_last_run_at: ISO-8601\` at the top level -
       the reflection of this run's pass state, also persisted to the
       sibling sidecar
       ~/.agent-framework/test-runs/scenarios/<name>/last-run.json
-      (NOT written back to the fixture). A \`fixture-bug/\` fixture
+      (NOT written back to the fixture). A \`non-deterministic/\` fixture
       reporting reality=expected-to-pass is a promotion candidate; an
-      \`expected-to-pass/\` fixture reporting reality=fixture-bug is a
+      \`expected-to-pass/\` fixture reporting reality=non-deterministic is a
       regression.
 
 **run_scenarios** -- execute MULTIPLE scenarios in one MCP call
@@ -950,18 +950,18 @@ Step 5 -- Keep the scenario. Every scenario file under
   Sources (unioned):
     1. ~/.agent-framework/test-runs/scenarios/<name>/scenario.json
        User-authored / inline-created originals.
-    2. <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/expected-to-pass/<name>.json
+    2. <AGENT_FRAMEWORK_ROOT>/scenarios/expected-to-pass/<name>.json
        Committed fixtures that pass consistently against current code.
-    3. <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/fixture-bug/<name>.json
-       Committed fixtures whose own JSON is wrong (needs fixture-fixing).
-    4. <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/expected-to-fail/<name>.json
+    3. <AGENT_FRAMEWORK_ROOT>/scenarios/non-deterministic/<name>.json
+       Committed fixtures whose current behavior is nondeterministic.
+    4. <AGENT_FRAMEWORK_ROOT>/scenarios/expected-to-fail/<name>.json
        Committed fixtures codifying unimplemented features. See each
        subfolder's README.md.
   Filename stem MUST equal scenario.name; validateScenario enforced at load.
   Slug collisions across ANY two or more sources are a HARD ERROR -- the
   whole batch fails with a message listing every offending path with its
   source tag. Delete all but one copy to proceed.
-  Optional scenario_source: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home" --
+  Optional scenario_source: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home" --
     when set, restricts the batch to that single source tree. Slug
     uniqueness is still enforced across all four sources regardless.
   Behavior:
@@ -971,21 +971,21 @@ Step 5 -- Keep the scenario. Every scenario file under
       error entries; batch continues.
     - scenario_names omitted or empty: runs EVERY scenario in the
       (filtered) union, alphabetically by name.
-    - Empty scenario_source="fixture-bug" result is NOT an error -- an empty
-      fixture-bug/ folder is the healthy state.
+    - Empty scenario_source="non-deterministic" result is NOT an error -- an empty
+      non-deterministic/ folder is the healthy state.
     - Fixtures run IN PLACE (no staging, no copy). scenario.ts is
       invoked with --scenario <fixture-path> and writes cache/ and
       report-scenario.json under
       ~/.agent-framework/test-runs/scenarios/<name>/, never next to the
       repo fixture. Edits to a fixture are picked up on the next run.
     - Returns aggregated JSON: {total, passed, failed, results[]}.
-      Each result: {name, source: "home"|"expected-to-pass"|"fixture-bug"
+      Each result: {name, source: "home"|"expected-to-pass"|"non-deterministic"
       |"expected-to-fail", pass, decision, gate, expected, reason, ms,
-      expectation_reality: "expected-to-pass"|"fixture-bug"|"expected-to-fail"|null,
-      expectation_reality_last_run_at: ISO-8601, error?}. A \`fixture-bug/\`
+      expectation_reality: "expected-to-pass"|"non-deterministic"|"expected-to-fail"|null,
+      expectation_reality_last_run_at: ISO-8601, error?}. A \`non-deterministic/\`
       fixture whose result has expectation_reality="expected-to-pass" is a
       promotion candidate; an \`expected-to-pass/\` fixture whose result has
-      expectation_reality="fixture-bug" is a regression. The aggregate
+      expectation_reality="non-deterministic" is a regression. The aggregate
       response does NOT summarize mismatches; callers inspect results[]
       directly.
     - Writes scenarios/<name>/report-scenario.json per scenario. Each
@@ -996,10 +996,10 @@ Step 5 -- Keep the scenario. Every scenario file under
 
 **list_scenarios** -- list all scenarios across home + fixture subfolders
   Optional: working_dir, scenario_source
-  Each row tagged [home] or [expected-to-pass] or [fixture-bug] or
+  Each row tagged [home] or [expected-to-pass] or [non-deterministic] or
   [expected-to-fail], with "has-report" when a prior run produced
   ~/.agent-framework/test-runs/scenarios/<name>/report-scenario.json.
-  Optional scenario_source: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home" --
+  Optional scenario_source: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home" --
     when set, filters the list to that single source tree.
   Slug collisions across trees throw here as well -- fix them before
   continuing.
@@ -1011,7 +1011,7 @@ Step 5 -- Keep the scenario. Every scenario file under
   home scenario.json (fixtures run in place), so
   read_scenario <fixture-slug> filename=scenario.json returns an error
   -- read the fixture file directly from
-  <repo>/test-harness/fixtures/scenarios/{expected-to-pass,fixture-bug,expected-to-fail}/<name>.json
+  <repo>/scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/<name>.json
   instead. Reports always land in home and can be read here.
 
 ### B.4 Scenario JSON schema
@@ -1429,14 +1429,14 @@ the same scenario JSON schema.
        state.json              Seeded prior-turn session state
 
 2. Fixtures (repo-tracked, read-only source) -- three category subfolders:
-   <AGENT_FRAMEWORK_ROOT>/test-harness/fixtures/scenarios/
+   <AGENT_FRAMEWORK_ROOT>/scenarios/
      REPRODUCTION-NOTES.md     Authoring notes (not a scenario; stays at root).
      expected-to-pass/
        README.md               Category definition + scenario list + move policy.
        {scenario-name}.json    Scenario passes consistently against current code.
-     fixture-bug/
+     non-deterministic/
        README.md               Category definition + scenario list + move policy.
-       {scenario-name}.json    Fixture itself is wrong (needs fixture-fixing).
+      {scenario-name}.json    Behavior is currently nondeterministic.
      expected-to-fail/
        README.md               Category definition + scenario list + move policy.
        {scenario-name}.json    Codifies unimplemented feature.
@@ -1444,7 +1444,7 @@ the same scenario JSON schema.
    validateScenario enforced per entry.
 
 Invariant: a given slug may live in EXACTLY ONE of the four sources
-(home, expected-to-pass, fixture-bug, expected-to-fail). A collision
+(home, expected-to-pass, non-deterministic, expected-to-fail). A collision
 throws with every offending path labeled by its source tag. Fixtures
 run IN PLACE from the repo; run_scenario / run_scenarios always write
 artifacts under tree (1) above so the repo is never polluted. Edits to

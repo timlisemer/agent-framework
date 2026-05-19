@@ -933,7 +933,7 @@ export function findTestableTranscripts(): Array<{ name: string; status: "UNTEST
 
 // ─── Scenario Helpers ──────────────────────────────────────────────────────
 
-const FIXTURE_SUBFOLDERS = ["expected-to-pass", "fixture-bug", "expected-to-fail"] as const;
+const FIXTURE_SUBFOLDERS = ["expected-to-pass", "non-deterministic", "expected-to-fail"] as const;
 
 /** Absolute path to the scenarios root under test-runs/. */
 export function scenariosDir(): string {
@@ -1002,8 +1002,8 @@ export function readScenarioFile(name: string, filename: string): string {
 /**
  * Describes one discoverable scenario across the four sources: home
  * (~/.agent-framework/test-runs/scenarios/<name>/scenario.json) and the
- * three repo-tracked fixture subfolders (expected-to-pass/, fixture-bug/,
- * expected-to-fail/ under <root>/test-harness/fixtures/scenarios/). `inputPath`
+ * three repo-tracked fixture subfolders (expected-to-pass/, non-deterministic/,
+ * expected-to-fail/ under <root>/scenarios/). `inputPath`
  * is what the scenario runner reads; `outputDir` is where cache/ and
  * report-scenario.json land — always under
  * ~/.agent-framework/test-runs/scenarios/<name>/ so the repo-tracked
@@ -1016,10 +1016,10 @@ export function readScenarioFile(name: string, filename: string): string {
 export type ScenarioSourceTag =
   | "home"
   | "expected-to-pass"
-  | "fixture-bug"
+  | "non-deterministic"
   | "expected-to-fail";
 
-export type ScenarioRealityValue = "expected-to-pass" | "fixture-bug" | "expected-to-fail" | null;
+export type ScenarioRealityValue = "expected-to-pass" | "non-deterministic" | "expected-to-fail" | null;
 
 export interface ScenarioSource {
   name: string;
@@ -1035,8 +1035,8 @@ export interface ScenarioSource {
 /**
  * Enumerate every scenario discoverable across four sources: home
  * (~/.agent-framework/test-runs/scenarios/) and the three repo-tracked
- * fixture subfolders (<root>/test-harness/fixtures/scenarios/expected-to-pass/,
- * fixture-bug/, expected-to-fail/). Entries are sorted alphabetically by name.
+ * fixture subfolders (<root>/scenarios/expected-to-pass/,
+ * non-deterministic/, expected-to-fail/). Entries are sorted alphabetically by name.
  *
  * Per-fixture validation errors (filename stem != scenario.name, or
  * validateScenario rejection) are attached to the entry as `error`
@@ -1136,7 +1136,7 @@ export function listAllScenarios(rootOverride?: string): ScenarioSource[] {
  */
 export function filterScenariosBySource(
   all: ScenarioSource[],
-  filter: "expected-to-pass" | "fixture-bug" | "expected-to-fail" | "home",
+  filter: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home",
 ): ScenarioSource[] {
   return all.filter((s) => s.source === filter);
 }
