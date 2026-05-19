@@ -180,6 +180,10 @@ export interface AdapterSpec {
    *  never sees `<command-name>`, `$agent-framework-`, or `/`. */
   recognizeWorkflowInvocation(content: string): CanonicalWorkflow | null;
 
+  /** True only when the entire user entry is an adapter workflow/skill
+   *  wrapper, not when human prose merely mentions a workflow invocation. */
+  isWorkflowInvocationOnly(content: string): boolean;
+
   /** Render an example invocation for user-facing text.
    *  Claude("commit")→"/commit". Codex("commit")→"$agent-framework-commit". */
   renderWorkflowInvocation(canonical: CanonicalWorkflow): string;

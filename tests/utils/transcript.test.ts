@@ -9,6 +9,7 @@ import {
   readRecentUserMessagesArray,
   readTranscriptExact,
   resolveActiveSlashCommandAllowedTools,
+  userTurnFollowedByCompletedToolRoundtrip,
 } from "../../src/utils/transcript.js";
 
 describe("detectParallelBatch", () => {
@@ -759,6 +760,47 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
       expect(result.slashCommandContext?.allowedTools).toContain("mcp-commit");
       expect(result.slashCommandContext?.allowedTools).toContain("mcp-push");
       expect(result.user[0].content).toBe("older normal prompt");
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
+  });
+
+  it("keeps mixed Codex workflow prompts as latest user intent while excluding pure wrappers", async () => {
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      const latest = "if you are happy now, please call $agent-framework-quickpush and iterate by editing files to fix complaints";
+      const filePath = writeTranscript([
+        codexMessage("user", "do not edit anything, just chat"),
+        codexMessage("assistant", "I will only discuss it."),
+        codexMessage("user", latest),
+        codexMessage("user", "<skill>\n<name>agent-framework-quickpush</name>\n</skill>"),
+      ]);
+
+      const exact = await readTranscriptExact(filePath, {
+        counts: { user: 2 },
+        excludeSlashCommandPrompts: true,
+        includeSlashCommandContext: true,
+      });
+      expect(exact.newestUserWasSlashCommand).toBe(true);
+      expect(exact.slashCommandContext?.commandName).toBe("quickpush");
+      expect(exact.user.map((m) => m.content)).toEqual([
+        latest,
+        "do not edit anything, just chat",
+      ]);
+
+      await expect(readRecentUserMessagesArray(filePath, 2, { stripQuoted: false })).resolves.toEqual([
+        "do not edit anything, just chat",
+        latest,
+      ]);
+      await expect(readRecentUserMessages(filePath, 2, false, { stripQuoted: false })).resolves.toBe(
+        `do not edit anything, just chat\n---\n${latest}`,
+      );
+      await expect(userTurnFollowedByCompletedToolRoundtrip(filePath, latest)).resolves.toBe(false);
     } finally {
       if (prev === undefined) {
         delete process.env.AGENT_FRAMEWORK_ADAPTER;

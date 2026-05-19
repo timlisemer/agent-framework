@@ -296,6 +296,10 @@ function isSlashCommandPrompt(content: string): boolean {
   return activeSpec().recognizeWorkflowInvocation(content) !== null;
 }
 
+function isWorkflowInvocationOnlyPrompt(content: string): boolean {
+  return activeSpec().isWorkflowInvocationOnly(content);
+}
+
 
 /**
  * Extract slash command metadata from a slash command system prompt.
@@ -658,13 +662,13 @@ export async function readTranscriptExact(
 
         if (typeof msgContent === "string") {
           if (excludeSystemReminders && msgContent.startsWith("<system-reminder>")) continue;
-          if (excludeSlashCommandPrompts && isSlashCommandPrompt(msgContent)) continue;
+          if (excludeSlashCommandPrompts && isWorkflowInvocationOnlyPrompt(msgContent)) continue;
           text = msgContent;
         } else if (Array.isArray(msgContent)) {
           for (const block of msgContent) {
             if (block.type === "text" && block.text) {
               if (excludeSystemReminders && block.text.startsWith("<system-reminder>")) continue;
-              if (excludeSlashCommandPrompts && isSlashCommandPrompt(block.text)) continue;
+              if (excludeSlashCommandPrompts && isWorkflowInvocationOnlyPrompt(block.text)) continue;
               text = block.text;
               break;
             }
@@ -827,7 +831,7 @@ function processUserEntry(
     if (excludeSystemReminders && msgContent.startsWith('<system-reminder>')) {
       return;
     }
-    if (excludeSlashCommandPrompts && isSlashCommandPrompt(msgContent)) {
+    if (excludeSlashCommandPrompts && isWorkflowInvocationOnlyPrompt(msgContent)) {
       return;
     }
     if (collected.user.length < targetUser) {
@@ -861,7 +865,7 @@ function processUserEntry(
         if (excludeSystemReminders && block.text.startsWith('<system-reminder>')) {
           continue;
         }
-        if (excludeSlashCommandPrompts && isSlashCommandPrompt(block.text)) {
+        if (excludeSlashCommandPrompts && isWorkflowInvocationOnlyPrompt(block.text)) {
           continue;
         }
         if (collected.user.length < targetUser) {
@@ -944,7 +948,7 @@ export async function readRecentUserMessages(
     let text: string | undefined;
     if (typeof content === "string") {
       if (content.startsWith("<system-reminder>")) continue;
-      if (isSlashCommandPrompt(content)) continue;
+      if (isWorkflowInvocationOnlyPrompt(content)) continue;
       text = content;
     } else if (Array.isArray(content)) {
       let foundText: string | undefined;
@@ -952,7 +956,7 @@ export async function readRecentUserMessages(
       for (const block of content) {
         if (block.type === "text" && block.text) {
           if (block.text.startsWith("<system-reminder>")) continue;
-          if (isSlashCommandPrompt(block.text)) continue;
+          if (isWorkflowInvocationOnlyPrompt(block.text)) continue;
           foundText = block.text;
           onlyToolResults = false;
           break;
@@ -1000,7 +1004,7 @@ export async function readRecentUserMessagesArray(
     let text: string | undefined;
     if (typeof content === "string") {
       if (content.startsWith("<system-reminder>")) continue;
-      if (isSlashCommandPrompt(content)) continue;
+      if (isWorkflowInvocationOnlyPrompt(content)) continue;
       text = content;
     } else if (Array.isArray(content)) {
       let foundText: string | undefined;
@@ -1008,7 +1012,7 @@ export async function readRecentUserMessagesArray(
       for (const block of content) {
         if (block.type === "text" && block.text) {
           if (block.text.startsWith("<system-reminder>")) continue;
-          if (isSlashCommandPrompt(block.text)) continue;
+          if (isWorkflowInvocationOnlyPrompt(block.text)) continue;
           foundText = block.text;
           onlyToolResults = false;
           break;
@@ -1055,13 +1059,13 @@ export async function userTurnFollowedByCompletedToolRoundtrip(
     let firstText: string | undefined;
     if (typeof content === "string") {
       if (content.startsWith("<system-reminder>")) continue;
-      if (isSlashCommandPrompt(content)) continue;
+      if (isWorkflowInvocationOnlyPrompt(content)) continue;
       firstText = content;
     } else if (Array.isArray(content)) {
       for (const block of content) {
         if (block.type === "text" && block.text) {
           if (block.text.startsWith("<system-reminder>")) continue;
-          if (isSlashCommandPrompt(block.text)) continue;
+          if (isWorkflowInvocationOnlyPrompt(block.text)) continue;
           firstText = block.text;
           break;
         }

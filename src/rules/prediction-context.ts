@@ -7,14 +7,19 @@ export const predictionContextRule: PreToolRule = {
   priority: 68,
   appealable: false,
   usesLlm: true,
-  promptSection: `Check whether this tool call serves the user's stated intent based on the predictions/sentiment context provided.
+  promptSection: `Check whether this tool call serves the user's stated intent based on the live latest user message and predictions/sentiment context provided.
 
 You receive Tool Predictions: expected tools based on user intent analysis.
+Cached predictions are historical context. If they conflict with the live latest user message, the live latest user intent wins.
 If expected tools are listed and the current tool is NOT expected, consider why - a mismatch is NOT automatic denial; only DENY if it clearly contradicts user intent.`,
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     const prediction = ctx.state.currentPrediction ?? null;
     if (!prediction) return null;
-    return { llmContext: `PREDICTIONS:\n${formatPredictionContext(prediction)}` };
+    const latest = (ctx.latestUserTurn?.logicText || ctx.latestUserMessage || "").trim();
+    const latestSection = latest
+      ? `LIVE LATEST USER MESSAGE (authoritative on conflicts):\n${latest}\n\n`
+      : "";
+    return { llmContext: `${latestSection}PREDICTIONS (historical cached context):\n${formatPredictionContext(prediction)}` };
   },
 };

@@ -32,6 +32,7 @@ import {
   runReplayCommand,
   runScenarioCommand,
   runScenarioCommandAsync,
+  runJustBuild,
   getVersion,
   checkAndIncrementRunLimit,
   rollbackRunLimit,
@@ -193,6 +194,7 @@ function handleRunScenario(
     writeScenarioFile(name, scenario);
     const outputDir = scenarioDir(name);
     const inputPath = path.join(outputDir, "scenario.json");
+    runJustBuild(rootOverride);
     return runScenarioCommand(
       ["--scenario", inputPath, "--source", "home"],
       SINGLE_SCENARIO_TIMEOUT_MS,
@@ -214,6 +216,7 @@ function handleRunScenario(
     );
   }
   fs.mkdirSync(target.outputDir, { recursive: true });
+  runJustBuild(rootOverride);
   return runScenarioCommand(
     ["--scenario", target.inputPath, "--source", target.source],
     SINGLE_SCENARIO_TIMEOUT_MS,
@@ -248,6 +251,7 @@ async function handleMaterializeScenario(
   };
 
   if (runMaterialized) {
+    runJustBuild(rootOverride);
     payload.run = JSON.parse(runScenarioCommand(
       ["--scenario", scenarioPath, "--source", "home"],
       SINGLE_SCENARIO_TIMEOUT_MS,
@@ -370,6 +374,8 @@ async function handleRunScenarios(
       2,
     );
   }
+
+  runJustBuild(rootOverride);
 
   const startedAt = Date.now();
   const results = new Array<ScenarioResult>(targets.length);

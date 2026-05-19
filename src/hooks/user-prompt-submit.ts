@@ -147,8 +147,7 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
     planModeCtx: getPlanModeContext(planMode),
   };
 
-  const workflowInvocation = spec.recognizeWorkflowInvocation(input.prompt);
-  if (workflowInvocation === null) {
+  if (!spec.isWorkflowInvocationOnly(input.prompt)) {
     await evaluateRulesForUserPromptSubmit(ALL_RULES, ctx);
   }
 

@@ -18,6 +18,7 @@ export const claudeSpec: AdapterSpec = {
   mcpWireName:  MCP.mcpWireName,
   canonicalizeToolCall: TC.canonicalizeToolCall,
   recognizeWorkflowInvocation: WI.recognizeWorkflowInvocation,
+  isWorkflowInvocationOnly: WI.isWorkflowInvocationOnly,
   renderWorkflowInvocation:    WI.renderWorkflowInvocation,
   parseTranscript: PT.parseTranscript,
   isInterruptionMessage: IR.isInterruptionMessage,

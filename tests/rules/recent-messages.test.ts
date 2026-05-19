@@ -56,4 +56,22 @@ describe("recentMessagesRule", () => {
     expect(llmContext).toContain(longMessage);
     expect(llmContext).toContain("now edit README.md");
   });
+
+  it("prefers ctx.recentUserMessages and labels the newest message", async () => {
+    const ctx = {
+      ...makeCtx(),
+      recentUserMessages: [
+        "do not edit anything, just chat",
+        "now call quickpush and fix complaints by editing files",
+      ],
+    };
+
+    const result = await recentMessagesRule.check(ctx);
+
+    expect(mockReadTranscriptExact).not.toHaveBeenCalled();
+    const llmContext = result && "llmContext" in result ? result.llmContext : "";
+    expect(llmContext).toContain("[0] do not edit anything, just chat");
+    expect(llmContext).toContain("[1 LATEST/NEWEST] now call quickpush and fix complaints by editing files");
+    expect(recentMessagesRule.promptSection).toContain("newest direct user instruction wins");
+  });
 });

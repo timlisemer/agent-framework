@@ -82,6 +82,20 @@ describe("claudeSpec.recognizeWorkflowInvocation", () => {
   });
 });
 
+describe("claudeSpec.isWorkflowInvocationOnly", () => {
+  it("treats bare commands and plain command parameters as workflow-only", () => {
+    expect(claudeSpec.isWorkflowInvocationOnly("<command-name>/quickpush</command-name>")).toBe(true);
+    expect(claudeSpec.isWorkflowInvocationOnly("/quickpush")).toBe(true);
+    expect(claudeSpec.isWorkflowInvocationOnly("/check now")).toBe(true);
+    expect(claudeSpec.isWorkflowInvocationOnly('/locate-scenario "quote"')).toBe(true);
+  });
+
+  it("does not treat mixed human instructions as workflow-only", () => {
+    expect(claudeSpec.isWorkflowInvocationOnly("<command-name>/plan3</command-name>\nthats complete bullshit do not cheat")).toBe(false);
+    expect(claudeSpec.isWorkflowInvocationOnly("/quickpush and then fix complaints by editing files")).toBe(false);
+  });
+});
+
 describe("codexSpec.recognizeWorkflowInvocation", () => {
   it("detects Codex skill mentions", () => {
     expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-quickpush")).toBe("quickpush");
@@ -98,6 +112,19 @@ describe("codexSpec.recognizeWorkflowInvocation", () => {
     expect(codexSpec.recognizeWorkflowInvocation("$skill-creator")).toBeNull();
     expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-unknown")).toBeNull();
     expect(codexSpec.recognizeWorkflowInvocation("<skill><name>agent-framework-unknown</name></skill>")).toBeNull();
+  });
+});
+
+describe("codexSpec.isWorkflowInvocationOnly", () => {
+  it("treats bare Codex skill wrappers as workflow-only", () => {
+    expect(codexSpec.isWorkflowInvocationOnly("$agent-framework-quickpush")).toBe(true);
+    expect(codexSpec.isWorkflowInvocationOnly("<skill>\n<name>agent-framework-quickpush</name>\n</skill>")).toBe(true);
+    expect(codexSpec.isWorkflowInvocationOnly("---\nname: agent-framework-confirm\ndescription: Confirm\n---")).toBe(true);
+  });
+
+  it("does not treat inline mentions or pasted metadata as workflow-only", () => {
+    expect(codexSpec.isWorkflowInvocationOnly("please call $agent-framework-quickpush and fix complaints by editing files")).toBe(false);
+    expect(codexSpec.isWorkflowInvocationOnly("quoted:\n<skill>\n<name>agent-framework-quickpush</name>\n</skill>")).toBe(false);
   });
 });
 

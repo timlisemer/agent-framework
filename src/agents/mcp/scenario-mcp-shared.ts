@@ -18,6 +18,7 @@ import {
   validateReasonMustExpectation,
   type ReasonMustExpectation,
 } from "../../scenario/types.js";
+import { runCommand } from "../../utils/command.js";
 import {
   runtimeRoot,
   projectTranscriptsDir,
@@ -144,6 +145,18 @@ function filterHarnessStderr(stderr: string): string {
   return stderr.split("\n").filter(
     (line) => !line.includes("fatal: not a git repository") && !line.includes("GIT_DISCOVERY_ACROSS_FILESYSTEM")
   ).join("\n");
+}
+
+export function runJustBuild(rootOverride?: string): void {
+  const root = rootOverride || getAgentFrameworkRoot();
+  const result = runCommand("just build 2>&1", root);
+  if (result.exitCode !== 0) {
+    const output = filterHarnessStderr(result.output).trim();
+    throw new Error(
+      `just build failed with exit code ${result.exitCode}: ` +
+      `${(output || "(no output)").slice(0, 2000)}`,
+    );
+  }
 }
 
 /**

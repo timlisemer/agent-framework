@@ -190,7 +190,13 @@ export async function evaluateRules(
       `Be extra conservative. Prefer DENY unless the user's most recent message ` +
       `explicitly authorized editing this specific path.\n\n`
     : "";
-  const promptSections = outsideSection + triggered.map(({ rule, llmContext }) =>
+  const latestUserIntent = (ctx.latestUserTurn?.logicText || ctx.latestUserMessage || "").trim();
+  const currentUserIntentSection = latestUserIntent
+    ? `=== CURRENT USER INTENT PRIORITY ===\n` +
+      `The live latest user message is authoritative when it conflicts with older cached or recent-message context:\n` +
+      `${latestUserIntent}\n\n`
+    : "";
+  const promptSections = outsideSection + currentUserIntentSection + triggered.map(({ rule, llmContext }) =>
     `=== RULE: ${rule.name} ===\n${rule.promptSection}\n\nCONTEXT:\n${llmContext}`
   ).join("\n\n");
 

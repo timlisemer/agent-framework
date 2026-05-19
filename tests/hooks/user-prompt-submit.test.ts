@@ -137,6 +137,28 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "ok");
   });
 
+  it("runs UserPromptSubmit rules for mixed Codex workflow prompts with edit authorization", async () => {
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      await mainUserPromptSubmit(
+        {
+          session_id: "session-mixed-skill",
+          transcript_path: transcriptPath,
+          cwd: tempDir,
+          prompt: "please call $agent-framework-quickpush and iterate by editing files to fix complaints",
+        },
+        encoder,
+      );
+
+      expect(mockEvaluateRulesForUserPromptSubmit).toHaveBeenCalledTimes(1);
+      expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "ok");
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      else process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+    }
+  });
+
   it("does not inject the planning contract while temporary hook injection is disabled", async () => {
     fs.writeFileSync(path.join(tempDir, "PLANS.md"), "# Planning Contract\n\nFollow it.");
     await mainUserPromptSubmit(
