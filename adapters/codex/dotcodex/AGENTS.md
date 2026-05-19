@@ -1,5 +1,12 @@
 # Planning Contract
 
+## Codex Auto Compaction
+
+Auto compaction must stay off for planning sessions. Use the documented Codex
+configuration key `model_auto_compact_token_limit`, described by the Codex
+configuration reference as the token threshold that triggers automatic
+conversation compaction; do not invent another setting name.
+
 Every final plan must be decision-complete, concrete, and detailed enough that two independent implementers make the same edits without asking follow-up questions.
 
 Do not present a final plan while required information is missing. If an assumption cannot be answered from the user message, repository files, documentation, or available tools, ask the user before presenting the final plan.

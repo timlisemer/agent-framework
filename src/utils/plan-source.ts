@@ -109,8 +109,8 @@ function missingPlanfileWorkflow(sessionDir?: string): string {
   const createPlanfileWireName = activeSpec().mcpWireName("create_planfile");
   const planfiles = listSessionPlanfiles(sessionDir);
   const existingGuidance = planfiles.length > 0
-    ? ` If this is your planfile ${planfiles.map((planfile) => `"${planfile}"`).join(", ")}, edit it directly even if plan mode is active, because planfile edits are explicitly allowed, then validate it with ${validatePlanWireName} and present the finished plan using <proposed_plan>. If this is a new planning phase, initialize it with ${createPlanfileWireName}.`
-    : ` If one of the existing session planfiles is the current plan, edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed, then validate it with ${validatePlanWireName} and present the finished plan using <proposed_plan>.`;
+    ? ` If this is your planfile ${planfiles.map((planfile) => `"${planfile}"`).join(", ")}, edit it directly even if plan mode is active, because planfile edits are explicitly allowed, then validate it with ${validatePlanWireName} and present the complete contents of the validated planfile inside a whole-message <proposed_plan>...</proposed_plan> block. Do not summarize it or replace it with only the plan name, planfile path, or validation status. If this is a new planning phase, initialize it with ${createPlanfileWireName}.`
+    : ` If one of the existing session planfiles is the current plan, edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed, then validate it with ${validatePlanWireName} and present the complete contents of the validated planfile inside a whole-message <proposed_plan>...</proposed_plan> block. Do not summarize it or replace it with only the plan name, planfile path, or validation status.`;
   return `The presented plan must use a Plan Name matching one of the accepted session planfiles, or create a new named session planfile first. ${formatSessionPlanfilesForFeedback(sessionDir)}${existingGuidance}`;
 }
 

@@ -153,7 +153,8 @@ describe("runValidatePlanAgent", () => {
   it("passes when the plan-validate LLM returns VALID", async () => {
     const result = await validatePlanText(validPlan());
     expect(result).toContain("- Status: PASS");
-    expect(result).toContain("## Instructions\nNow present the finished plan using <proposed_plan>.");
+    expect(result).toContain("## Instructions\nNow present the complete contents of the validated planfile inside a whole-message <proposed_plan>...</proposed_plan> block.");
+    expect(result).toContain("Do not summarize it or replace it with only the plan name, planfile path, or validation status.");
     expect(result).not.toContain("## Reasons\n(none)");
   });
 

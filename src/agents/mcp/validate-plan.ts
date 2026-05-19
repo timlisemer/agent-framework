@@ -76,7 +76,7 @@ function formatResult(status: "PASS" | "FAIL", reasons: readonly string[]): stri
 - Status: ${status}
 
 ## Instructions
-Now present the finished plan using <proposed_plan>.`;
+Now present the complete contents of the validated planfile inside a whole-message <proposed_plan>...</proposed_plan> block. Do not summarize it or replace it with only the plan name, planfile path, or validation status.`;
   }
   const body = reasons.length > 0 ? reasons.join("\n") : "(none)";
   return `## Results
