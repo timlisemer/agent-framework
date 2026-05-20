@@ -1,0 +1,133 @@
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  buildClaudeQueryOptions,
+  buildCodexTurnInput,
+  createProviderRunner,
+} from "../../src/ai-backend/provider.js";
+import { buildCodexThreadOptions } from "../../src/providers/codex-agent-runtime.js";
+import { PROVIDER_TYPES, resetProviderConfig } from "../../src/utils/provider-config.js";
+import { clearProviderEnvForTest } from "../helpers/provider-env.js";
+
+describe("AI backend OpenRouter provider resolution", () => {
+  const restore = clearProviderEnvForTest();
+
+  afterEach(() => {
+    restore();
+  });
+
+  it("uses Codex as the OpenRouter SDK runtime by default", () => {
+    process.env.AGENT_FRAMEWORK_SDK_PROVIDER = "openrouter";
+    resetProviderConfig();
+
+    const runner = createProviderRunner({
+      provider: "openrouter",
+      model: null,
+      workingDir: null,
+      systemPrompt: null,
+    });
+
+    expect(runner.resolvedProvider.type).toBe(PROVIDER_TYPES.OPENROUTER);
+    expect(runner.resolvedProvider.sdkRuntime).toBe("codex");
+  });
+
+  it("allows explicit Claude runtime override for OpenRouter SDK mode", () => {
+    process.env.AGENT_FRAMEWORK_SDK_PROVIDER = "openrouter";
+    process.env.AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME = "claude";
+    resetProviderConfig();
+
+    const runner = createProviderRunner({
+      provider: "openrouter",
+      model: null,
+      workingDir: null,
+      systemPrompt: null,
+    });
+
+    expect(runner.resolvedProvider.type).toBe(PROVIDER_TYPES.OPENROUTER);
+    expect(runner.resolvedProvider.sdkRuntime).toBe("claude");
+  });
+
+  it("uses the session provider before global SDK provider settings", () => {
+    process.env.AGENT_FRAMEWORK_SDK_PROVIDER = "claude-subscription";
+    resetProviderConfig();
+
+    const runner = createProviderRunner({
+      provider: "openai-subscription",
+      model: null,
+      workingDir: null,
+      systemPrompt: null,
+    });
+
+    expect(runner.resolvedProvider.type).toBe(PROVIDER_TYPES.OPENAI_SUBSCRIPTION);
+    expect(runner.resolvedProvider.sdkRuntime).toBe("codex");
+  });
+
+  it("includes configured system prompts in Codex turn input", () => {
+    expect(
+      buildCodexTurnInput(
+        {
+          provider: "openrouter",
+          model: null,
+          workingDir: null,
+          systemPrompt: "Be concise.",
+        },
+        "Summarize this."
+      )
+    ).toBe("System instructions:\nBe concise.\n\nUser request:\nSummarize this.");
+  });
+
+  it("keeps Claude SDK sessions non-persistent", () => {
+    const abortController = new AbortController();
+    const options = buildClaudeQueryOptions(
+      {
+        provider: "claude-subscription",
+        model: null,
+        workingDir: "/tmp/work",
+        systemPrompt: "System",
+      },
+      {
+        type: PROVIDER_TYPES.CLAUDE_SUBSCRIPTION,
+        mode: "sdk",
+        modelId: "claude-sonnet-4-5",
+        sdkRuntime: "claude",
+        costTracking: "none",
+      },
+      abortController,
+      {}
+    );
+
+    expect(options).toMatchObject({
+      cwd: "/tmp/work",
+      persistSession: false,
+      abortController,
+    });
+  });
+
+  it("keeps Codex UI turns read-only with web search disabled and reasoning effort applied", () => {
+    expect(
+      buildCodexThreadOptions(
+        {
+          provider: "openai-subscription",
+          model: "opus",
+          workingDir: "/tmp/work",
+          systemPrompt: null,
+        },
+        {
+          type: PROVIDER_TYPES.OPENAI_SUBSCRIPTION,
+          mode: "sdk",
+          modelId: "gpt-5.5",
+          reasoningEffort: "xhigh",
+          sdkRuntime: "codex",
+          costTracking: "none",
+        }
+      )
+    ).toMatchObject({
+      workingDirectory: "/tmp/work",
+      sandboxMode: "read-only",
+      approvalPolicy: "never",
+      networkAccessEnabled: false,
+      webSearchMode: "disabled",
+      webSearchEnabled: false,
+      modelReasoningEffort: "xhigh",
+    });
+  });
+});

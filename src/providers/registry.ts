@@ -17,7 +17,7 @@ export const PROVIDERS = {
     type: PROVIDER_TYPES.OPENROUTER,
     displayName: "OpenRouter",
     costTracking: "openrouter-generation",
-    defaultSdkRuntime: "claude",
+    defaultSdkRuntime: "codex",
     models: {
       haiku: { id: "x-ai/grok-4.1-fast" },
       sonnet: { id: "google/gemini-3-flash-preview" },
@@ -80,4 +80,3 @@ export function parseSdkRuntimeStrict(value: string, source: string): SdkRuntime
   }
   return normalized;
 }
-

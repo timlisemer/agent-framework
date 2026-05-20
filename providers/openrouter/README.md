@@ -6,7 +6,7 @@ OpenRouter is the default provider. Direct mode uses OpenRouter's Anthropic API 
 
 ```bash
 export AGENT_FRAMEWORK_PROVIDER=openrouter
-export AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=claude # claude | codex
+export AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=codex # claude | codex
 ```
 
 For Claude-compatible routing, OpenRouter documents this setup:

@@ -8,6 +8,25 @@ import {
 } from "../utils/cancellation.js";
 import { PROVIDER_TYPES } from "./registry.js";
 import type { ProviderExecutionResult, ProviderRunInput } from "./execution-types.js";
+import type { ResolvedProvider } from "./types.js";
+
+type ClaudeQueryOptionsConfig = {
+  workingDir?: string | null;
+  systemPrompt?: string | null;
+};
+
+type ClaudeQueryOptionOverrides = {
+  tools?: readonly string[];
+  allowedTools?: readonly string[];
+  permissionMode?: string;
+  allowDangerouslySkipPermissions?: boolean;
+  maxTurns?: number;
+  canUseTool?: unknown;
+  includePartialMessages?: boolean;
+  includeHookEvents?: boolean;
+  pathToClaudeCodeExecutable?: string;
+  stderr?: (data: string) => void;
+};
 
 export async function runClaudeAgent(
   input: ProviderRunInput,
@@ -62,23 +81,23 @@ Your final response should be your complete analysis in the required format.`;
       try {
         const q = query({
           prompt,
-          options: {
-            model: resolvedProvider.modelId,
-            cwd: workingDir,
-            systemPrompt,
-            tools,
-            allowedTools: tools,
-            permissionMode: "bypassPermissions",
-            allowDangerouslySkipPermissions: true,
-            maxTurns: mode === "direct" ? 1 : (config.maxTurns ?? 10),
-            env: subprocessEnv,
-            pathToClaudeCodeExecutable: `${homedir()}/.local/bin/claude`,
-            persistSession: false,
+          options: buildClaudeQueryOptions(
+            { ...config, workingDir, systemPrompt },
+            resolvedProvider,
             abortController,
-            stderr: (data: string) => {
-              stderrBuffer = (stderrBuffer + data).slice(-2048);
-            },
-          },
+            subprocessEnv,
+            {
+              tools,
+              allowedTools: tools,
+              permissionMode: "bypassPermissions",
+              allowDangerouslySkipPermissions: true,
+              maxTurns: mode === "direct" ? 1 : (config.maxTurns ?? 10),
+              pathToClaudeCodeExecutable: `${homedir()}/.local/bin/claude`,
+              stderr: (data: string) => {
+                stderrBuffer = (stderrBuffer + data).slice(-2048);
+              },
+            }
+          ),
         });
 
         for await (const message of q) {
@@ -117,13 +136,13 @@ Your final response should be your complete analysis in the required format.`;
               }
             }
 
-            if (
-              lastResultSubtype === "success" &&
-              lastResultIsError !== true &&
-              "result" in message &&
-              typeof message.result === "string"
-            ) {
-              finalResult = message.result;
+          if (
+            lastResultSubtype === "success" &&
+            lastResultIsError !== true &&
+            "result" in message &&
+            typeof message.result === "string"
+          ) {
+              finalResult = collectClaudeMessageResult(message).text;
             }
             break;
           }
@@ -134,30 +153,10 @@ Your final response should be your complete analysis in the required format.`;
               lastAssistantError = assistantError;
               continue;
             }
-            if ("message" in message) {
-              const msg = message.message;
-              if (msg && typeof msg === "object" && "content" in msg) {
-                const content = msg.content;
-                if (typeof content === "string") {
-                  lastAssistantContent = content;
-                } else if (Array.isArray(content)) {
-                  const textBlocks: string[] = [];
-                  for (const block of content) {
-                    if (
-                      block &&
-                      typeof block === "object" &&
-                      "type" in block &&
-                      block.type === "text" &&
-                      "text" in block &&
-                      typeof block.text === "string"
-                    ) {
-                      textBlocks.push(block.text);
-                    }
-                  }
-                  if (textBlocks.length > 0) lastAssistantContent = textBlocks.join("\n");
-                }
-              }
-            }
+            lastAssistantContent = collectClaudeMessageResult(message, {
+              text: lastAssistantContent,
+              nativeSessionId: null,
+            }).text;
           }
         }
       } finally {
@@ -218,7 +217,7 @@ Your final response should be your complete analysis in the required format.`;
   return toResult(second, resolvedProvider);
 }
 
-function sanitizeClaudeEnv(env: NodeJS.ProcessEnv, subscription: boolean): NodeJS.ProcessEnv {
+export function sanitizeClaudeEnv(env: NodeJS.ProcessEnv, subscription: boolean): NodeJS.ProcessEnv {
   const next = { ...env };
   if (subscription) {
     delete next.ANTHROPIC_API_KEY;
@@ -231,6 +230,74 @@ function sanitizeClaudeEnv(env: NodeJS.ProcessEnv, subscription: boolean): NodeJ
     next.ANTHROPIC_API_KEY = "";
   }
   return next;
+}
+
+export function buildClaudeQueryOptions<T extends ClaudeQueryOptionsConfig>(
+  config: T,
+  resolvedProvider: ResolvedProvider,
+  abortController: AbortController,
+  env: NodeJS.ProcessEnv,
+  overrides: ClaudeQueryOptionOverrides = {}
+): Record<string, unknown> {
+  return {
+    model: resolvedProvider.modelId,
+    cwd: config.workingDir ?? process.cwd(),
+    systemPrompt: config.systemPrompt ?? undefined,
+    env,
+    persistSession: false,
+    abortController,
+    ...overrides,
+  };
+}
+
+export function extractClaudeAssistantText(message: unknown): string {
+  if (!message || typeof message !== "object" || !("message" in message)) return "";
+  const msg = (message as { message?: unknown }).message;
+  if (!msg || typeof msg !== "object" || !("content" in msg)) return "";
+  const content = (msg as { content?: unknown }).content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const textBlocks: string[] = [];
+  for (const block of content) {
+    if (
+      block &&
+      typeof block === "object" &&
+      "type" in block &&
+      block.type === "text" &&
+      "text" in block &&
+      typeof block.text === "string"
+    ) {
+      textBlocks.push(block.text);
+    }
+  }
+  return textBlocks.join("\n");
+}
+
+export function collectClaudeMessageResult(
+  message: unknown,
+  current: { text: string; nativeSessionId: string | null } = { text: "", nativeSessionId: null }
+): { text: string; nativeSessionId: string | null } {
+  const raw = message as Record<string, unknown>;
+  const nativeSessionId = typeof raw.session_id === "string" ? raw.session_id : current.nativeSessionId;
+  if (raw.type === "assistant") {
+    return { text: extractClaudeAssistantText(message) || current.text, nativeSessionId };
+  }
+  if (raw.type === "result" && typeof raw.result === "string") {
+    return { text: raw.result, nativeSessionId };
+  }
+  return { text: current.text, nativeSessionId };
+}
+
+export async function collectClaudeQueryResult(
+  stream: AsyncIterable<unknown>,
+  signal: AbortSignal
+): Promise<{ text: string; nativeSessionId: string | null }> {
+  let collected = { text: "", nativeSessionId: null as string | null };
+  for await (const message of stream) {
+    signal.throwIfAborted();
+    collected = collectClaudeMessageResult(message, collected);
+  }
+  return collected;
 }
 
 function toResult(outcome: SdkAttemptOutcome, resolvedProvider: ProviderRunInput["resolvedProvider"]): ProviderExecutionResult {

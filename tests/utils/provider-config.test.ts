@@ -94,21 +94,21 @@ describe("resolveProvider", () => {
     expect(result.type).toBe(PROVIDER_TYPES.CLAUDE_SUBSCRIPTION);
   });
 
-  it("supports OpenRouter SDK mode with Claude runtime by default", () => {
+  it("supports OpenRouter SDK mode with Codex runtime by default", () => {
     process.env.AGENT_FRAMEWORK_SDK_PROVIDER = "openrouter";
     resetProviderConfig();
     const result = resolveProvider(MODEL_TIERS.OPUS, "sdk");
     expect(result.type).toBe(PROVIDER_TYPES.OPENROUTER);
-    expect(result.sdkRuntime).toBe("claude");
+    expect(result.sdkRuntime).toBe("codex");
     expect(result.costTracking).toBe("none");
   });
 
-  it("supports OpenRouter SDK mode with Codex runtime override", () => {
+  it("supports OpenRouter SDK mode with Claude runtime override", () => {
     process.env.AGENT_FRAMEWORK_SDK_PROVIDER = "openrouter";
-    process.env.AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME = "codex";
+    process.env.AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME = "claude";
     resetProviderConfig();
     const result = resolveProvider(MODEL_TIERS.OPUS, "sdk");
-    expect(result.sdkRuntime).toBe("codex");
+    expect(result.sdkRuntime).toBe("claude");
   });
 
   it("mode-specific env var overrides global env var", () => {

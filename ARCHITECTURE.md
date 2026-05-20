@@ -74,6 +74,16 @@ src/                                # TypeScript source
     claude-agent-runtime.ts         # Claude subscription / Claude SDK runtime
     codex-agent-runtime.ts          # OpenAI subscription / Codex SDK runtime
 
+  ai-backend/                       # Provider-neutral JSONL backend for UI sessions
+    server.ts                       # stdin/stdout JSONL frame loop
+    session-manager.ts              # Session lifecycle, transcript updates, turn execution
+    provider.ts                     # Claude/Codex SDK provider runners for UI turns
+    wire.ts                         # Backend wire parsing and serialization helpers
+
+  ai-protocol/                      # TypeScript protocol bindings shared with Astral
+    generated/                      # ts-rs generated AI request/response/event types
+    index.ts                        # Stable barrel export for generated protocol types
+
   scenario/                         # Scenario testing + capture pipeline
     types.ts                        # Scenario schema + validateScenario
     runner.ts                       # Scenario execution (single-hook + fan-out)
@@ -117,6 +127,9 @@ dist/                               # Compiled JavaScript (build output)
   mcp/server.js                     # MCP server entry point
   agents/                           # Compiled agents
   utils/                            # Compiled utilities
+
+scripts/
+  sync-astral-ai-bindings.mjs       # Copies generated Astral AI protocol bindings into src/ai-protocol/generated
 ```
 
 ## Adapters

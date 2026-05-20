@@ -77,6 +77,7 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
     (queryMock as unknown as { mockClear: () => void }).mockClear?.();
     queryArgs.length = 0;
     setQueryGenerators();
+    process.env.AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME = "claude";
   });
 
   afterEach(() => {

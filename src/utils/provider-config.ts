@@ -168,7 +168,7 @@ function providerFromConfig(value: ProviderTypeValue | undefined, source: string
 function resolveOpenRouterSdkRuntime(config: ProviderConfigFile): SdkRuntime {
   const envValue = process.env.AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME;
   if (envValue) return parseSdkRuntimeStrict(envValue, "AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME");
-  return config.providers?.openrouter?.sdkRuntime ?? "claude";
+  return config.providers?.openrouter?.sdkRuntime ?? "codex";
 }
 
 /**

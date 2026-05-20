@@ -62,6 +62,7 @@ describe("runAgentWithRetryAndTelemetry — env-keyed LLM stub", () => {
     logAgentStartedSpy.mockReset();
     logAgentDecisionSpy.mockReset();
     delete process.env.AGENT_FRAMEWORK_LLM_STUBS;
+    process.env.AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME = "claude";
     vi.resetModules();
   });
 

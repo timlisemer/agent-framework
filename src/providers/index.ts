@@ -3,6 +3,9 @@ import { runAnthropicApiSkinDirect } from "./anthropic-api-skin.js";
 import { runClaudeAgent } from "./claude-agent-runtime.js";
 import { runCodexAgent } from "./codex-agent-runtime.js";
 import type { ProviderExecutionResult, ProviderRunInput } from "./execution-types.js";
+import type { ResolvedProvider } from "./types.js";
+
+export type SdkRuntimeSelection = "claude" | "codex";
 
 export async function runProviderDirect(input: ProviderRunInput): Promise<ProviderExecutionResult> {
   switch (input.resolvedProvider.type) {
@@ -18,16 +21,21 @@ export async function runProviderDirect(input: ProviderRunInput): Promise<Provid
 }
 
 export async function runProviderSdk(input: ProviderRunInput): Promise<ProviderExecutionResult> {
-  switch (input.resolvedProvider.type) {
+  const runtime = selectSdkRuntime(input.resolvedProvider);
+  return runtime === "codex"
+    ? runCodexAgent(input, "sdk")
+    : runClaudeAgent(input, "sdk");
+}
+
+export function selectSdkRuntime(resolvedProvider: ResolvedProvider): SdkRuntimeSelection {
+  switch (resolvedProvider.type) {
     case PROVIDER_TYPES.OPENROUTER:
-      return input.resolvedProvider.sdkRuntime === "codex"
-        ? runCodexAgent(input, "sdk")
-        : runClaudeAgent(input, "sdk");
+      return resolvedProvider.sdkRuntime === "codex" ? "codex" : "claude";
     case PROVIDER_TYPES.CLAUDE_SUBSCRIPTION:
-      return runClaudeAgent(input, "sdk");
+      return "claude";
     case PROVIDER_TYPES.OPENAI_SUBSCRIPTION:
-      return runCodexAgent(input, "sdk");
+      return "codex";
     default:
-      throw new Error(`Unsupported provider: ${String(input.resolvedProvider.type)}`);
+      throw new Error(`Unsupported provider: ${String(resolvedProvider.type)}`);
   }
 }

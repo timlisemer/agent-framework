@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
+    "sync:ai-protocol": "node scripts/sync-astral-ai-bindings.mjs",
+    "ai-backend": "node dist/src/ai-backend/server.js",
     "mcp": "node dist/mcp/server.js",
     "test": "vitest run",
     "test:watch": "vitest"

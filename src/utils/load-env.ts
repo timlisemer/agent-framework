@@ -42,7 +42,10 @@ function findProjectRoot(startPath: string): string {
 function getProjectRoot(): string {
   // Fast path: use explicit env var (avoids 10+ sync FS calls)
   const envRoot = process.env.AGENT_FRAMEWORK_ROOT;
-  if (envRoot && existsSync(resolve(envRoot, ".env"))) {
+  if (
+    envRoot &&
+    (existsSync(resolve(envRoot, ".env")) || existsSync(resolve(envRoot, "package.json")))
+  ) {
     return envRoot;
   }
 
