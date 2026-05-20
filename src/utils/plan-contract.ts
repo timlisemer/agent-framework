@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as url from "url";
+import { adapterSpecByName, registeredAdapterNames } from "../adapter/spec.js";
 import { extractPlanName, extractPlanfileFooter, PLAN_NAME_RE } from "./planfile.js";
 import {
   type MarkdownHeadingMatcher,
@@ -61,6 +62,14 @@ const UNRESOLVED_RE = /\b(assuming|probably|likely|if needed|should be|might|may
 const UNRESOLVED_MATCH_RE = /\b(assuming|probably|likely|if needed|should be|might|maybe|to be determined|tbd|unknown)\b/gi;
 const LIVE_OPTION_RE = /\b(option|approach|alternative)\s+([A-Z]|\d+):/i;
 const SCHEDULE_RE = /\b(week|day|month)\s*\d+:|\b\d+(-\d+)?\s*(days?|weeks?|months?)\b/i;
+
+function acceptedCheckMcpWireNames(configuredWireName?: string): string[] {
+  return [
+    ...(configuredWireName ? [configuredWireName] : []),
+    ...registeredAdapterNames().map((name) => adapterSpecByName(name).mcpWireName("check")),
+  ].filter((wireName, index, all) => all.indexOf(wireName) === index);
+}
+
 export function readRequiredFinalPlanHeadings(projectDir: string): string[] {
   void projectDir;
   const envRoot = process.env.AGENT_FRAMEWORK_ROOT;
@@ -253,10 +262,11 @@ export function validatePlanContractWithRequiredHeadings(
   }
 
   const assistantVerification = sections.get("Assistant Verification") ?? "";
+  const checkMcpWireNames = acceptedCheckMcpWireNames(options.checkMcpWireName);
   if (
     assistantVerification.trim() &&
-    options.checkMcpWireName &&
-    !assistantVerification.includes(options.checkMcpWireName)
+    checkMcpWireNames.length > 0 &&
+    !checkMcpWireNames.some((wireName) => assistantVerification.includes(wireName))
   ) {
     findings.push({
       kind: "assistant_verification_not_mcp_check",

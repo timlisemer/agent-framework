@@ -26,6 +26,17 @@ describe("runProcessCancellable", () => {
     expect(result.output.length).toBeLessThan(140);
   });
 
+  it("passes env overrides to child processes", async () => {
+    const result = await runProcessCancellable(
+      { shell: true, command: "node -e \"process.stdout.write(process.env.AGENT_FRAMEWORK_ADAPTER || '')\"" },
+      process.cwd(),
+      { env: { AGENT_FRAMEWORK_ADAPTER: "claude" } },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toBe("claude");
+  });
+
   it("rejects with OperationCancelledError when aborted", async () => {
     const controller = new AbortController();
     const running = runProcessCancellable(

@@ -54,8 +54,11 @@ import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 
-import { activeSpec } from "../../adapter/spec.js";
+import { activeSpec, registeredAdapterNames } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("check"); }
+
+type CheckRunner = { cmd: string; dir: string; type: string };
+type CheckInvocation = CheckRunner & { adapter?: string; env?: NodeJS.ProcessEnv };
 
 /**
  * Regex matching unused-code lines emitted by linters across languages.
@@ -286,7 +289,7 @@ function detectLinter(
 function findCheckRunner(
   workingDir: string,
   mainRepo: string
-): { cmd: string; dir: string; type: string } | { error: string } | null {
+): CheckRunner | { error: string } | null {
   const runners = [
     { file: "justfile", cmd: "just check 2>&1", type: "just", tool: "just" },
     { file: "Justfile", cmd: "just check 2>&1", type: "just", tool: "just" },
@@ -307,6 +310,30 @@ function findCheckRunner(
   }
 
   return null;
+}
+
+function isAgentFrameworkRepo(dir: string): boolean {
+  const packageJsonPath = path.join(dir, "package.json");
+  if (!fs.existsSync(packageJsonPath)) return false;
+
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as { name?: unknown };
+    return packageJson.name === "agent-framework" && fs.existsSync(path.join(dir, "src", "adapter", "spec.ts"));
+  } catch {
+    return false;
+  }
+}
+
+export function checkInvocationsForRunner(checkRunner: CheckRunner): CheckInvocation[] {
+  if (checkRunner.type !== "just" || !isAgentFrameworkRepo(checkRunner.dir)) {
+    return [checkRunner];
+  }
+
+  return registeredAdapterNames().map((adapter) => ({
+    ...checkRunner,
+    adapter,
+    env: { AGENT_FRAMEWORK_ADAPTER: adapter },
+  }));
 }
 
 /**
@@ -350,11 +377,20 @@ export async function runCheckAgent(
   if (checkRunner && "error" in checkRunner) {
     checkOutput = `CHECK OUTPUT: ${checkRunner.error}`;
   } else if (checkRunner) {
-    throwIfAborted(options.signal);
-    const check = await runProcessCancellable({ shell: true, command: checkRunner.cmd }, checkRunner.dir, options);
-    const label = checkRunner.type === "just" ? "JUST CHECK" : "MAKE CHECK";
-    const checkLocation = checkRunner.dir === workingDir ? "" : ` (from ${path.basename(checkRunner.dir)})`;
-    checkOutput = `${label} OUTPUT${checkLocation} (exit code ${check.exitCode}):\n${check.output}`;
+    const checkSections: string[] = [];
+    for (const invocation of checkInvocationsForRunner(checkRunner)) {
+      throwIfAborted(options.signal);
+      const check = await runProcessCancellable(
+        { shell: true, command: invocation.cmd },
+        invocation.dir,
+        { ...options, env: invocation.env },
+      );
+      const label = invocation.type === "just" ? "JUST CHECK" : "MAKE CHECK";
+      const checkLocation = invocation.dir === workingDir ? "" : ` (from ${path.basename(invocation.dir)})`;
+      const adapterLabel = invocation.adapter ? ` [adapter=${invocation.adapter}]` : "";
+      checkSections.push(`${label} OUTPUT${adapterLabel}${checkLocation} (exit code ${check.exitCode}):\n${check.output}`);
+    }
+    checkOutput = checkSections.join("\n\n");
   } else {
     checkOutput = "CHECK OUTPUT: No Justfile or Makefile found. The check agent expects a Justfile with a 'check' recipe, or a Makefile with a 'check' target.";
   }

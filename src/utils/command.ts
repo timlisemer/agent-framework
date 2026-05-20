@@ -63,6 +63,7 @@ export type ProcessMode =
 export interface ProcessOutputLimits extends CancellationOptions {
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
+  env?: NodeJS.ProcessEnv;
 }
 
 const DEFAULT_PROCESS_STREAM_LIMIT_BYTES = 2 * 1024 * 1024;
@@ -112,12 +113,14 @@ export async function runProcessCancellable(
     const child = mode.shell
       ? spawn(mode.command, {
           cwd,
+          env: options.env ? { ...process.env, ...options.env } : process.env,
           shell: true,
           detached: process.platform !== "win32",
           stdio: ["ignore", "pipe", "pipe"],
         })
       : spawn(mode.file, mode.args, {
           cwd,
+          env: options.env ? { ...process.env, ...options.env } : process.env,
           shell: false,
           detached: process.platform !== "win32",
           stdio: ["ignore", "pipe", "pipe"],

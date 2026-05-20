@@ -8,6 +8,10 @@ import {
   validatePlanContract,
 } from "../../src/utils/plan-contract.js";
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 const required = [
   "User Goal",
   "Answered Assumptions",
@@ -115,10 +119,11 @@ describe("plan contract", () => {
       ];
 
       for (const body of directCommands) {
+        const activeCheckMcp = activeSpec().mcpWireName("check");
         const plan = validPlan().replace(
-          /Run `mcp__agent_framework__check` with `working_dir` set to `\/repo`\./,
+          new RegExp(`Run \`${escapeRegExp(activeCheckMcp)}\` with \`working_dir\` set to \`/repo\`\\.`),
           [
-            "Run `mcp__agent_framework__check` with `working_dir` set to `/repo`.",
+            `Run \`${activeCheckMcp}\` with \`working_dir\` set to \`/repo\`.`,
             body,
           ].join("\n"),
         );

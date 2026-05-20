@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
   applyStatusOverride,
+  checkInvocationsForRunner,
   promoteUnusedCodeToErrors,
 } from "../../../src/agents/mcp/check.js";
 
@@ -149,5 +153,39 @@ some error
 `;
     const r = promoteUnusedCodeToErrors(input);
     expect(r).toBe(input);
+  });
+});
+
+describe("checkInvocationsForRunner", () => {
+  it("runs agent-framework just checks once per registered adapter", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-check-"));
+    fs.mkdirSync(path.join(dir, "src", "adapter"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "src", "adapter", "spec.ts"), "");
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "agent-framework" }));
+
+    const invocations = checkInvocationsForRunner({ cmd: "just check 2>&1", dir, type: "just" });
+
+    expect(invocations.map((invocation) => invocation.adapter)).toEqual(["claude", "codex"]);
+    expect(invocations.map((invocation) => invocation.env?.AGENT_FRAMEWORK_ADAPTER)).toEqual(["claude", "codex"]);
+  });
+
+  it("does not multiply non-agent-framework project checks", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "other-project-check-"));
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "other-project" }));
+
+    const invocations = checkInvocationsForRunner({ cmd: "just check 2>&1", dir, type: "just" });
+
+    expect(invocations).toEqual([{ cmd: "just check 2>&1", dir, type: "just" }]);
+  });
+
+  it("does not multiply make checks", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-check-"));
+    fs.mkdirSync(path.join(dir, "src", "adapter"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "src", "adapter", "spec.ts"), "");
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "agent-framework" }));
+
+    const invocations = checkInvocationsForRunner({ cmd: "make check 2>&1", dir, type: "make" });
+
+    expect(invocations).toEqual([{ cmd: "make check 2>&1", dir, type: "make" }]);
   });
 });

@@ -185,7 +185,7 @@ describe("runCreatePlanfileAgent", () => {
       expect(result).toContain("- Status: FAIL");
       expect(result).toContain("Missing concrete file paths.");
       expect(result).toContain("Do not call create_planfile again for this plan");
-      expect(result).toContain("mcp__agent_framework__validate_plan");
+      expect(result).toContain(activeSpec().mcpWireName("validate_plan"));
       expect(fs.existsSync(sessionPlanFile(sessionDir, "failing-plan"))).toBe(true);
       expect(fs.existsSync(sessionCurrentPlanFile(sessionDir))).toBe(false);
     } finally {
