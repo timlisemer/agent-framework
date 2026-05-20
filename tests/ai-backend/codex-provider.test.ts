@@ -6,10 +6,18 @@ describe("AI backend Codex provider helpers", () => {
     const config = buildCodexConfig("/tmp/codex-home", true);
 
     expect(config.model_provider).toBe("openrouter");
+    expect(config.history).toEqual({ persistence: "none" });
     expect(config.forced_login_method).toBeUndefined();
     expect(config.model_providers).toMatchObject({
       openrouter: { env_key: "OPENROUTER_API_KEY" },
     });
+  });
+
+  it("does not disable Codex history for continuable sessions", () => {
+    const config = buildCodexConfig("/tmp/codex-home", false, true);
+
+    expect(config.history).toBeUndefined();
+    expect(config.forced_login_method).toBe("chatgpt");
   });
 
   it("removes API-key env for OpenAI subscription sessions", () => {

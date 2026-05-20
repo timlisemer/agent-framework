@@ -13,6 +13,7 @@ const sessionConfigSchema = z.object({
   model: nullableString,
   workingDir: nullableString,
   systemPrompt: nullableString,
+  continuable: z.boolean().default(false),
 }).strict();
 const planStateSchema = z.object({
   mode: z.enum(["disabled", "planning", "awaitingApproval", "approved"]),
@@ -64,8 +65,7 @@ const clientFrameSchema = z.discriminatedUnion("type", [
 
 export function parseClientFrame(line: string): AiClientMessage {
   const parsed = JSON.parse(line) as unknown;
-  clientFrameSchema.parse(parsed);
-  return parsed as AiClientMessage;
+  return clientFrameSchema.parse(parsed) as AiClientMessage;
 }
 
 export function writeBackendFrame(frame: AiBackendMessage, stdout: JsonlWritable = processStdout): void {

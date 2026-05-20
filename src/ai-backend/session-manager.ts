@@ -10,14 +10,24 @@ import type {
   TurnId,
 } from "../ai-protocol/index.js";
 import { TranscriptStore } from "./transcript-store.js";
-import { createProviderRunner, resolveSessionProvider } from "./provider.js";
+import { createProviderRunner, resolveSessionProvider, type AiProviderRunner } from "./provider.js";
 
 type WriteFrame = (frame: AiBackendMessage) => void;
+type RunningTurn = {
+  sessionId: SessionId;
+  controller: AbortController;
+};
+type RunningTurnPromise = {
+  sessionId: SessionId;
+  promise: Promise<void>;
+};
 
 export class AiBackendSessionManager {
   readonly #store = new TranscriptStore();
   readonly #write: WriteFrame;
-  readonly #turns = new Map<string, AbortController>();
+  readonly #turns = new Map<string, RunningTurn>();
+  readonly #turnPromises = new Map<string, RunningTurnPromise>();
+  readonly #runners = new Map<SessionId, AiProviderRunner>();
 
   constructor(write: WriteFrame) {
     this.#write = write;
@@ -34,7 +44,7 @@ export class AiBackendSessionManager {
   private async handleRequest(request: AiRequest): Promise<void> {
     switch (request.type) {
       case "startSession":
-        this.startSession(request.sessionId, request.config);
+        await this.startSession(request.sessionId, request.config);
         break;
       case "sendInput":
         this.startTurn(request.sessionId, request.turnId, request.input);
@@ -63,10 +73,14 @@ export class AiBackendSessionManager {
     }
   }
 
-  private startSession(sessionId: SessionId, config: AiSessionConfig): void {
+  private async startSession(sessionId: SessionId, config: AiSessionConfig): Promise<void> {
+    await this.waitForRunningTurns(sessionId);
+
     let resolvedProvider: ReturnType<typeof resolveSessionProvider>;
+    let runner: AiProviderRunner;
     try {
       resolvedProvider = resolveSessionProvider(config);
+      runner = createProviderRunner(config);
     } catch (error) {
       this.#write({
         type: "response",
@@ -78,6 +92,8 @@ export class AiBackendSessionManager {
       });
       return;
     }
+    void this.#runners.get(sessionId)?.dispose?.();
+    this.#runners.set(sessionId, runner);
     const resolvedConfig = { ...config, provider: config.provider ?? resolvedProvider.type };
     const snapshot = this.#store.create(sessionId, resolvedConfig);
     this.#write({
@@ -101,8 +117,12 @@ export class AiBackendSessionManager {
       return;
     }
     const baseConfig = this.#store.getConfig(sessionId);
+    if (this.hasRunningTurn(sessionId)) {
+      this.writeError(sessionId, turnId, `AI session already has a running turn: ${sessionId}`);
+      return;
+    }
     const controller = new AbortController();
-    this.#turns.set(turnKey(sessionId, turnId), controller);
+    this.#turns.set(turnKey(sessionId, turnId), { sessionId, controller });
     this.#store.setStatus(sessionId, "running");
     this.#write({
       type: "response",
@@ -110,7 +130,10 @@ export class AiBackendSessionManager {
     });
     this.#write({ type: "event", event: { type: "turnStarted", sessionId, turnId } });
     this.#store.append(sessionId, transcriptEntry(sessionId, turnId, "user", { type: "text", text: input }));
-    void this.runTurn(sessionId, turnId, input, controller, baseConfig);
+    const key = turnKey(sessionId, turnId);
+    const turnPromise = this.runTurn(sessionId, turnId, input, controller, baseConfig);
+    this.#turnPromises.set(key, { sessionId, promise: turnPromise });
+    void turnPromise;
   }
 
   private async runTurn(
@@ -123,7 +146,8 @@ export class AiBackendSessionManager {
     try {
       const config = turnConfig ?? this.#store.getConfig(sessionId);
       if (!config) throw new Error(`Unknown AI session config: ${sessionId}`);
-      const runner = createProviderRunner(config);
+      const runner = this.#runners.get(sessionId);
+      if (!runner) throw new Error(`Unknown AI session provider: ${sessionId}`);
       const result = await runner.runTurn(config, input, controller.signal);
       const assistant: AiMessage = {
         role: "assistant",
@@ -175,18 +199,30 @@ export class AiBackendSessionManager {
         });
       }
     } finally {
-      this.#turns.delete(turnKey(sessionId, turnId));
+      const key = turnKey(sessionId, turnId);
+      this.#turns.delete(key);
+      this.#turnPromises.delete(key);
     }
   }
 
   private cancel(sessionId: SessionId, turnId: TurnId | null): void {
     if (turnId) {
-      this.#turns.get(turnKey(sessionId, turnId))?.abort();
+      this.#turns.get(turnKey(sessionId, turnId))?.controller.abort();
     } else {
-      for (const [key, controller] of this.#turns) {
-        if (key.startsWith(`${sessionId}:`)) controller.abort();
+      for (const turn of this.#turns.values()) {
+        if (turn.sessionId === sessionId) turn.controller.abort();
       }
     }
+  }
+
+  async dispose(): Promise<void> {
+    for (const turn of this.#turns.values()) {
+      turn.controller.abort();
+    }
+    this.#turns.clear();
+    const disposals = [...this.#runners.values()].map((runner) => runner.dispose?.());
+    this.#runners.clear();
+    await Promise.all(disposals);
   }
 
   private writeError(sessionId: SessionId, turnId: TurnId | null, message: string): void {
@@ -202,10 +238,25 @@ export class AiBackendSessionManager {
       event: { type: "error", sessionId, turnId, message },
     });
   }
+
+  private hasRunningTurn(sessionId: SessionId): boolean {
+    for (const turn of this.#turns.values()) {
+      if (turn.sessionId === sessionId) return true;
+    }
+    return false;
+  }
+
+  private async waitForRunningTurns(sessionId: SessionId): Promise<void> {
+    const pending = [...this.#turnPromises.values()]
+      .filter((turn) => turn.sessionId === sessionId)
+      .map((turn) => turn.promise);
+    if (pending.length === 0) return;
+    await Promise.allSettled(pending);
+  }
 }
 
 function turnKey(sessionId: SessionId, turnId: TurnId): string {
-  return `${sessionId}:${turnId}`;
+  return JSON.stringify([sessionId, turnId]);
 }
 
 function transcriptEntry(

@@ -3,6 +3,7 @@ import { resolveProvider, resolveProviderForType, type ResolvedProvider } from "
 import { parseProviderTypeStrict } from "../providers/registry.js";
 import { buildClaudeQueryOptions, collectClaudeQueryResult, sanitizeClaudeEnv } from "../providers/claude-agent-runtime.js";
 import {
+  createCodexLiveSession,
   normalizeCodexAiUsage,
   withCodexThread,
 } from "../providers/codex-agent-runtime.js";
@@ -25,6 +26,7 @@ export interface ProviderTurnResult {
 export interface AiProviderRunner {
   readonly resolvedProvider: ResolvedProvider;
   runTurn(config: AiSessionConfig, prompt: string, signal: AbortSignal): Promise<ProviderTurnResult>;
+  dispose?(): Promise<void> | void;
 }
 
 export function createProviderRunner(config: AiSessionConfig): AiProviderRunner {
@@ -47,6 +49,8 @@ export function buildCodexTurnInput(config: AiSessionConfig, prompt: string): st
 }
 
 class ClaudeUiProvider implements AiProviderRunner {
+  #nativeSessionId: string | null = null;
+
   constructor(readonly resolvedProvider: ResolvedProvider) {}
 
   async runTurn(config: AiSessionConfig, prompt: string, signal: AbortSignal): Promise<ProviderTurnResult> {
@@ -69,9 +73,16 @@ class ClaudeUiProvider implements AiProviderRunner {
           permissionMode: "default",
           allowedTools: [],
           tools: [],
+          persistSession: config.continuable === true,
+          ...(config.continuable === true && this.#nativeSessionId
+            ? { resume: this.#nativeSessionId }
+            : {}),
         }),
       });
       const { text, nativeSessionId } = await collectClaudeQueryResult(stream, signal);
+      if (config.continuable === true) {
+        this.#nativeSessionId = nativeSessionId;
+      }
       return {
         text,
         usage: null,
@@ -88,9 +99,29 @@ class ClaudeUiProvider implements AiProviderRunner {
 }
 
 class CodexUiProvider implements AiProviderRunner {
+  #liveSession: Awaited<ReturnType<typeof createCodexLiveSession>> | null = null;
+
   constructor(readonly resolvedProvider: ResolvedProvider) {}
 
   async runTurn(config: AiSessionConfig, prompt: string, signal: AbortSignal): Promise<ProviderTurnResult> {
+    if (config.continuable === true) {
+      this.#liveSession ??= await createCodexLiveSession(
+        this.resolvedProvider,
+        config,
+        "agent-framework-ai-codex-"
+      );
+      const result = await this.#liveSession.thread.run(buildCodexTurnInput(config, prompt), { signal });
+      return {
+        text: result.finalResponse ?? "",
+        usage: normalizeCodexAiUsage(result.usage, optionalBigInt),
+        resume: {
+          provider: this.resolvedProvider.type,
+          nativeSessionId: null,
+          nativeThreadId: this.#liveSession.thread.id ?? null,
+        },
+      };
+    }
+
     return withCodexThread(
       this.resolvedProvider,
       config,
@@ -108,6 +139,11 @@ class CodexUiProvider implements AiProviderRunner {
         };
       }
     );
+  }
+
+  dispose(): void {
+    this.#liveSession?.dispose();
+    this.#liveSession = null;
   }
 }
 

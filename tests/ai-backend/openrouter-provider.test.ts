@@ -24,6 +24,7 @@ describe("AI backend OpenRouter provider resolution", () => {
       model: null,
       workingDir: null,
       systemPrompt: null,
+      continuable: false,
     });
 
     expect(runner.resolvedProvider.type).toBe(PROVIDER_TYPES.OPENROUTER);
@@ -40,6 +41,7 @@ describe("AI backend OpenRouter provider resolution", () => {
       model: null,
       workingDir: null,
       systemPrompt: null,
+      continuable: false,
     });
 
     expect(runner.resolvedProvider.type).toBe(PROVIDER_TYPES.OPENROUTER);
@@ -55,6 +57,7 @@ describe("AI backend OpenRouter provider resolution", () => {
       model: null,
       workingDir: null,
       systemPrompt: null,
+      continuable: false,
     });
 
     expect(runner.resolvedProvider.type).toBe(PROVIDER_TYPES.OPENAI_SUBSCRIPTION);
@@ -69,6 +72,7 @@ describe("AI backend OpenRouter provider resolution", () => {
           model: null,
           workingDir: null,
           systemPrompt: "Be concise.",
+          continuable: false,
         },
         "Summarize this."
       )
@@ -83,6 +87,7 @@ describe("AI backend OpenRouter provider resolution", () => {
         model: null,
         workingDir: "/tmp/work",
         systemPrompt: "System",
+        continuable: false,
       },
       {
         type: PROVIDER_TYPES.CLAUDE_SUBSCRIPTION,
@@ -100,6 +105,35 @@ describe("AI backend OpenRouter provider resolution", () => {
       persistSession: false,
       abortController,
     });
+    expect(options).not.toHaveProperty("resume");
+  });
+
+  it("can opt Claude SDK sessions into explicit persistence and resume", () => {
+    const abortController = new AbortController();
+    const options = buildClaudeQueryOptions(
+      {
+        provider: "claude-subscription",
+        model: null,
+        workingDir: "/tmp/work",
+        systemPrompt: "System",
+        continuable: true,
+      },
+      {
+        type: PROVIDER_TYPES.CLAUDE_SUBSCRIPTION,
+        mode: "sdk",
+        modelId: "claude-sonnet-4-5",
+        sdkRuntime: "claude",
+        costTracking: "none",
+      },
+      abortController,
+      {},
+      { persistSession: true, resume: "native-session-1" }
+    );
+
+    expect(options).toMatchObject({
+      persistSession: true,
+      resume: "native-session-1",
+    });
   });
 
   it("keeps Codex UI turns read-only with web search disabled and reasoning effort applied", () => {
@@ -110,6 +144,7 @@ describe("AI backend OpenRouter provider resolution", () => {
           model: "opus",
           workingDir: "/tmp/work",
           systemPrompt: null,
+          continuable: false,
         },
         {
           type: PROVIDER_TYPES.OPENAI_SUBSCRIPTION,

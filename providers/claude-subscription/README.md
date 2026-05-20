@@ -28,5 +28,5 @@ Compliance stance:
 
 Silence/session behavior:
 
-- Agent-framework passes `persistSession: false` for Claude SDK calls.
+- Agent-framework passes `persistSession: false` for one-shot Claude SDK calls. Opt-in continuable SDK sessions preserve the native Claude session ID across turns until the owning session is disposed.
 - It scrubs OpenRouter and Anthropic API-key environment variables when this provider is selected so the runtime uses the signed-in Claude Code account path instead of accidentally falling back to API billing.

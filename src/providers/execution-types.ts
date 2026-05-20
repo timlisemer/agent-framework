@@ -17,6 +17,23 @@ export interface ProviderExecutionResult {
   generationId?: string;
   provider?: ProviderType;
   modelName?: string;
+  continuationState?: ProviderContinuationState;
+}
+
+export type ProviderContinuationState =
+  | ClaudeProviderContinuationState
+  | CodexProviderContinuationState;
+
+export interface ClaudeProviderContinuationState {
+  kind: "claude";
+  nativeSessionId: string | null;
+}
+
+export interface CodexProviderContinuationState {
+  kind: "codex";
+  nativeThreadId: string | null;
+  liveSession: unknown;
+  dispose?: () => void | Promise<void>;
 }
 
 export interface ProviderRunInput {
@@ -25,5 +42,5 @@ export interface ProviderRunInput {
   resolvedProvider: ResolvedProvider;
   options: CancellationOptions;
   tools?: readonly string[];
+  continuationState?: ProviderContinuationState;
 }
-

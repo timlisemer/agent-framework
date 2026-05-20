@@ -36,11 +36,19 @@ export type CodexConstructor = new (options?: Record<string, unknown>) => {
   resumeThread?: (threadId: string, options?: Record<string, unknown>) => CodexThread;
 };
 
+type CodexLiveSession = {
+  tempHome: string;
+  thread: CodexThread;
+  dispose(): void;
+};
+
 export async function runCodexAgent(
   input: ProviderRunInput,
   mode: "direct" | "sdk"
 ): Promise<ProviderExecutionResult> {
   const { config, prompt, resolvedProvider, options } = input;
+  const continuable = config.continuable === true;
+  let createdLiveSession: CodexLiveSession | null = null;
 
   try {
     const fullPrompt = mode === "direct"
@@ -50,20 +58,41 @@ export async function runCodexAgent(
 You are running as a read-only validation agent for agent-framework. Do not edit files. Use only read-only inspection.
 
 ${prompt}`;
-    const turn = await withCodexThread(
-      resolvedProvider,
-      config,
-      "agent-framework-codex-",
-      (thread) => thread.run(fullPrompt, { signal: options.signal })
-    );
+    const previousSession = continuable && input.continuationState?.kind === "codex"
+      ? input.continuationState.liveSession as CodexLiveSession
+      : null;
+    const liveSession = continuable
+      ? previousSession ?? (createdLiveSession = await createCodexLiveSession(
+        resolvedProvider,
+        config,
+        "agent-framework-codex-"
+      ))
+      : null;
+    const turn = liveSession
+      ? await liveSession.thread.run(fullPrompt, { signal: options.signal })
+      : await withCodexThread(
+        resolvedProvider,
+        config,
+        "agent-framework-codex-",
+        (thread) => thread.run(fullPrompt, { signal: options.signal })
+      );
 
     return {
       text: turn.finalResponse ?? "",
       usage: normalizeCodexUsage(turn.usage),
       provider: resolvedProvider.type,
       modelName: resolvedProvider.modelId,
+      continuationState: liveSession
+        ? {
+            kind: "codex",
+            nativeThreadId: liveSession.thread.id ?? null,
+            liveSession,
+            dispose: () => liveSession.dispose(),
+          }
+        : undefined,
     };
   } catch (error) {
+    createdLiveSession?.dispose();
     if (isCancellationError(error)) throw error;
     const errorMessage = error instanceof Error ? error.message : String(error);
     return {
@@ -96,18 +125,38 @@ export async function withCodexThread<T>(
   tempPrefix: string,
   callback: (thread: CodexThread) => Promise<T>
 ): Promise<T> {
+  const session = await createCodexLiveSession(resolvedProvider, config, tempPrefix, false);
+  try {
+    const thread = session.thread;
+    return await callback(thread);
+  } finally {
+    session.dispose();
+  }
+}
+
+export async function createCodexLiveSession(
+  resolvedProvider: ResolvedProvider,
+  config: CodexThreadOptionsConfig,
+  tempPrefix: string,
+  persistHistory = true
+): Promise<CodexLiveSession> {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), tempPrefix));
   try {
     copyCodexAuthIfPresent(tempHome);
     const Codex = await loadCodexConstructor();
     const codex = new Codex({
       env: buildCodexEnv(tempHome, resolvedProvider.type === PROVIDER_TYPES.OPENAI_SUBSCRIPTION),
-      config: buildCodexConfig(tempHome, resolvedProvider.type === PROVIDER_TYPES.OPENROUTER),
+      config: buildCodexConfig(tempHome, resolvedProvider.type === PROVIDER_TYPES.OPENROUTER, persistHistory),
     });
     const thread = codex.startThread(buildCodexThreadOptions(config, resolvedProvider));
-    return await callback(thread);
-  } finally {
+    return {
+      tempHome,
+      thread,
+      dispose: () => fs.rmSync(tempHome, { recursive: true, force: true }),
+    };
+  } catch (error) {
     fs.rmSync(tempHome, { recursive: true, force: true });
+    throw error;
   }
 }
 
@@ -176,9 +225,13 @@ export function buildCodexEnv(tempHome: string, openaiSubscription: boolean): Re
   return env;
 }
 
-export function buildCodexConfig(tempHome: string, openrouter: boolean): Record<string, unknown> {
+export function buildCodexConfig(
+  tempHome: string,
+  openrouter: boolean,
+  persistHistory = false
+): Record<string, unknown> {
   const config: Record<string, unknown> = {
-    history: { persistence: "none" },
+    history: persistHistory ? undefined : { persistence: "none" },
     log_dir: path.join(tempHome, "logs"),
     forced_login_method: openrouter ? undefined : "chatgpt",
   };

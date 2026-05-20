@@ -33,5 +33,5 @@ Compliance stance:
 
 Silence/session behavior:
 
-- Agent-framework creates a temporary `CODEX_HOME` per call, copies only `auth.json` when present, sets history persistence to `none`, and removes the temp directory after the call.
+- Agent-framework creates a temporary `CODEX_HOME`, copies only `auth.json` when present, and sets history persistence to `none` for one-shot calls. Opt-in continuable SDK sessions keep a live Codex thread and its temporary home until the owning session is disposed.
 - It deletes `OPENAI_API_KEY`, `CODEX_API_KEY`, OpenRouter, and Anthropic API environment variables for this provider so Codex uses ChatGPT/Codex sign-in rather than API billing.

@@ -28,6 +28,7 @@ const defaultConfig: AiSessionConfig = {
   model: null,
   workingDir: null,
   systemPrompt: null,
+  continuable: false,
 };
 
 function createHarness(): { frames: AiBackendMessage[]; manager: AiBackendSessionManager } {
@@ -52,6 +53,7 @@ async function startSession(
 
 describe("AI backend session manager", () => {
   beforeEach(() => {
+    provider.createProviderRunner.mockReset();
     provider.createProviderRunner.mockImplementation(() => ({
       resolvedProvider: { type: "openrouter" },
       runTurn: provider.runTurn,
@@ -80,6 +82,7 @@ describe("AI backend session manager", () => {
       model: null,
       workingDir: null,
       systemPrompt: null,
+      continuable: false,
     });
 
     expect(frames[0]).toMatchObject({
@@ -102,6 +105,7 @@ describe("AI backend session manager", () => {
       model: null,
       workingDir: null,
       systemPrompt: null,
+      continuable: false,
     });
 
     expect(frames[0]).toMatchObject({
@@ -161,6 +165,276 @@ describe("AI backend session manager", () => {
       throw new Error("expected sessionUpdated event");
     }
     expect(sessionUpdated.event.snapshot.transcript).toHaveLength(2);
+  });
+
+  it("reuses one provider runner across turns in a session", async () => {
+    provider.runTurn
+      .mockResolvedValueOnce({
+        text: "first",
+        usage: null,
+        resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: "thread-1" },
+      })
+      .mockResolvedValueOnce({
+        text: "second",
+        usage: null,
+        resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: "thread-1" },
+      });
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-runner-reuse", { ...defaultConfig, continuable: true });
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session-runner-reuse",
+        turnId: "turn-1",
+        input: "first",
+      },
+    });
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({
+        type: "event",
+        event: { type: "turnFinished", sessionId: "session-runner-reuse", turnId: "turn-1", usage: null },
+      });
+    });
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session-runner-reuse",
+        turnId: "turn-2",
+        input: "second",
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({
+        type: "event",
+        event: { type: "turnFinished", sessionId: "session-runner-reuse", turnId: "turn-2", usage: null },
+      });
+    });
+    expect(provider.createProviderRunner).toHaveBeenCalledTimes(1);
+    expect(provider.runTurn).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects overlapping turns for the same session", async () => {
+    let resolveTurn!: (value: unknown) => void;
+    provider.runTurn.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveTurn = resolve;
+      })
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-overlap", { ...defaultConfig, continuable: true });
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session-overlap",
+        turnId: "turn-1",
+        input: "first",
+      },
+    });
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session-overlap",
+        turnId: "turn-2",
+        input: "second",
+      },
+    });
+
+    expect(frames).toContainEqual({
+      type: "event",
+      event: {
+        type: "error",
+        sessionId: "session-overlap",
+        turnId: "turn-2",
+        message: "AI session already has a running turn: session-overlap",
+      },
+    });
+    expect(provider.runTurn).toHaveBeenCalledTimes(1);
+
+    resolveTurn({
+      text: "done",
+      usage: null,
+      resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: null },
+    });
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({
+        type: "event",
+        event: { type: "turnFinished", sessionId: "session-overlap", turnId: "turn-1", usage: null },
+      });
+    });
+  });
+
+  it("does not reject turns for sessions whose ids are prefixes of running sessions", async () => {
+    const resolveTurns: Array<(value: unknown) => void> = [];
+    provider.runTurn.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveTurns.push(resolve);
+      })
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session");
+    await startSession(manager, "session:child");
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session:child",
+        turnId: "turn-1",
+        input: "child",
+      },
+    });
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session",
+        turnId: "turn-1",
+        input: "parent",
+      },
+    });
+
+    expect(provider.runTurn).toHaveBeenCalledTimes(2);
+    expect(frames).not.toContainEqual({
+      type: "event",
+      event: {
+        type: "error",
+        sessionId: "session",
+        turnId: "turn-1",
+        message: "AI session already has a running turn: session",
+      },
+    });
+
+    for (const resolveTurn of resolveTurns) {
+      resolveTurn({
+        text: "done",
+        usage: null,
+        resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: null },
+      });
+    }
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({
+        type: "event",
+        event: { type: "turnFinished", sessionId: "session", turnId: "turn-1", usage: null },
+      });
+    });
+  });
+
+  it("waits for an in-flight turn before replacing a session runner", async () => {
+    let resolveTurn!: (value: unknown) => void;
+    const firstRunner = {
+      resolvedProvider: { type: "openrouter" },
+      runTurn: vi.fn(() => new Promise((resolve) => {
+        resolveTurn = resolve;
+      })),
+      dispose: vi.fn(),
+    };
+    const secondRunner = {
+      resolvedProvider: { type: "openrouter" },
+      runTurn: vi.fn(),
+      dispose: vi.fn(),
+    };
+    provider.createProviderRunner
+      .mockReturnValueOnce(firstRunner)
+      .mockReturnValueOnce(secondRunner);
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-restart-waits", { ...defaultConfig, continuable: true });
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session-restart-waits",
+        turnId: "turn-1",
+        input: "first",
+      },
+    });
+    const restartPromise = startSession(manager, "session-restart-waits", {
+      ...defaultConfig,
+      continuable: true,
+      systemPrompt: "restarted",
+    });
+    await Promise.resolve();
+
+    expect(provider.createProviderRunner).toHaveBeenCalledTimes(1);
+    expect(firstRunner.dispose).not.toHaveBeenCalled();
+
+    resolveTurn({
+      text: "done",
+      usage: null,
+      resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: "thread-1" },
+    });
+    await restartPromise;
+
+    expect(provider.createProviderRunner).toHaveBeenCalledTimes(2);
+    expect(firstRunner.dispose).toHaveBeenCalledTimes(1);
+    expect(frames).toContainEqual({
+      type: "event",
+      event: { type: "turnFinished", sessionId: "session-restart-waits", turnId: "turn-1", usage: null },
+    });
+    expect(frames.at(-1)).toMatchObject({
+      type: "response",
+      response: {
+        type: "sessionStarted",
+        sessionId: "session-restart-waits",
+        snapshot: { sessionId: "session-restart-waits" },
+      },
+    });
+  });
+
+  it("does not wait for running turns from sessions whose ids share prefixes", async () => {
+    let resolveTurn!: (value: unknown) => void;
+    provider.runTurn.mockImplementation(
+      () => new Promise((resolve) => {
+        resolveTurn = resolve;
+      })
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session");
+    await startSession(manager, "session:child");
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session:child",
+        turnId: "turn-1",
+        input: "child",
+      },
+    });
+    const restartPromise = startSession(manager, "session", {
+      ...defaultConfig,
+      systemPrompt: "parent restart",
+    });
+    await restartPromise;
+
+    expect(provider.createProviderRunner).toHaveBeenCalledTimes(3);
+    expect(frames.at(-1)).toMatchObject({
+      type: "response",
+      response: {
+        type: "sessionStarted",
+        sessionId: "session",
+        snapshot: { sessionId: "session" },
+      },
+    });
+
+    resolveTurn({
+      text: "done",
+      usage: null,
+      resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: null },
+    });
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({
+        type: "event",
+        event: { type: "turnFinished", sessionId: "session:child", turnId: "turn-1", usage: null },
+      });
+    });
   });
 
   it("emits protocol errors for unknown sessions", async () => {
@@ -249,6 +523,53 @@ describe("AI backend session manager", () => {
         snapshot: expect.objectContaining({ status: "cancelled" }),
       }),
     });
+  });
+
+  it("does not cancel running turns from sessions whose ids share prefixes", async () => {
+    let childAborted = false;
+    provider.runTurn.mockImplementation(
+      (_config: unknown, _input: unknown, signal: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            childAborted = true;
+            reject(new Error("aborted"));
+          }, { once: true });
+        })
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session");
+    await startSession(manager, "session:child");
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session:child",
+        turnId: "turn-1",
+        input: "wait",
+      },
+    });
+    await manager.handle({
+      type: "cancel",
+      sessionId: "session",
+      turnId: null,
+    });
+    await Promise.resolve();
+
+    expect(childAborted).toBe(false);
+
+    await manager.handle({
+      type: "cancel",
+      sessionId: "session:child",
+      turnId: null,
+    });
+    await vi.waitFor(() => {
+      expect(frames).toContainEqual({
+        type: "event",
+        event: { type: "turnFinished", sessionId: "session:child", turnId: "turn-1", usage: null },
+      });
+    });
+    expect(childAborted).toBe(true);
   });
 
   it("emits an error session snapshot after failed turns", async () => {

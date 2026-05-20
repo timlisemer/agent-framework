@@ -7,7 +7,7 @@ import {
   throwIfAborted,
 } from "../utils/cancellation.js";
 import { PROVIDER_TYPES } from "./registry.js";
-import type { ProviderExecutionResult, ProviderRunInput } from "./execution-types.js";
+import type { ClaudeProviderContinuationState, ProviderExecutionResult, ProviderRunInput } from "./execution-types.js";
 import type { ResolvedProvider } from "./types.js";
 
 type ClaudeQueryOptionsConfig = {
@@ -26,6 +26,8 @@ type ClaudeQueryOptionOverrides = {
   includeHookEvents?: boolean;
   pathToClaudeCodeExecutable?: string;
   stderr?: (data: string) => void;
+  persistSession?: boolean;
+  resume?: string;
 };
 
 export async function runClaudeAgent(
@@ -57,6 +59,11 @@ Git data (status/diff/log/show) is already provided in the prompt context -- do 
 Your final response should be your complete analysis in the required format.`;
 
   const subprocessEnv = sanitizeClaudeEnv(process.env, isSubscription);
+  const continuable = config.continuable === true;
+  let previousNativeSessionId = continuable &&
+    input.continuationState?.kind === "claude"
+    ? input.continuationState.nativeSessionId
+    : null;
 
   const runOnce = async (): Promise<SdkAttemptOutcome> => {
     let stderrBuffer = "";
@@ -71,6 +78,7 @@ Your final response should be your complete analysis in the required format.`;
     let lastApiRetryStatus: string | undefined;
     let finalResult = "";
     let lastAssistantContent = "";
+    let nativeSessionId: string | null = null;
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
     let totalCachedTokens = 0;
@@ -92,6 +100,8 @@ Your final response should be your complete analysis in the required format.`;
               permissionMode: "bypassPermissions",
               allowDangerouslySkipPermissions: true,
               maxTurns: mode === "direct" ? 1 : (config.maxTurns ?? 10),
+              persistSession: continuable,
+              ...(previousNativeSessionId ? { resume: previousNativeSessionId } : {}),
               pathToClaudeCodeExecutable: `${homedir()}/.local/bin/claude`,
               stderr: (data: string) => {
                 stderrBuffer = (stderrBuffer + data).slice(-2048);
@@ -110,6 +120,10 @@ Your final response should be your complete analysis in the required format.`;
           }
 
           if (message.type === "result") {
+            nativeSessionId = collectClaudeMessageResult(message, {
+              text: finalResult || lastAssistantContent,
+              nativeSessionId,
+            }).nativeSessionId;
             lastResultSubtype = (message as { subtype?: string }).subtype;
             if ("is_error" in message && typeof message.is_error === "boolean") {
               lastResultIsError = message.is_error;
@@ -153,10 +167,12 @@ Your final response should be your complete analysis in the required format.`;
               lastAssistantError = assistantError;
               continue;
             }
-            lastAssistantContent = collectClaudeMessageResult(message, {
+            const collected = collectClaudeMessageResult(message, {
               text: lastAssistantContent,
-              nativeSessionId: null,
-            }).text;
+              nativeSessionId,
+            });
+            lastAssistantContent = collected.text;
+            nativeSessionId = collected.nativeSessionId;
           }
         }
       } finally {
@@ -177,7 +193,10 @@ Your final response should be your complete analysis in the required format.`;
     } : undefined;
 
     if (finalResult || lastAssistantContent) {
-      return { kind: "ok", text: finalResult || lastAssistantContent, usage };
+      const continuationState: ClaudeProviderContinuationState | undefined = continuable
+        ? { kind: "claude", nativeSessionId }
+        : undefined;
+      return { kind: "ok", text: finalResult || lastAssistantContent, usage, continuationState };
     }
 
     return {
@@ -195,12 +214,16 @@ Your final response should be your complete analysis in the required format.`;
         stderrBuffer,
       }),
       usage,
+      continuationState: continuable ? { kind: "claude", nativeSessionId } : undefined,
       diagnostics: { lastResultSubtype, lastResultIsError },
     };
   };
 
   const first = await runOnce();
   if (first.kind === "ok") return toResult(first, resolvedProvider);
+  if (continuable && first.kind === "noOutput" && first.continuationState?.nativeSessionId) {
+    previousNativeSessionId = first.continuationState.nativeSessionId;
+  }
 
   let shouldRetry = false;
   if (first.kind === "noOutput") {
@@ -307,15 +330,22 @@ function toResult(outcome: SdkAttemptOutcome, resolvedProvider: ProviderRunInput
     generationId: undefined,
     provider: resolvedProvider.type,
     modelName: resolvedProvider.modelId,
+    continuationState: outcome.kind === "thrown" ? undefined : outcome.continuationState,
   };
 }
 
 type SdkAttemptOutcome =
-  | { kind: "ok"; text: string; usage?: ProviderExecutionResult["usage"] }
+  | {
+      kind: "ok";
+      text: string;
+      usage?: ProviderExecutionResult["usage"];
+      continuationState?: ClaudeProviderContinuationState;
+    }
   | {
       kind: "noOutput";
       text: string;
       usage?: ProviderExecutionResult["usage"];
+      continuationState?: ClaudeProviderContinuationState;
       diagnostics: {
         lastResultSubtype: string | undefined;
         lastResultIsError: boolean | undefined;

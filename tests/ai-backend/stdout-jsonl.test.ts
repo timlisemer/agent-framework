@@ -17,6 +17,33 @@ describe("AI backend JSONL wire", () => {
     );
 
     expect(frame.type).toBe("request");
+    if (frame.type === "request" && frame.request.type === "startSession") {
+      expect(frame.request.config.continuable).toBe(false);
+    }
+  });
+
+  it("parses continuable session config", () => {
+    const frame = parseClientFrame(
+      JSON.stringify({
+        type: "request",
+        request: {
+          type: "startSession",
+          sessionId: "session-jsonl",
+          config: {
+            provider: null,
+            model: null,
+            workingDir: null,
+            systemPrompt: null,
+            continuable: true,
+          },
+        },
+      })
+    );
+
+    expect(frame).toMatchObject({
+      type: "request",
+      request: { type: "startSession", config: { continuable: true } },
+    });
   });
 
   it("rejects malformed request frames before session handling", () => {

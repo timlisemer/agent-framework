@@ -90,7 +90,7 @@ import {
   throwIfAborted,
 } from "./cancellation.js";
 import { runProviderDirect, runProviderSdk } from "../providers/index.js";
-import type { ProviderExecutionResult } from "../providers/execution-types.js";
+import type { ProviderContinuationState, ProviderExecutionResult } from "../providers/execution-types.js";
 
 /**
  * Tools available to SDK mode agents.
@@ -148,6 +148,15 @@ export interface AgentConfig {
    * - 'sdk': Multi-turn with Read and read-only Bash tools
    */
   mode: "direct" | "sdk";
+
+  /**
+   * Whether SDK mode should keep provider-native conversation state across
+   * repeated turns from a reusable agent session.
+   *
+   * Defaults to false. runAgent() remains one-shot; use
+   * createContinuableAgentSession() when a caller owns repeated turns.
+   */
+  continuable?: boolean;
 
   /**
    * System prompt defining agent behavior.
@@ -331,7 +340,7 @@ export async function runAgent(
   try {
     result =
       config.mode === "sdk"
-        ? await runSdkAgent(config, fullPrompt, options)
+        ? await runSdkAgent({ ...config, continuable: false }, fullPrompt, options)
         : await runDirectAgent(config, fullPrompt, options);
 
     // Detect error responses
@@ -340,46 +349,13 @@ export async function runAgent(
       errorCount = 1;
     }
 
-    // Format validation (if configured)
-    // Run validation even when success===false from a sentinel error so that
-    // [SDK ERROR] / [DIRECT ERROR] outputs are translated into the agent's
-    // configured fallbackOutput (e.g. confirm's "## Verdict\nDECLINED:").
-    // Without this, sentinel errors leak upward as if they were valid verdicts.
-    if (config.formatValidation) {
-      const { validator, formatReminder, fallbackOutput } = config.formatValidation;
-
-      if (!validator.test(result.text)) {
-        // Skip the retry-tier loop when the input is already a sentinel —
-        // a cheaper model cannot reformat "no output received" into a verdict.
-        const isSentinelError =
-          result.text.startsWith("[DIRECT ERROR]") ||
-          result.text.startsWith("[SDK ERROR]");
-
-        if (!isSentinelError) {
-          const retryTiers = getRetryTiers(config.tier);
-          const baseProvider = result.provider ?? resolveProvider(config.tier, "direct").type;
-
-          for (const retryTier of retryTiers) {
-            const retryResolved = resolveProviderForType(baseProvider, retryTier, "direct");
-            const retryResult = await runProviderDirect({
-              config: { ...config, tier: retryTier, maxTokens: 500 },
-              prompt: `Invalid format. ${formatReminder}\n\nOriginal output:\n${result.text.slice(0, 2000)}`,
-              resolvedProvider: retryResolved,
-              options,
-            });
-            result = mergeRetryResult(result, retryResult);
-
-            if (validator.test(result.text)) break;
-          }
-        }
-
-        if (!validator.test(result.text)) {
-          result.text = fallbackOutput.replace("$RAW", result.text.slice(0, 500));
-          success = false;
-          errorCount++;
-        }
-      }
-    }
+    ({ result, success, errorCount } = await applyFormatValidation(
+      config,
+      result,
+      options,
+      success,
+      errorCount
+    ));
   } catch (error) {
     if (isCancellationError(error)) {
       throw error;
@@ -410,6 +386,75 @@ export async function runAgent(
   };
 }
 
+export interface ContinuableAgentSession {
+  run(input: AgentInput, options?: CancellationOptions): Promise<AgentExecutionResult>;
+  dispose(): Promise<void>;
+}
+
+export function createContinuableAgentSession(config: AgentConfig): ContinuableAgentSession {
+  return new ContinuableAgentSessionImpl(config);
+}
+
+class ContinuableAgentSessionImpl implements ContinuableAgentSession {
+  readonly #config: AgentConfig;
+  #continuationState: ProviderContinuationState | undefined;
+  #disposed = false;
+
+  constructor(config: AgentConfig) {
+    this.#config = config;
+  }
+
+  async run(input: AgentInput, options: CancellationOptions = {}): Promise<AgentExecutionResult> {
+    if (this.#disposed) {
+      throw new Error(`Agent session '${this.#config.name}' has been disposed`);
+    }
+    throwIfAborted(options.signal);
+    const fullPrompt = input.context
+      ? `${input.prompt}\n\n${input.context}`
+      : input.prompt;
+    const startTime = Date.now();
+    let result: InternalAgentResult;
+    let success = true;
+    let errorCount = 0;
+
+    try {
+      if (this.#config.mode === "sdk") {
+        result = await runSdkAgent(this.#config, fullPrompt, options, this.#continuationState);
+      } else {
+        result = await runDirectAgent(this.#config, fullPrompt, options);
+      }
+      this.#continuationState = result.continuationState ?? this.#continuationState;
+      if (result.text.startsWith("[DIRECT ERROR]") || result.text.startsWith("[SDK ERROR]")) {
+        success = false;
+        errorCount = 1;
+      }
+      ({ result, success, errorCount } = await applyFormatValidation(
+        this.#config,
+        result,
+        options,
+        success,
+        errorCount
+      ));
+    } catch (error) {
+      if (isCancellationError(error)) throw error;
+      result = { text: error instanceof Error ? error.message : String(error) };
+      success = false;
+      errorCount = 1;
+    }
+
+    return toAgentExecutionResult(this.#config, result, startTime, success, errorCount);
+  }
+
+  async dispose(): Promise<void> {
+    this.#disposed = true;
+    const dispose = this.#continuationState && "dispose" in this.#continuationState
+      ? this.#continuationState.dispose
+      : undefined;
+    this.#continuationState = undefined;
+    if (dispose) await dispose();
+  }
+}
+
 /**
  * Execute an agent using direct Anthropic API call.
  *
@@ -428,7 +473,12 @@ async function runDirectAgent(
 ): Promise<InternalAgentResult> {
   throwIfAborted(options.signal);
   const resolvedProvider = resolveProvider(config.tier, "direct");
-  return runProviderDirect({ config, prompt, resolvedProvider, options });
+  return runProviderDirect({
+    config: { ...config, continuable: false },
+    prompt,
+    resolvedProvider,
+    options,
+  });
 }
 
 function mergeRetryResult(
@@ -445,6 +495,62 @@ function mergeRetryResult(
     provider: retry.provider ?? previous.provider,
     modelName: retry.modelName ?? previous.modelName,
   };
+}
+
+async function applyFormatValidation(
+  config: AgentConfig,
+  result: InternalAgentResult,
+  options: CancellationOptions,
+  success: boolean,
+  errorCount: number
+): Promise<{
+  result: InternalAgentResult;
+  success: boolean;
+  errorCount: number;
+}> {
+  // Run validation even when success===false from a sentinel error so that
+  // [SDK ERROR] / [DIRECT ERROR] outputs are translated into the agent's
+  // configured fallbackOutput (e.g. confirm's "## Verdict\nDECLINED:").
+  // Without this, sentinel errors leak upward as if they were valid verdicts.
+  if (!config.formatValidation) {
+    return { result, success, errorCount };
+  }
+
+  const { validator, formatReminder, fallbackOutput } = config.formatValidation;
+
+  if (!validator.test(result.text)) {
+    // Skip the retry-tier loop when the input is already a sentinel —
+    // a cheaper model cannot reformat "no output received" into a verdict.
+    const isSentinelError =
+      result.text.startsWith("[DIRECT ERROR]") ||
+      result.text.startsWith("[SDK ERROR]");
+
+    if (!isSentinelError) {
+      const retryTiers = getRetryTiers(config.tier);
+      const baseProvider = result.provider ?? resolveProvider(config.tier, "direct").type;
+
+      for (const retryTier of retryTiers) {
+        const retryResolved = resolveProviderForType(baseProvider, retryTier, "direct");
+        const retryResult = await runProviderDirect({
+          config: { ...config, tier: retryTier, maxTokens: 500, continuable: false },
+          prompt: `Invalid format. ${formatReminder}\n\nOriginal output:\n${result.text.slice(0, 2000)}`,
+          resolvedProvider: retryResolved,
+          options,
+        });
+        result = mergeRetryResult(result, retryResult);
+
+        if (validator.test(result.text)) break;
+      }
+    }
+
+    if (!validator.test(result.text)) {
+      result.text = fallbackOutput.replace("$RAW", result.text.slice(0, 500));
+      success = false;
+      errorCount++;
+    }
+  }
+
+  return { result, success, errorCount };
 }
 
 /**
@@ -479,7 +585,8 @@ function mergeRetryResult(
 async function runSdkAgent(
   config: AgentConfig,
   prompt: string,
-  options: CancellationOptions = {}
+  options: CancellationOptions = {},
+  continuationState?: ProviderContinuationState
 ): Promise<InternalAgentResult> {
   throwIfAborted(options.signal);
   if (!config.workingDir) {
@@ -487,7 +594,32 @@ async function runSdkAgent(
   }
   const resolvedProvider = resolveProvider(config.tier, "sdk");
   const tools = [...SDK_TOOLS, ...(config.extraTools ?? [])];
-  return runProviderSdk({ config, prompt, resolvedProvider, options, tools });
+  return runProviderSdk({ config, prompt, resolvedProvider, options, tools, continuationState });
+}
+
+function toAgentExecutionResult(
+  config: AgentConfig,
+  result: InternalAgentResult,
+  startTime: number,
+  success: boolean,
+  errorCount: number
+): AgentExecutionResult {
+  return {
+    output: result.text,
+    latencyMs: Date.now() - startTime,
+    modelTier: config.tier,
+    modelName: result.modelName ?? resolveProvider(config.tier, config.mode).modelId,
+    success,
+    errorCount,
+    promptTokens: result.usage?.promptTokens,
+    completionTokens: result.usage?.completionTokens,
+    totalTokens: result.usage?.totalTokens,
+    cachedTokens: result.usage?.cachedTokens,
+    reasoningTokens: result.usage?.reasoningTokens,
+    cost: result.usage?.cost,
+    generationId: result.generationId,
+    provider: result.provider,
+  };
 }
 
 /**
@@ -600,7 +732,7 @@ export async function runAgentWithRetry(
     try {
       const retryResolved = resolveProviderForType(baseProvider, config.tier, "direct");
       const retryResult = await runProviderDirect({
-        config: { ...config, maxTokens },
+        config: { ...config, maxTokens, continuable: false },
         prompt: `Invalid format: "${decision}". You are evaluating: ${contextDesc}. ${formatReminder}`,
         resolvedProvider: retryResolved,
         options,

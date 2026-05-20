@@ -11,7 +11,7 @@ describe("AI backend plan state", () => {
       request: {
         type: "startSession",
         sessionId: "session-plan-state",
-        config: { provider: null, model: null, workingDir: null, systemPrompt: null },
+        config: { provider: null, model: null, workingDir: null, systemPrompt: null, continuable: false },
       },
     });
     const response = frames[0];

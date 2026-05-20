@@ -46,7 +46,12 @@ vi.mock("../../src/utils/logger.js", () => ({
 }));
 
 import { query as queryMock } from "@anthropic-ai/claude-agent-sdk";
-import { runAgent, type AgentConfig } from "../../src/utils/agent-runner.js";
+import {
+  createContinuableAgentSession,
+  runAgent,
+  runAgentWithRetry,
+  type AgentConfig,
+} from "../../src/utils/agent-runner.js";
 import { MODEL_TIERS } from "../../src/types.js";
 
 const FALLBACK_TEMPLATE = "## Verdict\nDECLINED: Agent returned malformed output\n\n## Raw Output\n$RAW";
@@ -119,6 +124,78 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
     // Sanity: success/errorCount reflect the failure path.
     expect(result.success).toBe(false);
     expect(result.errorCount).toBeGreaterThan(0);
+  });
+
+  it("applies format retry validation to continuable SDK sessions", async () => {
+    setQueryGenerators(
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      async function* (_stderr) {
+        yield {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "malformed output",
+          session_id: "native-1",
+        };
+      },
+    );
+    runAnthropicApiSkinDirectSpy.mockResolvedValueOnce({
+      text: "## Verdict\nCONFIRMED: reformatted",
+      usage: {},
+      provider: "openrouter",
+      modelName: "retry-model",
+    });
+
+    const session = createContinuableAgentSession(makeConfig({ continuable: true }));
+    const result = await session.run({ prompt: "Evaluate:" });
+    await session.dispose();
+
+    expect(result.output).toBe("## Verdict\nCONFIRMED: reformatted");
+    expect(result.success).toBe(true);
+    expect(result.errorCount).toBe(0);
+    expect(runAnthropicApiSkinDirectSpy).toHaveBeenCalledTimes(1);
+    expect(runAnthropicApiSkinDirectSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ continuable: false }),
+      }),
+    );
+  });
+
+  it("resumes a continuable Claude session when retrying after no output", async () => {
+    setQueryGenerators(
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      async function* (_stderr) {
+        yield {
+          type: "result",
+          subtype: "error_during_execution",
+          is_error: true,
+          session_id: "native-first",
+        };
+      },
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      async function* (_stderr) {
+        yield {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "## Verdict\nCONFIRMED: retry recovered",
+          session_id: "native-second",
+        };
+      },
+    );
+
+    const session = createContinuableAgentSession(makeConfig({ continuable: true }));
+    const result = await session.run({ prompt: "Evaluate:" });
+    await session.dispose();
+
+    expect(result.output).toBe("## Verdict\nCONFIRMED: retry recovered");
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    expect(queryArgs[0].options).toMatchObject({ persistSession: true });
+    expect(queryArgs[0].options).not.toHaveProperty("resume");
+    expect(queryArgs[1].options).toMatchObject({
+      persistSession: true,
+      resume: "native-first",
+    });
   });
 
   it("enriches sentinel with error-subtype diagnostics from result message", async () => {
@@ -252,6 +329,74 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
         options: expect.objectContaining({ signal: controller.signal }),
       }),
     );
+  });
+
+  it("forces direct one-shot calls to non-continuable provider execution", async () => {
+    runAnthropicApiSkinDirectSpy.mockResolvedValueOnce({
+      text: "OK",
+      usage: {},
+      provider: "openrouter",
+      modelName: "test-model",
+    });
+
+    await runAgent(
+      {
+        name: "direct-test",
+        tier: MODEL_TIERS.HAIKU,
+        mode: "direct",
+        systemPrompt: "Test",
+        continuable: true,
+      },
+      { prompt: "Evaluate:" },
+    );
+
+    expect(runAnthropicApiSkinDirectSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ continuable: false }),
+      }),
+    );
+  });
+
+  it("forces runAgentWithRetry fallback calls to non-continuable provider execution", async () => {
+    runAnthropicApiSkinDirectSpy
+      .mockResolvedValueOnce({
+        text: "bad",
+        usage: {},
+        provider: "openrouter",
+        modelName: "test-model",
+      })
+      .mockResolvedValueOnce({
+        text: "OK",
+        usage: {},
+        provider: "openrouter",
+        modelName: "test-model",
+      });
+
+    const result = await runAgentWithRetry(
+      {
+        name: "direct-test",
+        tier: MODEL_TIERS.HAIKU,
+        mode: "direct",
+        systemPrompt: "Test",
+        continuable: true,
+      },
+      { prompt: "Evaluate:" },
+      {
+        formatValidator: (output) => output === "OK",
+        formatReminder: "Reply OK.",
+        maxRetries: 1,
+      },
+    );
+
+    expect(result.output).toBe("OK");
+    expect(runAnthropicApiSkinDirectSpy).toHaveBeenCalledTimes(2);
+    for (const call of runAnthropicApiSkinDirectSpy.mock.calls) {
+      expect(call[0]).toEqual(
+        expect.objectContaining({
+          config: expect.objectContaining({ continuable: false }),
+        }),
+      );
+    }
   });
 
   it("throws cancellation instead of fallback-wrapping a pre-aborted signal", async () => {

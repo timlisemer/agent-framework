@@ -155,6 +155,66 @@ describe("runAgentWithRetryAndTelemetry — env-keyed LLM stub", () => {
 
     expect(queryMock).toHaveBeenCalled();
     expect(result.modelName).not.toBe("stub");
+    expect(queryMock.mock.calls[0]?.[0]?.options?.persistSession).toBe(false);
+  });
+
+  it("continuable SDK sessions pass Claude resume only after the first turn", async () => {
+    let callCount = 0;
+    queryMock.mockImplementation(async function* () {
+      callCount++;
+      yield {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: `turn-${callCount}`,
+        session_id: `native-${callCount}`,
+      };
+    });
+
+    const { createContinuableAgentSession } = await import(
+      "../../src/utils/agent-runner.js"
+    );
+    const session = createContinuableAgentSession(
+      makeConfig({ mode: "sdk", workingDir: "/tmp", continuable: true })
+    );
+
+    await session.run({ prompt: "First" });
+    await session.run({ prompt: "Second" });
+    await session.dispose();
+
+    expect(queryMock).toHaveBeenCalledTimes(2);
+    expect(queryMock.mock.calls[0]?.[0]?.options).toMatchObject({
+      persistSession: true,
+    });
+    expect(queryMock.mock.calls[0]?.[0]?.options).not.toHaveProperty("resume");
+    expect(queryMock.mock.calls[1]?.[0]?.options).toMatchObject({
+      persistSession: true,
+      resume: "native-1",
+    });
+  });
+
+  it("runAgent remains one-shot even when config continuable is true", async () => {
+    queryMock.mockImplementation(async function* () {
+      yield {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "UPHOLD",
+        session_id: "native-one-shot",
+      };
+    });
+
+    const { runAgent } = await import("../../src/utils/agent-runner.js");
+
+    await runAgent(
+      makeConfig({ mode: "sdk", workingDir: "/tmp", continuable: true }),
+      { prompt: "Evaluate:" }
+    );
+
+    expect(queryMock.mock.calls[0]?.[0]?.options).toMatchObject({
+      persistSession: false,
+    });
+    expect(queryMock.mock.calls[0]?.[0]?.options).not.toHaveProperty("resume");
   });
 
   it("malformed JSON in env throws descriptive error", async () => {
