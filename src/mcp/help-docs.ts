@@ -98,7 +98,6 @@ without invoking an LLM.
 - model_tier (optional): haiku | sonnet | opus (default opus)
 - extra_context (optional): free-form additional instructions or focus areas
 - optional_planfile (optional): planfile path to include in confirm context
-- transcript_path (optional): session transcript path for statusLine
 - skip_elicitation (optional, bool): skip interactive repo/preference prompts
 
 ## Flow
@@ -134,7 +133,6 @@ and executes git commit. Optionally auto-pushes after successful commits.
 - model_tier (optional): haiku | sonnet | opus (passed through to confirm)
 - extra_context (optional): passed through to confirm
 - optional_planfile (optional): passed through to confirm as plan context
-- transcript_path (optional): session transcript path for statusLine
 - skip_elicitation (optional, bool): skip interactive prompts
 - auto_push (optional, bool): push every successfully-committed repo after
 

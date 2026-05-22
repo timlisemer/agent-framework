@@ -99,7 +99,7 @@ describe("runCommitAgent", () => {
     const before = git(repo, ["rev-parse", "HEAD"]).trim();
 
     await expect(
-      runCommitAgent(repo, "haiku", undefined, undefined, undefined, { signal: activeController.signal }),
+      runCommitAgent(repo, "haiku", undefined, undefined, { signal: activeController.signal }),
     ).rejects.toMatchObject({ name: "OperationCancelledError" });
 
     expect(git(repo, ["rev-parse", "HEAD"]).trim()).toBe(before);
@@ -138,13 +138,12 @@ DECLINED: check failed with 2 error(s); see Check Errors above.`;
       output: "SIZE: SMALL\nMESSAGE:\ncommit: include planfile",
     });
 
-    await runCommitAgent(repo, "haiku", "focus", "/tmp/transcript.jsonl", "plan.md");
+    await runCommitAgent(repo, "haiku", "focus", "plan.md");
 
     expect(mocks.runConfirmAgent).toHaveBeenCalledWith(
       repo,
       "haiku",
       "focus",
-      "/tmp/transcript.jsonl",
       "plan.md",
       expect.any(Object),
     );
@@ -159,5 +158,6 @@ DECLINED: check failed with 2 error(s); see Check Errors above.`;
     const commitBlock = serverSource.slice(start, end);
 
     expect(commitBlock).toContain("optional_planfile");
+    expect(commitBlock).not.toContain("transcript_path");
   });
 });

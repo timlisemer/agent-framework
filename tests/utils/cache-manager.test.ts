@@ -227,14 +227,17 @@ describe("getAgentFrameworkSessionDir", () => {
   });
 
   it("resolves the most recent project session from transcript sidecars", () => {
-    const transcriptPath = "/tmp/test-transcript-sidecar-current.jsonl";
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "session-sidecar-current-"));
+    const projectDir = path.join(tempDir, "project");
+    const transcriptPath = path.join(tempDir, "transcript.jsonl");
+    fs.mkdirSync(projectDir);
     fs.writeFileSync(transcriptPath, "");
-    const sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: process.cwd() });
+    const sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir });
     try {
-      expect(getAgentFrameworkSessionDir({ projectDir: process.cwd() })).toBe(sessionDir);
+      expect(getAgentFrameworkSessionDir({ projectDir })).toBe(sessionDir);
     } finally {
       fs.rmSync(sessionDir, { recursive: true, force: true });
-      fs.rmSync(transcriptPath, { force: true });
+      fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
 

@@ -62,11 +62,15 @@ describe("runCreatePlanfileAgent", () => {
 
   it("writes a normalized session planfile, validates it, and records current-plan on PASS", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-planfile-"));
+    const previousProjectDir = process.env.AGENT_FRAMEWORK_PROJECT_DIR;
     let sessionDir = "";
     try {
+      const projectDir = path.join(tempDir, "project");
+      fs.mkdirSync(projectDir);
+      process.env.AGENT_FRAMEWORK_PROJECT_DIR = projectDir;
       const transcriptPath = path.join(tempDir, "transcript.jsonl");
       fs.writeFileSync(transcriptPath, "");
-      sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: process.cwd() });
+      sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir });
       const runCreatePlanfileAgent = await loadRunCreatePlanfileAgent();
 
       const result = await runCreatePlanfileAgent({
@@ -93,6 +97,11 @@ describe("runCreatePlanfileAgent", () => {
       expect(Object.values(status)[0]).toMatchObject({ status: "pass", planPath });
     } finally {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
+      if (previousProjectDir === undefined) {
+        delete process.env.AGENT_FRAMEWORK_PROJECT_DIR;
+      } else {
+        process.env.AGENT_FRAMEWORK_PROJECT_DIR = previousProjectDir;
+      }
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
@@ -170,11 +179,15 @@ describe("runCreatePlanfileAgent", () => {
 
   it("does not update current-plan when validation fails", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-planfile-"));
+    const previousProjectDir = process.env.AGENT_FRAMEWORK_PROJECT_DIR;
     let sessionDir = "";
     try {
+      const projectDir = path.join(tempDir, "project");
+      fs.mkdirSync(projectDir);
+      process.env.AGENT_FRAMEWORK_PROJECT_DIR = projectDir;
       const transcriptPath = path.join(tempDir, "transcript.jsonl");
       fs.writeFileSync(transcriptPath, "");
-      sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: process.cwd() });
+      sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir });
       const runCreatePlanfileAgent = await loadRunCreatePlanfileAgent("INVALID: Missing concrete file paths.");
 
       const result = await runCreatePlanfileAgent({
@@ -190,17 +203,26 @@ describe("runCreatePlanfileAgent", () => {
       expect(fs.existsSync(sessionCurrentPlanFile(sessionDir))).toBe(false);
     } finally {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
+      if (previousProjectDir === undefined) {
+        delete process.env.AGENT_FRAMEWORK_PROJECT_DIR;
+      } else {
+        process.env.AGENT_FRAMEWORK_PROJECT_DIR = previousProjectDir;
+      }
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
   it("refuses to overwrite an existing planfile with the same plan name", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-planfile-"));
+    const previousProjectDir = process.env.AGENT_FRAMEWORK_PROJECT_DIR;
     let sessionDir = "";
     try {
+      const projectDir = path.join(tempDir, "project");
+      fs.mkdirSync(projectDir);
+      process.env.AGENT_FRAMEWORK_PROJECT_DIR = projectDir;
       const transcriptPath = path.join(tempDir, "transcript.jsonl");
       fs.writeFileSync(transcriptPath, "");
-      sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: process.cwd() });
+      sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir });
       const planPath = sessionPlanFile(sessionDir, "existing-plan");
       fs.mkdirSync(path.dirname(planPath), { recursive: true });
       fs.writeFileSync(planPath, "original planfile");
@@ -214,6 +236,11 @@ describe("runCreatePlanfileAgent", () => {
       expect(fs.readFileSync(planPath, "utf-8")).toBe("original planfile");
     } finally {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
+      if (previousProjectDir === undefined) {
+        delete process.env.AGENT_FRAMEWORK_PROJECT_DIR;
+      } else {
+        process.env.AGENT_FRAMEWORK_PROJECT_DIR = previousProjectDir;
+      }
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });

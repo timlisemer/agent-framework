@@ -29,7 +29,6 @@ import { COMMIT_AGENT } from "../../utils/agent-configs.js";
 import { runProcessCancellable } from "../../utils/command.js";
 import { getUncommittedChangesCancellable, classifyCommitSize } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
-import { setTranscriptPath } from "../../utils/execution-context.js";
 import { runConfirmAgent } from "./confirm.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 
@@ -73,7 +72,6 @@ function parseCommitResponse(
  * @param workingDir - The project directory to commit
  * @param confirmTierName - Passed through to confirm agent (does not affect commit agent tier)
  * @param confirmExtraContext - Passed through to confirm agent
- * @param transcriptPath - Optional transcript path for statusLine updates
  * @param optionalPlanfile - Optional explicit planfile path passed through to confirm
  * @returns Result with confirm output, message size, and commit hash
  */
@@ -81,14 +79,9 @@ export async function runCommitAgent(
   workingDir: string,
   confirmTierName?: string,
   confirmExtraContext?: string,
-  transcriptPath?: string,
   optionalPlanfile?: string,
   options: CancellationOptions = {}
 ): Promise<string> {
-  // Set up execution context for statusLine logging
-  if (transcriptPath) {
-    setTranscriptPath(transcriptPath);
-  }
   logAgentStarted("commit", getHookName());
 
   const { status, diff, diffStat, untrackedDiff } = await getUncommittedChangesCancellable(workingDir, options);
@@ -103,7 +96,6 @@ export async function runCommitAgent(
     workingDir,
     confirmTierName,
     confirmExtraContext,
-    transcriptPath,
     optionalPlanfile,
     options
   );

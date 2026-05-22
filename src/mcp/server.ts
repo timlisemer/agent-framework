@@ -141,7 +141,6 @@ server.registerTool(
       model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Model tier for evaluation (default: opus)"),
       extra_context: z.string().optional().describe("Additional instructions or areas to focus on"),
       optional_planfile: z.string().optional().describe("Optional planfile path to include in confirm context. If omitted and no session planfile exists, confirm runs without plan input."),
-      transcript_path: z.string().optional().describe("Session transcript path for statusLine"),
       skip_elicitation: coercibleBoolean.describe("Skip interactive questions, use defaults")
     }
   },
@@ -200,7 +199,7 @@ server.registerTool(
         extraContext = extraContext ? `${multiContext}\n${extraContext}` : multiContext;
       }
 
-      let result = await runConfirmAgent(repo.path, prefs.tier, extraContext, args.transcript_path, args.optional_planfile, options);
+      let result = await runConfirmAgent(repo.path, prefs.tier, extraContext, args.optional_planfile, options);
 
       // Post-processing: If DECLINED with uncertainties, elicit clarification and retry
       if (!args.skip_elicitation && result.includes("DECLINED")) {
@@ -210,7 +209,7 @@ server.registerTool(
           throwIfAborted(extra.signal);
           if (clarification) {
             const retryContext = extraContext ? `${extraContext}\n${clarification}` : clarification;
-            result = await runConfirmAgent(repo.path, prefs.tier, retryContext, args.transcript_path, args.optional_planfile, options);
+            result = await runConfirmAgent(repo.path, prefs.tier, retryContext, args.optional_planfile, options);
           }
         }
       }
@@ -236,7 +235,6 @@ server.registerTool(
       model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Passed to confirm agent (default: opus)"),
       extra_context: z.string().optional().describe("Passed to confirm agent"),
       optional_planfile: z.string().optional().describe("Optional planfile path forwarded to confirm. If omitted and no session planfile exists, confirm runs without plan input."),
-      transcript_path: z.string().optional().describe("Session transcript path for statusLine"),
       skip_elicitation: coercibleBoolean.describe("Skip interactive questions, use defaults"),
       auto_push: coercibleBoolean.describe("Automatically push all committed repos after successful commit")
     }
@@ -297,7 +295,7 @@ server.registerTool(
         extraContext = extraContext ? `${multiContext}\n${extraContext}` : multiContext;
       }
 
-      const result = await runCommitAgent(repo.path, prefs.tier, extraContext, args.transcript_path, args.optional_planfile, options);
+      const result = await runCommitAgent(repo.path, prefs.tier, extraContext, args.optional_planfile, options);
 
       // runCommitAgent emits "HASH: <sha>" on its last line only on successful
       // commits (commit.ts:166). All failure paths omit it. Substring-matching

@@ -23,7 +23,6 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
 import { getUncommittedChangesCancellable } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
-import { setTranscriptPath } from "../../utils/execution-context.js";
 import { runConfirmPrefilter, formatConfirmPrefilter } from "../../utils/confirm-prefilter.js";
 import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
 import { readStoredCurrentPlan } from "../../utils/plan-source.js";
@@ -69,6 +68,10 @@ type ConfirmPlanfileResolution =
   | { kind: "missing" }
   | { kind: "error"; message: string };
 
+type ConfirmSessionContext = {
+  sessionDir?: string;
+};
+
 async function readPlanfileForConfirm(planPath: string): Promise<ConfirmPlanfileResolution> {
   try {
     const content = await fs.promises.readFile(planPath, "utf-8");
@@ -88,9 +91,18 @@ async function readPlanfileForConfirm(planPath: string): Promise<ConfirmPlanfile
   }
 }
 
+function resolveConfirmSessionContext(workingDir: string): ConfirmSessionContext {
+  try {
+    const sessionDir = getAgentFrameworkSessionDir({ projectDir: workingDir });
+    return { sessionDir };
+  } catch {
+    return {};
+  }
+}
+
 async function resolveConfirmPlanfile(
   workingDir: string,
-  transcriptPath?: string,
+  sessionDir: string | undefined,
   optionalPlanfile?: string,
 ): Promise<ConfirmPlanfileResolution> {
   if (optionalPlanfile !== undefined) {
@@ -105,17 +117,7 @@ async function resolveConfirmPlanfile(
     return readPlanfileForConfirm(resolved);
   }
 
-  let sessionDir: string;
-  try {
-    sessionDir = getAgentFrameworkSessionDir(
-      transcriptPath
-        ? { transcriptPath, projectDir: workingDir }
-        : { projectDir: workingDir },
-    );
-  } catch {
-    return { kind: "missing" };
-  }
-
+  if (!sessionDir) return { kind: "missing" };
   const stored = readStoredCurrentPlan(sessionDir);
   if (!stored?.path) return { kind: "missing" };
 
@@ -146,7 +148,6 @@ ${planfile.content}`;
  * @param workingDir - The project directory to evaluate
  * @param tierName - Optional model tier (haiku/sonnet/opus, defaults to opus)
  * @param extraContext - Optional extra instructions for the evaluation
- * @param transcriptPath - Optional transcript path for statusLine updates
  * @param optionalPlanfile - Optional explicit planfile path to include as plan context
  * @returns Structured verdict with CONFIRMED or DECLINED
  */
@@ -154,22 +155,18 @@ export async function runConfirmAgent(
   workingDir: string,
   tierName?: string,
   extraContext?: string,
-  transcriptPath?: string,
   optionalPlanfile?: string,
   options: CancellationOptions = {}
 ): Promise<string> {
-  // Set up execution context for statusLine logging
-  if (transcriptPath) {
-    setTranscriptPath(transcriptPath);
-  }
+  const sessionContext = resolveConfirmSessionContext(workingDir);
   logAgentStarted("confirm", getHookName());
 
   const tier = parseTierName(tierName);
-  const planfile = await resolveConfirmPlanfile(workingDir, transcriptPath, optionalPlanfile);
+  const planfile = await resolveConfirmPlanfile(workingDir, sessionContext.sessionDir, optionalPlanfile);
   if (planfile.kind === "error") return planfile.message;
 
   // Step 1: Run check agent first
-  const checkResult = await runCheckAgent(workingDir, transcriptPath, options);
+  const checkResult = await runCheckAgent(workingDir, undefined, options);
 
   const errorMatch = checkResult.match(/Errors:\s*(\d+)/i);
   const errorCount = errorMatch ? parseInt(errorMatch[1], 10) : 0;

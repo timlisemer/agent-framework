@@ -89,7 +89,7 @@ describe("runConfirmAgent planfile context", () => {
     const planPath = path.join(tempDir, "plan.md");
     fs.writeFileSync(planPath, "Plan Name: test-plan\n\nImplement x.\n");
 
-    const result = await runConfirmAgent(tempDir, "haiku", undefined, undefined, planPath);
+    const result = await runConfirmAgent(tempDir, "haiku", undefined, planPath);
 
     expect(result).toContain("CONFIRMED");
     expect(mocks.runCheckAgent).toHaveBeenCalled();
@@ -103,7 +103,7 @@ describe("runConfirmAgent planfile context", () => {
   it("returns an error before check when explicit optional_planfile is unreadable", async () => {
     const missingPath = path.join(tempDir, "missing.md");
 
-    const result = await runConfirmAgent(tempDir, "haiku", undefined, undefined, missingPath);
+    const result = await runConfirmAgent(tempDir, "haiku", undefined, missingPath);
 
     expect(result).toContain("ERROR: optional_planfile was provided but could not be read");
     expect(result).toContain(missingPath);
@@ -112,7 +112,7 @@ describe("runConfirmAgent planfile context", () => {
   });
 
   it("returns an error before check when explicit optional_planfile is blank", async () => {
-    const result = await runConfirmAgent(tempDir, "haiku", undefined, undefined, "  ");
+    const result = await runConfirmAgent(tempDir, "haiku", undefined, "  ");
 
     expect(result).toBe("ERROR: optional_planfile was provided but the planfile path is empty.");
     expect(mocks.runCheckAgent).not.toHaveBeenCalled();
@@ -140,11 +140,34 @@ describe("runConfirmAgent planfile context", () => {
       JSON.stringify({ kind: "file", path: planPath, planName: "empty-plan" }) + "\n",
     );
 
-    const result = await runConfirmAgent(tempDir, "haiku", undefined, transcriptPath);
+    const result = await runConfirmAgent(tempDir, "haiku");
 
     expect(result).toContain("CONFIRMED");
     const context = mocks.runAgent.mock.calls[0][1].context as string;
     expect(context).toContain("PLANFILE CONTEXT: No planfile was provided through optional_planfile");
+
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+  });
+
+  it("uses the current session when available", async () => {
+    const transcriptPath = path.join(tempDir, "sidecar-transcript.jsonl");
+    fs.writeFileSync(transcriptPath, "");
+    const sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: tempDir });
+    const planPath = path.join(tempDir, "session-plan.md");
+    fs.writeFileSync(planPath, "Plan Name: session-plan\n\nUse session plan.\n");
+    fs.writeFileSync(
+      sessionCurrentPlanFile(sessionDir),
+      JSON.stringify({ kind: "file", path: planPath, planName: "session-plan" }) + "\n",
+    );
+
+    const result = await runConfirmAgent(tempDir, "haiku");
+
+    expect(result).toContain("CONFIRMED");
+    expect(mocks.runCheckAgent).toHaveBeenCalledWith(tempDir, undefined, expect.any(Object));
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("PLANFILE PATH:");
+    expect(context).toContain(planPath);
+    expect(context).toContain("Use session plan.");
 
     fs.rmSync(sessionDir, { recursive: true, force: true });
   });
@@ -158,5 +181,6 @@ describe("runConfirmAgent planfile context", () => {
     const confirmBlock = serverSource.slice(start, end);
 
     expect(confirmBlock).toContain("optional_planfile");
+    expect(confirmBlock).not.toContain("transcript_path");
   });
 });
