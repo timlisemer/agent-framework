@@ -11,7 +11,7 @@ describe("AI backend plan state", () => {
       request: {
         type: "startSession",
         sessionId: "session-plan-state",
-        config: { provider: null, model: null, workingDir: null, systemPrompt: null, continuable: false },
+        config: { model: null, workingDir: null, systemPrompt: null, continuable: false },
       },
     });
     const response = frames[0];
@@ -28,13 +28,13 @@ describe("AI backend plan state", () => {
       },
     });
 
-    expect(frames.at(-1)).toMatchObject({
+    expect(frames).toContainEqual({
       type: "event",
-      event: {
+      event: expect.objectContaining({
         type: "planStateChanged",
         sessionId: response.response.sessionId,
         state: { mode: "approved", planText: "ship it", approved: true },
-      },
+      }),
     });
   });
 });

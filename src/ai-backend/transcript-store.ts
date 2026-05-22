@@ -1,11 +1,28 @@
 import type {
+  AiBackendProcess,
+  AiBackendProcessId,
+  AiContinuationState,
+  AiErrorInfo,
+  AiEvent,
+  AiEventSeq,
+  AiMessageId,
+  AiMessageRole,
+  AiMessageStatus,
   AiPlanState,
   AiSessionConfig,
   AiSessionSnapshot,
   AiSessionStatus,
+  AiSnapshotRevision,
+  AiToolCall,
+  AiToolInputSummary,
+  AiToolOutputBlock,
+  AiToolResult,
+  AiToolStatus,
   AiTranscriptEntry,
-  ProviderResumeMetadata,
   SessionId,
+  TokenUsage,
+  ToolCallId,
+  TurnId,
 } from "../ai-protocol/index.js";
 
 const defaultPlan: AiPlanState = {
@@ -17,64 +34,325 @@ const defaultPlan: AiPlanState = {
 export class TranscriptStore {
   readonly #sessions = new Map<SessionId, AiSessionSnapshot>();
   readonly #configs = new Map<SessionId, AiSessionConfig>();
+  readonly #events = new Map<SessionId, AiEvent[]>();
+
   create(sessionId: SessionId, config: AiSessionConfig): AiSessionSnapshot {
+    const now = new Date().toISOString();
     const snapshot: AiSessionSnapshot = {
       sessionId,
-      status: "idle" as AiSessionStatus,
+      status: "idle",
+      revision: 0,
+      lastEventSeq: 0,
       transcript: [],
-      pendingTools: [],
+      toolCalls: [],
+      backendProcesses: [],
       plan: { ...defaultPlan },
-      resume: config.provider
-        ? {
-            provider: config.provider,
-            nativeSessionId: null,
-            nativeThreadId: null,
-          }
-        : null,
+      continuation: {
+        enabled: config.continuable === true,
+        available: false,
+        updatedAt: config.continuable === true ? now : null,
+      },
+      errors: [],
       error: null,
     };
     this.#sessions.set(sessionId, snapshot);
     this.#configs.set(sessionId, config);
-    return snapshot;
+    this.#events.set(sessionId, []);
+    return structuredClone(snapshot);
   }
 
   get(sessionId: SessionId): AiSessionSnapshot | undefined {
-    return this.#sessions.get(sessionId);
+    const snapshot = this.#sessions.get(sessionId);
+    return snapshot ? structuredClone(snapshot) : undefined;
   }
 
   getConfig(sessionId: SessionId): AiSessionConfig | undefined {
     return this.#configs.get(sessionId);
   }
 
-  append(sessionId: SessionId, entry: AiTranscriptEntry): AiSessionSnapshot {
-    return this.update(sessionId, (snapshot) => {
-      snapshot.transcript.push(entry);
-    });
+  eventsSince(sessionId: SessionId, afterSeq: AiEventSeq): AiEvent[] {
+    return (this.#events.get(sessionId) ?? []).filter((event) => event.seq > afterSeq).map((event) => structuredClone(event));
   }
 
-  setStatus(sessionId: SessionId, status: AiSessionStatus, error: string | null = null): AiSessionSnapshot {
+  recordEvent(sessionId: SessionId, event: AiEvent): AiEvent {
+    this.update(sessionId, (snapshot) => {
+      snapshot.lastEventSeq = event.seq;
+    });
+    const recorded = event.type === "sessionUpdated"
+      ? { ...event, snapshot: required(this.get(sessionId)) }
+      : event;
+    this.#events.get(sessionId)?.push(structuredClone(recorded));
+    return structuredClone(recorded);
+  }
+
+  nextSeq(sessionId: SessionId): AiEventSeq {
+    return (this.#sessions.get(sessionId)?.lastEventSeq ?? 0) + 1;
+  }
+
+  setStatus(sessionId: SessionId, status: AiSessionStatus, error: AiErrorInfo | null = null): AiSessionSnapshot {
     return this.update(sessionId, (snapshot) => {
       snapshot.status = status;
       snapshot.error = error;
+      if (error) snapshot.errors.push(error);
     });
   }
 
   setPlan(sessionId: SessionId, plan: AiPlanState): AiSessionSnapshot {
     return this.update(sessionId, (snapshot) => {
-      snapshot.plan = plan;
+      snapshot.plan = { ...plan };
     });
   }
 
-  setResume(sessionId: SessionId, resume: ProviderResumeMetadata): AiSessionSnapshot {
+  setContinuation(sessionId: SessionId, continuation: AiContinuationState): AiSessionSnapshot {
     return this.update(sessionId, (snapshot) => {
-      snapshot.resume = resume;
+      snapshot.continuation = { ...continuation };
     });
+  }
+
+  appendMessage(
+    sessionId: SessionId,
+    input: {
+      id: AiMessageId;
+      turnId: TurnId | null;
+      role: AiMessageRole;
+      content: AiToolOutputBlock | string;
+      status: AiMessageStatus;
+      createdAt: string;
+      usage?: TokenUsage | null;
+    }
+  ): AiTranscriptEntry {
+    let entry: AiTranscriptEntry | undefined;
+    this.update(sessionId, (snapshot) => {
+      const text = typeof input.content === "string" ? input.content : "";
+      entry = {
+        id: input.id,
+        turnId: input.turnId,
+        role: input.role,
+        content: text ? [{ type: "text", text }] : [],
+        status: input.status,
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+        completedAt: input.status === "streaming" ? null : input.createdAt,
+        usage: input.usage ?? null,
+      };
+      snapshot.transcript.push(entry);
+    });
+    return structuredClone(required(entry));
+  }
+
+  appendMessageDelta(sessionId: SessionId, id: AiMessageId, delta: string, now: string): AiTranscriptEntry {
+    let entry: AiTranscriptEntry | undefined;
+    this.update(sessionId, (snapshot) => {
+      const target = requireEntry(snapshot.transcript.find((item) => item.id === id), id);
+      const last = target.content.at(-1);
+      if (last?.type === "text") {
+        last.text += delta;
+      } else {
+        target.content.push({ type: "text", text: delta });
+      }
+      target.updatedAt = now;
+      entry = target;
+    });
+    return structuredClone(required(entry));
+  }
+
+  completeMessage(
+    sessionId: SessionId,
+    id: AiMessageId,
+    now: string,
+    status: Exclude<AiMessageStatus, "streaming">,
+    usage: TokenUsage | null,
+    content?: string
+  ): AiTranscriptEntry {
+    let entry: AiTranscriptEntry | undefined;
+    this.update(sessionId, (snapshot) => {
+      const target = requireEntry(snapshot.transcript.find((item) => item.id === id), id);
+      if (content !== undefined) target.content = content ? [{ type: "text", text: content }] : [];
+      target.status = status;
+      target.updatedAt = now;
+      target.completedAt = now;
+      target.usage = usage;
+      entry = target;
+    });
+    return structuredClone(required(entry));
+  }
+
+  createTool(
+    sessionId: SessionId,
+    input: {
+      id: ToolCallId;
+      turnId: TurnId;
+      name: string;
+      summary: AiToolInputSummary;
+      now: string;
+    }
+  ): AiToolCall {
+    let tool: AiToolCall | undefined;
+    this.update(sessionId, (snapshot) => {
+      tool = {
+        id: input.id,
+        turnId: input.turnId,
+        name: input.name,
+        input: input.summary,
+        status: "created",
+        wait: null,
+        output: [],
+        result: null,
+        processId: null,
+        progress: null,
+        elapsedMs: null,
+        createdAt: input.now,
+        updatedAt: input.now,
+        completedAt: null,
+      };
+      snapshot.toolCalls.push(tool);
+    });
+    return structuredClone(required(tool));
+  }
+
+  updateTool(
+    sessionId: SessionId,
+    id: ToolCallId,
+    now: string,
+    update: Partial<Pick<AiToolCall, "status" | "wait" | "progress" | "elapsedMs" | "processId">> & {
+      output?: AiToolOutputBlock[];
+      result?: AiToolResult | null;
+    }
+  ): AiToolCall {
+    let tool: AiToolCall | undefined;
+    this.update(sessionId, (snapshot) => {
+      const target = requireEntry(snapshot.toolCalls.find((item) => item.id === id), id);
+      const { output, result, ...fields } = update;
+      Object.assign(target, fields);
+      if (output) target.output = mergeOutput(target.output, output);
+      if (result !== undefined) {
+        target.result = result?.state === "completed"
+          ? { ...result, output: target.output }
+          : result;
+      }
+      target.updatedAt = now;
+      if (isTerminalToolStatus(target.status)) target.completedAt = now;
+      tool = target;
+    });
+    return structuredClone(required(tool));
+  }
+
+  createBackendProcess(
+    sessionId: SessionId,
+    input: {
+      id: AiBackendProcessId;
+      turnId: TurnId;
+      title: string;
+      cancellable: boolean;
+      now: string;
+    }
+  ): AiBackendProcess {
+    let process: AiBackendProcess | undefined;
+    this.update(sessionId, (snapshot) => {
+      process = {
+        id: input.id,
+        turnId: input.turnId,
+        title: input.title,
+        status: "created",
+        progress: null,
+        output: [],
+        error: null,
+        cancellable: input.cancellable,
+        elapsedMs: null,
+        createdAt: input.now,
+        updatedAt: input.now,
+        completedAt: null,
+      };
+      snapshot.backendProcesses.push(process);
+    });
+    return structuredClone(required(process));
+  }
+
+  updateBackendProcess(
+    sessionId: SessionId,
+    id: AiBackendProcessId,
+    now: string,
+    update: Partial<Pick<AiBackendProcess, "status" | "progress" | "elapsedMs" | "error">> & {
+      output?: AiToolOutputBlock[];
+    }
+  ): AiBackendProcess {
+    let process: AiBackendProcess | undefined;
+    this.update(sessionId, (snapshot) => {
+      const target = requireEntry(snapshot.backendProcesses.find((item) => item.id === id), id);
+      const { output, ...fields } = update;
+      Object.assign(target, fields);
+      if (output) target.output = mergeOutput(target.output, output);
+      target.updatedAt = now;
+      if (["completed", "failed", "cancelled"].includes(target.status)) target.completedAt = now;
+      process = target;
+    });
+    return structuredClone(required(process));
+  }
+
+  cancelActiveOperations(sessionId: SessionId, turnId: TurnId, now: string): {
+    tools: AiToolCall[];
+    processes: AiBackendProcess[];
+  } {
+    const tools: AiToolCall[] = [];
+    const processes: AiBackendProcess[] = [];
+    this.update(sessionId, (snapshot) => {
+      for (const tool of snapshot.toolCalls) {
+        if (tool.turnId === turnId && !isTerminalToolStatus(tool.status)) {
+          tool.status = "cancelled";
+          tool.wait = null;
+          tool.progress = null;
+          tool.elapsedMs = null;
+          tool.updatedAt = now;
+          tool.completedAt = now;
+          tool.result = { state: "cancelled", output: tool.output, error: null };
+          tools.push(structuredClone(tool));
+        }
+      }
+      for (const process of snapshot.backendProcesses) {
+        if (process.turnId === turnId && !["completed", "failed", "cancelled"].includes(process.status)) {
+          process.status = "cancelled";
+          process.progress = null;
+          process.elapsedMs = null;
+          process.updatedAt = now;
+          process.completedAt = now;
+          processes.push(structuredClone(process));
+        }
+      }
+    });
+    return { tools, processes };
   }
 
   update(sessionId: SessionId, f: (snapshot: AiSessionSnapshot) => void): AiSessionSnapshot {
     const snapshot = this.#sessions.get(sessionId);
     if (!snapshot) throw new Error(`Unknown AI session: ${sessionId}`);
     f(snapshot);
-    return snapshot;
+    snapshot.revision = (snapshot.revision + 1) as AiSnapshotRevision;
+    return structuredClone(snapshot);
   }
+}
+
+function isTerminalToolStatus(status: AiToolStatus): boolean {
+  return ["completed", "failed", "cancelled", "denied", "unsupported"].includes(status);
+}
+
+function required<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("Expected value to be present");
+  return value;
+}
+
+function requireEntry<T>(value: T | undefined, id: string): T {
+  if (!value) throw new Error(`Unknown AI timeline item: ${id}`);
+  return value;
+}
+
+function mergeOutput(existing: AiToolOutputBlock[], incoming: AiToolOutputBlock[]): AiToolOutputBlock[] {
+  if (incoming.length === 0) return existing;
+  if (startsWithBlocks(incoming, existing)) return [...incoming];
+  if (startsWithBlocks(existing, incoming)) return existing;
+  return [...existing, ...incoming];
+}
+
+function startsWithBlocks(value: AiToolOutputBlock[], prefix: AiToolOutputBlock[]): boolean {
+  if (prefix.length > value.length) return false;
+  return prefix.every((item, index) => JSON.stringify(item) === JSON.stringify(value[index]));
 }

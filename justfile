@@ -8,9 +8,6 @@ check:
     npx vitest run --reporter=verbose
     npx tsx scripts/check-fixture-purity.ts
 
-sync-ai-protocol:
-    npm run sync:ai-protocol
-
 clean:
     rm -rf dist
 

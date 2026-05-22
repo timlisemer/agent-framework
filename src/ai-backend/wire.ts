@@ -9,7 +9,6 @@ interface JsonlWritable {
 
 const nullableString = z.string().nullable();
 const sessionConfigSchema = z.object({
-  provider: nullableString,
   model: nullableString,
   workingDir: nullableString,
   systemPrompt: nullableString,
@@ -22,8 +21,7 @@ const planStateSchema = z.object({
 }).strict();
 const toolDecisionSchema = z.object({
   toolCallId: z.string(),
-  providerToolCallId: z.string(),
-  approve: z.boolean(),
+  decision: z.enum(["approve", "deny"]),
   reason: nullableString,
 }).strict();
 const requestSchema = z.discriminatedUnion("type", [
@@ -49,6 +47,15 @@ const requestSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
     state: planStateSchema,
   }).strict(),
+  z.object({
+    type: z.literal("getSessionSnapshot"),
+    sessionId: z.string(),
+  }).strict(),
+  z.object({
+    type: z.literal("eventsSince"),
+    sessionId: z.string(),
+    afterSeq: z.number().int().nonnegative(),
+  }).strict(),
 ]);
 
 const clientFrameSchema = z.discriminatedUnion("type", [
@@ -72,17 +79,26 @@ export function writeBackendFrame(frame: AiBackendMessage, stdout: JsonlWritable
   stdout.write(`${JSON.stringify(frame, jsonReplacer)}\n`);
 }
 
+function jsonReplacer(_key: string, value: unknown): unknown {
+  return typeof value === "bigint" ? value.toString() : value;
+}
+
 export async function readClientFrames(
   onFrame: (frame: AiClientMessage) => void | Promise<void>,
-  input = processStdin
+  input: NodeJS.ReadableStream = processStdin,
+  onError?: (error: unknown) => void | Promise<void>
 ): Promise<void> {
   const rl = createInterface({ input, crlfDelay: Infinity });
   for await (const line of rl) {
     if (!line.trim()) continue;
-    await onFrame(parseClientFrame(line));
+    let frame: AiClientMessage;
+    try {
+      frame = parseClientFrame(line);
+    } catch (error) {
+      if (!onError) throw error;
+      await onError(error);
+      continue;
+    }
+    await onFrame(frame);
   }
-}
-
-function jsonReplacer(_key: string, value: unknown): unknown {
-  return typeof value === "bigint" ? Number(value) : value;
 }

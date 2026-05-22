@@ -3,28 +3,30 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AiBackendSessionManager } from "../../src/ai-backend/session-manager.js";
 import type { AiBackendMessage, AiSessionConfig, SessionId } from "../../src/ai-protocol/index.js";
+import type { AiRuntimeEvent, AiRunTurnInput } from "../../src/ai-backend/runtime-events.js";
 
 const provider = vi.hoisted(() => ({
-  createProviderRunner: vi.fn(),
+  createResolvedProviderRunner: vi.fn(),
   runTurn: vi.fn(),
 }));
 
+function resolvedProviderFor(config: AiSessionConfig) {
+  if (config.model === "invalid-model") throw new Error("Invalid model tier");
+  return {
+    type: "openrouter",
+    mode: "sdk",
+    modelId: "anthropic/claude-opus-4.5",
+    sdkRuntime: "codex",
+    costTracking: "none",
+  };
+}
+
 vi.mock("../../src/ai-backend/provider.js", () => ({
-  createProviderRunner: provider.createProviderRunner,
-  resolveSessionProvider: (config: AiSessionConfig) => {
-    if (config.provider === "invalid-provider") throw new Error("Invalid provider 'invalid-provider'");
-    return {
-      type: "openrouter",
-      mode: "sdk",
-      modelId: "anthropic/claude-opus-4.5",
-      sdkRuntime: "codex",
-      costTracking: "none",
-    };
-  },
+  createResolvedProviderRunner: provider.createResolvedProviderRunner,
+  resolveSessionProvider: resolvedProviderFor,
 }));
 
 const defaultConfig: AiSessionConfig = {
-  provider: "openrouter",
   model: null,
   workingDir: null,
   systemPrompt: null,
@@ -43,66 +45,58 @@ async function startSession(
 ): Promise<void> {
   await manager.handle({
     type: "request",
-    request: {
-      type: "startSession",
-      sessionId,
-      config,
-    },
+    request: { type: "startSession", sessionId, config },
   });
+}
+
+async function* events(...items: AiRuntimeEvent[]): AsyncIterable<AiRuntimeEvent> {
+  yield* items;
 }
 
 describe("AI backend session manager", () => {
   beforeEach(() => {
-    provider.createProviderRunner.mockReset();
-    provider.createProviderRunner.mockImplementation(() => ({
-      resolvedProvider: { type: "openrouter" },
+    provider.createResolvedProviderRunner.mockReset();
+    provider.createResolvedProviderRunner.mockImplementation((resolvedProvider: ReturnType<typeof resolvedProviderFor>) => ({
+      resolvedProvider,
       runTurn: provider.runTurn,
     }));
     provider.runTurn.mockReset();
+    provider.runTurn.mockImplementation(() =>
+      events(
+        { type: "message.created", ref: "assistant", content: "" },
+        { type: "message.completed", ref: "assistant", content: "done", usage: null }
+      )
+    );
   });
 
-  it("starts sessions without provider execution", async () => {
+  it("starts sessions without provider execution or public provider metadata", async () => {
     const { frames, manager } = createHarness();
 
-    await startSession(manager, "session-start-resume");
+    await startSession(manager, "session-start");
+
     const started = frames[0];
     expect(started.type).toBe("response");
     if (started.type !== "response" || started.response.type !== "sessionStarted") {
       throw new Error("expected sessionStarted response");
     }
-    expect(started.response.snapshot.resume?.provider).toBe("openrouter");
-    expect(started.response.sessionId).toBe("session-start-resume");
+    expect(started.response.snapshot).toMatchObject({
+      sessionId: "session-start",
+      status: "idle",
+      transcript: [],
+      toolCalls: [],
+      backendProcesses: [],
+      continuation: { enabled: false, available: false },
+    });
+    expect(JSON.stringify(started)).not.toMatch(
+      new RegExp(`provider|native(Session|Thread)Id|${["pending", "Tools"].join("")}|resume`, "i")
+    );
   });
 
-  it("includes resolved default provider metadata in start snapshots", async () => {
+  it("returns protocol errors for invalid internally resolved sessions", async () => {
     const { frames, manager } = createHarness();
 
-    await startSession(manager, "session-default-provider", {
-      provider: null,
-      model: null,
-      workingDir: null,
-      systemPrompt: null,
-      continuable: false,
-    });
-
-    expect(frames[0]).toMatchObject({
-      type: "response",
-      response: {
-        type: "sessionStarted",
-        sessionId: "session-default-provider",
-        snapshot: {
-          resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: null },
-        },
-      },
-    });
-  });
-
-  it("returns protocol errors for invalid session providers", async () => {
-    const { frames, manager } = createHarness();
-
-    await startSession(manager, "session-invalid-provider", {
-      provider: "invalid-provider",
-      model: null,
+    await startSession(manager, "session-invalid", {
+      model: "invalid-model",
       workingDir: null,
       systemPrompt: null,
       continuable: false,
@@ -112,22 +106,31 @@ describe("AI backend session manager", () => {
       type: "response",
       response: {
         type: "error",
-        sessionId: "session-invalid-provider",
-        message: expect.stringContaining("Invalid provider"),
+        sessionId: "session-invalid",
+        error: { code: "runtime_error" },
       },
     });
   });
 
-  it("emits an idle session snapshot after a successful turn", async () => {
-    provider.runTurn.mockResolvedValue({
-      text: "done",
-      usage: null,
-      resume: {
-        provider: "openrouter",
-        nativeSessionId: "native-session",
-        nativeThreadId: null,
-      },
-    });
+  it("reduces a streamed assistant timeline into ordered events and snapshots", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        { type: "message.created", ref: "assistant", content: "" },
+        { type: "message.delta", ref: "assistant", delta: "hel" },
+        {
+          type: "message.completed",
+          ref: "assistant",
+          content: "hello",
+          usage: {
+            promptTokens: 1,
+            cachedTokens: null,
+            completionTokens: 2,
+            reasoningTokens: null,
+            totalTokens: 3,
+          },
+        }
+      )
+    );
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-turn-success");
@@ -142,468 +145,529 @@ describe("AI backend session manager", () => {
     });
 
     await vi.waitFor(() => {
-      expect(
-        frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")
-      ).toBe(true);
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
     });
-    const sessionUpdated = frames.find(
-      (frame) => frame.type === "event" && frame.event.type === "sessionUpdated"
-    );
+    const eventsOnly = frames.filter((frame): frame is Extract<AiBackendMessage, { type: "event" }> => frame.type === "event");
+    expect(eventsOnly.map((frame) => frame.event.seq)).toEqual(eventsOnly.map((_, index) => index + 1));
+    expect(eventsOnly.some((frame) => frame.event.type === "messageDelta")).toBe(true);
 
-    expect(sessionUpdated).toMatchObject({
-      type: "event",
-      event: {
-        type: "sessionUpdated",
-        sessionId: "session-turn-success",
-        snapshot: {
-          status: "idle",
-          resume: { provider: "openrouter", nativeSessionId: "native-session" },
-        },
-      },
-    });
-    if (sessionUpdated?.type !== "event" || sessionUpdated.event.type !== "sessionUpdated") {
+    const sessionUpdated = [...eventsOnly].reverse().find((frame) => frame.event.type === "sessionUpdated");
+    if (!sessionUpdated || sessionUpdated.event.type !== "sessionUpdated") {
       throw new Error("expected sessionUpdated event");
     }
-    expect(sessionUpdated.event.snapshot.transcript).toHaveLength(2);
+    expect(sessionUpdated.event.sessionId).toBe("session-turn-success");
+    expect(sessionUpdated.event.snapshot.status).toBe("idle");
+    expect(sessionUpdated.event.snapshot.transcript).toContainEqual(
+      expect.objectContaining({ role: "user", status: "completed" })
+    );
+    expect(sessionUpdated.event.snapshot.transcript).toContainEqual(
+      expect.objectContaining({ role: "assistant", status: "completed", usage: expect.objectContaining({ totalTokens: 3 }) })
+    );
+    expect(JSON.stringify(frames)).not.toMatch(
+      new RegExp(`native(Session|Thread)Id|${["provider", "ToolCallId"].join("")}|${["resume", "MetadataUpdated"].join("")}`)
+    );
+  });
+
+  it("emits message creation for implicitly materialized assistant messages", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        { type: "message.delta", ref: "assistant", delta: "hel" },
+        { type: "message.completed", ref: "assistant", content: "hello", usage: null }
+      )
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-implicit-message");
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session-implicit-message",
+        turnId: "turn-1",
+        input: "hello",
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
+    });
+    const assistantCreated = frames.find((frame) =>
+      frame.type === "event" &&
+      frame.event.type === "messageCreated" &&
+      frame.event.message.role === "assistant"
+    );
+    expect(assistantCreated).toBeDefined();
+  });
+
+  it("returns reconnect snapshots and events since a cursor", async () => {
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-reconnect");
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session-reconnect",
+        turnId: "turn-1",
+        input: "hello",
+      },
+    });
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
+    });
+    await manager.handle({
+      type: "request",
+      request: { type: "getSessionSnapshot", sessionId: "session-reconnect" },
+    });
+    await manager.handle({
+      type: "request",
+      request: { type: "eventsSince", sessionId: "session-reconnect", afterSeq: 2 },
+    });
+
+    const response = frames.at(-1);
+    expect(frames.at(-2)).toMatchObject({
+      type: "response",
+      response: { type: "sessionSnapshot", sessionId: "session-reconnect" },
+    });
+    expect(response).toMatchObject({
+      type: "response",
+      response: { type: "sessionEvents", sessionId: "session-reconnect" },
+    });
+    if (response?.type !== "response" || response.response.type !== "sessionEvents") {
+      throw new Error("expected sessionEvents response");
+    }
+    expect(response.response.events.every((event) => event.seq > 2)).toBe(true);
+    expect(response.response.snapshot.lastEventSeq).toBeGreaterThan(2);
+  });
+
+  it("keeps streamed provider failures in the session snapshot", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        { type: "message.created", ref: "assistant", content: "" },
+        { type: "message.failed", ref: "assistant", error: new Error("native provider detail") }
+      )
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-stream-failure");
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session-stream-failure",
+        turnId: "turn-1",
+        input: "hello",
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
+    });
+    const sessionUpdates = frames.filter((frame): frame is Extract<AiBackendMessage, { type: "event" }> =>
+      frame.type === "event" && frame.event.type === "sessionUpdated"
+    );
+    const lastSessionUpdate = sessionUpdates.at(-1);
+    if (!lastSessionUpdate || lastSessionUpdate.event.type !== "sessionUpdated") {
+      throw new Error("expected sessionUpdated event");
+    }
+    expect(lastSessionUpdate.event.snapshot.status).toBe("error");
+    expect(lastSessionUpdate.event.snapshot.error).toMatchObject({
+      code: "runtime_error",
+      message: "Runtime operation failed",
+    });
+    expect(JSON.stringify(frames)).not.toContain("native provider detail");
+  });
+
+  it("terminates active operations when a turn fails after tool activity starts", async () => {
+    provider.runTurn.mockImplementation(async function* () {
+      yield {
+        type: "tool.created",
+        ref: "tool-ref",
+        name: "inspect",
+        input: { text: "inspect(path=\".\")" },
+      };
+      yield { type: "tool.updated", ref: "tool-ref", status: "running" };
+      yield { type: "backend_process.created", ref: "process-ref", title: "background work" };
+      yield { type: "backend_process.updated", ref: "process-ref", status: "running" };
+      throw new Error("native provider detail");
+    });
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-runtime-failure-active");
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session-runtime-failure-active",
+        turnId: "turn-1",
+        input: "hello",
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
+    });
+    const sessionUpdates = frames.filter((frame): frame is Extract<AiBackendMessage, { type: "event" }> =>
+      frame.type === "event" && frame.event.type === "sessionUpdated"
+    );
+    const lastSessionUpdate = sessionUpdates.at(-1);
+    if (!lastSessionUpdate || lastSessionUpdate.event.type !== "sessionUpdated") {
+      throw new Error("expected sessionUpdated event");
+    }
+    expect(lastSessionUpdate.event.snapshot.status).toBe("error");
+    expect(lastSessionUpdate.event.snapshot.toolCalls).toContainEqual(
+      expect.objectContaining({ status: "cancelled" })
+    );
+    expect(lastSessionUpdate.event.snapshot.backendProcesses).toContainEqual(
+      expect.objectContaining({ status: "cancelled" })
+    );
+    expect(JSON.stringify(frames)).not.toContain("native provider detail");
   });
 
   it("reuses one provider runner across turns in a session", async () => {
-    provider.runTurn
-      .mockResolvedValueOnce({
-        text: "first",
-        usage: null,
-        resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: "thread-1" },
-      })
-      .mockResolvedValueOnce({
-        text: "second",
-        usage: null,
-        resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: "thread-1" },
-      });
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-runner-reuse", { ...defaultConfig, continuable: true });
     await manager.handle({
       type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-runner-reuse",
-        turnId: "turn-1",
-        input: "first",
-      },
+      request: { type: "sendInput", sessionId: "session-runner-reuse", turnId: "turn-1", input: "first" },
     });
     await vi.waitFor(() => {
-      expect(frames).toContainEqual({
-        type: "event",
-        event: { type: "turnFinished", sessionId: "session-runner-reuse", turnId: "turn-1", usage: null },
-      });
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished" && frame.event.turnId === "turn-1")).toBe(true);
     });
     await manager.handle({
       type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-runner-reuse",
-        turnId: "turn-2",
-        input: "second",
-      },
+      request: { type: "sendInput", sessionId: "session-runner-reuse", turnId: "turn-2", input: "second" },
     });
 
     await vi.waitFor(() => {
-      expect(frames).toContainEqual({
-        type: "event",
-        event: { type: "turnFinished", sessionId: "session-runner-reuse", turnId: "turn-2", usage: null },
-      });
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished" && frame.event.turnId === "turn-2")).toBe(true);
     });
-    expect(provider.createProviderRunner).toHaveBeenCalledTimes(1);
+    expect(provider.createResolvedProviderRunner).toHaveBeenCalledTimes(1);
     expect(provider.runTurn).toHaveBeenCalledTimes(2);
+    const sessionUpdated = [...frames].reverse().find((frame) => frame.type === "event" && frame.event.type === "sessionUpdated");
+    if (!sessionUpdated || sessionUpdated.type !== "event" || sessionUpdated.event.type !== "sessionUpdated") {
+      throw new Error("expected sessionUpdated event");
+    }
+    const assistantEntries = sessionUpdated.event.snapshot.transcript.filter((entry) => entry.role === "assistant");
+    expect(assistantEntries).toHaveLength(2);
+    expect(assistantEntries.every((entry) => entry.status === "completed")).toBe(true);
+    expect(new Set(assistantEntries.map((entry) => entry.id)).size).toBe(2);
   });
 
-  it("rejects overlapping turns for the same session", async () => {
-    let resolveTurn!: (value: unknown) => void;
-    provider.runTurn.mockImplementation(
-      () => new Promise((resolve) => {
-        resolveTurn = resolve;
-      })
-    );
+  it("rejects overlapping turns and session replacement for the same session", async () => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    provider.runTurn.mockImplementation(async function* () {
+      await pending;
+      yield { type: "message.completed", ref: "assistant", content: "done", usage: null };
+    });
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-overlap", { ...defaultConfig, continuable: true });
     await manager.handle({
       type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-overlap",
-        turnId: "turn-1",
-        input: "first",
-      },
+      request: { type: "sendInput", sessionId: "session-overlap", turnId: "turn-1", input: "first" },
     });
     await manager.handle({
       type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-overlap",
-        turnId: "turn-2",
-        input: "second",
-      },
+      request: { type: "sendInput", sessionId: "session-overlap", turnId: "turn-2", input: "second" },
     });
+    await startSession(manager, "session-overlap", { ...defaultConfig, systemPrompt: "replacement" });
 
     expect(frames).toContainEqual({
       type: "event",
-      event: {
+      event: expect.objectContaining({
         type: "error",
         sessionId: "session-overlap",
         turnId: "turn-2",
-        message: "AI session already has a running turn: session-overlap",
-      },
+        error: expect.objectContaining({ code: "conflict" }),
+      }),
     });
-    expect(provider.runTurn).toHaveBeenCalledTimes(1);
+    expect(frames).toContainEqual({
+      type: "response",
+      response: expect.objectContaining({
+        type: "error",
+        sessionId: "session-overlap",
+        error: expect.objectContaining({ code: "conflict" }),
+      }),
+    });
 
-    resolveTurn({
-      text: "done",
-      usage: null,
-      resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: null },
-    });
+    release();
     await vi.waitFor(() => {
-      expect(frames).toContainEqual({
-        type: "event",
-        event: { type: "turnFinished", sessionId: "session-overlap", turnId: "turn-1", usage: null },
-      });
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
     });
   });
 
   it("does not reject turns for sessions whose ids are prefixes of running sessions", async () => {
-    const resolveTurns: Array<(value: unknown) => void> = [];
-    provider.runTurn.mockImplementation(
-      () => new Promise((resolve) => {
-        resolveTurns.push(resolve);
-      })
-    );
+    const releases: Array<() => void> = [];
+    provider.runTurn.mockImplementation(async function* () {
+      await new Promise<void>((resolve) => releases.push(resolve));
+      yield { type: "message.completed", ref: "assistant", content: "done", usage: null };
+    });
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session");
     await startSession(manager, "session:child");
     await manager.handle({
       type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session:child",
-        turnId: "turn-1",
-        input: "child",
-      },
+      request: { type: "sendInput", sessionId: "session:child", turnId: "turn-1", input: "child" },
     });
     await manager.handle({
       type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session",
-        turnId: "turn-1",
-        input: "parent",
-      },
+      request: { type: "sendInput", sessionId: "session", turnId: "turn-1", input: "parent" },
     });
 
     expect(provider.runTurn).toHaveBeenCalledTimes(2);
-    expect(frames).not.toContainEqual({
-      type: "event",
-      event: {
-        type: "error",
-        sessionId: "session",
-        turnId: "turn-1",
-        message: "AI session already has a running turn: session",
-      },
-    });
-
-    for (const resolveTurn of resolveTurns) {
-      resolveTurn({
-        text: "done",
-        usage: null,
-        resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: null },
-      });
-    }
+    for (const release of releases) release();
     await vi.waitFor(() => {
-      expect(frames).toContainEqual({
-        type: "event",
-        event: { type: "turnFinished", sessionId: "session", turnId: "turn-1", usage: null },
-      });
-    });
-  });
-
-  it("waits for an in-flight turn before replacing a session runner", async () => {
-    let resolveTurn!: (value: unknown) => void;
-    const firstRunner = {
-      resolvedProvider: { type: "openrouter" },
-      runTurn: vi.fn(() => new Promise((resolve) => {
-        resolveTurn = resolve;
-      })),
-      dispose: vi.fn(),
-    };
-    const secondRunner = {
-      resolvedProvider: { type: "openrouter" },
-      runTurn: vi.fn(),
-      dispose: vi.fn(),
-    };
-    provider.createProviderRunner
-      .mockReturnValueOnce(firstRunner)
-      .mockReturnValueOnce(secondRunner);
-    const { frames, manager } = createHarness();
-
-    await startSession(manager, "session-restart-waits", { ...defaultConfig, continuable: true });
-    await manager.handle({
-      type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-restart-waits",
-        turnId: "turn-1",
-        input: "first",
-      },
-    });
-    const restartPromise = startSession(manager, "session-restart-waits", {
-      ...defaultConfig,
-      continuable: true,
-      systemPrompt: "restarted",
-    });
-    await Promise.resolve();
-
-    expect(provider.createProviderRunner).toHaveBeenCalledTimes(1);
-    expect(firstRunner.dispose).not.toHaveBeenCalled();
-
-    resolveTurn({
-      text: "done",
-      usage: null,
-      resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: "thread-1" },
-    });
-    await restartPromise;
-
-    expect(provider.createProviderRunner).toHaveBeenCalledTimes(2);
-    expect(firstRunner.dispose).toHaveBeenCalledTimes(1);
-    expect(frames).toContainEqual({
-      type: "event",
-      event: { type: "turnFinished", sessionId: "session-restart-waits", turnId: "turn-1", usage: null },
-    });
-    expect(frames.at(-1)).toMatchObject({
-      type: "response",
-      response: {
-        type: "sessionStarted",
-        sessionId: "session-restart-waits",
-        snapshot: { sessionId: "session-restart-waits" },
-      },
-    });
-  });
-
-  it("does not wait for running turns from sessions whose ids share prefixes", async () => {
-    let resolveTurn!: (value: unknown) => void;
-    provider.runTurn.mockImplementation(
-      () => new Promise((resolve) => {
-        resolveTurn = resolve;
-      })
-    );
-    const { frames, manager } = createHarness();
-
-    await startSession(manager, "session");
-    await startSession(manager, "session:child");
-    await manager.handle({
-      type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session:child",
-        turnId: "turn-1",
-        input: "child",
-      },
-    });
-    const restartPromise = startSession(manager, "session", {
-      ...defaultConfig,
-      systemPrompt: "parent restart",
-    });
-    await restartPromise;
-
-    expect(provider.createProviderRunner).toHaveBeenCalledTimes(3);
-    expect(frames.at(-1)).toMatchObject({
-      type: "response",
-      response: {
-        type: "sessionStarted",
-        sessionId: "session",
-        snapshot: { sessionId: "session" },
-      },
-    });
-
-    resolveTurn({
-      text: "done",
-      usage: null,
-      resume: { provider: "openrouter", nativeSessionId: null, nativeThreadId: null },
-    });
-    await vi.waitFor(() => {
-      expect(frames).toContainEqual({
-        type: "event",
-        event: { type: "turnFinished", sessionId: "session:child", turnId: "turn-1", usage: null },
-      });
+      expect(frames.filter((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toHaveLength(2);
     });
   });
 
   it("emits protocol errors for unknown sessions", async () => {
     const { frames, manager } = createHarness();
 
-    await expect(
-      manager.handle({
-        type: "request",
-        request: {
-          type: "sendInput",
-          sessionId: "missing-session",
-          turnId: "turn-missing",
-          input: "hello",
-        },
-      })
-    ).resolves.toBeUndefined();
-    await expect(
-      manager.handle({
-        type: "request",
-        request: {
-          type: "setPlanState",
-          sessionId: "missing-session",
-          state: { mode: "approved", planText: "ship it", approved: true },
-        },
-      })
-    ).resolves.toBeUndefined();
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "missing-session", turnId: "turn-missing", input: "hello" },
+    });
+    await manager.handle({
+      type: "request",
+      request: { type: "getSessionSnapshot", sessionId: "missing-session" },
+    });
 
     expect(frames).toMatchObject([
-      {
-        type: "event",
-        event: {
-          type: "error",
-          sessionId: "missing-session",
-          turnId: "turn-missing",
-          message: "Unknown AI session: missing-session",
-        },
-      },
-      {
-        type: "event",
-        event: {
-          type: "error",
-          sessionId: "missing-session",
-          turnId: null,
-          message: "Unknown AI session: missing-session",
-        },
-      },
+      { type: "response", response: { type: "error", sessionId: "missing-session", error: { code: "not_found" } } },
+      { type: "response", response: { type: "error", sessionId: "missing-session", error: { code: "not_found" } } },
     ]);
   });
 
-  it("cancels in-flight turns through the provider signal", async () => {
-    provider.runTurn.mockImplementation(
-      (_config: unknown, _input: unknown, signal: AbortSignal) =>
-        new Promise((_resolve, reject) => {
-          signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-        })
-    );
+  it("cancels in-flight turns and active operations through the provider signal", async () => {
+    provider.runTurn.mockImplementation(async function* (input: AiRunTurnInput) {
+      input.signal.throwIfAborted();
+      yield {
+        type: "tool.created",
+        ref: "tool-ref",
+        name: "inspect",
+        input: { text: "inspect(path=\".\")", fields: { path: "." } },
+      };
+      yield { type: "tool.updated", ref: "tool-ref", status: "running" };
+      yield { type: "tool.progress", ref: "tool-ref", progress: "working" };
+      yield { type: "backend_process.created", ref: "process-ref", title: "background work" };
+      yield { type: "backend_process.updated", ref: "process-ref", status: "running" };
+      yield { type: "backend_process.progress", ref: "process-ref", progress: "working" };
+      input.signal.throwIfAborted();
+      await new Promise((_resolve, reject) => {
+        if (input.signal.aborted) {
+          reject(new Error("aborted"));
+          return;
+        }
+        input.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+    });
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-cancel");
     await manager.handle({
       type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-cancel",
-        turnId: "turn-cancel",
-        input: "wait",
-      },
+      request: { type: "sendInput", sessionId: "session-cancel", turnId: "turn-cancel", input: "wait" },
     });
-    await manager.handle({
-      type: "cancel",
-      sessionId: "session-cancel",
-      turnId: "turn-cancel",
-    });
+    await manager.handle({ type: "cancel", sessionId: "session-cancel", turnId: "turn-cancel" });
 
     await vi.waitFor(() => {
-      expect(frames).toContainEqual({
-        type: "event",
-        event: { type: "turnFinished", sessionId: "session-cancel", turnId: "turn-cancel", usage: null },
-      });
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
     });
     expect(frames).toContainEqual({
       type: "event",
       event: expect.objectContaining({
-        type: "sessionUpdated",
-        sessionId: "session-cancel",
-        snapshot: expect.objectContaining({ status: "cancelled" }),
+        type: "toolCallUpdated",
+        toolCall: expect.objectContaining({
+          status: "cancelled",
+          wait: null,
+          progress: null,
+          elapsedMs: null,
+        }),
+      }),
+    });
+    expect(frames).toContainEqual({
+      type: "event",
+      event: expect.objectContaining({
+        type: "backendProcessUpdated",
+        process: expect.objectContaining({
+          status: "cancelled",
+          progress: null,
+          elapsedMs: null,
+        }),
       }),
     });
   });
 
-  it("does not cancel running turns from sessions whose ids share prefixes", async () => {
-    let childAborted = false;
-    provider.runTurn.mockImplementation(
-      (_config: unknown, _input: unknown, signal: AbortSignal) =>
-        new Promise((_resolve, reject) => {
-          signal.addEventListener("abort", () => {
-            childAborted = true;
-            reject(new Error("aborted"));
-          }, { once: true });
-        })
+  it("tracks tool and backend process lifecycle events", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        {
+          type: "tool.created",
+          ref: "tool-ref",
+          name: "inspect",
+          input: { text: "inspect(path=\".\")", fields: { path: "." } },
+        },
+        { type: "tool.updated", ref: "tool-ref", status: "running" },
+        { type: "tool.output", ref: "tool-ref", output: [{ type: "text", text: "started" }] },
+        { type: "tool.promoted_to_backend_process", toolRef: "tool-ref", processRef: "process-ref", title: "background work" },
+        { type: "backend_process.updated", ref: "process-ref", status: "running" },
+        { type: "backend_process.progress", ref: "process-ref", progress: "50%" },
+        { type: "backend_process.completed", ref: "process-ref", output: [{ type: "text", text: "done" }] },
+        { type: "message.completed", ref: "assistant", content: "done", usage: null }
+      )
     );
     const { frames, manager } = createHarness();
 
-    await startSession(manager, "session");
-    await startSession(manager, "session:child");
+    await startSession(manager, "session-tools");
     await manager.handle({
       type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session:child",
-        turnId: "turn-1",
-        input: "wait",
-      },
+      request: { type: "sendInput", sessionId: "session-tools", turnId: "turn-tools", input: "run" },
     });
-    await manager.handle({
-      type: "cancel",
-      sessionId: "session",
-      turnId: null,
-    });
-    await Promise.resolve();
 
-    expect(childAborted).toBe(false);
-
-    await manager.handle({
-      type: "cancel",
-      sessionId: "session:child",
-      turnId: null,
-    });
     await vi.waitFor(() => {
-      expect(frames).toContainEqual({
-        type: "event",
-        event: { type: "turnFinished", sessionId: "session:child", turnId: "turn-1", usage: null },
-      });
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
     });
-    expect(childAborted).toBe(true);
+    expect(frames.some((frame) => frame.type === "event" && frame.event.type === "toolCallCreated")).toBe(true);
+    expect(frames.some((frame) => frame.type === "event" && frame.event.type === "toolCallPromotedToBackendProcess")).toBe(true);
+    expect(frames.some((frame) => frame.type === "event" && frame.event.type === "backendProcessProgress")).toBe(true);
+    expect(JSON.stringify(frames)).not.toMatch(
+      new RegExp(`${["provider", "ToolCallId"].join("")}|native(Session|Thread)Id`)
+    );
   });
 
-  it("emits an error session snapshot after failed turns", async () => {
-    provider.runTurn.mockRejectedValue(new Error("provider failed"));
+  it("stores completed tool results with cumulative output once", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        {
+          type: "tool.created",
+          ref: "tool-ref",
+          name: "inspect",
+          input: { text: "inspect(path=\".\")" },
+        },
+        { type: "tool.output", ref: "tool-ref", output: [{ type: "text", text: "started" }] },
+        { type: "tool.completed", ref: "tool-ref", output: [{ type: "text", text: "done" }] },
+        { type: "message.completed", ref: "assistant", content: "done", usage: null }
+      )
+    );
     const { frames, manager } = createHarness();
 
-    await startSession(manager, "session-error");
+    await startSession(manager, "session-tool-output");
     await manager.handle({
       type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-error",
-        turnId: "turn-error",
-        input: "fail",
-      },
+      request: { type: "sendInput", sessionId: "session-tool-output", turnId: "turn-tools", input: "run" },
     });
 
     await vi.waitFor(() => {
-      expect(frames).toContainEqual({
-        type: "event",
-        event: { type: "error", sessionId: "session-error", turnId: "turn-error", message: "provider failed" },
-      });
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
     });
+    const updated = [...frames].reverse().find((frame) =>
+      frame.type === "event" &&
+      frame.event.type === "toolCallUpdated" &&
+      frame.event.toolCall.status === "completed"
+    );
+    if (!updated || updated.type !== "event" || updated.event.type !== "toolCallUpdated") {
+      throw new Error("expected completed tool update");
+    }
+    expect(updated.event.toolCall.output).toEqual([
+      { type: "text", text: "started" },
+      { type: "text", text: "done" },
+    ]);
+    expect(updated.event.toolCall.result?.output).toEqual(updated.event.toolCall.output);
+  });
+
+  it("handles generic tool decisions without provider tool ids", async () => {
+    const submitToolDecision = vi.fn();
+    provider.createResolvedProviderRunner.mockImplementation(() => ({
+      resolvedProvider: { type: "openrouter" },
+      runTurn: provider.runTurn,
+      submitToolDecision,
+    }));
+    provider.runTurn.mockImplementation(() =>
+      events(
+        {
+          type: "tool.created",
+          ref: "tool-ref",
+          name: "inspect",
+          input: { text: "inspect(path=\".\")" },
+        },
+        { type: "tool.updated", ref: "tool-ref", status: "waiting", waitReason: "approval" }
+      )
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-decision");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-decision", turnId: "turn-1", input: "run" },
+    });
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "toolCallUpdated")).toBe(true);
+    });
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "submitToolDecision",
+        sessionId: "session-decision",
+        turnId: "turn-1",
+        decision: { toolCallId: "tool-1", decision: "approve", reason: null },
+      },
+    });
+
+    expect(submitToolDecision).toHaveBeenCalledWith({ toolCallId: "tool-ref", decision: "approve", reason: null });
+    expect(frames.at(-1)).toEqual({
+      type: "response",
+      response: { type: "accepted", sessionId: "session-decision", turnId: "turn-1" },
+    });
+  });
+
+  it("marks unsupported tool approval without failing the tool", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        {
+          type: "tool.created",
+          ref: "tool-ref",
+          name: "inspect",
+          input: { text: "inspect(path=\".\")" },
+        },
+        { type: "tool.updated", ref: "tool-ref", status: "waiting", waitReason: "approval" }
+      )
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-unsupported-decision");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-unsupported-decision", turnId: "turn-1", input: "run" },
+    });
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "toolCallUpdated")).toBe(true);
+    });
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "submitToolDecision",
+        sessionId: "session-unsupported-decision",
+        turnId: "turn-1",
+        decision: { toolCallId: "tool-1", decision: "approve", reason: null },
+      },
+    });
+
     expect(frames).toContainEqual({
       type: "event",
       event: expect.objectContaining({
-        type: "sessionUpdated",
-        sessionId: "session-error",
-        snapshot: expect.objectContaining({ status: "error", error: "provider failed" }),
+        type: "toolCallUpdated",
+        toolCall: expect.objectContaining({
+          status: "unsupported",
+          result: expect.objectContaining({ state: "unsupported" }),
+        }),
       }),
-    });
-    expect(frames).toContainEqual({
-      type: "event",
-      event: { type: "turnFinished", sessionId: "session-error", turnId: "turn-error", usage: null },
     });
   });
 

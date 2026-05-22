@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildCodexConfig, buildCodexEnv } from "../../src/providers/codex-agent-runtime.js";
+import {
+  buildCodexConfig,
+  buildCodexEnv,
+  createCodexUiStreamState,
+  mapCodexUiStreamEvent,
+} from "../../src/providers/codex-agent-runtime.js";
 
 describe("AI backend Codex provider helpers", () => {
   it("builds OpenRouter Codex config without forcing ChatGPT login", () => {
@@ -26,5 +31,32 @@ describe("AI backend Codex provider helpers", () => {
     expect(env.CODEX_HOME).toBe("/tmp/codex-home");
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(env.OPENROUTER_API_KEY).toBeUndefined();
+  });
+
+  it("keeps file-change items running until completion", () => {
+    const state = createCodexUiStreamState();
+    const started = mapCodexUiStreamEvent({
+      type: "item.started",
+      item: {
+        id: "file-change-1",
+        type: "file_change",
+        status: "started",
+        changes: [{ path: "src/example.ts", kind: "update" }],
+      },
+    }, state);
+    const completed = mapCodexUiStreamEvent({
+      type: "item.completed",
+      item: {
+        id: "file-change-1",
+        type: "file_change",
+        status: "completed",
+        changes: [{ path: "src/example.ts", kind: "update" }],
+      },
+    }, state);
+
+    expect(started).toContainEqual({ type: "tool.created", ref: "file-change-1", name: "file_edit", input: expect.any(Object) });
+    expect(started).toContainEqual({ type: "tool.updated", ref: "file-change-1", status: "running" });
+    expect(started).not.toContainEqual(expect.objectContaining({ type: "tool.completed" }));
+    expect(completed).toContainEqual(expect.objectContaining({ type: "tool.completed", ref: "file-change-1" }));
   });
 });

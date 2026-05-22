@@ -176,3 +176,21 @@ export function summarizeToolInputForLlm(toolName: string, toolInput: unknown): 
     }
   }
 }
+
+export function summarizeToolInputForUi(toolName: string, toolInput: unknown): {
+  text: string;
+  fields?: Record<string, string | number | boolean | null>;
+} {
+  const fields: Record<string, string | number | boolean | null> = {};
+  if (toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)) {
+    for (const [key, value] of Object.entries(toolInput as Dict)) {
+      if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+        fields[key] = value;
+      }
+    }
+  }
+  return {
+    text: summarizeToolInputForLlm(toolName, toolInput),
+    ...(Object.keys(fields).length > 0 ? { fields } : {}),
+  };
+}

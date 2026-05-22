@@ -76,13 +76,13 @@ src/                                # TypeScript source
 
   ai-backend/                       # Provider-neutral JSONL backend for UI sessions
     server.ts                       # stdin/stdout JSONL frame loop
-    session-manager.ts              # Session lifecycle, transcript updates, turn execution
-    provider.ts                     # Claude/Codex SDK provider runners for UI turns
+    session-manager.ts              # Session lifecycle and generic timeline reducer
+    provider.ts                     # Internal SDK runtime runner boundary for UI turns
     wire.ts                         # Backend wire parsing and serialization helpers
 
-  ai-protocol/                      # TypeScript protocol bindings shared with Astral
-    generated/                      # ts-rs generated AI request/response/event types
-    index.ts                        # Stable barrel export for generated protocol types
+  ai-protocol/                      # Locally owned TypeScript JSONL protocol
+    types.ts                        # Public request/response/event/snapshot types
+    index.ts                        # Stable barrel export for protocol types
 
   scenario/                         # Scenario testing + capture pipeline
     types.ts                        # Scenario schema + validateScenario
@@ -128,8 +128,6 @@ dist/                               # Compiled JavaScript (build output)
   agents/                           # Compiled agents
   utils/                            # Compiled utilities
 
-scripts/
-  sync-astral-ai-bindings.mjs       # Copies generated Astral AI protocol bindings into src/ai-protocol/generated
 ```
 
 ## Adapters

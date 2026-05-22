@@ -2,10 +2,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { isCancellationError } from "../utils/cancellation.js";
+import { errorMessage, optionalNumber, outputBlocks, stringField, textOutput } from "../utils/output.js";
+import { summarizeToolInputForUi } from "../utils/tool-input-summary.js";
 import { PROVIDER_TYPES } from "./registry.js";
 import type { ProviderExecutionResult, ProviderRunInput } from "./execution-types.js";
 import type { ProviderUsage } from "./execution-types.js";
 import type { ResolvedProvider } from "./types.js";
+import type { AiRuntimeEvent } from "../ai-backend/runtime-events.js";
 
 export type CodexThreadOptionsConfig = {
   workingDir?: string | null;
@@ -14,7 +17,7 @@ export type CodexThreadOptionsConfig = {
 export type CodexThread = {
   id?: string;
   run(input: string, options?: Record<string, unknown>): Promise<CodexTurn>;
-  runStreamed?: (input: string, options?: Record<string, unknown>) => AsyncIterable<unknown>;
+  runStreamed?: (input: string, options?: Record<string, unknown>) => Promise<{ events: AsyncIterable<unknown> }>;
 };
 
 export type CodexTurn = {
@@ -31,10 +34,24 @@ export type CodexConstructor = new (options?: Record<string, unknown>) => {
   startThread(options?: Record<string, unknown>): {
     id?: string;
     run(input: string, options?: Record<string, unknown>): Promise<CodexTurn>;
-    runStreamed?: (input: string, options?: Record<string, unknown>) => AsyncIterable<unknown>;
+    runStreamed?: (input: string, options?: Record<string, unknown>) => Promise<{ events: AsyncIterable<unknown> }>;
   };
   resumeThread?: (threadId: string, options?: Record<string, unknown>) => CodexThread;
 };
+
+export type CodexUiStreamState = {
+  seenMessages: Set<string>;
+  seenTools: Set<string>;
+  seenProcesses: Set<string>;
+};
+
+export function createCodexUiStreamState(): CodexUiStreamState {
+  return {
+    seenMessages: new Set(),
+    seenTools: new Set(),
+    seenProcesses: new Set(),
+  };
+}
 
 type CodexLiveSession = {
   tempHome: string;
@@ -169,7 +186,7 @@ export function buildCodexThreadOptions<T extends CodexThreadOptionsConfig>(
     skipGitRepoCheck: true,
     model: resolvedProvider.modelId,
     sandboxMode: "read-only",
-    approvalPolicy: "never",
+    approvalPolicy: "on-request",
     networkAccessEnabled: false,
     webSearchMode: "disabled",
     webSearchEnabled: false,
@@ -208,6 +225,30 @@ export function normalizeCodexAiUsage<T>(
   } : null;
 }
 
+export function mapCodexUiStreamEvent(event: unknown, state: CodexUiStreamState): AiRuntimeEvent[] {
+  if (!event || typeof event !== "object") return [];
+  const raw = event as Record<string, unknown>;
+  if (raw.type === "turn.completed") {
+    return [{ type: "message.completed", ref: "assistant", usage: normalizeCodexAiUsage(raw.usage as CodexTurn["usage"], optionalNumber) }];
+  }
+  if (raw.type === "turn.failed") {
+    return [{ type: "error", error: errorMessage(raw.error) }];
+  }
+  if (raw.type === "error") {
+    return [{ type: "error", error: stringField(raw, "message") ?? "Runtime stream error" }];
+  }
+  if (
+    raw.type !== "item.started" &&
+    raw.type !== "item.updated" &&
+    raw.type !== "item.completed"
+  ) {
+    return [];
+  }
+  const item = raw.item;
+  if (!item || typeof item !== "object") return [];
+  return mapCodexUiItem(raw.type, item as Record<string, unknown>, state);
+}
+
 export function buildCodexEnv(tempHome: string, openaiSubscription: boolean): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -223,6 +264,92 @@ export function buildCodexEnv(tempHome: string, openaiSubscription: boolean): Re
     delete env.ANTHROPIC_BASE_URL;
   }
   return env;
+}
+
+function mapCodexUiItem(
+  eventType: string,
+  item: Record<string, unknown>,
+  state: CodexUiStreamState
+): AiRuntimeEvent[] {
+  const itemType = stringField(item, "type");
+  const id = stringField(item, "id") ?? `${itemType ?? "item"}-${state.seenTools.size + state.seenProcesses.size + 1}`;
+  switch (itemType) {
+    case "agent_message": {
+      const text = stringField(item, "text") ?? "";
+      const ref = "assistant";
+      const events: AiRuntimeEvent[] = [];
+      if (!state.seenMessages.has(ref)) {
+        state.seenMessages.add(ref);
+        events.push({ type: "message.created", ref, content: "" });
+      }
+      if (eventType === "item.completed") {
+        events.push({ type: "message.completed", ref, content: text, usage: null });
+      } else if (text) {
+        events.push({ type: "message.delta", ref, delta: text });
+      }
+      return events;
+    }
+    case "command_execution": {
+      const command = stringField(item, "command") ?? "Command";
+      const status = stringField(item, "status");
+      const output = stringField(item, "aggregated_output");
+      const events = ensureTool(state, id, "shell", { command });
+      if (status === "completed") {
+        events.push({ type: "tool.completed", ref: id, output: output ? textOutput(output) : [] });
+      } else if (status === "failed") {
+        if (output) events.push({ type: "tool.output", ref: id, output: textOutput(output) });
+        events.push({ type: "tool.failed", ref: id, error: "Operation failed" });
+      } else {
+        events.push({ type: "tool.updated", ref: id, status: "running" });
+        if (output) events.push({ type: "tool.progress", ref: id, progress: output });
+      }
+      return events;
+    }
+    case "mcp_tool_call": {
+      const name = "external_tool";
+      const status = stringField(item, "status");
+      const events = ensureTool(state, id, name, item.arguments);
+      if (status === "completed") {
+        events.push({ type: "tool.completed", ref: id, output: outputBlocks(item.result) });
+      } else if (status === "failed") {
+        events.push({ type: "tool.failed", ref: id, error: errorMessage(item.error) });
+      } else {
+        events.push({ type: "tool.updated", ref: id, status: "running" });
+      }
+      return events;
+    }
+    case "file_change": {
+      const events = ensureTool(state, id, "file_edit", { changes: item.changes });
+      const status = stringField(item, "status");
+      if (status === "failed") {
+        events.push({ type: "tool.failed", ref: id, error: "File change failed" });
+      } else if (status === "completed" || eventType === "item.completed") {
+        events.push({ type: "tool.completed", ref: id, output: outputBlocks(item.changes) });
+      } else {
+        events.push({ type: "tool.updated", ref: id, status: "running" });
+      }
+      return events;
+    }
+    case "web_search": {
+      const events = ensureTool(state, id, "search", { query: item.query });
+      if (eventType === "item.completed") {
+        events.push({ type: "tool.completed", ref: id, output: [] });
+      } else {
+        events.push({ type: "tool.updated", ref: id, status: "running" });
+      }
+      return events;
+    }
+    case "error":
+      return [{ type: "error", error: stringField(item, "message") ?? "Runtime item error" }];
+    default:
+      return [];
+  }
+}
+
+function ensureTool(state: CodexUiStreamState, ref: string, name: string, input: unknown): AiRuntimeEvent[] {
+  if (state.seenTools.has(ref)) return [];
+  state.seenTools.add(ref);
+  return [{ type: "tool.created", ref, name, input: summarizeToolInputForUi(name, input) }];
 }
 
 export function buildCodexConfig(

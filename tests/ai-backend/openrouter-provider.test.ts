@@ -20,7 +20,6 @@ describe("AI backend OpenRouter provider resolution", () => {
     resetProviderConfig();
 
     const runner = createProviderRunner({
-      provider: "openrouter",
       model: null,
       workingDir: null,
       systemPrompt: null,
@@ -37,7 +36,6 @@ describe("AI backend OpenRouter provider resolution", () => {
     resetProviderConfig();
 
     const runner = createProviderRunner({
-      provider: "openrouter",
       model: null,
       workingDir: null,
       systemPrompt: null,
@@ -48,12 +46,11 @@ describe("AI backend OpenRouter provider resolution", () => {
     expect(runner.resolvedProvider.sdkRuntime).toBe("claude");
   });
 
-  it("uses the session provider before global SDK provider settings", () => {
-    process.env.AGENT_FRAMEWORK_SDK_PROVIDER = "claude-subscription";
+  it("uses internal provider resolution rather than session config provider selection", () => {
+    process.env.AGENT_FRAMEWORK_SDK_PROVIDER = "openai-subscription";
     resetProviderConfig();
 
     const runner = createProviderRunner({
-      provider: "openai-subscription",
       model: null,
       workingDir: null,
       systemPrompt: null,
@@ -68,7 +65,6 @@ describe("AI backend OpenRouter provider resolution", () => {
     expect(
       buildCodexTurnInput(
         {
-          provider: "openrouter",
           model: null,
           workingDir: null,
           systemPrompt: "Be concise.",
@@ -83,7 +79,6 @@ describe("AI backend OpenRouter provider resolution", () => {
     const abortController = new AbortController();
     const options = buildClaudeQueryOptions(
       {
-        provider: "claude-subscription",
         model: null,
         workingDir: "/tmp/work",
         systemPrompt: "System",
@@ -112,7 +107,6 @@ describe("AI backend OpenRouter provider resolution", () => {
     const abortController = new AbortController();
     const options = buildClaudeQueryOptions(
       {
-        provider: "claude-subscription",
         model: null,
         workingDir: "/tmp/work",
         systemPrompt: "System",
@@ -136,11 +130,10 @@ describe("AI backend OpenRouter provider resolution", () => {
     });
   });
 
-  it("keeps Codex UI turns read-only with web search disabled and reasoning effort applied", () => {
+  it("keeps Codex UI turns read-only with approval lifecycle enabled and reasoning effort applied", () => {
     expect(
       buildCodexThreadOptions(
         {
-          provider: "openai-subscription",
           model: "opus",
           workingDir: "/tmp/work",
           systemPrompt: null,
@@ -158,7 +151,7 @@ describe("AI backend OpenRouter provider resolution", () => {
     ).toMatchObject({
       workingDirectory: "/tmp/work",
       sandboxMode: "read-only",
-      approvalPolicy: "never",
+      approvalPolicy: "on-request",
       networkAccessEnabled: false,
       webSearchMode: "disabled",
       webSearchEnabled: false,
