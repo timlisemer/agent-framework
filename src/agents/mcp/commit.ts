@@ -74,6 +74,7 @@ function parseCommitResponse(
  * @param confirmTierName - Passed through to confirm agent (does not affect commit agent tier)
  * @param confirmExtraContext - Passed through to confirm agent
  * @param transcriptPath - Optional transcript path for statusLine updates
+ * @param optionalPlanfile - Optional explicit planfile path passed through to confirm
  * @returns Result with confirm output, message size, and commit hash
  */
 export async function runCommitAgent(
@@ -81,6 +82,7 @@ export async function runCommitAgent(
   confirmTierName?: string,
   confirmExtraContext?: string,
   transcriptPath?: string,
+  optionalPlanfile?: string,
   options: CancellationOptions = {}
 ): Promise<string> {
   // Set up execution context for statusLine logging
@@ -102,11 +104,12 @@ export async function runCommitAgent(
     confirmTierName,
     confirmExtraContext,
     transcriptPath,
+    optionalPlanfile,
     options
   );
-  if (confirmResult.includes("DECLINED")) {
-    // Preserve confirm output verbatim so check failures keep their concrete
-    // error list instead of collapsing to a vague decline summary.
+  if (confirmResult.includes("DECLINED") || confirmResult.startsWith("ERROR:")) {
+    // Preserve confirm output verbatim so check and planfile failures keep
+    // their concrete error list instead of collapsing to a vague summary.
     return confirmResult;
   }
 

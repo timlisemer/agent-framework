@@ -97,6 +97,7 @@ without invoking an LLM.
 - working_dir (optional): directory to evaluate (defaults to cwd)
 - model_tier (optional): haiku | sonnet | opus (default opus)
 - extra_context (optional): free-form additional instructions or focus areas
+- optional_planfile (optional): planfile path to include in confirm context
 - transcript_path (optional): session transcript path for statusLine
 - skip_elicitation (optional, bool): skip interactive repo/preference prompts
 
@@ -105,9 +106,12 @@ without invoking an LLM.
 1. Detect repos with uncommitted changes via list_repos logic
 2. If multiple repos and skip_elicitation=false, elicit selection via form
 3. For each selected repo, optionally elicit model tier + focus area
-4. Run check agent. If it FAILs, DECLINE without LLM.
-5. Otherwise, run the confirm SDK agent (Read + read-only Bash available)
-6. On DECLINED with uncertainties, elicit clarification and retry once
+4. Resolve plan context from optional_planfile or the session current planfile.
+   If neither exists, continue without plan input. If optional_planfile is
+   provided but unreadable or empty, fail before check.
+5. Run check agent. If it FAILs, DECLINE without LLM.
+6. Otherwise, run the confirm SDK agent (Read + read-only Bash available)
+7. On DECLINED with uncertainties, elicit clarification and retry once
 
 ## Output
 
@@ -129,6 +133,7 @@ and executes git commit. Optionally auto-pushes after successful commits.
 - working_dir (optional): directory to commit in (defaults to cwd)
 - model_tier (optional): haiku | sonnet | opus (passed through to confirm)
 - extra_context (optional): passed through to confirm
+- optional_planfile (optional): passed through to confirm as plan context
 - transcript_path (optional): session transcript path for statusLine
 - skip_elicitation (optional, bool): skip interactive prompts
 - auto_push (optional, bool): push every successfully-committed repo after

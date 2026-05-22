@@ -16,6 +16,8 @@
  * @module confirm
  */
 
+import * as fs from "fs";
+import * as path from "path";
 import { EXECUTION_TYPES, parseTierName } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
@@ -23,6 +25,8 @@ import { getUncommittedChangesCancellable } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { runConfirmPrefilter, formatConfirmPrefilter } from "../../utils/confirm-prefilter.js";
+import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
+import { readStoredCurrentPlan } from "../../utils/plan-source.js";
 import { runCheckAgent } from "./check.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 
@@ -60,6 +64,82 @@ ${checkErrors}
 DECLINED: check failed with ${errorCount} error(s); see Check Errors above.`;
 }
 
+type ConfirmPlanfileResolution =
+  | { kind: "found"; path: string; content: string }
+  | { kind: "missing" }
+  | { kind: "error"; message: string };
+
+async function readPlanfileForConfirm(planPath: string): Promise<ConfirmPlanfileResolution> {
+  try {
+    const content = await fs.promises.readFile(planPath, "utf-8");
+    if (!content.trim()) {
+      return {
+        kind: "error",
+        message: `ERROR: optional_planfile was provided but the planfile is empty: ${planPath}`,
+      };
+    }
+    return { kind: "found", path: planPath, content };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      kind: "error",
+      message: `ERROR: optional_planfile was provided but could not be read: ${planPath}: ${message}`,
+    };
+  }
+}
+
+async function resolveConfirmPlanfile(
+  workingDir: string,
+  transcriptPath?: string,
+  optionalPlanfile?: string,
+): Promise<ConfirmPlanfileResolution> {
+  if (optionalPlanfile !== undefined) {
+    const explicit = optionalPlanfile.trim();
+    if (!explicit) {
+      return {
+        kind: "error",
+        message: "ERROR: optional_planfile was provided but the planfile path is empty.",
+      };
+    }
+    const resolved = path.isAbsolute(explicit) ? explicit : path.resolve(workingDir, explicit);
+    return readPlanfileForConfirm(resolved);
+  }
+
+  let sessionDir: string;
+  try {
+    sessionDir = getAgentFrameworkSessionDir(
+      transcriptPath
+        ? { transcriptPath, projectDir: workingDir }
+        : { projectDir: workingDir },
+    );
+  } catch {
+    return { kind: "missing" };
+  }
+
+  const stored = readStoredCurrentPlan(sessionDir);
+  if (!stored?.path) return { kind: "missing" };
+
+  try {
+    const content = await fs.promises.readFile(stored.path, "utf-8");
+    if (!content.trim()) return { kind: "missing" };
+    return { kind: "found", path: stored.path, content };
+  } catch {
+    return { kind: "missing" };
+  }
+}
+
+function formatPlanfileContext(planfile: ConfirmPlanfileResolution): string {
+  if (planfile.kind === "found") {
+    return `PLANFILE PATH:
+${planfile.path}
+
+PLANFILE CONTENT:
+${planfile.content}`;
+  }
+
+  return "PLANFILE CONTEXT: No planfile was provided through optional_planfile and no usable session planfile was found. Continue evaluating the code changes without plan input.";
+}
+
 /**
  * Run the confirm agent to evaluate code changes.
  *
@@ -67,6 +147,7 @@ DECLINED: check failed with ${errorCount} error(s); see Check Errors above.`;
  * @param tierName - Optional model tier (haiku/sonnet/opus, defaults to opus)
  * @param extraContext - Optional extra instructions for the evaluation
  * @param transcriptPath - Optional transcript path for statusLine updates
+ * @param optionalPlanfile - Optional explicit planfile path to include as plan context
  * @returns Structured verdict with CONFIRMED or DECLINED
  */
 export async function runConfirmAgent(
@@ -74,6 +155,7 @@ export async function runConfirmAgent(
   tierName?: string,
   extraContext?: string,
   transcriptPath?: string,
+  optionalPlanfile?: string,
   options: CancellationOptions = {}
 ): Promise<string> {
   // Set up execution context for statusLine logging
@@ -83,6 +165,9 @@ export async function runConfirmAgent(
   logAgentStarted("confirm", getHookName());
 
   const tier = parseTierName(tierName);
+  const planfile = await resolveConfirmPlanfile(workingDir, transcriptPath, optionalPlanfile);
+  if (planfile.kind === "error") return planfile.message;
+
   // Step 1: Run check agent first
   const checkResult = await runCheckAgent(workingDir, transcriptPath, options);
 
@@ -109,7 +194,9 @@ export async function runConfirmAgent(
     { ...CONFIRM_AGENT, tier, workingDir },
     {
       prompt: "Evaluate these code changes:",
-      context: `${prefilterSection}GIT STATUS (files changed):
+      context: `${prefilterSection}${formatPlanfileContext(planfile)}
+
+GIT STATUS (files changed):
 ${status || "(no changes)"}
 
 GIT DIFF (all uncommitted changes):

@@ -99,7 +99,7 @@ describe("runCommitAgent", () => {
     const before = git(repo, ["rev-parse", "HEAD"]).trim();
 
     await expect(
-      runCommitAgent(repo, "haiku", undefined, undefined, { signal: activeController.signal }),
+      runCommitAgent(repo, "haiku", undefined, undefined, undefined, { signal: activeController.signal }),
     ).rejects.toMatchObject({ name: "OperationCancelledError" });
 
     expect(git(repo, ["rev-parse", "HEAD"]).trim()).toBe(before);
@@ -130,5 +130,34 @@ DECLINED: check failed with 2 error(s); see Check Errors above.`;
 
     expect(result).toBe(declined);
     expect(mocks.runAgent).not.toHaveBeenCalled();
+  });
+
+  it("forwards optional planfile to confirm", async () => {
+    fs.writeFileSync(path.join(repo, "file.txt"), "content\n");
+    mocks.runAgent.mockResolvedValue({
+      output: "SIZE: SMALL\nMESSAGE:\ncommit: include planfile",
+    });
+
+    await runCommitAgent(repo, "haiku", "focus", "/tmp/transcript.jsonl", "plan.md");
+
+    expect(mocks.runConfirmAgent).toHaveBeenCalledWith(
+      repo,
+      "haiku",
+      "focus",
+      "/tmp/transcript.jsonl",
+      "plan.md",
+      expect.any(Object),
+    );
+  });
+
+  it("exposes optional_planfile on the commit MCP schema", () => {
+    const serverSource = fs.readFileSync(path.join(process.cwd(), "src/mcp/server.ts"), "utf-8");
+    const start = serverSource.indexOf('server.registerTool(\n  "commit"');
+    const end = serverSource.indexOf('server.registerTool(\n  "push"', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const commitBlock = serverSource.slice(start, end);
+
+    expect(commitBlock).toContain("optional_planfile");
   });
 });
