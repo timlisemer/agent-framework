@@ -480,6 +480,9 @@ export class AiBackendSessionManager {
         this.emitSessionUpdated(sessionId);
         return null;
       }
+      case "turn.completed": {
+        return event.usage ?? null;
+      }
       case "error": {
         const error = toPublicError(event.error);
         this.writeProtocolError(sessionId, turnId, error.code, error.message);

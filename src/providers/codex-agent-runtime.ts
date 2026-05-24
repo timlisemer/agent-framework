@@ -246,7 +246,7 @@ export function mapCodexUiStreamEvent(event: unknown, state: CodexUiStreamState)
   if (!event || typeof event !== "object") return [];
   const raw = event as Record<string, unknown>;
   if (raw.type === "turn.completed") {
-    return [{ type: "message.completed", ref: "assistant", usage: normalizeCodexAiUsage(raw.usage as CodexTurn["usage"], optionalNumber) }];
+    return [{ type: "turn.completed", usage: normalizeCodexAiUsage(raw.usage as CodexTurn["usage"], optionalNumber) }];
   }
   if (raw.type === "turn.failed") {
     return [{ type: "error", error: errorMessage(raw.error) }];
@@ -299,8 +299,8 @@ function mapCodexUiItem(
   switch (itemType) {
     case "agent_message": {
       const text = stringField(item, "text") ?? "";
-      const ref = "assistant";
-      const trackingId = stringField(item, "id") ?? ref;
+      const ref = stringField(item, "id") ?? syntheticCodexItemRef(itemType, item);
+      const trackingId = ref;
       const events: AiRuntimeEvent[] = [];
       ensureAssistantMessage(events, state, ref);
       if (eventType === "item.completed") {
@@ -315,8 +315,8 @@ function mapCodexUiItem(
     }
     case "reasoning": {
       const text = stringField(item, "text") ?? stringField(item, "summary") ?? "";
-      const ref = "assistant";
-      const trackingId = stringField(item, "id") ?? "assistant_reasoning";
+      const ref = stringField(item, "id") ?? syntheticCodexItemRef(itemType, item);
+      const trackingId = ref;
       const events: AiRuntimeEvent[] = [];
       ensureAssistantMessage(events, state, ref);
       if (!text) return events;
@@ -336,7 +336,12 @@ function mapCodexUiItem(
       const command = stringField(item, "command") ?? "Command";
       const status = stringField(item, "status");
       const output = stringField(item, "aggregated_output");
-      const events = ensureTool(state, id, "shell", { command });
+      const commandActions = item.commandActions;
+      const events = ensureTool(state, id, "shell", {
+        command,
+        commandActions,
+        actionSummary: codexCommandActionSummary(commandActions),
+      });
       if (status === "completed") {
         events.push({ type: "tool.completed", ref: id, output: output ? textOutput(output) : [] });
       } else if (status === "failed") {
@@ -426,6 +431,37 @@ function codexTodoPlanText(value: unknown): string | null {
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
+function codexCommandActionSummary(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const lines = value
+    .map(codexCommandActionLine)
+    .filter((line): line is string => Boolean(line));
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
+function codexCommandActionLine(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const action = value as Record<string, unknown>;
+  const type = stringField(action, "type");
+  if (type === "read") {
+    const target = stringField(action, "name") ?? stringField(action, "path");
+    return target ? `Read ${target}` : null;
+  }
+  if (type === "search") {
+    const query = stringField(action, "query");
+    const path = stringField(action, "path");
+    if (query && path) return `Search ${query} in ${path}`;
+    if (query) return `Search ${query}`;
+    if (path) return `Search ${path}`;
+    return null;
+  }
+  if (type === "listFiles") {
+    const path = stringField(action, "path");
+    return path ? `List ${path}` : null;
+  }
+  return null;
+}
+
 function mapUnknownCodexItem(
   eventType: string,
   item: Record<string, unknown>,
@@ -490,8 +526,9 @@ export function buildCodexConfig(
   openrouter: boolean,
   persistHistory = false
 ): Record<string, unknown> | undefined {
-  if (runtimeEnvironment === "user" && !openrouter) return undefined;
-  const config: Record<string, unknown> = {};
+  const config: Record<string, unknown> = {
+    show_raw_agent_reasoning: true,
+  };
   if (runtimeEnvironment === "isolated") {
     if (!tempHome) throw new Error("Isolated Codex runtime requires a temporary home");
     if (!persistHistory) config.history = { persistence: "none" };

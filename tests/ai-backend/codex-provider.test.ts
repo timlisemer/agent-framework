@@ -11,6 +11,7 @@ describe("AI backend Codex provider helpers", () => {
     const config = buildCodexConfig("isolated", "/tmp/codex-home", true);
 
     expect(config?.model_provider).toBe("openrouter");
+    expect(config?.show_raw_agent_reasoning).toBe(true);
     expect(config?.history).toEqual({ persistence: "none" });
     expect(config?.forced_login_method).toBeUndefined();
     expect(config?.model_providers).toMatchObject({
@@ -22,6 +23,7 @@ describe("AI backend Codex provider helpers", () => {
     const config = buildCodexConfig("user", null, true, false);
 
     expect(config?.model_provider).toBe("openrouter");
+    expect(config?.show_raw_agent_reasoning).toBe(true);
     expect(config?.model_providers).toMatchObject({
       openrouter: { env_key: "OPENROUTER_API_KEY" },
     });
@@ -35,6 +37,7 @@ describe("AI backend Codex provider helpers", () => {
 
     expect(config?.history).toBeUndefined();
     expect(config?.forced_login_method).toBe("chatgpt");
+    expect(config?.show_raw_agent_reasoning).toBe(true);
   });
 
   it("removes API-key env for OpenAI subscription sessions", () => {
@@ -60,7 +63,7 @@ describe("AI backend Codex provider helpers", () => {
       expect(env.CODEX_HOME).toBe("/home/user/.codex");
       expect(env.OPENAI_API_KEY).toBeUndefined();
       expect(env.OPENROUTER_API_KEY).toBeUndefined();
-      expect(config).toBeUndefined();
+      expect(config?.show_raw_agent_reasoning).toBe(true);
     } finally {
       if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
       else process.env.CODEX_HOME = previousCodexHome;
@@ -98,6 +101,37 @@ describe("AI backend Codex provider helpers", () => {
     expect(completed).toContainEqual(expect.objectContaining({ type: "tool.completed", ref: "file-change-1" }));
   });
 
+  it("passes Codex command actions through as UI action summaries", () => {
+    const state = createCodexUiStreamState();
+
+    const events = mapCodexUiStreamEvent({
+      type: "item.started",
+      item: {
+        id: "cmd-1",
+        type: "command_execution",
+        command: "rg -n ai-message-section crates/astral-shell/src/style/style.css",
+        status: "in_progress",
+        commandActions: [
+          { type: "read", name: "message_rendering.rs", path: "/repo/crates/astral-ai-gtk/src/message_rendering.rs" },
+          { type: "search", query: "ai-message-section", path: "style.css" },
+          { type: "listFiles", path: "crates/astral-ai-gtk/src" },
+          { type: "unknown", command: "sed -n '1,2p' file" },
+        ],
+      },
+    }, state);
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "tool.created",
+      ref: "cmd-1",
+      name: "shell",
+      input: expect.objectContaining({
+        fields: expect.objectContaining({
+          actionSummary: "Read message_rendering.rs\nSearch ai-message-section in style.css\nList crates/astral-ai-gtk/src",
+        }),
+      }),
+    }));
+  });
+
   it("maps reasoning, todo lists, mcp identity, and unknown items to generic events", () => {
     const state = createCodexUiStreamState();
 
@@ -105,8 +139,8 @@ describe("AI backend Codex provider helpers", () => {
       type: "item.updated",
       item: { id: "r1", type: "reasoning", text: "thinking" },
     }, state)).toEqual([
-      { type: "message.created", ref: "assistant", content: "" },
-      { type: "message.reasoning_delta", ref: "assistant", delta: "thinking" },
+      { type: "message.created", ref: "r1", content: "" },
+      { type: "message.reasoning_delta", ref: "r1", delta: "thinking" },
     ]);
 
     expect(mapCodexUiStreamEvent({
@@ -156,10 +190,54 @@ describe("AI backend Codex provider helpers", () => {
       item: { type: "reasoning", summary: "reason" },
     }, state);
 
-    expect(firstText).toContainEqual({ type: "message.delta", ref: "assistant", delta: "hel" });
-    expect(secondText).toEqual([{ type: "message.delta", ref: "assistant", delta: "lo" }]);
-    expect(firstReasoning).toContainEqual({ type: "message.reasoning_delta", ref: "assistant", delta: "rea" });
-    expect(secondReasoning).toEqual([{ type: "message.reasoning_delta", ref: "assistant", delta: "son" }]);
+    const textDelta = firstText.find((event) => event.type === "message.delta");
+    const reasoningDelta = firstReasoning.find((event) => event.type === "message.reasoning_delta");
+
+    expect(textDelta).toMatchObject({ type: "message.delta", delta: "hel" });
+    expect(secondText).toEqual([{ type: "message.delta", ref: textDelta?.ref, delta: "lo" }]);
+    expect(reasoningDelta).toMatchObject({ type: "message.reasoning_delta", delta: "rea" });
+    expect(secondReasoning).toEqual([{ type: "message.reasoning_delta", ref: reasoningDelta?.ref, delta: "son" }]);
+  });
+
+  it("keeps separate assistant message items as separate transcript messages", () => {
+    const state = createCodexUiStreamState();
+
+    const beforeTool = mapCodexUiStreamEvent({
+      type: "item.completed",
+      item: { id: "msg-1", type: "agent_message", text: "Running the command now." },
+    }, state);
+    const afterTool = mapCodexUiStreamEvent({
+      type: "item.completed",
+      item: { id: "msg-2", type: "agent_message", text: "I just ran the bash command." },
+    }, state);
+
+    expect(beforeTool).toContainEqual({ type: "message.created", ref: "msg-1", content: "" });
+    expect(beforeTool).toContainEqual({ type: "message.completed", ref: "msg-1", content: "Running the command now.", usage: null });
+    expect(afterTool).toContainEqual({ type: "message.created", ref: "msg-2", content: "" });
+    expect(afterTool).toContainEqual({ type: "message.completed", ref: "msg-2", content: "I just ran the bash command.", usage: null });
+  });
+
+  it("maps terminal turn completion to usage without creating assistant messages", () => {
+    const state = createCodexUiStreamState();
+
+    expect(mapCodexUiStreamEvent({
+      type: "turn.completed",
+      usage: {
+        input_tokens: 10,
+        cached_input_tokens: 2,
+        output_tokens: 5,
+        reasoning_output_tokens: 3,
+      },
+    }, state)).toEqual([{
+      type: "turn.completed",
+      usage: {
+        promptTokens: 10,
+        cachedTokens: 2,
+        completionTokens: 5,
+        reasoningTokens: 3,
+        totalTokens: 15,
+      },
+    }]);
   });
 
   it("uses stable synthetic refs for id-less mutable tool items", () => {

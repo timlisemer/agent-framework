@@ -34,6 +34,7 @@ export type AiRuntimeEvent =
   | { type: "tool.promoted_to_backend_process"; toolRef: RuntimeRef; processRef: RuntimeRef; title: string; createdAt?: string }
   | { type: "continuation.updated"; available: boolean; createdAt?: string }
   | { type: "plan.updated"; state: AiPlanState; createdAt?: string }
+  | { type: "turn.completed"; usage?: TokenUsage | null; createdAt?: string }
   | { type: "error"; error: unknown; createdAt?: string };
 
 export type AiRunTurnInput = {

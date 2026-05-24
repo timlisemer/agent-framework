@@ -201,6 +201,59 @@ describe("AI backend session manager", () => {
     expect(assistantCreated).toBeDefined();
   });
 
+  it("does not materialize a duplicate assistant message for terminal turn usage", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        { type: "message.completed", ref: "msg-1", content: "Running the command now.", usage: null },
+        {
+          type: "tool.created",
+          ref: "tool-1",
+          name: "shell",
+          input: { text: "shell(command=\"true\")" },
+        },
+        { type: "tool.completed", ref: "tool-1", output: [] },
+        { type: "message.completed", ref: "msg-2", content: "I just ran the bash command.", usage: null },
+        {
+          type: "turn.completed",
+          usage: {
+            promptTokens: 1,
+            cachedTokens: null,
+            completionTokens: 2,
+            reasoningTokens: null,
+            totalTokens: 3,
+          },
+        }
+      )
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-no-terminal-duplicate");
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session-no-terminal-duplicate",
+        turnId: "turn-1",
+        input: "hello",
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
+    });
+    const sessionUpdated = [...frames].reverse().find((frame) => frame.type === "event" && frame.event.type === "sessionUpdated");
+    if (!sessionUpdated || sessionUpdated.type !== "event" || sessionUpdated.event.type !== "sessionUpdated") {
+      throw new Error("expected sessionUpdated event");
+    }
+    const assistantMessages = sessionUpdated.event.snapshot.transcript.filter((entry) => entry.role === "assistant");
+    expect(assistantMessages.map((entry) => entry.content)).toEqual([
+      [{ type: "text", text: "Running the command now." }],
+      [{ type: "text", text: "I just ran the bash command." }],
+    ]);
+    const turnFinished = frames.find((frame) => frame.type === "event" && frame.event.type === "turnFinished");
+    expect(turnFinished).toMatchObject({ type: "event", event: { usage: { totalTokens: 3 } } });
+  });
+
   it("persists reasoning blocks and preserves them when final text completes", async () => {
     provider.runTurn.mockImplementation(() =>
       events(
