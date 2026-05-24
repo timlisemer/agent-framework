@@ -131,6 +131,7 @@ export type AiSessionConfig = {
 
 export type AiSessionSnapshot = {
   sessionId: SessionId;
+  workingDir: string | null;
   status: AiSessionStatus;
   revision: AiSnapshotRevision;
   lastEventSeq: AiEventSeq;

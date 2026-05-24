@@ -40,6 +40,7 @@ export class TranscriptStore {
     const now = new Date().toISOString();
     const snapshot: AiSessionSnapshot = {
       sessionId,
+      workingDir: config.workingDir ?? process.cwd(),
       status: "idle",
       revision: 0,
       lastEventSeq: 0,
