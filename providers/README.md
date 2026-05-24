@@ -3,7 +3,9 @@
 Agent-framework has one provider abstraction for both execution modes:
 
 - `direct`: one prompt in, one text result out.
-- `sdk`: read-only autonomous investigation through a host-agent runtime.
+- `sdk`: autonomous investigation through a host-agent runtime. Framework-owned
+  agents default to an isolated read-only runtime; explicit user-runtime UI
+  sessions use the user's host-agent home and runtime policy.
 
 Supported providers:
 

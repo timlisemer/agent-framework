@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildCodexConfig,
   buildCodexEnv,
+  buildCodexThreadOptions,
   createCodexUiStreamState,
   mapCodexUiStreamEvent,
 } from "../../src/providers/codex-agent-runtime.js";
+import { PROVIDER_TYPES } from "../../src/utils/provider-config.js";
 
 describe("AI backend Codex provider helpers", () => {
   it("builds OpenRouter Codex config without forcing ChatGPT login", () => {
@@ -74,6 +76,50 @@ describe("AI backend Codex provider helpers", () => {
     }
   });
 
+  it("keeps Codex sandbox policy isolated to isolated runtime sessions", () => {
+    const isolated = buildCodexThreadOptions({
+      workingDir: "/repo",
+      sdkRuntimeEnvironment: "isolated",
+    }, {
+      type: PROVIDER_TYPES.OPENAI_SUBSCRIPTION,
+      mode: "sdk",
+      modelId: "gpt-5.3-codex",
+      costTracking: "none",
+    });
+    const user = buildCodexThreadOptions({
+      workingDir: "/repo",
+      sdkRuntimeEnvironment: "user",
+    }, {
+      type: PROVIDER_TYPES.OPENAI_SUBSCRIPTION,
+      mode: "sdk",
+      modelId: "gpt-5.3-codex",
+      reasoningEffort: "high",
+      costTracking: "none",
+    });
+
+    expect(isolated).toMatchObject({
+      workingDirectory: "/repo",
+      skipGitRepoCheck: true,
+      model: "gpt-5.3-codex",
+      sandboxMode: "read-only",
+      approvalPolicy: "on-request",
+      networkAccessEnabled: false,
+      webSearchMode: "disabled",
+      webSearchEnabled: false,
+    });
+    expect(user).toMatchObject({
+      workingDirectory: "/repo",
+      skipGitRepoCheck: true,
+      model: "gpt-5.3-codex",
+      modelReasoningEffort: "high",
+    });
+    expect(user).not.toHaveProperty("sandboxMode");
+    expect(user).not.toHaveProperty("approvalPolicy");
+    expect(user).not.toHaveProperty("networkAccessEnabled");
+    expect(user).not.toHaveProperty("webSearchMode");
+    expect(user).not.toHaveProperty("webSearchEnabled");
+  });
+
   it("keeps file-change items running until completion", () => {
     const state = createCodexUiStreamState();
     const started = mapCodexUiStreamEvent({
@@ -128,6 +174,29 @@ describe("AI backend Codex provider helpers", () => {
         fields: expect.objectContaining({
           actionSummary: "Read message_rendering.rs\nSearch ai-message-section in style.css\nList crates/astral-ai-gtk/src",
         }),
+      }),
+    }));
+  });
+
+  it("does not fabricate Codex action summaries from plain shell commands", () => {
+    const state = createCodexUiStreamState();
+
+    const events = mapCodexUiStreamEvent({
+      type: "item.started",
+      item: {
+        id: "cmd-plain",
+        type: "command_execution",
+        command: "sed -n '1,120p' src/example.ts",
+        status: "in_progress",
+      },
+    }, state);
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "tool.created",
+      ref: "cmd-plain",
+      name: "shell",
+      input: expect.objectContaining({
+        fields: expect.not.objectContaining({ actionSummary: expect.anything() }),
       }),
     }));
   });

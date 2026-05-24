@@ -198,18 +198,26 @@ export function buildCodexThreadOptions<T extends CodexThreadOptionsConfig>(
   config: T,
   resolvedProvider: ResolvedProvider
 ): Record<string, unknown> {
+  const runtimeEnvironment = config.sdkRuntimeEnvironment ?? "isolated";
   return {
     workingDirectory: config.workingDir ?? process.cwd(),
     skipGitRepoCheck: true,
     model: resolvedProvider.modelId,
+    ...codexRuntimePolicyOptions(runtimeEnvironment),
+    ...(resolvedProvider.reasoningEffort
+      ? { modelReasoningEffort: resolvedProvider.reasoningEffort }
+      : {}),
+  };
+}
+
+function codexRuntimePolicyOptions(runtimeEnvironment: SdkRuntimeEnvironment): Record<string, unknown> {
+  if (runtimeEnvironment === "user") return {};
+  return {
     sandboxMode: "read-only",
     approvalPolicy: "on-request",
     networkAccessEnabled: false,
     webSearchMode: "disabled",
     webSearchEnabled: false,
-    ...(resolvedProvider.reasoningEffort
-      ? { modelReasoningEffort: resolvedProvider.reasoningEffort }
-      : {}),
   };
 }
 
@@ -337,10 +345,11 @@ function mapCodexUiItem(
       const status = stringField(item, "status");
       const output = stringField(item, "aggregated_output");
       const commandActions = item.commandActions;
+      const actionSummary = codexCommandActionSummary(commandActions);
       const events = ensureTool(state, id, "shell", {
         command,
         commandActions,
-        actionSummary: codexCommandActionSummary(commandActions),
+        ...(actionSummary ? { actionSummary } : {}),
       });
       if (status === "completed") {
         events.push({ type: "tool.completed", ref: id, output: output ? textOutput(output) : [] });
