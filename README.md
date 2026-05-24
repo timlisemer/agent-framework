@@ -366,7 +366,7 @@ export AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=codex # claude | codex
 - `openrouter` direct mode uses `https://openrouter.ai/api`, `ANTHROPIC_AUTH_TOKEN`, and an explicitly empty `ANTHROPIC_API_KEY`.
 - `openrouter` SDK mode uses `AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=claude|codex`.
 - `claude-subscription` scrubs API/OpenRouter env vars and uses persistent Claude sessions only for opt-in continuable SDK sessions.
-- `openai-subscription` uses a temporary `CODEX_HOME`, disables history persistence for one-shot calls, and scrubs API env vars so Codex uses ChatGPT/Codex sign-in. Opt-in continuable SDK sessions keep live Codex thread state until the owning session is disposed.
+- `openai-subscription` uses Codex SDK with ChatGPT/Codex sign-in and scrubs API env vars. Isolated sessions use a temporary `CODEX_HOME` and disable history persistence for one-shot calls; user-runtime sessions use the normal Codex home/config. Opt-in continuable SDK sessions keep live Codex thread state until the owning session is disposed.
 
 ### Example Setups
 

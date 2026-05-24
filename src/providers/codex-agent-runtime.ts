@@ -5,13 +5,14 @@ import { isCancellationError } from "../utils/cancellation.js";
 import { errorMessage, optionalNumber, outputBlocks, stringField, textOutput } from "../utils/output.js";
 import { summarizeToolInputForUi } from "../utils/tool-input-summary.js";
 import { PROVIDER_TYPES } from "./registry.js";
-import type { ProviderExecutionResult, ProviderRunInput } from "./execution-types.js";
+import type { ProviderExecutionResult, ProviderRunInput, SdkRuntimeEnvironment } from "./execution-types.js";
 import type { ProviderUsage } from "./execution-types.js";
 import type { ResolvedProvider } from "./types.js";
 import type { AiRuntimeEvent } from "../ai-backend/runtime-events.js";
 
 export type CodexThreadOptionsConfig = {
   workingDir?: string | null;
+  sdkRuntimeEnvironment?: SdkRuntimeEnvironment;
 };
 
 export type CodexThread = {
@@ -54,7 +55,7 @@ export function createCodexUiStreamState(): CodexUiStreamState {
 }
 
 type CodexLiveSession = {
-  tempHome: string;
+  tempHome: string | null;
   thread: CodexThread;
   dispose(): void;
 };
@@ -157,22 +158,33 @@ export async function createCodexLiveSession(
   tempPrefix: string,
   persistHistory = true
 ): Promise<CodexLiveSession> {
-  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), tempPrefix));
+  const runtimeEnvironment = config.sdkRuntimeEnvironment ?? "isolated";
+  const tempHome = runtimeEnvironment === "isolated"
+    ? fs.mkdtempSync(path.join(os.tmpdir(), tempPrefix))
+    : null;
   try {
-    copyCodexAuthIfPresent(tempHome);
+    if (tempHome) copyCodexAuthIfPresent(tempHome);
     const Codex = await loadCodexConstructor();
+    const codexConfig = buildCodexConfig(
+      runtimeEnvironment,
+      tempHome,
+      resolvedProvider.type === PROVIDER_TYPES.OPENROUTER,
+      persistHistory
+    );
     const codex = new Codex({
-      env: buildCodexEnv(tempHome, resolvedProvider.type === PROVIDER_TYPES.OPENAI_SUBSCRIPTION),
-      config: buildCodexConfig(tempHome, resolvedProvider.type === PROVIDER_TYPES.OPENROUTER, persistHistory),
+      env: buildCodexEnv(runtimeEnvironment, tempHome, resolvedProvider.type === PROVIDER_TYPES.OPENAI_SUBSCRIPTION),
+      ...(codexConfig ? { config: codexConfig } : {}),
     });
     const thread = codex.startThread(buildCodexThreadOptions(config, resolvedProvider));
     return {
       tempHome,
       thread,
-      dispose: () => fs.rmSync(tempHome, { recursive: true, force: true }),
+      dispose: () => {
+        if (tempHome) fs.rmSync(tempHome, { recursive: true, force: true });
+      },
     };
   } catch (error) {
-    fs.rmSync(tempHome, { recursive: true, force: true });
+    if (tempHome) fs.rmSync(tempHome, { recursive: true, force: true });
     throw error;
   }
 }
@@ -249,12 +261,15 @@ export function mapCodexUiStreamEvent(event: unknown, state: CodexUiStreamState)
   return mapCodexUiItem(raw.type, item as Record<string, unknown>, state);
 }
 
-export function buildCodexEnv(tempHome: string, openaiSubscription: boolean): Record<string, string> {
+export function buildCodexEnv(
+  runtimeEnvironment: SdkRuntimeEnvironment,
+  tempHome: string | null,
+  openaiSubscription: boolean
+): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === "string") env[key] = value;
   }
-  env.CODEX_HOME = tempHome;
   if (openaiSubscription) {
     delete env.OPENAI_API_KEY;
     delete env.CODEX_API_KEY;
@@ -263,6 +278,9 @@ export function buildCodexEnv(tempHome: string, openaiSubscription: boolean): Re
     delete env.ANTHROPIC_AUTH_TOKEN;
     delete env.ANTHROPIC_BASE_URL;
   }
+  if (runtimeEnvironment === "user") return env;
+  if (!tempHome) throw new Error("Isolated Codex runtime requires a temporary home");
+  env.CODEX_HOME = tempHome;
   return env;
 }
 
@@ -353,15 +371,19 @@ function ensureTool(state: CodexUiStreamState, ref: string, name: string, input:
 }
 
 export function buildCodexConfig(
-  tempHome: string,
+  runtimeEnvironment: SdkRuntimeEnvironment,
+  tempHome: string | null,
   openrouter: boolean,
   persistHistory = false
-): Record<string, unknown> {
-  const config: Record<string, unknown> = {
-    history: persistHistory ? undefined : { persistence: "none" },
-    log_dir: path.join(tempHome, "logs"),
-    forced_login_method: openrouter ? undefined : "chatgpt",
-  };
+): Record<string, unknown> | undefined {
+  if (runtimeEnvironment === "user" && !openrouter) return undefined;
+  const config: Record<string, unknown> = {};
+  if (runtimeEnvironment === "isolated") {
+    if (!tempHome) throw new Error("Isolated Codex runtime requires a temporary home");
+    if (!persistHistory) config.history = { persistence: "none" };
+    config.log_dir = path.join(tempHome, "logs");
+    if (!openrouter) config.forced_login_method = "chatgpt";
+  }
   if (openrouter) {
     config.model_provider = "openrouter";
     config.model_providers = {

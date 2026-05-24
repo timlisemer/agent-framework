@@ -13,6 +13,7 @@ const sessionConfigSchema = z.object({
   workingDir: nullableString,
   systemPrompt: nullableString,
   continuable: z.boolean().default(false),
+  sdkRuntimeEnvironment: z.enum(["isolated", "user"]).default("isolated"),
 }).strict();
 const planStateSchema = z.object({
   mode: z.enum(["disabled", "planning", "awaitingApproval", "approved"]),

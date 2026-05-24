@@ -20,7 +20,7 @@ export ANTHROPIC_API_KEY="" # Important: Must be explicitly empty
 
 Official reference: https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration
 
-For Codex-compatible routing, Codex uses OpenRouter's OpenAI-compatible `/api/v1` endpoint. Agent-framework injects a temporary Codex config with:
+For Codex-compatible routing, Codex uses OpenRouter's OpenAI-compatible `/api/v1` endpoint. Agent-framework configures Codex with OpenRouter provider routing:
 
 ```toml
 [model_providers.openrouter]
@@ -28,5 +28,7 @@ name = "OpenRouter"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 ```
+
+Isolated Codex SDK sessions place that routing in the temporary Codex config. User-runtime Codex SDK sessions preserve the user's normal Codex home/config while still passing the OpenRouter provider routing needed for the session.
 
 OpenRouter SDK mode is still billed by OpenRouter credits. Cost telemetry is only fetched for direct OpenRouter calls that return a generation id; SDK calls are logged with tokens/latency when available but excluded from OpenRouter generation-cost lookup.

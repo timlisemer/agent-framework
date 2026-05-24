@@ -20,6 +20,7 @@ describe("AI backend JSONL wire", () => {
     expect(frame.type).toBe("request");
     if (frame.type === "request" && frame.request.type === "startSession") {
       expect(frame.request.config.continuable).toBe(false);
+      expect(frame.request.config.sdkRuntimeEnvironment).toBe("isolated");
     }
   });
 
@@ -43,6 +44,30 @@ describe("AI backend JSONL wire", () => {
     expect(frame).toMatchObject({
       type: "request",
       request: { type: "startSession", config: { continuable: true } },
+    });
+  });
+
+  it("parses user SDK runtime environment session config", () => {
+    const frame = parseClientFrame(
+      JSON.stringify({
+        type: "request",
+        request: {
+          type: "startSession",
+          sessionId: "session-jsonl",
+          config: {
+            model: null,
+            workingDir: null,
+            systemPrompt: null,
+            continuable: true,
+            sdkRuntimeEnvironment: "user",
+          },
+        },
+      })
+    );
+
+    expect(frame).toMatchObject({
+      type: "request",
+      request: { type: "startSession", config: { sdkRuntimeEnvironment: "user" } },
     });
   });
 

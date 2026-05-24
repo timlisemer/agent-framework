@@ -156,7 +156,36 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
     expect(runAnthropicApiSkinDirectSpy).toHaveBeenCalledTimes(1);
     expect(runAnthropicApiSkinDirectSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        config: expect.objectContaining({ continuable: false }),
+        config: expect.objectContaining({
+          continuable: false,
+          sdkRuntimeEnvironment: "isolated",
+        }),
+      }),
+    );
+  });
+
+  it("keeps direct provider execution isolated even when user runtime is requested", async () => {
+    runAnthropicApiSkinDirectSpy.mockResolvedValueOnce({
+      text: "OK",
+      usage: {},
+      provider: "openrouter",
+      modelName: "test-model",
+    });
+
+    await runAgent(
+      {
+        name: "direct-test",
+        tier: MODEL_TIERS.HAIKU,
+        mode: "direct",
+        systemPrompt: "Test",
+        sdkRuntimeEnvironment: "user",
+      },
+      { prompt: "Evaluate:" },
+    );
+
+    expect(runAnthropicApiSkinDirectSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({ sdkRuntimeEnvironment: "isolated" }),
       }),
     );
   });
@@ -352,7 +381,10 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
 
     expect(runAnthropicApiSkinDirectSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        config: expect.objectContaining({ continuable: false }),
+        config: expect.objectContaining({
+          continuable: false,
+          sdkRuntimeEnvironment: "isolated",
+        }),
       }),
     );
   });
@@ -393,7 +425,10 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
     for (const call of runAnthropicApiSkinDirectSpy.mock.calls) {
       expect(call[0]).toEqual(
         expect.objectContaining({
-          config: expect.objectContaining({ continuable: false }),
+          config: expect.objectContaining({
+            continuable: false,
+            sdkRuntimeEnvironment: "isolated",
+          }),
         }),
       );
     }

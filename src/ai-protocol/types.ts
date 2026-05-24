@@ -7,6 +7,7 @@ export type AiEventSeq = number;
 export type AiSnapshotRevision = number;
 
 export type AiPlanMode = "disabled" | "planning" | "awaitingApproval" | "approved";
+export type SdkRuntimeEnvironment = "isolated" | "user";
 export type AiMessageRole = "user" | "assistant" | "system" | "tool";
 export type AiMessageStatus = "streaming" | "completed" | "failed" | "cancelled";
 export type AiSessionStatus = "idle" | "running" | "waiting" | "error" | "cancelled";
@@ -127,6 +128,7 @@ export type AiSessionConfig = {
   workingDir: string | null;
   systemPrompt: string | null;
   continuable: boolean;
+  sdkRuntimeEnvironment: SdkRuntimeEnvironment;
 };
 
 export type AiSessionSnapshot = {

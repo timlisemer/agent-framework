@@ -31,6 +31,7 @@ const defaultConfig: AiSessionConfig = {
   workingDir: null,
   systemPrompt: null,
   continuable: false,
+  sdkRuntimeEnvironment: "isolated",
 };
 
 function createHarness(): { frames: AiBackendMessage[]; manager: AiBackendSessionManager } {
@@ -100,6 +101,7 @@ describe("AI backend session manager", () => {
       workingDir: null,
       systemPrompt: null,
       continuable: false,
+      sdkRuntimeEnvironment: "isolated",
     });
 
     expect(frames[0]).toMatchObject({

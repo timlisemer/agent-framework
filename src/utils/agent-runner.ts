@@ -91,6 +91,7 @@ import {
 } from "./cancellation.js";
 import { runProviderDirect, runProviderSdk } from "../providers/index.js";
 import type { ProviderContinuationState, ProviderExecutionResult } from "../providers/execution-types.js";
+import type { SdkRuntimeEnvironment } from "../ai-protocol/index.js";
 
 /**
  * Tools available to SDK mode agents.
@@ -157,6 +158,12 @@ export interface AgentConfig {
    * createContinuableAgentSession() when a caller owns repeated turns.
    */
   continuable?: boolean;
+
+  /**
+   * SDK runtime setup to use for providers that support separate isolated and
+   * user runtime environments. Defaults to isolated for framework agents.
+   */
+  sdkRuntimeEnvironment?: SdkRuntimeEnvironment;
 
   /**
    * System prompt defining agent behavior.
@@ -474,7 +481,11 @@ async function runDirectAgent(
   throwIfAborted(options.signal);
   const resolvedProvider = resolveProvider(config.tier, "direct");
   return runProviderDirect({
-    config: { ...config, continuable: false },
+    config: {
+      ...config,
+      continuable: false,
+      sdkRuntimeEnvironment: "isolated",
+    },
     prompt,
     resolvedProvider,
     options,
@@ -532,7 +543,13 @@ async function applyFormatValidation(
       for (const retryTier of retryTiers) {
         const retryResolved = resolveProviderForType(baseProvider, retryTier, "direct");
         const retryResult = await runProviderDirect({
-          config: { ...config, tier: retryTier, maxTokens: 500, continuable: false },
+          config: {
+            ...config,
+            tier: retryTier,
+            maxTokens: 500,
+            continuable: false,
+            sdkRuntimeEnvironment: "isolated",
+          },
           prompt: `Invalid format. ${formatReminder}\n\nOriginal output:\n${result.text.slice(0, 2000)}`,
           resolvedProvider: retryResolved,
           options,
@@ -594,7 +611,17 @@ async function runSdkAgent(
   }
   const resolvedProvider = resolveProvider(config.tier, "sdk");
   const tools = [...SDK_TOOLS, ...(config.extraTools ?? [])];
-  return runProviderSdk({ config, prompt, resolvedProvider, options, tools, continuationState });
+  return runProviderSdk({
+    config: {
+      ...config,
+      sdkRuntimeEnvironment: config.sdkRuntimeEnvironment ?? "isolated",
+    },
+    prompt,
+    resolvedProvider,
+    options,
+    tools,
+    continuationState,
+  });
 }
 
 function toAgentExecutionResult(
@@ -732,7 +759,12 @@ export async function runAgentWithRetry(
     try {
       const retryResolved = resolveProviderForType(baseProvider, config.tier, "direct");
       const retryResult = await runProviderDirect({
-        config: { ...config, maxTokens, continuable: false },
+        config: {
+          ...config,
+          maxTokens,
+          continuable: false,
+          sdkRuntimeEnvironment: "isolated",
+        },
         prompt: `Invalid format: "${decision}". You are evaluating: ${contextDesc}. ${formatReminder}`,
         resolvedProvider: retryResolved,
         options,

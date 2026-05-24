@@ -1,6 +1,9 @@
 import type { CancellationOptions } from "../utils/cancellation.js";
 import type { AgentConfig } from "../utils/agent-runner.js";
+import type { SdkRuntimeEnvironment } from "../ai-protocol/index.js";
 import type { ProviderType, ResolvedProvider } from "./types.js";
+
+export type { SdkRuntimeEnvironment } from "../ai-protocol/index.js";
 
 export interface ProviderUsage {
   promptTokens?: number;
@@ -37,7 +40,7 @@ export interface CodexProviderContinuationState {
 }
 
 export interface ProviderRunInput {
-  config: AgentConfig;
+  config: AgentConfig & { sdkRuntimeEnvironment?: SdkRuntimeEnvironment };
   prompt: string;
   resolvedProvider: ResolvedProvider;
   options: CancellationOptions;

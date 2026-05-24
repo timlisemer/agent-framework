@@ -24,6 +24,7 @@ describe("AI backend OpenRouter provider resolution", () => {
       workingDir: null,
       systemPrompt: null,
       continuable: false,
+      sdkRuntimeEnvironment: "isolated",
     });
 
     expect(runner.resolvedProvider.type).toBe(PROVIDER_TYPES.OPENROUTER);
@@ -40,6 +41,7 @@ describe("AI backend OpenRouter provider resolution", () => {
       workingDir: null,
       systemPrompt: null,
       continuable: false,
+      sdkRuntimeEnvironment: "isolated",
     });
 
     expect(runner.resolvedProvider.type).toBe(PROVIDER_TYPES.OPENROUTER);
@@ -55,6 +57,7 @@ describe("AI backend OpenRouter provider resolution", () => {
       workingDir: null,
       systemPrompt: null,
       continuable: false,
+      sdkRuntimeEnvironment: "isolated",
     });
 
     expect(runner.resolvedProvider.type).toBe(PROVIDER_TYPES.OPENAI_SUBSCRIPTION);
@@ -69,6 +72,7 @@ describe("AI backend OpenRouter provider resolution", () => {
           workingDir: null,
           systemPrompt: "Be concise.",
           continuable: false,
+          sdkRuntimeEnvironment: "isolated",
         },
         "Summarize this."
       )
@@ -83,6 +87,7 @@ describe("AI backend OpenRouter provider resolution", () => {
         workingDir: "/tmp/work",
         systemPrompt: "System",
         continuable: false,
+        sdkRuntimeEnvironment: "isolated",
       },
       {
         type: PROVIDER_TYPES.CLAUDE_SUBSCRIPTION,
@@ -111,6 +116,7 @@ describe("AI backend OpenRouter provider resolution", () => {
         workingDir: "/tmp/work",
         systemPrompt: "System",
         continuable: true,
+        sdkRuntimeEnvironment: "isolated",
       },
       {
         type: PROVIDER_TYPES.CLAUDE_SUBSCRIPTION,
@@ -138,6 +144,7 @@ describe("AI backend OpenRouter provider resolution", () => {
           workingDir: "/tmp/work",
           systemPrompt: null,
           continuable: false,
+          sdkRuntimeEnvironment: "isolated",
         },
         {
           type: PROVIDER_TYPES.OPENAI_SUBSCRIPTION,
