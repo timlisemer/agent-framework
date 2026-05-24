@@ -53,6 +53,8 @@ import { getGitStatusCancellable, getRepoInfoCancellable } from "../../utils/git
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
+import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
+import { resetDriftDetectionWindow } from "../../scenario/lifecycle.js";
 
 import { activeSpec, registeredAdapterNames } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("check"); }
@@ -353,6 +355,15 @@ export async function runCheckAgent(
     setTranscriptPath(transcriptPath);
   }
   logAgentStarted("check", getHookName());
+
+  try {
+    const sessionDir = transcriptPath
+      ? getAgentFrameworkSessionDir({ transcriptPath })
+      : getAgentFrameworkSessionDir({ projectDir: workingDir });
+    await resetDriftDetectionWindow(sessionDir);
+  } catch {
+    // Best-effort: check output must remain the authoritative result.
+  }
 
   // Get main repo path for fallback
   const repoInfo = await getRepoInfoCancellable(workingDir, options);

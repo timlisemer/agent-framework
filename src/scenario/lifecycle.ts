@@ -94,3 +94,19 @@ export async function onUserPromptTurn(sessionDir: string): Promise<void> {
     // Best-effort.
   }
 }
+
+/**
+ * Reset only the edit-drift repetition window.
+ *
+ * Used by sanctioned validation tools such as check/confirm after they give
+ * the agent feedback. This intentionally preserves broader user-turn state and
+ * forensic logs while making older edit entries fall outside drift detection.
+ */
+export async function resetDriftDetectionWindow(sessionDir: string): Promise<void> {
+  const stateManager = getSessionState(sessionDir);
+  await stateManager.update((s) => ({
+    ...s,
+    driftState: {},
+    lastUserMessageTimestamp: Date.now(),
+  }));
+}

@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { onUserPromptTurn } from "../../src/scenario/lifecycle.js";
+import {
+  onUserPromptTurn,
+  resetDriftDetectionWindow,
+} from "../../src/scenario/lifecycle.js";
 import {
   getSessionState,
   sessionStateDefaults,
@@ -60,5 +63,43 @@ describe("onUserPromptTurn", () => {
     expect(state.driftState).toEqual({});
     expect(state.lastProcessedPlanApprovalToolUseId).toBeNull();
     expect(state.lastUserMessageTimestamp).toBeGreaterThan(0);
+  });
+
+  it("resets only the drift window and preserves forensic tool log", async () => {
+    await appendToolLog(tempDir, {
+      ts: Date.now(),
+      tool: "Edit",
+      path: "/tmp/file.ts",
+      status: "allowed",
+      gate: "all-rules",
+      ms: 1,
+    });
+
+    const stateManager = getSessionState(tempDir);
+    await stateManager.save({
+      ...sessionStateDefaults(),
+      forceCheckPending: true,
+      currentEditIntent: true,
+      editIntentOverturnCount: 2,
+      respondFirstChecked: true,
+      driftState: {
+        "/tmp/file.ts": { level: 2, allowedSinceLevelChange: 1 },
+      },
+      lastProcessedPlanApprovalToolUseId: "toolu_plan",
+      lastUserMessageTimestamp: 123,
+    });
+
+    await resetDriftDetectionWindow(tempDir);
+
+    expect(fs.existsSync(path.join(tempDir, "tool-log.jsonl"))).toBe(true);
+
+    const state = await stateManager.load();
+    expect(state.forceCheckPending).toBe(true);
+    expect(state.currentEditIntent).toBe(true);
+    expect(state.editIntentOverturnCount).toBe(2);
+    expect(state.respondFirstChecked).toBe(true);
+    expect(state.lastProcessedPlanApprovalToolUseId).toBe("toolu_plan");
+    expect(state.driftState).toEqual({});
+    expect(state.lastUserMessageTimestamp).toBeGreaterThan(123);
   });
 });
