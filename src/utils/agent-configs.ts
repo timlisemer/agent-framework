@@ -700,10 +700,12 @@ OVER-ENGINEERING DRIFT:
 - Manual descriptions of expected behavior are fine (e.g., "Home shows unavailable until device reports")
 
 UNREQUESTED PARAMETERS DRIFT (→ DRIFT):
-- Plan adds behavioral parameters (timeouts, thresholds, expiry times, counts) that user did not specify
-- Plan adds constants or magic numbers without user explicitly requesting them
+- Plan adds externally observable behavioral parameters (timeouts, thresholds, expiry times, counts) that user did not specify
+- Plan adds constants or magic numbers that set unsupported runtime/product policy
 - Example: User says "after denial, use strict for next tool" but plan adds "30 minute expiry" - this is DRIFT
-- If user specifies behavior without numbers, plan should NOT invent numbers - ask for clarification instead
+- If user specifies externally observable behavior without numbers, plan should NOT invent policy numbers - ask for clarification instead
+- Internal implementation constants are ALLOWED when they make the requested implementation concrete, especially local rendering, preview, layout, batching, or helper algorithm constants.
+- Do not reject a plan merely because it names constants such as line limits or head/tail preview budgets; reject only if the numbers impose unsupported product/runtime policy like expiry, timeout, retry count, quota, rate limit, or security threshold.
 
 NOTE: Numbered task organization like "Phase 1:", "Step 1:", "Task 1:" is ALLOWED - these organize work sequentially, not estimate time
 
@@ -724,6 +726,7 @@ PLANNING CONTRACT STRUCTURAL DRIFT (→ DRIFT):
 - Do not present live option menus such as Option A:, Approach 1:, or Alternative 1:.
 - Do not include schedule buckets, timeline estimates, or unresolved assumption language.
 - Do not allow weak or vague required section bodies: empty, placeholder, extremely short, generic, or vague sections must be remediated.
+- Flag obvious code-reuse violations visible in the plan or provided uncommitted-code context: duplicate code that should be shared, missed chances to use an existing helper, missed chances to create a helper for repeated logic, newly created helpers that are very similar to existing helpers, and helpers placed outside the project's obvious helper location without a clear reason.
 
 VAGUE PLAN DRIFT (→ DRIFT):
 - Plan says "modify X" without specifying HOW (what code changes)
@@ -892,7 +895,7 @@ BLOCK if ANY of these apply:
    EXCEPTION: If user invoked the commit or push workflow, git-related questions ARE allowed:
    - Which repositories to commit/push (multi-repo selection)
    - Model tier for code review (opus/sonnet/haiku)
-   - Areas to focus on (security/performance/none)
+   - Confirm review depth (Default/In depth/Broad-minimal)
    These are part of the commit and push workflows and should be ALLOWED.
 
 2. UNSEEN CONTENT - Question asks about content not yet shown to user:

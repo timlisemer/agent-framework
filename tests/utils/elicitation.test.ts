@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { sortReposSubmodulesFirst, parseUncertainties, elicitRepoSelection } from "../../src/utils/elicitation.js";
+import {
+  sortReposSubmodulesFirst,
+  parseUncertainties,
+  elicitRepoSelection,
+  elicitPreferences,
+} from "../../src/utils/elicitation.js";
 import type { RepoInfo } from "../../src/utils/git-utils.js";
 
 describe("sortReposSubmodulesFirst", () => {
@@ -103,6 +108,51 @@ describe("parseUncertainties", () => {
     const output = "DECLINED\nUNCERTAIN: test -   Extra spaces   ";
     const result = parseUncertainties(output);
     expect(result[0].description).toBe("Extra spaces");
+  });
+});
+
+describe("elicitPreferences", () => {
+  it("uses Default/In depth/Broad-minimal review depth choices", async () => {
+    const elicitInput = vi.fn().mockResolvedValue({
+      action: "accept",
+      content: { model_tier: "opus", focus: "Default" },
+    });
+
+    const prefs = await elicitPreferences({ elicitInput } as never, "repo");
+
+    expect(prefs).toEqual({ modelTier: "opus", focus: undefined });
+    const schema = elicitInput.mock.calls[0][0].requestedSchema;
+    expect(schema.properties.focus).toMatchObject({
+      title: "Confirm review depth",
+      enum: ["Default", "In depth", "Broad/minimal"],
+      default: "Default",
+    });
+  });
+
+  it("maps In depth to explicit confirm investigation instructions", async () => {
+    const elicitInput = vi.fn().mockResolvedValue({
+      action: "accept",
+      content: { model_tier: "opus", focus: "In depth" },
+    });
+
+    const prefs = await elicitPreferences({ elicitInput } as never, "repo");
+
+    expect(prefs.focus).toContain("do not be lazy");
+    expect(prefs.focus).toContain("Investigate thoroughly before confirming");
+    expect(prefs.focus).toContain("deduplication/generic-code concerns");
+  });
+
+  it("maps Broad/minimal to lightweight review instructions", async () => {
+    const elicitInput = vi.fn().mockResolvedValue({
+      action: "accept",
+      content: { model_tier: "sonnet", focus: "Broad/minimal" },
+    });
+
+    const prefs = await elicitPreferences({ elicitInput } as never, "repo");
+
+    expect(prefs.modelTier).toBe("sonnet");
+    expect(prefs.focus).toContain("broad but lightweight pass");
+    expect(prefs.focus).toContain("without deep optional exploration");
   });
 });
 

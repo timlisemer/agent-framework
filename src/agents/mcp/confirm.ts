@@ -23,14 +23,60 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
 import { getUncommittedChangesCancellable } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
-import { runConfirmPrefilter, formatConfirmPrefilter } from "../../utils/confirm-prefilter.js";
-import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
+import {
+  findDeduplicationUserRequirement,
+  runConfirmPrefilter,
+  formatConfirmPrefilter,
+} from "../../utils/confirm-prefilter.js";
+import { getAgentFrameworkSessionDir, sessionTranscriptPathSidecar } from "../../utils/paths.js";
 import { readStoredCurrentPlan } from "../../utils/plan-source.js";
+import { readRecentUserMessagesArray } from "../../utils/transcript.js";
 import { runCheckAgent } from "./check.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 
 import { activeSpec } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("confirm"); }
+
+const CONFIRM_DEDUPLICATION_PROMPT_EXTENSION = `## REQUIRED CATEGORY UPDATE: Deduplication
+
+This update supersedes any earlier category count or Results list in the base prompt.
+
+Add this category between Security and Documentation:
+
+### Deduplication
+Evaluate the diff and nearby code for:
+- Obvious duplicate code that should be shared
+- Missed chances to use an existing helper
+- Missed chances to create a helper or generic utility for repeated logic
+- New helpers that are very similar to existing helpers
+- New helpers placed outside the project's obvious helper location without a clear reason
+- Missed opportunities for generic code when the local pattern clearly calls for reusable code
+
+When the provided context includes a DEDUPLICATION USER REQUIREMENT block and the code under review clearly does not satisfy it, Deduplication MUST FAIL. In the Deduplication failure reason and in the DECLINED verdict, quote the exact user wording from that block, then state exactly which changed code violates it.
+
+The Results section must include exactly these six categories:
+- Files: PASS or FAIL (<brief reason if FAIL>)
+- Code Quality: PASS or FAIL (<brief reason if FAIL>)
+- Security: PASS or FAIL (<brief reason if FAIL>)
+- Deduplication: PASS or FAIL (<brief reason if FAIL>)
+- Documentation: PASS or FAIL (<brief reason if FAIL>)
+- Tests: PASS or FAIL (<brief reason if FAIL>)
+
+All six categories must PASS for CONFIRMED. Any FAIL means DECLINED.`;
+
+const CONFIRM_FORMAT_FALLBACK = `## Results
+- Files: UNKNOWN
+- Code Quality: UNKNOWN
+- Security: UNKNOWN
+- Deduplication: UNKNOWN
+- Documentation: UNKNOWN
+- Tests: UNKNOWN
+
+## Verdict
+DECLINED: Agent returned malformed output
+
+## Raw Output
+$RAW`;
 
 function extractCheckErrors(checkResult: string): string {
   const errorsMatch = checkResult.match(/## Errors\s*\n([\s\S]*?)(?=\n## |\s*$)/);
@@ -50,6 +96,7 @@ export function formatCheckFailure(checkResult: string, errorCount: number): str
 - Files: SKIP
 - Code Quality: SKIP
 - Security: SKIP
+- Deduplication: SKIP
 - Documentation: SKIP
 - Tests: SKIP
 
@@ -142,6 +189,35 @@ ${planfile.content}`;
   return "PLANFILE CONTEXT: No planfile was provided through optional_planfile and no usable session planfile was found. Continue evaluating the code changes without plan input.";
 }
 
+function filterGeneratedConfirmGuidance(extraContext: string | undefined): string {
+  if (!extraContext) return "";
+  return extraContext
+    .split("\n")
+    .filter((line) => !line.includes("[generated confirm review-depth guidance]"))
+    .join("\n");
+}
+
+async function readRecentUserContextForConfirm(sessionDir: string | undefined): Promise<string> {
+  if (!sessionDir) return "";
+  try {
+    const transcriptPath = fs.readFileSync(sessionTranscriptPathSidecar(sessionDir), "utf-8").trim();
+    if (!transcriptPath) return "";
+    const messages = await readRecentUserMessagesArray(transcriptPath, 5);
+    return messages.join("\n");
+  } catch {
+    return "";
+  }
+}
+
+function formatDeduplicationRequirementContext(requirement: string | undefined): string {
+  if (!requirement) return "";
+  return `=== DEDUPLICATION USER REQUIREMENT ===
+Exact user wording: ${JSON.stringify(requirement)}
+If the changed code clearly violates this requirement, fail Deduplication and quote this exact wording in the Deduplication reason and verdict.
+=== END DEDUPLICATION USER REQUIREMENT ===
+`;
+}
+
 /**
  * Run the confirm agent to evaluate code changes.
  *
@@ -185,13 +261,27 @@ export async function runConfirmAgent(
 
   // Step 3.5: Pre-filter deterministic violations (file/extension-aware)
   const prefilterSection = formatConfirmPrefilter(runConfirmPrefilter(status, diff));
+  const recentUserContext = await readRecentUserContextForConfirm(sessionContext.sessionDir);
+  const deduplicationRequirement = findDeduplicationUserRequirement([
+    filterGeneratedConfirmGuidance(extraContext),
+    recentUserContext,
+  ].join("\n"));
+  const deduplicationRequirementSection = formatDeduplicationRequirementContext(deduplicationRequirement);
 
   // Step 4: Run SDK agent with dynamic tier
   const result = await runAgent(
-    { ...CONFIRM_AGENT, tier, workingDir },
+    {
+      ...CONFIRM_AGENT,
+      tier,
+      workingDir,
+      systemPrompt: `${CONFIRM_AGENT.systemPrompt}\n\n${CONFIRM_DEDUPLICATION_PROMPT_EXTENSION}`,
+      formatValidation: CONFIRM_AGENT.formatValidation
+        ? { ...CONFIRM_AGENT.formatValidation, fallbackOutput: CONFIRM_FORMAT_FALLBACK }
+        : undefined,
+    },
     {
       prompt: "Evaluate these code changes:",
-      context: `${prefilterSection}${formatPlanfileContext(planfile)}
+      context: `${prefilterSection}${deduplicationRequirementSection}${formatPlanfileContext(planfile)}
 
 GIT STATUS (files changed):
 ${status || "(no changes)"}

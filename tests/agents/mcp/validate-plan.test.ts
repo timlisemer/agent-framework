@@ -190,6 +190,12 @@ describe("runValidatePlanAgent", () => {
     expect(result).toContain("Missing required heading \"## Relevant Files\".");
   });
 
+  it("surfaces helper reuse invalid reasons", async () => {
+    const result = await validatePlanText(validPlan(), "INVALID: Missed chance to use existing helper `src/utils/file-io.ts` for repeated file reads.");
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("Missed chance to use existing helper `src/utils/file-io.ts` for repeated file reads.");
+  });
+
   it("reads plan_file relative to working_dir", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "validate-plan-"));
     try {

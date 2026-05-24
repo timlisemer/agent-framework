@@ -96,7 +96,7 @@ without invoking an LLM.
 
 - working_dir (optional): directory to evaluate (defaults to cwd)
 - model_tier (optional): haiku | sonnet | opus (default opus)
-- extra_context (optional): free-form additional instructions or focus areas
+- extra_context (optional): free-form additional instructions or review-depth guidance
 - optional_planfile (optional): planfile path to include in confirm context
 - skip_elicitation (optional, bool): skip interactive repo/preference prompts
 
@@ -104,7 +104,7 @@ without invoking an LLM.
 
 1. Detect repos with uncommitted changes via list_repos logic
 2. If multiple repos and skip_elicitation=false, elicit selection via form
-3. For each selected repo, optionally elicit model tier + focus area
+3. For each selected repo, optionally elicit model tier + confirm review depth
 4. Resolve plan context from optional_planfile or the session current planfile.
    If neither exists, continue without plan input. If optional_planfile is
    provided but unreadable or empty, fail before check.

@@ -334,7 +334,7 @@ Do not include:
 - Timeline buckets.
 - Live solution branches.
 - Open assumptions.
-- Invented behavioral numbers, counts, thresholds, or timeouts.
+- Invented externally observable behavioral numbers, counts, thresholds, or timeouts that set product or runtime policy the user did not request. Internal implementation constants are allowed when they make the requested implementation concrete, such as local rendering, preview, layout, batching, or helper algorithm constants.
 - Vague implementation verbs without concrete detail.
 - Generic verification headings.
 - Manual project check/lint/test/build/format commands.

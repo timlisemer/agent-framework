@@ -60,6 +60,14 @@ const UNUSED_CODE_WORKAROUNDS: { re: RegExp; label: string }[] = [
   { re: /#\[allow\(dead_code\)\]/, label: "#[allow(dead_code)]" },
 ];
 
+const DEDUPLICATION_USER_REQUEST_PATTERNS: RegExp[] = [
+  /\bde-?duplicat(?:e|ed|es|ing|ion)\b/i,
+  /\b(?:remove|avoid|prevent|fix)\s+(?:the\s+)?duplicate\s+code\b/i,
+  /\b(?:reuse|use)\s+(?:the\s+)?(?:existing|shared|common)\s+(?:code|helper|utility|function|logic)\b/i,
+  /\b(?:generic|reusable|shared|common)\s+(?:code|helper|utility|function|logic|abstraction)\b/i,
+  /\b(?:create|extract|factor(?:\s+out)?)\s+(?:a\s+)?(?:generic|reusable|shared|common)\s+(?:helper|utility|function|logic|abstraction)\b/i,
+];
+
 export interface ConfirmPrefilterResult {
   unwantedFiles: string[];
   debugCode: { file: string; line: string; label: string }[];
@@ -147,6 +155,18 @@ export function runConfirmPrefilter(
   }
 
   return { unwantedFiles, debugCode, unusedCodeWorkarounds };
+}
+
+export function findDeduplicationUserRequirement(text: string): string | undefined {
+  const lines = text.split("\n");
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (DEDUPLICATION_USER_REQUEST_PATTERNS.some((re) => re.test(line))) {
+      return line.replace(/^>\s*/, "");
+    }
+  }
+  return undefined;
 }
 
 /**

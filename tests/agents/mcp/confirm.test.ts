@@ -41,6 +41,7 @@ src/bar.ts:8: 'unusedValue' is declared but its value is never read.
     const result = formatCheckFailure(checkResult, 2);
 
     expect(result).toContain("- Errors: 2");
+    expect(result).toContain("- Deduplication: SKIP");
     expect(result).toContain("## Check Errors");
     expect(result).toContain("src/foo.ts:12: Type 'string' is not assignable to type 'number'.");
     expect(result).toContain("src/bar.ts:8: 'unusedValue' is declared but its value is never read.");
@@ -98,6 +99,66 @@ describe("runConfirmAgent planfile context", () => {
     expect(context).toContain(planPath);
     expect(context).toContain("PLANFILE CONTENT:");
     expect(context).toContain("Implement x.");
+  });
+
+  it("adds the Deduplication category to the confirm agent prompt and fallback output", async () => {
+    await runConfirmAgent(tempDir, "haiku");
+
+    const config = mocks.runAgent.mock.calls[0][0];
+    expect(config.systemPrompt).toContain("## REQUIRED CATEGORY UPDATE: Deduplication");
+    expect(config.systemPrompt).toContain("- Deduplication: PASS or FAIL");
+    expect(config.systemPrompt).toContain("DEDUPLICATION USER REQUIREMENT");
+    expect(config.systemPrompt).not.toContain("This quote requirement applies ONLY to deduplication/generic-code wishes");
+    expect(config.formatValidation.fallbackOutput).toContain("- Deduplication: UNKNOWN");
+  });
+
+  it("injects the deduplication user requirement only when regex-detected in context", async () => {
+    const transcriptPath = path.join(tempDir, "dedup-transcript.jsonl");
+    fs.writeFileSync(
+      transcriptPath,
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: "please remove the duplicate code and reuse existing code",
+        },
+      }) + "\n",
+    );
+    getAgentFrameworkSessionDir({ transcriptPath, projectDir: tempDir });
+
+    await runConfirmAgent(tempDir, "haiku", "Focus: generated review-depth text");
+
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("=== DEDUPLICATION USER REQUIREMENT ===");
+    expect(context).toContain("Exact user wording: \"please remove the duplicate code and reuse existing code\"");
+
+    mocks.runAgent.mockClear();
+    fs.unlinkSync(transcriptPath);
+    await runConfirmAgent(tempDir, "haiku", "please remove the duplicate code and reuse existing code");
+
+    const nextContext = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(nextContext).toContain("=== DEDUPLICATION USER REQUIREMENT ===");
+  });
+
+  it("does not treat generated review-depth guidance as a user deduplication requirement", async () => {
+    await runConfirmAgent(
+      tempDir,
+      "haiku",
+      "Focus: [generated confirm review-depth guidance] In depth confirm review: check deduplication/generic-code concerns.",
+    );
+
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).not.toContain("=== DEDUPLICATION USER REQUIREMENT ===");
+  });
+
+  it("does not scan assistant-authored planfile text for deduplication requirements", async () => {
+    const planPath = path.join(tempDir, "plan.md");
+    fs.writeFileSync(planPath, "Plan Name: x\n\nCreate a generic helper for repeated logic.\n");
+
+    await runConfirmAgent(tempDir, "haiku", undefined, planPath);
+
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).not.toContain("=== DEDUPLICATION USER REQUIREMENT ===");
   });
 
   it("returns an error before check when explicit optional_planfile is unreadable", async () => {

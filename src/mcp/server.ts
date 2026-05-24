@@ -139,7 +139,7 @@ server.registerTool(
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
       model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Model tier for evaluation (default: opus)"),
-      extra_context: z.string().optional().describe("Additional instructions or areas to focus on"),
+      extra_context: z.string().optional().describe("Additional instructions or review-depth guidance"),
       optional_planfile: z.string().optional().describe("Optional planfile path to include in confirm context. If omitted and no session planfile exists, confirm runs without plan input."),
       skip_elicitation: coercibleBoolean.describe("Skip interactive questions, use defaults")
     }

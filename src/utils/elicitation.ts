@@ -32,6 +32,12 @@ export interface Preferences {
   focus: string | undefined;
 }
 
+const IN_DEPTH_CONFIRM_FOCUS =
+  "[generated confirm review-depth guidance] In depth confirm review: do not be lazy. Investigate thoroughly before confirming. Read the relevant changed code and nearby helpers/patterns, search for existing helpers or similar implementations where appropriate, and only CONFIRMED after you have genuinely checked the important files, edge cases, tests/docs implications, and deduplication/generic-code concerns.";
+
+const BROAD_MINIMAL_CONFIRM_FOCUS =
+  "[generated confirm review-depth guidance] Broad/minimal confirm review: do a broad but lightweight pass. Check the changed files for obvious correctness, security, documentation, test, and deduplication issues without deep optional exploration unless the diff reveals a concrete risk.";
+
 /**
  * Ask the user which repositories to process when multiple have changes.
  * Returns all repos with changes if only one has changes (no form shown).
@@ -107,10 +113,10 @@ export async function elicitPreferences(
         },
         focus: {
           type: "string",
-          title: "Any specific areas to focus on?",
-          description: "Standard review, or extra focus on security/performance",
-          enum: ["None", "Security", "Performance"],
-          default: "None",
+          title: "Confirm review depth",
+          description: "Default review, deeper investigation, or broad/minimal pass",
+          enum: ["Default", "In depth", "Broad/minimal"],
+          default: "Default",
         },
       },
     },
@@ -127,7 +133,11 @@ export async function elicitPreferences(
 
   return {
     modelTier: tier as "haiku" | "sonnet" | "opus",
-    focus: focus && focus !== "None" ? focus : undefined,
+    focus: focus === "In depth"
+      ? IN_DEPTH_CONFIRM_FOCUS
+      : focus === "Broad/minimal"
+        ? BROAD_MINIMAL_CONFIRM_FOCUS
+        : undefined,
   };
 }
 

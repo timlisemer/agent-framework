@@ -43,7 +43,10 @@ Final plans must satisfy the planning contract:
 - Include a Manual User Verification section only for checks the user must perform outside AI-accessible verification, or state that none is required.
 - Do not include generic verification headings like ## Verification, ## Testing, or ## Test Plan.
 - Do not include schedule buckets, time estimates, live option menus, unresolved assumptions, or vague required section bodies.
-- Do not invent behavioral numbers, thresholds, timeouts, or counts.
+- Do not invent externally observable behavioral numbers, thresholds, timeouts, or counts that set product policy the user did not ask for.
+- Allow concrete internal implementation constants when they are part of the requested implementation shape, especially local rendering, preview, layout, batching, or helper algorithm constants. Do not reject a plan merely because it names constants such as line limits or head/tail preview budgets.
+- Reject numeric parameters only when the plan adds an unsupported runtime/product policy such as an expiry, timeout, retry count, quota, rate limit, or security threshold.
+- Flag obvious code-reuse violations visible in the plan or provided uncommitted-code context: duplicate code that should be shared, missed chances to use an existing helper, missed chances to create a helper for repeated logic, newly created helpers that are very similar to existing helpers, and helpers placed outside the project's obvious helper location without a clear reason.
 - Do not include blacklisted commands outside Manual User Verification.
 
 Reply with EXACTLY:
@@ -94,7 +97,7 @@ function hasSpecificInvalidReason(text: string): boolean {
   const reason = text.replace(/^INVALID:\s*/i, "").trim();
   if (!reason) return false;
   if (/^(the plan|plan)\s+(does not|doesn't|fails to)\s+(follow|satisfy|meet)/i.test(reason)) return false;
-  if (/\b(missing|required|extra|duplicate|heading|section|line|rule|contract|verification|specific|vague|unresolved|schedule|option|blacklisted)\b/i.test(reason)) return true;
+  if (/\b(missing|required|extra|duplicate|helper|reuse|shared|repeated|similar|location|heading|section|line|rule|contract|verification|specific|vague|unresolved|schedule|option|blacklisted)\b/i.test(reason)) return true;
   return /##\s+\S+|\b(User Goal|Answered Assumptions|Goal In My Words|Approach|Data Flow|Files To Create|Files To Modify|Implementation Order|Assistant Verification|Manual User Verification|Approaches Decided Against|Possible Future Followups|Relevant Files|Files That Need Changes)\b/i.test(reason);
 }
 

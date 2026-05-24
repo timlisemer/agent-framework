@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  findDeduplicationUserRequirement,
   runConfirmPrefilter,
   formatConfirmPrefilter,
 } from "../../src/utils/confirm-prefilter.js";
@@ -184,5 +185,23 @@ describe("formatConfirmPrefilter", () => {
     });
     expect(out).toContain("CATEGORY 2");
     expect(out).toContain("console.log");
+  });
+});
+
+describe("findDeduplicationUserRequirement", () => {
+  it("detects explicit duplicate-code requests", () => {
+    expect(
+      findDeduplicationUserRequirement("please remove the duplicate code and reuse existing code"),
+    ).toBe("please remove the duplicate code and reuse existing code");
+  });
+
+  it("detects generic helper requests", () => {
+    expect(
+      findDeduplicationUserRequirement("make this a generic helper instead of repeating the logic"),
+    ).toBe("make this a generic helper instead of repeating the logic");
+  });
+
+  it("does not match unrelated generic language", () => {
+    expect(findDeduplicationUserRequirement("write a generic summary of the change")).toBeUndefined();
   });
 });
