@@ -5,6 +5,7 @@ import {
   buildClaudeQueryOptions,
   createClaudeUiStreamState,
   mapClaudeUiStreamMessage,
+  recordClaudePlanUpdate,
   sanitizeClaudeEnv,
 } from "../providers/claude-agent-runtime.js";
 import {
@@ -81,6 +82,9 @@ class ClaudeUiProvider implements AiProviderRunner {
             queue.push({ type: "tool.updated", ref, status: "waiting", waitReason: options.title ?? options.decisionReason ?? null });
             const decision = await this.#decisions.waitForDecision(ref, options.signal);
             if (decision.decision === "approve") {
+              if (toolName === "ExitPlanMode" && typeof toolInput.plan === "string" && recordClaudePlanUpdate(streamState, toolInput.plan)) {
+                queue.push({ type: "plan.updated", state: { mode: "awaitingApproval", planText: toolInput.plan, approved: false } });
+              }
               return { behavior: "allow" as const, updatedInput: toolInput, toolUseID: options.toolUseID };
             }
             return {

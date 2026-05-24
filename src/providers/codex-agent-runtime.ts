@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { isCancellationError } from "../utils/cancellation.js";
@@ -44,6 +45,8 @@ export type CodexUiStreamState = {
   seenMessages: Set<string>;
   seenTools: Set<string>;
   seenProcesses: Set<string>;
+  assistantText: Map<string, string>;
+  assistantReasoning: Map<string, string>;
 };
 
 export function createCodexUiStreamState(): CodexUiStreamState {
@@ -51,6 +54,8 @@ export function createCodexUiStreamState(): CodexUiStreamState {
     seenMessages: new Set(),
     seenTools: new Set(),
     seenProcesses: new Set(),
+    assistantText: new Map(),
+    assistantReasoning: new Map(),
   };
 }
 
@@ -290,22 +295,42 @@ function mapCodexUiItem(
   state: CodexUiStreamState
 ): AiRuntimeEvent[] {
   const itemType = stringField(item, "type");
-  const id = stringField(item, "id") ?? `${itemType ?? "item"}-${state.seenTools.size + state.seenProcesses.size + 1}`;
+  const id = stringField(item, "id") ?? syntheticCodexItemRef(itemType, item);
   switch (itemType) {
     case "agent_message": {
       const text = stringField(item, "text") ?? "";
       const ref = "assistant";
+      const trackingId = stringField(item, "id") ?? ref;
       const events: AiRuntimeEvent[] = [];
-      if (!state.seenMessages.has(ref)) {
-        state.seenMessages.add(ref);
-        events.push({ type: "message.created", ref, content: "" });
-      }
+      ensureAssistantMessage(events, state, ref);
       if (eventType === "item.completed") {
         events.push({ type: "message.completed", ref, content: text, usage: null });
       } else if (text) {
-        events.push({ type: "message.delta", ref, delta: text });
+        const previous = state.assistantText.get(trackingId) ?? "";
+        const delta = text.startsWith(previous) ? text.slice(previous.length) : text;
+        state.assistantText.set(trackingId, text);
+        if (delta) events.push({ type: "message.delta", ref, delta });
       }
       return events;
+    }
+    case "reasoning": {
+      const text = stringField(item, "text") ?? stringField(item, "summary") ?? "";
+      const ref = "assistant";
+      const trackingId = stringField(item, "id") ?? "assistant_reasoning";
+      const events: AiRuntimeEvent[] = [];
+      ensureAssistantMessage(events, state, ref);
+      if (!text) return events;
+      const previous = state.assistantReasoning.get(trackingId) ?? "";
+      const delta = text.startsWith(previous) ? text.slice(previous.length) : text;
+      state.assistantReasoning.set(trackingId, text);
+      if (delta) events.push({ type: "message.reasoning_delta", ref, delta });
+      return events;
+    }
+    case "todo_list": {
+      const planText = codexTodoPlanText(item.items ?? item.todos);
+      return planText
+        ? [{ type: "plan.updated", state: { mode: "planning", planText, approved: false } }]
+        : [];
     }
     case "command_execution": {
       const command = stringField(item, "command") ?? "Command";
@@ -324,9 +349,11 @@ function mapCodexUiItem(
       return events;
     }
     case "mcp_tool_call": {
-      const name = "external_tool";
+      const server = stringField(item, "server");
+      const tool = stringField(item, "tool");
+      const name = server && tool ? `mcp__${server}__${tool}` : "mcp_tool";
       const status = stringField(item, "status");
-      const events = ensureTool(state, id, name, item.arguments);
+      const events = ensureTool(state, id, name, { server, tool, arguments: item.arguments });
       if (status === "completed") {
         events.push({ type: "tool.completed", ref: id, output: outputBlocks(item.result) });
       } else if (status === "failed") {
@@ -337,7 +364,16 @@ function mapCodexUiItem(
       return events;
     }
     case "file_change": {
-      const events = ensureTool(state, id, "file_edit", { changes: item.changes });
+      const changes = Array.isArray(item.changes) ? item.changes : [];
+      const paths = changes
+        .map((change) => change && typeof change === "object" ? stringField(change as Record<string, unknown>, "path") : null)
+        .filter((path): path is string => Boolean(path));
+      const events = ensureTool(state, id, "file_edit", {
+        changes: item.changes,
+        changeCount: changes.length,
+        files: paths.slice(0, 3).join(", "),
+        path: paths[0] ?? null,
+      });
       const status = stringField(item, "status");
       if (status === "failed") {
         events.push({ type: "tool.failed", ref: id, error: "File change failed" });
@@ -360,7 +396,7 @@ function mapCodexUiItem(
     case "error":
       return [{ type: "error", error: stringField(item, "message") ?? "Runtime item error" }];
     default:
-      return [];
+      return mapUnknownCodexItem(eventType, item, itemType, id, state);
   }
 }
 
@@ -368,6 +404,84 @@ function ensureTool(state: CodexUiStreamState, ref: string, name: string, input:
   if (state.seenTools.has(ref)) return [];
   state.seenTools.add(ref);
   return [{ type: "tool.created", ref, name, input: summarizeToolInputForUi(name, input) }];
+}
+
+function ensureAssistantMessage(events: AiRuntimeEvent[], state: CodexUiStreamState, ref: string): void {
+  if (state.seenMessages.has(ref)) return;
+  state.seenMessages.add(ref);
+  events.push({ type: "message.created", ref, content: "" });
+}
+
+function codexTodoPlanText(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const lines = value.map((todo) => {
+    if (!todo || typeof todo !== "object") return null;
+    const raw = todo as Record<string, unknown>;
+    const text = stringField(raw, "content") ?? stringField(raw, "text") ?? stringField(raw, "title");
+    if (!text) return null;
+    const status = stringField(raw, "status") ?? "";
+    const marker = status === "completed" ? "x" : " ";
+    return `- [${marker}] ${text}`;
+  }).filter((line): line is string => Boolean(line));
+  return lines.length > 0 ? lines.join("\n") : null;
+}
+
+function mapUnknownCodexItem(
+  eventType: string,
+  item: Record<string, unknown>,
+  itemType: string | null,
+  id: string,
+  state: CodexUiStreamState
+): AiRuntimeEvent[] {
+  const status = stringField(item, "status");
+  const events = ensureTool(state, id, "runtime_item", {
+    itemType: itemType ?? "unknown",
+    status: status ?? eventType,
+  });
+  if (eventType === "item.completed" || status === "completed") {
+    events.push({ type: "tool.completed", ref: id, output: [{ type: "json", value: item }] });
+  } else if (status === "failed" || status === "error") {
+    events.push({ type: "tool.failed", ref: id, error: errorMessage(item.error) });
+  } else {
+    events.push({ type: "tool.updated", ref: id, status: "running" });
+  }
+  return events;
+}
+
+function syntheticCodexItemRef(itemType: string | null, item: Record<string, unknown>): string {
+  const stableItem = stableCodexItemPayload(itemType, item);
+  const canonical = canonicalJson(stableItem);
+  const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 12);
+  return `${itemType ?? "item"}:${hash}`;
+}
+
+function stableCodexItemPayload(itemType: string | null, item: Record<string, unknown>): Record<string, unknown> {
+  switch (itemType) {
+    case "command_execution":
+      return { type: itemType, command: item.command };
+    case "mcp_tool_call":
+      return { type: itemType, server: item.server, tool: item.tool, arguments: item.arguments };
+    case "file_change":
+      return { type: itemType, changes: item.changes };
+    case "web_search":
+      return { type: itemType, query: item.query };
+    default: {
+      const stable: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(item)) {
+        if (["status", "text", "summary", "aggregated_output", "result", "error", "progress"].includes(key)) continue;
+        stable[key] = value;
+      }
+      return stable;
+    }
+  }
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.keys(value as Record<string, unknown>).sort().map((key) =>
+    `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`
+  ).join(",")}}`;
 }
 
 export function buildCodexConfig(

@@ -189,6 +189,36 @@ export function summarizeToolInputForUi(toolName: string, toolInput: unknown): {
       }
     }
   }
+  if (toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)) {
+    const input = toolInput as Dict;
+    if (toolName === "shell" && typeof input.command === "string") fields.command = input.command;
+    if (toolName === "search" && typeof input.query === "string") fields.query = input.query;
+    if (toolName === "runtime_item") {
+      if (typeof input.itemType === "string") fields.itemType = input.itemType;
+      if (typeof input.status === "string") fields.status = input.status;
+    }
+    if (toolName === "file_edit") {
+      if (typeof input.path === "string") fields.path = input.path;
+      if (typeof input.file_path === "string") fields.file_path = input.file_path;
+      if (typeof input.files === "string") fields.files = input.files;
+      if (typeof input.changeCount === "number") fields.changeCount = input.changeCount;
+      if (Array.isArray(input.changes)) fields.changeCount = input.changes.length;
+    }
+    if (toolName === "mcp_tool" || toolName.startsWith("mcp__")) {
+      if (typeof input.server === "string") fields.server = input.server;
+      if (typeof input.tool === "string") fields.tool = input.tool;
+      const args = input.arguments;
+      if (args && typeof args === "object" && !Array.isArray(args)) {
+        for (const [key, value] of Object.entries(args as Dict)) {
+          if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+            fields[key] = value;
+          } else if (Array.isArray(value)) {
+            fields[key] = value.length;
+          }
+        }
+      }
+    }
+  }
   return {
     text: summarizeToolInputForLlm(toolName, toolInput),
     ...(Object.keys(fields).length > 0 ? { fields } : {}),

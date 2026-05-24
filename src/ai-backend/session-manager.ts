@@ -241,6 +241,14 @@ export class AiBackendSessionManager {
         this.emit(sessionId, { type: "messageDelta", sessionId, turnId, messageId, delta: event.delta });
         return null;
       }
+      case "message.reasoning_delta": {
+        const messageId = state.messageId(event.ref);
+        this.ensureMessage(sessionId, turnId, messageId, now);
+        this.#store.appendReasoningDelta(sessionId, messageId, event.delta, now);
+        this.emit(sessionId, { type: "messageReasoningDelta", sessionId, turnId, messageId, delta: event.delta });
+        this.emitSessionUpdated(sessionId);
+        return null;
+      }
       case "message.completed": {
         const messageId = state.messageId(event.ref);
         this.ensureMessage(sessionId, turnId, messageId, now);
@@ -453,6 +461,22 @@ export class AiBackendSessionManager {
         const continuation = { ...snapshot.continuation, available: event.available, updatedAt: now };
         this.#store.setContinuation(sessionId, continuation);
         this.emit(sessionId, { type: "continuationUpdated", sessionId, continuation });
+        this.emitSessionUpdated(sessionId);
+        return null;
+      }
+      case "plan.updated": {
+        const snapshot = this.#store.get(sessionId);
+        if (!snapshot) return null;
+        const state = snapshot.plan.mode === "approved" && snapshot.plan.approved
+          ? {
+              ...event.state,
+              mode: "approved" as const,
+              approved: true,
+              planText: event.state.planText ?? snapshot.plan.planText,
+            }
+          : event.state;
+        this.#store.setPlan(sessionId, state);
+        this.emit(sessionId, { type: "planStateChanged", sessionId, state });
         this.emitSessionUpdated(sessionId);
         return null;
       }

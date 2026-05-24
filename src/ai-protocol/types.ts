@@ -34,6 +34,7 @@ export type TokenUsage = {
 
 export type AiContentBlock =
   | { type: "text"; text: string }
+  | { type: "reasoning"; text: string }
   | { type: "error"; message: string };
 
 export type AiMessage = {
@@ -178,6 +179,7 @@ export type AiEvent =
   | (AiEventBase & { type: "turnStarted"; turnId: TurnId })
   | (AiEventBase & { type: "messageCreated"; turnId: TurnId; message: AiTranscriptEntry })
   | (AiEventBase & { type: "messageDelta"; turnId: TurnId; messageId: AiMessageId; delta: string })
+  | (AiEventBase & { type: "messageReasoningDelta"; turnId: TurnId; messageId: AiMessageId; delta: string })
   | (AiEventBase & { type: "messageCompleted"; turnId: TurnId; message: AiTranscriptEntry; usage: TokenUsage | null })
   | (AiEventBase & { type: "toolCallCreated"; turnId: TurnId; toolCall: AiToolCall })
   | (AiEventBase & { type: "toolCallUpdated"; turnId: TurnId; toolCall: AiToolCall })

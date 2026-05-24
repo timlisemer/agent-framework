@@ -201,6 +201,109 @@ describe("AI backend session manager", () => {
     expect(assistantCreated).toBeDefined();
   });
 
+  it("persists reasoning blocks and preserves them when final text completes", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        { type: "message.reasoning_delta", ref: "assistant", delta: "think" },
+        { type: "message.delta", ref: "assistant", delta: "hel" },
+        { type: "message.completed", ref: "assistant", content: "hello", usage: null }
+      )
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-reasoning");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-reasoning", turnId: "turn-1", input: "hello" },
+    });
+
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
+    });
+    expect(frames).toContainEqual(expect.objectContaining({
+      type: "event",
+      event: expect.objectContaining({ type: "messageReasoningDelta", delta: "think" }),
+    }));
+    const sessionUpdated = [...frames].reverse().find((frame) => frame.type === "event" && frame.event.type === "sessionUpdated");
+    if (!sessionUpdated || sessionUpdated.type !== "event" || sessionUpdated.event.type !== "sessionUpdated") {
+      throw new Error("expected sessionUpdated event");
+    }
+    const assistant = sessionUpdated.event.snapshot.transcript.find((entry) => entry.role === "assistant");
+    expect(assistant?.content).toEqual([{ type: "reasoning", text: "think" }, { type: "text", text: "hello" }]);
+  });
+
+  it("removes stale interleaved text blocks when final text completes", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        { type: "message.delta", ref: "assistant", delta: "draft " },
+        { type: "message.reasoning_delta", ref: "assistant", delta: "think" },
+        { type: "message.delta", ref: "assistant", delta: "tail" },
+        { type: "message.completed", ref: "assistant", content: "final", usage: null }
+      )
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-interleaved-final");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-interleaved-final", turnId: "turn-1", input: "hello" },
+    });
+
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
+    });
+    const sessionUpdated = [...frames].reverse().find((frame) => frame.type === "event" && frame.event.type === "sessionUpdated");
+    if (!sessionUpdated || sessionUpdated.type !== "event" || sessionUpdated.event.type !== "sessionUpdated") {
+      throw new Error("expected sessionUpdated event");
+    }
+    const assistant = sessionUpdated.event.snapshot.transcript.find((entry) => entry.role === "assistant");
+    expect(assistant?.content).toEqual([{ type: "text", text: "final" }, { type: "reasoning", text: "think" }]);
+  });
+
+  it("applies provider plan updates without downgrading approved plans", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events({ type: "plan.updated", state: { mode: "planning", planText: "Provider plan", approved: false } })
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-plan");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-plan", turnId: "turn-1", input: "plan" },
+    });
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
+    });
+    expect(frames).toContainEqual(expect.objectContaining({
+      type: "event",
+      event: expect.objectContaining({ type: "planStateChanged", state: { mode: "planning", planText: "Provider plan", approved: false } }),
+    }));
+
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "setPlanState",
+        sessionId: "session-plan",
+        state: { mode: "approved", planText: "Approved plan", approved: true },
+      },
+    });
+    provider.runTurn.mockImplementation(() =>
+      events({ type: "plan.updated", state: { mode: "planning", planText: "Updated provider plan", approved: false } })
+    );
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-plan", turnId: "turn-2", input: "plan again" },
+    });
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished" && frame.event.turnId === "turn-2")).toBe(true);
+    });
+    const sessionUpdated = [...frames].reverse().find((frame) => frame.type === "event" && frame.event.type === "sessionUpdated");
+    if (!sessionUpdated || sessionUpdated.type !== "event" || sessionUpdated.event.type !== "sessionUpdated") {
+      throw new Error("expected sessionUpdated event");
+    }
+    expect(sessionUpdated.event.snapshot.plan).toEqual({ mode: "approved", planText: "Updated provider plan", approved: true });
+  });
+
   it("returns reconnect snapshots and events since a cursor", async () => {
     const { frames, manager } = createHarness();
 

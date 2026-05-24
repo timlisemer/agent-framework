@@ -97,4 +97,85 @@ describe("AI backend Codex provider helpers", () => {
     expect(started).not.toContainEqual(expect.objectContaining({ type: "tool.completed" }));
     expect(completed).toContainEqual(expect.objectContaining({ type: "tool.completed", ref: "file-change-1" }));
   });
+
+  it("maps reasoning, todo lists, mcp identity, and unknown items to generic events", () => {
+    const state = createCodexUiStreamState();
+
+    expect(mapCodexUiStreamEvent({
+      type: "item.updated",
+      item: { id: "r1", type: "reasoning", text: "thinking" },
+    }, state)).toEqual([
+      { type: "message.created", ref: "assistant", content: "" },
+      { type: "message.reasoning_delta", ref: "assistant", delta: "thinking" },
+    ]);
+
+    expect(mapCodexUiStreamEvent({
+      type: "item.updated",
+      item: { id: "todos", type: "todo_list", items: [{ content: "Inspect", status: "completed" }, { content: "Patch", status: "pending" }] },
+    }, state)).toContainEqual({
+      type: "plan.updated",
+      state: { mode: "planning", planText: "- [x] Inspect\n- [ ] Patch", approved: false },
+    });
+
+    const mcp = mapCodexUiStreamEvent({
+      type: "item.started",
+      item: { id: "mcp-1", type: "mcp_tool_call", server: "github", tool: "search", arguments: { query: "abc" } },
+    }, state);
+    expect(mcp).toContainEqual(expect.objectContaining({
+      type: "tool.created",
+      ref: "mcp-1",
+      name: "mcp__github__search",
+      input: expect.objectContaining({ fields: expect.objectContaining({ server: "github", tool: "search", query: "abc" }) }),
+    }));
+
+    const unknown = mapCodexUiStreamEvent({
+      type: "item.completed",
+      item: { id: "future-1", type: "future_item", status: "completed", value: 1 },
+    }, state);
+    expect(unknown).toContainEqual(expect.objectContaining({ type: "tool.created", ref: "future-1", name: "runtime_item" }));
+    expect(unknown).toContainEqual(expect.objectContaining({ type: "tool.completed", ref: "future-1" }));
+  });
+
+  it("uses stable tracking for id-less streamed assistant and reasoning items", () => {
+    const state = createCodexUiStreamState();
+
+    const firstText = mapCodexUiStreamEvent({
+      type: "item.updated",
+      item: { type: "agent_message", text: "hel" },
+    }, state);
+    const secondText = mapCodexUiStreamEvent({
+      type: "item.updated",
+      item: { type: "agent_message", text: "hello" },
+    }, state);
+    const firstReasoning = mapCodexUiStreamEvent({
+      type: "item.updated",
+      item: { type: "reasoning", summary: "rea" },
+    }, state);
+    const secondReasoning = mapCodexUiStreamEvent({
+      type: "item.updated",
+      item: { type: "reasoning", summary: "reason" },
+    }, state);
+
+    expect(firstText).toContainEqual({ type: "message.delta", ref: "assistant", delta: "hel" });
+    expect(secondText).toEqual([{ type: "message.delta", ref: "assistant", delta: "lo" }]);
+    expect(firstReasoning).toContainEqual({ type: "message.reasoning_delta", ref: "assistant", delta: "rea" });
+    expect(secondReasoning).toEqual([{ type: "message.reasoning_delta", ref: "assistant", delta: "son" }]);
+  });
+
+  it("uses stable synthetic refs for id-less mutable tool items", () => {
+    const state = createCodexUiStreamState();
+
+    const started = mapCodexUiStreamEvent({
+      type: "item.started",
+      item: { type: "command_execution", command: "npm test", status: "in_progress", aggregated_output: "one" },
+    }, state);
+    const updated = mapCodexUiStreamEvent({
+      type: "item.updated",
+      item: { type: "command_execution", command: "npm test", status: "in_progress", aggregated_output: "one two" },
+    }, state);
+
+    expect(started.filter((event) => event.type === "tool.created")).toHaveLength(1);
+    expect(updated.filter((event) => event.type === "tool.created")).toHaveLength(0);
+    expect(updated).toContainEqual(expect.objectContaining({ type: "tool.progress", progress: "one two" }));
+  });
 });

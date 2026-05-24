@@ -1,6 +1,7 @@
 import type {
   AiBackendProcess,
   AiBackendProcessId,
+  AiContentBlock,
   AiContinuationState,
   AiErrorInfo,
   AiEvent,
@@ -142,14 +143,28 @@ export class TranscriptStore {
   }
 
   appendMessageDelta(sessionId: SessionId, id: AiMessageId, delta: string, now: string): AiTranscriptEntry {
+    return this.appendContentDelta(sessionId, id, "text", delta, now);
+  }
+
+  appendReasoningDelta(sessionId: SessionId, id: AiMessageId, delta: string, now: string): AiTranscriptEntry {
+    return this.appendContentDelta(sessionId, id, "reasoning", delta, now);
+  }
+
+  private appendContentDelta(
+    sessionId: SessionId,
+    id: AiMessageId,
+    blockType: Extract<AiContentBlock["type"], "text" | "reasoning">,
+    delta: string,
+    now: string
+  ): AiTranscriptEntry {
     let entry: AiTranscriptEntry | undefined;
     this.update(sessionId, (snapshot) => {
       const target = requireEntry(snapshot.transcript.find((item) => item.id === id), id);
       const last = target.content.at(-1);
-      if (last?.type === "text") {
+      if (last?.type === blockType) {
         last.text += delta;
       } else {
-        target.content.push({ type: "text", text: delta });
+        target.content.push({ type: blockType, text: delta });
       }
       target.updatedAt = now;
       entry = target;
@@ -168,7 +183,19 @@ export class TranscriptStore {
     let entry: AiTranscriptEntry | undefined;
     this.update(sessionId, (snapshot) => {
       const target = requireEntry(snapshot.transcript.find((item) => item.id === id), id);
-      if (content !== undefined) target.content = content ? [{ type: "text", text: content }] : [];
+      if (content !== undefined) {
+        const textIndex = target.content.findIndex((block) => block.type === "text");
+        if (textIndex >= 0) {
+          target.content = target.content.filter((block, index) => block.type !== "text" || index === textIndex);
+          if (content) {
+            target.content[textIndex] = { type: "text", text: content };
+          } else {
+            target.content.splice(textIndex, 1);
+          }
+        } else if (content) {
+          target.content.push({ type: "text", text: content });
+        }
+      }
       target.status = status;
       target.updatedAt = now;
       target.completedAt = now;

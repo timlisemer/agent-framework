@@ -1,5 +1,6 @@
 import type {
   AiBackendProcessStatus,
+  AiPlanState,
   AiSessionConfig,
   AiToolInputSummary,
   AiToolOutputBlock,
@@ -13,6 +14,7 @@ export type RuntimeRef = string;
 export type AiRuntimeEvent =
   | { type: "message.created"; ref?: RuntimeRef; role?: "assistant"; content?: string; createdAt?: string }
   | { type: "message.delta"; ref?: RuntimeRef; delta: string; createdAt?: string }
+  | { type: "message.reasoning_delta"; ref?: RuntimeRef; delta: string; createdAt?: string }
   | { type: "message.completed"; ref?: RuntimeRef; content?: string; usage?: TokenUsage | null; createdAt?: string }
   | { type: "message.failed"; ref?: RuntimeRef; error: unknown; createdAt?: string }
   | { type: "tool.created"; ref: RuntimeRef; name: string; input: AiToolInputSummary; createdAt?: string }
@@ -31,6 +33,7 @@ export type AiRuntimeEvent =
   | { type: "backend_process.cancelled"; ref: RuntimeRef; createdAt?: string }
   | { type: "tool.promoted_to_backend_process"; toolRef: RuntimeRef; processRef: RuntimeRef; title: string; createdAt?: string }
   | { type: "continuation.updated"; available: boolean; createdAt?: string }
+  | { type: "plan.updated"; state: AiPlanState; createdAt?: string }
   | { type: "error"; error: unknown; createdAt?: string };
 
 export type AiRunTurnInput = {

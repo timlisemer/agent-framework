@@ -39,6 +39,8 @@ export type ClaudeUiStreamState = {
   seenTools: Set<string>;
   seenProcesses: Set<string>;
   assistantText: string;
+  assistantReasoning: Map<string, string>;
+  planUpdates: Set<string>;
   sessionRef: string | null;
 };
 
@@ -48,8 +50,16 @@ export function createClaudeUiStreamState(sessionRef: string | null = null): Cla
     seenTools: new Set(),
     seenProcesses: new Set(),
     assistantText: "",
+    assistantReasoning: new Map(),
+    planUpdates: new Set(),
     sessionRef,
   };
+}
+
+export function recordClaudePlanUpdate(state: ClaudeUiStreamState, plan: string): boolean {
+  if (state.planUpdates.has(plan)) return false;
+  state.planUpdates.add(plan);
+  return true;
 }
 
 export async function runClaudeAgent(
@@ -391,6 +401,13 @@ function mapClaudePartialStreamEvent(event: unknown, state: ClaudeUiStreamState)
       state.assistantText += delta.text;
       events.push({ type: "message.delta", ref: "assistant", delta: delta.text });
     }
+    const thinking = reasoningText(delta);
+    if (thinking) {
+      const key = reasoningKey(raw.index, stringField(delta as Record<string, unknown>, "type"));
+      const previous = state.assistantReasoning.get(key) ?? "";
+      state.assistantReasoning.set(key, previous + thinking);
+      events.push({ type: "message.reasoning_delta", ref: "assistant", delta: thinking });
+    }
   }
   return events;
 }
@@ -409,13 +426,28 @@ function mapClaudeAssistantMessage(raw: Record<string, unknown>, state: ClaudeUi
   }
 
   const content = messageContent(raw);
-  for (const block of content) {
+  for (const [index, block] of content.entries()) {
     if (!block || typeof block !== "object") continue;
     const item = block as Record<string, unknown>;
+    const thinking = reasoningText(item);
+    if (thinking) {
+      const key = reasoningKey(index, stringField(item, "type"));
+      const previous = state.assistantReasoning.get(key) ?? "";
+      const delta = thinking.startsWith(previous) ? thinking.slice(previous.length) : thinking;
+      state.assistantReasoning.set(key, thinking);
+      if (delta) events.push({ type: "message.reasoning_delta", ref: "assistant", delta });
+    }
     if (item.type !== "tool_use") continue;
     const ref = stringField(item, "id");
     const name = stringField(item, "name") ?? "tool";
-    if (ref) ensureTool(events, state, ref, name, item.input);
+    const input = item.input;
+    if (name === "ExitPlanMode" && input && typeof input === "object") {
+      const plan = stringField(input as Record<string, unknown>, "plan");
+      if (plan && recordClaudePlanUpdate(state, plan)) {
+        events.push({ type: "plan.updated", state: { mode: "awaitingApproval", planText: plan, approved: false } });
+      }
+    }
+    if (ref) ensureTool(events, state, ref, name, input);
   }
   return events;
 }
@@ -497,6 +529,21 @@ function messageContent(raw: Record<string, unknown>): unknown[] {
   if (!message || typeof message !== "object") return [];
   const content = (message as Record<string, unknown>).content;
   return Array.isArray(content) ? content : [];
+}
+
+function reasoningText(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const type = stringField(raw, "type");
+  if (type !== "thinking" && type !== "reasoning" && type !== "thinking_delta" && type !== "redacted_thinking") {
+    return null;
+  }
+  return stringField(raw, "thinking") ?? stringField(raw, "text") ?? stringField(raw, "summary");
+}
+
+function reasoningKey(index: unknown, type: string | null): string {
+  const normalizedType = type === "thinking_delta" ? "thinking" : (type ?? "thinking");
+  return `reasoning:${String(index ?? "unknown")}:${normalizedType}`;
 }
 
 function normalizeClaudeUiUsage(usage: unknown): TokenUsage | null {
