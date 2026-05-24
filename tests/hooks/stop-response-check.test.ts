@@ -540,6 +540,9 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     const output = mockExitAfterFlush.mock.calls.at(-1)?.[1] ?? "";
     expect(output).toContain("Plan validation failed:");
     expect(output).toContain("Missing concrete file path.");
+    expect(output).toContain("Iterate on the planfile using");
+    expect(output).toContain("mcp__agent_framework__validate_plan");
+    expect(output).toContain(planPath);
   });
 
   it("trusts exact recorded pass without revalidating", async () => {

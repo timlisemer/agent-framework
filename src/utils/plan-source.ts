@@ -142,6 +142,14 @@ function uniqueSessionPlanName(sessionDir: string, basePlanName: string): string
   return planName;
 }
 
+function formatPlanfileValidationFailure(reasons: readonly string[], planPath: string): string {
+  return appendPlanfileValidationWorkflow(
+    reasons.join("; ") || "Plan validation failed.",
+    planPath,
+    activeSpec().mcpWireName("validate_plan"),
+  );
+}
+
 async function createFirstInlinePlanfileAndBlock(input: {
   transcriptPath: string;
   sessionDir: string;
@@ -159,7 +167,7 @@ async function createFirstInlinePlanfileAndBlock(input: {
   });
   const validationResult = validation.status === "PASS"
     ? "Validation passed. Present the plan again with the created planfile path."
-    : validation.reasons.join("; ") || "Plan validation failed.";
+    : formatPlanfileValidationFailure(validation.reasons, planPath);
   return {
     approved: false,
     reason: `Cannot exit plan mode without a planfile path. ${missingPlanfileWorkflow(input.sessionDir)} A planfile was created for you at ${planPath}. Validation resulted in the following ${validation.status === "PASS" ? "status" : "error"}: ${validationResult}`,
@@ -202,7 +210,7 @@ async function validateExistingPlanfileForStop(input: {
 
   return {
     approved: false,
-    reason: validation.reasons.join("; ") || "Plan validation failed.",
+    reason: formatPlanfileValidationFailure(validation.reasons, input.planPath),
   };
 }
 
@@ -306,7 +314,7 @@ export async function validatePlanExitPresentation(input: {
   }
   return {
     approved: false,
-    reason: validation.reasons.join("; ") || "Plan validation failed.",
+    reason: formatPlanfileValidationFailure(validation.reasons, planPath),
   };
 }
 

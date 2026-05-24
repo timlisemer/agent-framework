@@ -271,7 +271,7 @@ plan_file is required.
 <concrete validation reasons on FAIL>
 
 ## Instructions
-<next instruction on PASS>
+<present the validated planfile on PASS, or iterate on the planfile until it passes on FAIL>
 \`\`\`
 
 ## When to use

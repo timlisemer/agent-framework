@@ -97,6 +97,18 @@ describe("runValidatePlanAgent", () => {
     expect(result).toContain("generic verification");
   });
 
+  it("prints planfile iteration workflow once for multiple deterministic violations", async () => {
+    const plan = validPlan()
+      .replace("## Files To Modify", "## Files Modified")
+      .replace("## Approach", "## Context\n\nContext details.\n\n## Approach");
+    const result = await validatePlanText(plan);
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain('Extra level-two heading "## Context" is not in the required final-plan structure.');
+    expect(result).toContain('Missing required heading "## Files To Modify".');
+    const workflowMatches = result.match(/Iterate on the planfile using/g) ?? [];
+    expect(workflowMatches).toHaveLength(1);
+  });
+
   it("names unresolved assumption language in deterministic failures", async () => {
     const result = await validatePlanText(
       validPlan().replace(
@@ -258,7 +270,7 @@ describe("runValidatePlanAgent", () => {
         planPath,
       });
       expect((Object.values(status)[0] as { reasons: string[] }).reasons[0]).toContain("Missing required heading \"## Relevant Files\".");
-      expect((Object.values(status)[0] as { reasons: string[] }).reasons[0]).toContain("Iterate on the planfile using");
+      expect((Object.values(status)[0] as { reasons: string[] }).reasons[0]).not.toContain("Iterate on the planfile using");
     } finally {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
       fs.rmSync(tempDir, { recursive: true, force: true });
