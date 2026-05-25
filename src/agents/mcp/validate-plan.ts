@@ -61,6 +61,7 @@ export interface ValidatePlanInput {
   planFile: string;
   transcriptPath?: string;
   sessionDir?: string;
+  continueWorkflow?: boolean;
 }
 
 export interface PlanValidationRunResult {
@@ -73,18 +74,26 @@ export interface PlanValidationRunResult {
 
 function getHookName(): string { return activeSpec().mcpWireName("validate_plan"); }
 
+export function formatPlanValidationPassInstructions(continueWorkflow = false): string {
+  if (continueWorkflow) {
+    return "Validation passed. Continue with the next step of the invoking plan workflow instead of presenting the plan now.";
+  }
+  return "Now present the complete contents of the validated planfile inside a whole-message <proposed_plan>...</proposed_plan> block. Do not summarize it or replace it with only the plan name, planfile path, or validation status.";
+}
+
 function formatResult(
   status: "PASS" | "FAIL",
   reasons: readonly string[],
   planPath?: string,
   validatePlanWireName?: string,
+  continueWorkflow = false,
 ): string {
   if (status === "PASS" && reasons.length === 0) {
     return `## Results
 - Status: ${status}
 
 ## Instructions
-Now present the complete contents of the validated planfile inside a whole-message <proposed_plan>...</proposed_plan> block. Do not summarize it or replace it with only the plan name, planfile path, or validation status.`;
+${formatPlanValidationPassInstructions(continueWorkflow)}`;
   }
   const body = reasons.length > 0 ? reasons.join("\n") : "(none)";
   const instructions = planPath && validatePlanWireName
@@ -132,7 +141,13 @@ export async function runValidatePlanAgent(
     "validate_plan",
     result.content ?? result.reasons.join("\n"),
   );
-  return formatResult(result.status, result.reasons, result.resolvedPath, validatePlanWireName);
+  return formatResult(
+    result.status,
+    result.reasons,
+    result.resolvedPath,
+    validatePlanWireName,
+    input.continueWorkflow,
+  );
 }
 
 function recordValidationResult(input: ValidatePlanInput, result: PlanValidationRunResult): void {

@@ -47,7 +47,7 @@ After the agent returns, consolidate its result into final plan content using ex
 
 Do not add non-contract `##` headings such as `## Context`, `## Verification`, `## Testing`, or `## Test Plan`. Include concrete changes with file paths, line numbers, and code inside the required sections. `Assistant Verification` must call `mcp__agent-framework__check` with the repository `working_dir` after each larger code change as the repository-level replacement for direct shell check and test commands, including targeted shell test runs; put only user-only checks in `Manual User Verification`, or state that none are required.
 
-Call `mcp__agent-framework__create_planfile` with `plan_name` set to a lowercase kebab-case name and `content` set to the consolidated plan content. The tool writes the correct planfile, validates it, and returns the planfile path plus PASS.
+Call the agent-framework `create_planfile` MCP with `plan_name` set to a lowercase kebab-case name, `content` set to the consolidated plan content, and `continue_workflow` set to `true`. The tool writes the correct planfile, validates it, and returns the planfile path plus PASS.
 
 ## Step 3: Launch 1 Verification agent
 

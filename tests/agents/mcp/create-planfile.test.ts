@@ -106,6 +106,42 @@ describe("runCreatePlanfileAgent", () => {
     }
   });
 
+  it("uses continuation instructions on PASS when continueWorkflow is true", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-planfile-"));
+    const previousProjectDir = process.env.AGENT_FRAMEWORK_PROJECT_DIR;
+    let sessionDir = "";
+    try {
+      const projectDir = path.join(tempDir, "project");
+      fs.mkdirSync(projectDir);
+      process.env.AGENT_FRAMEWORK_PROJECT_DIR = projectDir;
+      const transcriptPath = path.join(tempDir, "transcript.jsonl");
+      fs.writeFileSync(transcriptPath, "");
+      sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir });
+      const runCreatePlanfileAgent = await loadRunCreatePlanfileAgent();
+
+      const result = await runCreatePlanfileAgent({
+        planName: "continue-workflow-plan",
+        content: planBody(),
+        continueWorkflow: true,
+      });
+
+      expect(result).toContain("- Status: PASS");
+      expect(result).toContain("## Instructions\nValidation passed. Continue with the next step of the invoking plan workflow instead of presenting the plan now.");
+      expect(result).not.toContain("<proposed_plan>");
+      expect(result).not.toContain("Do not summarize it or replace it with only the plan name, planfile path, or validation status.");
+      expect(fs.existsSync(sessionPlanFile(sessionDir, "continue-workflow-plan"))).toBe(true);
+      expect(fs.existsSync(sessionCurrentPlanFile(sessionDir))).toBe(true);
+    } finally {
+      if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
+      if (previousProjectDir === undefined) {
+        delete process.env.AGENT_FRAMEWORK_PROJECT_DIR;
+      } else {
+        process.env.AGENT_FRAMEWORK_PROJECT_DIR = previousProjectDir;
+      }
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("uses the active session after a transcript-bound sidecar refresh", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-planfile-"));
     const previousProjectDir = process.env.AGENT_FRAMEWORK_PROJECT_DIR;
@@ -174,7 +210,10 @@ describe("runCreatePlanfileAgent", () => {
     const inputInterface = createPlanfileSource.match(/export interface CreatePlanfileInput \{[\s\S]*?\n\}/)?.[0] ?? "";
 
     expect(createPlanfileBlock).not.toContain("transcript_path");
+    expect(createPlanfileBlock).toContain("continue_workflow");
+    expect(createPlanfileBlock).toContain("continueWorkflow: args.continue_workflow");
     expect(inputInterface).not.toContain("transcriptPath");
+    expect(inputInterface).toContain("continueWorkflow?: boolean");
   });
 
   it("does not update current-plan when validation fails", async () => {

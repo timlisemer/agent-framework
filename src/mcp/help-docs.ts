@@ -258,6 +258,7 @@ plan-validate agent. This validates the plan itself, not user-intent alignment.
 - working_dir (optional): directory whose planning contract applies (defaults to cwd)
 - plan_file (required): path to a plan file to validate
 - transcript_path (optional): session transcript path, used only for statusLine
+- continue_workflow (optional, default false): on PASS, continue the invoking plan workflow instead of presenting <proposed_plan>
 
 plan_file is required.
 
@@ -271,7 +272,7 @@ plan_file is required.
 <concrete validation reasons on FAIL>
 
 ## Instructions
-<present the validated planfile on PASS, or iterate on the planfile until it passes on FAIL>
+<present the validated planfile on PASS, continue the invoking workflow on PASS with continue_workflow=true, or iterate on the planfile until it passes on FAIL>
 \`\`\`
 
 ## When to use
@@ -288,8 +289,9 @@ Creates the current session planfile for a lowercase kebab-case plan name, then 
 
 - plan_name (required): lowercase kebab-case plan name
 - content (required): final plan body/content
+- continue_workflow (optional, default false): on validation PASS, continue the invoking plan workflow instead of presenting <proposed_plan>
 
-The tool resolves the current session through the shared agent-framework session resolver, creates the file, normalizes the Plan Name header and Planfile Path footer, and returns the validate_plan result for the written file. MCP calls without an explicit transcript path use the latest transcript-path.txt sidecar for the active project.
+The tool resolves the current session through the shared agent-framework session resolver, creates the file, normalizes the Plan Name header and Planfile Path footer, and returns the validate_plan result for the written file. With continue_workflow=true, the PASS instructions tell the caller to continue the invoking workflow instead of presenting the plan immediately. MCP calls without an explicit transcript path use the latest transcript-path.txt sidecar for the active project.
 
 ## When to use
 

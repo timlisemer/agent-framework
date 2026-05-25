@@ -54,13 +54,13 @@ async function loadRunValidatePlanAgent(stub?: string) {
   return mod.runValidatePlanAgent;
 }
 
-async function validatePlanText(plan: string, stub = "VALID"): Promise<string> {
+async function validatePlanText(plan: string, stub = "VALID", continueWorkflow = false): Promise<string> {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "validate-plan-"));
   try {
     const planPath = path.join(tempDir, "plan.md");
     fs.writeFileSync(planPath, plan.replaceAll("/tmp/validate-plan.md", planPath));
     const runValidatePlanAgent = await loadRunValidatePlanAgent(stub);
-    return await runValidatePlanAgent({ workingDir: tempDir, planFile: "plan.md" });
+    return await runValidatePlanAgent({ workingDir: tempDir, planFile: "plan.md", continueWorkflow });
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -170,6 +170,14 @@ describe("runValidatePlanAgent", () => {
     expect(result).not.toContain("## Reasons\n(none)");
   });
 
+  it("uses continuation instructions on PASS when continueWorkflow is true", async () => {
+    const result = await validatePlanText(validPlan(), "VALID", true);
+    expect(result).toContain("- Status: PASS");
+    expect(result).toContain("## Instructions\nValidation passed. Continue with the next step of the invoking plan workflow instead of presenting the plan now.");
+    expect(result).not.toContain("<proposed_plan>");
+    expect(result).not.toContain("Do not summarize it or replace it with only the plan name, planfile path, or validation status.");
+  });
+
   it("accepts Relevant Files and Files That Need Changes as required headings", async () => {
     const result = await validatePlanText(validPlan());
     expect(result).toContain("- Status: PASS");
@@ -222,6 +230,18 @@ describe("runValidatePlanAgent", () => {
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it("exposes and forwards continue_workflow in the validate_plan MCP registration", () => {
+    const serverSource = fs.readFileSync(path.join(process.cwd(), "src/mcp/server.ts"), "utf-8");
+    const start = serverSource.indexOf('server.registerTool(\n  "validate_plan"');
+    const end = serverSource.indexOf('server.registerTool(\n  "create_planfile"', start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const validatePlanBlock = serverSource.slice(start, end);
+
+    expect(validatePlanBlock).toContain("continue_workflow");
+    expect(validatePlanBlock).toContain("continueWorkflow: args.continue_workflow");
   });
 
   it("records PASS validation status when session context is available", async () => {

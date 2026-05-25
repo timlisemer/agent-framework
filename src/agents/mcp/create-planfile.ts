@@ -4,11 +4,16 @@ import { activeSpec, mcpWireNameForText } from "../../adapter/spec.js";
 import { appendPlanfileValidationWorkflow, getPathToPlanfile } from "../../utils/planfile.js";
 import { getAgentFrameworkSessionDir, sessionCurrentPlanFile } from "../../utils/paths.js";
 import { writeJson } from "../../utils/file-io.js";
-import { validatePlanFileWithContract, type PlanValidationRunResult } from "./validate-plan.js";
+import {
+  formatPlanValidationPassInstructions,
+  validatePlanFileWithContract,
+  type PlanValidationRunResult,
+} from "./validate-plan.js";
 
 export interface CreatePlanfileInput {
   planName: string;
   content: string;
+  continueWorkflow?: boolean;
 }
 
 export type ExistingPlanfilePolicy = "reject" | "overwrite";
@@ -99,7 +104,7 @@ export async function runCreatePlanfileAgent(input: CreatePlanfileInput): Promis
     : "";
   const validationDetails = validation.status === "PASS" && validation.reasons.length === 0
     ? `## Instructions
-Now present the complete contents of the validated planfile inside a whole-message <proposed_plan>...</proposed_plan> block. Do not summarize it or replace it with only the plan name, planfile path, or validation status.`
+${formatPlanValidationPassInstructions(input.continueWorkflow)}`
     : `## Reasons
 ${reasons}${failureReminder}`;
   return `Created planfile: ${planPath}

@@ -96,7 +96,8 @@ server.registerTool(
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
       plan_file: z.string().describe("Path to a plan file to validate"),
-      transcript_path: z.string().optional().describe("Session transcript path for statusLine")
+      transcript_path: z.string().optional().describe("Session transcript path for statusLine"),
+      continue_workflow: coercibleBoolean.describe("On PASS, continue the invoking plan workflow instead of presenting <proposed_plan>. Defaults to false")
     }
   },
   async (args, extra) => {
@@ -105,6 +106,7 @@ server.registerTool(
         workingDir: args.working_dir || process.cwd(),
         planFile: args.plan_file,
         transcriptPath: args.transcript_path,
+        continueWorkflow: args.continue_workflow,
       },
       { signal: extra.signal },
     );
@@ -119,13 +121,15 @@ server.registerTool(
     description: "Create the current session planfile for a lowercase kebab-case plan name, resolving the session through transcript sidecars when needed, normalize Plan Name and Planfile Path footer, then validate it.",
     inputSchema: {
       plan_name: z.string().describe("Lowercase kebab-case plan name"),
-      content: z.string().describe("Plan body/content to write. The tool normalizes the Plan Name header and Planfile Path footer.")
+      content: z.string().describe("Plan body/content to write. The tool normalizes the Plan Name header and Planfile Path footer."),
+      continue_workflow: coercibleBoolean.describe("On validation PASS, continue the invoking plan workflow instead of presenting <proposed_plan>. Defaults to false")
     }
   },
   async (args) => {
     const result = await runCreatePlanfileAgent({
       planName: args.plan_name,
       content: args.content,
+      continueWorkflow: args.continue_workflow,
     });
     return { content: [{ type: "text", text: result }] };
   }
