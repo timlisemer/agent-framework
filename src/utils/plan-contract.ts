@@ -278,7 +278,7 @@ export function validatePlanContractWithRequiredHeadings(
     findings.push({
       kind: "assistant_verification_not_mcp_check",
       heading: "Assistant Verification",
-      message: "Assistant Verification must not instruct direct project shell check, build, test, lint, or format commands; the MCP check owns repository-level verification.",
+      message: "Assistant Verification must replace direct project shell check, build, test, lint, or format commands with the agent-framework check MCP; non-shell confirmation bullets may remain.",
     });
   }
 

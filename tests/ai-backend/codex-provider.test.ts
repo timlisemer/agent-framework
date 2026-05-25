@@ -147,7 +147,7 @@ describe("AI backend Codex provider helpers", () => {
     expect(completed).toContainEqual(expect.objectContaining({ type: "tool.completed", ref: "file-change-1" }));
   });
 
-  it("passes Codex command actions through as UI action summaries", () => {
+  it("maps Codex command executions as plain shell tools", () => {
     const state = createCodexUiStreamState();
 
     const events = mapCodexUiStreamEvent({
@@ -155,13 +155,11 @@ describe("AI backend Codex provider helpers", () => {
       item: {
         id: "cmd-1",
         type: "command_execution",
-        command: "rg -n ai-message-section crates/astral-shell/src/style/style.css",
+        command: "sed -n '1,120p' src/example.ts",
         status: "in_progress",
         commandActions: [
-          { type: "read", name: "message_rendering.rs", path: "/repo/crates/astral-ai-gtk/src/message_rendering.rs" },
-          { type: "search", query: "ai-message-section", path: "style.css" },
-          { type: "listFiles", path: "crates/astral-ai-gtk/src" },
-          { type: "unknown", command: "sed -n '1,2p' file" },
+          { type: "read", name: "example.ts", path: "/repo/src/example.ts" },
+          { type: "search", query: "needle", path: "src/example.ts" },
         ],
       },
     }, state);
@@ -171,32 +169,7 @@ describe("AI backend Codex provider helpers", () => {
       ref: "cmd-1",
       name: "shell",
       input: expect.objectContaining({
-        fields: expect.objectContaining({
-          actionSummary: "Read message_rendering.rs\nSearch ai-message-section in style.css\nList crates/astral-ai-gtk/src",
-        }),
-      }),
-    }));
-  });
-
-  it("does not fabricate Codex action summaries from plain shell commands", () => {
-    const state = createCodexUiStreamState();
-
-    const events = mapCodexUiStreamEvent({
-      type: "item.started",
-      item: {
-        id: "cmd-plain",
-        type: "command_execution",
-        command: "sed -n '1,120p' src/example.ts",
-        status: "in_progress",
-      },
-    }, state);
-
-    expect(events).toContainEqual(expect.objectContaining({
-      type: "tool.created",
-      ref: "cmd-plain",
-      name: "shell",
-      input: expect.objectContaining({
-        fields: expect.not.objectContaining({ actionSummary: expect.anything() }),
+        fields: { command: "sed -n '1,120p' src/example.ts" },
       }),
     }));
   });

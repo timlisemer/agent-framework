@@ -107,6 +107,26 @@ describe("plan contract", () => {
     });
   });
 
+  it("allows non-shell confirmation bullets in Assistant Verification", () => {
+    withProject((projectDir) => {
+      const assistantVerification = [
+        "## Assistant Verification",
+        "",
+        "Run `mcp__agent_framework__check` with `working_dir` set to `/repo` after each larger code change.",
+        "Confirm no remaining references to `PopupFocusPolicy`.",
+        "Confirm no remaining uses of `BarPopupWindowOptions::anchored_no_focus()`.",
+        "Confirm static contract coverage allows keyboard/focus APIs only in overview, AI panel, clipboard, and non-popover surfaces.",
+      ].join("\n");
+      const plan = validPlan().replace(
+        /## Assistant Verification[\s\S]*?(?=\n\n## Manual User Verification)/,
+        assistantVerification,
+      );
+      expect(validatePlanContract(plan, projectDir, {
+        checkMcpWireName: activeSpec().mcpWireName("check"),
+      })).toEqual([]);
+    });
+  });
+
   it("rejects direct project shell commands in Assistant Verification", () => {
     withProject((projectDir) => {
       const directCommands = [
@@ -132,6 +152,25 @@ describe("plan contract", () => {
         }).map((f) => f.kind);
         expect(kinds).toContain("assistant_verification_not_mcp_check");
       }
+    });
+  });
+
+  it("explains that only direct shell verification commands must be replaced", () => {
+    withProject((projectDir) => {
+      const activeCheckMcp = activeSpec().mcpWireName("check");
+      const plan = validPlan().replace(
+        `Run \`${activeCheckMcp}\` with \`working_dir\` set to \`/repo\`.`,
+        [
+          `Run \`${activeCheckMcp}\` with \`working_dir\` set to \`/repo\`.`,
+          "Run `cargo test -p astral-shell`.",
+          "Confirm no remaining references to `PopupFocusPolicy`.",
+        ].join("\n"),
+      );
+      const finding = validatePlanContract(plan, projectDir, {
+        checkMcpWireName: activeSpec().mcpWireName("check"),
+      }).find((f) => f.kind === "assistant_verification_not_mcp_check");
+      expect(finding?.message).toContain("direct project shell");
+      expect(finding?.message).toContain("non-shell confirmation bullets may remain");
     });
   });
 
