@@ -30,6 +30,16 @@ describe("detectEmojiAddition", () => {
     expect(detectEmojiAddition("hello \u{1F600}", "hello \u{1F600}")).toEqual([]);
   });
 
+  it("detects another occurrence of an existing emoji", () => {
+    const oldText = "| BooleanState | ✅ Implemented |";
+    const newText = [
+      "| BooleanState | ✅ Implemented |",
+      "| ICD Management | ✅ Minimal |",
+    ].join("\n");
+
+    expect(detectEmojiAddition(oldText, newText)).toEqual(["✅"]);
+  });
+
   it("deduplicates added emojis", () => {
     const result = detectEmojiAddition("text", "text \u{1F600}\u{1F600}\u{1F600}");
     expect(result).toHaveLength(1);

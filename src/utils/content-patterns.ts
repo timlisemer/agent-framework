@@ -193,9 +193,20 @@ export function getRuleViolationHighlights(content: string): string[] {
  * Detect emoji additions between old and new content.
  */
 export function detectEmojiAddition(oldStr: string, newStr: string): string[] {
-  const oldEmojis = new Set(oldStr.match(EMOJI_REGEX) || []);
+  const oldCounts = new Map<string, number>();
+  for (const emoji of oldStr.match(EMOJI_REGEX) || []) {
+    oldCounts.set(emoji, (oldCounts.get(emoji) || 0) + 1);
+  }
+
   const newEmojis = newStr.match(EMOJI_REGEX) || [];
-  const addedEmojis = newEmojis.filter((e) => !oldEmojis.has(e));
+  const addedEmojis = newEmojis.filter((emoji) => {
+    const remaining = oldCounts.get(emoji) || 0;
+    if (remaining > 0) {
+      oldCounts.set(emoji, remaining - 1);
+      return false;
+    }
+    return true;
+  });
   return [...new Set(addedEmojis)];
 }
 
