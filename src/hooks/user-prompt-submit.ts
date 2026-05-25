@@ -21,6 +21,30 @@ import {
 } from "../utils/plan-mode-entry-state.js";
 import { buildPendingContextInjections } from "../utils/context-injection-providers.js";
 import { appendSessionInjections, combineInjectionMessages } from "../utils/session-injections.js";
+import type { ToolPrediction } from "../utils/prediction-types.js";
+
+function synthesizeWorkflowInvocationPrediction(
+  prompt: string,
+  workflow: string,
+): ToolPrediction {
+  const prefix = `[workflow invoked: ${workflow}] `;
+  const snippet = prefix + prompt.slice(0, Math.max(0, 200 - prefix.length));
+  return {
+    mood: "neutral",
+    trust: "normal",
+    intent: `User invoked the ${workflow} workflow. Complete that workflow and report its result.`,
+    blockedIntent: "",
+    explicitlyAllowedTools: [],
+    explicitlyBlockedSubstrings: [],
+    blockAllTools: false,
+    hasExplicitOverride: false,
+    contextSwitch: "yes",
+    questionIsStalling: "n/a",
+    userMessageFull: prefix + prompt,
+    userMessageSnippet: snippet,
+    timestamp: Date.now(),
+  };
+}
 
 /**
  * UserPromptSubmit Hook
@@ -147,7 +171,15 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
     planModeCtx: getPlanModeContext(planMode),
   };
 
-  if (!spec.isWorkflowInvocationOnly(input.prompt)) {
+  const workflowInvocation = spec.recognizeWorkflowInvocation(input.prompt);
+  if (spec.isWorkflowInvocationOnly(input.prompt) && workflowInvocation) {
+    await stateManager.update((s) => ({
+      ...s,
+      currentPrediction: synthesizeWorkflowInvocationPrediction(input.prompt, workflowInvocation),
+      frustrationStreak: 0,
+      currentWindowSize: 2,
+    }));
+  } else {
     await evaluateRulesForUserPromptSubmit(ALL_RULES, ctx);
   }
 

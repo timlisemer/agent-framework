@@ -112,7 +112,82 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
       );
 
       expect(mockEvaluateRulesForUserPromptSubmit).not.toHaveBeenCalled();
+      const state = JSON.parse(fs.readFileSync(sessionStateFile(sessionDir), "utf-8")).data;
+      expect(state.currentPrediction.intent).toBe(
+        "User invoked the quickpush workflow. Complete that workflow and report its result.",
+      );
+      expect(state.currentPrediction.userMessageFull).toContain("$agent-framework-quickpush");
+      expect(state.frustrationStreak).toBe(0);
       expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "ok");
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
+  });
+
+  it("replaces stale frustrated prediction for workflow-only skill prompts", async () => {
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      fs.mkdirSync(sessionDir, { recursive: true });
+      fs.writeFileSync(
+        sessionStateFile(sessionDir),
+        JSON.stringify({
+          data: {
+            toolCallCount: 0,
+            currentEditIntent: false,
+            previousEditIntent: null,
+            editIntentTimestamp: 1,
+            editIntentOverturnCount: 0,
+            respondFirstChecked: true,
+            currentPrediction: {
+              mood: "frustrated",
+              trust: "normal",
+              intent: "The user is asking about a prior stub discussion.",
+              blockedIntent: "",
+              explicitlyAllowedTools: [],
+              explicitlyBlockedSubstrings: [],
+              blockAllTools: false,
+              hasExplicitOverride: false,
+              contextSwitch: "no",
+              questionIsStalling: "n/a",
+              userMessageFull: "what?? in what sense",
+              userMessageSnippet: "what?? in what sense",
+              timestamp: 1,
+            },
+            forceCheckPending: false,
+            frustrationStreak: 2,
+            currentWindowSize: 8,
+            driftState: {},
+            lastProcessedPlanApprovalToolUseId: null,
+            lastUserMessageTimestamp: 1,
+          },
+        }) + "\n",
+      );
+
+      await mainUserPromptSubmit(
+        {
+          session_id: "session-stale-skill",
+          transcript_path: transcriptPath,
+          cwd: tempDir,
+          prompt: "$agent-framework-implement",
+        },
+        encoder,
+      );
+
+      expect(mockEvaluateRulesForUserPromptSubmit).not.toHaveBeenCalled();
+      const state = JSON.parse(fs.readFileSync(sessionStateFile(sessionDir), "utf-8")).data;
+      expect(state.currentPrediction.mood).toBe("neutral");
+      expect(state.currentPrediction.intent).toBe(
+        "User invoked the implement workflow. Complete that workflow and report its result.",
+      );
+      expect(state.currentPrediction.userMessageFull).toContain("$agent-framework-implement");
+      expect(state.currentPrediction.userMessageFull).not.toContain("what??");
+      expect(state.frustrationStreak).toBe(0);
+      expect(state.currentWindowSize).toBe(2);
     } finally {
       if (prev === undefined) {
         delete process.env.AGENT_FRAMEWORK_ADAPTER;
