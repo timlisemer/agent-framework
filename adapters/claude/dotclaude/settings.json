@@ -3,6 +3,9 @@
   "effortLevel": "medium",
   "voiceEnabled": true,
   "autoMemoryEnabled": false,
+  "env": {
+    "MCP_TOOL_TIMEOUT": "2147483647"
+  },
   "enabledPlugins": {
     "rust-analyzer-lsp@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": false,

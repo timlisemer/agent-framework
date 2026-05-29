@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   sortReposSubmodulesFirst,
   parseUncertainties,
@@ -6,6 +6,11 @@ import {
   elicitPreferences,
 } from "../../src/utils/elicitation.js";
 import type { RepoInfo } from "../../src/utils/git-utils.js";
+import {
+  DEFAULT_MCP_TIMEOUT_MS,
+  MCP_NO_TIMEOUT_MS,
+  runMcpToolWithTimeout,
+} from "../../src/mcp/timeout.js";
 
 describe("sortReposSubmodulesFirst", () => {
   const mainRepoPath = "/home/user/project";
@@ -157,6 +162,10 @@ describe("elicitPreferences", () => {
 });
 
 describe("elicitation cancellation", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("passes no-timeout and AbortSignal to MCP elicitation", async () => {
     const controller = new AbortController();
     const elicitInput = vi.fn().mockResolvedValue({
@@ -184,9 +193,58 @@ describe("elicitation cancellation", () => {
     expect(elicitInput).toHaveBeenCalledWith(
       expect.any(Object),
       expect.objectContaining({
-        timeout: 2147483647,
+        timeout: MCP_NO_TIMEOUT_MS,
         signal: controller.signal,
       }),
     );
+  });
+
+  it("pauses MCP active-work timeout while elicitation is pending", async () => {
+    vi.useFakeTimers();
+    let resolveElicitation!: (value: {
+      action: "accept";
+      content: Record<string, boolean>;
+    }) => void;
+    let settled = false;
+    const elicitInput = vi.fn().mockImplementation(() => new Promise((resolve) => {
+      resolveElicitation = resolve;
+    }));
+    const repoInfo: RepoInfo = {
+      mainRepo: "/repo/a",
+      mainRepoName: "a",
+      mainRepoHasChanges: true,
+      submodules: [],
+      reposWithChanges: [
+        { path: "/repo/a", name: "a" },
+        { path: "/repo/b", name: "b" },
+      ],
+    };
+
+    const result = runMcpToolWithTimeout("check", undefined, async (signal) => {
+      await elicitRepoSelection(
+        { elicitInput } as never,
+        repoInfo,
+        { signal },
+      );
+      return new Promise(() => undefined);
+    }).finally(() => {
+      settled = true;
+    });
+    const assertion = expect(result).rejects.toMatchObject({
+      name: "McpToolTimeoutError",
+      toolName: "check",
+    });
+
+    await vi.advanceTimersByTimeAsync(DEFAULT_MCP_TIMEOUT_MS * 2);
+    expect(settled).toBe(false);
+
+    resolveElicitation({
+      action: "accept",
+      content: { "/repo/a": true, "/repo/b": false },
+    });
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(DEFAULT_MCP_TIMEOUT_MS);
+
+    await assertion;
   });
 });

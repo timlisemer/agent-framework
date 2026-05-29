@@ -1,7 +1,20 @@
 import "../utils/load-env.js";
 import { activeSpec } from "../adapter/spec.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import type {
+  CallToolResult,
+  ServerNotification,
+  ServerRequest,
+  ToolAnnotations,
+} from "@modelcontextprotocol/sdk/types.js";
+import type {
+  AnySchema,
+  ShapeOutput,
+  ZodRawShapeCompat,
+} from "@modelcontextprotocol/sdk/server/zod-compat.js";
 import { z } from "zod";
 import { runCheckAgent } from "../agents/mcp/check.js";
 import { runValidatePlanAgent } from "../agents/mcp/validate-plan.js";
@@ -43,6 +56,11 @@ import {
   richExpectationSchema,
   scenarioSchema,
 } from "./scenario-schema.js";
+import {
+  McpToolTimeoutError,
+  formatMcpTimeoutError,
+  runMcpToolWithTimeout,
+} from "./timeout.js";
 
 const coercibleBoolean = z.preprocess(
   (val) => (typeof val === "string" ? val === "true" : val),
@@ -71,7 +89,45 @@ const server = new McpServer({
   version: "1.0.0"
 });
 
-server.registerTool(
+type ToolExtra = RequestHandlerExtra<ServerRequest, ServerNotification>;
+
+type TimedToolConfig<InputArgs extends ZodRawShapeCompat> = {
+  title?: string;
+  description?: string;
+  inputSchema: InputArgs;
+  outputSchema?: ZodRawShapeCompat | AnySchema;
+  annotations?: ToolAnnotations;
+  _meta?: Record<string, unknown>;
+};
+
+function registerTimedTool<Name extends string, InputArgs extends ZodRawShapeCompat>(
+  name: Name,
+  config: TimedToolConfig<InputArgs>,
+  handler: (
+    args: ShapeOutput<InputArgs>,
+    extra: ToolExtra,
+    signal: AbortSignal,
+  ) => Promise<CallToolResult>,
+): void {
+  const timedHandler = (async (
+    args: ShapeOutput<InputArgs>,
+    extra: ToolExtra,
+  ) => {
+    try {
+      return await runMcpToolWithTimeout(name, extra.signal, (signal) =>
+        handler(args, extra, signal),
+      );
+    } catch (error) {
+      if (error instanceof McpToolTimeoutError) {
+        return { content: [{ type: "text", text: formatMcpTimeoutError(error) }] };
+      }
+      throw error;
+    }
+  }) as ToolCallback<InputArgs>;
+  server.registerTool(name, config, timedHandler);
+}
+
+registerTimedTool(
   "check",
   {
     title: "Check",
@@ -81,14 +137,14 @@ server.registerTool(
       transcript_path: z.string().optional().describe("Session transcript path for statusLine")
     }
   },
-  async (args, extra) => {
-    const options = { signal: extra.signal };
+  async (args, _extra, signal) => {
+    const options = { signal };
     const result = await runCheckAgent(args.working_dir || process.cwd(), args.transcript_path, options);
     return { content: [{ type: "text", text: result }] };
   }
 );
 
-server.registerTool(
+registerTimedTool(
   "validate_plan",
   {
     title: "Validate Plan",
@@ -100,7 +156,7 @@ server.registerTool(
       continue_workflow: coercibleBoolean.describe("On PASS, continue the invoking plan workflow instead of presenting <proposed_plan>. Defaults to false")
     }
   },
-  async (args, extra) => {
+  async (args, _extra, signal) => {
     const result = await runValidatePlanAgent(
       {
         workingDir: args.working_dir || process.cwd(),
@@ -108,13 +164,13 @@ server.registerTool(
         transcriptPath: args.transcript_path,
         continueWorkflow: args.continue_workflow,
       },
-      { signal: extra.signal },
+      { signal },
     );
     return { content: [{ type: "text", text: result }] };
   }
 );
 
-server.registerTool(
+registerTimedTool(
   "create_planfile",
   {
     title: "Create Planfile",
@@ -125,17 +181,17 @@ server.registerTool(
       continue_workflow: coercibleBoolean.describe("On validation PASS, continue the invoking plan workflow instead of presenting <proposed_plan>. Defaults to false")
     }
   },
-  async (args) => {
+  async (args, _extra, signal) => {
     const result = await runCreatePlanfileAgent({
       planName: args.plan_name,
       content: args.content,
       continueWorkflow: args.continue_workflow,
-    });
+    }, { signal });
     return { content: [{ type: "text", text: result }] };
   }
 );
 
-server.registerTool(
+registerTimedTool(
   "confirm",
   {
     title: "Confirm",
@@ -148,11 +204,11 @@ server.registerTool(
       skip_elicitation: coercibleBoolean.describe("Skip interactive questions, use defaults")
     }
   },
-  async (args, extra) => {
-    const options = { signal: extra.signal };
+  async (args, _extra, signal) => {
+    const options = { signal };
     const workingDir = args.working_dir || process.cwd();
     const repoInfo = await getRepoInfoCancellable(workingDir, options);
-    throwIfAborted(extra.signal);
+    throwIfAborted(signal);
 
     if (repoInfo.reposWithChanges.length === 0) {
       return { content: [{ type: "text", text: "No repositories with uncommitted changes found." }] };
@@ -167,7 +223,7 @@ server.registerTool(
     let selectedRepos = repoInfo.reposWithChanges;
     if (!args.skip_elicitation && repoInfo.reposWithChanges.length > 1) {
       selectedRepos = await elicitRepoSelection(server.server, repoInfo, options);
-      throwIfAborted(extra.signal);
+      throwIfAborted(signal);
       if (selectedRepos.length === 0) {
         return { content: [{ type: "text", text: "No repositories selected." }] };
       }
@@ -177,10 +233,10 @@ server.registerTool(
     // Phase 1: Collect all preferences upfront
     const repoPrefs = new Map<string, { tier: string | undefined; extraContext: string | undefined }>();
     for (const repo of selectedRepos) {
-      throwIfAborted(extra.signal);
+      throwIfAborted(signal);
       if (!args.skip_elicitation && !args.model_tier) {
         const prefs = await elicitPreferences(server.server, repo.name, options);
-        throwIfAborted(extra.signal);
+        throwIfAborted(signal);
         const focus = prefs.focus ? `Focus: ${prefs.focus}` : undefined;
         const combinedExtraContext = args.extra_context && focus ? `${args.extra_context}\n${focus}` : focus || args.extra_context;
         repoPrefs.set(repo.path, { tier: prefs.modelTier, extraContext: combinedExtraContext });
@@ -192,7 +248,7 @@ server.registerTool(
     // Phase 2: Process all repos
     const results: string[] = [];
     for (const repo of selectedRepos) {
-      throwIfAborted(extra.signal);
+      throwIfAborted(signal);
       const prefs = repoPrefs.get(repo.path)!;
       let extraContext = prefs.extraContext;
 
@@ -210,7 +266,7 @@ server.registerTool(
         const uncertainties = parseUncertainties(result);
         if (uncertainties.length > 0) {
           const clarification = await elicitUncertaintyClarification(server.server, uncertainties, options);
-          throwIfAborted(extra.signal);
+          throwIfAborted(signal);
           if (clarification) {
             const retryContext = extraContext ? `${extraContext}\n${clarification}` : clarification;
             result = await runConfirmAgent(repo.path, prefs.tier, retryContext, args.optional_planfile, options);
@@ -229,7 +285,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+registerTimedTool(
   "commit",
   {
     title: "Commit",
@@ -243,11 +299,11 @@ server.registerTool(
       auto_push: coercibleBoolean.describe("Automatically push all committed repos after successful commit")
     }
   },
-  async (args, extra) => {
-    const options = { signal: extra.signal };
+  async (args, _extra, signal) => {
+    const options = { signal };
     const workingDir = args.working_dir || process.cwd();
     const repoInfo = await getRepoInfoCancellable(workingDir, options);
-    throwIfAborted(extra.signal);
+    throwIfAborted(signal);
 
     if (repoInfo.reposWithChanges.length === 0) {
       return { content: [{ type: "text", text: "SKIPPED: No repositories with uncommitted changes found." }] };
@@ -262,7 +318,7 @@ server.registerTool(
     let selectedRepos = repoInfo.reposWithChanges;
     if (!args.skip_elicitation && repoInfo.reposWithChanges.length > 1) {
       selectedRepos = await elicitRepoSelection(server.server, repoInfo, options);
-      throwIfAborted(extra.signal);
+      throwIfAborted(signal);
       if (selectedRepos.length === 0) {
         return { content: [{ type: "text", text: "No repositories selected." }] };
       }
@@ -272,10 +328,10 @@ server.registerTool(
     // Phase 1: Collect all preferences upfront
     const repoPrefs = new Map<string, { tier: string | undefined; extraContext: string | undefined }>();
     for (const repo of selectedRepos) {
-      throwIfAborted(extra.signal);
+      throwIfAborted(signal);
       if (!args.skip_elicitation && !args.model_tier) {
         const prefs = await elicitPreferences(server.server, repo.name, options);
-        throwIfAborted(extra.signal);
+        throwIfAborted(signal);
         const focus = prefs.focus ? `Focus: ${prefs.focus}` : undefined;
         const combinedExtraContext = args.extra_context && focus ? `${args.extra_context}\n${focus}` : focus || args.extra_context;
         repoPrefs.set(repo.path, { tier: prefs.modelTier, extraContext: combinedExtraContext });
@@ -288,7 +344,7 @@ server.registerTool(
     const results: string[] = [];
     const committedRepos: typeof selectedRepos = [];
     for (const repo of selectedRepos) {
-      throwIfAborted(extra.signal);
+      throwIfAborted(signal);
       const prefs = repoPrefs.get(repo.path)!;
       let extraContext = prefs.extraContext;
 
@@ -320,7 +376,7 @@ server.registerTool(
 
     // Phase 3: Auto-push if requested
     if (args.auto_push && committedRepos.length > 0) {
-      throwIfAborted(extra.signal);
+      throwIfAborted(signal);
       let reposToPush = committedRepos;
 
       // If elicitation is enabled and multiple repos, ask which to push
@@ -329,7 +385,7 @@ server.registerTool(
           ...repoInfo,
           reposWithChanges: committedRepos,
         }, options);
-        throwIfAborted(extra.signal);
+        throwIfAborted(signal);
         if (reposToPush.length === 0) {
           results.push("\nPush skipped: no repositories selected for push.");
           return { content: [{ type: "text", text: results.join("\n\n") }] };
@@ -339,7 +395,7 @@ server.registerTool(
 
       results.push("\n--- Push Results ---");
       for (const repo of reposToPush) {
-        throwIfAborted(extra.signal);
+        throwIfAborted(signal);
         const pushResult = await runPushAgent(repo.path, options);
         if (reposToPush.length > 1) {
           results.push(`=== ${repo.name} (${repo.path}) ===\n${pushResult}`);
@@ -353,7 +409,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+registerTimedTool(
   "push",
   {
     title: "Push",
@@ -363,11 +419,11 @@ server.registerTool(
       skip_elicitation: coercibleBoolean.describe("Skip interactive questions, push all repos")
     }
   },
-  async (args, extra) => {
-    const options = { signal: extra.signal };
+  async (args, _extra, signal) => {
+    const options = { signal };
     const workingDir = args.working_dir || process.cwd();
     const repoInfo = await getRepoInfoCancellable(workingDir, options);
-    throwIfAborted(extra.signal);
+    throwIfAborted(signal);
 
     // For push, we push all repos (or let user select)
     // Use reposWithChanges as a starting point, but push can also push repos without uncommitted changes
@@ -382,7 +438,7 @@ server.registerTool(
 
     if (!args.skip_elicitation && selectedRepos.length > 1) {
       selectedRepos = await elicitRepoSelection(server.server, repoInfo, options);
-      throwIfAborted(extra.signal);
+      throwIfAborted(signal);
       if (selectedRepos.length === 0) {
         return { content: [{ type: "text", text: "No repositories selected." }] };
       }
@@ -391,7 +447,7 @@ server.registerTool(
 
     const results: string[] = [];
     for (const repo of selectedRepos) {
-      throwIfAborted(extra.signal);
+      throwIfAborted(signal);
       const result = await runPushAgent(repo.path, options);
       if (selectedRepos.length > 1) {
         results.push(`=== ${repo.name} (${repo.path}) ===\n${result}`);
@@ -404,7 +460,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+registerTimedTool(
   "list_repos",
   {
     title: "List Repos",
@@ -448,7 +504,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+registerTimedTool(
   "validate_intent",
   {
     title: "Validate Intent",
@@ -488,7 +544,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+registerTimedTool(
   "transcript",
   {
     title: "Transcript",
@@ -500,7 +556,7 @@ server.registerTool(
   async (args) => ({ content: [{ type: "text", text: await runTranscriptAgent(args.transcript_path) }] })
 );
 
-server.registerTool(
+registerTimedTool(
   "locate_scenario",
   {
     title: "Locate Scenario",
@@ -511,20 +567,20 @@ server.registerTool(
       transcript_path: z.string().optional().describe("Session transcript path for statusLine")
     }
   },
-  async (args, extra) => {
+  async (args, _extra, signal) => {
     const result = await runLocateScenarioMcp(
       {
         quotes: args.quotes,
         workingDir: args.working_dir,
         transcriptPath: args.transcript_path,
       },
-      { signal: extra.signal },
+      { signal },
     );
     return { content: [{ type: "text", text: result }] };
   }
 );
 
-server.registerTool(
+registerTimedTool(
   "scenario_labeler",
   {
     title: "Scenario Labeler",
@@ -583,7 +639,7 @@ server.registerTool(
   }
 );
 
-server.registerTool(
+registerTimedTool(
   "scenario_tester",
   {
     title: "Scenario Tester",

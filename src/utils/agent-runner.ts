@@ -932,7 +932,8 @@ export async function runAgentWithRetryAndTelemetry(
   config: AgentConfig,
   input: AgentInput,
   retryOptions: AgentRetryOptions,
-  telemetry: TelemetryContext
+  telemetry: TelemetryContext,
+  options: CancellationOptions = {},
 ): Promise<AgentExecutionResult> {
   // Test-harness LLM stub: when AGENT_FRAMEWORK_LLM_STUBS is set and contains
   // a key matching telemetry.agent, synthesize an AgentExecutionResult from
@@ -974,7 +975,7 @@ export async function runAgentWithRetryAndTelemetry(
   // Mark agent as running in statusline before execution
   logAgentStarted(telemetry.agent, telemetry.toolName);
 
-  const result = await runAgentWithRetry(config, input, retryOptions);
+  const result = await runAgentWithRetry(config, input, retryOptions, options);
 
   // Auto-extract decision from output
   const decision = telemetry.decisionOverride ?? extractDecision(result.output) ?? "DENY";

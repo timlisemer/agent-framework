@@ -235,8 +235,8 @@ describe("runConfirmAgent planfile context", () => {
 
   it("exposes optional_planfile on the confirm MCP schema", () => {
     const serverSource = fs.readFileSync(path.join(process.cwd(), "src/mcp/server.ts"), "utf-8");
-    const start = serverSource.indexOf('server.registerTool(\n  "confirm"');
-    const end = serverSource.indexOf('server.registerTool(\n  "commit"', start);
+    const start = serverSource.indexOf('registerTimedTool(\n  "confirm"');
+    const end = serverSource.indexOf('registerTimedTool(\n  "commit"', start);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     const confirmBlock = serverSource.slice(start, end);

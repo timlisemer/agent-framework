@@ -13,13 +13,27 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { RepoInfo } from "./git-utils.js";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
+import { MCP_NO_TIMEOUT_MS, pauseMcpTimeout, resumeMcpTimeout } from "../mcp/timeout.js";
 
 // MCP SDK always calls setTimeout internally with no way to disable it.
 // Max 32-bit signed int is the largest value setTimeout accepts.
-const NO_TIMEOUT: RequestOptions = { timeout: 2147483647 };
+const NO_TIMEOUT: RequestOptions = { timeout: MCP_NO_TIMEOUT_MS };
 
 function noTimeoutWithCancellation(options: CancellationOptions = {}): RequestOptions {
   return { ...NO_TIMEOUT, signal: options.signal };
+}
+
+async function elicitInputNoTimeout<T>(
+  mcpServer: Server,
+  request: Parameters<Server["elicitInput"]>[0],
+  options: CancellationOptions = {},
+): Promise<T> {
+  pauseMcpTimeout();
+  try {
+    return await mcpServer.elicitInput(request, noTimeoutWithCancellation(options)) as T;
+  } finally {
+    resumeMcpTimeout();
+  }
 }
 
 export interface RepoSelection {
@@ -70,14 +84,14 @@ export async function elicitRepoSelection(
     };
   }
 
-  const result = await mcpServer.elicitInput({
+  const result = await elicitInputNoTimeout<Awaited<ReturnType<Server["elicitInput"]>>>(mcpServer, {
     mode: "form",
     message: "Multiple repositories have uncommitted changes. Select which to process:",
     requestedSchema: {
       type: "object",
       properties,
     },
-  }, noTimeoutWithCancellation(options));
+  }, options);
 
   throwIfAborted(options.signal);
 
@@ -98,7 +112,7 @@ export async function elicitPreferences(
   options: CancellationOptions = {}
 ): Promise<Preferences> {
   throwIfAborted(options.signal);
-  const result = await mcpServer.elicitInput({
+  const result = await elicitInputNoTimeout<Awaited<ReturnType<Server["elicitInput"]>>>(mcpServer, {
     mode: "form",
     message: `Preferences for ${repoName}:`,
     requestedSchema: {
@@ -120,7 +134,7 @@ export async function elicitPreferences(
         },
       },
     },
-  }, noTimeoutWithCancellation(options));
+  }, options);
 
   throwIfAborted(options.signal);
 
@@ -200,14 +214,14 @@ export async function elicitUncertaintyClarification(
     };
   }
 
-  const result = await mcpServer.elicitInput({
+  const result = await elicitInputNoTimeout<Awaited<ReturnType<Server["elicitInput"]>>>(mcpServer, {
     mode: "form",
     message: "The quality gate declined but flagged uncertainties that your input could resolve:",
     requestedSchema: {
       type: "object",
       properties,
     },
-  }, noTimeoutWithCancellation(options));
+  }, options);
 
   throwIfAborted(options.signal);
 

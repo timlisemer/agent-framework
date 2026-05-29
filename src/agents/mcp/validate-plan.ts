@@ -267,6 +267,7 @@ export async function validatePlanFileWithContract(
       workingDir: input.workingDir,
       executionType: EXECUTION_TYPES.LLM,
     },
+    options,
   );
 
   if (result.output.trim() === "VALID") {

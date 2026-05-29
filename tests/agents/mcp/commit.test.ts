@@ -151,8 +151,8 @@ DECLINED: check failed with 2 error(s); see Check Errors above.`;
 
   it("exposes optional_planfile on the commit MCP schema", () => {
     const serverSource = fs.readFileSync(path.join(process.cwd(), "src/mcp/server.ts"), "utf-8");
-    const start = serverSource.indexOf('server.registerTool(\n  "commit"');
-    const end = serverSource.indexOf('server.registerTool(\n  "push"', start);
+    const start = serverSource.indexOf('registerTimedTool(\n  "commit"');
+    const end = serverSource.indexOf('registerTimedTool(\n  "push"', start);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     const commitBlock = serverSource.slice(start, end);

@@ -195,8 +195,8 @@ describe("runCreatePlanfileAgent", () => {
 
   it("does not expose transcript_path on create_planfile", () => {
     const serverSource = fs.readFileSync(path.join(process.cwd(), "src/mcp/server.ts"), "utf-8");
-    const start = serverSource.indexOf('server.registerTool(\n  "create_planfile"');
-    const end = serverSource.indexOf('server.registerTool(\n  "confirm"', start);
+    const start = serverSource.indexOf('registerTimedTool(\n  "create_planfile"');
+    const end = serverSource.indexOf('registerTimedTool(\n  "confirm"', start);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     const createPlanfileBlock = serverSource.slice(
@@ -212,8 +212,42 @@ describe("runCreatePlanfileAgent", () => {
     expect(createPlanfileBlock).not.toContain("transcript_path");
     expect(createPlanfileBlock).toContain("continue_workflow");
     expect(createPlanfileBlock).toContain("continueWorkflow: args.continue_workflow");
+    expect(createPlanfileBlock).toContain("{ signal }");
     expect(inputInterface).not.toContain("transcriptPath");
     expect(inputInterface).toContain("continueWorkflow?: boolean");
+  });
+
+  it("honors cancellation before writing the planfile", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "create-planfile-"));
+    const previousProjectDir = process.env.AGENT_FRAMEWORK_PROJECT_DIR;
+    let sessionDir = "";
+    try {
+      const projectDir = path.join(tempDir, "project");
+      fs.mkdirSync(projectDir);
+      process.env.AGENT_FRAMEWORK_PROJECT_DIR = projectDir;
+      const transcriptPath = path.join(tempDir, "transcript.jsonl");
+      fs.writeFileSync(transcriptPath, "");
+      sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir });
+      const runCreatePlanfileAgent = await loadRunCreatePlanfileAgent();
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(runCreatePlanfileAgent({
+        planName: "cancelled-plan",
+        content: planBody(),
+      }, { signal: controller.signal })).rejects.toThrow("Operation cancelled");
+
+      expect(fs.existsSync(sessionPlanFile(sessionDir, "cancelled-plan"))).toBe(false);
+      expect(fs.existsSync(sessionCurrentPlanFile(sessionDir))).toBe(false);
+    } finally {
+      if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
+      if (previousProjectDir === undefined) {
+        delete process.env.AGENT_FRAMEWORK_PROJECT_DIR;
+      } else {
+        process.env.AGENT_FRAMEWORK_PROJECT_DIR = previousProjectDir;
+      }
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it("does not update current-plan when validation fails", async () => {

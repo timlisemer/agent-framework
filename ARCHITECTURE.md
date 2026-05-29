@@ -130,6 +130,23 @@ dist/                               # Compiled JavaScript (build output)
 
 ```
 
+### MCP Timeouts
+
+Agent-framework expects host MCP tool timeouts to be effectively disabled when
+the host supports timeout configuration. The shared timeout policy lives in
+`src/mcp/timeout.ts`, so per-tool budgets are adapter-independent: tools default
+to 300 seconds of active work, while `commit` and `confirm` use 600 seconds.
+The active-work clock pauses while MCP elicitation is waiting on the user, and
+nested MCP-agent calls reuse the outer timeout context instead of stacking a
+second timer.
+
+The checked-in Codex adapter config includes the host MCP timeout because Codex
+stores that server entry in `adapters/codex/dotcodex/config.toml`. Claude Code
+MCP server registration is user/project managed outside `adapters/claude/`, so
+there is no Claude adapter MCP config file in this repository. Claude and Codex
+still share the same runtime timeout enforcement once a tool call reaches
+`src/mcp/server.ts`.
+
 ## Adapters
 
 The adapter layer translates between canonical hook handler outputs and the

@@ -238,6 +238,21 @@ For manual MCP config (alternative to `claude mcp add`):
 }
 ```
 
+When the host supports per-server tool timeout configuration, set the
+agent-framework MCP host timeout to an effectively disabled value
+(`2147483647`). Agent-framework enforces its own adapter-independent active-work
+timeouts: tools default to 300 seconds, `commit` and `confirm` use 600 seconds,
+and time spent waiting for MCP elicitation forms does not count against the
+active-work budget.
+
+Codex has a repository-managed MCP server entry in
+`adapters/codex/dotcodex/config.toml`, so that host timeout is checked in
+there. Claude Code MCP registration is user/project managed through
+`claude mcp add` or `--mcp-config`; this repository does not ship a Claude MCP
+server config file to edit. The timeout policy still remains adapter-independent
+because every Claude and Codex MCP call reaches the same `src/mcp/server.ts`
+wrapper and `src/mcp/timeout.ts` budget logic.
+
 ## Tool Names
 
 The `PreToolUse` hook intercepts tool calls. To configure which tools trigger your hook, you need to know the exact tool names the host agent uses.

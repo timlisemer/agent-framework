@@ -234,8 +234,8 @@ describe("runValidatePlanAgent", () => {
 
   it("exposes and forwards continue_workflow in the validate_plan MCP registration", () => {
     const serverSource = fs.readFileSync(path.join(process.cwd(), "src/mcp/server.ts"), "utf-8");
-    const start = serverSource.indexOf('server.registerTool(\n  "validate_plan"');
-    const end = serverSource.indexOf('server.registerTool(\n  "create_planfile"', start);
+    const start = serverSource.indexOf('registerTimedTool(\n  "validate_plan"');
+    const end = serverSource.indexOf('registerTimedTool(\n  "create_planfile"', start);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
     const validatePlanBlock = serverSource.slice(start, end);

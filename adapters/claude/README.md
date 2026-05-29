@@ -62,3 +62,26 @@ relies on the Claude encoder for stdout formatting.
 
 `dotclaude/settings.json` contains the `hooks` configuration that Claude Code
 reads to register the hook scripts. Paths reference `$AGENT_FRAMEWORK_ROOT`.
+It also sets Claude Code MCP client environment overrides that belong with the
+Claude dotfolder configuration. In particular, it sets:
+
+```json
+"env": {
+  "MCP_TOOL_TIMEOUT": "2147483647"
+}
+```
+
+`MCP_TOOL_TIMEOUT` controls Claude Code's MCP tool execution timeout. It is set
+to the largest practical value here so the host timeout does not race
+agent-framework's own timeout system. Do not add a timeout flag to
+`claude mcp add`; that command only registers the MCP server command.
+
+## MCP Server Registration
+
+The Claude adapter does not include a checked-in MCP server config file.
+Claude Code MCP servers are registered by the user or project through
+`claude mcp add` or `--mcp-config`, while `dotclaude/settings.json` only covers
+hooks, commands, agents, and Claude Code environment settings such as
+`MCP_TOOL_TIMEOUT`. Agent-framework MCP timeout policy still lives in shared
+server code (`src/mcp/server.ts` and `src/mcp/timeout.ts`) rather than in the
+Claude adapter; the Claude setting only disables the host-side tool timeout.
