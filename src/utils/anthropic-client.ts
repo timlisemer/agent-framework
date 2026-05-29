@@ -37,29 +37,6 @@
 
 import "./load-env.js";
 import Anthropic from "@anthropic-ai/sdk";
-import AgentKeepAlive from "agentkeepalive";
-
-// Custom HTTP agent to prevent connection-level hangs.
-//
-// The SDK's default agent (agentkeepalive with keepAlive: true, timeout: 5min)
-// keeps connections pooled for up to 5 minutes with no idle socket cleanup and
-// no active socket TTL. This allows stale/dead connections to persist and be
-// reused for new requests that hang indefinitely.
-//
-// Root causes addressed:
-// - Stale pooled connections: dead connections appear open, requests sent into void
-// - OpenRouter proxy hangs (Cline #1407, #5829): proxy drops idle connections
-//   silently, but the pooled socket still looks alive to the client
-// - No connection rotation: long-lived sockets accumulate protocol-level issues
-const httpsAgent = new AgentKeepAlive.HttpsAgent({
-  keepAlive: true,
-  // Close idle sockets after 30s — prevents reusing connections that OpenRouter
-  // or intermediary proxies may have already closed on their end
-  freeSocketTimeout: 30_000,
-  // Max socket lifetime regardless of activity — forces periodic fresh connections
-  // to prevent protocol-level issue accumulation on long-lived connections
-  socketActiveTTL: 120_000,
-});
 
 let clientInstance: Anthropic | null = null;
 
@@ -82,7 +59,6 @@ export function getAnthropicClient(): Anthropic {
       // tool-appeal) already handle retries with exponential backoff.
       // SDK retrying on the same broken connection compounds hangs.
       maxRetries: 1,
-      httpAgent: httpsAgent,
       defaultHeaders: {
         "X-Title": "timlisemer/agent-framework",
         "HTTP-Referer": "https://github.com/timlisemer/agent-framework",

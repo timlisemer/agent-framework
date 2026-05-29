@@ -241,7 +241,7 @@ For manual MCP config (alternative to `claude mcp add`):
 When the host supports per-server tool timeout configuration, set the
 agent-framework MCP host timeout to an effectively disabled value
 (`2147483647`). Agent-framework enforces its own adapter-independent active-work
-timeouts: tools default to 300 seconds, `commit` and `confirm` use 600 seconds,
+timeouts: tools default to 300 seconds, `commit` and `confirm` use 1500 seconds,
 and time spent waiting for MCP elicitation forms does not count against the
 active-work budget.
 

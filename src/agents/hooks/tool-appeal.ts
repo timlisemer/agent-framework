@@ -58,7 +58,7 @@
 
 import { EXECUTION_TYPES } from "../../types.js";
 import { runAgentWithRetryAndTelemetry } from "../../utils/agent-runner.js";
-import { TOOL_APPEAL_AGENT } from "../../utils/agent-configs.js";
+import { buildToolAppealAgent } from "../../utils/agent-configs.js";
 import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
 import { extractGateNote } from "../../utils/gate-reasoning-cache.js";
@@ -225,7 +225,7 @@ Allowed tools: ${allowedToolsStr}
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const result = await runAgentWithRetryAndTelemetry(
-        { ...TOOL_APPEAL_AGENT, workingDir },
+        { ...buildToolAppealAgent(), workingDir },
         {
           prompt: "Review this appeal for a denied tool call.",
           context: `BLOCK REASON: ${originalReason}

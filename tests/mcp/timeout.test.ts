@@ -15,9 +15,9 @@ describe("mcp timeout policy", () => {
     expect(mcpTimeoutForTool("check")).toBe(DEFAULT_MCP_TIMEOUT_MS);
   });
 
-  it("uses 600 seconds for confirm and commit", () => {
-    expect(mcpTimeoutForTool("confirm")).toBe(600_000);
-    expect(mcpTimeoutForTool("commit")).toBe(600_000);
+  it("uses 1500 seconds for confirm and commit", () => {
+    expect(mcpTimeoutForTool("confirm")).toBe(1_500_000);
+    expect(mcpTimeoutForTool("commit")).toBe(1_500_000);
   });
 });
 
@@ -104,8 +104,8 @@ describe("runMcpToolWithTimeout", () => {
 
 describe("formatMcpTimeoutError", () => {
   it("formats a clear timeout message", () => {
-    expect(formatMcpTimeoutError(new McpToolTimeoutError("confirm", 600_000))).toBe(
-      'ERROR: MCP tool "confirm" timed out after 600 seconds of active work. The operation was cancelled.',
+    expect(formatMcpTimeoutError(new McpToolTimeoutError("confirm", 1_500_000))).toBe(
+      'ERROR: MCP tool "confirm" timed out after 1500 seconds of active work. The operation was cancelled.',
     );
   });
 });

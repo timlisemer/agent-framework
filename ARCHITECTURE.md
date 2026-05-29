@@ -135,7 +135,7 @@ dist/                               # Compiled JavaScript (build output)
 Agent-framework expects host MCP tool timeouts to be effectively disabled when
 the host supports timeout configuration. The shared timeout policy lives in
 `src/mcp/timeout.ts`, so per-tool budgets are adapter-independent: tools default
-to 300 seconds of active work, while `commit` and `confirm` use 600 seconds.
+to 300 seconds of active work, while `commit` and `confirm` use 1500 seconds.
 The active-work clock pauses while MCP elicitation is waiting on the user, and
 nested MCP-agent calls reuse the outer timeout context instead of stacking a
 second timer.

@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export const MCP_NO_TIMEOUT_MS = 2147483647;
 export const DEFAULT_MCP_TIMEOUT_MS = 300_000;
 
-const EXTENDED_MCP_TIMEOUT_MS = 600_000;
+const EXTENDED_MCP_TIMEOUT_MS = 1_500_000;
 
 type TimeoutContext = {
   toolName: string;

@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "node:path";
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { TOOL_APPROVE_PROMPT_SECTION } from "../utils/agent-configs.js";
+import { buildToolApprovePromptSection } from "../utils/agent-configs.js";
 import { FILE_TOOLS, extractFilePaths, isPlanFile } from "./utils.js";
 import { planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
 import { RESTRICTED_MCPS } from "../utils/slash-commands.js";
@@ -16,7 +16,9 @@ export const toolApproveRule: PreToolRule = {
   priority: 100,
   appealable: true,
   usesLlm: true,
-  promptSection: TOOL_APPROVE_PROMPT_SECTION,
+  get promptSection(): string {
+    return buildToolApprovePromptSection();
+  },
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     // Plan files are handled by the dedicated plan-validate block in

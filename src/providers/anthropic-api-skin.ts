@@ -1,14 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
-import AgentKeepAlive from "agentkeepalive";
 import { extractTextFromResponse } from "../utils/response-parser.js";
 import { isCancellationError } from "../utils/cancellation.js";
 import type { ProviderExecutionResult, ProviderRunInput } from "./execution-types.js";
-
-const httpsAgent = new AgentKeepAlive.HttpsAgent({
-  keepAlive: true,
-  freeSocketTimeout: 30_000,
-  socketActiveTTL: 120_000,
-});
 
 function createOpenRouterAnthropicClient(): Anthropic {
   return new Anthropic({
@@ -16,7 +9,6 @@ function createOpenRouterAnthropicClient(): Anthropic {
     authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
     baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
     maxRetries: 1,
-    httpAgent: httpsAgent,
     defaultHeaders: {
       "X-Title": "timlisemer/agent-framework",
       "HTTP-Referer": "https://github.com/timlisemer/agent-framework",
@@ -79,4 +71,3 @@ export async function runAnthropicApiSkinDirect(
     };
   }
 }
-

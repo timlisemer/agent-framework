@@ -9,8 +9,12 @@
  * @module elicitation
  */
 
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
+import type {
+  ElicitRequestFormParams,
+  ElicitRequestURLParams,
+  ElicitResult,
+} from "@modelcontextprotocol/sdk/types.js";
 import type { RepoInfo } from "./git-utils.js";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
 import { MCP_NO_TIMEOUT_MS, pauseMcpTimeout, resumeMcpTimeout } from "../mcp/timeout.js";
@@ -19,13 +23,20 @@ import { MCP_NO_TIMEOUT_MS, pauseMcpTimeout, resumeMcpTimeout } from "../mcp/tim
 // Max 32-bit signed int is the largest value setTimeout accepts.
 const NO_TIMEOUT: RequestOptions = { timeout: MCP_NO_TIMEOUT_MS };
 
+interface ElicitInputServer {
+  elicitInput(
+    params: ElicitRequestFormParams | ElicitRequestURLParams,
+    options?: RequestOptions,
+  ): Promise<ElicitResult>;
+}
+
 function noTimeoutWithCancellation(options: CancellationOptions = {}): RequestOptions {
   return { ...NO_TIMEOUT, signal: options.signal };
 }
 
 async function elicitInputNoTimeout<T>(
-  mcpServer: Server,
-  request: Parameters<Server["elicitInput"]>[0],
+  mcpServer: ElicitInputServer,
+  request: ElicitRequestFormParams | ElicitRequestURLParams,
   options: CancellationOptions = {},
 ): Promise<T> {
   pauseMcpTimeout();
@@ -57,7 +68,7 @@ const BROAD_MINIMAL_CONFIRM_FOCUS =
  * Returns all repos with changes if only one has changes (no form shown).
  */
 export async function elicitRepoSelection(
-  mcpServer: Server,
+  mcpServer: ElicitInputServer,
   repoInfo: RepoInfo,
   options: CancellationOptions = {}
 ): Promise<RepoSelection[]> {
@@ -84,7 +95,7 @@ export async function elicitRepoSelection(
     };
   }
 
-  const result = await elicitInputNoTimeout<Awaited<ReturnType<Server["elicitInput"]>>>(mcpServer, {
+  const result = await elicitInputNoTimeout<ElicitResult>(mcpServer, {
     mode: "form",
     message: "Multiple repositories have uncommitted changes. Select which to process:",
     requestedSchema: {
@@ -107,12 +118,12 @@ export async function elicitRepoSelection(
  * Ask the user for model tier and focus area preferences for a repo.
  */
 export async function elicitPreferences(
-  mcpServer: Server,
+  mcpServer: ElicitInputServer,
   repoName: string,
   options: CancellationOptions = {}
 ): Promise<Preferences> {
   throwIfAborted(options.signal);
-  const result = await elicitInputNoTimeout<Awaited<ReturnType<Server["elicitInput"]>>>(mcpServer, {
+  const result = await elicitInputNoTimeout<ElicitResult>(mcpServer, {
     mode: "form",
     message: `Preferences for ${repoName}:`,
     requestedSchema: {
@@ -196,7 +207,7 @@ export function parseUncertainties(
  * Returns extra_context string if user provides clarification, or undefined.
  */
 export async function elicitUncertaintyClarification(
-  mcpServer: Server,
+  mcpServer: ElicitInputServer,
   uncertainties: Array<{ category: string; description: string }>,
   options: CancellationOptions = {}
 ): Promise<string | undefined> {
@@ -214,7 +225,7 @@ export async function elicitUncertaintyClarification(
     };
   }
 
-  const result = await elicitInputNoTimeout<Awaited<ReturnType<Server["elicitInput"]>>>(mcpServer, {
+  const result = await elicitInputNoTimeout<ElicitResult>(mcpServer, {
     mode: "form",
     message: "The quality gate declined but flagged uncertainties that your input could resolve:",
     requestedSchema: {
