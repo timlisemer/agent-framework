@@ -217,6 +217,54 @@ describe("runAgentWithRetryAndTelemetry — env-keyed LLM stub", () => {
     expect(queryMock.mock.calls[0]?.[0]?.options).not.toHaveProperty("resume");
   });
 
+  it("runAgent keeps direct and SDK provider boundaries separate", async () => {
+    const runProviderDirectSpy = vi.fn(async (_input: unknown) => ({
+      text: "direct-result",
+      provider: "openrouter",
+      modelName: "direct-model",
+    }));
+    const runProviderSdkSpy = vi.fn(async (_input: unknown) => ({
+      text: "sdk-result",
+      provider: "openrouter",
+      modelName: "sdk-model",
+    }));
+
+    vi.doMock("../../src/providers/index.js", () => ({
+      runProviderDirect: (input: unknown) => runProviderDirectSpy(input),
+      runProviderSdk: (input: unknown) => runProviderSdkSpy(input),
+    }));
+
+    try {
+      const { runAgent } = await import("../../src/utils/agent-runner.js");
+
+      await runAgent(makeConfig({ mode: "direct" }), { prompt: "Summarize:" });
+      await runAgent(
+        makeConfig({ mode: "sdk", workingDir: "/tmp" }),
+        { prompt: "Investigate:" }
+      );
+
+      expect(runProviderDirectSpy).toHaveBeenCalledTimes(1);
+      expect(runProviderSdkSpy).toHaveBeenCalledTimes(1);
+      expect(runProviderDirectSpy.mock.calls[0]?.[0]).toMatchObject({
+        config: {
+          mode: "direct",
+          continuable: false,
+          sdkRuntimeEnvironment: "isolated",
+        },
+      });
+      expect(runProviderDirectSpy.mock.calls[0]?.[0]).not.toHaveProperty("tools");
+      expect(runProviderSdkSpy.mock.calls[0]?.[0]).toMatchObject({
+        config: {
+          mode: "sdk",
+          sdkRuntimeEnvironment: "isolated",
+        },
+        tools: ["Read", "Bash"],
+      });
+    } finally {
+      vi.doUnmock("../../src/providers/index.js");
+    }
+  });
+
   it("malformed JSON in env throws descriptive error", async () => {
     process.env.AGENT_FRAMEWORK_LLM_STUBS = "{not valid json";
 

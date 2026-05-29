@@ -14,7 +14,10 @@ import type { AiRuntimeEvent } from "../ai-backend/runtime-events.js";
 export type CodexThreadOptionsConfig = {
   workingDir?: string | null;
   sdkRuntimeEnvironment?: SdkRuntimeEnvironment;
+  runtimeExecutionMode?: CodexRuntimeExecutionMode;
 };
+
+export type CodexRuntimeExecutionMode = "direct" | "sdk";
 
 export type CodexThread = {
   id?: string;
@@ -24,12 +27,17 @@ export type CodexThread = {
 
 export type CodexTurn = {
   finalResponse?: string;
+  items?: CodexItemForPolicyCheck[];
   usage?: {
     input_tokens?: number;
     cached_input_tokens?: number;
     output_tokens?: number;
     reasoning_output_tokens?: number;
   } | null;
+};
+
+export type CodexItemForPolicyCheck = {
+  type?: string;
 };
 
 export type CodexConstructor = new (options?: Record<string, unknown>) => {
@@ -70,8 +78,12 @@ export async function runCodexAgent(
   mode: "direct" | "sdk"
 ): Promise<ProviderExecutionResult> {
   const { config, prompt, resolvedProvider, options } = input;
-  const continuable = config.continuable === true;
+  const continuable = mode === "sdk" && config.continuable === true;
   let createdLiveSession: CodexLiveSession | null = null;
+  const threadConfig = {
+    ...config,
+    runtimeExecutionMode: mode,
+  };
 
   try {
     const fullPrompt = mode === "direct"
@@ -87,7 +99,7 @@ ${prompt}`;
     const liveSession = continuable
       ? previousSession ?? (createdLiveSession = await createCodexLiveSession(
         resolvedProvider,
-        config,
+        threadConfig,
         "agent-framework-codex-"
       ))
       : null;
@@ -95,10 +107,15 @@ ${prompt}`;
       ? await liveSession.thread.run(fullPrompt, { signal: options.signal })
       : await withCodexThread(
         resolvedProvider,
-        config,
+        threadConfig,
         "agent-framework-codex-",
         (thread) => thread.run(fullPrompt, { signal: options.signal })
       );
+
+    const directViolation = mode === "direct"
+      ? codexDirectToolUseErrorResult(turn, resolvedProvider)
+      : null;
+    if (directViolation) return directViolation;
 
     return {
       text: turn.finalResponse ?? "",
@@ -199,25 +216,57 @@ export function buildCodexThreadOptions<T extends CodexThreadOptionsConfig>(
   resolvedProvider: ResolvedProvider
 ): Record<string, unknown> {
   const runtimeEnvironment = config.sdkRuntimeEnvironment ?? "isolated";
+  const runtimeExecutionMode = config.runtimeExecutionMode ?? "sdk";
   return {
     workingDirectory: config.workingDir ?? process.cwd(),
     skipGitRepoCheck: true,
     model: resolvedProvider.modelId,
-    ...codexRuntimePolicyOptions(runtimeEnvironment),
+    ...codexRuntimePolicyOptions(runtimeEnvironment, runtimeExecutionMode),
     ...(resolvedProvider.reasoningEffort
       ? { modelReasoningEffort: resolvedProvider.reasoningEffort }
       : {}),
   };
 }
 
-function codexRuntimePolicyOptions(runtimeEnvironment: SdkRuntimeEnvironment): Record<string, unknown> {
+function codexRuntimePolicyOptions(
+  runtimeEnvironment: SdkRuntimeEnvironment,
+  mode: CodexRuntimeExecutionMode
+): Record<string, unknown> {
   if (runtimeEnvironment === "user") return {};
   return {
     sandboxMode: "read-only",
-    approvalPolicy: "on-request",
+    approvalPolicy: mode === "direct" ? "never" : "on-request",
     networkAccessEnabled: false,
     webSearchMode: "disabled",
     webSearchEnabled: false,
+  };
+}
+
+const DIRECT_FORBIDDEN_CODEX_ITEM_TYPES = new Set([
+  "command_execution",
+  "file_change",
+  "mcp_tool_call",
+  "web_search",
+]);
+
+export function codexTurnHasDirectForbiddenItems(turn: CodexTurn): boolean {
+  return Array.isArray(turn.items) &&
+    turn.items.some((item) =>
+      typeof item?.type === "string" &&
+      DIRECT_FORBIDDEN_CODEX_ITEM_TYPES.has(item.type)
+    );
+}
+
+export function codexDirectToolUseErrorResult(
+  turn: CodexTurn,
+  resolvedProvider: ResolvedProvider
+): ProviderExecutionResult | null {
+  if (!codexTurnHasDirectForbiddenItems(turn)) return null;
+  return {
+    text: "[DIRECT ERROR] Direct Codex runtime attempted tool use",
+    usage: normalizeCodexUsage(turn.usage),
+    provider: resolvedProvider.type,
+    modelName: resolvedProvider.modelId,
   };
 }
 

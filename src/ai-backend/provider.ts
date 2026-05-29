@@ -141,7 +141,7 @@ class CodexUiProvider implements AiProviderRunner {
     if (config.continuable === true) {
       this.#liveSession ??= await createCodexLiveSession(
         this.resolvedProvider,
-        config,
+        { ...config, runtimeExecutionMode: "sdk" },
         "agent-framework-ai-codex-"
       );
       yield* runCodexUiTurn(this.#liveSession.thread, buildCodexTurnInput(config, prompt), signal);
@@ -151,7 +151,7 @@ class CodexUiProvider implements AiProviderRunner {
 
     const events = await withCodexThread(
       this.resolvedProvider,
-      config,
+      { ...config, runtimeExecutionMode: "sdk" },
       "agent-framework-ai-codex-",
       async (thread) => collectCodexUiTurn(thread, buildCodexTurnInput(config, prompt), signal)
     );

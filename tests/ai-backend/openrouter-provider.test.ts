@@ -145,6 +145,7 @@ describe("AI backend OpenRouter provider resolution", () => {
           systemPrompt: null,
           continuable: false,
           sdkRuntimeEnvironment: "isolated",
+          runtimeExecutionMode: "sdk",
         },
         {
           type: PROVIDER_TYPES.OPENAI_SUBSCRIPTION,
