@@ -1,15 +1,18 @@
 /**
- * Check Agent - Linter and Type-Check Summarizer
+ * Check Agent - Linter, Type-Check, and Supplemental Diagnostics Summarizer
  *
- * This agent runs project linters and make/just check, then summarizes the results
- * without analysis or suggestions. It classifies issues as errors, warnings, or info.
+ * This agent runs project linters, make/just check, and narrow supplemental
+ * editor diagnostics for known command-tool gaps, then summarizes the results
+ * without analysis or suggestions. It classifies issues as errors, warnings,
+ * or info.
  *
  * ## FLOW
  *
  * 1. Get uncommitted files info
  * 2. Detect and run project linter (ESLint, Cargo, Ruff, etc.)
  * 3. Run check target (Justfile preferred, Makefile fallback)
- * 4. Summarize results via unified runner
+ * 4. Run supplemental editor diagnostics for known gaps
+ * 5. Summarize results via unified runner
  *
  * ## CLASSIFICATION
  *
@@ -55,6 +58,7 @@ import { setTranscriptPath } from "../../utils/execution-context.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
 import { resetDriftDetectionWindow } from "../../scenario/lifecycle.js";
+import { runSupplementalDiagnosticProviders } from "../../utils/supplemental-diagnostics.js";
 
 import { activeSpec, registeredAdapterNames } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("check"); }
@@ -339,7 +343,7 @@ export function checkInvocationsForRunner(checkRunner: CheckRunner): CheckInvoca
 }
 
 /**
- * Run the check agent to summarize linter and type-check results.
+ * Run the check agent to summarize linter, type-check, and supplemental diagnostics results.
  *
  * @param workingDir - The project directory to check
  * @param transcriptPath - Optional transcript path for statusLine updates
@@ -406,12 +410,17 @@ export async function runCheckAgent(
     checkOutput = "CHECK OUTPUT: No Justfile or Makefile found. The check agent expects a Justfile with a 'check' recipe, or a Makefile with a 'check' target.";
   }
 
-  // Step 4: Use unified runner for analysis
+  // Step 4: Run supplemental editor diagnostics for known command-tool gaps
+  throwIfAborted(options.signal);
+  const supplementalOutput = await runSupplementalDiagnosticProviders(workingDir, options);
+  const supplementalContext = supplementalOutput ? `\n\n${supplementalOutput}` : "";
+
+  // Step 5: Use unified runner for analysis
   const result = await runAgent(
     { ...CHECK_AGENT, workingDir },
     {
       prompt: "Summarize the following check results:",
-      context: `UNCOMMITTED FILES:\n${status || "(none)"}\n\n${lintOutput}${checkOutput}`,
+      context: `UNCOMMITTED FILES:\n${status || "(none)"}\n\n${lintOutput}${checkOutput}${supplementalContext}`,
     },
     options
   );
@@ -436,7 +445,7 @@ export async function runCheckAgent(
     decisionReason: isPassing ? "All checks passed" : "Checks failed",
   });
 
-  // Step 5: Add guidance for unused code errors. Run the regex on the
+  // Step 6: Add guidance for unused code errors. Run the regex on the
   // normalized output so the footer fires for promoted lines too.
   const hasUnusedCode = UNUSED_CODE_RE.test(normalized);
   if (hasUnusedCode && /- Status:\s*FAIL/i.test(normalized)) {

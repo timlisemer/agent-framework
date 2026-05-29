@@ -16,7 +16,7 @@
  *
  * | Agent                | Tier   | Mode   | Pattern        | Purpose                                          |
  * |----------------------|--------|--------|----------------|--------------------------------------------------|
- * | check                | sonnet | direct | mcp            | Summarize linter/type-check results              |
+ * | check                | sonnet | direct | mcp            | Summarize linter/type-check/editor diagnostics   |
  * | confirm              | opus   | sdk    | mcp            | Quality gate with code investigation             |
  * | commit               | haiku  | direct | mcp            | Generate commit messages                         |
  * | validate-intent      | haiku  | direct | side-effect    | Check if AI followed user intentions (PreToolUse)|
@@ -68,7 +68,7 @@ import { activeSpec } from "../adapter/spec.js";
 /**
  * Check Agent Configuration
  *
- * Summarizes linter and type-check output without analysis or suggestions.
+ * Summarizes linter, type-check, and supplemental editor diagnostic output without analysis or suggestions.
  *
  * **Tier: sonnet** - Needs to parse complex error output accurately
  * **Mode: direct** - All context (linter output) provided upfront

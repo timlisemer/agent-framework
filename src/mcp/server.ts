@@ -131,7 +131,7 @@ registerTimedTool(
   "check",
   {
     title: "Check",
-    description: "Run linter and make/just check, return summarized results with warning recommendations. Does not access source code.",
+    description: "Run linter, make/just check, and supplemental editor diagnostics; return summarized results with warning recommendations.",
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
       transcript_path: z.string().optional().describe("Session transcript path for statusLine")

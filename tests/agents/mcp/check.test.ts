@@ -1,11 +1,64 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+
+const mocks = vi.hoisted(() => ({
+  runAgent: vi.fn(),
+  runProcessCancellable: vi.fn(),
+  getGitStatusCancellable: vi.fn(),
+  getRepoInfoCancellable: vi.fn(),
+  logAgentStarted: vi.fn(),
+  logAgentResult: vi.fn(),
+  setTranscriptPath: vi.fn(),
+  getAgentFrameworkSessionDir: vi.fn(),
+  resetDriftDetectionWindow: vi.fn(),
+  runSupplementalDiagnosticProviders: vi.fn(),
+}));
+
+vi.mock("../../../src/utils/agent-runner.js", () => ({
+  runAgent: mocks.runAgent,
+}));
+
+vi.mock("../../../src/utils/command.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/utils/command.js")>();
+  return {
+    ...actual,
+    runProcessCancellable: mocks.runProcessCancellable,
+  };
+});
+
+vi.mock("../../../src/utils/git-utils.js", () => ({
+  getGitStatusCancellable: mocks.getGitStatusCancellable,
+  getRepoInfoCancellable: mocks.getRepoInfoCancellable,
+}));
+
+vi.mock("../../../src/utils/logger.js", () => ({
+  logAgentStarted: mocks.logAgentStarted,
+  logAgentResult: mocks.logAgentResult,
+}));
+
+vi.mock("../../../src/utils/execution-context.js", () => ({
+  setTranscriptPath: mocks.setTranscriptPath,
+}));
+
+vi.mock("../../../src/utils/paths.js", () => ({
+  getAgentFrameworkSessionDir: mocks.getAgentFrameworkSessionDir,
+}));
+
+vi.mock("../../../src/scenario/lifecycle.js", () => ({
+  resetDriftDetectionWindow: mocks.resetDriftDetectionWindow,
+}));
+
+vi.mock("../../../src/utils/supplemental-diagnostics.js", () => ({
+  runSupplementalDiagnosticProviders: mocks.runSupplementalDiagnosticProviders,
+}));
+
 import {
   applyStatusOverride,
   checkInvocationsForRunner,
   promoteUnusedCodeToErrors,
+  runCheckAgent,
 } from "../../../src/agents/mcp/check.js";
 
 describe("applyStatusOverride", () => {
@@ -187,5 +240,49 @@ describe("checkInvocationsForRunner", () => {
     const invocations = checkInvocationsForRunner({ cmd: "make check 2>&1", dir, type: "make" });
 
     expect(invocations).toEqual([{ cmd: "make check 2>&1", dir, type: "make" }]);
+  });
+});
+
+describe("runCheckAgent supplemental diagnostics context", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "check-agent-context-"));
+    mocks.getRepoInfoCancellable.mockResolvedValue({ mainRepo: tempDir });
+    mocks.getGitStatusCancellable.mockResolvedValue(" M src/example.ts");
+    mocks.getAgentFrameworkSessionDir.mockReturnValue(path.join(tempDir, ".agent-framework-session"));
+    mocks.resetDriftDetectionWindow.mockResolvedValue(undefined);
+    mocks.runSupplementalDiagnosticProviders.mockResolvedValue(
+      "TYPESCRIPT LANGUAGE SERVICE DIAGNOSTICS:\nsrc/example.ts:1:1 warning TS6385: deprecated",
+    );
+    mocks.runAgent.mockResolvedValue({
+      output: `## Results
+- Errors: 0
+- Warnings: 1
+
+## Errors
+(none)
+
+## Warnings
+src/example.ts:1:1 warning TS6385: deprecated
+`,
+    });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("appends supplemental diagnostics before CHECK_AGENT summarization", async () => {
+    await runCheckAgent(tempDir);
+
+    expect(mocks.runSupplementalDiagnosticProviders).toHaveBeenCalledWith(tempDir, expect.any(Object));
+    expect(mocks.runAgent).toHaveBeenCalled();
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("UNCOMMITTED FILES:\n M src/example.ts");
+    expect(context).toContain("CHECK OUTPUT: No Justfile or Makefile found.");
+    expect(context).toContain("TYPESCRIPT LANGUAGE SERVICE DIAGNOSTICS:");
+    expect(context).toContain("src/example.ts:1:1 warning TS6385: deprecated");
   });
 });
