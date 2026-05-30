@@ -154,19 +154,19 @@ describe("planModeEditBlock", () => {
 });
 
 describe("planModeBashBlock", () => {
-  it("blocks echo redirect in plan mode", () => {
+  it("defers echo redirect to the general Bash blacklist in plan mode", () => {
     const result = planModeBashBlock(true, "Bash", 'echo "test" > file.txt');
-    expect(result).toContain("Plan mode is active");
+    expect(result).toBeNull();
   });
 
-  it("blocks git commit in plan mode", () => {
+  it("defers git commit to the general Bash blacklist in plan mode", () => {
     const result = planModeBashBlock(true, "Bash", "git commit -m 'msg'");
-    expect(result).toContain("Plan mode is active");
+    expect(result).toBeNull();
   });
 
-  it("blocks git push in plan mode", () => {
+  it("defers git push to the general Bash blacklist in plan mode", () => {
     const result = planModeBashBlock(true, "Bash", "git push origin main");
-    expect(result).toContain("Plan mode is active");
+    expect(result).toBeNull();
   });
 
   it("blocks rm in plan mode", () => {
@@ -174,9 +174,14 @@ describe("planModeBashBlock", () => {
     expect(result).toContain("Plan mode is active");
   });
 
-  it("blocks sed -i in plan mode", () => {
+  it("defers sed -i to the general Bash blacklist in plan mode", () => {
     const result = planModeBashBlock(true, "Bash", "sed -i 's/foo/bar/' file.txt");
-    expect(result).toContain("Plan mode is active");
+    expect(result).toBeNull();
+  });
+
+  it("defers tee file writes to the general Bash blacklist in plan mode", () => {
+    const result = planModeBashBlock(true, "Bash", "tee /tmp/plan.md");
+    expect(result).toBeNull();
   });
 
   it("allows git status in plan mode", () => {

@@ -4,6 +4,7 @@ import { editIntentRule } from "../../src/rules/edit-intent.js";
 import { predictionBlockRule } from "../../src/rules/prediction-block.js";
 import { planModeBlockRule } from "../../src/rules/plan-mode-block.js";
 import type { RuleContext } from "../../src/rules/types.js";
+import { getBlacklistHighlights } from "../../src/utils/command-patterns.js";
 import { sessionPlanFile } from "../../src/utils/paths.js";
 
 function makeCtx(overrides: Partial<RuleContext>): RuleContext {
@@ -93,5 +94,21 @@ describe("session planfile rule exemptions", () => {
     }));
 
     expect(result).toMatchObject({ fastDeny: expect.stringContaining("Plan mode is active") });
+  });
+
+  it("plan-mode-block lets tee writes to session planfiles fall through to blacklist", async () => {
+    const sessionDir = path.join(process.cwd(), ".tmp-session");
+    const planPath = sessionPlanFile(sessionDir, "shared-ai-ui-runtime");
+    const command = `tee ${planPath}`;
+    const result = await planModeBlockRule.check(makeCtx({
+      sessionDir,
+      planMode: true,
+      planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
+      toolName: "Bash",
+      toolInput: { command },
+    }));
+
+    expect(result).toBeNull();
+    expect(getBlacklistHighlights("Bash", { command }, process.cwd())).toContain("[BLACKLIST: tee file write] Use Write tool");
   });
 });

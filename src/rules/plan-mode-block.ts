@@ -42,7 +42,7 @@ export const planModeBlockRule: PreToolRule = {
 
     if (ctx.toolName === "Bash") {
       const command = (ctx.toolInput as { command?: string }).command || "";
-      const bashBlock = planModeBashBlock(ctx.planMode, ctx.toolName, command);
+      const bashBlock = planModeBashBlock(ctx.planMode, ctx.toolName, command, ctx.projectDir);
       if (bashBlock) {
         return { fastDeny: bashBlock };
       }

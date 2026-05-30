@@ -90,6 +90,7 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
 
   // File writing - should use Write tool
   { pattern: /\becho\s+.*>/, name: 'echo redirect', alternative: 'Use Write tool' },
+  { pattern: /\btee\s+(?:-[A-Za-z]+\s+)*\S+/, name: 'tee file write', alternative: 'Use Write tool' },
 
   // Directory change - always deny
   { pattern: /\bcd\s+/, name: 'cd', alternative: 'Use absolute paths' },

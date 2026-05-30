@@ -178,6 +178,11 @@ describe("getBlacklistHighlights", () => {
     expect(highlights.some((h) => h.includes("Use nix-eval-jobs instead"))).toBe(true);
   });
 
+  it("detects tee file writes in Bash command and points to Write", () => {
+    const highlights = getBlacklistHighlights("Bash", { command: "tee /tmp/out.md" });
+    expect(highlights).toContain("[BLACKLIST: tee file write] Use Write tool");
+  });
+
   it("returns multiple violations for compound command", () => {
     const highlights = getBlacklistHighlights("Bash", { command: "cd /tmp && git push" });
     expect(highlights.length).toBeGreaterThanOrEqual(2);

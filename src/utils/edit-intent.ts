@@ -9,7 +9,7 @@
  */
 
 import type { ToolPrediction } from "./prediction-types.js";
-import { PLAN_MODE_BASH_WRITE_PATTERNS } from "./bash-command-policy.js";
+import { getBlacklistHighlights, PLAN_MODE_BASH_WRITE_PATTERNS } from "./bash-command-policy.js";
 import { activeSpec } from "../adapter/spec.js";
 import { isSessionPlanfilePath } from "./planfile.js";
 
@@ -122,10 +122,12 @@ export function planModeEditBlock(
 export function planModeBashBlock(
   planMode: boolean,
   toolName: string,
-  command: string
+  command: string,
+  workingDir?: string,
 ): string | null {
   if (!planMode) return null;
   if (toolName !== "Bash") return null;
+  if (getBlacklistHighlights(toolName, { command }, workingDir).length > 0) return null;
   for (const pattern of PLAN_MODE_BASH_WRITE_PATTERNS) {
     if (pattern.test(command)) {
       return `Plan mode is active - write commands are blocked. Command: ${command.slice(0, 100)}. ${PLAN_MODE_SCRATCH_GUIDANCE}`;
