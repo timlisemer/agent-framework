@@ -63,6 +63,7 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
     .map((message) => message.content);
   const planExitText = [
     input.last_assistant_message,
+    ...(tx.assistantTextCandidates ?? []),
     ...transcriptAssistantTexts,
   ].find((candidate) => spec.isPlanExit({ event: "Stop", assistantText: candidate ?? null })) ?? null;
   const stopPlanExit = planExitText !== null;

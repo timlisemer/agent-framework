@@ -38,6 +38,20 @@ describe("Codex plan source", () => {
     expect(isPlanExit({ event: "Stop", assistantText: text })).toBe(false);
   });
 
+  it("extracts only the outer proposed_plan tags", () => {
+    const text = [
+      "<proposed_plan>",
+      "## User Goal",
+      "Document the plan.",
+      "</proposed_plan>",
+    ].join("\n");
+
+    const expected = "## User Goal\nDocument the plan.";
+    expect(parseCodexProposedPlanBlock(text)).toEqual({ content: expected });
+    expect(extractProposedPlanContent(text)).toBe(expected);
+    expect(extractStopProposedPlan(text)).toBe(expected);
+  });
+
   it("ignores incomplete proposed_plan blocks", () => {
     expect(extractProposedPlanContent("<proposed_plan>\nmissing close")).toBeNull();
     expect(isPlanExit({ event: "Stop", assistantText: "<proposed_plan>\nmissing close" })).toBe(false);

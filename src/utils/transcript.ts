@@ -124,6 +124,11 @@ export interface TranscriptReadResult {
    * a slash command and was filtered."
    */
   newestUserWasSlashCommand?: boolean;
+  /**
+   * Newest raw assistant text blocks from the same parsed transcript snapshot,
+   * before adjacent assistant entries are grouped for rule context.
+   */
+  assistantTextCandidates?: string[];
 }
 
 /**
@@ -259,6 +264,38 @@ function buildAssistantGroups(
   }
 
   return byIndex;
+}
+
+function collectAssistantTextCandidates(
+  parsedEntries: (TranscriptEntry | null)[],
+  maxAssistantEntries: number,
+): string[] {
+  const candidates: string[] = [];
+  let assistantEntriesSeen = 0;
+
+  for (let i = parsedEntries.length - 1; i >= 0; i--) {
+    const entry = parsedEntries[i];
+    if (!entry?.message || entry.isMeta === true || entry.message.role !== "assistant") {
+      continue;
+    }
+
+    assistantEntriesSeen++;
+    const content = entry.message.content;
+    if (Array.isArray(content)) {
+      for (let j = content.length - 1; j >= 0; j--) {
+        const block = content[j];
+        if (block.type === "text" && block.text?.trim()) {
+          candidates.push(block.text);
+        }
+      }
+    } else if (typeof content === "string" && content.trim()) {
+      candidates.push(content);
+    }
+
+    if (assistantEntriesSeen >= maxAssistantEntries) break;
+  }
+
+  return candidates;
 }
 
 /**
@@ -527,6 +564,10 @@ export async function readTranscriptExact(
   ];
 
   const assistantGroupByIndex = buildAssistantGroups(parsedEntries, "user-text-or-tool-result");
+  collected.assistantTextCandidates = collectAssistantTextCandidates(
+    parsedEntries,
+    assistantSpec.count === Infinity ? parsedEntries.length : assistantSpec.count,
+  );
 
   // First pass: build tool_use ID map + extract slash command context
   for (const entry of parsedEntries) {

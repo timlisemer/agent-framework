@@ -14,16 +14,25 @@ export interface CodexProposedPlanBlock {
   content: string;
 }
 
-const WHOLE_PROPOSED_PLAN_RE =
-  /^\s*<proposed_plan>\s*([\s\S]*?)\s*<\/proposed_plan>\s*$/;
+const PROPOSED_PLAN_OPEN = "<proposed_plan>";
+const PROPOSED_PLAN_CLOSE = "</proposed_plan>";
 
 export function parseCodexProposedPlanBlock(
   text: string | null | undefined,
 ): CodexProposedPlanBlock | null {
   if (!text) return null;
-  const match = text.match(WHOLE_PROPOSED_PLAN_RE);
-  const content = match?.[1]?.trim();
-  return content ? { content } : null;
+  const trimmed = text.trim();
+  if (!trimmed.startsWith(PROPOSED_PLAN_OPEN)) return null;
+  if (!trimmed.endsWith(PROPOSED_PLAN_CLOSE)) return null;
+
+  const body = trimmed
+    .slice(PROPOSED_PLAN_OPEN.length, trimmed.length - PROPOSED_PLAN_CLOSE.length)
+    .trim();
+  if (!body) return null;
+
+  // This parser owns only the presentation wrapper. The plan body is content:
+  // do not inspect or strip literal tag text that appears inside it.
+  return { content: body };
 }
 
 export function extractProposedPlanContent(text: string | null | undefined): string | null {

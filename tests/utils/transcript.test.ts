@@ -587,6 +587,24 @@ describe("currentTurnAssistantState", () => {
     ]);
   });
 
+  it("readTranscriptExact returns newest atomic assistant text candidates within the assistant bound", async () => {
+    const filePath = writeTranscript([
+      userText("start"),
+      assistantText("msg_old", "Old assistant text."),
+      assistantText("msg_mid", "Previous assistant text."),
+      assistantText("msg_new", "Recent assistant text."),
+    ]);
+
+    const result = await readTranscriptExact(filePath, {
+      counts: { user: 1, assistant: 2 },
+    });
+
+    expect(result.assistantTextCandidates).toEqual([
+      "Recent assistant text.",
+      "Previous assistant text.",
+    ]);
+  });
+
   it("readTranscriptExact keeps a Codex final proposed plan separate after tool output", async () => {
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
     const planText = "<proposed_plan>\nPlan Name: codex-stop-regression\n\n## User Goal\nFix it.\n</proposed_plan>";

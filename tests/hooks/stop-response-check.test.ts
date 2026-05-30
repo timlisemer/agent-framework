@@ -32,6 +32,8 @@ vi.mock("../../src/agents/mcp/validate-plan.js", () => ({
 import { mainStop } from "../../src/hooks/stop-response-check.js";
 import { exitAfterFlush } from "../../src/utils/hook-bootstrap.js";
 import { validatePlanFileWithContract } from "../../src/agents/mcp/validate-plan.js";
+import { readTranscriptExact } from "../../src/utils/transcript.js";
+import { FIRST_RESPONSE_STOP_COUNTS } from "../../src/utils/transcript-presets.js";
 
 const mockExitAfterFlush = vi.mocked(exitAfterFlush);
 const mockValidatePlanFileWithContract = vi.mocked(validatePlanFileWithContract);
@@ -95,6 +97,21 @@ function appendCompletedPlan(transcriptPath: string, text: string): void {
           type: "Plan",
           text,
         },
+      },
+    }) + "\n",
+  );
+}
+
+function appendFinalAssistantProposedPlan(transcriptPath: string, planText: string): void {
+  fs.appendFileSync(
+    transcriptPath,
+    JSON.stringify({
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: proposedPlan(planText) }],
+        phase: "final_answer",
       },
     }) + "\n",
   );
@@ -386,6 +403,39 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
       path: planPath,
       planName: "test-plan",
     });
+    expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
+  });
+
+  it("creates a clean first planfile when grouped Codex transcript text has duplicated proposed_plan boundaries", async () => {
+    seedPlanMode(transcriptPath);
+    const planPath = sessionPlanFile(sessionDir, "test-plan");
+    const completedPlan = validPlan(planPath, "test-plan", "completed");
+    const finalPlan = validPlan(planPath, "test-plan", "final");
+    appendCompletedPlan(transcriptPath, completedPlan);
+    appendFinalAssistantProposedPlan(transcriptPath, finalPlan);
+
+    const grouped = await readTranscriptExact(transcriptPath, FIRST_RESPONSE_STOP_COUNTS);
+    expect(grouped.assistant[0]?.content).toContain("</proposed_plan> <proposed_plan>");
+
+    await mainStop(
+      {
+        session_id: "session-stop",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        last_assistant_message: "",
+      },
+      codexEncoder,
+    );
+
+    const created = fs.readFileSync(planPath, "utf-8");
+    expect(created.match(/^Plan Name: test-plan$/gm)).toHaveLength(2);
+    expect(created.match(/^## User Goal$/gm)).toHaveLength(1);
+    expect(created.match(/^Planfile Path: /gm)).toHaveLength(1);
+    expect(created).toContain("src/final.ts");
+    expect(created).not.toContain("src/completed.ts");
+    expect(created).not.toContain("<proposed_plan>");
+    expect(created).not.toContain("</proposed_plan>");
+    expect(mockValidatePlanFileWithContract).toHaveBeenCalledOnce();
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 
