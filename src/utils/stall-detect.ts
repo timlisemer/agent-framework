@@ -41,6 +41,98 @@ export const BLOCKED_INTENT_NAMES_ANNOUNCEMENT_WITHOUT_ACTION_RE =
 const CORRECTIVE_COMMITMENT_WITHOUT_ACTION_RE =
   /\b(?:i(?:['\u2019]m|\s+am)\s+sorry|you\s+told\s+me|you\s+asked\s+me|you\s+wanted\s+me)\b[\s\S]{0,500}\bi(?:['\u2019]ll|\s+will)\s+(?:stay|keep|focus|return|stick)\b[^.!?]{0,180}\b(?:topic|task|helper|search|request|instruction)\b[^.!?]{0,220}\b(?:identify|use|search|find|locate|fix|implement|change|update|do|handle)\b/i;
 
+const PLANFILE_REMEDIATION_CONTEXT_RE =
+  /\b(?:plan validation failed|iterate on the planfile|validate_plan|planfile edits are explicitly allowed)\b/i;
+
+const PLANFILE_DIRECT_EDIT_CONTEXT_RE =
+  /\b(?:(?:edit|update|modify|write|patch|revise)\b[^.!?]{0,80}\bplanfile\b|planfile\b[^.!?]{0,80}\b(?:edit|update|modify|write|patch|revise))\b/i;
+
+const PLANFILE_DIRECT_EDIT_COMMITMENT_RE =
+  /\b(?:i(?:['\u2019]ll|\s+will)|i(?:['\u2019]m|\s+am)\s+(?:going|about)|let\s+me|now\s+i(?:['\u2019]ll|\s+will))\b[^.!?]{0,220}\b(?:edit|update|modify|write|patch|revise)\b[^.!?]{0,160}\bplanfile\b[\s\S]{0,260}\bvalidate_plan\b/i;
+
+const PLANFILE_TRANSCRIPT_DISCUSSION_RE =
+  /\b(?:quoted\s+transcript|transcript\s+says|example\s+says|quoted\s+example)\b/i;
+
+const PLANFILE_EDIT_REFUSAL_SENTENCE_PATTERNS = [
+  /\bi\s+(?:can['\u2019]?t|cannot)\s+perform\s+step\s+1\s+because\s+active\s+plan\s+mode\s+forbids\s+file\s+writes\b/i,
+  /\bi\s+(?:can['\u2019]?t|cannot)\s+edit\s+the\s+planfile\s+in\s+this\s+turn\s+because\s+plan\s+mode\s+here\s+explicitly\s+forbids\s+file\s+writes\b/i,
+  /\bi\s+(?:can['\u2019]?t|cannot)\s+edit\s+the\s+planfile\s+while\s+the\s+active\s+plan\s+mode\s+instructions?\s+forbid\s+file\s+writes\b/i,
+  /\bi\s+(?:can['\u2019]?t|cannot)\s+edit\s+the\s+planfile\s+in\s+this\s+turn\s+because\s+the\s+active\s+developer\s+plan\s+mode\s+instruction\s+forbids\s+file\s+writes\b/i,
+  /\bi\s+(?:can['\u2019]?t|cannot)\s+edit\s+the\s+planfile\s+while\s+this\s+conversation\s+is\s+in\s+plan\s+mode\.\s+the\s+active\s+plan\s+mode\s+instruction\s+forbids\s+mutating\s+actions\b/i,
+  /\bi\s+(?:can['\u2019]?t|cannot)\s+edit\s+the\s+planfile\s+under\s+this\s+turn['\u2019]s\s+plan\s+mode\s+write\s+restriction\b/i,
+  /\bi\s+(?:can['\u2019]?t|cannot)\s+edit\s+the\s+planfile\s+from\s+this\s+turn\s+because\s+the\s+active\s+plan\s+mode\s+instruction\b[^.!?]{0,80}\bforbids\s+file\s+writes\b/i,
+  /\bi\s+(?:can['\u2019]?t|cannot)\s+edit\s+the\s+planfile\s+in\s+this\s+plan\s+mode\s+turn\b/i,
+  /\bi\s+(?:can['\u2019]?t|cannot)\s+edit\s+the\s+planfile\s+while\s+this\s+session\s+is\s+under\s+plan\s+mode['\u2019]s\s+no-file-writes\s+rule\b/i,
+  /\bi\s+(?:can['\u2019]?t|cannot)\s+perform\s+that\s+edit\s+while\s+this\s+plan\s+mode\s+instruction\s+set\s+forbids\s+mutating\s+actions\b/i,
+  /\bunder\s+the\s+active\s+plan\s+mode\s+developer\s+instructions,\s+i\s+(?:can['\u2019]?t|cannot)\s+write\s+files\b/i,
+  /\bi\s+can\s+still\s+provide\s+the\s+exact\s+replacement\s+content\s+or\s+a\s+patch\s+for\s+the\s+planfile,\s+but\s+i\s+(?:can['\u2019]?t|cannot)\s+apply\s+it\b/i,
+  /\bi\s+(?:can['\u2019]?t|cannot)\s+apply\s+it\s+from\s+this\s+active\s+plan\s+mode\s+turn\b/i,
+  /\bthat\s+is\s+a\s+higher-priority\s+instruction\s+than\s+your\s+request\s+and\s+the\s+stop\s+hook\s+remediation\b/i,
+  /\bhigher-priority\s*\/\s*plan\s+mode\s+restrictions\s+still\s+win\b/i,
+  /\bhigher-priority\s+write\s+restrictions\s+take\s+precedence\b/i,
+  /\bhigher-priority\s+plan\s+mode\s+rule\b[\s\S]{0,180}\bconflicts?\s+with\s+the\s+hook\s+remediation\b/i,
+  /\bthere\s+is\s+a\s+conflict\s+between\s+the\s+planfile\s+remediation\s+instruction\s+and\s+plan\s+mode\b/i,
+  /\byou\s+need\s+to\s+resolve\s+the\s+conflict\s+before\s+i\s+can\s+edit\s+it\b/i,
+  /\bi\s+(?:can['\u2019]?t|cannot)\s+both\s+obey\s+the\s+hook\s+and\s+obey\s+plan\s+mode\b/i,
+  /\bthis\s+thread\s+has\s+to\s+leave\s+plan\s+mode;\s+then\s+i\s+can\s+edit\s+the\s+planfile\b/i,
+  /\bi['\u2019]?m\s+blocked\s+specifically\s+on\s+step\s+1\s+by\s+the\s+current\s+plan\s+mode\s+rules\b/i,
+  /\bi\s+stay\s+blocked\s+on\s+the\s+planfile\s+edit\s+because\s+file\s+write\s+restrictions\s+still\s+apply\s+in\s+plan\s+mode\b/i,
+  /\bcontinuing\s+to\s+emit\s+inline\s+plans\s+will\s+not\s+satisfy\s+the\s+hook\s+while\s+that\s+stale\s+file\s+remains\s+unchanged\b/i,
+  /\bthe\s+active\s+developer\s+plan\s+mode\s+instruction\s+forbids\s+file\s+writes\b/i,
+  /\bthe\s+active\s+plan\s+mode\s+instruction\s+forbids\s+mutating\s+actions,\s+including\s+editing\s+or\s+writing\s+files\b/i,
+  /\bactive\s+plan\s+mode\s+forbids\s+file\s+writes\b/i,
+  /\bplan\s+mode\s+forbids\s+file\s+writes\b/i,
+  /\bhigher-level\s+instructions?\s+prevent\s+this\b/i,
+  /\bstay\s+blocked\b/i,
+  /\bexit\s+plan\s+mode\s+so\s+i\s+can\s+edit\b/i,
+  /\b(?:option\s+[ab]|\b1\.\s+|\b2\.\s+)[\s\S]{0,500}\b(?:exit|leave)\s+plan\s+mode\b[\s\S]{0,500}\b(?:stay\s+blocked|inline|patch|provide)\b/i,
+] as const;
+
+export function detectPlanfileEditRefusal(
+  assistantText: string,
+  contextText: string,
+): string | null {
+  const strippedAssistant = stripQuotedContent(assistantText).trim();
+  const strippedContext = stripQuotedContent(contextText).trim();
+  if (
+    !strippedAssistant ||
+    !(
+      PLANFILE_REMEDIATION_CONTEXT_RE.test(strippedContext) ||
+      PLANFILE_DIRECT_EDIT_CONTEXT_RE.test(strippedContext)
+    )
+  ) {
+    return null;
+  }
+
+  if (PLANFILE_DIRECT_EDIT_COMMITMENT_RE.test(strippedAssistant)) {
+    return null;
+  }
+  if (PLANFILE_TRANSCRIPT_DISCUSSION_RE.test(strippedAssistant)) {
+    return null;
+  }
+
+  if (PLANFILE_EDIT_REFUSAL_SENTENCE_PATTERNS.some((pattern) => pattern.test(strippedAssistant))) {
+    return "planfile edit refusal during validation remediation";
+  }
+
+  return null;
+}
+
+export function isPlanfileDirectEditCommitment(
+  assistantText: string,
+  contextText: string,
+): boolean {
+  const strippedAssistant = stripQuotedContent(assistantText).trim();
+  const strippedContext = stripQuotedContent(contextText).trim();
+  return (
+    (
+      PLANFILE_REMEDIATION_CONTEXT_RE.test(strippedContext) ||
+      PLANFILE_DIRECT_EDIT_CONTEXT_RE.test(strippedContext)
+    ) &&
+    PLANFILE_DIRECT_EDIT_COMMITMENT_RE.test(strippedAssistant)
+  );
+}
+
 export function isHostileContext(
   prediction: ToolPrediction | null,
   frustrationStreak: number,

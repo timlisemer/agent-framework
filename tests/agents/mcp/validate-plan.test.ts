@@ -102,9 +102,15 @@ describe("runValidatePlanAgent", () => {
       .replace("## Files To Modify", "## Files Modified")
       .replace("## Approach", "## Context\n\nContext details.\n\n## Approach");
     const result = await validatePlanText(plan);
+    const planPath = result.match(/for (\/tmp\/validate-plan-[^ ]+\/plan\.md) until it passes/)?.[1];
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain('Extra level-two heading "## Context" is not in the required final-plan structure.');
     expect(result).toContain('Missing required heading "## Files To Modify".');
+    expect(result).toContain(`using ${activeSpec().mcpWireName("validate_plan")}`);
+    expect(planPath).toBeTruthy();
+    expect(result).toContain(`for ${planPath} until it passes`);
+    expect(result).toContain("the named planfile is the planning surface");
+    expect(result).toContain("this is the required remediation path, not an implementation edit");
     const workflowMatches = result.match(/Iterate on the planfile using/g) ?? [];
     expect(workflowMatches).toHaveLength(1);
   });

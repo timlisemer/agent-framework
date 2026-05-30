@@ -31,7 +31,7 @@ export function formatPlanfileValidationWorkflow(
   planPath: string,
   validatePlanWireName: string,
 ): string {
-  return `Iterate on the planfile using ${validatePlanWireName} for ${planPath} until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed. Then present the complete contents of the validated planfile inside a whole-message <proposed_plan>...</proposed_plan> block. Do not summarize it or replace it with only the plan name, planfile path, or validation status.`;
+  return `Iterate on the planfile using ${validatePlanWireName} for ${planPath} until it passes; edit that planfile directly even if plan mode is active, because the named planfile is the planning surface, this is the required remediation path, not an implementation edit, and planfile edits are explicitly allowed. Then present the complete contents of the validated planfile inside a whole-message <proposed_plan>...</proposed_plan> block. Do not summarize it or replace it with only the plan name, planfile path, or validation status.`;
 }
 
 export function appendPlanfileValidationWorkflow(reason: string, planPath?: string | null, validatePlanWireName?: string): string {
