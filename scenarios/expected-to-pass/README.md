@@ -8,6 +8,10 @@ signal. Re-run before moving; if results disagree, move the fixture to
 
 ## Recent Changes
 
+2026-05-30 Stop prior-error remediation coverage:
+
+- Added `stop-prior-planfile-remediation-refusal-should-block.json` for the regression where prior `validate_plan` feedback told the assistant to edit a named planfile directly, but the assistant stopped by arguing that active Plan Mode or higher-level write restrictions prevented the required file edit. The fixture proves the Stop hook blocks through transcript-derived prior actionable feedback.
+
 2026-05-19 scenario reclassification after three full scenario sweeps:
 
 - Promoted newly stable passing scenarios from `expected-to-fail/`:

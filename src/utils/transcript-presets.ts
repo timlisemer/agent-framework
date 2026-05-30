@@ -80,7 +80,7 @@ export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
   counts: {
     user: { count: 3, maxStale: 5 },
     assistant: 3,
-    tool: 2,
+    tool: 8,
   },
 };
 

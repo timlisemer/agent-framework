@@ -1,14 +1,15 @@
 import { setTranscriptPath } from "../utils/execution-context.js";
 import { writeTool } from "../utils/synthetic.js";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
-import { getSessionState } from "../utils/session-store.js";
+import { getSessionState, readRecentToolLogPriorErrors } from "../utils/session-store.js";
 import { getAgentFrameworkSessionDir } from "../utils/paths.js";
 import { detectPlanModeForHook, getPlanModeContext } from "../utils/plan-mode-detector.js";
-import { readTranscriptExact } from "../utils/transcript.js";
+import { extractActionableToolResultFeedback, readTranscriptExact } from "../utils/transcript.js";
 import { FIRST_RESPONSE_STOP_COUNTS } from "../utils/transcript-presets.js";
 import { evaluateRulesForStop, ALL_RULES } from "../rules/index.js";
 import { getMostRecentMessage } from "../rules/response-align-stop.js";
 import type { RuleContext } from "../rules/types.js";
+import type { PriorErrorContext } from "../utils/prior-error-context.js";
 import type { AdapterEncoder } from "../adapter/types.js";
 import type { FrameworkStopHookInput } from "./types.js";
 import { resolveHostContext } from "../utils/host-context.js";
@@ -18,6 +19,56 @@ import { appendCapture } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
 import { onEpochRotation } from "../scenario/lifecycle.js";
+
+function priorErrorIdentity(context: PriorErrorContext): string {
+  return [
+    context.source,
+    context.gate ?? "",
+    context.tool ?? "",
+    context.toolUseId ?? "",
+    context.text,
+  ].join("\0");
+}
+
+function mergePriorErrorContexts(
+  transcriptContexts: readonly PriorErrorContext[],
+  toolLogContexts: readonly PriorErrorContext[],
+): PriorErrorContext[] {
+  const merged = new Map<string, PriorErrorContext>();
+  for (const context of [...transcriptContexts, ...toolLogContexts]) {
+    const key = priorErrorIdentity(context);
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, { ...context, provenance: [...context.provenance] });
+      continue;
+    }
+    merged.set(key, {
+      ...existing,
+      provenance: [...new Set([...existing.provenance, ...context.provenance])],
+      gate: context.gate ?? existing.gate,
+      tool: context.tool ?? existing.tool,
+      toolUseId: context.toolUseId ?? existing.toolUseId,
+      index: context.index ?? existing.index,
+      ts: Math.max(existing.ts ?? 0, context.ts ?? 0) || undefined,
+      isError: existing.isError === true || context.isError === true ? true : undefined,
+    });
+  }
+
+  const all = [...merged.values()];
+  const transcriptKeys = new Set(transcriptContexts.map(priorErrorIdentity));
+  const transcriptOnly = all.filter((context) => transcriptKeys.has(priorErrorIdentity(context)));
+  const toolLogOnly = all
+    .filter((context) => !transcriptKeys.has(priorErrorIdentity(context)))
+    .sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0))
+    .slice(-10);
+  const transcriptOrdered = transcriptOnly.sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+
+  // Keep sources in explicit precedence order instead of comparing transcript
+  // line indexes with wall-clock timestamps. The evaluator scans this list from
+  // the end, so current transcript feedback wins over supplemental tool-log-only
+  // context whenever both are present.
+  return [...toolLogOnly, ...transcriptOrdered];
+}
 
 /**
  * Stop Hook: Response Check
@@ -168,6 +219,10 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
     planModeCtx: getPlanModeContext(planMode),
     assistantText: assistantText ?? getMostRecentMessage(tx.assistant).content,
     userText: getMostRecentMessage(tx.user).content,
+    priorErrorContext: mergePriorErrorContexts(
+      extractActionableToolResultFeedback(tx.tool),
+      readRecentToolLogPriorErrors(sessionDir, 25),
+    ),
   };
 
   const result = await evaluateRulesForStop(ALL_RULES, ctx);

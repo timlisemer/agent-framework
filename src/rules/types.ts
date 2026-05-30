@@ -2,6 +2,7 @@ import type { SessionState } from "../utils/session-store.js";
 import type { CacheManager } from "../utils/cache-manager.js";
 import type { LatestUserTurn, Mood, Trust } from "../utils/prediction-types.js";
 import type { HostContext } from "../utils/host-context.js";
+import type { PriorErrorContext } from "../utils/prior-error-context.js";
 
 export type HookEvent = "PreToolUse" | "UserPromptSubmit" | "Stop";
 
@@ -19,6 +20,7 @@ export interface RuleContext {
   // Stop-only
   assistantText?: string;
   userText?: string;
+  priorErrorContext?: PriorErrorContext[];
   // Common
   projectDir: string;
   host?: HostContext;

@@ -67,6 +67,16 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
   };
 }
 
+function planfilePriorError(text: string): NonNullable<RuleContext["priorErrorContext"]> {
+  return [{
+    source: "plan-validation",
+    provenance: ["transcript"],
+    tool: "plan-validate",
+    text,
+    index: 10,
+  }];
+}
+
 describe("responseAlignStopRule — deterministic null paths", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -247,13 +257,15 @@ describe("responseAlignStopRule — deterministic stall-shape detection", () => 
 
   it("blocks Plan Mode planfile-edit refusal during validation remediation before the LLM classifier", async () => {
     const planPath = path.join(tempDir, "plans", "fix-validation.md");
+    const feedback =
+      `Plan validation failed: missing required heading. Iterate on the planfile using mcp__agent_framework__validate_plan for ${planPath} until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed.`;
     const ctx = makeCtx({
       planMode: true,
       planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
       assistantText:
         "I cannot perform step 1 because active Plan Mode forbids file writes, including editing the planfile.",
-      userText:
-        `Plan validation failed: missing required heading. Iterate on the planfile using mcp__agent_framework__validate_plan for ${planPath} until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed.`,
+      userText: feedback,
+      priorErrorContext: planfilePriorError(feedback),
     });
 
     const result = await responseAlignStopRule.check(ctx);
@@ -266,13 +278,15 @@ describe("responseAlignStopRule — deterministic stall-shape detection", () => 
   });
 
   it("blocks option menus that route around direct planfile editing during remediation", async () => {
+    const feedback =
+      "Plan validation failed: bad headings. Iterate on the planfile using mcp__agent_framework__validate_plan for /tmp/session/plans/fix.md until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed.";
     const ctx = makeCtx({
       planMode: true,
       planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
       assistantText:
         "Option A: exit Plan Mode so I can edit the planfile. Option B: I can give you an inline version here. Which approach do you prefer?",
-      userText:
-        "Plan validation failed: bad headings. Iterate on the planfile using mcp__agent_framework__validate_plan for /tmp/session/plans/fix.md until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed.",
+      userText: feedback,
+      priorErrorContext: planfilePriorError(feedback),
     });
 
     const result = await responseAlignStopRule.check(ctx);
@@ -283,13 +297,15 @@ describe("responseAlignStopRule — deterministic stall-shape detection", () => 
   });
 
   it("blocks arguing that higher-priority Plan Mode write restrictions win during remediation", async () => {
+    const feedback =
+      "Plan validation failed: bad headings. Iterate on the planfile using mcp__agent_framework__validate_plan for /tmp/session/plans/fix.md until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed.";
     const ctx = makeCtx({
       planMode: true,
       planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
       assistantText:
         "I understand the planfile says edits are explicitly allowed, but higher-priority write restrictions take precedence. I must stay blocked until the Plan Mode conflict is resolved.",
-      userText:
-        "Plan validation failed: bad headings. Iterate on the planfile using mcp__agent_framework__validate_plan for /tmp/session/plans/fix.md until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed.",
+      userText: feedback,
+      priorErrorContext: planfilePriorError(feedback),
     });
 
     const result = await responseAlignStopRule.check(ctx);
@@ -300,13 +316,15 @@ describe("responseAlignStopRule — deterministic stall-shape detection", () => 
   });
 
   it("blocks slash-separated higher-priority Plan Mode restrictions still win arguing", async () => {
+    const feedback =
+      "Plan validation failed: bad headings. Iterate on the planfile using mcp__agent_framework__validate_plan for /tmp/session/plans/fix.md until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed.";
     const ctx = makeCtx({
       planMode: true,
       planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
       assistantText:
         "I understand the remediation says to edit the planfile, but higher-priority/Plan Mode restrictions still win.",
-      userText:
-        "Plan validation failed: bad headings. Iterate on the planfile using mcp__agent_framework__validate_plan for /tmp/session/plans/fix.md until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed.",
+      userText: feedback,
+      priorErrorContext: planfilePriorError(feedback),
     });
 
     const result = await responseAlignStopRule.check(ctx);
@@ -316,7 +334,15 @@ describe("responseAlignStopRule — deterministic stall-shape detection", () => 
     expect(mockRunAgent).not.toHaveBeenCalled();
   });
 
-  it("blocks direct planfile edit request refusal before generic classifier feedback", async () => {
+  it("does not deterministically block direct planfile edit request refusal without prior actionable feedback", async () => {
+    mockRunAgent.mockResolvedValue({
+      output: "OK",
+      success: true,
+      latencyMs: 80,
+      errorCount: 0,
+      modelTier: "haiku" as never,
+      modelName: "claude-haiku-4-5",
+    });
     const ctx = makeCtx({
       planMode: true,
       planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
@@ -326,26 +352,33 @@ describe("responseAlignStopRule — deterministic stall-shape detection", () => 
     });
 
     const result = await responseAlignStopRule.check(ctx);
-    expect(result).toEqual({
-      stopBlock: expect.stringContaining("Edit the named planfile directly"),
-    });
-    expect((result as { stopBlock: string }).stopBlock).toContain("do not argue about Plan Mode writes");
-    expect(mockRunAgent).not.toHaveBeenCalled();
+    expect(result).toBeNull();
+    expect(mockRunAgent).toHaveBeenCalled();
   });
 
   it("does not block direct planfile-edit remediation commitment", async () => {
+    mockRunAgent.mockResolvedValue({
+      output: "OK",
+      success: true,
+      latencyMs: 80,
+      errorCount: 0,
+      modelTier: "haiku" as never,
+      modelName: "claude-haiku-4-5",
+    });
+    const feedback =
+      "Plan validation failed: bad headings. Iterate on the planfile using mcp__agent_framework__validate_plan for /tmp/session/plans/fix.md until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed.";
     const ctx = makeCtx({
       planMode: true,
       planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
       assistantText:
         "I will edit the planfile directly and then run validate_plan for that same path until it passes.",
-      userText:
-        "Plan validation failed: bad headings. Iterate on the planfile using mcp__agent_framework__validate_plan for /tmp/session/plans/fix.md until it passes; edit that planfile directly even if plan mode is active, because planfile edits are explicitly allowed.",
+      userText: feedback,
+      priorErrorContext: planfilePriorError(feedback),
     });
 
     const result = await responseAlignStopRule.check(ctx);
     expect(result).toBeNull();
-    expect(mockRunAgent).not.toHaveBeenCalled();
+    expect(mockRunAgent).toHaveBeenCalled();
   });
 });
 

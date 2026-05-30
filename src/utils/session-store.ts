@@ -15,6 +15,7 @@ import {
 import { sessionToolLogFile, sessionStateFile } from "./paths.js";
 import { appendJsonlEntry, appendJsonlEntrySync, readJsonl } from "./file-io.js";
 import type { ToolPrediction } from "./prediction-types.js";
+import type { PriorErrorContext } from "./prior-error-context.js";
 
 export interface ToolLogEntry {
   ts: number;
@@ -131,6 +132,29 @@ export async function appendToolLog(sessionDir: string, entry: ToolLogEntry): Pr
  */
 export function readToolLogEntries(sessionDir: string, count: number): ToolLogEntry[] {
   return readJsonl<ToolLogEntry>(sessionToolLogFile(sessionDir), { tail: count });
+}
+
+export function readRecentToolLogPriorErrors(sessionDir: string, count: number): PriorErrorContext[] {
+  return readToolLogEntries(sessionDir, count)
+    .filter((entry) => entry.status === "denied" || entry.status === "failed" || entry.status === "error")
+    .map((entry) => ({
+      source: /\b(?:plan[-_\s]?validate|validate_plan)\b/i.test(entry.gate)
+        ? "plan-validation"
+        : entry.status === "denied"
+          ? "tool-denial"
+          : "tool-failure",
+      provenance: ["tool-log"],
+      gate: entry.gate,
+      tool: entry.tool,
+      toolUseId: entry.toolUseId,
+      text: toolLogPriorErrorText(entry),
+      ts: entry.ts,
+    }));
+}
+
+function toolLogPriorErrorText(entry: ToolLogEntry): string {
+  const detail = entry.reason ?? entry.cmd ?? entry.path ?? entry.tool;
+  return `[${entry.gate}] ${entry.status}: ${entry.tool}${detail ? ` - ${detail}` : ""}`;
 }
 
 /**
