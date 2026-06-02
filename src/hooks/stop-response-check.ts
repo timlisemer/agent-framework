@@ -221,7 +221,10 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
     userText: getMostRecentMessage(tx.user).content,
     priorErrorContext: mergePriorErrorContexts(
       extractActionableToolResultFeedback(tx.tool),
-      readRecentToolLogPriorErrors(sessionDir, 25),
+      readRecentToolLogPriorErrors(sessionDir, 25, {
+        sinceTs: state.lastUserMessageTimestamp || undefined,
+        onlyUnresolvedSinceSuccess: true,
+      }),
     ),
   };
 

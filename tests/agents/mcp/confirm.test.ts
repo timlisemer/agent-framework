@@ -161,22 +161,46 @@ describe("runConfirmAgent planfile context", () => {
     expect(context).not.toContain("=== DEDUPLICATION USER REQUIREMENT ===");
   });
 
-  it("returns an error before check when explicit optional_planfile is unreadable", async () => {
+  it("returns an error before LLM when explicit optional_planfile is unreadable after check passes", async () => {
     const missingPath = path.join(tempDir, "missing.md");
 
     const result = await runConfirmAgent(tempDir, "haiku", undefined, missingPath);
 
     expect(result).toContain("ERROR: optional_planfile was provided but could not be read");
     expect(result).toContain(missingPath);
-    expect(mocks.runCheckAgent).not.toHaveBeenCalled();
+    expect(mocks.runCheckAgent).toHaveBeenCalled();
+    expect(mocks.getUncommittedChangesCancellable).not.toHaveBeenCalled();
     expect(mocks.runAgent).not.toHaveBeenCalled();
   });
 
-  it("returns an error before check when explicit optional_planfile is blank", async () => {
+  it("returns an error before LLM when explicit optional_planfile is blank after check passes", async () => {
     const result = await runConfirmAgent(tempDir, "haiku", undefined, "  ");
 
     expect(result).toBe("ERROR: optional_planfile was provided but the planfile path is empty.");
-    expect(mocks.runCheckAgent).not.toHaveBeenCalled();
+    expect(mocks.runCheckAgent).toHaveBeenCalled();
+    expect(mocks.getUncommittedChangesCancellable).not.toHaveBeenCalled();
+    expect(mocks.runAgent).not.toHaveBeenCalled();
+  });
+
+  it("returns check failure before optional_planfile deterministic errors", async () => {
+    const missingPath = path.join(tempDir, "missing.md");
+    mocks.runCheckAgent.mockResolvedValue(`## Results
+- Errors: 1
+- Warnings: 0
+- Status: FAIL
+
+## Errors
+src/foo.ts:1: Type error.
+
+## Warnings
+(none)`);
+
+    const result = await runConfirmAgent(tempDir, "haiku", undefined, missingPath);
+
+    expect(result).toContain("## Check Failure");
+    expect(result).toContain("src/foo.ts:1: Type error.");
+    expect(result).not.toContain("optional_planfile");
+    expect(mocks.getUncommittedChangesCancellable).not.toHaveBeenCalled();
     expect(mocks.runAgent).not.toHaveBeenCalled();
   });
 

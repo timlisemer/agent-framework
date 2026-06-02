@@ -312,11 +312,12 @@ export interface AgentExecutionResult {
  * );
  *
  * // Track telemetry with full context
+ * const confirmMcp = activeSpec().mcpWireName("confirm");
  * trackAgentExecution({
  *   agentName: "confirm",
- *   hookName: "mcp__agent-framework__confirm",
+ *   hookName: confirmMcp,
  *   decision: extractDecision(result.output) ?? "DECLINED",
- *   toolName: "mcp__agent-framework__confirm",
+ *   toolName: confirmMcp,
  *   workingDir: cwd,
  *   latencyMs: result.latencyMs,
  *   modelTier: result.modelTier,

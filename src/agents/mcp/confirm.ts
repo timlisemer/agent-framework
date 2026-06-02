@@ -238,8 +238,6 @@ export async function runConfirmAgent(
   logAgentStarted("confirm", getHookName());
 
   const tier = parseTierName(tierName);
-  const planfile = await resolveConfirmPlanfile(workingDir, sessionContext.sessionDir, optionalPlanfile);
-  if (planfile.kind === "error") return planfile.message;
 
   // Step 1: Run check agent first
   const checkResult = await runCheckAgent(workingDir, undefined, options);
@@ -254,6 +252,11 @@ export async function runConfirmAgent(
     // Note: No telemetry here since no LLM was called - check agent handles its own telemetry
     return formatCheckFailure(checkResult, errorCount);
   }
+
+  const planfile = await resolveConfirmPlanfile(workingDir, sessionContext.sessionDir, optionalPlanfile);
+  const deterministicErrors: string[] = [];
+  if (planfile.kind === "error") deterministicErrors.push(planfile.message);
+  if (deterministicErrors.length > 0) return deterministicErrors.join("\n");
 
   // Step 3: Get git data
   throwIfAborted(options.signal);

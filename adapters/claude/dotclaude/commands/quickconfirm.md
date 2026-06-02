@@ -13,8 +13,9 @@ You MUST use mcp__agent-framework__confirm for confirm. Do not use raw check, te
 
 Do not pass extra_context. Do not pass a placeholder string such as "no extra context".
 
-2. If the confirm result is DECLINED or contains errors, you MUST spell out the specific errors returned by the MCP.
+2. If the confirm result is DECLINED or contains errors, you MUST spell out the specific errors returned by the MCP before making any repair edits.
    - If multiple errors are returned, list the multiple errors; do not replace them with only a vague count or summary such as "check failed with N errors".
+   - Do not silently proceed to fixes after a DECLINED result; first show the returned error text clearly enough that the user can see exactly what quickconfirm is repairing.
 
 3. Fix every returned error by editing files.
 

@@ -134,8 +134,31 @@ export function readToolLogEntries(sessionDir: string, count: number): ToolLogEn
   return readJsonl<ToolLogEntry>(sessionToolLogFile(sessionDir), { tail: count });
 }
 
-export function readRecentToolLogPriorErrors(sessionDir: string, count: number): PriorErrorContext[] {
-  return readToolLogEntries(sessionDir, count)
+interface PriorErrorReadOptions {
+  sinceTs?: number;
+  onlyUnresolvedSinceSuccess?: boolean;
+}
+
+export function readRecentToolLogPriorErrors(
+  sessionDir: string,
+  count: number,
+  opts: PriorErrorReadOptions = {},
+): PriorErrorContext[] {
+  let entries = readToolLogEntries(sessionDir, count);
+  if (opts.sinceTs !== undefined) {
+    entries = entries.filter((entry) => entry.ts >= opts.sinceTs!);
+  }
+  if (opts.onlyUnresolvedSinceSuccess) {
+    let lastSuccessIndex = -1;
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].status === "allowed") {
+        lastSuccessIndex = i;
+        break;
+      }
+    }
+    if (lastSuccessIndex >= 0) entries = entries.slice(lastSuccessIndex + 1);
+  }
+  return entries
     .filter((entry) => entry.status === "denied" || entry.status === "failed" || entry.status === "error")
     .map((entry) => ({
       source: /\b(?:plan[-_\s]?validate|validate_plan)\b/i.test(entry.gate)

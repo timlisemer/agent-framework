@@ -1,5 +1,26 @@
-import { describe, it, expect } from "vitest";
-import { formatToolDetail } from "../../src/utils/session-store.js";
+import { describe, it, expect, afterEach } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import {
+  appendToolLog,
+  formatToolDetail,
+  readRecentToolLogPriorErrors,
+} from "../../src/utils/session-store.js";
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function tempSessionDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "session-store-test-"));
+  tempDirs.push(dir);
+  return dir;
+}
 
 describe("formatToolDetail", () => {
   it("returns 'Edit <path>' for Edit tool", () => {
@@ -40,5 +61,75 @@ describe("formatToolDetail", () => {
   it("handles missing input fields with 'unknown'", () => {
     expect(formatToolDetail("Edit", {})).toBe("Edit unknown");
     expect(formatToolDetail("Bash", {})).toBe("");
+  });
+});
+
+describe("readRecentToolLogPriorErrors", () => {
+  it("ignores prior errors older than the latest user message timestamp", async () => {
+    const sessionDir = tempSessionDir();
+    await appendToolLog(sessionDir, {
+      ts: 100,
+      tool: "mcp-scenario_tester",
+      status: "denied",
+      gate: "prediction-block",
+      reason: "previous denied tool",
+      ms: 1,
+    });
+
+    expect(readRecentToolLogPriorErrors(sessionDir, 25, { sinceTs: 200 })).toEqual([]);
+  });
+
+  it("ignores prior errors when a successful tool call happened afterward", async () => {
+    const sessionDir = tempSessionDir();
+    await appendToolLog(sessionDir, {
+      ts: 100,
+      tool: "mcp-scenario_tester",
+      status: "denied",
+      gate: "prediction-block",
+      reason: "previous denied tool",
+      ms: 1,
+    });
+    await appendToolLog(sessionDir, {
+      ts: 150,
+      tool: "mcp-scenario_tester",
+      status: "allowed",
+      gate: "all-rules",
+      ms: 1,
+    });
+
+    expect(readRecentToolLogPriorErrors(sessionDir, 25, {
+      sinceTs: 1,
+      onlyUnresolvedSinceSuccess: true,
+    })).toEqual([]);
+  });
+
+  it("keeps errors after the latest successful tool call in the current user turn", async () => {
+    const sessionDir = tempSessionDir();
+    await appendToolLog(sessionDir, {
+      ts: 100,
+      tool: "Read",
+      status: "allowed",
+      gate: "all-rules",
+      ms: 1,
+    });
+    await appendToolLog(sessionDir, {
+      ts: 150,
+      tool: "mcp-scenario_tester",
+      status: "denied",
+      gate: "prediction-block",
+      reason: "current denied tool",
+      ms: 1,
+    });
+
+    expect(readRecentToolLogPriorErrors(sessionDir, 25, {
+      sinceTs: 1,
+      onlyUnresolvedSinceSuccess: true,
+    })).toEqual([
+      expect.objectContaining({
+        source: "tool-denial",
+        tool: "mcp-scenario_tester",
+        gate: "prediction-block",
+      }),
+    ]);
   });
 });

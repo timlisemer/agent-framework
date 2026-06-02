@@ -24,7 +24,7 @@ import { VERSION } from "../version.js";
 export interface TrackAgentParams {
   /** Agent name (e.g., "tool-approve", "commit", "check") */
   agentName: string;
-  /** Hook or MCP tool name (e.g., "PreToolUse", "mcp__agent-framework__check") */
+  /** Hook or MCP tool name (e.g., "PreToolUse", activeSpec().mcpWireName("check")) */
   hookName: string;
   /** Decision result from the agent */
   decision: DecisionType;

@@ -110,6 +110,10 @@ function stripViolationPrefix(text: string): string {
   return text.replace(/^\[VIOLATION: ([^\]]+)\]\s*/, "$1: ");
 }
 
+function uniqueReasons(reasons: readonly string[]): string[] {
+  return [...new Set(reasons)];
+}
+
 function hasSpecificInvalidReason(text: string): boolean {
   const reason = text.replace(/^INVALID:\s*/i, "").trim();
   if (!reason) return false;
@@ -210,35 +214,12 @@ export async function validatePlanFileWithContract(
 
   throwIfAborted(options.signal);
   const findings = collectPlanValidationViolations(plan, input.workingDir, source.resolvedPath);
-
-  if (findings.hardRuleViolations.length > 0) {
+  const deterministicReasons = uniqueReasons(findings.allViolations.map(stripViolationPrefix));
+  if (deterministicReasons.length > 0) {
     const result: PlanValidationRunResult = {
       ...baseResult,
       status: "FAIL",
-      reasons: findings.hardRuleViolations
-        .map(stripViolationPrefix),
-    };
-    recordValidationResult(input, result);
-    return result;
-  }
-
-  if (findings.filteredBlacklistHighlights.length > 0) {
-    const result: PlanValidationRunResult = {
-      ...baseResult,
-      status: "FAIL",
-      reasons: findings.blacklistHighlights
-        .map(stripViolationPrefix),
-    };
-    recordValidationResult(input, result);
-    return result;
-  }
-
-  if (findings.allViolations.length > 0) {
-    const result: PlanValidationRunResult = {
-      ...baseResult,
-      status: "FAIL",
-      reasons: findings.allViolations
-        .map(stripViolationPrefix),
+      reasons: deterministicReasons,
     };
     recordValidationResult(input, result);
     return result;

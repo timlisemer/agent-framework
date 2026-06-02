@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { activeSpec } from "../../src/adapter/spec.js";
 import {
   EXPLICIT_OVERRIDE_RE,
   SELF_CONTRADICTING_BLOCK_INTENT_RE,
@@ -624,6 +625,77 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     );
     expect(result.decision).toBe("allow");
     expect(result.reason ?? "").toMatch(/explicit re-authorization/);
+  });
+});
+
+describe("step 3.7: latest user tool reauthorization", () => {
+  it("allows scenario tester when fresh message names the scenario tester under sustained frustration", () => {
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "low",
+      intent: "The user is insisting the assistant stay on the workflow.",
+      userMessageSnippet: "stay on the workflow",
+    });
+    const result = decidePrediction(
+      pred,
+      "mcp-scenario_tester",
+      { action: "run_scenario", scenario_name: "x" },
+      1,
+      "call the scenario tester, you are still banned from bash",
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason ?? "").toContain("fresh positive imperative");
+  });
+
+  it("does not authorize an unrelated tool when the latest message only negates frustration", () => {
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "low",
+      intent: "The user is clarifying mood.",
+      userMessageSnippet: "I am not frustrated",
+    });
+    const result = decidePrediction(
+      pred,
+      "Edit",
+      { file_path: "src/foo.ts", old_string: "a", new_string: "b" },
+      1,
+      "I am not frustrated",
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("denies scenario tester when the latest message revokes the scenario tester", () => {
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "low",
+      intent: "The user is blocking a tester call.",
+      userMessageSnippet: "stop using the scenario tester",
+    });
+    const result = decidePrediction(
+      pred,
+      "mcp-scenario_tester",
+      { action: "run_scenario", scenario_name: "x" },
+      1,
+      "stop using the scenario tester",
+    );
+    expect(result.decision).toBe("deny");
+  });
+
+  it("continues to deny when the latest message says stop using the tester", () => {
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "low",
+      intent: "The user is blocking a tester call.",
+      userMessageSnippet: "stop using the tester",
+    });
+    const result = decidePrediction(
+      pred,
+      "mcp-scenario_tester",
+      { action: "run_scenario", scenario_name: "x" },
+      1,
+      "stop using the tester",
+    );
+    expect(result.decision).toBe("deny");
   });
 });
 
@@ -1941,13 +2013,13 @@ describe("decidePrediction step 3.11: slash-command authorization", () => {
     // Pass empty latestUserMessage to prevent step 3.7 class-level reauth from firing
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__commit",
+      activeSpec().mcpWireName("commit"),
       {},
       1,
       "",
       [],
       false,
-      ["mcp__agent-framework__commit"],
+      [activeSpec().mcpWireName("commit")],
     );
     expect(result.decision).toBe("allow");
     expect(result.reason).toMatch(/Active slash command/);
@@ -1965,13 +2037,13 @@ describe("decidePrediction step 3.11: slash-command authorization", () => {
     // Pass empty latestUserMessage to prevent step 3.7 class-level reauth from firing
     const result = decidePrediction(
       pred,
-      "mcp__agent-framework__check",
+      activeSpec().mcpWireName("check"),
       {},
       1,
       "",
       [],
       false,
-      ["mcp__agent-framework__check"],
+      [activeSpec().mcpWireName("check")],
     );
     expect(result.decision).toBe("allow");
     expect(result.reason).toMatch(/Active slash command/);

@@ -115,6 +115,23 @@ describe("runValidatePlanAgent", () => {
     expect(workflowMatches).toHaveLength(1);
   });
 
+  it("accumulates all deterministic violations before the LLM fallback", async () => {
+    const plan = validPlan()
+      .replace("## Files To Modify", "## Files Modified")
+      .replace(
+        "This section contains concrete repository-specific details for Approach with `src/file.ts` references.",
+        "Option A: run make build over 5 days if needed.",
+      );
+    const result = await validatePlanText(
+      plan,
+      "INVALID: LLM fallback should not run when deterministic violations exist.",
+    );
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("Option A");
+    expect(result).toContain("Missing required heading \"## Files To Modify\".");
+    expect(result).not.toContain("LLM fallback should not run");
+  });
+
   it("names unresolved assumption language in deterministic failures", async () => {
     const result = await validatePlanText(
       validPlan().replace(
