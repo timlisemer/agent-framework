@@ -36,6 +36,15 @@ describe("SLASH_COMMAND_ALLOWED_TOOLS canonical keys", () => {
     expect(SLASH_COMMAND_ALLOWED_TOOLS["quickpush"]).toEqual(["mcp-push", "mcp-commit"]);
   });
 
+  it("quickconfirm maps to canonical mcp-confirm tool", () => {
+    expect(SLASH_COMMAND_ALLOWED_TOOLS["quickconfirm"]).toEqual([
+      "mcp-confirm",
+      "Edit",
+      "MultiEdit",
+      "Write",
+    ]);
+  });
+
   it("check maps to canonical mcp-check tool", () => {
     expect(SLASH_COMMAND_ALLOWED_TOOLS["check"]).toEqual(["mcp-check"]);
   });
@@ -67,11 +76,13 @@ describe("RESTRICTED_MCPS", () => {
 describe("claudeSpec.recognizeWorkflowInvocation", () => {
   it("detects Claude slash-command tags", () => {
     expect(claudeSpec.recognizeWorkflowInvocation("<command-name>/quickpush</command-name>")).toBe("quickpush");
+    expect(claudeSpec.recognizeWorkflowInvocation("<command-name>/quickconfirm</command-name>")).toBe("quickconfirm");
     expect(claudeSpec.recognizeWorkflowInvocation("<command-name>/plan3</command-name>")).toBe("plan3");
   });
 
   it("detects direct slash prompts", () => {
     expect(claudeSpec.recognizeWorkflowInvocation("/quickpush")).toBe("quickpush");
+    expect(claudeSpec.recognizeWorkflowInvocation("/quickconfirm")).toBe("quickconfirm");
     expect(claudeSpec.recognizeWorkflowInvocation("  /check now")).toBe("check");
     expect(claudeSpec.recognizeWorkflowInvocation("  /locate-scenario \"quote\"")).toBe("locate-scenario");
   });
@@ -85,7 +96,9 @@ describe("claudeSpec.recognizeWorkflowInvocation", () => {
 describe("claudeSpec.isWorkflowInvocationOnly", () => {
   it("treats bare commands and plain command parameters as workflow-only", () => {
     expect(claudeSpec.isWorkflowInvocationOnly("<command-name>/quickpush</command-name>")).toBe(true);
+    expect(claudeSpec.isWorkflowInvocationOnly("<command-name>/quickconfirm</command-name>")).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly("/quickpush")).toBe(true);
+    expect(claudeSpec.isWorkflowInvocationOnly("/quickconfirm")).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly("/check now")).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly('/locate-scenario "quote"')).toBe(true);
   });
@@ -99,12 +112,14 @@ describe("claudeSpec.isWorkflowInvocationOnly", () => {
 describe("codexSpec.recognizeWorkflowInvocation", () => {
   it("detects Codex skill mentions", () => {
     expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-quickpush")).toBe("quickpush");
+    expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-quickconfirm")).toBe("quickconfirm");
     expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-transcript")).toBe("transcript");
     expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-locate-scenario")).toBe("locate-scenario");
   });
 
   it("detects Codex skill context blocks", () => {
     expect(codexSpec.recognizeWorkflowInvocation("<skill>\n<name>agent-framework-quickpush</name>\n</skill>")).toBe("quickpush");
+    expect(codexSpec.recognizeWorkflowInvocation("<skill>\n<name>agent-framework-quickconfirm</name>\n</skill>")).toBe("quickconfirm");
     expect(codexSpec.recognizeWorkflowInvocation("---\nname: agent-framework-confirm\ndescription: Confirm\n---")).toBe("confirm");
   });
 
@@ -118,7 +133,9 @@ describe("codexSpec.recognizeWorkflowInvocation", () => {
 describe("codexSpec.isWorkflowInvocationOnly", () => {
   it("treats bare Codex skill wrappers as workflow-only", () => {
     expect(codexSpec.isWorkflowInvocationOnly("$agent-framework-quickpush")).toBe(true);
+    expect(codexSpec.isWorkflowInvocationOnly("$agent-framework-quickconfirm")).toBe(true);
     expect(codexSpec.isWorkflowInvocationOnly("<skill>\n<name>agent-framework-quickpush</name>\n</skill>")).toBe(true);
+    expect(codexSpec.isWorkflowInvocationOnly("<skill>\n<name>agent-framework-quickconfirm</name>\n</skill>")).toBe(true);
     expect(codexSpec.isWorkflowInvocationOnly("---\nname: agent-framework-confirm\ndescription: Confirm\n---")).toBe(true);
   });
 
@@ -161,6 +178,19 @@ describe("resolveActiveSlashCommandAllowedTools (Claude adapter)", () => {
     await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual([
       "mcp-push",
       "mcp-commit",
+    ]);
+  });
+
+  it("resolves quickconfirm to canonical mcp-confirm", async () => {
+    const transcript = await writeTranscript([
+      claudeUserEntry("<command-name>/quickconfirm</command-name>"),
+    ]);
+
+    await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual([
+      "mcp-confirm",
+      "Edit",
+      "MultiEdit",
+      "Write",
     ]);
   });
 

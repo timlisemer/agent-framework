@@ -20,6 +20,7 @@ export const SLASH_COMMAND_GATED_MCPS: Record<string, readonly CanonicalMcp[]> =
   push:      ["push", "commit"],
   quickpush: ["push", "commit"],
   confirm:   ["confirm"],
+  quickconfirm: ["confirm"],
 };
 
 /**
@@ -50,6 +51,7 @@ export const SLASH_COMMAND_ALLOWED_TOOLS: Record<string, readonly string[]> = {
   push:      ["mcp-push", "mcp-commit"],
   quickpush: ["mcp-push", "mcp-commit"],
   confirm:   ["mcp-confirm"],
+  quickconfirm: ["mcp-confirm", "Edit", "MultiEdit", "Write"],
   check:     ["mcp-check"],
   transcript: ["mcp-transcript"],
   "locate-scenario": ["mcp-locate_scenario"],

@@ -84,12 +84,12 @@ export const CANONICAL_MCPS: readonly CanonicalMcp[] = [
 ] as const;
 
 export type CanonicalWorkflow =
-  | "commit" | "push" | "quickpush" | "confirm"
+  | "commit" | "push" | "quickpush" | "confirm" | "quickconfirm"
   | "check"  | "transcript" | "locate-scenario"
   | "plan1"  | "plan3" | "plan5" | "implement";
 
 export const CANONICAL_WORKFLOWS: readonly CanonicalWorkflow[] = [
-  "commit", "push", "quickpush", "confirm", "check", "transcript", "locate-scenario",
+  "commit", "push", "quickpush", "confirm", "quickconfirm", "check", "transcript", "locate-scenario",
   "plan1", "plan3", "plan5", "implement",
 ] as const;
 
