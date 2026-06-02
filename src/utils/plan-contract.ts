@@ -70,6 +70,18 @@ function acceptedCheckMcpWireNames(configuredWireName?: string): string[] {
   ].filter((wireName, index, all) => all.indexOf(wireName) === index);
 }
 
+function hasWorkingDirReference(text: string): boolean {
+  return /\bworking_dir\b/.test(text);
+}
+
+function hasLargerCodeChangeCadence(text: string): boolean {
+  return /\bafter\s+(?:each\s+larger\s+code\s+change|larger\s+code\s+changes)\b/i.test(text);
+}
+
+function formatAssistantVerificationCheckMessage(wireName: string): string {
+  return `Assistant Verification must state \`${wireName}\` is run with repository \`working_dir\` after each larger code change.`;
+}
+
 export function readRequiredFinalPlanHeadings(projectDir: string): string[] {
   void projectDir;
   const envRoot = process.env.AGENT_FRAMEWORK_ROOT;
@@ -266,12 +278,14 @@ export function validatePlanContractWithRequiredHeadings(
   if (
     assistantVerification.trim() &&
     checkMcpWireNames.length > 0 &&
-    !checkMcpWireNames.some((wireName) => assistantVerification.includes(wireName))
+    (!checkMcpWireNames.some((wireName) => assistantVerification.includes(wireName)) ||
+      !hasWorkingDirReference(assistantVerification) ||
+      !hasLargerCodeChangeCadence(assistantVerification))
   ) {
     findings.push({
       kind: "assistant_verification_not_mcp_check",
       heading: "Assistant Verification",
-      message: "Assistant Verification must use the agent-framework check MCP with the repository working_dir.",
+      message: formatAssistantVerificationCheckMessage(checkMcpWireNames[0]),
     });
   }
   if (hasDirectProjectCommandInstruction(assistantVerification)) {

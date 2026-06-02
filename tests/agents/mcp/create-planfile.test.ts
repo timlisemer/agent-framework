@@ -38,7 +38,7 @@ function planBody(): string {
       return `## ${heading}\n\nInput\n  |\n  v\nPlanfile creator\n  |\n  v\nValidated planfile`;
     }
     if (heading === "Assistant Verification") {
-      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\`.`;
+      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\` after each larger code change.`;
     }
     if (heading === "Manual User Verification") {
       return `## ${heading}\n\nNo manual user verification is required.`;

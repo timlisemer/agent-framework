@@ -62,8 +62,8 @@ const USER_GOAL_SECTION = "User Goal";
 const MANUAL_USER_VERIFICATION_SECTION = /manual\s+(user\s+)?verification/i;
 
 /**
- * Collect deterministic plan-validation findings that are shared by the
- * plan-edit hook and the validate_plan MCP.
+ * Collect deterministic plan-validation findings, including planning-contract
+ * checks, that are shared by the plan-edit hook and the validate_plan MCP.
  */
 export function collectPlanValidationViolations(
   resultingPlan: string,

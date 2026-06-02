@@ -33,7 +33,7 @@ function validPlan(planPath = "/tmp/validate-plan.md", planName = "validate-plan
       return `## ${heading}\n\nInput\n  |\n  v\nPlan validator\n  |\n  v\nMCP output`;
     }
     if (heading === "Assistant Verification") {
-      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\`.`;
+      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\` after each larger code change.`;
     }
     if (heading === "Manual User Verification") {
       return `## ${heading}\n\nNo manual user verification is required.`;
@@ -155,6 +155,19 @@ describe("runValidatePlanAgent", () => {
       ),
     );
     expect(result).toContain("- Status: PASS");
+  });
+
+  it("reports the complete deterministic Assistant Verification failure before LLM fallback", async () => {
+    const result = await validatePlanText(
+      validPlan().replace(
+        /## Assistant Verification[\s\S]*?(?=\n\n## Manual User Verification)/,
+        "## Assistant Verification\n\nAssistant Verification must use the agent-framework check MCP with the repository working_dir.",
+      ),
+      "INVALID: Assistant Verification must state `mcp__agent_framework__check` is run with `working_dir` after each larger code change, not only as a single final check.",
+    );
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain(`Assistant Verification must state \`${activeSpec().mcpWireName("check")}\` is run with repository \`working_dir\` after each larger code change.`);
+    expect(result).not.toContain("not only as a single final check");
   });
 
   it("still fails scanner-prohibited text outside excluded sections", async () => {

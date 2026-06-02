@@ -52,7 +52,7 @@ function validPlan(planPath = "/tmp/test-plan.md", planName = "test-plan"): stri
       return `## ${heading}\n\nInput\n  |\n  v\nDetector\n  |\n  v\nHook output`;
     }
     if (heading === "Assistant Verification") {
-      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\`.`;
+      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\` after each larger code change.`;
     }
     if (heading === "Manual User Verification") {
       return `## ${heading}\n\nNo manual user verification is required.`;
@@ -141,9 +141,9 @@ describe("plan contract", () => {
       for (const body of directCommands) {
         const activeCheckMcp = activeSpec().mcpWireName("check");
         const plan = validPlan().replace(
-          new RegExp(`Run \`${escapeRegExp(activeCheckMcp)}\` with \`working_dir\` set to \`/repo\`\\.`),
+          new RegExp(`Run \`${escapeRegExp(activeCheckMcp)}\` with \`working_dir\` set to \`/repo\` after each larger code change\\.`),
           [
-            `Run \`${activeCheckMcp}\` with \`working_dir\` set to \`/repo\`.`,
+            `Run \`${activeCheckMcp}\` with \`working_dir\` set to \`/repo\` after each larger code change.`,
             body,
           ].join("\n"),
         );
@@ -159,9 +159,9 @@ describe("plan contract", () => {
     withProject((projectDir) => {
       const activeCheckMcp = activeSpec().mcpWireName("check");
       const plan = validPlan().replace(
-        `Run \`${activeCheckMcp}\` with \`working_dir\` set to \`/repo\`.`,
+        `Run \`${activeCheckMcp}\` with \`working_dir\` set to \`/repo\` after each larger code change.`,
         [
-          `Run \`${activeCheckMcp}\` with \`working_dir\` set to \`/repo\`.`,
+          `Run \`${activeCheckMcp}\` with \`working_dir\` set to \`/repo\` after each larger code change.`,
           "Run `cargo test -p astral-shell`.",
           "Confirm no remaining references to `PopupFocusPolicy`.",
         ].join("\n"),
@@ -171,6 +171,60 @@ describe("plan contract", () => {
       }).find((f) => f.kind === "assistant_verification_not_mcp_check");
       expect(finding?.message).toContain("direct project shell");
       expect(finding?.message).toContain("non-shell confirmation bullets may remain");
+    });
+  });
+
+  it("rejects Assistant Verification that names the check MCP without working_dir or cadence", () => {
+    withProject((projectDir) => {
+      const plan = validPlan().replace(
+        /## Assistant Verification[\s\S]*?(?=\n\n## Manual User Verification)/,
+        "## Assistant Verification\n\nRun `mcp__agent_framework__check`.",
+      );
+      const finding = validatePlanContract(plan, projectDir, {
+        checkMcpWireName: activeSpec().mcpWireName("check"),
+      }).find((f) => f.kind === "assistant_verification_not_mcp_check");
+      expect(finding?.message).toContain("working_dir");
+      expect(finding?.message).toContain("after each larger code change");
+    });
+  });
+
+  it("rejects Assistant Verification that names working_dir without the larger-code-change cadence", () => {
+    withProject((projectDir) => {
+      const plan = validPlan().replace(
+        /## Assistant Verification[\s\S]*?(?=\n\n## Manual User Verification)/,
+        "## Assistant Verification\n\nRun `mcp__agent_framework__check` with `working_dir` set to `/repo`.",
+      );
+      const finding = validatePlanContract(plan, projectDir, {
+        checkMcpWireName: activeSpec().mcpWireName("check"),
+      }).find((f) => f.kind === "assistant_verification_not_mcp_check");
+      expect(finding?.message).toContain("after each larger code change");
+    });
+  });
+
+  it("reports the complete stricter message for the old first-pass remediation wording", () => {
+    withProject((projectDir) => {
+      const plan = validPlan().replace(
+        /## Assistant Verification[\s\S]*?(?=\n\n## Manual User Verification)/,
+        "## Assistant Verification\n\nAssistant Verification must use the agent-framework check MCP with the repository working_dir.",
+      );
+      const findings = validatePlanContract(plan, projectDir, {
+        checkMcpWireName: activeSpec().mcpWireName("check"),
+      }).filter((f) => f.kind === "assistant_verification_not_mcp_check");
+      expect(findings).toHaveLength(1);
+      expect(findings[0]?.message).toContain("working_dir");
+      expect(findings[0]?.message).toContain("after each larger code change");
+    });
+  });
+
+  it("accepts Assistant Verification with the complete check MCP wording", () => {
+    withProject((projectDir) => {
+      const plan = validPlan().replace(
+        /## Assistant Verification[\s\S]*?(?=\n\n## Manual User Verification)/,
+        "## Assistant Verification\n\nRun `mcp__agent_framework__check` with `working_dir` set to `/repo` after each larger code change.",
+      );
+      expect(validatePlanContract(plan, projectDir, {
+        checkMcpWireName: activeSpec().mcpWireName("check"),
+      })).toEqual([]);
     });
   });
 
