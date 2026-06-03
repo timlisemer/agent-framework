@@ -338,10 +338,15 @@ The `commit`, `confirm`, and `push` tools use MCP elicitation (`server.elicitInp
 
 ```
 Tool called → getRepoInfo()
-  → Multiple repos? → elicitInput: repo selection form
-  → For each repo → elicitInput: tier + focus preferences form
-  → Run agent chain per repo
-  → Return combined results
+  → Multiple repos? → elicitInput: all repos vs individual repos
+  → All repos:
+      → Run one combined confirm/check scope across dirty repos
+      → commit: reuse that confirm result while committing each dirty repo
+  → Individual repos:
+      → elicitInput: repo selection form
+      → For each repo → elicitInput: tier + focus preferences form
+      → Run agent chain per selected repo
+  → Return results
 ```
 
 ### Confirm Uncertainty Elicitation (last resort)
@@ -357,7 +362,7 @@ confirm returns DECLINED + UNCERTAIN markers
 
 ### Skip Elicitation
 
-All three tools accept `skip_elicitation: true` to bypass interactive questions and use defaults. Used by `/quickpush` for zero-interaction commits.
+All three tools accept `skip_elicitation: true` to bypass interactive questions and use defaults. For `confirm` and `commit`, this selects the all-repos scope and defaults the confirm tier to `opus` when no tier is provided. Used by `/quickpush` for zero-interaction commits.
 
 ## SDK Agent Restrictions
 

@@ -19,8 +19,8 @@ import { z } from "zod";
 import { runCheckAgent } from "../agents/mcp/check.js";
 import { runValidatePlanAgent } from "../agents/mcp/validate-plan.js";
 import { runCreatePlanfileAgent } from "../agents/mcp/create-planfile.js";
-import { runConfirmAgent } from "../agents/mcp/confirm.js";
-import { runCommitAgent } from "../agents/mcp/commit.js";
+import { confirmResultFailed, runConfirmAgent } from "../agents/mcp/confirm.js";
+import { runCommitAgent, runCommitAgentWithSharedConfirm } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
 import { runTranscriptAgent } from "../agents/mcp/transcript.js";
 import { runLocateScenarioMcp } from "../agents/mcp/locate-scenario.js";
@@ -42,11 +42,12 @@ import {
   TRANSCRIPT_HELP,
   LOCATE_SCENARIO_HELP,
 } from "./help-docs.js";
-import { getRepoInfo, getRepoInfoCancellable } from "../utils/git-utils.js";
+import { getRepoInfo, getRepoInfoCancellable, sortReposWithChangesSubmodulesFirst } from "../utils/git-utils.js";
 import { throwIfAborted } from "../utils/cancellation.js";
 import { initializeTelemetry } from "../telemetry/index.js";
 import {
   elicitRepoSelection,
+  elicitRepoScope,
   elicitPreferences,
   sortReposSubmodulesFirst,
   parseUncertainties,
@@ -195,7 +196,7 @@ registerTimedTool(
   "confirm",
   {
     title: "Confirm",
-    description: "Binary code quality gate. Detects repos with changes, asks user for preferences via form, then analyzes git diff. Returns CONFIRMED or DECLINED per repo.",
+    description: "Review uncommitted code changes. Detects repos with changes, asks user for preferences via form, runs check, then analyzes git diff only if check passes. Returns raw check output on check failure, otherwise CONFIRMED or DECLINED.",
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
       model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Model tier for evaluation (default: opus)"),
@@ -214,19 +215,50 @@ registerTimedTool(
       return { content: [{ type: "text", text: "No repositories with uncommitted changes found." }] };
     }
 
-    // Non-interactive mode: validate required params instead of asking
-    if (args.skip_elicitation && !args.model_tier) {
-      return { content: [{ type: "text", text: "ERROR: model_tier is required when skip_elicitation is true." }] };
+    let repoScope: "all" | "individual" = args.skip_elicitation ? "all" : "individual";
+    if (!args.skip_elicitation && repoInfo.reposWithChanges.length > 1) {
+      const scopeChoice = await elicitRepoScope(server.server, "confirm", repoInfo, options);
+      throwIfAborted(signal);
+      if (!scopeChoice) {
+        return { content: [{ type: "text", text: "No repository scope selected." }] };
+      }
+      repoScope = scopeChoice;
     }
 
-    // Select repos (elicit if multiple, unless skipped)
-    let selectedRepos = repoInfo.reposWithChanges;
-    if (!args.skip_elicitation && repoInfo.reposWithChanges.length > 1) {
-      selectedRepos = await elicitRepoSelection(server.server, repoInfo, options);
-      throwIfAborted(signal);
-      if (selectedRepos.length === 0) {
-        return { content: [{ type: "text", text: "No repositories selected." }] };
+    if (repoScope === "all") {
+      let result = await runConfirmAgent(
+        repoInfo.mainRepo,
+        args.model_tier || "opus",
+        args.extra_context,
+        args.optional_planfile,
+        { ...options, repoScope: { mode: "all", repoInfo } },
+      );
+
+      if (!args.skip_elicitation && result.includes("DECLINED")) {
+        const uncertainties = parseUncertainties(result);
+        if (uncertainties.length > 0) {
+          const clarification = await elicitUncertaintyClarification(server.server, uncertainties, options);
+          throwIfAborted(signal);
+          if (clarification) {
+            const retryContext = args.extra_context ? `${args.extra_context}\n${clarification}` : clarification;
+            result = await runConfirmAgent(
+              repoInfo.mainRepo,
+              args.model_tier || "opus",
+              retryContext,
+              args.optional_planfile,
+              { ...options, repoScope: { mode: "all", repoInfo } },
+            );
+          }
+        }
       }
+
+      return { content: [{ type: "text", text: result }] };
+    }
+
+    let selectedRepos = await elicitRepoSelection(server.server, repoInfo, options);
+    throwIfAborted(signal);
+    if (selectedRepos.length === 0) {
+      return { content: [{ type: "text", text: "No repositories selected." }] };
     }
     selectedRepos = sortReposSubmodulesFirst(selectedRepos, repoInfo);
 
@@ -259,7 +291,13 @@ registerTimedTool(
         extraContext = extraContext ? `${multiContext}\n${extraContext}` : multiContext;
       }
 
-      let result = await runConfirmAgent(repo.path, prefs.tier, extraContext, args.optional_planfile, options);
+      let result = await runConfirmAgent(
+        repo.path,
+        prefs.tier,
+        extraContext,
+        args.optional_planfile,
+        { ...options, repoScope: { mode: "single", repoInfo } },
+      );
 
       // Post-processing: If DECLINED with uncertainties, elicit clarification and retry
       if (!args.skip_elicitation && result.includes("DECLINED")) {
@@ -269,7 +307,13 @@ registerTimedTool(
           throwIfAborted(signal);
           if (clarification) {
             const retryContext = extraContext ? `${extraContext}\n${clarification}` : clarification;
-            result = await runConfirmAgent(repo.path, prefs.tier, retryContext, args.optional_planfile, options);
+            result = await runConfirmAgent(
+              repo.path,
+              prefs.tier,
+              retryContext,
+              args.optional_planfile,
+              { ...options, repoScope: { mode: "single", repoInfo } },
+            );
           }
         }
       }
@@ -309,21 +353,95 @@ registerTimedTool(
       return { content: [{ type: "text", text: "SKIPPED: No repositories with uncommitted changes found." }] };
     }
 
-    // Non-interactive mode: validate required params instead of asking
-    if (args.skip_elicitation && !args.model_tier) {
-      return { content: [{ type: "text", text: "ERROR: model_tier is required when skip_elicitation is true." }] };
+    let repoScope: "all" | "individual" = args.skip_elicitation ? "all" : "individual";
+    if (!args.skip_elicitation && repoInfo.reposWithChanges.length > 1) {
+      const scopeChoice = await elicitRepoScope(server.server, "commit", repoInfo, options);
+      throwIfAborted(signal);
+      if (!scopeChoice) {
+        return { content: [{ type: "text", text: "No repository scope selected." }] };
+      }
+      repoScope = scopeChoice;
     }
 
-    // Select repos (elicit if multiple, unless skipped)
-    let selectedRepos = repoInfo.reposWithChanges;
-    if (!args.skip_elicitation && repoInfo.reposWithChanges.length > 1) {
-      selectedRepos = await elicitRepoSelection(server.server, repoInfo, options);
-      throwIfAborted(signal);
-      if (selectedRepos.length === 0) {
-        return { content: [{ type: "text", text: "No repositories selected." }] };
-      }
+    let selectedRepos = repoScope === "all"
+      ? sortReposWithChangesSubmodulesFirst(repoInfo)
+      : await elicitRepoSelection(server.server, repoInfo, options);
+    throwIfAborted(signal);
+    if (selectedRepos.length === 0) {
+      return { content: [{ type: "text", text: "No repositories selected." }] };
     }
     selectedRepos = sortReposSubmodulesFirst(selectedRepos, repoInfo);
+
+    if (repoScope === "all") {
+      let confirmResult = await runConfirmAgent(
+        repoInfo.mainRepo,
+        args.model_tier || "opus",
+        args.extra_context,
+        args.optional_planfile,
+        { ...options, repoScope: { mode: "all", repoInfo } },
+      );
+      if (!args.skip_elicitation && confirmResult.includes("DECLINED")) {
+        const uncertainties = parseUncertainties(confirmResult);
+        if (uncertainties.length > 0) {
+          const clarification = await elicitUncertaintyClarification(server.server, uncertainties, options);
+          throwIfAborted(signal);
+          if (clarification) {
+            const retryContext = args.extra_context ? `${args.extra_context}\n${clarification}` : clarification;
+            confirmResult = await runConfirmAgent(
+              repoInfo.mainRepo,
+              args.model_tier || "opus",
+              retryContext,
+              args.optional_planfile,
+              { ...options, repoScope: { mode: "all", repoInfo } },
+            );
+          }
+        }
+      }
+      if (confirmResultFailed(confirmResult)) {
+        return { content: [{ type: "text", text: confirmResult }] };
+      }
+
+      const repoNames = selectedRepos.map((repo) => repo.name).join(", ");
+      const sharedCommitContext = `SHARED ALL-REPOSITORIES CONFIRM CONTEXT:
+This commit is part of one all-repositories commit run covering: ${repoNames}.
+Use the shared confirm analysis to keep commit messages visibly related across repositories, while still describing only the current repository's own diff.`;
+
+      const results: string[] = [];
+      const committedRepos: typeof selectedRepos = [];
+      for (const repo of selectedRepos) {
+        throwIfAborted(signal);
+        const result = await runCommitAgentWithSharedConfirm(
+          repo.path,
+          confirmResult,
+          sharedCommitContext,
+          options,
+        );
+        if (/\nHASH: [0-9a-f]+$/.test(result)) {
+          committedRepos.push(repo);
+        }
+        if (selectedRepos.length > 1) {
+          results.push(`=== ${repo.name} (${repo.path}) ===\n${result}`);
+        } else {
+          results.push(result);
+        }
+      }
+
+      if (args.auto_push && committedRepos.length > 0) {
+        throwIfAborted(signal);
+        results.push("\n--- Push Results ---");
+        for (const repo of committedRepos) {
+          throwIfAborted(signal);
+          const pushResult = await runPushAgent(repo.path, options);
+          if (committedRepos.length > 1) {
+            results.push(`=== ${repo.name} (${repo.path}) ===\n${pushResult}`);
+          } else {
+            results.push(pushResult);
+          }
+        }
+      }
+
+      return { content: [{ type: "text", text: results.join("\n\n") }] };
+    }
 
     // Phase 1: Collect all preferences upfront
     const repoPrefs = new Map<string, { tier: string | undefined; extraContext: string | undefined }>();
@@ -355,7 +473,13 @@ registerTimedTool(
         extraContext = extraContext ? `${multiContext}\n${extraContext}` : multiContext;
       }
 
-      const result = await runCommitAgent(repo.path, prefs.tier, extraContext, args.optional_planfile, options);
+      const result = await runCommitAgent(
+        repo.path,
+        prefs.tier,
+        extraContext,
+        args.optional_planfile,
+        { ...options, repoScope: { mode: "single", repoInfo } },
+      );
 
       // runCommitAgent emits "HASH: <sha>" on its last line only on successful
       // commits (commit.ts:166). All failure paths omit it. Substring-matching

@@ -147,6 +147,27 @@ export interface RepoInfo {
   reposWithChanges: Array<{ path: string; name: string }>;
 }
 
+export interface RepoGitContext {
+  path: string;
+  name: string;
+  changes: GitChanges;
+}
+
+function sortRepoSelectionsSubmodulesFirst<T extends { path: string }>(
+  repos: T[],
+  mainRepo: string,
+): T[] {
+  const submodules = repos.filter((repo) => repo.path !== mainRepo);
+  const main = repos.filter((repo) => repo.path === mainRepo);
+  return [...submodules, ...main];
+}
+
+export function sortReposWithChangesSubmodulesFirst(
+  repoInfo: RepoInfo,
+): Array<{ path: string; name: string }> {
+  return sortRepoSelectionsSubmodulesFirst(repoInfo.reposWithChanges, repoInfo.mainRepo);
+}
+
 /**
  * Get all uncommitted code changes from a git repository.
  *
@@ -346,6 +367,117 @@ export async function getUncommittedChangesCancellable(
     diff: (trackedDiff.output || "") + untrackedDiff,
     diffStat: diffStat.output || "",
     untrackedDiff,
+  };
+}
+
+function formatRepoHeading(repo: { path: string; name: string }): string {
+  return `${repo.name} (${repo.path})`;
+}
+
+export function formatGitContextForRepos(repos: RepoGitContext[]): string {
+  if (repos.length === 0) {
+    return `GIT STATUS (files changed):
+(no changes)
+
+GIT DIFF (all uncommitted changes):
+(no diff)`;
+  }
+
+  return repos.map((repo) => `=== REPOSITORY: ${formatRepoHeading(repo)} ===
+
+GIT STATUS (files changed):
+${repo.changes.status || "(no changes)"}
+
+GIT DIFF (all uncommitted changes):
+${repo.changes.diff || "(no diff)"}`).join("\n\n");
+}
+
+export function formatSiblingRepoOverview(repos: RepoGitContext[]): string {
+  if (repos.length === 0) return "";
+
+  return `=== SIBLING REPOSITORY OVERVIEW ===
+These uncommitted code changes are part of a repository with multiple dirty repositories. The current repository is provided in full above. Other dirty repositories are shown here as overview-only context:
+
+${repos.map((repo) => `--- ${formatRepoHeading(repo)} ---
+GIT STATUS:
+${repo.changes.status || "(no changes)"}
+
+GIT DIFF STAT:
+${repo.changes.diffStat || "(no diff stat)"}`).join("\n\n")}
+=== END SIBLING REPOSITORY OVERVIEW ===`;
+}
+
+export async function getRepoGitContextsCancellable(
+  repos: Array<{ path: string; name: string }>,
+  options: CancellationOptions = {},
+): Promise<RepoGitContext[]> {
+  const contexts: RepoGitContext[] = [];
+  for (const repo of repos) {
+    throwIfAborted(options.signal);
+    contexts.push({
+      ...repo,
+      changes: await getUncommittedChangesCancellable(repo.path, options),
+    });
+  }
+  return contexts;
+}
+
+async function getRepoGitOverviewContextsCancellable(
+  repos: Array<{ path: string; name: string }>,
+  options: CancellationOptions = {},
+): Promise<RepoGitContext[]> {
+  const contexts: RepoGitContext[] = [];
+  for (const repo of repos) {
+    throwIfAborted(options.signal);
+    const status = await runGit(["status", "--porcelain"], repo.path, {
+      ...options,
+      maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+      maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    });
+    const diffStat = await runGit(["diff", "--stat", "HEAD"], repo.path, {
+      ...options,
+      maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+      maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    });
+    contexts.push({
+      ...repo,
+      changes: {
+        status: status.output || "",
+        diff: "",
+        diffStat: diffStat.output || "",
+        untrackedDiff: "",
+      },
+    });
+  }
+  return contexts;
+}
+
+export async function getAllReposGitContextCancellable(
+  repoInfo: RepoInfo,
+  options: CancellationOptions = {},
+): Promise<{ repos: RepoGitContext[]; context: string }> {
+  const repos = await getRepoGitContextsCancellable(
+    sortReposWithChangesSubmodulesFirst(repoInfo),
+    options,
+  );
+  return { repos, context: formatGitContextForRepos(repos) };
+}
+
+export async function getSingleRepoGitContextWithSiblingOverviewCancellable(
+  workingDir: string,
+  repoInfo: RepoInfo,
+  options: CancellationOptions = {},
+): Promise<{ current: RepoGitContext; siblingOverview: string }> {
+  const sortedRepos = sortReposWithChangesSubmodulesFirst(repoInfo);
+  const currentRepo = sortedRepos.find((repo) => repo.path === workingDir)
+    ?? { path: workingDir, name: path.basename(workingDir) };
+  const currentChanges = await getUncommittedChangesCancellable(currentRepo.path, options);
+  const siblingRepos = sortedRepos.filter((repo) => repo.path !== currentRepo.path);
+  const siblingContexts = await getRepoGitOverviewContextsCancellable(siblingRepos, options);
+
+  return {
+    current: { ...currentRepo, changes: currentChanges },
+    siblingOverview: formatSiblingRepoOverview(siblingContexts),
   };
 }
 

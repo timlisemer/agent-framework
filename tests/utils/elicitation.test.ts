@@ -3,6 +3,7 @@ import {
   sortReposSubmodulesFirst,
   parseUncertainties,
   elicitRepoSelection,
+  elicitRepoScope,
   elicitPreferences,
 } from "../../src/utils/elicitation.js";
 import type { RepoInfo } from "../../src/utils/git-utils.js";
@@ -117,7 +118,7 @@ describe("parseUncertainties", () => {
 });
 
 describe("elicitPreferences", () => {
-  it("uses Default/In depth/Broad-minimal review depth choices", async () => {
+  it("uses Default/In depth/Minimal review depth choices", async () => {
     const elicitInput = vi.fn().mockResolvedValue({
       action: "accept",
       content: { model_tier: "opus", focus: "Default" },
@@ -129,7 +130,7 @@ describe("elicitPreferences", () => {
     const schema = elicitInput.mock.calls[0][0].requestedSchema;
     expect(schema.properties.focus).toMatchObject({
       title: "Confirm review depth",
-      enum: ["Default", "In depth", "Broad/minimal"],
+      enum: ["Default", "In depth", "Minimal"],
       default: "Default",
     });
   });
@@ -147,10 +148,10 @@ describe("elicitPreferences", () => {
     expect(prefs.focus).toContain("deduplication/generic-code concerns");
   });
 
-  it("maps Broad/minimal to lightweight review instructions", async () => {
+  it("maps Minimal to lightweight review instructions", async () => {
     const elicitInput = vi.fn().mockResolvedValue({
       action: "accept",
-      content: { model_tier: "sonnet", focus: "Broad/minimal" },
+      content: { model_tier: "sonnet", focus: "Minimal" },
     });
 
     const prefs = await elicitPreferences({ elicitInput } as never, "repo");
@@ -158,6 +159,46 @@ describe("elicitPreferences", () => {
     expect(prefs.modelTier).toBe("sonnet");
     expect(prefs.focus).toContain("broad but lightweight pass");
     expect(prefs.focus).toContain("without deep optional exploration");
+  });
+});
+
+describe("elicitRepoScope", () => {
+  const repoInfo: RepoInfo = {
+    mainRepo: "/repo/main",
+    mainRepoName: "main",
+    mainRepoHasChanges: true,
+    submodules: [],
+    reposWithChanges: [
+      { path: "/repo/main", name: "main" },
+      { path: "/repo/sub", name: "sub" },
+    ],
+  };
+
+  it("asks an operation-specific all-vs-individual scope question defaulting to all", async () => {
+    const elicitInput = vi.fn().mockResolvedValue({
+      action: "accept",
+      content: { repo_scope: "All repositories" },
+    });
+
+    const scope = await elicitRepoScope({ elicitInput } as never, "commit", repoInfo);
+
+    expect(scope).toBe("all");
+    const request = elicitInput.mock.calls[0][0];
+    expect(request.message).toContain("Commit all repositories together");
+    expect(request.requestedSchema.properties.repo_scope).toMatchObject({
+      title: "Commit scope",
+      enum: ["All repositories", "Individual repositories"],
+      default: "All repositories",
+    });
+  });
+
+  it("returns individual when selected", async () => {
+    const elicitInput = vi.fn().mockResolvedValue({
+      action: "accept",
+      content: { repo_scope: "Individual repositories" },
+    });
+
+    await expect(elicitRepoScope({ elicitInput } as never, "confirm", repoInfo)).resolves.toBe("individual");
   });
 });
 

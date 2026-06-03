@@ -895,7 +895,7 @@ BLOCK if ANY of these apply:
    EXCEPTION: If user invoked the commit or push workflow, git-related questions ARE allowed:
    - Which repositories to commit/push (multi-repo selection)
    - Model tier for code review (opus/sonnet/haiku)
-   - Confirm review depth (Default/In depth/Broad-minimal)
+   - Confirm review depth (Default/In depth/Minimal)
    These are part of the commit and push workflows and should be ALLOWED.
 
 2. UNSEEN CONTENT - Question asks about content not yet shown to user:

@@ -8,7 +8,7 @@
  * ## FLOW
  *
  * 1. Run check agent first (linter/type-check must pass)
- * 2. If check fails, immediately DECLINE
+ * 2. If check fails, return check output verbatim
  * 3. Gather git status and diff
  * 4. Run SDK agent with investigation capabilities
  * 5. Return verdict (CONFIRMED or DECLINED)
@@ -21,7 +21,13 @@ import * as path from "path";
 import { EXECUTION_TYPES, parseTierName } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
-import { getUncommittedChangesCancellable } from "../../utils/git-utils.js";
+import {
+  formatGitContextForRepos,
+  getAllReposGitContextCancellable,
+  getSingleRepoGitContextWithSiblingOverviewCancellable,
+  getUncommittedChangesCancellable,
+  type RepoInfo,
+} from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import {
   findDeduplicationUserRequirement,
@@ -78,36 +84,16 @@ DECLINED: Agent returned malformed output
 ## Raw Output
 $RAW`;
 
-function extractCheckErrors(checkResult: string): string {
-  const errorsMatch = checkResult.match(/## Errors\s*\n([\s\S]*?)(?=\n## |\s*$)/);
-  const errors = errorsMatch ? errorsMatch[1].trim() : "";
-  if (errors && errors !== "(none)") {
-    return errors;
-  }
-
-  const trimmed = checkResult.trim();
-  return trimmed || "(check failed, but no check output was returned)";
+export function formatCheckFailure(checkResult: string, errorCount: number): string {
+  void errorCount;
+  return checkResult;
 }
 
-export function formatCheckFailure(checkResult: string, errorCount: number): string {
-  const checkErrors = extractCheckErrors(checkResult);
-
-  return `## Results
-- Files: SKIP
-- Code Quality: SKIP
-- Security: SKIP
-- Deduplication: SKIP
-- Documentation: SKIP
-- Tests: SKIP
-
-## Check Failure
-- Errors: ${errorCount}
-
-## Check Errors
-${checkErrors}
-
-## Verdict
-DECLINED: check failed with ${errorCount} error(s); see Check Errors above.`;
+export function confirmResultFailed(result: string): boolean {
+  return result.includes("DECLINED")
+    || result.startsWith("ERROR:")
+    || /-\s*Status:\s*FAIL\b/i.test(result)
+    || /\bStatus:\s*FAIL\b/i.test(result);
 }
 
 type ConfirmPlanfileResolution =
@@ -117,6 +103,14 @@ type ConfirmPlanfileResolution =
 
 type ConfirmSessionContext = {
   sessionDir?: string;
+};
+
+type ConfirmRepoScope =
+  | { mode: "single"; repoInfo?: RepoInfo }
+  | { mode: "all"; repoInfo: RepoInfo };
+
+type ConfirmOptions = CancellationOptions & {
+  repoScope?: ConfirmRepoScope;
 };
 
 async function readPlanfileForConfirm(planPath: string): Promise<ConfirmPlanfileResolution> {
@@ -225,14 +219,14 @@ If the changed code clearly violates this requirement, fail Deduplication and qu
  * @param tierName - Optional model tier (haiku/sonnet/opus, defaults to opus)
  * @param extraContext - Optional extra instructions for the evaluation
  * @param optionalPlanfile - Optional explicit planfile path to include as plan context
- * @returns Structured verdict with CONFIRMED or DECLINED
+ * @returns Check output on check failure, otherwise structured verdict with CONFIRMED or DECLINED
  */
 export async function runConfirmAgent(
   workingDir: string,
   tierName?: string,
   extraContext?: string,
   optionalPlanfile?: string,
-  options: CancellationOptions = {}
+  options: ConfirmOptions = {}
 ): Promise<string> {
   const sessionContext = resolveConfirmSessionContext(workingDir);
   logAgentStarted("confirm", getHookName());
@@ -240,7 +234,13 @@ export async function runConfirmAgent(
   const tier = parseTierName(tierName);
 
   // Step 1: Run check agent first
-  const checkResult = await runCheckAgent(workingDir, undefined, options);
+  const allRepoInfo = options.repoScope?.mode === "all" ? options.repoScope.repoInfo : undefined;
+  const checkResult = allRepoInfo
+    ? await runCheckAgent(allRepoInfo.mainRepo, undefined, {
+        ...options,
+        repoScope: { mode: "all", repoInfo: allRepoInfo },
+      })
+    : await runCheckAgent(workingDir, undefined, options);
 
   const errorMatch = checkResult.match(/Errors:\s*(\d+)/i);
   const errorCount = errorMatch ? parseInt(errorMatch[1], 10) : 0;
@@ -249,7 +249,7 @@ export async function runConfirmAgent(
 
   // Step 2: If check failed, decline immediately
   if (checkStatus === "FAIL" || errorCount > 0) {
-    // Note: No telemetry here since no LLM was called - check agent handles its own telemetry
+    // No confirm output or LLM call here: check output is the authoritative failure.
     return formatCheckFailure(checkResult, errorCount);
   }
 
@@ -260,7 +260,38 @@ export async function runConfirmAgent(
 
   // Step 3: Get git data
   throwIfAborted(options.signal);
-  const { status, diff } = await getUncommittedChangesCancellable(workingDir, options);
+  let status = "";
+  let diff = "";
+  let gitContext = "";
+  if (allRepoInfo) {
+    const allContext = await getAllReposGitContextCancellable(allRepoInfo, options);
+    status = allContext.repos.map((repo) => repo.changes.status).join("\n");
+    diff = allContext.repos.map((repo) => repo.changes.diff).join("\n");
+    gitContext = allContext.context;
+  } else if (
+    options.repoScope?.mode === "single"
+    && options.repoScope.repoInfo
+    && options.repoScope.repoInfo.reposWithChanges.length > 1
+  ) {
+    const singleRepoInfo = options.repoScope.repoInfo;
+    const singleContext = await getSingleRepoGitContextWithSiblingOverviewCancellable(
+      workingDir,
+      singleRepoInfo,
+      options,
+    );
+    status = singleContext.current.changes.status;
+    diff = singleContext.current.changes.diff;
+    gitContext = `${formatGitContextForRepos([singleContext.current])}${singleContext.siblingOverview ? `\n\n${singleContext.siblingOverview}` : ""}`;
+  } else {
+    const changes = await getUncommittedChangesCancellable(workingDir, options);
+    status = changes.status;
+    diff = changes.diff;
+    gitContext = `GIT STATUS (files changed):
+${status || "(no changes)"}
+
+GIT DIFF (all uncommitted changes):
+${diff || "(no diff)"}`;
+  }
 
   // Step 3.5: Pre-filter deterministic violations (file/extension-aware)
   const prefilterSection = formatConfirmPrefilter(runConfirmPrefilter(status, diff));
@@ -286,11 +317,7 @@ export async function runConfirmAgent(
       prompt: "Evaluate these code changes:",
       context: `${prefilterSection}${deduplicationRequirementSection}${formatPlanfileContext(planfile)}
 
-GIT STATUS (files changed):
-${status || "(no changes)"}
-
-GIT DIFF (all uncommitted changes):
-${diff || "(no diff)"}${extraContext ? `\n\nUSER INSTRUCTIONS:\n${extraContext}` : ""}`,
+${gitContext}${extraContext ? `\n\nUSER INSTRUCTIONS:\n${extraContext}` : ""}`,
     },
     options
   );

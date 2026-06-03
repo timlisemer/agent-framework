@@ -52,7 +52,12 @@ import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { CHECK_AGENT } from "../../utils/agent-configs.js";
 import { runProcessCancellable } from "../../utils/command.js";
-import { getGitStatusCancellable, getRepoInfoCancellable } from "../../utils/git-utils.js";
+import {
+  getGitStatusCancellable,
+  getRepoInfoCancellable,
+  sortReposWithChangesSubmodulesFirst,
+  type RepoInfo,
+} from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
@@ -65,6 +70,10 @@ function getHookName(): string { return activeSpec().mcpWireName("check"); }
 
 type CheckRunner = { cmd: string; dir: string; type: string };
 type CheckInvocation = CheckRunner & { adapter?: string; env?: NodeJS.ProcessEnv };
+type CheckScope =
+  | { mode: "single" }
+  | { mode: "all"; repoInfo: RepoInfo };
+type CheckOptions = CancellationOptions & { repoScope?: CheckScope };
 
 /**
  * Regex matching unused-code lines emitted by linters across languages.
@@ -352,7 +361,7 @@ export function checkInvocationsForRunner(checkRunner: CheckRunner): CheckInvoca
 export async function runCheckAgent(
   workingDir: string,
   transcriptPath?: string,
-  options: CancellationOptions = {}
+  options: CheckOptions = {}
 ): Promise<string> {
   // Set up execution context for statusLine logging
   if (transcriptPath) {
@@ -370,49 +379,97 @@ export async function runCheckAgent(
   }
 
   // Get main repo path for fallback
-  const repoInfo = await getRepoInfoCancellable(workingDir, options);
+  const repoInfo = options.repoScope?.mode === "all"
+    ? options.repoScope.repoInfo
+    : await getRepoInfoCancellable(workingDir, options);
   const mainRepo = repoInfo.mainRepo;
+  const scopedRepos = options.repoScope?.mode === "all"
+    ? sortReposWithChangesSubmodulesFirst(repoInfo)
+    : [{ path: workingDir, name: path.basename(workingDir) }];
 
   // Step 1: Get uncommitted files info
-  const status = await getGitStatusCancellable(workingDir, options);
+  let status = "";
+  if (options.repoScope?.mode === "all") {
+    const statusSections: string[] = [];
+    for (const repo of scopedRepos) {
+      throwIfAborted(options.signal);
+      const repoStatus = await getGitStatusCancellable(repo.path, options);
+      statusSections.push(`=== ${repo.name} (${repo.path}) ===\n${repoStatus || "(none)"}`);
+    }
+    status = statusSections.join("\n\n");
+  } else {
+    status = await getGitStatusCancellable(workingDir, options);
+  }
 
   // Step 2: Run linter if configured (check workingDir first, then main repo)
   let lintOutput = "";
-  const linter = detectLinter(workingDir, mainRepo);
-  if (linter) {
-    throwIfAborted(options.signal);
-    const lint = await runProcessCancellable({ shell: true, command: linter.cmd }, linter.dir, options);
-    const lintLocation = linter.dir === workingDir ? "" : ` (from ${path.basename(linter.dir)})`;
-    lintOutput = `LINTER OUTPUT${lintLocation} (exit code ${lint.exitCode}):\n${lint.output}\n`;
+  const lintSections: string[] = [];
+  const seenLintInvocations = new Set<string>();
+  for (const repo of scopedRepos) {
+    const linter = detectLinter(repo.path, mainRepo);
+    if (linter) {
+      const lintKey = `${linter.dir}\0${linter.cmd}`;
+      if (seenLintInvocations.has(lintKey)) {
+        continue;
+      }
+      seenLintInvocations.add(lintKey);
+      throwIfAborted(options.signal);
+      const lint = await runProcessCancellable({ shell: true, command: linter.cmd }, linter.dir, options);
+      const lintLocation = linter.dir === repo.path ? "" : ` (from ${path.basename(linter.dir)})`;
+      const repoLabel = options.repoScope?.mode === "all" ? ` for ${repo.name}` : "";
+      lintSections.push(`LINTER OUTPUT${repoLabel}${lintLocation} (exit code ${lint.exitCode}):\n${lint.output}`);
+    }
   }
+  lintOutput = lintSections.length > 0 ? `${lintSections.join("\n\n")}\n` : "";
 
   // Step 3: Run check target (Justfile preferred, Makefile fallback)
   let checkOutput = "";
-  const checkRunner = findCheckRunner(workingDir, mainRepo);
-  if (checkRunner && "error" in checkRunner) {
-    checkOutput = `CHECK OUTPUT: ${checkRunner.error}`;
-  } else if (checkRunner) {
-    const checkSections: string[] = [];
-    for (const invocation of checkInvocationsForRunner(checkRunner)) {
+  const checkSections: string[] = [];
+  const seenCheckInvocations = new Set<string>();
+  for (const repo of scopedRepos) {
+    const checkRunner = findCheckRunner(repo.path, mainRepo);
+    if (checkRunner && "error" in checkRunner) {
+      checkSections.push(`CHECK OUTPUT${options.repoScope?.mode === "all" ? ` for ${repo.name}` : ""}: ${checkRunner.error}`);
+    } else if (checkRunner) {
+      for (const invocation of checkInvocationsForRunner(checkRunner)) {
+        const envKey = invocation.adapter ? `adapter=${invocation.adapter}` : "";
+        const checkKey = `${invocation.dir}\0${invocation.cmd}\0${envKey}`;
+        if (seenCheckInvocations.has(checkKey)) {
+          continue;
+        }
+        seenCheckInvocations.add(checkKey);
+        throwIfAborted(options.signal);
+        const check = await runProcessCancellable(
+          { shell: true, command: invocation.cmd },
+          invocation.dir,
+          { ...options, env: invocation.env },
+        );
+        const label = invocation.type === "just" ? "JUST CHECK" : "MAKE CHECK";
+        const checkLocation = invocation.dir === repo.path ? "" : ` (from ${path.basename(invocation.dir)})`;
+        const adapterLabel = invocation.adapter ? ` [adapter=${invocation.adapter}]` : "";
+        const repoLabel = options.repoScope?.mode === "all" ? ` for ${repo.name}` : "";
+        checkSections.push(`${label} OUTPUT${adapterLabel}${repoLabel}${checkLocation} (exit code ${check.exitCode}):\n${check.output}`);
+      }
+    } else {
       throwIfAborted(options.signal);
-      const check = await runProcessCancellable(
-        { shell: true, command: invocation.cmd },
-        invocation.dir,
-        { ...options, env: invocation.env },
-      );
-      const label = invocation.type === "just" ? "JUST CHECK" : "MAKE CHECK";
-      const checkLocation = invocation.dir === workingDir ? "" : ` (from ${path.basename(invocation.dir)})`;
-      const adapterLabel = invocation.adapter ? ` [adapter=${invocation.adapter}]` : "";
-      checkSections.push(`${label} OUTPUT${adapterLabel}${checkLocation} (exit code ${check.exitCode}):\n${check.output}`);
+      checkSections.push(`CHECK OUTPUT${options.repoScope?.mode === "all" ? ` for ${repo.name}` : ""}: No Justfile or Makefile found. The check agent expects a Justfile with a 'check' recipe, or a Makefile with a 'check' target.`);
     }
-    checkOutput = checkSections.join("\n\n");
-  } else {
-    checkOutput = "CHECK OUTPUT: No Justfile or Makefile found. The check agent expects a Justfile with a 'check' recipe, or a Makefile with a 'check' target.";
   }
+  checkOutput = checkSections.join("\n\n");
 
   // Step 4: Run supplemental editor diagnostics for known command-tool gaps
   throwIfAborted(options.signal);
-  const supplementalOutput = await runSupplementalDiagnosticProviders(workingDir, options);
+  const supplementalSections: string[] = [];
+  for (const repo of scopedRepos) {
+    throwIfAborted(options.signal);
+    const supplementalOutput = await runSupplementalDiagnosticProviders(repo.path, options);
+    if (supplementalOutput) {
+      supplementalSections.push(options.repoScope?.mode === "all"
+        ? `SUPPLEMENTAL DIAGNOSTICS for ${repo.name} (${repo.path}):\n${supplementalOutput}`
+        : supplementalOutput);
+    }
+  }
+  const supplementalOutput = supplementalSections.join("\n\n");
   const supplementalContext = supplementalOutput ? `\n\n${supplementalOutput}` : "";
 
   // Step 5: Use unified runner for analysis

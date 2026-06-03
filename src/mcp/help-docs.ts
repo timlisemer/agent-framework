@@ -86,11 +86,11 @@ requested materialization.
 On failure, returns \`## Locate Scenario Failed\`, the predefined commands tried,
 and manual guidance for locating scenarios by transcript/session logs.`;
 
-export const CONFIRM_HELP = `# confirm -- Code Quality Gate
+export const CONFIRM_HELP = `# confirm -- Code Review Confirmation
 
-Binary gate that evaluates uncommitted changes for quality, security, and
-documentation. Runs check first; if check fails, confirm DECLINES immediately
-without invoking an LLM.
+Reviews uncommitted changes for quality, security, and documentation. Runs
+check first; if check fails, confirm returns the check output verbatim without
+invoking the confirm LLM or adding a confirm verdict.
 
 ## Inputs
 
@@ -103,18 +103,24 @@ without invoking an LLM.
 ## Flow
 
 1. Detect repos with uncommitted changes via list_repos logic
-2. If multiple repos and skip_elicitation=false, elicit selection via form
-3. For each selected repo, optionally elicit model tier + confirm review depth
-4. Run check agent. If it FAILs, DECLINE without LLM.
-5. Resolve plan context from optional_planfile or the session current planfile.
+2. If multiple repos and skip_elicitation=false, ask whether to confirm all repos together or individually
+3. All mode runs one combined check and one combined confirm with default opus when model_tier is omitted
+4. Individual mode elicits repo selection, then per repo optionally elicits model tier + confirm review depth
+5. Run check agent. If it FAILs, return the check output verbatim without LLM.
+6. Resolve plan context from optional_planfile or the session current planfile.
    If neither exists, continue without plan input. If optional_planfile is
    provided but unreadable or empty, fail before the confirm LLM.
-6. Otherwise, run the confirm SDK agent (Read + read-only Bash available)
-7. On DECLINED with uncertainties, elicit clarification and retry once
+7. Otherwise, run the confirm SDK agent (Read + read-only Bash available)
+8. On DECLINED with uncertainties, elicit clarification and retry once
 
 ## Output
 
-One "## Verdict" block per repo: either CONFIRMED or DECLINED with reason.
+If check fails, output is the raw check result, including \`## Results\`,
+\`## Errors\`, and \`## Warnings\`.
+
+If check passes, all mode returns one combined "## Verdict" block for the
+all-repos scope. Individual mode returns one "## Verdict" block per selected
+repo. Verdicts are either CONFIRMED or DECLINED with reason.
 
 ## When to use
 
@@ -139,14 +145,15 @@ and executes git commit. Optionally auto-pushes after successful commits.
 ## Flow
 
 1. Detect repos with uncommitted changes
-2. Elicit repo selection (if multiple + interactive)
-3. Per repo: elicit preferences, run confirm agent
-4. If CONFIRMED, generate message sized to diff:
+2. If multiple repos and interactive, ask whether to commit all repos together or individually
+3. All mode runs one combined confirm, then commits each dirty repo using shared confirm summary guidance
+4. Individual mode elicits repo selection and per-repo preferences, then runs confirm per repo
+5. If CONFIRMED, generate message sized to diff:
    - SMALL (1-3 files, <50 lines): single lowercase line
    - MEDIUM (4-10 files or 50-200 lines): scope-prefixed line
    - LARGE (10+ files or 200+ lines): title + bullet body
-5. Execute git add -A && git commit
-6. If auto_push, elicit push selection and run push agent per repo
+6. Execute git add -A && git commit
+7. If auto_push, elicit push selection for individual mode and run push agent per repo
 
 ## Output
 

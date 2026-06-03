@@ -11,13 +11,17 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../../../src/agents/mcp/confirm.js", () => ({
   runConfirmAgent: mocks.runConfirmAgent,
+  confirmResultFailed: (result: string) => result.includes("DECLINED")
+    || result.startsWith("ERROR:")
+    || /-\s*Status:\s*FAIL\b/i.test(result)
+    || /\bStatus:\s*FAIL\b/i.test(result),
 }));
 
 vi.mock("../../../src/utils/agent-runner.js", () => ({
   runAgent: mocks.runAgent,
 }));
 
-import { runCommitAgent } from "../../../src/agents/mcp/commit.js";
+import { runCommitAgent, runCommitAgentWithSharedConfirm } from "../../../src/agents/mcp/commit.js";
 
 function git(repo: string, args: string[]): string {
   return execFileSync("git", args, {
@@ -106,24 +110,19 @@ describe("runCommitAgent", () => {
     expect(git(repo, ["diff", "--cached", "--name-only"]).trim()).toBe("");
   });
 
-  it("returns declined confirm output verbatim with all listed check errors", async () => {
+  it("returns raw failed check output verbatim without generating a commit message", async () => {
     fs.writeFileSync(path.join(repo, "file.txt"), "content\n");
     const declined = `## Results
-- Files: SKIP
-- Code Quality: SKIP
-- Security: SKIP
-- Documentation: SKIP
-- Tests: SKIP
-
-## Check Failure
 - Errors: 2
+- Warnings: 0
+- Status: FAIL
 
-## Check Errors
+## Errors
 src/foo.ts:12: Type 'string' is not assignable to type 'number'.
 src/bar.ts:8: 'unusedValue' is declared but its value is never read.
 
-## Verdict
-DECLINED: check failed with 2 error(s); see Check Errors above.`;
+## Warnings
+(none)`;
     mocks.runConfirmAgent.mockResolvedValue(declined);
 
     const result = await runCommitAgent(repo, "haiku");
@@ -149,6 +148,51 @@ DECLINED: check failed with 2 error(s); see Check Errors above.`;
     );
   });
 
+  it("commits with a shared confirm result without rerunning confirm", async () => {
+    fs.writeFileSync(path.join(repo, "file.txt"), "content\n");
+    mocks.runAgent.mockResolvedValue({
+      output: "SIZE: SMALL\nMESSAGE:\ncommit: related repo change",
+    });
+
+    const result = await runCommitAgentWithSharedConfirm(
+      repo,
+      "## Verdict\nCONFIRMED: all repos ok",
+      "SHARED ALL-REPOSITORIES CONFIRM CONTEXT:\nUse related messages.",
+    );
+
+    expect(result).toContain("HASH:");
+    expect(mocks.runConfirmAgent).not.toHaveBeenCalled();
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("CONFIRMED: all repos ok");
+    expect(context).toContain("Use related messages.");
+  });
+
+  it("passes individual multi-repo context through to confirm", async () => {
+    fs.writeFileSync(path.join(repo, "file.txt"), "content\n");
+    mocks.runAgent.mockResolvedValue({
+      output: "SIZE: SMALL\nMESSAGE:\ncommit: include sibling context",
+    });
+    const repoInfo = {
+      mainRepo: repo,
+      mainRepoName: "repo",
+      mainRepoHasChanges: true,
+      submodules: [],
+      reposWithChanges: [{ path: repo, name: "repo" }],
+    };
+
+    await runCommitAgent(repo, "haiku", "focus", "plan.md", {
+      repoScope: { mode: "single", repoInfo },
+    });
+
+    expect(mocks.runConfirmAgent).toHaveBeenCalledWith(
+      repo,
+      "haiku",
+      "focus",
+      "plan.md",
+      expect.objectContaining({ repoScope: { mode: "single", repoInfo } }),
+    );
+  });
+
   it("exposes optional_planfile on the commit MCP schema", () => {
     const serverSource = fs.readFileSync(path.join(process.cwd(), "src/mcp/server.ts"), "utf-8");
     const start = serverSource.indexOf('registerTimedTool(\n  "commit"');
@@ -159,5 +203,9 @@ DECLINED: check failed with 2 error(s); see Check Errors above.`;
 
     expect(commitBlock).toContain("optional_planfile");
     expect(commitBlock).not.toContain("transcript_path");
+    expect(commitBlock).not.toContain("repo_scope:");
+    expect(commitBlock).not.toContain("model_tier is required when skip_elicitation is true");
+    expect(commitBlock).toContain('elicitRepoScope(server.server, "commit"');
+    expect(commitBlock).toContain("runCommitAgentWithSharedConfirm");
   });
 });

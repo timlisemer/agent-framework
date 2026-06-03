@@ -27,9 +27,9 @@ import { EXECUTION_TYPES } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
 import { COMMIT_AGENT } from "../../utils/agent-configs.js";
 import { runProcessCancellable } from "../../utils/command.js";
-import { getUncommittedChangesCancellable, classifyCommitSize } from "../../utils/git-utils.js";
+import { getUncommittedChangesCancellable, classifyCommitSize, type RepoInfo } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
-import { runConfirmAgent } from "./confirm.js";
+import { confirmResultFailed, runConfirmAgent } from "./confirm.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 
 import { activeSpec } from "../../adapter/spec.js";
@@ -42,6 +42,10 @@ function runGit(
 ): Promise<{ output: string; exitCode: number }> {
   return runProcessCancellable({ shell: false, file: "git", args }, cwd, options);
 }
+
+type CommitOptions = CancellationOptions & {
+  repoScope?: { mode: "single"; repoInfo?: RepoInfo };
+};
 
 /**
  * Parse the LLM response to extract size and message.
@@ -66,42 +70,19 @@ function parseCommitResponse(
   return { size, message };
 }
 
-/**
- * Run the commit agent to generate and execute a git commit.
- *
- * @param workingDir - The project directory to commit
- * @param confirmTierName - Passed through to confirm agent (does not affect commit agent tier)
- * @param confirmExtraContext - Passed through to confirm agent
- * @param optionalPlanfile - Optional explicit planfile path passed through to confirm
- * @returns Result with confirm output, message size, and commit hash
- */
-export async function runCommitAgent(
+async function commitWithConfirmResult(
   workingDir: string,
-  confirmTierName?: string,
-  confirmExtraContext?: string,
-  optionalPlanfile?: string,
-  options: CancellationOptions = {}
+  confirmResult: string,
+  sharedCommitContext: string | undefined,
+  options: CancellationOptions = {},
 ): Promise<string> {
-  logAgentStarted("commit", getHookName());
-
   const { status, diff, diffStat, untrackedDiff } = await getUncommittedChangesCancellable(workingDir, options);
 
   if (!status.trim()) {
     return "SKIPPED: nothing to commit";
   }
 
-  // Confirm changes before generating commit message (pass through tier/context)
-  throwIfAborted(options.signal);
-  const confirmResult = await runConfirmAgent(
-    workingDir,
-    confirmTierName,
-    confirmExtraContext,
-    optionalPlanfile,
-    options
-  );
-  if (confirmResult.includes("DECLINED") || confirmResult.startsWith("ERROR:")) {
-    // Preserve confirm output verbatim so check and planfile failures keep
-    // their concrete error list instead of collapsing to a vague summary.
+  if (confirmResultFailed(confirmResult)) {
     return confirmResult;
   }
 
@@ -116,7 +97,7 @@ export async function runCommitAgent(
     {
       prompt: "Generate a commit message based on the analysis and stats below.",
       context: `CONFIRM AGENT ANALYSIS:
-${confirmResult}
+${confirmResult}${sharedCommitContext ? `\n\n${sharedCommitContext}` : ""}
 
 ---
 
@@ -198,4 +179,56 @@ ${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
   });
 
   return `${confirmResult}\n\nSIZE: ${parsed.size}\n${parsed.message}\nHASH: ${hash}`;
+}
+
+export async function runCommitAgentWithSharedConfirm(
+  workingDir: string,
+  confirmResult: string,
+  sharedCommitContext?: string,
+  options: CancellationOptions = {},
+): Promise<string> {
+  logAgentStarted("commit", getHookName());
+  return commitWithConfirmResult(workingDir, confirmResult, sharedCommitContext, options);
+}
+
+/**
+ * Run the commit agent to generate and execute a git commit.
+ *
+ * @param workingDir - The project directory to commit
+ * @param confirmTierName - Passed through to confirm agent (does not affect commit agent tier)
+ * @param confirmExtraContext - Passed through to confirm agent
+ * @param optionalPlanfile - Optional explicit planfile path passed through to confirm
+ * @returns Result with confirm output, message size, and commit hash
+ */
+export async function runCommitAgent(
+  workingDir: string,
+  confirmTierName?: string,
+  confirmExtraContext?: string,
+  optionalPlanfile?: string,
+  options: CommitOptions = {}
+): Promise<string> {
+  logAgentStarted("commit", getHookName());
+
+  const { status } = await getUncommittedChangesCancellable(workingDir, options);
+
+  if (!status.trim()) {
+    return "SKIPPED: nothing to commit";
+  }
+
+  // Confirm changes before generating commit message (pass through tier/context)
+  throwIfAborted(options.signal);
+  const confirmResult = await runConfirmAgent(
+    workingDir,
+    confirmTierName,
+    confirmExtraContext,
+    optionalPlanfile,
+    options
+  );
+  if (confirmResultFailed(confirmResult)) {
+    // Preserve confirm output verbatim so check and planfile failures keep
+    // their concrete error list instead of collapsing to a vague summary.
+    return confirmResult;
+  }
+
+  return commitWithConfirmResult(workingDir, confirmResult, undefined, options);
 }

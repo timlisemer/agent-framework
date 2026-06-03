@@ -57,11 +57,56 @@ export interface Preferences {
   focus: string | undefined;
 }
 
+export type RepoScopeChoice = "all" | "individual";
+
 const IN_DEPTH_CONFIRM_FOCUS =
   "[generated confirm review-depth guidance] In depth confirm review: do not be lazy. Investigate thoroughly before confirming. Read the relevant changed code and nearby helpers/patterns, search for existing helpers or similar implementations where appropriate, and only CONFIRMED after you have genuinely checked the important files, edge cases, tests/docs implications, and deduplication/generic-code concerns.";
 
-const BROAD_MINIMAL_CONFIRM_FOCUS =
-  "[generated confirm review-depth guidance] Broad/minimal confirm review: do a broad but lightweight pass. Check the changed files for obvious correctness, security, documentation, test, and deduplication issues without deep optional exploration unless the diff reveals a concrete risk.";
+const MINIMAL_CONFIRM_FOCUS =
+  "[generated confirm review-depth guidance] Minimal confirm review: do a broad but lightweight pass. Check the changed files for obvious correctness, security, documentation, test, and deduplication issues without deep optional exploration unless the diff reveals a concrete risk.";
+
+/**
+ * Ask whether a multi-repo operation should process all dirty repos as one
+ * scope or preserve the existing individual per-repo flow.
+ */
+export async function elicitRepoScope(
+  mcpServer: ElicitInputServer,
+  operation: "commit" | "confirm",
+  repoInfo: RepoInfo,
+  options: CancellationOptions = {},
+): Promise<RepoScopeChoice | undefined> {
+  throwIfAborted(options.signal);
+
+  if (repoInfo.reposWithChanges.length <= 1) {
+    return "all";
+  }
+
+  const operationTitle = operation === "commit" ? "Commit" : "Confirm";
+  const result = await elicitInputNoTimeout<ElicitResult>(mcpServer, {
+    mode: "form",
+    message: `Multiple repositories have uncommitted changes. ${operationTitle} all repositories together, or choose repositories individually?`,
+    requestedSchema: {
+      type: "object",
+      properties: {
+        repo_scope: {
+          type: "string",
+          title: `${operationTitle} scope`,
+          description: `${operationTitle} all dirty repositories, or choose individual repositories and preferences.`,
+          enum: ["All repositories", "Individual repositories"],
+          default: "All repositories",
+        },
+      },
+    },
+  }, options);
+
+  throwIfAborted(options.signal);
+
+  if (result.action !== "accept" || !result.content) {
+    return undefined;
+  }
+
+  return result.content.repo_scope === "Individual repositories" ? "individual" : "all";
+}
 
 /**
  * Ask the user which repositories to process when multiple have changes.
@@ -139,8 +184,8 @@ export async function elicitPreferences(
         focus: {
           type: "string",
           title: "Confirm review depth",
-          description: "Default review, deeper investigation, or broad/minimal pass",
-          enum: ["Default", "In depth", "Broad/minimal"],
+          description: "Default review, deeper investigation, or minimal pass",
+          enum: ["Default", "In depth", "Minimal"],
           default: "Default",
         },
       },
@@ -160,8 +205,8 @@ export async function elicitPreferences(
     modelTier: tier as "haiku" | "sonnet" | "opus",
     focus: focus === "In depth"
       ? IN_DEPTH_CONFIRM_FOCUS
-      : focus === "Broad/minimal"
-        ? BROAD_MINIMAL_CONFIRM_FOCUS
+      : focus === "Minimal"
+        ? MINIMAL_CONFIRM_FOCUS
         : undefined,
   };
 }

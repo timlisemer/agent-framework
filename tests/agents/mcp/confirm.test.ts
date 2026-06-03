@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   runCheckAgent: vi.fn(),
   runAgent: vi.fn(),
   getUncommittedChangesCancellable: vi.fn(),
+  getAllReposGitContextCancellable: vi.fn(),
+  getSingleRepoGitContextWithSiblingOverviewCancellable: vi.fn(),
+  formatGitContextForRepos: vi.fn(),
 }));
 
 vi.mock("../../../src/agents/mcp/check.js", () => ({
@@ -19,13 +22,16 @@ vi.mock("../../../src/utils/agent-runner.js", () => ({
 
 vi.mock("../../../src/utils/git-utils.js", () => ({
   getUncommittedChangesCancellable: mocks.getUncommittedChangesCancellable,
+  getAllReposGitContextCancellable: mocks.getAllReposGitContextCancellable,
+  getSingleRepoGitContextWithSiblingOverviewCancellable: mocks.getSingleRepoGitContextWithSiblingOverviewCancellable,
+  formatGitContextForRepos: mocks.formatGitContextForRepos,
 }));
 
 import { formatCheckFailure, runConfirmAgent } from "../../../src/agents/mcp/confirm.js";
 import { getAgentFrameworkSessionDir, sessionCurrentPlanFile } from "../../../src/utils/paths.js";
 
 describe("formatCheckFailure", () => {
-  it("preserves check errors when confirm declines before investigation", () => {
+  it("returns check output verbatim when confirm declines before investigation", () => {
     const checkResult = `## Results
 - Errors: 2
 - Warnings: 0
@@ -40,20 +46,18 @@ src/bar.ts:8: 'unusedValue' is declared but its value is never read.
 
     const result = formatCheckFailure(checkResult, 2);
 
-    expect(result).toContain("- Errors: 2");
-    expect(result).toContain("- Deduplication: SKIP");
-    expect(result).toContain("## Check Errors");
-    expect(result).toContain("src/foo.ts:12: Type 'string' is not assignable to type 'number'.");
-    expect(result).toContain("src/bar.ts:8: 'unusedValue' is declared but its value is never read.");
-    expect(result).toContain("DECLINED: check failed with 2 error(s); see Check Errors above.");
+    expect(result).toBe(checkResult);
+    expect(result).not.toContain("- Deduplication: SKIP");
+    expect(result).not.toContain("## Check Errors");
+    expect(result).not.toContain("DECLINED: check failed");
   });
 
-  it("falls back to full check output when the errors section is missing", () => {
+  it("returns malformed check output unchanged", () => {
     const checkResult = "tool failed before producing structured sections";
 
     const result = formatCheckFailure(checkResult, 1);
 
-    expect(result).toContain("tool failed before producing structured sections");
+    expect(result).toBe(checkResult);
   });
 });
 
@@ -77,6 +81,35 @@ describe("runConfirmAgent planfile context", () => {
       status: " M src/example.ts",
       diff: "diff --git a/src/example.ts b/src/example.ts",
     });
+    mocks.getAllReposGitContextCancellable.mockResolvedValue({
+      repos: [
+        {
+          name: "repo",
+          path: tempDir,
+          changes: {
+            status: " M src/example.ts",
+            diff: "diff --git a/src/example.ts b/src/example.ts",
+            diffStat: "src/example.ts | 1 +",
+            untrackedDiff: "",
+          },
+        },
+      ],
+      context: "=== REPOSITORY: repo ===\ncombined context",
+    });
+    mocks.getSingleRepoGitContextWithSiblingOverviewCancellable.mockResolvedValue({
+      current: {
+        name: "repo",
+        path: tempDir,
+        changes: {
+          status: " M src/example.ts",
+          diff: "diff --git a/src/example.ts b/src/example.ts",
+          diffStat: "src/example.ts | 1 +",
+          untrackedDiff: "",
+        },
+      },
+      siblingOverview: "=== SIBLING REPOSITORY OVERVIEW ===\nsibling stat",
+    });
+    mocks.formatGitContextForRepos.mockReturnValue("CURRENT FULL CONTEXT");
     mocks.runAgent.mockResolvedValue({
       output: "## Verdict\nCONFIRMED: ok",
     });
@@ -197,8 +230,16 @@ src/foo.ts:1: Type error.
 
     const result = await runConfirmAgent(tempDir, "haiku", undefined, missingPath);
 
-    expect(result).toContain("## Check Failure");
-    expect(result).toContain("src/foo.ts:1: Type error.");
+    expect(result).toBe(`## Results
+- Errors: 1
+- Warnings: 0
+- Status: FAIL
+
+## Errors
+src/foo.ts:1: Type error.
+
+## Warnings
+(none)`);
     expect(result).not.toContain("optional_planfile");
     expect(mocks.getUncommittedChangesCancellable).not.toHaveBeenCalled();
     expect(mocks.runAgent).not.toHaveBeenCalled();
@@ -212,6 +253,55 @@ src/foo.ts:1: Type error.
     const context = mocks.runAgent.mock.calls[0][1].context as string;
     expect(context).toContain("PLANFILE CONTEXT: No planfile was provided through optional_planfile");
     expect(context).toContain("Continue evaluating the code changes without plan input.");
+  });
+
+  it("runs combined check and uses all-repos git context for all scope", async () => {
+    const repoInfo = {
+      mainRepo: tempDir,
+      mainRepoName: "repo",
+      mainRepoHasChanges: true,
+      submodules: [],
+      reposWithChanges: [{ path: tempDir, name: "repo" }],
+    };
+
+    await runConfirmAgent(tempDir, "haiku", undefined, undefined, {
+      repoScope: { mode: "all", repoInfo },
+    });
+
+    expect(mocks.runCheckAgent).toHaveBeenCalledWith(
+      tempDir,
+      undefined,
+      expect.objectContaining({ repoScope: { mode: "all", repoInfo } }),
+    );
+    expect(mocks.getAllReposGitContextCancellable).toHaveBeenCalledWith(repoInfo, expect.any(Object));
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("combined context");
+  });
+
+  it("adds sibling overview context in individual multi-repo mode", async () => {
+    const repoInfo = {
+      mainRepo: tempDir,
+      mainRepoName: "repo",
+      mainRepoHasChanges: true,
+      submodules: [],
+      reposWithChanges: [
+        { path: tempDir, name: "repo" },
+        { path: path.join(tempDir, "sub"), name: "sub" },
+      ],
+    };
+
+    await runConfirmAgent(tempDir, "haiku", undefined, undefined, {
+      repoScope: { mode: "single", repoInfo },
+    });
+
+    expect(mocks.getSingleRepoGitContextWithSiblingOverviewCancellable).toHaveBeenCalledWith(
+      tempDir,
+      repoInfo,
+      expect.any(Object),
+    );
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("CURRENT FULL CONTEXT");
+    expect(context).toContain("SIBLING REPOSITORY OVERVIEW");
   });
 
   it("continues without plan input when stored session planfile is empty", async () => {
@@ -267,5 +357,9 @@ src/foo.ts:1: Type error.
 
     expect(confirmBlock).toContain("optional_planfile");
     expect(confirmBlock).not.toContain("transcript_path");
+    expect(confirmBlock).not.toContain("repo_scope:");
+    expect(confirmBlock).not.toContain("model_tier is required when skip_elicitation is true");
+    expect(confirmBlock).toContain('elicitRepoScope(server.server, "confirm"');
+    expect(confirmBlock).toContain('repoScope: { mode: "all", repoInfo }');
   });
 });

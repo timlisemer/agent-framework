@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   runProcessCancellable: vi.fn(),
   getGitStatusCancellable: vi.fn(),
   getRepoInfoCancellable: vi.fn(),
+  sortReposWithChangesSubmodulesFirst: vi.fn(),
   logAgentStarted: vi.fn(),
   logAgentResult: vi.fn(),
   setTranscriptPath: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock("../../../src/utils/command.js", async (importOriginal) => {
 vi.mock("../../../src/utils/git-utils.js", () => ({
   getGitStatusCancellable: mocks.getGitStatusCancellable,
   getRepoInfoCancellable: mocks.getRepoInfoCancellable,
+  sortReposWithChangesSubmodulesFirst: mocks.sortReposWithChangesSubmodulesFirst,
 }));
 
 vi.mock("../../../src/utils/logger.js", () => ({
@@ -250,6 +252,7 @@ describe("runCheckAgent supplemental diagnostics context", () => {
     vi.clearAllMocks();
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "check-agent-context-"));
     mocks.getRepoInfoCancellable.mockResolvedValue({ mainRepo: tempDir });
+    mocks.sortReposWithChangesSubmodulesFirst.mockImplementation((repoInfo) => repoInfo.reposWithChanges);
     mocks.getGitStatusCancellable.mockResolvedValue(" M src/example.ts");
     mocks.getAgentFrameworkSessionDir.mockReturnValue(path.join(tempDir, ".agent-framework-session"));
     mocks.resetDriftDetectionWindow.mockResolvedValue(undefined);
@@ -284,5 +287,107 @@ src/example.ts:1:1 warning TS6385: deprecated
     expect(context).toContain("CHECK OUTPUT: No Justfile or Makefile found.");
     expect(context).toContain("TYPESCRIPT LANGUAGE SERVICE DIAGNOSTICS:");
     expect(context).toContain("src/example.ts:1:1 warning TS6385: deprecated");
+  });
+
+  it("summarizes all-repos check context with one check-agent call", async () => {
+    const subDir = path.join(tempDir, "sub");
+    fs.mkdirSync(subDir);
+    const repoInfo = {
+      mainRepo: tempDir,
+      mainRepoName: "main",
+      mainRepoHasChanges: true,
+      submodules: [],
+      reposWithChanges: [
+        { path: subDir, name: "sub" },
+        { path: tempDir, name: "main" },
+      ],
+    };
+    mocks.sortReposWithChangesSubmodulesFirst.mockReturnValue(repoInfo.reposWithChanges);
+    mocks.getGitStatusCancellable
+      .mockResolvedValueOnce(" M sub.ts")
+      .mockResolvedValueOnce(" M main.ts");
+
+    await runCheckAgent(tempDir, undefined, {
+      repoScope: { mode: "all", repoInfo },
+    });
+
+    expect(mocks.getRepoInfoCancellable).not.toHaveBeenCalled();
+    expect(mocks.runAgent).toHaveBeenCalledTimes(1);
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain(`=== sub (${subDir}) ===\n M sub.ts`);
+    expect(context).toContain(`=== main (${tempDir}) ===\n M main.ts`);
+  });
+
+  it("preserves main-repo check fallback for subrepos in all-repos scope", async () => {
+    const subDir = path.join(tempDir, "sub");
+    fs.mkdirSync(subDir);
+    fs.writeFileSync(path.join(tempDir, "Justfile"), "check:\n  echo main-check\n");
+    mocks.runProcessCancellable.mockResolvedValue({
+      output: "main check passed",
+      exitCode: 0,
+    });
+    const repoInfo = {
+      mainRepo: tempDir,
+      mainRepoName: "main",
+      mainRepoHasChanges: false,
+      submodules: [{ path: "sub", absolutePath: subDir, hasChanges: true }],
+      reposWithChanges: [{ path: subDir, name: "sub" }],
+    };
+    mocks.sortReposWithChangesSubmodulesFirst.mockReturnValue(repoInfo.reposWithChanges);
+    mocks.getGitStatusCancellable.mockResolvedValue(" M sub.ts");
+
+    await runCheckAgent(tempDir, undefined, {
+      repoScope: { mode: "all", repoInfo },
+    });
+
+    expect(mocks.runProcessCancellable).toHaveBeenCalledWith(
+      { shell: true, command: "just check 2>&1" },
+      tempDir,
+      expect.any(Object),
+    );
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("JUST CHECK OUTPUT for sub (from");
+    expect(context).toContain("main check passed");
+    expect(context).not.toContain("CHECK OUTPUT for sub: No Justfile or Makefile found.");
+  });
+
+  it("deduplicates shared main-repo fallback checks in all-repos scope", async () => {
+    const subADir = path.join(tempDir, "sub-a");
+    const subBDir = path.join(tempDir, "sub-b");
+    fs.mkdirSync(subADir);
+    fs.mkdirSync(subBDir);
+    fs.writeFileSync(path.join(tempDir, "Justfile"), "check:\n  echo main-check\n");
+    mocks.runProcessCancellable.mockResolvedValue({
+      output: "main check passed",
+      exitCode: 0,
+    });
+    const repoInfo = {
+      mainRepo: tempDir,
+      mainRepoName: "main",
+      mainRepoHasChanges: false,
+      submodules: [
+        { path: "sub-a", absolutePath: subADir, hasChanges: true },
+        { path: "sub-b", absolutePath: subBDir, hasChanges: true },
+      ],
+      reposWithChanges: [
+        { path: subADir, name: "sub-a" },
+        { path: subBDir, name: "sub-b" },
+      ],
+    };
+    mocks.sortReposWithChangesSubmodulesFirst.mockReturnValue(repoInfo.reposWithChanges);
+    mocks.getGitStatusCancellable
+      .mockResolvedValueOnce(" M sub-a.ts")
+      .mockResolvedValueOnce(" M sub-b.ts");
+
+    await runCheckAgent(tempDir, undefined, {
+      repoScope: { mode: "all", repoInfo },
+    });
+
+    expect(mocks.runProcessCancellable).toHaveBeenCalledTimes(1);
+    expect(mocks.runProcessCancellable).toHaveBeenCalledWith(
+      { shell: true, command: "just check 2>&1" },
+      tempDir,
+      expect.any(Object),
+    );
   });
 });
