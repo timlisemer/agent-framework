@@ -438,6 +438,13 @@ describe("getBlacklistHighlights path redaction regression", () => {
     expect(highlights.some((h) => h.includes("[BLACKLIST: echo redirect]"))).toBe(true);
   });
 
+  it("does not treat an echo separator before later stderr redirects as an echo file write", () => {
+    const command = `ls -la /home/tim/Coding/nixos/files/ags/src/bindings/ 2>&1; echo "---"; ls /home/tim/Coding/private_repos/astral/bindings/ 2>&1`;
+    const highlights = getBlacklistHighlights("Bash", { command });
+    expect(highlights.some((h) => h.includes("[BLACKLIST: echo redirect]"))).toBe(false);
+    expect(highlights.some((h) => h.includes("Use Write tool"))).toBe(false);
+  });
+
   // Negative cases: find/grep with *.test.ts arguments must NOT fire "test command"
   it("does not false-fire 'test command' on find with *.test.ts argument (failing scenario exact command)", () => {
     const cmd = `find /home/tim/Coding/public_repos/agent-framework/src -name "*.test.ts" -path "*/src/*" | xargs grep -l "..."`;

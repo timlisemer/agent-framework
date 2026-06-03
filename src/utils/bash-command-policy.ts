@@ -89,7 +89,7 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // bash (bundled ugrep/bfs), so blocking them leaves no search mechanism.
 
   // File writing - should use Write tool
-  { pattern: /\becho\s+.*>/, name: 'echo redirect', alternative: 'Use Write tool' },
+  { pattern: /\b(?:echo|printf)\b[^;|&\n\r]*\d?>>?\|?\s*(?![&(])\S/, name: 'echo redirect', alternative: 'Use Write tool' },
   { pattern: /\btee\s+(?:-[A-Za-z]+\s+)*\S+/, name: 'tee file write', alternative: 'Use Write tool' },
 
   // Directory change - always deny
@@ -377,7 +377,7 @@ function splitShellSegments(command: string): {
   backgrounded: boolean;
 } {
   const basis = stripQuotedRegions(command);
-  const splitRegex = /\s*(?:\|\||&&|[;|&\n\r])\s*/g;
+  const splitRegex = /\s*(?:\|\||&&|[;|\n\r]|(?<![<>])&)\s*/g;
   const segments: string[] = [];
   let last = 0;
   let hasComplexOperator = false;
