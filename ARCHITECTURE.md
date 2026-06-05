@@ -135,7 +135,8 @@ dist/                               # Compiled JavaScript (build output)
 Agent-framework expects host MCP tool timeouts to be effectively disabled when
 the host supports timeout configuration. The shared timeout policy lives in
 `src/mcp/timeout.ts`, so per-tool budgets are adapter-independent: tools default
-to 300 seconds of active work, while `commit` and `confirm` use 1500 seconds.
+to 300 seconds of active work, while `commit`, `confirm`, and `fullconfirm` use
+1500 seconds.
 The active-work clock pauses while MCP elicitation is waiting on the user, and
 nested MCP-agent calls reuse the outer timeout context instead of stacking a
 second timer.
@@ -183,7 +184,7 @@ All agents use the unified `runAgent()` function from `utils/agent-runner.ts`. T
 | Mode   | Description                              | Used By                        |
 |--------|------------------------------------------|--------------------------------|
 | direct | Single API call, no tools, fast          | All hook agents, check, commit, locate_scenario |
-| sdk    | Multi-turn with Read/Glob/Grep tools     | confirm                        |
+| sdk    | Multi-turn with Read/Glob/Grep tools     | confirm, fullconfirm           |
 
 ### Why Two Modes?
 
@@ -192,7 +193,7 @@ All agents use the unified `runAgent()` function from `utils/agent-runner.ts`. T
 - MCP agents with deterministic commands don't need tool selection
 - Single API call is cheaper and more predictable
 
-**SDK Mode** (for confirm agent):
+**SDK Mode** (for confirm/fullconfirm agents):
 - Code quality decisions benefit from autonomous investigation
 - Can read additional files to understand context
 - Can search codebase for patterns
@@ -316,7 +317,7 @@ Models are centrally configured in `src/types.ts`:
 |--------|--------|------------------------------------------------------------------------------|
 | haiku  | direct | rule-gate, tool-appeal, commit, style-drift, question-validate, sentiment, validate-intent, response-align-stop |
 | sonnet | direct | check, plan-validate, claude-md-validate |
-| opus   | sdk    | confirm (code quality gate with investigation)                               |
+| opus   | sdk    | confirm and fullconfirm (code quality gates with investigation)              |
 
 ## Agent Chains
 
@@ -328,19 +329,24 @@ commit → confirm → check
   │         │         └─ Runs linter + make/just check + supplemental editor diagnostics (sonnet, direct)
   │         └─ Analyzes git diff + investigates code (opus, SDK)
   └─ Generates commit message + executes commit (haiku, direct)
+
+fullconfirm → check
+  │           │
+  │           └─ Runs linter + make/just check + supplemental editor diagnostics (sonnet, direct)
+  └─ Reviews git-visible repository scope and investigates code (opus, SDK)
 ```
 
 ## MCP Elicitation
 
-The `commit`, `confirm`, and `push` tools use MCP elicitation (`server.elicitInput()`) to ask users structured questions mid-tool-execution, replacing the previous pattern where slash commands instructed the agent to call `AskUserQuestion`.
+The `commit`, `confirm`, `fullconfirm`, and `push` tools use MCP elicitation (`server.elicitInput()`) to ask users structured questions mid-tool-execution, replacing the previous pattern where slash commands instructed the agent to call `AskUserQuestion`.
 
-### Flow (commit/confirm)
+### Flow (commit/confirm/fullconfirm)
 
 ```
 Tool called → getRepoInfo()
   → Multiple repos? → elicitInput: all repos vs individual repos
   → All repos:
-      → Run one combined confirm/check scope across dirty repos
+      → Run one combined confirm/check scope across dirty repos, or fullconfirm/check scope across selected repositories
       → commit: reuse that confirm result while committing each dirty repo
   → Individual repos:
       → elicitInput: repo selection form
@@ -351,22 +357,22 @@ Tool called → getRepoInfo()
 
 ### Confirm Uncertainty Elicitation (last resort)
 
-When the confirm agent DECLINEs with `UNCERTAIN:` markers, the tool callback elicits user clarification and re-runs:
+When the confirm or fullconfirm agent DECLINEs with `UNCERTAIN:` markers, the tool callback elicits user clarification and re-runs:
 
 ```
-confirm returns DECLINED + UNCERTAIN markers
+confirm/fullconfirm returns DECLINED + UNCERTAIN markers
   → Parse markers → elicitInput: clarification form
-  → User provides input → re-run confirm with extra_context
+  → User provides input → re-run the same confirm/fullconfirm tool with extra_context
   → Return new result (or original DECLINED if user cancels)
 ```
 
 ### Skip Elicitation
 
-All three tools accept `skip_elicitation: true` to bypass interactive questions and use defaults. For `confirm` and `commit`, this selects the all-repos scope and defaults the confirm tier to `opus` when no tier is provided. Used by `/quickpush` for zero-interaction commits.
+All four tools accept `skip_elicitation: true` to bypass interactive questions and use defaults. For `confirm`, `fullconfirm`, and `commit`, this selects the all-repos scope and defaults the confirm tier to `opus` when no tier is provided. Used by `/quickpush` and `/fullquickconfirm` for zero-interaction workflows.
 
 ## SDK Agent Restrictions
 
-The confirm agent (only SDK mode user) is restricted to read-only tools:
+The confirm and fullconfirm agents are restricted to read-only tools:
 
 - **Read**: View file contents
 - **Glob**: Find files by pattern

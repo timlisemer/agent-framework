@@ -68,6 +68,20 @@ describe("errorAcknowledgeRule", () => {
     await expect(errorAcknowledgeRule.check(makeCtx())).resolves.toBeNull();
   });
 
+  it("ignores older denials after a sanctioned fullconfirm passed", async () => {
+    appendToolLog({
+      tool: "Bash",
+      status: "denied",
+      reason: "test command is covered by the agent-framework check MCP (matched check target entry: vitest). You must run mcp__agent-framework__check",
+    });
+    appendToolLog({
+      tool: activeSpec().mcpWireName("fullconfirm"),
+      status: "allowed",
+    });
+
+    await expect(errorAcknowledgeRule.check(makeCtx())).resolves.toBeNull();
+  });
+
   it("still denies when the newest relevant event is an unresolved denial", async () => {
     appendToolLog({
       tool: activeSpec().mcpWireName("check"),

@@ -74,6 +74,7 @@ const AGENT_DISPLAY_NAMES: Record<string, string> = {
   "error-acknowledge": "Error Ack",
   check: "Check",
   confirm: "Confirm",
+  fullconfirm: "FullConfirm",
   commit: "Commit",
 };
 

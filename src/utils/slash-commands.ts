@@ -21,6 +21,8 @@ export const SLASH_COMMAND_GATED_MCPS: Record<string, readonly CanonicalMcp[]> =
   quickpush: ["push", "commit"],
   confirm:   ["confirm"],
   quickconfirm: ["confirm"],
+  fullconfirm: ["fullconfirm"],
+  fullquickconfirm: ["fullconfirm"],
 };
 
 /**
@@ -52,6 +54,8 @@ export const SLASH_COMMAND_ALLOWED_TOOLS: Record<string, readonly string[]> = {
   quickpush: ["mcp-push", "mcp-commit"],
   confirm:   ["mcp-confirm"],
   quickconfirm: ["mcp-confirm", "Edit", "MultiEdit", "Write"],
+  fullconfirm: ["mcp-fullconfirm"],
+  fullquickconfirm: ["mcp-fullconfirm", "Edit", "MultiEdit", "Write"],
   check:     ["mcp-check"],
   transcript: ["mcp-transcript"],
   "locate-scenario": ["mcp-locate_scenario"],
@@ -65,4 +69,4 @@ export const SLASH_COMMAND_ALLOWED_TOOLS: Record<string, readonly string[]> = {
  * Canonical MCP names that require slash-command authorization.
  * Wire-name translation happens in adapters/.
  */
-export const RESTRICTED_MCPS: ReadonlySet<CanonicalMcp> = new Set(["commit", "push", "confirm"]);
+export const RESTRICTED_MCPS: ReadonlySet<CanonicalMcp> = new Set(["commit", "push", "confirm", "fullconfirm"]);

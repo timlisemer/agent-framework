@@ -15,8 +15,9 @@ describe("mcp timeout policy", () => {
     expect(mcpTimeoutForTool("check")).toBe(DEFAULT_MCP_TIMEOUT_MS);
   });
 
-  it("uses 1500 seconds for confirm and commit", () => {
+  it("uses 1500 seconds for confirm, fullconfirm, and commit", () => {
     expect(mcpTimeoutForTool("confirm")).toBe(1_500_000);
+    expect(mcpTimeoutForTool("fullconfirm")).toBe(1_500_000);
     expect(mcpTimeoutForTool("commit")).toBe(1_500_000);
   });
 });

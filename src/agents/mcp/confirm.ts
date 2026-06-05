@@ -20,9 +20,11 @@ import * as fs from "fs";
 import * as path from "path";
 import { EXECUTION_TYPES, parseTierName } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
-import { CONFIRM_AGENT } from "../../utils/agent-configs.js";
+import { CONFIRM_AGENT, CONFIRM_AGGREGATOR_AGENT, CONFIRM_SPECIALIST_AGENT } from "../../utils/agent-configs.js";
 import {
   formatGitContextForRepos,
+  allReposInScope,
+  getRepoFullScopeContextsCancellable,
   getAllReposGitContextCancellable,
   getSingleRepoGitContextWithSiblingOverviewCancellable,
   getUncommittedChangesCancellable,
@@ -41,7 +43,11 @@ import { runCheckAgent } from "./check.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 
 import { activeSpec } from "../../adapter/spec.js";
-function getHookName(): string { return activeSpec().mcpWireName("confirm"); }
+function getHookName(scopeKind: ConfirmReviewScopeKind = "uncommitted"): string {
+  return activeSpec().mcpWireName(scopeKind === "full" ? "fullconfirm" : "confirm");
+}
+
+const MULTI_AGENT_LINE_THRESHOLD = 500;
 
 const CONFIRM_DEDUPLICATION_PROMPT_EXTENSION = `## REQUIRED CATEGORY UPDATE: Deduplication
 
@@ -111,6 +117,16 @@ type ConfirmRepoScope =
 
 type ConfirmOptions = CancellationOptions & {
   repoScope?: ConfirmRepoScope;
+};
+
+type ConfirmReviewScopeKind = "uncommitted" | "full";
+
+type ConfirmReviewContext = {
+  prompt: string;
+  context: string;
+  status: string;
+  diff: string;
+  lineCount: number;
 };
 
 async function readPlanfileForConfirm(planPath: string): Promise<ConfirmPlanfileResolution> {
@@ -212,54 +228,20 @@ If the changed code clearly violates this requirement, fail Deduplication and qu
 `;
 }
 
-/**
- * Run the confirm agent to evaluate code changes.
- *
- * @param workingDir - The project directory to evaluate
- * @param tierName - Optional model tier (haiku/sonnet/opus, defaults to opus)
- * @param extraContext - Optional extra instructions for the evaluation
- * @param optionalPlanfile - Optional explicit planfile path to include as plan context
- * @returns Check output on check failure, otherwise structured verdict with CONFIRMED or DECLINED
- */
-export async function runConfirmAgent(
+function countDiffReviewLines(diff: string): number {
+  return diff
+    .split("\n")
+    .filter((line) =>
+      (line.startsWith("+") && !line.startsWith("+++"))
+      || (line.startsWith("-") && !line.startsWith("---"))
+    ).length;
+}
+
+async function buildUncommittedReviewContext(
   workingDir: string,
-  tierName?: string,
-  extraContext?: string,
-  optionalPlanfile?: string,
-  options: ConfirmOptions = {}
-): Promise<string> {
-  const sessionContext = resolveConfirmSessionContext(workingDir);
-  logAgentStarted("confirm", getHookName());
-
-  const tier = parseTierName(tierName);
-
-  // Step 1: Run check agent first
-  const allRepoInfo = options.repoScope?.mode === "all" ? options.repoScope.repoInfo : undefined;
-  const checkResult = allRepoInfo
-    ? await runCheckAgent(allRepoInfo.mainRepo, undefined, {
-        ...options,
-        repoScope: { mode: "all", repoInfo: allRepoInfo },
-      })
-    : await runCheckAgent(workingDir, undefined, options);
-
-  const errorMatch = checkResult.match(/Errors:\s*(\d+)/i);
-  const errorCount = errorMatch ? parseInt(errorMatch[1], 10) : 0;
-  const statusMatch = checkResult.match(/Status:\s*(PASS|FAIL)/i);
-  const checkStatus = statusMatch ? statusMatch[1].toUpperCase() : "UNKNOWN";
-
-  // Step 2: If check failed, decline immediately
-  if (checkStatus === "FAIL" || errorCount > 0) {
-    // No confirm output or LLM call here: check output is the authoritative failure.
-    return formatCheckFailure(checkResult, errorCount);
-  }
-
-  const planfile = await resolveConfirmPlanfile(workingDir, sessionContext.sessionDir, optionalPlanfile);
-  const deterministicErrors: string[] = [];
-  if (planfile.kind === "error") deterministicErrors.push(planfile.message);
-  if (deterministicErrors.length > 0) return deterministicErrors.join("\n");
-
-  // Step 3: Get git data
-  throwIfAborted(options.signal);
+  allRepoInfo: RepoInfo | undefined,
+  options: ConfirmOptions,
+): Promise<ConfirmReviewContext> {
   let status = "";
   let diff = "";
   let gitContext = "";
@@ -293,17 +275,43 @@ GIT DIFF (all uncommitted changes):
 ${diff || "(no diff)"}`;
   }
 
-  // Step 3.5: Pre-filter deterministic violations (file/extension-aware)
-  const prefilterSection = formatConfirmPrefilter(runConfirmPrefilter(status, diff));
-  const recentUserContext = await readRecentUserContextForConfirm(sessionContext.sessionDir);
-  const deduplicationRequirement = findDeduplicationUserRequirement([
-    filterGeneratedConfirmGuidance(extraContext),
-    recentUserContext,
-  ].join("\n"));
-  const deduplicationRequirementSection = formatDeduplicationRequirementContext(deduplicationRequirement);
+  return {
+    prompt: "Evaluate these code changes:",
+    context: gitContext,
+    status,
+    diff,
+    lineCount: countDiffReviewLines(diff),
+  };
+}
 
-  // Step 4: Run SDK agent with dynamic tier
-  const result = await runAgent(
+async function buildFullReviewContext(
+  workingDir: string,
+  allRepoInfo: RepoInfo | undefined,
+  options: ConfirmOptions,
+): Promise<ConfirmReviewContext> {
+  const repos = allRepoInfo
+    ? allReposInScope(allRepoInfo)
+    : [{ path: workingDir, name: path.basename(workingDir) }];
+  const fullContext = await getRepoFullScopeContextsCancellable(repos, options);
+  return {
+    prompt: "Evaluate this full git-visible code scope:",
+    context: fullContext.context,
+    status: fullContext.repos
+      .flatMap((repo) => repo.inventory.files.map((file) => `?? ${file.path}`))
+      .join("\n"),
+    diff: "",
+    lineCount: fullContext.totalLines,
+  };
+}
+
+async function runSingleConfirmSdk(
+  workingDir: string,
+  tier: ReturnType<typeof parseTierName>,
+  prompt: string,
+  context: string,
+  options: ConfirmOptions,
+) {
+  return runAgent(
     {
       ...CONFIRM_AGENT,
       tier,
@@ -313,19 +321,155 @@ ${diff || "(no diff)"}`;
         ? { ...CONFIRM_AGENT.formatValidation, fallbackOutput: CONFIRM_FORMAT_FALLBACK }
         : undefined,
     },
-    {
-      prompt: "Evaluate these code changes:",
-      context: `${prefilterSection}${deduplicationRequirementSection}${formatPlanfileContext(planfile)}
-
-${gitContext}${extraContext ? `\n\nUSER INSTRUCTIONS:\n${extraContext}` : ""}`,
-    },
-    options
+    { prompt, context },
+    options,
   );
+}
+
+async function runConfirmReviewAgents(
+  workingDir: string,
+  tier: ReturnType<typeof parseTierName>,
+  reviewContext: ConfirmReviewContext,
+  fullContext: string,
+  options: ConfirmOptions,
+) {
+  if (reviewContext.lineCount <= MULTI_AGENT_LINE_THRESHOLD) {
+    return runSingleConfirmSdk(workingDir, tier, reviewContext.prompt, fullContext, options);
+  }
+
+  const [normalA, normalB, specialist] = await Promise.all([
+    runSingleConfirmSdk(workingDir, tier, reviewContext.prompt, fullContext, options),
+    runSingleConfirmSdk(workingDir, tier, reviewContext.prompt, fullContext, options),
+    runAgent(
+      {
+        ...CONFIRM_SPECIALIST_AGENT,
+        workingDir,
+      },
+      {
+        prompt: "Evaluate this review scope for duplication, helper, and separation-of-concern risks:",
+        context: fullContext,
+      },
+      options,
+    ),
+  ]);
+
+  return runAgent(
+    {
+      ...CONFIRM_AGGREGATOR_AGENT,
+      workingDir,
+    },
+    {
+      prompt: "Merge these parallel confirm results:",
+      context: `REVIEW LINE COUNT: ${reviewContext.lineCount}
+
+=== CONFIRM AGENT A ===
+${normalA.output}
+
+=== CONFIRM AGENT B ===
+${normalB.output}
+
+=== SPECIALIST AGENT ===
+${specialist.output}`,
+    },
+    options,
+  );
+}
+
+/**
+ * Run the confirm agent to evaluate code changes.
+ *
+ * @param workingDir - The project directory to evaluate
+ * @param tierName - Optional model tier (haiku/sonnet/opus, defaults to opus)
+ * @param extraContext - Optional extra instructions for the evaluation
+ * @param optionalPlanfile - Optional explicit planfile path to include as plan context
+ * @returns Check output on check failure, otherwise structured verdict with CONFIRMED or DECLINED
+ */
+export async function runConfirmAgent(
+  workingDir: string,
+  tierName?: string,
+  extraContext?: string,
+  optionalPlanfile?: string,
+  options: ConfirmOptions = {}
+): Promise<string> {
+  return runSharedConfirmAgent("uncommitted", workingDir, tierName, extraContext, optionalPlanfile, options);
+}
+
+export async function runFullConfirmAgent(
+  workingDir: string,
+  tierName?: string,
+  extraContext?: string,
+  optionalPlanfile?: string,
+  options: ConfirmOptions = {}
+): Promise<string> {
+  return runSharedConfirmAgent("full", workingDir, tierName, extraContext, optionalPlanfile, options);
+}
+
+async function runSharedConfirmAgent(
+  scopeKind: ConfirmReviewScopeKind,
+  workingDir: string,
+  tierName?: string,
+  extraContext?: string,
+  optionalPlanfile?: string,
+  options: ConfirmOptions = {}
+): Promise<string> {
+  const sessionContext = resolveConfirmSessionContext(workingDir);
+  const agentName = scopeKind === "full" ? "fullconfirm" : "confirm";
+  logAgentStarted(agentName, getHookName(scopeKind));
+
+  const tier = parseTierName(tierName);
+
+  // Step 1: Run check agent first
+  const allRepoInfo = options.repoScope?.mode === "all" ? options.repoScope.repoInfo : undefined;
+  const checkResult = allRepoInfo
+    ? await runCheckAgent(allRepoInfo.mainRepo, undefined, {
+        ...options,
+        repoScope: { mode: "all", repoInfo: allRepoInfo },
+      })
+    : await runCheckAgent(workingDir, undefined, options);
+
+  const errorMatch = checkResult.match(/Errors:\s*(\d+)/i);
+  const errorCount = errorMatch ? parseInt(errorMatch[1], 10) : 0;
+  const statusMatch = checkResult.match(/Status:\s*(PASS|FAIL)/i);
+  const checkStatus = statusMatch ? statusMatch[1].toUpperCase() : "UNKNOWN";
+
+  // Step 2: If check failed, decline immediately
+  if (checkStatus === "FAIL" || errorCount > 0) {
+    // No confirm output or LLM call here: check output is the authoritative failure.
+    return formatCheckFailure(checkResult, errorCount);
+  }
+
+  const planfile = await resolveConfirmPlanfile(workingDir, sessionContext.sessionDir, optionalPlanfile);
+  const deterministicErrors: string[] = [];
+  if (planfile.kind === "error") deterministicErrors.push(planfile.message);
+  if (deterministicErrors.length > 0) return deterministicErrors.join("\n");
+
+  // Step 3: Get review scope data
+  throwIfAborted(options.signal);
+  const reviewContext = scopeKind === "full"
+    ? await buildFullReviewContext(workingDir, allRepoInfo, options)
+    : await buildUncommittedReviewContext(workingDir, allRepoInfo, options);
+
+  // Step 3.5: Pre-filter deterministic violations (file/extension-aware)
+  const prefilterSection = formatConfirmPrefilter(runConfirmPrefilter(reviewContext.status, reviewContext.diff));
+  const recentUserContext = await readRecentUserContextForConfirm(sessionContext.sessionDir);
+  const deduplicationRequirement = findDeduplicationUserRequirement([
+    filterGeneratedConfirmGuidance(extraContext),
+    recentUserContext,
+  ].join("\n"));
+  const deduplicationRequirementSection = formatDeduplicationRequirementContext(deduplicationRequirement);
+
+  const context = `${prefilterSection}${deduplicationRequirementSection}${formatPlanfileContext(planfile)}
+
+REVIEW SCOPE: ${scopeKind === "full" ? "full git-visible code" : "uncommitted code changes"}
+REVIEW LINE COUNT: ${reviewContext.lineCount}
+
+${reviewContext.context}${extraContext ? `\n\nUSER INSTRUCTIONS:\n${extraContext}` : ""}`;
+  const result = await runConfirmReviewAgents(workingDir, tier, reviewContext, context, options);
 
   logAgentResult(result, {
-    agent: "confirm",
-    hookName: getHookName(),
-    toolName: getHookName(),
+    agent: agentName,
+    hookName: getHookName(scopeKind),
+    toolName: getHookName(scopeKind),
     workingDir,
     executionType: EXECUTION_TYPES.LLM,
     decisionOverride: "CONFIRM",

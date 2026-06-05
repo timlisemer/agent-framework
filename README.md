@@ -2,7 +2,7 @@
 
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
-1. **MCP Server** - For `check`, `confirm`, `commit`, `push`, `validate_intent`, `create_planfile`, `validate_plan`, `scenario_labeler`, `scenario_tester`, `locate_scenario` tools (portable, works with any MCP client)
+1. **MCP Server** - For `check`, `confirm`, `fullconfirm`, `commit`, `push`, `validate_intent`, `create_planfile`, `validate_plan`, `scenario_labeler`, `scenario_tester`, `locate_scenario` tools (portable, works with any MCP client)
 2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `style-drift`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
 3. **Stop Hook** - For `response-align-stop` and Codex `<proposed_plan>` acceptance validation
 4. **UserPromptSubmit Hook** - For `sentiment` rule (classifies user mood/intent before each tool call sequence)
@@ -27,7 +27,7 @@ npm run ai-backend
 
 ## Agents
 
-The framework implements 19 specialized agents and MCP tools organized into three categories:
+The framework implements 20 specialized agents and MCP tools organized into three categories:
 
 ### MCP Tools (User-Facing)
 
@@ -35,6 +35,7 @@ The framework implements 19 specialized agents and MCP tools organized into thre
 | --------------- | ------ | ------------------------------------------------------------ |
 | check           | sonnet | Run linter + make/just check plus supplemental editor diagnostics, return summary with recommendations |
 | confirm         | opus   | Binary quality gate: CONFIRMED or DECLINED                   |
+| fullconfirm     | opus   | Full-repository quality gate over git-visible code            |
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
 | validate_intent        | haiku  | Manual post-session review (requires transcript_path)        |
@@ -79,6 +80,7 @@ Agents call each other in verification chains:
 ```
 check ─────────────────────────► (runs independently)
 confirm ──► runCheckAgent() ───► (check must pass first)
+fullconfirm ─► runCheckAgent() ─► (check must pass first)
 commit ───► runConfirmAgent() ─► runCheckAgent() ─► (full chain)
 ```
 
@@ -241,7 +243,7 @@ For manual MCP config (alternative to `claude mcp add`):
 When the host supports per-server tool timeout configuration, set the
 agent-framework MCP host timeout to an effectively disabled value
 (`2147483647`). Agent-framework enforces its own adapter-independent active-work
-timeouts: tools default to 300 seconds, `commit` and `confirm` use 1500 seconds,
+timeouts: tools default to 300 seconds, `commit`, `confirm`, and `fullconfirm` use 1500 seconds,
 and time spent waiting for MCP elicitation forms does not count against the
 active-work budget.
 

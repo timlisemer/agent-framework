@@ -19,7 +19,7 @@ import { z } from "zod";
 import { runCheckAgent } from "../agents/mcp/check.js";
 import { runValidatePlanAgent } from "../agents/mcp/validate-plan.js";
 import { runCreatePlanfileAgent } from "../agents/mcp/create-planfile.js";
-import { confirmResultFailed, runConfirmAgent } from "../agents/mcp/confirm.js";
+import { confirmResultFailed, runConfirmAgent, runFullConfirmAgent } from "../agents/mcp/confirm.js";
 import { runCommitAgent, runCommitAgentWithSharedConfirm } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
 import { runTranscriptAgent } from "../agents/mcp/transcript.js";
@@ -33,6 +33,7 @@ import { handleScenarioTester, TESTER_HELP } from "../agents/mcp/scenario-tester
 import {
   CHECK_HELP,
   CONFIRM_HELP,
+  FULLCONFIRM_HELP,
   COMMIT_HELP,
   PUSH_HELP,
   LIST_REPOS_HELP,
@@ -42,7 +43,7 @@ import {
   TRANSCRIPT_HELP,
   LOCATE_SCENARIO_HELP,
 } from "./help-docs.js";
-import { getRepoInfo, getRepoInfoCancellable, sortReposWithChangesSubmodulesFirst } from "../utils/git-utils.js";
+import { allReposInScope, getRepoInfo, getRepoInfoCancellable, sortReposWithChangesSubmodulesFirst, type RepoInfo } from "../utils/git-utils.js";
 import { throwIfAborted } from "../utils/cancellation.js";
 import { initializeTelemetry } from "../telemetry/index.js";
 import {
@@ -128,6 +129,168 @@ function registerTimedTool<Name extends string, InputArgs extends ZodRawShapeCom
   server.registerTool(name, config, timedHandler);
 }
 
+type ConfirmLikeArgs = {
+  working_dir?: string;
+  model_tier?: "haiku" | "sonnet" | "opus";
+  extra_context?: string;
+  optional_planfile?: string;
+  skip_elicitation?: boolean;
+};
+
+type ConfirmRunner = (
+  workingDir: string,
+  tierName?: string,
+  extraContext?: string,
+  optionalPlanfile?: string,
+  options?: {
+    signal?: AbortSignal;
+    repoScope?: { mode: "all"; repoInfo: RepoInfo } | { mode: "single"; repoInfo?: RepoInfo };
+  },
+) => Promise<string>;
+
+async function retryConfirmWithClarification(
+  runner: ConfirmRunner,
+  result: string,
+  args: ConfirmLikeArgs,
+  workingDir: string,
+  currentExtraContext: string | undefined,
+  optionalPlanfile: string | undefined,
+  options: { signal: AbortSignal; repoScope: { mode: "all"; repoInfo: RepoInfo } | { mode: "single"; repoInfo: RepoInfo } },
+): Promise<string> {
+  if (args.skip_elicitation || !result.includes("DECLINED")) {
+    return result;
+  }
+
+  const uncertainties = parseUncertainties(result);
+  if (uncertainties.length === 0) {
+    return result;
+  }
+
+  const clarification = await elicitUncertaintyClarification(server.server, uncertainties, options);
+  throwIfAborted(options.signal);
+  if (!clarification) {
+    return result;
+  }
+
+  const retryContext = currentExtraContext ? `${currentExtraContext}\n${clarification}` : clarification;
+  return runner(
+    workingDir,
+    args.model_tier || "opus",
+    retryContext,
+    optionalPlanfile,
+    options,
+  );
+}
+
+async function runConfirmLikeTool(
+  scopeKind: "confirm" | "fullconfirm",
+  args: ConfirmLikeArgs,
+  signal: AbortSignal,
+): Promise<CallToolResult> {
+  const options = { signal };
+  const workingDir = args.working_dir || process.cwd();
+  const detectedRepoInfo = await getRepoInfoCancellable(workingDir, options);
+  throwIfAborted(signal);
+
+  const scopedRepoInfo: RepoInfo = scopeKind === "fullconfirm"
+    ? { ...detectedRepoInfo, reposWithChanges: allReposInScope(detectedRepoInfo) }
+    : detectedRepoInfo;
+
+  if (scopeKind === "confirm" && scopedRepoInfo.reposWithChanges.length === 0) {
+    return { content: [{ type: "text", text: "No repositories with uncommitted changes found." }] };
+  }
+
+  const runner: ConfirmRunner = scopeKind === "fullconfirm" ? runFullConfirmAgent : runConfirmAgent;
+  let repoScope: "all" | "individual" = args.skip_elicitation ? "all" : "individual";
+  if (!args.skip_elicitation && scopedRepoInfo.reposWithChanges.length > 1) {
+    const scopeChoice = await elicitRepoScope(server.server, "confirm", scopedRepoInfo, options);
+    throwIfAborted(signal);
+    if (!scopeChoice) {
+      return { content: [{ type: "text", text: "No repository scope selected." }] };
+    }
+    repoScope = scopeChoice;
+  }
+
+  if (repoScope === "all") {
+    const repoScopeOptions = { ...options, repoScope: { mode: "all" as const, repoInfo: scopedRepoInfo } };
+    const initial = await runner(
+      scopedRepoInfo.mainRepo,
+      args.model_tier || "opus",
+      args.extra_context,
+      args.optional_planfile,
+      repoScopeOptions,
+    );
+    const result = await retryConfirmWithClarification(
+      runner,
+      initial,
+      args,
+      scopedRepoInfo.mainRepo,
+      args.extra_context,
+      args.optional_planfile,
+      repoScopeOptions,
+    );
+    return { content: [{ type: "text", text: result }] };
+  }
+
+  let selectedRepos = await elicitRepoSelection(server.server, scopedRepoInfo, options);
+  throwIfAborted(signal);
+  if (selectedRepos.length === 0) {
+    return { content: [{ type: "text", text: "No repositories selected." }] };
+  }
+  selectedRepos = sortReposSubmodulesFirst(selectedRepos, scopedRepoInfo);
+
+  const repoPrefs = new Map<string, { tier: string | undefined; extraContext: string | undefined }>();
+  for (const repo of selectedRepos) {
+    throwIfAborted(signal);
+    if (!args.skip_elicitation && !args.model_tier) {
+      const prefs = await elicitPreferences(server.server, repo.name, options);
+      throwIfAborted(signal);
+      const focus = prefs.focus ? `Focus: ${prefs.focus}` : undefined;
+      const combinedExtraContext = args.extra_context && focus ? `${args.extra_context}\n${focus}` : focus || args.extra_context;
+      repoPrefs.set(repo.path, { tier: prefs.modelTier, extraContext: combinedExtraContext });
+    } else {
+      repoPrefs.set(repo.path, { tier: args.model_tier, extraContext: args.extra_context });
+    }
+  }
+
+  const results: string[] = [];
+  for (const repo of selectedRepos) {
+    throwIfAborted(signal);
+    const prefs = repoPrefs.get(repo.path)!;
+    let extraContext = prefs.extraContext;
+
+    if (selectedRepos.length > 1) {
+      const repoNames = selectedRepos.map((r) => r.name).join(", ");
+      const multiContext = `Note: This is part of a multi-repository ${scopeKind}. Repos: ${repoNames}. Currently evaluating: ${repo.name}.`;
+      extraContext = extraContext ? `${multiContext}\n${extraContext}` : multiContext;
+    }
+
+    const repoScopeOptions = { ...options, repoScope: { mode: "single" as const, repoInfo: scopedRepoInfo } };
+    const initial = await runner(
+      repo.path,
+      prefs.tier,
+      extraContext,
+      args.optional_planfile,
+      repoScopeOptions,
+    );
+    const result = await retryConfirmWithClarification(
+      runner,
+      initial,
+      args,
+      repo.path,
+      extraContext,
+      args.optional_planfile,
+      repoScopeOptions,
+    );
+
+    results.push(selectedRepos.length > 1
+      ? `=== ${repo.name} (${repo.path}) ===\n${result}`
+      : result);
+  }
+
+  return { content: [{ type: "text", text: results.join("\n\n") }] };
+}
+
 registerTimedTool(
   "check",
   {
@@ -206,126 +369,25 @@ registerTimedTool(
     }
   },
   async (args, _extra, signal) => {
-    const options = { signal };
-    const workingDir = args.working_dir || process.cwd();
-    const repoInfo = await getRepoInfoCancellable(workingDir, options);
-    throwIfAborted(signal);
+    return runConfirmLikeTool("confirm", args, signal);
+  }
+);
 
-    if (repoInfo.reposWithChanges.length === 0) {
-      return { content: [{ type: "text", text: "No repositories with uncommitted changes found." }] };
+registerTimedTool(
+  "fullconfirm",
+  {
+    title: "FullConfirm",
+    description: "Review the full git-visible code scope. Detects repos, asks user for preferences via form, runs check, then analyzes full-scope metadata and lets SDK agents inspect code if check passes. Returns raw check output on check failure, otherwise CONFIRMED or DECLINED.",
+    inputSchema: {
+      working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
+      model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Model tier for evaluation (default: opus)"),
+      extra_context: z.string().optional().describe("Additional instructions or review-depth guidance"),
+      optional_planfile: z.string().optional().describe("Optional planfile path to include in confirm context. If omitted and no session planfile exists, confirm runs without plan input."),
+      skip_elicitation: coercibleBoolean.describe("Skip interactive questions, use defaults")
     }
-
-    let repoScope: "all" | "individual" = args.skip_elicitation ? "all" : "individual";
-    if (!args.skip_elicitation && repoInfo.reposWithChanges.length > 1) {
-      const scopeChoice = await elicitRepoScope(server.server, "confirm", repoInfo, options);
-      throwIfAborted(signal);
-      if (!scopeChoice) {
-        return { content: [{ type: "text", text: "No repository scope selected." }] };
-      }
-      repoScope = scopeChoice;
-    }
-
-    if (repoScope === "all") {
-      let result = await runConfirmAgent(
-        repoInfo.mainRepo,
-        args.model_tier || "opus",
-        args.extra_context,
-        args.optional_planfile,
-        { ...options, repoScope: { mode: "all", repoInfo } },
-      );
-
-      if (!args.skip_elicitation && result.includes("DECLINED")) {
-        const uncertainties = parseUncertainties(result);
-        if (uncertainties.length > 0) {
-          const clarification = await elicitUncertaintyClarification(server.server, uncertainties, options);
-          throwIfAborted(signal);
-          if (clarification) {
-            const retryContext = args.extra_context ? `${args.extra_context}\n${clarification}` : clarification;
-            result = await runConfirmAgent(
-              repoInfo.mainRepo,
-              args.model_tier || "opus",
-              retryContext,
-              args.optional_planfile,
-              { ...options, repoScope: { mode: "all", repoInfo } },
-            );
-          }
-        }
-      }
-
-      return { content: [{ type: "text", text: result }] };
-    }
-
-    let selectedRepos = await elicitRepoSelection(server.server, repoInfo, options);
-    throwIfAborted(signal);
-    if (selectedRepos.length === 0) {
-      return { content: [{ type: "text", text: "No repositories selected." }] };
-    }
-    selectedRepos = sortReposSubmodulesFirst(selectedRepos, repoInfo);
-
-    // Phase 1: Collect all preferences upfront
-    const repoPrefs = new Map<string, { tier: string | undefined; extraContext: string | undefined }>();
-    for (const repo of selectedRepos) {
-      throwIfAborted(signal);
-      if (!args.skip_elicitation && !args.model_tier) {
-        const prefs = await elicitPreferences(server.server, repo.name, options);
-        throwIfAborted(signal);
-        const focus = prefs.focus ? `Focus: ${prefs.focus}` : undefined;
-        const combinedExtraContext = args.extra_context && focus ? `${args.extra_context}\n${focus}` : focus || args.extra_context;
-        repoPrefs.set(repo.path, { tier: prefs.modelTier, extraContext: combinedExtraContext });
-      } else {
-        repoPrefs.set(repo.path, { tier: args.model_tier, extraContext: args.extra_context });
-      }
-    }
-
-    // Phase 2: Process all repos
-    const results: string[] = [];
-    for (const repo of selectedRepos) {
-      throwIfAborted(signal);
-      const prefs = repoPrefs.get(repo.path)!;
-      let extraContext = prefs.extraContext;
-
-      // Multi-repo context
-      if (selectedRepos.length > 1) {
-        const repoNames = selectedRepos.map((r) => r.name).join(", ");
-        const multiContext = `Note: This is part of a multi-repository confirm. Repos: ${repoNames}. Currently evaluating: ${repo.name}.`;
-        extraContext = extraContext ? `${multiContext}\n${extraContext}` : multiContext;
-      }
-
-      let result = await runConfirmAgent(
-        repo.path,
-        prefs.tier,
-        extraContext,
-        args.optional_planfile,
-        { ...options, repoScope: { mode: "single", repoInfo } },
-      );
-
-      // Post-processing: If DECLINED with uncertainties, elicit clarification and retry
-      if (!args.skip_elicitation && result.includes("DECLINED")) {
-        const uncertainties = parseUncertainties(result);
-        if (uncertainties.length > 0) {
-          const clarification = await elicitUncertaintyClarification(server.server, uncertainties, options);
-          throwIfAborted(signal);
-          if (clarification) {
-            const retryContext = extraContext ? `${extraContext}\n${clarification}` : clarification;
-            result = await runConfirmAgent(
-              repo.path,
-              prefs.tier,
-              retryContext,
-              args.optional_planfile,
-              { ...options, repoScope: { mode: "single", repoInfo } },
-            );
-          }
-        }
-      }
-
-      if (selectedRepos.length > 1) {
-        results.push(`=== ${repo.name} (${repo.path}) ===\n${result}`);
-      } else {
-        results.push(result);
-      }
-    }
-
-    return { content: [{ type: "text", text: results.join("\n\n") }] };
+  },
+  async (args, _extra, signal) => {
+    return runConfirmLikeTool("fullconfirm", args, signal);
   }
 );
 
@@ -811,6 +873,7 @@ const HELP_RESOURCES: Array<{
 }> = [
   { tool: "check", title: "check -- Help", summary: "Linter + type-check summarizer", body: CHECK_HELP },
   { tool: "confirm", title: "confirm -- Help", summary: "Code quality gate", body: CONFIRM_HELP },
+  { tool: "fullconfirm", title: "fullconfirm -- Help", summary: "Full code quality gate", body: FULLCONFIRM_HELP },
   { tool: "commit", title: "commit -- Help", summary: "Quality-gated git commit", body: COMMIT_HELP },
   { tool: "push", title: "push -- Help", summary: "Git push wrapper", body: PUSH_HELP },
   { tool: "list_repos", title: "list_repos -- Help", summary: "Repo + submodule status", body: LIST_REPOS_HELP },

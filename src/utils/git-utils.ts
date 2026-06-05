@@ -1,4 +1,5 @@
 import path from "path";
+import fs from "fs";
 import { runCommand, runProcessCancellable, type ProcessOutputLimits } from "./command.js";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
 
@@ -7,6 +8,7 @@ const NULL_DEVICE = isWindows ? "NUL" : "/dev/null";
 const SUPPRESS_STDERR = isWindows ? "2>NUL" : "2>/dev/null";
 const DEFAULT_GIT_STATUS_MAX_BYTES = 512 * 1024;
 const DEFAULT_GIT_DIFF_MAX_BYTES = 4 * 1024 * 1024;
+const DEFAULT_GIT_FILE_LIST_MAX_BYTES = 64 * 1024 * 1024;
 const DEFAULT_UNTRACKED_DIFF_MAX_BYTES = 2 * 1024 * 1024;
 const DEFAULT_UNTRACKED_FILE_LIMIT = 50;
 
@@ -153,6 +155,25 @@ export interface RepoGitContext {
   changes: GitChanges;
 }
 
+export interface GitVisibleFileEntry {
+  path: string;
+  lines: number;
+}
+
+export interface GitVisibleFileInventory {
+  files: GitVisibleFileEntry[];
+  totalFiles: number;
+  totalLines: number;
+  skippedBinary: number;
+  skippedUnreadable: number;
+}
+
+export interface RepoFullScopeContext {
+  path: string;
+  name: string;
+  inventory: GitVisibleFileInventory;
+}
+
 function sortRepoSelectionsSubmodulesFirst<T extends { path: string }>(
   repos: T[],
   mainRepo: string,
@@ -166,6 +187,16 @@ export function sortReposWithChangesSubmodulesFirst(
   repoInfo: RepoInfo,
 ): Array<{ path: string; name: string }> {
   return sortRepoSelectionsSubmodulesFirst(repoInfo.reposWithChanges, repoInfo.mainRepo);
+}
+
+export function allReposInScope(repoInfo: RepoInfo): Array<{ path: string; name: string }> {
+  return [
+    ...repoInfo.submodules.map((submodule) => ({
+      path: submodule.absolutePath,
+      name: path.basename(submodule.absolutePath),
+    })),
+    { path: repoInfo.mainRepo, name: repoInfo.mainRepoName },
+  ];
 }
 
 /**
@@ -367,6 +398,102 @@ export async function getUncommittedChangesCancellable(
     diff: (trackedDiff.output || "") + untrackedDiff,
     diffStat: diffStat.output || "",
     untrackedDiff,
+  };
+}
+
+function countTextLines(content: string): number {
+  if (!content) return 0;
+  return content.endsWith("\n") ? content.split("\n").length - 1 : content.split("\n").length;
+}
+
+function formatGitVisibleInventory(inventory: GitVisibleFileInventory): string {
+  const fileLines = inventory.files
+    .map((file) => `${file.path} (${file.lines} lines)`)
+    .join("\n");
+  return `Files: ${inventory.totalFiles}
+Text lines: ${inventory.totalLines}
+Skipped binary files: ${inventory.skippedBinary}
+Skipped unreadable files: ${inventory.skippedUnreadable}
+
+GIT-VISIBLE FILE INVENTORY:
+${fileLines || "(none)"}`;
+}
+
+export async function getGitVisibleFileInventoryCancellable(
+  workingDir: string,
+  options: CancellationOptions = {},
+): Promise<GitVisibleFileInventory> {
+  const lsFiles = await runGit(["ls-files", "--cached", "--others", "--exclude-standard", "-z"], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_FILE_LIST_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  if ((lsFiles.output || "").includes("[agent-framework: stdout truncated after")) {
+    throw new Error(
+      `git-visible file inventory exceeded ${DEFAULT_GIT_FILE_LIST_MAX_BYTES} bytes; cannot compute reliable fullconfirm line count.`,
+    );
+  }
+  const paths = (lsFiles.output || "").split("\0").filter(Boolean).sort();
+  const files: GitVisibleFileEntry[] = [];
+  let skippedBinary = 0;
+  let skippedUnreadable = 0;
+
+  for (const relativePath of paths) {
+    throwIfAborted(options.signal);
+    try {
+      const absolutePath = path.join(workingDir, relativePath);
+      const stat = await fs.promises.stat(absolutePath);
+      if (!stat.isFile()) continue;
+      const buffer = await fs.promises.readFile(absolutePath);
+      if (buffer.includes(0)) {
+        skippedBinary += 1;
+        continue;
+      }
+      files.push({ path: relativePath, lines: countTextLines(buffer.toString("utf-8")) });
+    } catch {
+      skippedUnreadable += 1;
+    }
+  }
+
+  return {
+    files,
+    totalFiles: files.length,
+    totalLines: files.reduce((sum, file) => sum + file.lines, 0),
+    skippedBinary,
+    skippedUnreadable,
+  };
+}
+
+export function formatFullScopeContextForRepos(repos: RepoFullScopeContext[]): string {
+  if (repos.length === 0) {
+    return `FULLCONFIRM SCOPE:
+(no git-visible repositories found)`;
+  }
+
+  return repos.map((repo) => `=== REPOSITORY: ${formatRepoHeading(repo)} ===
+
+FULLCONFIRM SCOPE:
+Review the whole git-visible repository. Gitignored files are not the focus, but may be inspected if relevant. File contents are intentionally not embedded here; use read/search tools to inspect relevant code.
+
+${formatGitVisibleInventory(repo.inventory)}`).join("\n\n");
+}
+
+export async function getRepoFullScopeContextsCancellable(
+  repos: Array<{ path: string; name: string }>,
+  options: CancellationOptions = {},
+): Promise<{ repos: RepoFullScopeContext[]; context: string; totalLines: number }> {
+  const contexts: RepoFullScopeContext[] = [];
+  for (const repo of repos) {
+    throwIfAborted(options.signal);
+    contexts.push({
+      ...repo,
+      inventory: await getGitVisibleFileInventoryCancellable(repo.path, options),
+    });
+  }
+  return {
+    repos: contexts,
+    context: formatFullScopeContextForRepos(contexts),
+    totalLines: contexts.reduce((sum, repo) => sum + repo.inventory.totalLines, 0),
   };
 }
 

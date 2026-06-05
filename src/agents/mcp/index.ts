@@ -28,7 +28,7 @@
 export { runCheckAgent } from './check.js';
 export { runValidatePlanAgent } from './validate-plan.js';
 export { runCreatePlanfileAgent } from './create-planfile.js';
-export { runConfirmAgent } from './confirm.js';
+export { runConfirmAgent, runFullConfirmAgent } from './confirm.js';
 export { runCommitAgent } from './commit.js';
 export { runPushAgent } from './push.js';
 export { runLocateScenarioMcp } from './locate-scenario.js';

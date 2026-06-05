@@ -439,7 +439,7 @@ function extractSlashCommandMetadata(content: string): SlashCommandContext | nul
 
   // Fallback: try to infer from description
   if (!commandName && description) {
-    const cmdMatch = description.match(/\b(commit|push|confirm|check)\b/i);
+    const cmdMatch = description.match(/\b(commit|push|fullconfirm|confirm|check)\b/i);
     if (cmdMatch) {
       commandName = cmdMatch[1].toLowerCase();
     }

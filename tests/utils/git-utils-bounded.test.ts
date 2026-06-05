@@ -8,6 +8,7 @@ import {
   formatSiblingRepoOverview,
   getSingleRepoGitContextWithSiblingOverviewCancellable,
   getGitStatusCancellable,
+  getGitVisibleFileInventoryCancellable,
   getUncommittedChangesCancellable,
   sortReposWithChangesSubmodulesFirst,
 } from "../../src/utils/git-utils.js";
@@ -53,6 +54,23 @@ describe("bounded git utilities", () => {
 
     expect(changes.status).toContain("?? large-untracked.txt");
     expect(Buffer.byteLength(changes.untrackedDiff, "utf-8")).toBeLessThan(3 * 1024 * 1024);
+  });
+
+  it("counts git-visible text files for fullconfirm inventory", async () => {
+    fs.writeFileSync(path.join(repoDir, ".gitignore"), "ignored.txt\n");
+    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "base\nsecond\n");
+    fs.writeFileSync(path.join(repoDir, "untracked.txt"), "one\ntwo\nthree\n");
+    fs.writeFileSync(path.join(repoDir, "ignored.txt"), "ignored\n");
+    fs.writeFileSync(path.join(repoDir, "binary.bin"), Buffer.from([0, 1, 2, 3]));
+
+    const inventory = await getGitVisibleFileInventoryCancellable(repoDir);
+
+    expect(inventory.files.map((file) => file.path)).toContain("tracked.txt");
+    expect(inventory.files.map((file) => file.path)).toContain("untracked.txt");
+    expect(inventory.files.map((file) => file.path)).not.toContain("ignored.txt");
+    expect(inventory.files.map((file) => file.path)).not.toContain("binary.bin");
+    expect(inventory.totalLines).toBeGreaterThanOrEqual(5);
+    expect(inventory.skippedBinary).toBe(1);
   });
 });
 

@@ -73,23 +73,23 @@ export interface PlanModeDetection {
 // ── Canonical names ─────────────────────────────────────────────────────────
 
 export type CanonicalMcp =
-  | "check" | "commit" | "push" | "confirm"
+  | "check" | "commit" | "push" | "confirm" | "fullconfirm"
   | "transcript" | "validate_intent" | "validate_plan" | "create_planfile"
   | "scenario_tester" | "scenario_labeler" | "locate_scenario";
 
 export const CANONICAL_MCPS: readonly CanonicalMcp[] = [
-  "check", "commit", "push", "confirm", "transcript",
+  "check", "commit", "push", "confirm", "fullconfirm", "transcript",
   "validate_intent", "validate_plan", "create_planfile", "scenario_tester", "scenario_labeler",
   "locate_scenario",
 ] as const;
 
 export type CanonicalWorkflow =
-  | "commit" | "push" | "quickpush" | "confirm" | "quickconfirm"
+  | "commit" | "push" | "quickpush" | "confirm" | "quickconfirm" | "fullconfirm" | "fullquickconfirm"
   | "check"  | "transcript" | "locate-scenario"
   | "plan1"  | "plan3" | "plan5" | "implement";
 
 export const CANONICAL_WORKFLOWS: readonly CanonicalWorkflow[] = [
-  "commit", "push", "quickpush", "confirm", "quickconfirm", "check", "transcript", "locate-scenario",
+  "commit", "push", "quickpush", "confirm", "quickconfirm", "fullconfirm", "fullquickconfirm", "check", "transcript", "locate-scenario",
   "plan1", "plan3", "plan5", "implement",
 ] as const;
 

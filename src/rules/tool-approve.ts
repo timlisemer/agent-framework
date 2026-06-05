@@ -72,7 +72,7 @@ export const toolApproveRule: PreToolRule = {
       const spec = activeSpec();
       const mcp = spec.recognizeMcp(ctx.rawToolName ?? ctx.toolName);
       if (mcp && RESTRICTED_MCPS.has(mcp) && !ctx.slashCommandAllowedTools?.includes(ctx.toolName)) {
-        const hint = spec.renderWorkflowAuthorizationHint(["commit", "push", "confirm", "quickpush", "quickconfirm"]);
+        const hint = spec.renderWorkflowAuthorizationHint(["commit", "push", "confirm", "quickpush", "quickconfirm", "fullconfirm", "fullquickconfirm"]);
         return {
           fastDeny: `${ctx.rawToolName ?? ctx.toolName} requires explicit workflow authorization (${hint}).`,
         };

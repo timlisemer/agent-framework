@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getUncommittedChangesCancellable: vi.fn(),
   getAllReposGitContextCancellable: vi.fn(),
   getSingleRepoGitContextWithSiblingOverviewCancellable: vi.fn(),
+  getRepoFullScopeContextsCancellable: vi.fn(),
   formatGitContextForRepos: vi.fn(),
 }));
 
@@ -24,10 +25,11 @@ vi.mock("../../../src/utils/git-utils.js", () => ({
   getUncommittedChangesCancellable: mocks.getUncommittedChangesCancellable,
   getAllReposGitContextCancellable: mocks.getAllReposGitContextCancellable,
   getSingleRepoGitContextWithSiblingOverviewCancellable: mocks.getSingleRepoGitContextWithSiblingOverviewCancellable,
+  getRepoFullScopeContextsCancellable: mocks.getRepoFullScopeContextsCancellable,
   formatGitContextForRepos: mocks.formatGitContextForRepos,
 }));
 
-import { formatCheckFailure, runConfirmAgent } from "../../../src/agents/mcp/confirm.js";
+import { formatCheckFailure, runConfirmAgent, runFullConfirmAgent } from "../../../src/agents/mcp/confirm.js";
 import { getAgentFrameworkSessionDir, sessionCurrentPlanFile } from "../../../src/utils/paths.js";
 
 describe("formatCheckFailure", () => {
@@ -108,6 +110,23 @@ describe("runConfirmAgent planfile context", () => {
         },
       },
       siblingOverview: "=== SIBLING REPOSITORY OVERVIEW ===\nsibling stat",
+    });
+    mocks.getRepoFullScopeContextsCancellable.mockResolvedValue({
+      repos: [
+        {
+          name: "repo",
+          path: tempDir,
+          inventory: {
+            files: [{ path: "src/example.ts", lines: 12 }],
+            totalFiles: 1,
+            totalLines: 12,
+            skippedBinary: 0,
+            skippedUnreadable: 0,
+          },
+        },
+      ],
+      context: "FULLCONFIRM SCOPE:\nsrc/example.ts (12 lines)",
+      totalLines: 12,
     });
     mocks.formatGitContextForRepos.mockReturnValue("CURRENT FULL CONTEXT");
     mocks.runAgent.mockResolvedValue({
@@ -304,6 +323,66 @@ src/foo.ts:1: Type error.
     expect(context).toContain("SIBLING REPOSITORY OVERVIEW");
   });
 
+  it("runs fullconfirm with full-scope metadata instead of uncommitted diff context", async () => {
+    await runFullConfirmAgent(tempDir, "haiku");
+
+    expect(mocks.getRepoFullScopeContextsCancellable).toHaveBeenCalledWith(
+      [{ path: tempDir, name: path.basename(tempDir) }],
+      expect.any(Object),
+    );
+    expect(mocks.getUncommittedChangesCancellable).not.toHaveBeenCalled();
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("REVIEW SCOPE: full git-visible code");
+    expect(context).toContain("REVIEW LINE COUNT: 12");
+    expect(context).toContain("FULLCONFIRM SCOPE:");
+  });
+
+  it("runs fullconfirm file inventory through porcelain-shaped prefilter input", async () => {
+    mocks.getRepoFullScopeContextsCancellable.mockResolvedValue({
+      repos: [
+        {
+          path: tempDir,
+          name: "repo",
+          inventory: {
+            files: [{ path: "node_modules/generated.js", lines: 1 }],
+            totalFiles: 1,
+            totalLines: 1,
+            skippedBinary: 0,
+            skippedUnreadable: 0,
+          },
+        },
+      ],
+      context: "FULLCONFIRM SCOPE:\nnode_modules/generated.js (1 lines)",
+      totalLines: 1,
+    });
+
+    await runFullConfirmAgent(tempDir, "haiku");
+
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("PRECOMPUTED VIOLATIONS");
+    expect(context).toContain("node_modules/generated.js");
+  });
+
+  it("uses three SDK agents plus a direct aggregator above 500 review lines", async () => {
+    mocks.getUncommittedChangesCancellable.mockResolvedValue({
+      status: " M src/example.ts",
+      diff: Array.from({ length: 501 }, (_, index) => `+line ${index}`).join("\n"),
+    });
+    mocks.runAgent
+      .mockResolvedValueOnce({ output: "## Verdict\nCONFIRMED: first" })
+      .mockResolvedValueOnce({ output: "## Verdict\nCONFIRMED: second" })
+      .mockResolvedValueOnce({ output: "## Verdict\nDECLINED: duplicate helper" })
+      .mockResolvedValueOnce({ output: "## Verdict\nDECLINED: duplicate helper" });
+
+    const result = await runConfirmAgent(tempDir, "haiku");
+
+    expect(result).toContain("DECLINED: duplicate helper");
+    expect(mocks.runAgent).toHaveBeenCalledTimes(4);
+    expect(mocks.runAgent.mock.calls[2][0].name).toBe("confirm-specialist");
+    expect(mocks.runAgent.mock.calls[3][0].name).toBe("confirm-aggregator");
+    expect(mocks.runAgent.mock.calls[3][1].context).toContain("=== SPECIALIST AGENT ===");
+  });
+
   it("continues without plan input when stored session planfile is empty", async () => {
     const transcriptPath = path.join(tempDir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
@@ -359,7 +438,8 @@ src/foo.ts:1: Type error.
     expect(confirmBlock).not.toContain("transcript_path");
     expect(confirmBlock).not.toContain("repo_scope:");
     expect(confirmBlock).not.toContain("model_tier is required when skip_elicitation is true");
-    expect(confirmBlock).toContain('elicitRepoScope(server.server, "confirm"');
-    expect(confirmBlock).toContain('repoScope: { mode: "all", repoInfo }');
+    expect(confirmBlock).toContain('runConfirmLikeTool("confirm"');
+    expect(serverSource).toContain('elicitRepoScope(server.server, "confirm"');
+    expect(serverSource).toContain('repoScope: { mode: "all" as const, repoInfo: scopedRepoInfo }');
   });
 });

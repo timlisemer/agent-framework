@@ -225,7 +225,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
     // allowed MCP-matching tool clears the flag.
     {
       const mcp = spec.recognizeMcp(rawToolName);
-      if (exit.decision === "allow" && mcp && (["commit", "push", "confirm", "check"] as const).includes(mcp as "commit" | "push" | "confirm" | "check")) {
+      if (exit.decision === "allow" && mcp && (["commit", "push", "confirm", "fullconfirm", "check"] as const).includes(mcp as "commit" | "push" | "confirm" | "fullconfirm" | "check")) {
         await stateManager.update((s) => ({ ...s, forceCheckPending: false }));
       }
     }

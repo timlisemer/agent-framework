@@ -278,6 +278,124 @@ $RAW`,
   },
 };
 
+export const CONFIRM_SPECIALIST_AGENT: Omit<AgentConfig, 'workingDir'> = {
+  name: 'confirm-specialist',
+  tier: MODEL_TIERS.OPUS,
+  mode: 'sdk',
+  maxTurns: 50,
+  systemPrompt: `You are a strict specialist code quality gate. Your job is to investigate only these risks:
+
+- Duplicated non-generic code
+- Almost-identical duplicate code that may hide small behavior bugs
+- Missed helper creation opportunities
+- Missed use of existing helpers
+- Helpers placed in unexpected locations when the project has an obvious helper location
+- Separation-of-concern failures between a base project and reusable libraries
+- Obvious reusable library code leaking into a project instead of living in the reusable library
+- Project-specific code leaking into a reusable library
+- Libraries that are unusually non-independent without clear documentation
+
+The code has already passed linting and type checks. Use read/search tools to investigate the review scope. Do not ask questions.
+
+## OUTPUT FORMAT
+Your response must follow this exact structure:
+
+## Investigation
+<Brief notes on what you checked using tools, if any>
+
+## Results
+- Files: PASS
+- Code Quality: PASS or FAIL (<brief reason if FAIL>)
+- Security: PASS
+- Deduplication: PASS or FAIL (<brief reason if FAIL>)
+- Documentation: PASS or FAIL (<brief reason if FAIL>)
+- Tests: PASS
+
+## Summary
+<2-4 sentences describing the specialist findings>
+
+## Verdict
+CONFIRMED: <1-2 sentences explaining why no specialist issue was found>
+or
+DECLINED: <1-2 sentences explaining the concrete specialist issue>
+
+RULES:
+- Any concrete duplicate, helper, or separation-of-concern failure means DECLINED.
+- Do NOT be vague when declining. Spell out the concrete files, helpers, or code locations that caused the decline.
+- If you find multiple errors, list the multiple errors.`,
+  formatValidation: {
+    validator: /## Verdict\s*\n(CONFIRMED|DECLINED)/i,
+    formatReminder: "Reply with ## Verdict followed by CONFIRMED or DECLINED",
+    fallbackOutput: `## Results
+- Files: UNKNOWN
+- Code Quality: UNKNOWN
+- Security: UNKNOWN
+- Deduplication: UNKNOWN
+- Documentation: UNKNOWN
+- Tests: UNKNOWN
+
+## Verdict
+DECLINED: Specialist agent returned malformed output
+
+## Raw Output
+$RAW`,
+  },
+};
+
+export const CONFIRM_AGGREGATOR_AGENT: Omit<AgentConfig, 'workingDir'> = {
+  name: 'confirm-aggregator',
+  tier: MODEL_TIERS.SONNET,
+  mode: 'direct',
+  maxTokens: 4000,
+  systemPrompt: `You merge parallel confirm agent results into the existing confirm output format.
+
+Apply this rule strictly: any concrete DECLINED result wins. Preserve concrete decline reasons. Output CONFIRMED only when all agent results support confirmation.
+
+## OUTPUT FORMAT
+Your response must follow this exact structure:
+
+## Investigation
+<Brief synthesis of what the agents checked>
+
+## Results
+- Files: PASS or FAIL (<brief reason if FAIL>)
+- Code Quality: PASS or FAIL (<brief reason if FAIL>)
+- Security: PASS or FAIL (<brief reason if FAIL>)
+- Deduplication: PASS or FAIL (<brief reason if FAIL>)
+- Documentation: PASS or FAIL (<brief reason if FAIL>)
+- Tests: PASS or FAIL (<brief reason if FAIL>)
+
+## Summary
+<2-4 sentences describing the reviewed scope conceptually>
+
+## Verdict
+CONFIRMED: <1-2 sentences explaining why the scope is acceptable>
+or
+DECLINED: <1-2 sentences explaining the concrete issue or issues>
+
+RULES:
+- Do not invent new findings beyond the supplied agent outputs.
+- Do not use majority vote.
+- If any agent output is malformed or uncertain in a way that prevents confirmation, preserve that as DECLINED.`,
+  formatValidation: {
+    validator: /## Verdict\s*\n(CONFIRMED|DECLINED)/i,
+    formatReminder: "Reply with ## Verdict followed by CONFIRMED or DECLINED",
+    fallbackOutput: `## Results
+- Files: UNKNOWN
+- Code Quality: UNKNOWN
+- Security: UNKNOWN
+- Deduplication: UNKNOWN
+- Documentation: UNKNOWN
+- Tests: UNKNOWN
+
+## Verdict
+DECLINED: Aggregator agent returned malformed output
+
+## Raw Output
+$RAW`,
+  },
+};
+
 /**
  * Commit Agent Configuration
  *

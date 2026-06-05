@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   runValidatePlanAgent: vi.fn(),
   runCreatePlanfileAgent: vi.fn(),
   runConfirmAgent: vi.fn(),
+  runFullConfirmAgent: vi.fn(),
   runCommitAgent: vi.fn(),
   runCommitAgentWithSharedConfirm: vi.fn(),
   runPushAgent: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock("../../src/agents/mcp/create-planfile.js", () => ({
 
 vi.mock("../../src/agents/mcp/confirm.js", () => ({
   runConfirmAgent: mocks.runConfirmAgent,
+  runFullConfirmAgent: mocks.runFullConfirmAgent,
   confirmResultFailed: (result: string) => result.includes("DECLINED")
     || result.startsWith("ERROR:")
     || /-\s*Status:\s*FAIL\b/i.test(result)
@@ -143,7 +145,7 @@ const repoInfo = {
   ],
 };
 
-async function callTool(name: "confirm" | "commit", args: Record<string, unknown>) {
+async function callTool(name: "confirm" | "fullconfirm" | "commit", args: Record<string, unknown>) {
   const tool = mocks.tools.get(name);
   expect(tool).toBeDefined();
   return await tool!.handler(args, { signal: undefined });
@@ -166,6 +168,7 @@ describe("MCP server repo-scope routing", () => {
     mocks.elicitPreferences.mockResolvedValue({ modelTier: "haiku", focus: undefined });
     mocks.parseUncertainties.mockReturnValue([]);
     mocks.runConfirmAgent.mockResolvedValue("## Verdict\nCONFIRMED: ok");
+    mocks.runFullConfirmAgent.mockResolvedValue("## Verdict\nCONFIRMED: full ok");
     mocks.runCommitAgentWithSharedConfirm.mockResolvedValue("## Verdict\nCONFIRMED: ok\n\nSIZE: SMALL\ncommit: scoped\nHASH: abc123");
     mocks.runCommitAgent.mockResolvedValue("## Verdict\nCONFIRMED: ok\n\nSIZE: SMALL\ncommit: scoped\nHASH: def456");
   });
@@ -216,6 +219,41 @@ describe("MCP server repo-scope routing", () => {
       undefined,
       expect.objectContaining({ repoScope: { mode: "single", repoInfo } }),
     );
+  });
+
+  it("routes fullconfirm skip_elicitation over all repos even when no repos are dirty", async () => {
+    const cleanRepoInfo = {
+      ...repoInfo,
+      mainRepoHasChanges: false,
+      submodules: [{ path: "sub", absolutePath: "/repo/main/sub", hasChanges: false }],
+      reposWithChanges: [],
+    };
+    mocks.getRepoInfoCancellable.mockResolvedValue(cleanRepoInfo);
+
+    const result = await callTool("fullconfirm", {
+      working_dir: "/repo/main",
+      skip_elicitation: true,
+    });
+
+    expect(result.content[0].text).toContain("CONFIRMED");
+    expect(mocks.runFullConfirmAgent).toHaveBeenCalledWith(
+      "/repo/main",
+      "opus",
+      undefined,
+      undefined,
+      expect.objectContaining({
+        repoScope: {
+          mode: "all",
+          repoInfo: expect.objectContaining({
+            reposWithChanges: [
+              { path: "/repo/main/sub", name: "sub" },
+              { path: "/repo/main", name: "main" },
+            ],
+          }),
+        },
+      }),
+    );
+    expect(mocks.runConfirmAgent).not.toHaveBeenCalled();
   });
 
   it("routes commit all scope through one confirm and shared-confirm commits", async () => {

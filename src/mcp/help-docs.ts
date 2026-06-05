@@ -128,6 +128,39 @@ repo. Verdicts are either CONFIRMED or DECLINED with reason.
 - As a standalone code review gate during development
 - To get a structured quality/security/documentation verdict on a diff`;
 
+export const FULLCONFIRM_HELP = `# fullconfirm -- Full Code Review Confirmation
+
+Reviews the full git-visible code scope for quality, security, documentation,
+tests, deduplication, helper placement, and separation-of-concern problems.
+Runs check first; if check fails, fullconfirm returns the check output verbatim.
+
+## Inputs
+
+- working_dir (optional): directory to evaluate (defaults to cwd)
+- model_tier (optional): haiku | sonnet | opus (default opus)
+- extra_context (optional): free-form additional instructions or review-depth guidance
+- optional_planfile (optional): planfile path to include in confirm context
+- skip_elicitation (optional, bool): skip interactive repo/preference prompts
+
+## Flow
+
+1. Detect the main repository and submodules, including clean repositories
+2. If multiple repos and skip_elicitation=false, ask whether to confirm all repos together or individually
+3. Run check agent. If it FAILs, return the check output verbatim without LLM.
+4. Build git-visible file inventory and text line-count metadata without embedding full file contents.
+5. Run one SDK confirm agent for scopes at or below 500 lines.
+6. For scopes above 500 lines, run two normal SDK confirm agents plus one specialist SDK agent in parallel, then merge results with a direct aggregator.
+
+## Output
+
+If check fails, output is the raw check result. If check passes, output uses
+the same CONFIRMED or DECLINED verdict format as confirm.
+
+## When to use
+
+- To review the whole non-gitignored repository scope, not just a diff
+- As a standalone full-code quality gate`;
+
 export const COMMIT_HELP = `# commit -- Quality-Gated Git Commit
 
 Runs confirm first; if CONFIRMED, generates a commit message sized to the diff

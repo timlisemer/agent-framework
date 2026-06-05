@@ -21,7 +21,8 @@ deployment path; the activation script owns them.
 `dotcodex/skills/agent-framework-*` contains Codex-native skills
 (`$agent-framework-check`, `$agent-framework-commit`,
 `$agent-framework-confirm`, `$agent-framework-push`,
-`$agent-framework-quickpush`, `$agent-framework-quickconfirm`,
+`$agent-framework-fullconfirm`, `$agent-framework-quickpush`,
+`$agent-framework-quickconfirm`, `$agent-framework-fullquickconfirm`,
 `$agent-framework-transcript`,
 `$agent-framework-locate-scenario`,
 `$agent-framework-plan1`, `$agent-framework-plan3`,

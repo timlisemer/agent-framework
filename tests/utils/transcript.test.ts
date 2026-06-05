@@ -758,6 +758,25 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
     }
   });
 
+  it("readTranscriptExact infers fullconfirm from description-only frontmatter", async () => {
+    const filePath = writeTranscript([
+      userText([
+        "---",
+        "description: Run fullconfirm over the repository",
+        "---",
+        "",
+        "Body without an explicit command name.",
+      ].join("\n")),
+    ]);
+
+    const result = await readTranscriptExact(filePath, {
+      counts: { user: 1 },
+      includeSlashCommandContext: true,
+    });
+
+    expect(result.slashCommandContext?.commandName).toBe("fullconfirm");
+  });
+
   it("readTranscriptExact recognizes Codex rollout-shaped skill prompts", async () => {
     const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";

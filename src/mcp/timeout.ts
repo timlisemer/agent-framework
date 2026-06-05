@@ -34,7 +34,7 @@ export class McpToolTimeoutError extends Error {
 }
 
 export function mcpTimeoutForTool(toolName: string): number {
-  return toolName === "confirm" || toolName === "commit"
+  return toolName === "confirm" || toolName === "fullconfirm" || toolName === "commit"
     ? EXTENDED_MCP_TIMEOUT_MS
     : DEFAULT_MCP_TIMEOUT_MS;
 }

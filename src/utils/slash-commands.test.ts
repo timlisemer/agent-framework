@@ -45,6 +45,19 @@ describe("SLASH_COMMAND_ALLOWED_TOOLS canonical keys", () => {
     ]);
   });
 
+  it("fullconfirm maps to canonical mcp-fullconfirm tool", () => {
+    expect(SLASH_COMMAND_ALLOWED_TOOLS["fullconfirm"]).toEqual(["mcp-fullconfirm"]);
+  });
+
+  it("fullquickconfirm maps to canonical mcp-fullconfirm tool", () => {
+    expect(SLASH_COMMAND_ALLOWED_TOOLS["fullquickconfirm"]).toEqual([
+      "mcp-fullconfirm",
+      "Edit",
+      "MultiEdit",
+      "Write",
+    ]);
+  });
+
   it("check maps to canonical mcp-check tool", () => {
     expect(SLASH_COMMAND_ALLOWED_TOOLS["check"]).toEqual(["mcp-check"]);
   });
@@ -64,10 +77,11 @@ describe("SLASH_COMMAND_ALLOWED_TOOLS canonical keys", () => {
 });
 
 describe("RESTRICTED_MCPS", () => {
-  it("contains commit, push, confirm", () => {
+  it("contains commit, push, confirm, fullconfirm", () => {
     expect(RESTRICTED_MCPS.has("commit")).toBe(true);
     expect(RESTRICTED_MCPS.has("push")).toBe(true);
     expect(RESTRICTED_MCPS.has("confirm")).toBe(true);
+    expect(RESTRICTED_MCPS.has("fullconfirm")).toBe(true);
     expect(RESTRICTED_MCPS.has("create_planfile")).toBe(false);
     expect(RESTRICTED_MCPS.has("check")).toBe(false);
   });
@@ -77,12 +91,14 @@ describe("claudeSpec.recognizeWorkflowInvocation", () => {
   it("detects Claude slash-command tags", () => {
     expect(claudeSpec.recognizeWorkflowInvocation("<command-name>/quickpush</command-name>")).toBe("quickpush");
     expect(claudeSpec.recognizeWorkflowInvocation("<command-name>/quickconfirm</command-name>")).toBe("quickconfirm");
+    expect(claudeSpec.recognizeWorkflowInvocation("<command-name>/fullquickconfirm</command-name>")).toBe("fullquickconfirm");
     expect(claudeSpec.recognizeWorkflowInvocation("<command-name>/plan3</command-name>")).toBe("plan3");
   });
 
   it("detects direct slash prompts", () => {
     expect(claudeSpec.recognizeWorkflowInvocation("/quickpush")).toBe("quickpush");
     expect(claudeSpec.recognizeWorkflowInvocation("/quickconfirm")).toBe("quickconfirm");
+    expect(claudeSpec.recognizeWorkflowInvocation("/fullconfirm")).toBe("fullconfirm");
     expect(claudeSpec.recognizeWorkflowInvocation("  /check now")).toBe("check");
     expect(claudeSpec.recognizeWorkflowInvocation("  /locate-scenario \"quote\"")).toBe("locate-scenario");
   });
@@ -97,8 +113,10 @@ describe("claudeSpec.isWorkflowInvocationOnly", () => {
   it("treats bare commands and plain command parameters as workflow-only", () => {
     expect(claudeSpec.isWorkflowInvocationOnly("<command-name>/quickpush</command-name>")).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly("<command-name>/quickconfirm</command-name>")).toBe(true);
+    expect(claudeSpec.isWorkflowInvocationOnly("<command-name>/fullquickconfirm</command-name>")).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly("/quickpush")).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly("/quickconfirm")).toBe(true);
+    expect(claudeSpec.isWorkflowInvocationOnly("/fullconfirm")).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly("/check now")).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly('/locate-scenario "quote"')).toBe(true);
   });
@@ -113,6 +131,8 @@ describe("codexSpec.recognizeWorkflowInvocation", () => {
   it("detects Codex skill mentions", () => {
     expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-quickpush")).toBe("quickpush");
     expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-quickconfirm")).toBe("quickconfirm");
+    expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-fullconfirm")).toBe("fullconfirm");
+    expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-fullquickconfirm")).toBe("fullquickconfirm");
     expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-transcript")).toBe("transcript");
     expect(codexSpec.recognizeWorkflowInvocation("$agent-framework-locate-scenario")).toBe("locate-scenario");
   });
@@ -120,6 +140,7 @@ describe("codexSpec.recognizeWorkflowInvocation", () => {
   it("detects Codex skill context blocks", () => {
     expect(codexSpec.recognizeWorkflowInvocation("<skill>\n<name>agent-framework-quickpush</name>\n</skill>")).toBe("quickpush");
     expect(codexSpec.recognizeWorkflowInvocation("<skill>\n<name>agent-framework-quickconfirm</name>\n</skill>")).toBe("quickconfirm");
+    expect(codexSpec.recognizeWorkflowInvocation("<skill>\n<name>agent-framework-fullquickconfirm</name>\n</skill>")).toBe("fullquickconfirm");
     expect(codexSpec.recognizeWorkflowInvocation("---\nname: agent-framework-confirm\ndescription: Confirm\n---")).toBe("confirm");
   });
 
@@ -134,8 +155,10 @@ describe("codexSpec.isWorkflowInvocationOnly", () => {
   it("treats bare Codex skill wrappers as workflow-only", () => {
     expect(codexSpec.isWorkflowInvocationOnly("$agent-framework-quickpush")).toBe(true);
     expect(codexSpec.isWorkflowInvocationOnly("$agent-framework-quickconfirm")).toBe(true);
+    expect(codexSpec.isWorkflowInvocationOnly("$agent-framework-fullquickconfirm")).toBe(true);
     expect(codexSpec.isWorkflowInvocationOnly("<skill>\n<name>agent-framework-quickpush</name>\n</skill>")).toBe(true);
     expect(codexSpec.isWorkflowInvocationOnly("<skill>\n<name>agent-framework-quickconfirm</name>\n</skill>")).toBe(true);
+    expect(codexSpec.isWorkflowInvocationOnly("<skill>\n<name>agent-framework-fullconfirm</name>\n</skill>")).toBe(true);
     expect(codexSpec.isWorkflowInvocationOnly("---\nname: agent-framework-confirm\ndescription: Confirm\n---")).toBe(true);
   });
 
@@ -188,6 +211,19 @@ describe("resolveActiveSlashCommandAllowedTools (Claude adapter)", () => {
 
     await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual([
       "mcp-confirm",
+      "Edit",
+      "MultiEdit",
+      "Write",
+    ]);
+  });
+
+  it("resolves fullquickconfirm to canonical mcp-fullconfirm", async () => {
+    const transcript = await writeTranscript([
+      claudeUserEntry("<command-name>/fullquickconfirm</command-name>"),
+    ]);
+
+    await expect(resolveActiveSlashCommandAllowedTools(transcript)).resolves.toEqual([
+      "mcp-fullconfirm",
       "Edit",
       "MultiEdit",
       "Write",
