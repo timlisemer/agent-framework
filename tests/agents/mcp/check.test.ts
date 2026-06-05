@@ -6,6 +6,7 @@ import * as path from "path";
 const mocks = vi.hoisted(() => ({
   runAgent: vi.fn(),
   runProcessCancellable: vi.fn(),
+  findDeletedOrRenamedFileReferenceIssuesCancellable: vi.fn(),
   getGitStatusCancellable: vi.fn(),
   getRepoInfoCancellable: vi.fn(),
   sortReposWithChangesSubmodulesFirst: vi.fn(),
@@ -30,6 +31,7 @@ vi.mock("../../../src/utils/command.js", async (importOriginal) => {
 });
 
 vi.mock("../../../src/utils/git-utils.js", () => ({
+  findDeletedOrRenamedFileReferenceIssuesCancellable: mocks.findDeletedOrRenamedFileReferenceIssuesCancellable,
   getGitStatusCancellable: mocks.getGitStatusCancellable,
   getRepoInfoCancellable: mocks.getRepoInfoCancellable,
   sortReposWithChangesSubmodulesFirst: mocks.sortReposWithChangesSubmodulesFirst,
@@ -57,6 +59,7 @@ vi.mock("../../../src/utils/supplemental-diagnostics.js", () => ({
 }));
 
 import {
+  appendDeterministicCheckErrors,
   applyStatusOverride,
   checkInvocationsForRunner,
   promoteUnusedCodeToErrors,
@@ -116,6 +119,32 @@ real error message here
 `;
     const r = applyStatusOverride(input);
     expect(r).toContain("- Status: PASS");
+  });
+});
+
+describe("appendDeterministicCheckErrors", () => {
+  it("adds deterministic errors and forces FAIL", () => {
+    const input = `## Results
+- Errors: 0
+- Warnings: 0
+- Status: PASS
+
+## Errors
+(none)
+
+## Warnings
+(none)
+`;
+
+    const result = appendDeterministicCheckErrors(input, [
+      "Deleted file `src/old.ts` still has references to old filename `old.ts`:\n  - src/index.ts:1: import './old.ts';",
+    ]);
+
+    expect(result).toContain("- Errors: 1");
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("DETERMINISTIC CHECK ERRORS:");
+    expect(result).toContain("Deleted file `src/old.ts`");
+    expect(result).not.toMatch(/## Errors\s*\n\(none\)/);
   });
 });
 
@@ -254,6 +283,7 @@ describe("runCheckAgent supplemental diagnostics context", () => {
     mocks.getRepoInfoCancellable.mockResolvedValue({ mainRepo: tempDir });
     mocks.sortReposWithChangesSubmodulesFirst.mockImplementation((repoInfo) => repoInfo.reposWithChanges);
     mocks.getGitStatusCancellable.mockResolvedValue(" M src/example.ts");
+    mocks.findDeletedOrRenamedFileReferenceIssuesCancellable.mockResolvedValue([]);
     mocks.getAgentFrameworkSessionDir.mockReturnValue(path.join(tempDir, ".agent-framework-session"));
     mocks.resetDriftDetectionWindow.mockResolvedValue(undefined);
     mocks.runSupplementalDiagnosticProviders.mockResolvedValue(
@@ -287,6 +317,40 @@ src/example.ts:1:1 warning TS6385: deprecated
     expect(context).toContain("CHECK OUTPUT: No Justfile or Makefile found.");
     expect(context).toContain("TYPESCRIPT LANGUAGE SERVICE DIAGNOSTICS:");
     expect(context).toContain("src/example.ts:1:1 warning TS6385: deprecated");
+  });
+
+  it("appends deleted filename references as deterministic check errors", async () => {
+    mocks.findDeletedOrRenamedFileReferenceIssuesCancellable.mockResolvedValue([
+      {
+        oldPath: "src/old-helper.ts",
+        oldBasename: "old-helper.ts",
+        changeType: "deleted",
+        references: [
+          { path: "src/index.ts", line: 3, text: "import './old-helper.ts';" },
+        ],
+      },
+    ]);
+    mocks.runAgent.mockResolvedValue({
+      output: `## Results
+- Errors: 0
+- Warnings: 0
+- Status: PASS
+
+## Errors
+(none)
+
+## Warnings
+(none)
+`,
+    });
+
+    const result = await runCheckAgent(tempDir);
+
+    expect(mocks.findDeletedOrRenamedFileReferenceIssuesCancellable).toHaveBeenCalledWith(tempDir, expect.any(Object));
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("DETERMINISTIC CHECK ERRORS:");
+    expect(result).toContain("Deleted file `src/old-helper.ts` still has references");
+    expect(result).toContain("src/index.ts:3: import './old-helper.ts';");
   });
 
   it("summarizes all-repos check context with one check-agent call", async () => {

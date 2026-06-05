@@ -295,7 +295,7 @@ registerTimedTool(
   "check",
   {
     title: "Check",
-    description: "Run linter, make/just check, and supplemental editor diagnostics; return summarized results with warning recommendations.",
+    description: "Run linter, make/just check, deterministic deleted/renamed filename-reference diagnostics, and supplemental editor diagnostics; return summarized results with warning recommendations.",
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
       transcript_path: z.string().optional().describe("Session transcript path for statusLine")
@@ -871,7 +871,7 @@ const HELP_RESOURCES: Array<{
   summary: string;
   body: string;
 }> = [
-  { tool: "check", title: "check -- Help", summary: "Linter + type-check summarizer", body: CHECK_HELP },
+  { tool: "check", title: "check -- Help", summary: "Linter, type-check, and deterministic diagnostics summarizer", body: CHECK_HELP },
   { tool: "confirm", title: "confirm -- Help", summary: "Code quality gate", body: CONFIRM_HELP },
   { tool: "fullconfirm", title: "fullconfirm -- Help", summary: "Full code quality gate", body: FULLCONFIRM_HELP },
   { tool: "commit", title: "commit -- Help", summary: "Quality-gated git commit", body: COMMIT_HELP },

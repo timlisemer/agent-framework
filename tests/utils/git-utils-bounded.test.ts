@@ -6,6 +6,7 @@ import * as path from "path";
 import {
   formatGitContextForRepos,
   formatSiblingRepoOverview,
+  findDeletedOrRenamedFileReferenceIssuesCancellable,
   getSingleRepoGitContextWithSiblingOverviewCancellable,
   getGitStatusCancellable,
   getGitVisibleFileInventoryCancellable,
@@ -71,6 +72,131 @@ describe("bounded git utilities", () => {
     expect(inventory.files.map((file) => file.path)).not.toContain("binary.bin");
     expect(inventory.totalLines).toBeGreaterThanOrEqual(5);
     expect(inventory.skippedBinary).toBe(1);
+  });
+
+  it("reports references to a truly deleted filename", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.writeFileSync(path.join(repoDir, "src", "old-helper.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "src", "index.ts"), "import './old-helper.ts';\n");
+    git(repoDir, ["add", "src/old-helper.ts", "src/index.ts"]);
+    git(repoDir, ["commit", "-m", "add helper"]);
+    fs.rmSync(path.join(repoDir, "src", "old-helper.ts"));
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].oldPath).toBe("src/old-helper.ts");
+    expect(issues[0].changeType).toBe("deleted");
+    expect(issues[0].references).toEqual([
+      { path: "src/index.ts", line: 1, text: "import './old-helper.ts';" },
+    ]);
+  });
+
+  it("reports stale filename references after a same-basename move", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "lib"));
+    fs.writeFileSync(path.join(repoDir, "src", "same-name.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "src", "index.ts"), "import './same-name.ts';\n");
+    git(repoDir, ["add", "src/same-name.ts", "src/index.ts"]);
+    git(repoDir, ["commit", "-m", "add same-name"]);
+    fs.renameSync(path.join(repoDir, "src", "same-name.ts"), path.join(repoDir, "lib", "same-name.ts"));
+    git(repoDir, ["add", "-A"]);
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].oldPath).toBe("src/same-name.ts");
+    expect(issues[0].changeType).toBe("renamed");
+    expect(issues[0].references.map((ref) => ref.path)).toEqual(["src/index.ts"]);
+  });
+
+  it("does not treat an unrelated existing same-basename file as a move", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "docs"));
+    fs.writeFileSync(path.join(repoDir, "src", "duplicate.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "docs", "duplicate.ts"), "unrelated docs fixture\n");
+    fs.writeFileSync(path.join(repoDir, "src", "index.ts"), "import './duplicate.ts';\n");
+    git(repoDir, ["add", "src/duplicate.ts", "docs/duplicate.ts", "src/index.ts"]);
+    git(repoDir, ["commit", "-m", "add duplicate names"]);
+    fs.rmSync(path.join(repoDir, "src", "duplicate.ts"));
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].oldPath).toBe("src/duplicate.ts");
+    expect(issues[0].references.map((ref) => ref.path)).toEqual(["src/index.ts"]);
+  });
+
+  it("does not treat an unrelated untracked same-basename file as a move", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "scratch"));
+    fs.writeFileSync(path.join(repoDir, "src", "untracked-name.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "src", "index.ts"), "import './untracked-name.ts';\n");
+    git(repoDir, ["add", "src/untracked-name.ts", "src/index.ts"]);
+    git(repoDir, ["commit", "-m", "add untracked-name"]);
+    fs.rmSync(path.join(repoDir, "src", "untracked-name.ts"));
+    fs.writeFileSync(path.join(repoDir, "scratch", "untracked-name.ts"), "unrelated scratch file\n");
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].oldPath).toBe("src/untracked-name.ts");
+    expect(issues[0].references.map((ref) => ref.path)).toEqual(["src/index.ts"]);
+  });
+
+  it("does not treat an unrelated edited same-basename file as a move", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "docs"));
+    fs.writeFileSync(path.join(repoDir, "src", "edited-name.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "docs", "edited-name.ts"), "unrelated docs fixture\n");
+    fs.writeFileSync(path.join(repoDir, "src", "index.ts"), "import './edited-name.ts';\n");
+    git(repoDir, ["add", "src/edited-name.ts", "docs/edited-name.ts", "src/index.ts"]);
+    git(repoDir, ["commit", "-m", "add edited-name"]);
+    fs.rmSync(path.join(repoDir, "src", "edited-name.ts"));
+    fs.writeFileSync(path.join(repoDir, "docs", "edited-name.ts"), "unrelated docs fixture changed\n");
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].oldPath).toBe("src/edited-name.ts");
+    expect(issues[0].references.map((ref) => ref.path)).toEqual(["src/index.ts"]);
+  });
+
+  it("does not treat an unrelated same-basename rename as a move", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "docs"));
+    fs.mkdirSync(path.join(repoDir, "notes"));
+    fs.writeFileSync(path.join(repoDir, "src", "shared.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "docs", "shared.ts"), "unrelated docs fixture\n");
+    fs.writeFileSync(path.join(repoDir, "src", "index.ts"), "import './shared.ts';\n");
+    git(repoDir, ["add", "src/shared.ts", "docs/shared.ts", "src/index.ts"]);
+    git(repoDir, ["commit", "-m", "add shared names"]);
+    fs.rmSync(path.join(repoDir, "src", "shared.ts"));
+    fs.renameSync(path.join(repoDir, "docs", "shared.ts"), path.join(repoDir, "notes", "shared.ts"));
+    git(repoDir, ["add", "-A"]);
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    const deletedIssue = issues.find((issue) => issue.oldPath === "src/shared.ts");
+    expect(deletedIssue).toBeTruthy();
+    expect(deletedIssue?.references.map((ref) => ref.path)).toEqual(["src/index.ts"]);
+  });
+
+  it("reports references after a git rename to a different basename", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.writeFileSync(path.join(repoDir, "src", "old-name.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "src", "index.ts"), "import './old-name.ts';\n");
+    git(repoDir, ["add", "src/old-name.ts", "src/index.ts"]);
+    git(repoDir, ["commit", "-m", "add old-name"]);
+    fs.renameSync(path.join(repoDir, "src", "old-name.ts"), path.join(repoDir, "src", "new-name.ts"));
+    git(repoDir, ["add", "-A"]);
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].oldPath).toBe("src/old-name.ts");
+    expect(issues[0].changeType).toBe("renamed");
+    expect(issues[0].references.map((ref) => ref.path)).toEqual(["src/index.ts"]);
   });
 });
 

@@ -1,6 +1,6 @@
 ---
 disable-model-invocation: true
-description: Run linter, type checks, and supplemental editor diagnostics; return summarized results (user)
+description: Run linter, type checks, deterministic deleted/renamed filename-reference diagnostics, and supplemental editor diagnostics; return summarized results (user)
 allowed-tools: mcp__agent-framework__check
 ---
 

@@ -174,6 +174,19 @@ export interface RepoFullScopeContext {
   inventory: GitVisibleFileInventory;
 }
 
+export interface DeletedOrRenamedFileReference {
+  path: string;
+  line: number;
+  text: string;
+}
+
+export interface DeletedOrRenamedFileReferenceIssue {
+  oldPath: string;
+  oldBasename: string;
+  changeType: "deleted" | "renamed";
+  references: DeletedOrRenamedFileReference[];
+}
+
 function sortRepoSelectionsSubmodulesFirst<T extends { path: string }>(
   repos: T[],
   mainRepo: string,
@@ -309,6 +322,120 @@ export async function getGitStatusCancellable(
     maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
   });
   return status.output || "";
+}
+
+type DeletedOrRenamedChange = {
+  oldPath: string;
+  oldBasename: string;
+  changeType: "deleted" | "renamed";
+};
+
+type NameStatusChange = DeletedOrRenamedChange & {
+  newPath?: string;
+};
+
+function parseDeletedOrRenamedChanges(nameStatus: string): NameStatusChange[] {
+  const changes: NameStatusChange[] = [];
+  const seen = new Set<string>();
+
+  for (const line of nameStatus.split("\n")) {
+    if (!line.trim()) continue;
+    const parts = line.split("\t");
+    const status = parts[0] ?? "";
+    let oldPath: string | undefined;
+    let newPath: string | undefined;
+    let changeType: DeletedOrRenamedChange["changeType"] | undefined;
+
+    if (status === "D") {
+      oldPath = parts[1];
+      changeType = "deleted";
+    } else if (status.startsWith("R")) {
+      oldPath = parts[1];
+      newPath = parts[2];
+      changeType = "renamed";
+    }
+
+    if (!oldPath || !changeType) continue;
+    const key = `${changeType}\0${oldPath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    changes.push({
+      oldPath,
+      oldBasename: path.basename(oldPath),
+      changeType,
+      newPath,
+    });
+  }
+
+  return changes;
+}
+
+async function findReferencesToBasename(
+  workingDir: string,
+  files: string[],
+  basename: string,
+  options: CancellationOptions,
+): Promise<DeletedOrRenamedFileReference[]> {
+  const references: DeletedOrRenamedFileReference[] = [];
+  for (const relativePath of files) {
+    throwIfAborted(options.signal);
+    const absolutePath = path.join(workingDir, relativePath);
+    let content: string;
+    try {
+      content = await fs.promises.readFile(absolutePath, "utf-8");
+    } catch {
+      continue;
+    }
+
+    const lines = content.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (!lines[i].includes(basename)) continue;
+      references.push({
+        path: relativePath,
+        line: i + 1,
+        text: lines[i].trim(),
+      });
+    }
+  }
+  return references;
+}
+
+/**
+ * Deterministically find references to file names that were truly deleted or
+ * renamed in the uncommitted diff. A same-basename path elsewhere in the repo
+ * is treated as a move and skipped; a git rename to a different basename is
+ * not treated as a move.
+ */
+export async function findDeletedOrRenamedFileReferenceIssuesCancellable(
+  workingDir: string,
+  options: CancellationOptions = {},
+): Promise<DeletedOrRenamedFileReferenceIssue[]> {
+  const nameStatus = await runGit(["diff", "--name-status", "--find-renames", "HEAD"], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  const changes = parseDeletedOrRenamedChanges(nameStatus.output || "");
+  if (changes.length === 0) return [];
+
+  const inventory = await getGitVisibleFileInventoryCancellable(workingDir, options);
+  const files = inventory.files.map((file) => file.path);
+  const issues: DeletedOrRenamedFileReferenceIssue[] = [];
+
+  for (const change of changes) {
+    throwIfAborted(options.signal);
+    const references = await findReferencesToBasename(
+      workingDir,
+      files.filter((relativePath) => relativePath !== change.oldPath),
+      change.oldBasename,
+      options,
+    );
+    if (references.length > 0) {
+      issues.push({ ...change, references });
+    }
+  }
+
+  return issues;
 }
 
 function appendWithinLimit(

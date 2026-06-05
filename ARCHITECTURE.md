@@ -18,7 +18,7 @@ src/                                # TypeScript source
 
   agents/
     mcp/                            # MCP-exposed agents
-      check.ts                      # Runs linter + make/just check + supplemental editor diagnostics
+      check.ts                      # Runs linter + make/just check + deterministic deleted/renamed filename-reference and supplemental editor diagnostics
       create-planfile.ts            # Writes named planfiles and runs validation
       confirm.ts                    # Code quality gate (SDK mode)
       commit.ts                     # Generates commit message + commits
@@ -326,13 +326,13 @@ MCP agents chain together for verification:
 ```
 commit → confirm → check
   │         │         │
-  │         │         └─ Runs linter + make/just check + supplemental editor diagnostics (sonnet, direct)
+  │         │         └─ Runs linter + make/just check + deterministic deleted/renamed filename-reference + supplemental editor diagnostics (sonnet, direct)
   │         └─ Analyzes git diff + investigates code (opus, SDK)
   └─ Generates commit message + executes commit (haiku, direct)
 
 fullconfirm → check
   │           │
-  │           └─ Runs linter + make/just check + supplemental editor diagnostics (sonnet, direct)
+  │           └─ Runs linter + make/just check + deterministic deleted/renamed filename-reference + supplemental editor diagnostics (sonnet, direct)
   └─ Reviews git-visible repository scope and investigates code (opus, SDK)
 ```
 

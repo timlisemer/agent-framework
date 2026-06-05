@@ -53,9 +53,11 @@ import { runAgent } from "../../utils/agent-runner.js";
 import { CHECK_AGENT } from "../../utils/agent-configs.js";
 import { runProcessCancellable } from "../../utils/command.js";
 import {
+  findDeletedOrRenamedFileReferenceIssuesCancellable,
   getGitStatusCancellable,
   getRepoInfoCancellable,
   sortReposWithChangesSubmodulesFirst,
+  type DeletedOrRenamedFileReferenceIssue,
   type RepoInfo,
 } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
@@ -221,6 +223,79 @@ export function applyStatusOverride(output: string): string {
     return output.replace(errorsAfterRe, `$1- Status: ${status}\n`);
   }
   return output;
+}
+
+function countSectionBodyLines(output: string, heading: "Errors" | "Warnings"): number {
+  const match = output.match(new RegExp(`## ${heading}\\s*\\n([\\s\\S]*?)(?:\\n## |$)`));
+  if (!match) return 0;
+  return match[1]
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && line !== "(none)").length;
+}
+
+function replaceSectionBody(output: string, heading: "Errors" | "Warnings", body: string): string {
+  const sectionRe = new RegExp(`(## ${heading}\\s*\\n)([\\s\\S]*?)(?=\\n## |$)`);
+  if (sectionRe.test(output)) {
+    return output.replace(sectionRe, (_match, prefix: string) => `${prefix}${body.replace(/\n*$/, "\n")}`);
+  }
+  return `${output.replace(/\s*$/, "")}\n\n## ${heading}\n${body.replace(/\n*$/, "\n")}`;
+}
+
+function setResultCount(output: string, label: "Errors" | "Warnings", count: number): string {
+  const countRe = new RegExp(`(- ${label}:\\s*)\\d+`, "i");
+  if (countRe.test(output)) {
+    return output.replace(countRe, (_match, prefix: string) => `${prefix}${count}`);
+  }
+  const resultsRe = /## Results\s*\n/;
+  if (resultsRe.test(output)) {
+    return output.replace(resultsRe, `## Results\n- ${label}: ${count}\n`);
+  }
+  return `## Results\n- ${label}: ${count}\n\n${output}`;
+}
+
+function resultCount(output: string, label: "Errors" | "Warnings"): number {
+  const match = output.match(new RegExp(`- ${label}:\\s*(\\d+)`, "i"));
+  return match ? parseInt(match[1], 10) || 0 : countSectionBodyLines(output, label);
+}
+
+function formatDeletedOrRenamedReferenceError(
+  repo: { path: string; name: string },
+  issue: DeletedOrRenamedFileReferenceIssue,
+  includeRepoLabel: boolean,
+): string {
+  const action = issue.changeType === "deleted" ? "Deleted" : "Renamed";
+  const repoLabel = includeRepoLabel ? ` in ${repo.name} (${repo.path})` : "";
+  const references = issue.references
+    .map((ref) => `  - ${ref.path}:${ref.line}: ${ref.text}`)
+    .join("\n");
+  return [
+    `${action} file${repoLabel} \`${issue.oldPath}\` still has references to old filename \`${issue.oldBasename}\`:`,
+    references,
+  ].join("\n");
+}
+
+export function appendDeterministicCheckErrors(
+  output: string,
+  errors: string[],
+): string {
+  if (errors.length === 0) return output;
+
+  const errMatch = output.match(/## Errors\s*\n([\s\S]*?)(?:\n## |$)/);
+  const existingBody = errMatch?.[1].trim();
+  const existingErrors = existingBody && existingBody !== "(none)" ? existingBody : "";
+  const deterministicBody = [
+    existingErrors,
+    "DETERMINISTIC CHECK ERRORS:",
+    ...errors,
+  ].filter(Boolean).join("\n");
+
+  let next = replaceSectionBody(output, "Errors", deterministicBody);
+  const errorCount = resultCount(output, "Errors") + errors.length;
+  const warningCount = resultCount(output, "Warnings");
+  next = setResultCount(next, "Errors", errorCount);
+  next = setResultCount(next, "Warnings", warningCount);
+  return applyStatusOverride(next);
 }
 
 /**
@@ -472,6 +547,19 @@ export async function runCheckAgent(
   const supplementalOutput = supplementalSections.join("\n\n");
   const supplementalContext = supplementalOutput ? `\n\n${supplementalOutput}` : "";
 
+  // Deterministic deleted/renamed filename reference check. This runs outside
+  // CHECK_AGENT so stale references cannot be downgraded or missed by the LLM.
+  const deterministicErrors: string[] = [];
+  for (const repo of scopedRepos) {
+    throwIfAborted(options.signal);
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repo.path, options);
+    deterministicErrors.push(
+      ...issues.map((issue) =>
+        formatDeletedOrRenamedReferenceError(repo, issue, options.repoScope?.mode === "all")
+      ),
+    );
+  }
+
   // Step 5: Use unified runner for analysis
   const result = await runAgent(
     { ...CHECK_AGENT, workingDir },
@@ -484,10 +572,12 @@ export async function runCheckAgent(
 
   // TS post-parse normalization:
   //   1. Move unused-code lines from ## Warnings into ## Errors (recompute counts).
-  //   2. Recompute Status from the final Errors count.
+  //   2. Append deterministic TS-side errors that the LLM cannot downgrade.
+  //   3. Recompute Status from the final Errors count.
   // The LLM still classifies most lines correctly; this just corrects drift.
   const promoted = promoteUnusedCodeToErrors(result.output);
-  const normalized = applyStatusOverride(promoted);
+  const withDeterministicErrors = appendDeterministicCheckErrors(promoted, deterministicErrors);
+  const normalized = applyStatusOverride(withDeterministicErrors);
 
   // Determine pass/fail status from the TS-authoritative output
   const isPassing = /- Status:\s*PASS/i.test(normalized);

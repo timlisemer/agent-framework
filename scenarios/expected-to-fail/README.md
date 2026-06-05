@@ -32,7 +32,6 @@ Historical reclassification notes:
   `bash-cd-cat-head-chain-blocked-by-tool-approve-should-deny.json`,
   `bash-npx-tsc-blocked-wrong-reason.json`,
   `codex-apply-patch-angry-explicit-edit-should-allow.json`,
-  `codex-force-check-uses-codex-wire-name.json`,
   `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message.json`,
   `read-unasked-file-instead-of-doing-task-should-deny.json`,
   `sentiment-explicit-forbid-push.json`, and

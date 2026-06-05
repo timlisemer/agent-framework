@@ -10,8 +10,8 @@
 export const CHECK_HELP = `# check -- Linter + Type-Check Summarizer
 
 Runs the project's configured linter and check target (Justfile or Makefile),
-classifies the output into errors/warnings/info, and returns a structured
-summary. Does NOT read or analyze source code.
+runs deterministic deleted/renamed filename-reference diagnostics, classifies
+the output into errors/warnings/info, and returns a structured summary.
 
 ## Inputs
 
