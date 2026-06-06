@@ -198,6 +198,7 @@ All agents use the unified `runAgent()` function from `utils/agent-runner.ts`. T
 - Can read additional files to understand context
 - Can search codebase for patterns
 - Restricted to read-only tools (Read, Glob, Grep)
+- Confirm and fullconfirm always run three SDK reviewers in parallel: one general reviewer, one deduplication/generalization specialist, and one code-quality/pattern specialist. A direct aggregator merges their blocking findings and non-blocking warnings into the final verdict.
 
 ### Agent Runner Pattern
 
@@ -317,7 +318,7 @@ Models are centrally configured in `src/types.ts`:
 |--------|--------|------------------------------------------------------------------------------|
 | haiku  | direct | rule-gate, tool-appeal, commit, style-drift, question-validate, sentiment, validate-intent, response-align-stop |
 | sonnet | direct | check, plan-validate, claude-md-validate |
-| opus   | sdk    | confirm and fullconfirm (code quality gates with investigation)              |
+| opus   | sdk    | confirm and fullconfirm reviewers (general, deduplication, and code-quality/pattern investigation) |
 
 ## Agent Chains
 
@@ -327,13 +328,13 @@ MCP agents chain together for verification:
 commit → confirm → check
   │         │         │
   │         │         └─ Runs linter + make/just check + deterministic deleted/renamed filename-reference + supplemental editor diagnostics (sonnet, direct)
-  │         └─ Analyzes git diff + investigates code (opus, SDK)
+  │         └─ Analyzes git diff with three SDK reviewers + direct aggregator
   └─ Generates commit message + executes commit (haiku, direct)
 
 fullconfirm → check
   │           │
   │           └─ Runs linter + make/just check + deterministic deleted/renamed filename-reference + supplemental editor diagnostics (sonnet, direct)
-  └─ Reviews git-visible repository scope and investigates code (opus, SDK)
+  └─ Reviews git-visible repository scope with three SDK reviewers + direct aggregator
 ```
 
 ## MCP Elicitation

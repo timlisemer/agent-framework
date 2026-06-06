@@ -30,6 +30,12 @@ vi.mock("../../../src/utils/git-utils.js", () => ({
 }));
 
 import { formatCheckFailure, runConfirmAgent, runFullConfirmAgent } from "../../../src/agents/mcp/confirm.js";
+import {
+  CONFIRM_AGENT,
+  CONFIRM_AGGREGATOR_AGENT,
+  CONFIRM_PATTERN_AGENT,
+  CONFIRM_SPECIALIST_AGENT,
+} from "../../../src/utils/agent-configs.js";
 import { getAgentFrameworkSessionDir, sessionCurrentPlanFile } from "../../../src/utils/paths.js";
 
 describe("formatCheckFailure", () => {
@@ -363,24 +369,54 @@ src/foo.ts:1: Type error.
     expect(context).toContain("node_modules/generated.js");
   });
 
-  it("uses three SDK agents plus a direct aggregator above 500 review lines", async () => {
+  it("uses three SDK agents plus a direct aggregator for tiny diffs", async () => {
     mocks.getUncommittedChangesCancellable.mockResolvedValue({
       status: " M src/example.ts",
-      diff: Array.from({ length: 501 }, (_, index) => `+line ${index}`).join("\n"),
+      diff: "+line 1",
     });
     mocks.runAgent
       .mockResolvedValueOnce({ output: "## Verdict\nCONFIRMED: first" })
       .mockResolvedValueOnce({ output: "## Verdict\nCONFIRMED: second" })
-      .mockResolvedValueOnce({ output: "## Verdict\nDECLINED: duplicate helper" })
+      .mockResolvedValueOnce({ output: "## Verdict\nCONFIRMED: third" })
       .mockResolvedValueOnce({ output: "## Verdict\nDECLINED: duplicate helper" });
 
     const result = await runConfirmAgent(tempDir, "haiku");
 
     expect(result).toContain("DECLINED: duplicate helper");
     expect(mocks.runAgent).toHaveBeenCalledTimes(4);
-    expect(mocks.runAgent.mock.calls[2][0].name).toBe("confirm-specialist");
+    expect(mocks.runAgent.mock.calls[0][0].name).toBe("confirm");
+    expect(mocks.runAgent.mock.calls[1][0].name).toBe("confirm-specialist");
+    expect(mocks.runAgent.mock.calls[2][0].name).toBe("confirm-pattern-specialist");
     expect(mocks.runAgent.mock.calls[3][0].name).toBe("confirm-aggregator");
-    expect(mocks.runAgent.mock.calls[3][1].context).toContain("=== SPECIALIST AGENT ===");
+    expect(mocks.runAgent.mock.calls[3][1].context).toContain("=== GENERAL CONFIRM AGENT ===");
+    expect(mocks.runAgent.mock.calls[3][1].context).toContain("=== DEDUPLICATION SPECIALIST AGENT ===");
+    expect(mocks.runAgent.mock.calls[3][1].context).toContain("=== CODE QUALITY AND PATTERN SPECIALIST AGENT ===");
+  });
+
+  it("requires concrete finding and warning contracts in confirm reviewer prompts", () => {
+    for (const config of [CONFIRM_AGENT, CONFIRM_SPECIALIST_AGENT, CONFIRM_PATTERN_AGENT]) {
+      expect(config.systemPrompt).toContain("## Concrete Findings");
+      expect(config.systemPrompt).toContain("category, file/function/helper where available");
+      expect(config.systemPrompt).toContain("supporting evidence from changed or existing code");
+      expect(config.systemPrompt).toContain("concrete remediation");
+      expect(config.systemPrompt).toContain("Every warning must be expanded in Warnings");
+      expect(config.formatValidation?.fallbackOutput).toContain("## Concrete Findings");
+    }
+  });
+
+  it("requires warning preservation and no invented findings in the aggregator prompt", () => {
+    expect(CONFIRM_AGGREGATOR_AGENT.systemPrompt).toContain("Do not invent new findings");
+    expect(CONFIRM_AGGREGATOR_AGENT.systemPrompt).toContain("Do not use majority vote");
+    expect(CONFIRM_AGGREGATOR_AGENT.systemPrompt).toContain("Preserve every concrete blocking finding");
+    expect(CONFIRM_AGGREGATOR_AGENT.systemPrompt).toContain("Preserve every non-blocking warning");
+    expect(CONFIRM_AGGREGATOR_AGENT.systemPrompt).toContain("Return CONFIRMED only when all three reviewers confirm");
+    expect(CONFIRM_AGGREGATOR_AGENT.formatValidation?.fallbackOutput).toContain("## Concrete Findings");
+  });
+
+  it("requires deliberate-pattern-change caution in the pattern specialist prompt", () => {
+    expect(CONFIRM_PATTERN_AGENT.systemPrompt).toContain("Be cautious with deliberate pattern changes");
+    expect(CONFIRM_PATTERN_AGENT.systemPrompt).toContain("Better-approach observations that are not clearly blocking must be Warnings");
+    expect(CONFIRM_PATTERN_AGENT.systemPrompt).toContain("search for similar existing implementations");
   });
 
   it("continues without plan input when stored session planfile is empty", async () => {

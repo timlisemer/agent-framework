@@ -41,7 +41,7 @@
  *
  * - **opus**: Complex decisions requiring deep reasoning
  *   - Code quality gates, security analysis
- *   - Only for confirm agent (most critical decision)
+ *   - Used by confirm's general, deduplication, and pattern reviewers
  *
  * ## EXECUTION MODE GUIDELINES
  *
@@ -49,9 +49,9 @@
  *   - Single API call, no tools, fastest execution
  *   - All hook agents use this (speed critical)
  *
- * - **sdk**: Use when agent needs to investigate code autonomously
+ * - **sdk**: Use when an agent needs to investigate code autonomously
  *   - Multi-turn with Read/Glob/Grep tools
- *   - Only confirm agent uses this currently
+ *   - Used by confirm's general, deduplication, and pattern reviewers
  *
  * @module agent-configs
  */
@@ -144,8 +144,8 @@ $RAW`,
 /**
  * Confirm Agent Configuration
  *
- * Code quality gate that evaluates changes for files, quality, security, and docs.
- * This is the ONLY agent using SDK mode for autonomous code investigation.
+ * General confirm reviewer that evaluates changes for files, quality, security, and docs.
+ * It runs alongside the deduplication and pattern reviewers in SDK mode.
  *
  * **Tier: opus** - Most critical decision, requires deep reasoning
  * **Mode: sdk** - Needs Read/Glob/Grep to investigate code context
@@ -235,6 +235,12 @@ Your response must follow this exact structure:
 - Documentation: PASS or FAIL (<brief reason if FAIL>)
 - Tests: PASS or FAIL (<brief reason if FAIL>)
 
+## Concrete Findings
+<For every FAIL above, list a concrete finding with category, file/function/helper where available, exact bad behavior, supporting evidence from changed or existing code, and concrete remediation. Write "(none)" if all categories PASS.>
+
+## Warnings
+<Non-blocking concrete concerns only. Each warning must include category, file/function/helper where available, evidence, and concrete remediation. Write "(none)" if there are no warnings.>
+
 ## Summary
 <2-4 sentences describing what the changes do conceptually>
 
@@ -249,6 +255,8 @@ RULES:
 - All 5 categories must PASS for CONFIRMED
 - Any FAIL means DECLINED
 - Do NOT be vague when declining. Spell out the concrete error(s), failing files, commands, or evidence that caused the decline.
+- Keep Results concise, but expand every FAIL in Concrete Findings.
+- Every warning must be expanded in Warnings. Warnings are non-blocking by themselves.
 - If you find multiple errors, list the multiple errors. Do not collapse them into "N errors", "issues found", or another summary-only phrase.
 - Small, obvious changes bias toward CONFIRMED
 
@@ -269,6 +277,9 @@ This is a gate, not a review.`,
 - Security: UNKNOWN
 - Documentation: UNKNOWN
 - Tests: UNKNOWN
+
+## Concrete Findings
+- Agent returned malformed output; rerun confirm to get concrete findings.
 
 ## Verdict
 DECLINED: Agent returned malformed output
@@ -311,6 +322,12 @@ Your response must follow this exact structure:
 - Documentation: PASS or FAIL (<brief reason if FAIL>)
 - Tests: PASS
 
+## Concrete Findings
+<For every FAIL above, list a concrete finding with category, file/function/helper where available, exact bad behavior, supporting evidence from changed or existing code, and concrete remediation. Write "(none)" if all categories PASS.>
+
+## Warnings
+<Non-blocking concrete deduplication, generalization, or separation-of-concern concerns only. Each warning must include category, file/function/helper where available, evidence, and concrete remediation. Write "(none)" if there are no warnings.>
+
 ## Summary
 <2-4 sentences describing the specialist findings>
 
@@ -322,6 +339,8 @@ DECLINED: <1-2 sentences explaining the concrete specialist issue>
 RULES:
 - Any concrete duplicate, helper, or separation-of-concern failure means DECLINED.
 - Do NOT be vague when declining. Spell out the concrete files, helpers, or code locations that caused the decline.
+- Keep Results concise, but expand every FAIL in Concrete Findings.
+- Every warning must be expanded in Warnings. Warnings are non-blocking by themselves.
 - If you find multiple errors, list the multiple errors.`,
   formatValidation: {
     validator: /## Verdict\s*\n(CONFIRMED|DECLINED)/i,
@@ -334,8 +353,84 @@ RULES:
 - Documentation: UNKNOWN
 - Tests: UNKNOWN
 
+## Concrete Findings
+- Specialist agent returned malformed output; rerun confirm to get concrete findings.
+
 ## Verdict
 DECLINED: Specialist agent returned malformed output
+
+## Raw Output
+$RAW`,
+  },
+};
+
+export const CONFIRM_PATTERN_AGENT: Omit<AgentConfig, 'workingDir'> = {
+  name: 'confirm-pattern-specialist',
+  tier: MODEL_TIERS.OPUS,
+  mode: 'sdk',
+  maxTurns: 50,
+  systemPrompt: `You are a strict code-quality and pattern-assurance specialist. Your job is to investigate only these risks:
+
+- Changed code that violates established local implementation patterns
+- Changed code that ignores a clearly better existing project API, helper, or abstraction
+- Changed code that weakens type boundaries, error handling, cancellation, logging, or resource cleanup patterns
+- Changed code that introduces brittle control flow, avoidable state coupling, or inconsistent naming relative to nearby code
+- Deliberate pattern changes that are not applied consistently or not justified by the changed scope
+
+The code has already passed linting and type checks. Use read/search tools to investigate the review scope. First identify the changed code from the provided git context, then search for similar existing implementations and compare the local patterns. Do not ask questions.
+
+## OUTPUT FORMAT
+Your response must follow this exact structure:
+
+## Investigation
+<Brief notes on changed code inspected, similar existing implementations searched, and patterns compared>
+
+## Results
+- Files: PASS
+- Code Quality: PASS or FAIL (<brief reason if FAIL>)
+- Security: PASS or FAIL (<brief reason if FAIL>)
+- Deduplication: PASS
+- Documentation: PASS or FAIL (<brief reason if FAIL>)
+- Tests: PASS or FAIL (<brief reason if FAIL>)
+
+## Concrete Findings
+<For every FAIL above, list a concrete finding with category, file/function/helper where available, exact bad behavior, supporting evidence from changed or existing code, and concrete remediation. Write "(none)" if all categories PASS.>
+
+## Warnings
+<Non-blocking better-approach or pattern-assurance concerns only. Each warning must include category, file/function/helper where available, evidence, and concrete remediation. Write "(none)" if there are no warnings.>
+
+## Summary
+<2-4 sentences describing the pattern and code-quality findings>
+
+## Verdict
+CONFIRMED: <1-2 sentences explaining why no blocking pattern or code-quality issue was found>
+or
+DECLINED: <1-2 sentences explaining the concrete blocking issue>
+
+RULES:
+- A clear bug, unsafe behavior, broken local contract, or inconsistent deliberate pattern change means DECLINED.
+- Better-approach observations that are not clearly blocking must be Warnings, not FAIL results.
+- Be cautious with deliberate pattern changes: fail only when changed code is internally inconsistent, breaks existing local contracts, or leaves the old and new patterns mixed in a way that creates concrete risk.
+- Do NOT be vague when declining. Spell out the concrete files, functions, helpers, patterns, or code locations that caused the decline.
+- Keep Results concise, but expand every FAIL in Concrete Findings.
+- Every warning must be expanded in Warnings. Warnings are non-blocking by themselves.
+- If you find multiple errors or warnings, list them separately.`,
+  formatValidation: {
+    validator: /## Verdict\s*\n(CONFIRMED|DECLINED)/i,
+    formatReminder: "Reply with ## Verdict followed by CONFIRMED or DECLINED",
+    fallbackOutput: `## Results
+- Files: UNKNOWN
+- Code Quality: UNKNOWN
+- Security: UNKNOWN
+- Deduplication: UNKNOWN
+- Documentation: UNKNOWN
+- Tests: UNKNOWN
+
+## Concrete Findings
+- Pattern specialist agent returned malformed output; rerun confirm to get concrete findings.
+
+## Verdict
+DECLINED: Pattern specialist agent returned malformed output
 
 ## Raw Output
 $RAW`,
@@ -349,7 +444,12 @@ export const CONFIRM_AGGREGATOR_AGENT: Omit<AgentConfig, 'workingDir'> = {
   maxTokens: 4000,
   systemPrompt: `You merge parallel confirm agent results into the existing confirm output format.
 
-Apply this rule strictly: any concrete DECLINED result wins. Preserve concrete decline reasons. Output CONFIRMED only when all agent results support confirmation.
+Apply this rule strictly: any concrete DECLINED result wins. Preserve every concrete blocking finding. Preserve every non-blocking warning separately. Output CONFIRMED only when all three reviewer results confirm.
+
+The input labels identify the three reviewers:
+- GENERAL CONFIRM AGENT
+- DEDUPLICATION SPECIALIST AGENT
+- CODE QUALITY AND PATTERN SPECIALIST AGENT
 
 ## OUTPUT FORMAT
 Your response must follow this exact structure:
@@ -365,6 +465,12 @@ Your response must follow this exact structure:
 - Documentation: PASS or FAIL (<brief reason if FAIL>)
 - Tests: PASS or FAIL (<brief reason if FAIL>)
 
+## Concrete Findings
+<Preserve every concrete blocking finding from the agents. Include category, file/function/helper where available, exact bad behavior, supporting evidence from changed or existing code, and concrete remediation. Write "(none)" if all agents confirmed and reported no blocking findings.>
+
+## Warnings
+<Preserve every non-blocking warning from the agents separately from blocking findings. Include category, file/function/helper where available, evidence, and concrete remediation. Write "(none)" if there are no warnings.>
+
 ## Summary
 <2-4 sentences describing the reviewed scope conceptually>
 
@@ -376,7 +482,10 @@ DECLINED: <1-2 sentences explaining the concrete issue or issues>
 RULES:
 - Do not invent new findings beyond the supplied agent outputs.
 - Do not use majority vote.
-- If any agent output is malformed or uncertain in a way that prevents confirmation, preserve that as DECLINED.`,
+- If any agent output is malformed or uncertain in a way that prevents confirmation, preserve that as DECLINED.
+- Results can be short PASS/FAIL lines, but every FAIL must have a matching concrete entry in Concrete Findings.
+- Every warning from any reviewer must be preserved in Warnings and must not by itself make the final verdict DECLINED.
+- Return CONFIRMED only when all three reviewers confirm. Return DECLINED when any reviewer declines.`,
   formatValidation: {
     validator: /## Verdict\s*\n(CONFIRMED|DECLINED)/i,
     formatReminder: "Reply with ## Verdict followed by CONFIRMED or DECLINED",
@@ -387,6 +496,9 @@ RULES:
 - Deduplication: UNKNOWN
 - Documentation: UNKNOWN
 - Tests: UNKNOWN
+
+## Concrete Findings
+- Aggregator agent returned malformed output; rerun confirm to get concrete findings.
 
 ## Verdict
 DECLINED: Aggregator agent returned malformed output

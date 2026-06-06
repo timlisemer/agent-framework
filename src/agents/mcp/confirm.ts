@@ -2,15 +2,15 @@
  * Confirm Agent - Code Quality Gate with Autonomous Investigation
  *
  * This agent evaluates code changes for quality, security, and documentation.
- * It is the ONLY agent using SDK mode, giving it access to Read and
- * read-only Bash for autonomous code investigation.
+ * Confirm uses SDK-mode reviewers with read/search tools for autonomous code
+ * investigation, then merges their results with a direct aggregator.
  *
  * ## FLOW
  *
  * 1. Run check agent first (linter/type-check must pass)
  * 2. If check fails, return check output verbatim
  * 3. Gather git status and diff
- * 4. Run SDK agent with investigation capabilities
+ * 4. Run general, deduplication, and pattern SDK reviewers with investigation capabilities
  * 5. Return verdict (CONFIRMED or DECLINED)
  *
  * @module confirm
@@ -20,7 +20,12 @@ import * as fs from "fs";
 import * as path from "path";
 import { EXECUTION_TYPES, parseTierName } from "../../types.js";
 import { runAgent } from "../../utils/agent-runner.js";
-import { CONFIRM_AGENT, CONFIRM_AGGREGATOR_AGENT, CONFIRM_SPECIALIST_AGENT } from "../../utils/agent-configs.js";
+import {
+  CONFIRM_AGENT,
+  CONFIRM_AGGREGATOR_AGENT,
+  CONFIRM_PATTERN_AGENT,
+  CONFIRM_SPECIALIST_AGENT,
+} from "../../utils/agent-configs.js";
 import {
   formatGitContextForRepos,
   allReposInScope,
@@ -47,8 +52,6 @@ function getHookName(scopeKind: ConfirmReviewScopeKind = "uncommitted"): string 
   return activeSpec().mcpWireName(scopeKind === "full" ? "fullconfirm" : "confirm");
 }
 
-const MULTI_AGENT_LINE_THRESHOLD = 500;
-
 const CONFIRM_DEDUPLICATION_PROMPT_EXTENSION = `## REQUIRED CATEGORY UPDATE: Deduplication
 
 This update supersedes any earlier category count or Results list in the base prompt.
@@ -74,6 +77,8 @@ The Results section must include exactly these six categories:
 - Documentation: PASS or FAIL (<brief reason if FAIL>)
 - Tests: PASS or FAIL (<brief reason if FAIL>)
 
+Every FAIL, including Deduplication, must be expanded in ## Concrete Findings with category, file/function/helper where available, exact bad behavior, supporting evidence from changed or existing code, and concrete remediation. Every warning must be expanded in ## Warnings and is non-blocking by itself.
+
 All six categories must PASS for CONFIRMED. Any FAIL means DECLINED.`;
 
 const CONFIRM_FORMAT_FALLBACK = `## Results
@@ -83,6 +88,9 @@ const CONFIRM_FORMAT_FALLBACK = `## Results
 - Deduplication: UNKNOWN
 - Documentation: UNKNOWN
 - Tests: UNKNOWN
+
+## Concrete Findings
+- Agent returned malformed output; rerun confirm to get concrete findings.
 
 ## Verdict
 DECLINED: Agent returned malformed output
@@ -333,12 +341,7 @@ async function runConfirmReviewAgents(
   fullContext: string,
   options: ConfirmOptions,
 ) {
-  if (reviewContext.lineCount <= MULTI_AGENT_LINE_THRESHOLD) {
-    return runSingleConfirmSdk(workingDir, tier, reviewContext.prompt, fullContext, options);
-  }
-
-  const [normalA, normalB, specialist] = await Promise.all([
-    runSingleConfirmSdk(workingDir, tier, reviewContext.prompt, fullContext, options),
+  const [general, specialist, pattern] = await Promise.all([
     runSingleConfirmSdk(workingDir, tier, reviewContext.prompt, fullContext, options),
     runAgent(
       {
@@ -347,6 +350,17 @@ async function runConfirmReviewAgents(
       },
       {
         prompt: "Evaluate this review scope for duplication, helper, and separation-of-concern risks:",
+        context: fullContext,
+      },
+      options,
+    ),
+    runAgent(
+      {
+        ...CONFIRM_PATTERN_AGENT,
+        workingDir,
+      },
+      {
+        prompt: "Evaluate this review scope for code quality and local pattern assurance risks:",
         context: fullContext,
       },
       options,
@@ -362,14 +376,14 @@ async function runConfirmReviewAgents(
       prompt: "Merge these parallel confirm results:",
       context: `REVIEW LINE COUNT: ${reviewContext.lineCount}
 
-=== CONFIRM AGENT A ===
-${normalA.output}
+=== GENERAL CONFIRM AGENT ===
+${general.output}
 
-=== CONFIRM AGENT B ===
-${normalB.output}
+=== DEDUPLICATION SPECIALIST AGENT ===
+${specialist.output}
 
-=== SPECIALIST AGENT ===
-${specialist.output}`,
+=== CODE QUALITY AND PATTERN SPECIALIST AGENT ===
+${pattern.output}`,
     },
     options,
   );

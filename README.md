@@ -34,8 +34,8 @@ The framework implements 20 specialized agents and MCP tools organized into thre
 | Agent           | Model  | Purpose                                                      |
 | --------------- | ------ | ------------------------------------------------------------ |
 | check           | sonnet | Run linter + make/just check plus deterministic deleted/renamed filename-reference and supplemental editor diagnostics, return summary with recommendations |
-| confirm         | opus   | Binary quality gate: CONFIRMED or DECLINED                   |
-| fullconfirm     | opus   | Full-repository quality gate over git-visible code            |
+| confirm         | opus   | Binary quality gate using three SDK reviewers plus aggregator |
+| fullconfirm     | opus   | Full-repository quality gate using three SDK reviewers plus aggregator |
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
 | validate_intent        | haiku  | Manual post-session review (requires transcript_path)        |

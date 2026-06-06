@@ -110,8 +110,9 @@ invoking the confirm LLM or adding a confirm verdict.
 6. Resolve plan context from optional_planfile or the session current planfile.
    If neither exists, continue without plan input. If optional_planfile is
    provided but unreadable or empty, fail before the confirm LLM.
-7. Otherwise, run the confirm SDK agent (Read + read-only Bash available)
-8. On DECLINED with uncertainties, elicit clarification and retry once
+7. Run three SDK reviewers in parallel: one general confirm reviewer, one deduplication/generalization specialist, and one code-quality/pattern specialist.
+8. Merge the reviewer results with a direct aggregator that preserves blocking findings and non-blocking warnings.
+9. On DECLINED with uncertainties, elicit clarification and retry once
 
 ## Output
 
@@ -148,8 +149,8 @@ Runs check first; if check fails, fullconfirm returns the check output verbatim.
 2. If multiple repos and skip_elicitation=false, ask whether to confirm all repos together or individually
 3. Run check agent. If it FAILs, return the check output verbatim without LLM.
 4. Build git-visible file inventory and text line-count metadata without embedding full file contents.
-5. Run one SDK confirm agent for scopes at or below 500 lines.
-6. For scopes above 500 lines, run two normal SDK confirm agents plus one specialist SDK agent in parallel, then merge results with a direct aggregator.
+5. Run three SDK reviewers in parallel: one general confirm reviewer, one deduplication/generalization specialist, and one code-quality/pattern specialist.
+6. Merge the reviewer results with a direct aggregator that preserves blocking findings and non-blocking warnings.
 
 ## Output
 
