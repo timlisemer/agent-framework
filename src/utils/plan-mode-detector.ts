@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import type { AdapterSpec, PlanModeDetection } from "../adapter/types.js";
+import { READ_ONLY_GIT_COMMANDS_DESCRIPTION } from "./bash-command-policy.js";
 import { readPlanModeStoredState } from "./plan-mode-entry-state.js";
 
 export interface PlanModeContext {
@@ -17,7 +18,7 @@ BLOCKED (handled deterministically by TypeScript upstream — the LLM should nev
 
 ALLOWED in plan mode (APPROVE by default):
 - Read, LS
-- Read-only Bash classes: simple read-only commands and safe read-only pipelines/chains inspect state without modifying it — e.g. ls, tree, grep, rg, find, fd, wc, sort, uniq, cut, tr, head, tail, awk, sed (for printing/reading), file, stat, jq, echo, printf, read-only git (status, log, diff, show). Performance-heavy read-only evaluation such as nix-eval-jobs is read-only, but not a build/compile command. If a command does not write files, install packages, build, run code, make network requests, or modify git/process state, it is read-only and should be APPROVED in plan mode.
+- Read-only Bash classes: simple read-only commands and safe read-only pipelines/chains inspect state without modifying it — e.g. ls, tree, grep, rg, find, fd, wc, sort, uniq, cut, tr, head, tail, awk, sed (for printing/reading), file, stat, jq, echo, printf, read-only git (${READ_ONLY_GIT_COMMANDS_DESCRIPTION}). Performance-heavy read-only evaluation such as nix-eval-jobs is read-only, but not a build/compile command. If a command does not write files, install packages, build, run code, make network requests, or modify git/process state, it is read-only and should be APPROVED in plan mode.
 - WebFetch, WebSearch
 - Any MCP read tool
 - ExitPlanMode

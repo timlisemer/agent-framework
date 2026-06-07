@@ -11,6 +11,10 @@ import {
   getCheckRoutedCommandHighlights,
   stripQuotedRegions,
 } from "../../src/utils/bash-command-policy.js";
+import {
+  MUTATING_GIT_COMMAND_CASES,
+  READ_ONLY_GIT_COMMAND_CASES,
+} from "./bash-command-policy-cases.js";
 
 describe("classifyBashCommand", () => {
   it("blocks nix eval and points to nix-eval-jobs", () => {
@@ -87,6 +91,22 @@ describe("classifyBashCommand", () => {
       "cd /tmp && nix-eval-jobs --flake .#x",
     ]) {
       expect(classifyBashCommand(command).riskClass).toBe("blocked");
+    }
+  });
+
+  it("classifies common read-only git commands as simple read-only", () => {
+    for (const command of READ_ONLY_GIT_COMMAND_CASES) {
+      const result = classifyBashCommand(command);
+      expect(result.riskClass, command).toBe("simple-read-only");
+      expect(result.readOnly, command).toBe(true);
+    }
+  });
+
+  it("blocks mutating git commands, including mixed subcommand families", () => {
+    for (const command of MUTATING_GIT_COMMAND_CASES) {
+      const result = classifyBashCommand(command);
+      expect(result.riskClass, command).toBe("blocked");
+      expect(result.reason, command).toContain("git write op");
     }
   });
 });
@@ -187,5 +207,12 @@ describe("bash command policy invariants", () => {
 
     expect(getContentBlacklistHighlights("Check node_modules/foo.js in the plan")).toEqual([]);
     expect(getContentBlacklistHighlights('the script calls execSync("npm run build")')).toEqual([]);
+    expect(getContentBlacklistHighlights("Run git submodule status before inspecting nested diffs.")).toEqual([]);
+    expect(getContentBlacklistHighlights("Run git submodule update before inspecting nested diffs.")[0].rendered).toContain("[VIOLATION: git write op]");
+    expect(getContentBlacklistHighlights("Please git branch -d old-topic before merging.")[0].rendered).toContain("[VIOLATION: git write op]");
+    expect(getContentBlacklistHighlights("Run git -C repo push before merging.")[0].rendered).toContain("[VIOLATION: git write op (MCP)]");
+    expect(getContentBlacklistHighlights("Run git config edit before merging.")[0].rendered).toContain("[VIOLATION: git write op]");
+    expect(getContentBlacklistHighlights("Run 'git push' before merging.")[0].rendered).toContain("[VIOLATION: git write op (MCP)]");
+    expect(getContentBlacklistHighlights('```bash\nbash -lc "git push"\n```', { inverseCodeBlocks: true })[0].rendered).toContain("[VIOLATION: git write op (MCP)]");
   });
 });

@@ -60,6 +60,7 @@ import type { AgentConfig } from "./agent-runner.js";
 import { MODEL_TIERS } from "../types.js";
 import { FORBIDDEN_DENY_PROMPT_LIST } from "./fabricated-deny-patterns.js";
 import { activeSpec } from "../adapter/spec.js";
+import { READ_ONLY_GIT_COMMANDS_DESCRIPTION } from "./bash-command-policy.js";
 
 // ============================================================================
 // MCP AGENTS
@@ -684,7 +685,7 @@ sqlite3: APPROVE only for read-only operations.
 
 4. Non-read-only git commands
    - DENY: git commit, git push, git merge, git rebase, git reset, git checkout -b, git branch -d, git add
-   - ALLOW: git status, git log, git diff, git show, git branch (list), git stash
+   - ALLOW: read-only git (${READ_ONLY_GIT_COMMANDS_DESCRIPTION})
 
 5. Persistent background processes
    - DENY commands that start processes surviving after Claude Code exits
@@ -1074,7 +1075,7 @@ Honor any \`[VIOLATION: ...]\` lines in \`=== VIOLATIONS DETECTED ===\` as autho
 - Missing optional sections
 - Code examples with correct style (double quotes, no emojis)
 - Documentation mentioning MCP tools for testing/building
-- Read-only git commands: status, log, diff, show, branch list
+- Read-only git commands: ${READ_ONLY_GIT_COMMANDS_DESCRIPTION}
 - sqlite3 read-only: SELECT, .tables, .schema, .dump, PRAGMA
 - Read outside project for documentation (not sensitive files)
 

@@ -34,6 +34,8 @@ export interface BlacklistPattern {
   // `<PATH>` redaction marker) when scanning plan / CLAUDE.md prose,
   // so prose words like "node with" or "tail events" do not match.
   contentPattern?: RegExp;
+  commandMatcher?: (command: string) => boolean;
+  contentMatcher?: (content: string) => boolean;
   name: string;
   /** Static string or lazy getter called at lookup time (for adapter-dynamic alternatives). */
   alternative: string | (() => string);
@@ -78,6 +80,9 @@ export interface BashCommandClassification {
   predictionIdentities: string[];
 }
 
+export const READ_ONLY_GIT_COMMANDS_DESCRIPTION =
+  "status, log, diff, show, branch list, remote -v/get-url/show -n, tag list, stash list/show, submodule status/summary, worktree list, config reads, reflog show/list, ls-tree, cat-file";
+
 /**
  * Hard safety patterns that should be blocked by the blacklist rule.
  * Check-MCP redirects live in CHECK_ROUTED_COMMAND_POLICIES so they keep
@@ -98,8 +103,8 @@ export const BLACKLIST_PATTERNS: BlacklistPattern[] = [
   // Git write operations. Keep this list explicit: read-only commands like
   // `git status`, `git diff`, `git log`, and `git show` must remain usable
   // for inspection.
-  { pattern: /\bgit\s+(commit|push|add)\b/, name: 'git write op (MCP)', alternative: gitWorkflowAlternative },
-  { pattern: /\bgit\s+(?:am|apply|bisect|checkout|cherry-pick|clean|clone|fetch|gc|merge|mv|pull|rebase|reflog|remote|reset|restore|revert|rm|stash|submodule|switch|tag|worktree)\b/, name: 'git write op', alternative: 'Git write operation denied' },
+  { pattern: /\bgit\s+\S+/, commandMatcher: commandContainsGitWorkflowWriteOperation, contentMatcher: contentContainsGitWorkflowWriteOperation, name: 'git write op (MCP)', alternative: gitWorkflowAlternative },
+  { pattern: /\bgit\s+\S+/, commandMatcher: commandContainsGitWriteOperation, contentMatcher: contentContainsGitWriteOperation, name: 'git write op', alternative: 'Git write operation denied' },
 
   // Package install commands - dependency-modifying, should not be run by AI
   { pattern: /\bnpm\s+install\b/, name: "npm install", alternative: "LLMs should not modify project dependencies", redactPaths: true },
@@ -256,9 +261,98 @@ export const READ_ONLY_HEAVY_BASH_COMMANDS: ReadonlySet<string> = new Set([
 ]);
 
 const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
-  "blame", "branch", "describe", "diff", "grep", "log", "ls-files",
-  "rev-list", "rev-parse", "shortlog", "show", "show-branch", "status",
+  "blame", "cat-file", "describe", "diff", "grep", "log", "ls-files",
+  "ls-tree", "rev-list", "rev-parse", "shortlog", "show", "show-branch",
+  "status",
 ]);
+
+const WORKFLOW_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "add", "commit", "push",
+]);
+
+const WRITE_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "am", "apply", "bisect", "checkout", "cherry-pick", "clean",
+  "clone", "fetch", "gc", "merge", "mv", "pull", "rebase",
+  "reset", "restore", "revert", "rm", "switch",
+]);
+
+const MIXED_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "branch", "config", "reflog", "remote", "stash", "submodule", "tag",
+  "worktree",
+]);
+
+const GIT_BRANCH_WRITE_FLAGS: ReadonlySet<string> = new Set([
+  "-c", "-C", "--copy",
+  "-d", "-D", "--delete",
+  "-m", "-M", "--move",
+  "--create-reflog",
+  "-t", "--track", "--no-track",
+  "-u", "--set-upstream-to",
+  "--edit-description",
+  "--unset-upstream",
+]);
+
+const GIT_BRANCH_READ_FILTER_FLAGS: ReadonlySet<string> = new Set([
+  "-a", "--all", "-r", "--remotes",
+  "--contains", "--no-contains", "--merged", "--no-merged", "--points-at",
+  "--format", "--sort", "--column", "--list",
+]);
+
+const GIT_TAG_WRITE_FLAGS: ReadonlySet<string> = new Set([
+  "-a", "--annotate",
+  "-d", "--delete",
+  "-f", "--force",
+  "-F", "--file",
+  "-m", "--message",
+  "-s", "--sign",
+  "-u", "--local-user",
+]);
+
+const GIT_TAG_READ_FILTER_FLAGS: ReadonlySet<string> = new Set([
+  "-l", "--list", "-n", "--contains", "--no-contains", "--merged",
+  "--no-merged", "--points-at", "--format", "--sort", "--column",
+  "--ignore-case",
+]);
+
+const GIT_CONFIG_WRITE_FLAGS: ReadonlySet<string> = new Set([
+  "--add", "--edit", "-e", "--replace-all", "--set", "--unset",
+  "--unset-all", "--remove-section", "--rename-section",
+]);
+
+const GIT_CONFIG_READ_FLAGS: ReadonlySet<string> = new Set([
+  "--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l",
+  "--show-origin", "--show-scope", "--name-only", "--includes", "--null",
+  "-z",
+]);
+const GIT_CONFIG_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
+  "--blob", "--default", "--file", "--type", "-f",
+]);
+
+const GIT_CONFIG_READ_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "get", "get-all", "get-regexp", "get-urlmatch", "list",
+]);
+
+const GIT_CONFIG_WRITE_SUBCOMMANDS: ReadonlySet<string> = new Set([
+  "add", "edit", "remove-section", "rename-section", "replace-all", "set",
+  "unset", "unset-all",
+]);
+
+const GIT_REFLOG_READ_SUBCOMMANDS: ReadonlySet<string> = new Set(["show", "list"]);
+const GIT_REMOTE_READ_SUBCOMMANDS: ReadonlySet<string> = new Set(["get-url", "show"]);
+const GIT_REMOTE_SHOW_READ_FLAGS: ReadonlySet<string> = new Set(["-n"]);
+const GIT_STASH_READ_SUBCOMMANDS: ReadonlySet<string> = new Set(["list", "show"]);
+const GIT_SUBMODULE_READ_SUBCOMMANDS: ReadonlySet<string> = new Set(["status", "summary"]);
+const GIT_WORKTREE_READ_SUBCOMMANDS: ReadonlySet<string> = new Set(["list"]);
+const WRAPPER_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
+  "-a", "-C", "-f", "-g", "-h", "-o", "-u",
+  "--chdir", "--group", "--host", "--output", "--user",
+]);
+const NICE_WRAPPER_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set(["-n", "--adjustment"]);
+const SUDO_WRAPPER_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
+  "-g", "-h", "-p", "-u",
+  "--group", "--host", "--prompt", "--user",
+]);
+const TIMEOUT_WRAPPER_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set(["-k", "--kill-after"]);
 
 const XARGS_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
   "-d", "--delimiter",
@@ -290,30 +384,413 @@ export const PLAN_MODE_BASH_WRITE_PATTERNS: ReadonlyArray<RegExp> = [
   /\btee\s+/,
   /\bsed\s+-i/,
   /\b(mkdir|touch|rm|mv|cp)\s+/,
-  /\bgit\s+(commit|push|add|merge|rebase|reset)\b/,
   /\bnpm\s+(install|run\s+build)\b/,
 ];
 
 function tokenizeSegment(segment: string): string[] {
-  return segment.trim().split(/\s+/).filter(Boolean);
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | "\"" | null = null;
+  let escaped = false;
+
+  for (const ch of segment.trim()) {
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else current += ch;
+      continue;
+    }
+
+    if (quote === "\"") {
+      if (escaped) {
+        current += ch;
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "\"") {
+        quote = null;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+
+    if (ch === "'" || ch === "\"") {
+      quote = ch;
+      continue;
+    }
+
+    if (/\s/.test(ch)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+
+    current += ch;
+  }
+
+  if (current) tokens.push(current);
+  return tokens;
 }
 
 export function commandBare(token: string): string {
-  return token.startsWith("/") ? token.split("/").pop()! : token;
+  const cleaned = token.replace(/^[({]+/, "").replace(/[)}]+$/, "");
+  return cleaned.startsWith("/") ? cleaned.split("/").pop()! : cleaned;
 }
 
-function gitSubcommand(tokens: string[]): string | null {
+function gitSubcommandInfo(tokens: string[]): { subcommand: string; index: number } | null {
   for (let i = 1; i < tokens.length; i++) {
     const token = tokens[i];
     if (token === "-C" || token === "-c") {
       i++;
       continue;
     }
+    if (token === "--git-dir" || token === "--work-tree") {
+      i++;
+      continue;
+    }
     if (token.startsWith("--git-dir=") || token.startsWith("--work-tree=")) continue;
     if (token.startsWith("-")) continue;
-    return token;
+    return { subcommand: commandBare(token), index: i };
   }
   return null;
+}
+
+function hasOption(tokens: string[], options: ReadonlySet<string>): boolean {
+  for (const token of tokens) {
+    if (token === "--") return false;
+    if (options.has(token)) return true;
+    const eqIndex = token.indexOf("=");
+    if (eqIndex > 0 && options.has(token.slice(0, eqIndex))) return true;
+    if (/^-[A-Za-z]\S*/.test(token)) {
+      for (const flag of token.slice(1)) {
+        if (options.has(`-${flag}`)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function nonOptionArgs(tokens: string[]): string[] {
+  const marker = tokens.indexOf("--");
+  if (marker >= 0) {
+    return [
+      ...tokens.slice(0, marker).filter((token) => !token.startsWith("-")),
+      ...tokens.slice(marker + 1),
+    ];
+  }
+  return tokens.filter((token) => !token.startsWith("-"));
+}
+
+function stripOptionValues(tokens: string[], optionsWithValue: ReadonlySet<string>): string[] {
+  const result: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === "--") {
+      result.push(...tokens.slice(i));
+      break;
+    }
+    result.push(token);
+    const eqIndex = token.indexOf("=");
+    const option = eqIndex > 0 ? token.slice(0, eqIndex) : token;
+    if (eqIndex < 0 && optionsWithValue.has(option) && i + 1 < tokens.length) {
+      i++;
+    }
+  }
+  return result;
+}
+
+function readOnlyGitWithReadFilters(
+  args: string[],
+  writeFlags: ReadonlySet<string>,
+  readFilterFlags: ReadonlySet<string>,
+): boolean {
+  if (hasOption(args, writeFlags)) return false;
+  const positional = nonOptionArgs(args);
+  if (positional.length === 0) return true;
+  return hasOption(args, readFilterFlags);
+}
+
+function readOnlyGitFirstArg(args: string[], allowed: ReadonlySet<string>, allowMissing = false): boolean {
+  const subcommand = nonOptionArgs(args)[0];
+  return subcommand === undefined ? allowMissing : allowed.has(subcommand);
+}
+
+function readOnlyGitBranch(args: string[]): boolean {
+  return readOnlyGitWithReadFilters(args, GIT_BRANCH_WRITE_FLAGS, GIT_BRANCH_READ_FILTER_FLAGS);
+}
+
+function readOnlyGitConfig(args: string[]): boolean {
+  if (hasOption(args, GIT_CONFIG_WRITE_FLAGS)) return false;
+  const positional = nonOptionArgs(stripOptionValues(args, GIT_CONFIG_OPTIONS_WITH_VALUE));
+  const subcommand = positional[0];
+  if (!subcommand) return true;
+  if (GIT_CONFIG_WRITE_SUBCOMMANDS.has(subcommand)) return false;
+  if (GIT_CONFIG_READ_SUBCOMMANDS.has(subcommand)) return true;
+  if (hasOption(args, GIT_CONFIG_READ_FLAGS)) return true;
+  return positional.length === 1;
+}
+
+function readOnlyGitReflog(args: string[]): boolean {
+  return readOnlyGitFirstArg(args, GIT_REFLOG_READ_SUBCOMMANDS, true);
+}
+
+function readOnlyGitRemote(args: string[]): boolean {
+  const subcommand = nonOptionArgs(args)[0];
+  if (!subcommand) return true;
+  if (subcommand === "show") return hasOption(args, GIT_REMOTE_SHOW_READ_FLAGS);
+  return GIT_REMOTE_READ_SUBCOMMANDS.has(subcommand);
+}
+
+function readOnlyGitStash(args: string[]): boolean {
+  return readOnlyGitFirstArg(args, GIT_STASH_READ_SUBCOMMANDS);
+}
+
+function readOnlyGitSubmodule(args: string[]): boolean {
+  return readOnlyGitFirstArg(args, GIT_SUBMODULE_READ_SUBCOMMANDS, true);
+}
+
+function readOnlyGitTag(args: string[]): boolean {
+  return readOnlyGitWithReadFilters(args, GIT_TAG_WRITE_FLAGS, GIT_TAG_READ_FILTER_FLAGS);
+}
+
+function readOnlyGitWorktree(args: string[]): boolean {
+  return readOnlyGitFirstArg(args, GIT_WORKTREE_READ_SUBCOMMANDS);
+}
+
+function readOnlyMixedGitSubcommand(subcommand: string, args: string[]): boolean {
+  switch (subcommand) {
+    case "branch":
+      return readOnlyGitBranch(args);
+    case "config":
+      return readOnlyGitConfig(args);
+    case "reflog":
+      return readOnlyGitReflog(args);
+    case "remote":
+      return readOnlyGitRemote(args);
+    case "stash":
+      return readOnlyGitStash(args);
+    case "submodule":
+      return readOnlyGitSubmodule(args);
+    case "tag":
+      return readOnlyGitTag(args);
+    case "worktree":
+      return readOnlyGitWorktree(args);
+    default:
+      return false;
+  }
+}
+
+function validateReadOnlyGitCommand(tokens: string[]): { allowed: true } | { allowed: false; reason: string } {
+  const info = gitSubcommandInfo(tokens);
+  if (!info) {
+    return { allowed: false, reason: "git command missing read-only subcommand" };
+  }
+
+  const subcommand = info.subcommand;
+  if (READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) {
+    return { allowed: true };
+  }
+
+  if (MIXED_GIT_SUBCOMMANDS.has(subcommand)) {
+    const args = tokens.slice(info.index + 1);
+    if (readOnlyMixedGitSubcommand(subcommand, args)) {
+      return { allowed: true };
+    }
+  }
+
+  return { allowed: false, reason: `git subcommand not in read-only allowlist: ${subcommand}` };
+}
+
+function tokensAreGitWorkflowWriteOperation(tokens: string[]): boolean {
+  const info = gitSubcommandInfo(tokens);
+  if (!info) return false;
+  return WORKFLOW_GIT_SUBCOMMANDS.has(info.subcommand);
+}
+
+function tokensAreGitWriteOperation(tokens: string[]): boolean {
+  const info = gitSubcommandInfo(tokens);
+  if (!info) return false;
+  if (WORKFLOW_GIT_SUBCOMMANDS.has(info.subcommand)) return false;
+  if (WRITE_GIT_SUBCOMMANDS.has(info.subcommand)) return true;
+  if (!MIXED_GIT_SUBCOMMANDS.has(info.subcommand)) return false;
+
+  return !readOnlyMixedGitSubcommand(info.subcommand, tokens.slice(info.index + 1));
+}
+
+function segmentContainsGitOperation(segment: string, predicate: (tokens: string[]) => boolean, scanAnywhere: boolean): boolean {
+  const tokens = tokenizeSegment(segment);
+  if (tokens.length === 0) return false;
+
+  if (!scanAnywhere && segmentContainsShellLauncherGitOperation(tokens, predicate)) {
+    return true;
+  }
+  if (!scanAnywhere && segmentContainsEvalGitOperation(tokens, predicate)) {
+    return true;
+  }
+
+  if (!scanAnywhere) {
+    const index = gitExecutableTokenIndex(tokens);
+    return (index >= 0 && predicate(tokens.slice(index))) ||
+      shouldFallbackScanGitOperation(tokens) && segmentContainsGitOperation(segment, predicate, true);
+  }
+
+  for (let i = 0; i < tokens.length; i++) {
+    if (commandBare(tokens[i]) === "git" && predicate(tokens.slice(i))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function segmentContainsShellLauncherGitOperation(tokens: string[], predicate: (tokens: string[]) => boolean): boolean {
+  let start = wrappedExecutableTokenIndex(tokens);
+  if (start < 0) return false;
+  let head = commandBare(tokens[start]);
+  if (head === "busybox" && start + 1 < tokens.length) {
+    start++;
+    head = commandBare(tokens[start]);
+  }
+  if (head !== "sh" && head !== "bash" && head !== "zsh" && head !== "dash") return false;
+
+  for (let i = start + 1; i < tokens.length - 1; i++) {
+    const option = tokens[i];
+    if (option === "-c" || /^-[A-Za-z]*c[A-Za-z]*$/.test(option)) {
+      return commandContainsGitOperation(tokens[i + 1], predicate);
+    }
+  }
+  return false;
+}
+
+function shouldFallbackScanGitOperation(tokens: string[]): boolean {
+  const head = commandBare(tokens[0]);
+  return !READ_ONLY_BASH_COMMANDS.has(head);
+}
+
+function gitExecutableTokenIndex(tokens: string[]): number {
+  const index = wrappedExecutableTokenIndex(tokens);
+  return index >= 0 && commandBare(tokens[index]) === "git" ? index : -1;
+}
+
+function segmentContainsEvalGitOperation(tokens: string[], predicate: (tokens: string[]) => boolean): boolean {
+  const start = wrappedExecutableTokenIndex(tokens);
+  if (start < 0 || commandBare(tokens[start]) !== "eval") return false;
+  const command = tokens.slice(start + 1).join(" ");
+  return command ? commandContainsGitOperation(command, predicate) : false;
+}
+
+function wrappedExecutableTokenIndex(tokens: string[]): number {
+  let i = 0;
+  while (i < tokens.length) {
+    const token = commandBare(tokens[i]);
+    if (token === "") {
+      i++;
+      continue;
+    }
+    if (token === "nice") {
+      i = skipWrapperOptions(tokens, i + 1, NICE_WRAPPER_OPTIONS_WITH_VALUE);
+      continue;
+    }
+    if (token === "sudo") {
+      i = skipWrapperOptions(tokens, i + 1, SUDO_WRAPPER_OPTIONS_WITH_VALUE);
+      continue;
+    }
+    if (token === "time" || token === "exec" || token === "nohup" || token === "stdbuf" || token === "parallel" || token === "watch") {
+      i = skipWrapperOptions(tokens, i + 1);
+      continue;
+    }
+    if (token === "timeout") {
+      i = skipWrapperOptions(tokens, i + 1, TIMEOUT_WRAPPER_OPTIONS_WITH_VALUE);
+      if (i < tokens.length && /^\d/.test(tokens[i])) {
+        i++;
+      }
+      continue;
+    }
+    if (token === "setsid") {
+      i = skipWrapperOptions(tokens, i + 1);
+      continue;
+    }
+    if (token === "!" || token === "if" || token === "then" || token === "while" || token === "until" || token === "do") {
+      i++;
+      continue;
+    }
+    if (token === "command") {
+      i++;
+      while (i < tokens.length && tokens[i].startsWith("-")) {
+        i++;
+      }
+      continue;
+    }
+    if (token === "env") {
+      i = skipWrapperOptions(tokens, i + 1);
+      while (i < tokens.length && tokens[i].includes("=")) {
+        i++;
+      }
+      continue;
+    }
+    return i;
+  }
+  return -1;
+}
+
+function skipWrapperOptions(
+  tokens: string[],
+  start: number,
+  valueOptions: ReadonlySet<string> = WRAPPER_OPTIONS_WITH_VALUE,
+): number {
+  let i = start;
+  while (i < tokens.length && tokens[i].startsWith("-")) {
+    const token = tokens[i];
+    const eqIndex = token.indexOf("=");
+    const option = eqIndex > 0 ? token.slice(0, eqIndex) : token;
+    i++;
+    if (eqIndex < 0 && valueOptions.has(option) && i < tokens.length) {
+      i++;
+    }
+  }
+  return i;
+}
+
+function commandContainsGitOperation(
+  command: string,
+  predicate: (tokens: string[]) => boolean,
+  scanAnywhere = false,
+): boolean {
+  return splitShellSegments(command).segments.some((segment) =>
+    segmentContainsGitOperation(segment.trim(), predicate, scanAnywhere)
+  );
+}
+
+function commandContainsGitWorkflowWriteOperation(command: string): boolean {
+  return commandContainsGitOperation(command, tokensAreGitWorkflowWriteOperation);
+}
+
+function commandContainsGitWriteOperation(command: string): boolean {
+  return commandContainsGitOperation(command, tokensAreGitWriteOperation);
+}
+
+function contentContainsGitWorkflowWriteOperation(content: string): boolean {
+  return contentContainsGitOperation(content, tokensAreGitWorkflowWriteOperation);
+}
+
+function contentContainsGitWriteOperation(content: string): boolean {
+  return contentContainsGitOperation(content, tokensAreGitWriteOperation);
+}
+
+function contentContainsGitOperation(content: string, predicate: (tokens: string[]) => boolean): boolean {
+  const candidate = contentCommandCandidate(content);
+  const afterRun = candidate.replace(/^.*?\brun\s+/i, "");
+  const singleQuotesAsPunctuation = candidate.replace(/'/g, " ");
+  const afterRunSingleQuotesAsPunctuation = afterRun.replace(/'/g, " ");
+  return commandContainsGitOperation(candidate, predicate) ||
+    commandContainsGitOperation(afterRun, predicate) ||
+    commandContainsGitOperation(singleQuotesAsPunctuation, predicate) ||
+    commandContainsGitOperation(afterRunSingleQuotesAsPunctuation, predicate) ||
+    commandContainsGitOperation(candidate, predicate, true) ||
+    commandContainsGitOperation(afterRun, predicate, true) ||
+    commandContainsGitOperation(singleQuotesAsPunctuation, predicate, true) ||
+    commandContainsGitOperation(afterRunSingleQuotesAsPunctuation, predicate, true);
 }
 
 function xargsCommandToken(tokens: string[]): string | null {
@@ -353,13 +830,8 @@ function validateReadOnlyCommandHead(tokens: string[]): { allowed: true } | { al
   }
 
   if (bare === "git") {
-    const subcommand = gitSubcommand(tokens);
-    if (!subcommand) {
-      return { allowed: false, reason: "git command missing read-only subcommand" };
-    }
-    if (!READ_ONLY_GIT_SUBCOMMANDS.has(subcommand)) {
-      return { allowed: false, reason: `git subcommand not in read-only allowlist: ${subcommand}` };
-    }
+    const gitResult = validateReadOnlyGitCommand(tokens);
+    if (!gitResult.allowed) return gitResult;
   }
 
   if (bare === "xargs") {
@@ -412,6 +884,9 @@ function matchPolicyInCommand(command: string, policy: Pick<CheckRoutedCommandPo
 }
 
 function matchPatternInCommand(command: string, pattern: BlacklistPattern): boolean {
+  if (pattern.commandMatcher) {
+    return pattern.commandMatcher(pattern.redactPaths ? redactPathTokens(command) : command);
+  }
   const target = policyTarget(command, pattern.redactPaths);
   return pattern.pattern.test(target);
 }
@@ -645,14 +1120,15 @@ export function getContentBlacklistHighlights(
       redactedTarget = redactPathTokens(stripped);
     }
 
-    for (const { pattern, contentPattern, name, alternative, bashOnly, redactPaths: shouldRedact } of BLACKLIST_PATTERNS) {
+    for (const { pattern, contentPattern, contentMatcher, name, alternative, bashOnly, redactPaths: shouldRedact } of BLACKLIST_PATTERNS) {
       if (bashOnly) continue;
       const t = shouldRedact ? redactedTarget : target;
       // Prefer the stricter content-mode regex when the entry defines one;
       // it requires shape evidence (a flag or `<PATH>` token) that prose
       // word-pairs like "node with" or "tail events" don't have.
       const re = contentPattern ?? pattern;
-      if (re.test(t)) {
+      const matched = contentMatcher ? contentMatcher(t) : re.test(t);
+      if (matched) {
         const altStr = resolveAlternative(alternative);
         const rendered = `[VIOLATION: ${name}] "${line.trim()}" → ${altStr}`;
         highlights.push({

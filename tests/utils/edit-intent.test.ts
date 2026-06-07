@@ -169,6 +169,11 @@ describe("planModeBashBlock", () => {
     expect(result).toBeNull();
   });
 
+  it("defers wrapped git push to the general Bash blacklist in plan mode", () => {
+    const result = planModeBashBlock(true, "Bash", "command -p git push");
+    expect(result).toBeNull();
+  });
+
   it("blocks rm in plan mode", () => {
     const result = planModeBashBlock(true, "Bash", "rm -rf dist/");
     expect(result).toContain("Plan mode is active");

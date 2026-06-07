@@ -9,6 +9,10 @@ import {
   getCheckRoutedCommandHighlights,
 } from "../../src/utils/command-patterns.js";
 import { redactPathTokens } from "../../src/utils/path-redaction.js";
+import {
+  MUTATING_GIT_COMMAND_CASES,
+  READ_ONLY_GIT_COMMAND_CASES,
+} from "./bash-command-policy-cases.js";
 
 describe("getBlacklistDescription", () => {
   it("returns a non-empty string", () => {
@@ -37,9 +41,7 @@ describe("checkReadOnlyBashAllowlist", () => {
       "awk '{print $1}' package.json",
       "nl -ba src/index.ts",
       "find src -name '*.ts' | xargs grep -l foo",
-      "git status --short",
-      "git diff -- src/index.ts",
-      "git show HEAD:package.json",
+      ...READ_ONLY_GIT_COMMAND_CASES,
     ]) {
       expect(checkReadOnlyBashAllowlist(command).allowed).toBe(true);
     }
@@ -193,13 +195,13 @@ describe("getBlacklistHighlights", () => {
   });
 
   it("allows read-only git inspection commands", () => {
-    for (const command of ["git status", "git diff", "git log --oneline", "git show HEAD"]) {
+    for (const command of READ_ONLY_GIT_COMMAND_CASES) {
       expect(getBlacklistHighlights("Bash", { command })).toEqual([]);
     }
   });
 
   it("blocks raw git write operations", () => {
-    for (const command of ["git add .", "git commit -m fix", "git push", "git reset --hard", "git merge main"]) {
+    for (const command of MUTATING_GIT_COMMAND_CASES) {
       const highlights = getBlacklistHighlights("Bash", { command });
       expect(highlights.some((h) => h.includes("git write op"))).toBe(true);
     }
@@ -211,6 +213,17 @@ describe("getBlacklistHighlights", () => {
         command: `rg -n "git write op|Git write operation" src tests`,
       }),
     ).toEqual([]);
+  });
+
+  it("does not scan read-only command arguments as executable git intent", () => {
+    for (const command of [
+      "ls git branch -d old-topic",
+      "nl git push",
+      "stat git commit",
+      "wc git branch -rd origin/foo",
+    ]) {
+      expect(getBlacklistHighlights("Bash", { command })).toEqual([]);
+    }
   });
 
   it("routes 'vitest' Bash command through check-routed policy", () => {
