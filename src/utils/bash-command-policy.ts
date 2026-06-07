@@ -9,8 +9,27 @@
  */
 
 import { resolveCheckMessage } from "./check-target-context.js";
+import {
+  FIND_DESTRUCTIVE_DENY_REASON,
+  findDestructiveFlagsFromCommand,
+  findDestructiveFlagsFromFindArgs,
+} from "./find-command-policy.js";
 import { redactPathTokens } from "./path-redaction.js";
+import {
+  commandBare,
+  optionConsumesSeparateValue,
+  splitShellSegments,
+  stripQuotedRegions,
+  tokenizeShellSegment,
+  walkShellCharacters,
+  xargsCommandTokens,
+} from "./shell-command-parser.js";
+import type { ShellCharEvent } from "./shell-command-parser.js";
 import { activeSpec } from "../adapter/spec.js";
+
+export { commandBare, stripQuotedRegions } from "./shell-command-parser.js";
+
+const tokenizeSegment = tokenizeShellSegment;
 
 function checkMcpAction(): string {
   return `You must run the ${activeSpec().renderCheckMcpHint()}`;
@@ -206,42 +225,6 @@ export const WORKAROUND_PATTERNS: Record<string, { variants: string[]; redactPat
     },
   });
 
-export function stripQuotedRegions(s: string): string {
-  let out = "";
-  let quote: "'" | "\"" | null = null;
-  let escaped = false;
-
-  for (const ch of s) {
-    if (quote === "'") {
-      out += " ";
-      if (ch === "'") quote = null;
-      continue;
-    }
-
-    if (quote === "\"") {
-      out += " ";
-      if (escaped) {
-        escaped = false;
-      } else if (ch === "\\") {
-        escaped = true;
-      } else if (ch === "\"") {
-        quote = null;
-      }
-      continue;
-    }
-
-    if (ch === "'" || ch === "\"") {
-      quote = ch;
-      out += " ";
-      continue;
-    }
-
-    out += ch;
-  }
-
-  return out;
-}
-
 // Commands allowed for read-only Bash use. Shared by Bash policy callers so
 // the same inspection/navigation surface stays consistent.
 export const READ_ONLY_BASH_COMMANDS: ReadonlySet<string> = new Set([
@@ -354,29 +337,34 @@ const SUDO_WRAPPER_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
 ]);
 const TIMEOUT_WRAPPER_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set(["-k", "--kill-after"]);
 
-const XARGS_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
-  "-d", "--delimiter",
-  "-E", "--eof",
-  "-I", "--replace",
-  "-n", "--max-args",
-  "-P", "--max-procs",
-  "-s", "--max-chars",
+const COMMAND_SUBSTITUTION_DENY_REASON = "command or process substitution ($(...), backticks, <(...), >(...))";
+const SHELL_REDIRECT_DENY_REASON = "shell redirect to file";
+const SED_IN_PLACE_DENY_REASON = "sed in-place edit (-i)";
+
+const SED_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
+  "-e", "--expression", "-f", "--file",
 ]);
 
-const READ_ONLY_BASH_COMMAND_LEVEL_DENY: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
+interface ReadOnlyBashCommandLevelDeny {
+  reason: string;
+  matches(command: string): boolean;
+}
+
+const READ_ONLY_BASH_COMMAND_LEVEL_DENY: ReadonlyArray<ReadOnlyBashCommandLevelDeny> = [
   // Command/process substitution -- arbitrary-code-execution laundering.
-  { pattern: /\$\(|`|<\(|>\(/, reason: "command or process substitution ($(...), backticks, <(...), >(...))" },
+  { reason: COMMAND_SUBSTITUTION_DENY_REASON, matches: hasActiveCommandOrProcessSubstitution },
 
   // find destructive flags (GNU + BSD).
-  { pattern: /\bfind\b[^|;&]*\s-(delete|exec(dir)?|ok(dir)?|fprint[0f]?|fls)\b/, reason: "find destructive flag (-delete/-exec/-execdir/-ok/-okdir/-fprint/-fls)" },
+  { reason: FIND_DESTRUCTIVE_DENY_REASON, matches: hasFindDestructiveFlag },
 
   // sed in-place editing.
-  { pattern: /\bsed\b[^|;&]*\s-i(?:\b|['".A-Za-z0-9_-])/, reason: "sed in-place edit (-i)" },
+  { reason: SED_IN_PLACE_DENY_REASON, matches: hasSedInPlaceFlag },
 
-  // File redirection. Matches `> file`, `>> file`, `1>file`, `>|file`, etc.
-  // Excludes `2>&1` / `>&N` via `(?![&(])`, and `/dev/...` targets via `(?!\/dev\/)`.
+  // File redirection. Matches `> file`, `>> file`, `1>file`, `>|file`,
+  // `&>file`, and `&>>file`. Excludes fd duplication/closure forms such as
+  // `2>&1`, `>&2`, and `>&-`, and excludes `/dev/...` targets.
   // Process substitution is caught by the substitution rule above.
-  { pattern: />>?\s*(?!\/dev\/)(?![&(])[^|&(\s]/, reason: "shell redirect to file" },
+  { reason: SHELL_REDIRECT_DENY_REASON, matches: hasActiveFileRedirect },
 ];
 
 export const PLAN_MODE_BASH_WRITE_PATTERNS: ReadonlyArray<RegExp> = [
@@ -386,58 +374,6 @@ export const PLAN_MODE_BASH_WRITE_PATTERNS: ReadonlyArray<RegExp> = [
   /\b(mkdir|touch|rm|mv|cp)\s+/,
   /\bnpm\s+(install|run\s+build)\b/,
 ];
-
-function tokenizeSegment(segment: string): string[] {
-  const tokens: string[] = [];
-  let current = "";
-  let quote: "'" | "\"" | null = null;
-  let escaped = false;
-
-  for (const ch of segment.trim()) {
-    if (quote === "'") {
-      if (ch === "'") quote = null;
-      else current += ch;
-      continue;
-    }
-
-    if (quote === "\"") {
-      if (escaped) {
-        current += ch;
-        escaped = false;
-      } else if (ch === "\\") {
-        escaped = true;
-      } else if (ch === "\"") {
-        quote = null;
-      } else {
-        current += ch;
-      }
-      continue;
-    }
-
-    if (ch === "'" || ch === "\"") {
-      quote = ch;
-      continue;
-    }
-
-    if (/\s/.test(ch)) {
-      if (current) {
-        tokens.push(current);
-        current = "";
-      }
-      continue;
-    }
-
-    current += ch;
-  }
-
-  if (current) tokens.push(current);
-  return tokens;
-}
-
-export function commandBare(token: string): string {
-  const cleaned = token.replace(/^[({]+/, "").replace(/[)}]+$/, "");
-  return cleaned.startsWith("/") ? cleaned.split("/").pop()! : cleaned;
-}
 
 function gitSubcommandInfo(tokens: string[]): { subcommand: string; index: number } | null {
   for (let i = 1; i < tokens.length; i++) {
@@ -492,9 +428,7 @@ function stripOptionValues(tokens: string[], optionsWithValue: ReadonlySet<strin
       break;
     }
     result.push(token);
-    const eqIndex = token.indexOf("=");
-    const option = eqIndex > 0 ? token.slice(0, eqIndex) : token;
-    if (eqIndex < 0 && optionsWithValue.has(option) && i + 1 < tokens.length) {
+    if (optionConsumesSeparateValue(token, optionsWithValue) && i + 1 < tokens.length) {
       i++;
     }
   }
@@ -623,10 +557,10 @@ function segmentContainsGitOperation(segment: string, predicate: (tokens: string
   const tokens = tokenizeSegment(segment);
   if (tokens.length === 0) return false;
 
-  if (!scanAnywhere && segmentContainsShellLauncherGitOperation(tokens, predicate)) {
+  if (!scanAnywhere && segmentContainsShellLauncherOperation(tokens, (command) => commandContainsGitOperation(command, predicate))) {
     return true;
   }
-  if (!scanAnywhere && segmentContainsEvalGitOperation(tokens, predicate)) {
+  if (!scanAnywhere && segmentContainsEvalOperation(tokens, (command) => commandContainsGitOperation(command, predicate))) {
     return true;
   }
 
@@ -644,7 +578,7 @@ function segmentContainsGitOperation(segment: string, predicate: (tokens: string
   return false;
 }
 
-function segmentContainsShellLauncherGitOperation(tokens: string[], predicate: (tokens: string[]) => boolean): boolean {
+function segmentContainsShellLauncherOperation(tokens: string[], commandPredicate: (command: string) => boolean): boolean {
   let start = wrappedExecutableTokenIndex(tokens);
   if (start < 0) return false;
   let head = commandBare(tokens[start]);
@@ -657,7 +591,7 @@ function segmentContainsShellLauncherGitOperation(tokens: string[], predicate: (
   for (let i = start + 1; i < tokens.length - 1; i++) {
     const option = tokens[i];
     if (option === "-c" || /^-[A-Za-z]*c[A-Za-z]*$/.test(option)) {
-      return commandContainsGitOperation(tokens[i + 1], predicate);
+      return commandPredicate(tokens[i + 1]);
     }
   }
   return false;
@@ -673,11 +607,11 @@ function gitExecutableTokenIndex(tokens: string[]): number {
   return index >= 0 && commandBare(tokens[index]) === "git" ? index : -1;
 }
 
-function segmentContainsEvalGitOperation(tokens: string[], predicate: (tokens: string[]) => boolean): boolean {
+function segmentContainsEvalOperation(tokens: string[], commandPredicate: (command: string) => boolean): boolean {
   const start = wrappedExecutableTokenIndex(tokens);
   if (start < 0 || commandBare(tokens[start]) !== "eval") return false;
   const command = tokens.slice(start + 1).join(" ");
-  return command ? commandContainsGitOperation(command, predicate) : false;
+  return command ? commandPredicate(command) : false;
 }
 
 function wrappedExecutableTokenIndex(tokens: string[]): number {
@@ -742,10 +676,8 @@ function skipWrapperOptions(
   let i = start;
   while (i < tokens.length && tokens[i].startsWith("-")) {
     const token = tokens[i];
-    const eqIndex = token.indexOf("=");
-    const option = eqIndex > 0 ? token.slice(0, eqIndex) : token;
     i++;
-    if (eqIndex < 0 && valueOptions.has(option) && i < tokens.length) {
+    if (optionConsumesSeparateValue(token, valueOptions) && i < tokens.length) {
       i++;
     }
   }
@@ -793,17 +725,69 @@ function contentContainsGitOperation(content: string, predicate: (tokens: string
     commandContainsGitOperation(afterRunSingleQuotesAsPunctuation, predicate, true);
 }
 
-function xargsCommandToken(tokens: string[]): string | null {
-  for (let i = 1; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (XARGS_OPTIONS_WITH_VALUE.has(token)) {
+function tokensHaveFindDestructiveFlag(tokens: string[]): boolean {
+  return findDestructiveFlagsFromFindArgs(tokens.slice(1)).length > 0;
+}
+
+function tokensHaveSedInPlaceFlag(tokens: string[]): boolean {
+  const args = tokens.slice(1);
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i];
+    if (token === "--") return false;
+    if (token === "--in-place" || token.startsWith("--in-place=")) return true;
+    if (token.startsWith("--expression=") || token.startsWith("--file=")) continue;
+    if (optionConsumesSeparateValue(token, SED_OPTIONS_WITH_VALUE)) {
       i++;
       continue;
     }
-    if (token.startsWith("-")) continue;
-    return token;
+    if (/^-[ef].+/.test(token)) continue;
+    if (token.startsWith("--")) continue;
+    if (token.startsWith("-") && token.slice(1).includes("i")) return true;
   }
-  return null;
+  return false;
+}
+
+function tokensContainCommandPredicate(
+  tokens: string[],
+  commandName: string,
+  predicate: (tokens: string[]) => boolean,
+): boolean {
+  if (tokens.length === 0) return false;
+  const bare = commandBare(tokens[0]);
+  if (bare === commandName) return predicate(tokens);
+  if (bare === "xargs") {
+    const commandTokens = xargsCommandTokens(tokens);
+    return commandTokens ? tokensContainCommandPredicate(commandTokens, commandName, predicate) : false;
+  }
+  return false;
+}
+
+function segmentContainsCommandPredicate(
+  segment: string,
+  commandName: string,
+  predicate: (tokens: string[]) => boolean,
+): boolean {
+  const tokens = tokenizeSegment(segment);
+  if (tokens.length === 0) return false;
+
+  const commandPredicate = (command: string): boolean =>
+    commandSegmentsContainCommandPredicate(command, commandName, predicate);
+
+  if (segmentContainsShellLauncherOperation(tokens, commandPredicate)) return true;
+  if (segmentContainsEvalOperation(tokens, commandPredicate)) return true;
+
+  const index = wrappedExecutableTokenIndex(tokens);
+  return index >= 0 && tokensContainCommandPredicate(tokens.slice(index), commandName, predicate);
+}
+
+function commandSegmentsContainCommandPredicate(
+  command: string,
+  commandName: string,
+  predicate: (tokens: string[]) => boolean,
+): boolean {
+  return splitShellSegments(command).segments.some((segment) =>
+    segmentContainsCommandPredicate(segment.trim(), commandName, predicate)
+  );
 }
 
 function validateReadOnlyCommandHead(tokens: string[]): { allowed: true } | { allowed: false; reason: string } {
@@ -834,37 +818,21 @@ function validateReadOnlyCommandHead(tokens: string[]): { allowed: true } | { al
     if (!gitResult.allowed) return gitResult;
   }
 
+  if (bare === "find" && tokensHaveFindDestructiveFlag(tokens)) {
+    return { allowed: false, reason: FIND_DESTRUCTIVE_DENY_REASON };
+  }
+
+  if (bare === "sed" && tokensHaveSedInPlaceFlag(tokens)) {
+    return { allowed: false, reason: SED_IN_PLACE_DENY_REASON };
+  }
+
   if (bare === "xargs") {
-    const commandToken = xargsCommandToken(tokens);
-    if (!commandToken) return { allowed: true };
-    return validateReadOnlyCommandHead([commandToken]);
+    const commandTokens = xargsCommandTokens(tokens);
+    if (!commandTokens) return { allowed: true };
+    return validateReadOnlyCommandHead(commandTokens);
   }
 
   return { allowed: true };
-}
-
-function splitShellSegments(command: string): {
-  segments: string[];
-  hasComplexOperator: boolean;
-  backgrounded: boolean;
-} {
-  const basis = stripQuotedRegions(command);
-  const splitRegex = /\s*(?:\|\||&&|[;|\n\r]|(?<![<>])&)\s*/g;
-  const segments: string[] = [];
-  let last = 0;
-  let hasComplexOperator = false;
-  let backgrounded = false;
-  for (const m of basis.matchAll(splitRegex)) {
-    const operatorText = m[0];
-    hasComplexOperator = true;
-    if (operatorText.includes("&") && !operatorText.includes("&&")) {
-      backgrounded = true;
-    }
-    segments.push(command.slice(last, m.index));
-    last = (m.index ?? 0) + operatorText.length;
-  }
-  segments.push(command.slice(last));
-  return { segments, hasComplexOperator, backgrounded };
 }
 
 function contentCommandCandidate(line: string): string {
@@ -910,16 +878,86 @@ function firstCommandHead(command: string): string | undefined {
   return token ? commandBare(token) : undefined;
 }
 
+function scanShellActiveChars(command: string, predicate: (state: ShellCharEvent) => boolean): boolean {
+  return walkShellCharacters(command, (event) => event.active && predicate(event));
+}
+
+function scanShellSubstitutionChars(command: string, predicate: (state: ShellCharEvent) => boolean): boolean {
+  return walkShellCharacters(command, (event) =>
+    event.quote !== "'" &&
+    !event.quoteBoundary &&
+    !event.escapeInitiator &&
+    !event.escaped &&
+    predicate(event)
+  );
+}
+
+function commandOrNestedPayloadMatches(command: string, predicate: (command: string) => boolean): boolean {
+  if (predicate(command)) return true;
+
+  return splitShellSegments(command).segments.some((segment) => {
+    const tokens = tokenizeSegment(segment.trim());
+    if (tokens.length === 0) return false;
+    return segmentContainsShellLauncherOperation(tokens, (payload) => commandOrNestedPayloadMatches(payload, predicate)) ||
+      segmentContainsEvalOperation(tokens, (payload) => commandOrNestedPayloadMatches(payload, predicate));
+  });
+}
+
+function commandHasActiveCommandOrProcessSubstitution(command: string): boolean {
+  return scanShellSubstitutionChars(command, ({ ch, next, index }) => {
+    if (ch === "`" || (ch === "$" && next === "(" && command[index + 2] !== "(") || (ch === "<" && next === "(") || (ch === ">" && next === "(")) {
+      return true;
+    }
+    return false;
+  });
+}
+
+function hasActiveCommandOrProcessSubstitution(command: string): boolean {
+  return commandOrNestedPayloadMatches(command, commandHasActiveCommandOrProcessSubstitution);
+}
+
+function commandHasActiveFileRedirect(command: string): boolean {
+  return scanShellActiveChars(command, ({ ch, next, index: i, quote }) => {
+    if (quote !== null || ch !== ">") return false;
+    if (next === "(" || next === "&") return false;
+
+    let j = next === ">" || next === "|" ? i + 2 : i + 1;
+    while (j < command.length && /\s/.test(command[j])) j++;
+    if (command[j] === "'" || command[j] === "\"") j++;
+    if (command.startsWith("/dev/", j)) return false;
+    if (j < command.length && !/[|&(\s]/.test(command[j])) return true;
+    return false;
+  });
+}
+
+function hasActiveFileRedirect(command: string): boolean {
+  return commandOrNestedPayloadMatches(command, commandHasActiveFileRedirect);
+}
+
+function hasFindDestructiveFlag(command: string): boolean {
+  return findDestructiveFlagsFromCommand(command).length > 0;
+}
+
+function hasSedInPlaceFlag(command: string): boolean {
+  return commandSegmentsContainCommandPredicate(command, "sed", tokensHaveSedInPlaceFlag);
+}
+
+function readOnlyCommandLevelDenyReason(command: string): string | null {
+  for (const { reason, matches } of READ_ONLY_BASH_COMMAND_LEVEL_DENY) {
+    if (matches(command)) return reason;
+  }
+  return null;
+}
+
 export function checkReadOnlyBashAllowlist(command: string): { allowed: true } | { allowed: false; reason: string } {
   const trimmed = command.trim();
   if (!trimmed) {
     return { allowed: false, reason: "empty command" };
   }
 
-  for (const { pattern, reason } of READ_ONLY_BASH_COMMAND_LEVEL_DENY) {
-    if (pattern.test(trimmed)) {
-      return { allowed: false, reason };
-    }
+  const commandLevelDeny = readOnlyCommandLevelDenyReason(trimmed);
+  if (commandLevelDeny) {
+    return { allowed: false, reason: commandLevelDeny };
   }
 
   const { segments, backgrounded } = splitShellSegments(trimmed);
@@ -979,10 +1017,9 @@ export function classifyBashCommand(command: string, workingDir?: string): BashC
     });
   }
 
-  for (const { pattern, reason } of READ_ONLY_BASH_COMMAND_LEVEL_DENY) {
-    if (pattern.test(trimmed)) {
-      return base("blocked", { reason });
-    }
+  const commandLevelDeny = readOnlyCommandLevelDenyReason(trimmed);
+  if (commandLevelDeny) {
+    return base("blocked", { reason: commandLevelDeny });
   }
 
   const split = splitShellSegments(trimmed);

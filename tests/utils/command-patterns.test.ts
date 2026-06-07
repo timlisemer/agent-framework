@@ -10,8 +10,12 @@ import {
 } from "../../src/utils/command-patterns.js";
 import { redactPathTokens } from "../../src/utils/path-redaction.js";
 import {
+  COMMAND_SUBSTITUTION_DENY_COMMAND_CASES,
+  DESTRUCTIVE_READ_ONLY_COMMAND_DENY_CASES,
+  FILE_REDIRECT_DENY_COMMAND_CASES,
   MUTATING_GIT_COMMAND_CASES,
   READ_ONLY_GIT_COMMAND_CASES,
+  READ_ONLY_LITERAL_COMMAND_CASES,
 } from "./bash-command-policy-cases.js";
 
 describe("getBlacklistDescription", () => {
@@ -40,6 +44,7 @@ describe("checkReadOnlyBashAllowlist", () => {
       "sed -n '1,80p' src/index.ts",
       "awk '{print $1}' package.json",
       "nl -ba src/index.ts",
+      ...READ_ONLY_LITERAL_COMMAND_CASES,
       "find src -name '*.ts' | xargs grep -l foo",
       ...READ_ONLY_GIT_COMMAND_CASES,
     ]) {
@@ -53,11 +58,16 @@ describe("checkReadOnlyBashAllowlist", () => {
   });
 
   it("denies read-only-looking commands with mutation-capable shell features", () => {
-    expect(checkReadOnlyBashAllowlist("find . -delete").allowed).toBe(false);
-    expect(checkReadOnlyBashAllowlist("rg foo > out.txt").allowed).toBe(false);
-    expect(checkReadOnlyBashAllowlist("rg $(pwd)").allowed).toBe(false);
+    for (const command of COMMAND_SUBSTITUTION_DENY_COMMAND_CASES) {
+      expect(checkReadOnlyBashAllowlist(command).allowed, command).toBe(false);
+    }
+    for (const command of FILE_REDIRECT_DENY_COMMAND_CASES) {
+      expect(checkReadOnlyBashAllowlist(command).allowed, command).toBe(false);
+    }
+    for (const command of DESTRUCTIVE_READ_ONLY_COMMAND_DENY_CASES) {
+      expect(checkReadOnlyBashAllowlist(command).allowed, command).toBe(false);
+    }
     expect(checkReadOnlyBashAllowlist("cd src && rg -n foo .").allowed).toBe(false);
-    expect(checkReadOnlyBashAllowlist("sed -i 's/a/b/' file.txt").allowed).toBe(false);
     expect(checkReadOnlyBashAllowlist("git push").allowed).toBe(false);
     expect(checkReadOnlyBashAllowlist("git add .").allowed).toBe(false);
     expect(checkReadOnlyBashAllowlist("find . -name '*.ts' | xargs node").allowed).toBe(false);

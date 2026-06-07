@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { detectDrift } from "../../src/utils/drift-detector.js";
+import { FIND_DESTRUCTIVE_DENY_REASON } from "../../src/utils/find-command-policy.js";
 import type { DriftTargetState, ToolLogEntry } from "../../src/utils/session-store.js";
 
 const TARGET = "/home/tim/.claude/plans/drift.md";
@@ -110,11 +111,11 @@ describe("detectDrift - workaround escalation fingerprints", () => {
     const log: ToolLogEntry[] = [
       deniedBash(
         "find /home/tim/.agent-framework/sessions -name '*.jsonl' -exec grep -H foo {} \\;",
-        "find destructive flag (-delete/-exec/-execdir/-ok/-okdir/-fprint/-fls)",
+        FIND_DESTRUCTIVE_DENY_REASON,
       ),
       deniedBash(
         "find /home/tim/.agent-framework/sessions -type f -exec rg foo {} \\;",
-        "find destructive flag (-delete/-exec/-execdir/-ok/-okdir/-fprint/-fls)",
+        FIND_DESTRUCTIVE_DENY_REASON,
       ),
     ];
 
@@ -132,11 +133,11 @@ describe("detectDrift - workaround escalation fingerprints", () => {
     const log: ToolLogEntry[] = [
       deniedBash(
         "find /home/tim/.agent-framework/sessions -name '*.jsonl' -exec grep -H foo {} \\;",
-        "find destructive flag (-delete/-exec/-execdir/-ok/-okdir/-fprint/-fls)",
+        FIND_DESTRUCTIVE_DENY_REASON,
       ),
       deniedBash(
         "find /home/tim/.agent-framework/sessions -type f -exec rg foo {} \\;",
-        "find destructive flag (-delete/-exec/-execdir/-ok/-okdir/-fprint/-fls)",
+        FIND_DESTRUCTIVE_DENY_REASON,
       ),
     ];
 
@@ -150,6 +151,72 @@ describe("detectDrift - workaround escalation fingerprints", () => {
     expect(signal.detected).toBe(true);
     expect(signal.reason).toContain("find:exec");
     expect(signal.reason).toContain("possible workaround escalation");
+  });
+
+  it("fingerprints fprintf with the shared destructive find flag list", () => {
+    const log: ToolLogEntry[] = [
+      deniedBash(
+        "find /tmp -fprintf out.txt '%p\\n'",
+        FIND_DESTRUCTIVE_DENY_REASON,
+      ),
+      deniedBash(
+        "find /tmp -fprintf other.txt '%p\\n'",
+        FIND_DESTRUCTIVE_DENY_REASON,
+      ),
+    ];
+
+    const signal = detectDrift(
+      "Bash",
+      { command: "find /tmp -fprintf third.txt '%p\\n'" },
+      log,
+      {},
+    );
+
+    expect(signal.detected).toBe(true);
+    expect(signal.reason).toContain("find:fprintf");
+  });
+
+  it("does not fingerprint destructive-looking find option values or literals", () => {
+    const log: ToolLogEntry[] = [
+      deniedBash("find /tmp -delete", FIND_DESTRUCTIVE_DENY_REASON),
+      deniedBash("find /tmp -delete", FIND_DESTRUCTIVE_DENY_REASON),
+    ];
+
+    for (const command of [
+      "find /tmp -name -delete",
+      "find /tmp -printf -delete",
+      "find /tmp -- -delete",
+    ]) {
+      const signal = detectDrift("Bash", { command }, log, {});
+      expect(signal.detected, command).toBe(false);
+    }
+  });
+
+  it("fingerprints nested destructive find payloads with shared traversal", () => {
+    const cases = [
+      {
+        command: "bash -c 'find . -delete'",
+        fingerprint: "find:delete",
+      },
+      {
+        command: "eval 'find . -exec rm {} \\;'",
+        fingerprint: "find:exec",
+      },
+      {
+        command: "xargs -I{} find {} -delete",
+        fingerprint: "find:delete",
+      },
+    ];
+
+    for (const { command, fingerprint } of cases) {
+      const log: ToolLogEntry[] = [
+        deniedBash(command, FIND_DESTRUCTIVE_DENY_REASON),
+        deniedBash(command, FIND_DESTRUCTIVE_DENY_REASON),
+      ];
+      const signal = detectDrift("Bash", { command }, log, {});
+      expect(signal.detected, command).toBe(true);
+      expect(signal.reason, command).toContain(fingerprint);
+    }
   });
 
   it("ignores generic shell tokens shared with prior denials", () => {

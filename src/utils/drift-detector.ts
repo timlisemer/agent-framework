@@ -8,6 +8,7 @@
  */
 
 import type { DriftTargetState, ToolLogEntry } from "./session-store.js";
+import { findDestructiveFlagsFromCommand } from "./find-command-policy.js";
 
 export interface DriftSignal {
   detected: boolean;
@@ -172,16 +173,7 @@ function collectBashDenialFingerprints(command: string, reason: string): Set<str
 }
 
 function findDestructiveFlags(command: string): string[] {
-  const flags: string[] = [];
-  const findCommandPattern = /\bfind\b[^|;&]*/g;
-  for (const match of command.matchAll(findCommandPattern)) {
-    const segment = match[0];
-    const flagPattern = /\s-(delete|execdir|exec|okdir|ok|fprint0|fprint|fls)\b/g;
-    for (const flagMatch of segment.matchAll(flagPattern)) {
-      flags.push(flagMatch[1]);
-    }
-  }
-  return flags;
+  return findDestructiveFlagsFromCommand(command);
 }
 
 function isFilteredCheckCommand(command: string): boolean {

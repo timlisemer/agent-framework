@@ -31,6 +31,74 @@ export const READ_ONLY_GIT_COMMAND_CASES = [
   "git ls-tree HEAD src",
 ] as const;
 
+export const READ_ONLY_LITERAL_COMMAND_CASES = [
+  "rg -n \"TaskHistoryEntry>\" src",
+  "rg -n 'TaskHistoryEntry>' src",
+  "rg -n \"Record<string, TaskHistoryEntry>\" src",
+  "rg '$(pwd)' src",
+  "echo $((1+2))",
+  "find . -name \"-delete\"",
+  "find . -name \"-fprint0\"",
+  "find . -printf \"-delete\\n\"",
+  "find -- -delete",
+  "find . -- -delete",
+  "sed -n -e '-i' file.txt",
+  "sed -n --expression='-i' file.txt",
+  "rg foo > /dev/null",
+  "rg foo > \"/dev/null\"",
+] as const;
+
+export const COMMAND_SUBSTITUTION_DENY_COMMAND_CASES = [
+  "rg $(pwd) src",
+  "rg \"$(pwd)\" src",
+  "rg \"foo $(pwd)\" src",
+  "rg \"`pwd`\" src",
+  "echo \"`pwd`\"",
+  "rg foo\\'bar $(pwd) src",
+  "cat <(pwd)",
+  "cat >(pwd)",
+  "bash -c 'rg $(pwd) src'",
+  "eval 'rg $(pwd) src'",
+  "eval 'cat <(pwd)'",
+] as const;
+
+export const FILE_REDIRECT_DENY_COMMAND_CASES = [
+  "rg foo > out.txt",
+  "rg foo > \"out.txt\"",
+  "rg foo >> 'out.txt'",
+  "sh -c 'echo hi > out.txt'",
+  "eval 'printf x > out.txt'",
+  "sh -c 'echo hi &> out.txt'",
+  "eval 'printf x &>> out.txt'",
+] as const;
+
+export const DESTRUCTIVE_READ_ONLY_COMMAND_DENY_CASES = [
+  "find . -delete",
+  "(find . -delete)",
+  "find . \"-delete\"",
+  "find . '-exec' rm {} \\;",
+  "find . -fprint0 out.txt",
+  "sudo find . -delete",
+  "env find . -delete",
+  "bash -c 'find . -delete'",
+  "eval find . -delete",
+  "xargs -I{} find {} -delete",
+  "xargs -a file find . -delete",
+  "xargs --arg-file file find . -delete",
+  "printf '%s\\n' . | xargs -I{} find {} -delete",
+  "sed -i 's/a/b/' file.txt",
+  "sed -Ei 's/a/b/' file.txt",
+  "sed -ni 's/a/b/p' file.txt",
+  "sed --in-place 's/a/b/' file.txt",
+  "sed \"-i\" 's/a/b/' file.txt",
+  "time sed -i 's/a/b/' file.txt",
+  "sh -c 'sed -i \"s/a/b/\" file.txt'",
+  "xargs sed -i 's/a/b/'",
+  "xargs -a file sed -i 's/a/b/'",
+  "xargs --arg-file file sed -i 's/a/b/'",
+  "printf '%s\\n' file.txt | xargs sed -i 's/a/b/'",
+] as const;
+
 export const MUTATING_GIT_COMMAND_CASES = [
   "git add .",
   "git -C repo add .",

@@ -12,8 +12,12 @@ import {
   stripQuotedRegions,
 } from "../../src/utils/bash-command-policy.js";
 import {
+  COMMAND_SUBSTITUTION_DENY_COMMAND_CASES,
+  DESTRUCTIVE_READ_ONLY_COMMAND_DENY_CASES,
+  FILE_REDIRECT_DENY_COMMAND_CASES,
   MUTATING_GIT_COMMAND_CASES,
   READ_ONLY_GIT_COMMAND_CASES,
+  READ_ONLY_LITERAL_COMMAND_CASES,
 } from "./bash-command-policy-cases.js";
 
 describe("classifyBashCommand", () => {
@@ -40,6 +44,35 @@ describe("classifyBashCommand", () => {
     const command =
       "rg -n \"href: '/config'|/config|Config'|Config\\\"|routes/config|configStore\" iocto-website/src";
     expect(classifyBashCommand(command).riskClass).toBe("simple-read-only");
+  });
+
+  it("classifies rg patterns containing angle-bracket text as read-only", () => {
+    for (const command of READ_ONLY_LITERAL_COMMAND_CASES) {
+      expect(classifyBashCommand(command).riskClass, command).toBe("simple-read-only");
+    }
+  });
+
+  it("blocks command substitution inside double-quoted read-only command arguments", () => {
+    for (const command of COMMAND_SUBSTITUTION_DENY_COMMAND_CASES) {
+      const result = classifyBashCommand(command);
+      expect(result.riskClass, command).toBe("blocked");
+      expect(result.reason, command).toBe("command or process substitution ($(...), backticks, <(...), >(...))");
+    }
+  });
+
+  it("blocks shell redirects with quoted or unquoted targets", () => {
+    for (const command of FILE_REDIRECT_DENY_COMMAND_CASES) {
+      const result = classifyBashCommand(command);
+      expect(result.riskClass, command).toBe("blocked");
+      expect(result.reason, command).toBe("shell redirect to file");
+    }
+  });
+
+  it("blocks destructive read-only command flags even when quoted", () => {
+    for (const command of DESTRUCTIVE_READ_ONLY_COMMAND_DENY_CASES) {
+      const result = classifyBashCommand(command);
+      expect(result.riskClass, command).toBe("blocked");
+    }
   });
 
   it("classifies safe read-only pipelines as read-only-complex", () => {
