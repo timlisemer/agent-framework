@@ -9,6 +9,13 @@ repeated confirmation. If repeated runs disagree, move the fixture to
 
 ## Recent Changes
 
+2026-06-09 Fontconfig repro-before-edit regression:
+
+- Added `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow.json`.
+  The live hook denied an edit after the assistant had already reproduced the
+  requested Fontconfig error with `fc-match Arial`; correct behavior is to
+  allow the edit because the sequencing prerequisite was satisfied.
+
 2026-05-19 scenario reclassification after three full scenario sweeps:
 
 - Moved newly consistent expected-pass regression into this folder:
