@@ -52,6 +52,13 @@ export function summarizeToolInputForLlm(toolName: string, toolInput: unknown): 
       ])})`;
     }
     case "Edit": {
+      const hasStringEditFields =
+        typeof i.old_string === "string" && typeof i.new_string === "string";
+      if (!hasStringEditFields && Array.isArray(i.file_paths)) {
+        return `ApplyPatch(${kv([
+          ["file_paths", JSON.stringify(i.file_paths.filter((p) => typeof p === "string"))],
+        ])})`;
+      }
       return `Edit(${kv([
         ["file_path", q(String(i.file_path ?? ""))],
         ["old_string", bytesAndLines(i.old_string)],
