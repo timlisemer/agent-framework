@@ -100,6 +100,13 @@ export interface CanonicalToolCall {
   toolInput: unknown;
 }
 
+export interface AdapterToolCallContext {
+  rawToolName: string;
+  rawToolInput: unknown;
+  canonicalToolName: string;
+  canonicalToolInput: unknown;
+}
+
 export interface ScenarioMaterializeCtx {
   sessionId: string;
   cwd: string;
@@ -171,9 +178,22 @@ export interface AdapterSpec {
   mcpWireName(canonical: CanonicalMcp): string;
 
   /** Translate a raw wire-shape tool call into canonical form.
-   *  Handles MCP recognition, name aliases (apply_patch→Edit, exec_command→Bash),
-   *  and input shape translation (parse apply_patch body to {file_path}). */
+   *  Handles MCP recognition, adapter-specific name aliases, and input
+   *  shape translation. */
   canonicalizeToolCall(rawToolName: string, rawToolInput: unknown): CanonicalToolCall;
+
+  /** Summarize a tool call for LLM-facing gate/appeal prompts. Receives both
+   *  raw adapter-wire identity and canonical identity so adapters can explain
+   *  host-specific aliases without fabricating fields. */
+  summarizeToolCallForLlm(input: AdapterToolCallContext): string;
+
+  /** True when a deny reason is impossible for this adapter-specific call
+   *  shape and should be treated as hallucinated rule-gate output. */
+  isFabricatedDenyReason?(reason: string, input: AdapterToolCallContext): boolean;
+
+  /** True when a raw adapter tool name is a user-visible alias for the
+   *  matching canonical tool in appeal prompts. */
+  rawToolNameIsAppealAlias?(input: AdapterToolCallContext): boolean;
 
   // ── Workflow invocation ─────────────────────────────────────────────────
   /** Recognize a workflow invocation in a user message. Generic code

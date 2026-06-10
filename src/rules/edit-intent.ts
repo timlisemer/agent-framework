@@ -4,6 +4,7 @@ import { appealHelper } from "../agents/hooks/tool-appeal.js";
 import { buildAppealUserState } from "../agents/hooks/tool-appeal-user-state.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
 import { APPEAL_COUNTS } from "../utils/transcript-presets.js";
+import { appealToolIdentityFromRuleContext } from "./tool-call-context.js";
 
 export const editIntentRule: PreToolRule = {
   name: "edit-intent",
@@ -52,7 +53,9 @@ You should STRONGLY LEAN toward UPHOLD unless you find EXPLICIT, UNAMBIGUOUS use
 for editing files (e.g., "make the change", "fix it", "implement it", "go ahead and edit").
 Questions, discussions, or exploration of code do NOT count as edit approval.
 If in doubt, UPHOLD.
-=== END EDIT INTENT WARNING ===`
+=== END EDIT INTENT WARNING ===`,
+      undefined,
+      appealToolIdentityFromRuleContext(ctx),
     );
 
     if (!appeal.overturned) {

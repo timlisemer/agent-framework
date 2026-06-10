@@ -346,6 +346,7 @@ async function runConfirmReviewAgents(
     runAgent(
       {
         ...CONFIRM_SPECIALIST_AGENT,
+        tier,
         workingDir,
       },
       {
@@ -357,6 +358,7 @@ async function runConfirmReviewAgents(
     runAgent(
       {
         ...CONFIRM_PATTERN_AGENT,
+        tier,
         workingDir,
       },
       {
@@ -370,6 +372,7 @@ async function runConfirmReviewAgents(
   return runAgent(
     {
       ...CONFIRM_AGGREGATOR_AGENT,
+      tier,
       workingDir,
     },
     {

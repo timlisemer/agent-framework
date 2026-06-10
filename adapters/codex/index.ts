@@ -9,7 +9,23 @@ import * as SM  from "./scenario-materializer.js";
 import * as PS  from "./prompt-strings.js";
 import * as PLS from "./plan-source.js";
 import * as PM  from "./plan-mode.js";
-import type { AdapterSpec } from "../../src/adapter/types.js";
+import type { AdapterSpec, AdapterToolCallContext } from "../../src/adapter/types.js";
+import { summarizeToolInputForLlm } from "../../src/utils/tool-input-summary.js";
+import { extractApplyPatchPaths } from "./apply-patch-parser.js";
+
+function isPatchEditAlias(input: AdapterToolCallContext): boolean {
+  if (input.rawToolName !== "apply_patch") return false;
+  if (input.canonicalToolName !== "Edit") return false;
+  const canonical = input.canonicalToolInput as { file_paths?: unknown } | null | undefined;
+  return Array.isArray(canonical?.file_paths);
+}
+
+function canonicalFilePaths(input: AdapterToolCallContext): string[] {
+  const canonical = input.canonicalToolInput as { file_paths?: unknown } | null | undefined;
+  return Array.isArray(canonical?.file_paths)
+    ? canonical.file_paths.filter((p): p is string => typeof p === "string")
+    : [];
+}
 
 export const codexSpec: AdapterSpec = {
   name: "codex",
@@ -17,6 +33,18 @@ export const codexSpec: AdapterSpec = {
   recognizeMcp: MCP.recognizeMcp,
   mcpWireName:  MCP.mcpWireName,
   canonicalizeToolCall: TC.canonicalizeToolCall,
+  summarizeToolCallForLlm: (input) => {
+    if (isPatchEditAlias(input)) {
+      const rawPaths = extractApplyPatchPaths(input.rawToolInput);
+      const paths = rawPaths.length > 0 ? rawPaths : canonicalFilePaths(input);
+      return `ApplyPatch(file_paths=${JSON.stringify(paths)})`;
+    }
+    return summarizeToolInputForLlm(input.canonicalToolName, input.canonicalToolInput);
+  },
+  isFabricatedDenyReason: (reason, input) =>
+    isPatchEditAlias(input) &&
+    /old_string[^.]*new_string[^.]*(?:non-string|missing|malformed|invalid)/i.test(reason),
+  rawToolNameIsAppealAlias: (input) => isPatchEditAlias(input),
   recognizeWorkflowInvocation: WI.recognizeWorkflowInvocation,
   isWorkflowInvocationOnly: WI.isWorkflowInvocationOnly,
   renderWorkflowInvocation:    WI.renderWorkflowInvocation,

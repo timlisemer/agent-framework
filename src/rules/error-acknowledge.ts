@@ -3,8 +3,8 @@ import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { readToolLogEntries } from "../utils/session-store.js";
 import { readTranscriptExact } from "../utils/transcript.js";
 import { stringifyToolInput } from "../utils/prediction-types.js";
-import { summarizeToolInputForLlm } from "../utils/tool-input-summary.js";
 import { extractFilePath } from "./utils.js";
+import { summarizeRuleToolCall } from "./tool-call-context.js";
 
 const EDIT_CLASS_TOOLS: ReadonlySet<string> = new Set([
   "Edit",
@@ -107,9 +107,10 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
       const acknowledgesError = denialKeywords.some((kw) => kw.length > 3 && assistantLower.includes(kw));
 
       if (!acknowledgesError) {
+        const toolDescription = summarizeRuleToolCall(ctx);
         // Ambiguous -- use LLM to decide
         return {
-          llmContext: `PREVIOUS DENIAL:\nTool: ${recentDenial.tool}\nReason: ${recentDenial.reason}\n\nASSISTANT TEXT AFTER DENIAL:\n${lastAssistant.content.slice(0, 300)}\n\nCURRENT TOOL CALL:\n${summarizeToolInputForLlm(ctx.toolName, ctx.toolInput)}`,
+          llmContext: `PREVIOUS DENIAL:\nTool: ${recentDenial.tool}\nReason: ${recentDenial.reason}\n\nASSISTANT TEXT AFTER DENIAL:\n${lastAssistant.content.slice(0, 300)}\n\nCURRENT TOOL CALL:\n${toolDescription}`,
         };
       }
     }

@@ -64,6 +64,7 @@ import { startsWithAny } from "../../utils/retry.js";
 import { extractGateNote } from "../../utils/gate-reasoning-cache.js";
 import type { SlashCommandContext } from "../../utils/transcript.js";
 import type { AppealUserState } from "../../rules/types.js";
+import { stripQuotedAndPastedContent } from "../../utils/quote-detection.js";
 
 // The literal "ACTION" suffix appended by resolveCheckMessage
 // (src/utils/check-target-context.ts:120) and used by the static `alternative`
@@ -115,6 +116,17 @@ function stripExplicitQuoteBlocks(text: string): string {
   return text.replace(/\bQUOTE\b[\s\S]*?\bQUOTE END\b/gi, " ");
 }
 
+function userNamedLiteral(literal: string, userMessage: string): boolean {
+  if (!literal) return false;
+  const cleaned = stripExplicitQuoteBlocks(stripQuotedAndPastedContent(userMessage));
+  const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(?:^|[^\\w.-])${escaped}(?=$|[^\\w.-])`, "i");
+  const match = re.exec(cleaned);
+  if (!match) return false;
+  const before = cleaned.slice(Math.max(0, match.index - 80), match.index).toLowerCase();
+  return !/(?:do\s+not|don't|dont|never|no|not|without|avoid|stop|refuse|forbid|forbidden|shouldn't|should\s+not)(?:\s+\w+){0,6}\s*$/.test(before);
+}
+
 function parseBashCommandFromDescription(toolName: string, toolDescription: string): string | null {
   if (toolName !== "Bash") return null;
   const match = toolDescription.match(/\bcommand=("(?:\\.|[^"\\])*")/);
@@ -135,14 +147,13 @@ function shellPrefixUserNamed(command: string, userMessage: string): string | nu
   if (!firstArg.startsWith("-")) return null;
 
   const prefix = `${head} ${firstArg}`;
-  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(`(?:^|[^\\w.-])${escaped}(?=$|[^\\w.-])`, "i");
-  const match = re.exec(cleaned);
-  if (!match) return null;
+  return userNamedLiteral(prefix, cleaned) ? prefix : null;
+}
 
-  const before = cleaned.slice(Math.max(0, match.index - 80), match.index).toLowerCase();
-  const negatedMention = /(?:do\s+not|don't|dont|never|no|not|without|avoid|stop|refuse|forbid|forbidden|shouldn't|should\s+not)(?:\s+\w+){0,6}\s*$/.test(before);
-  return negatedMention ? null : prefix;
+export interface AppealToolIdentity {
+  rawToolName?: string;
+  canonicalToolName?: string;
+  rawToolNameIsAppealAlias?: boolean;
 }
 
 export async function appealHelper(
@@ -154,13 +165,18 @@ export async function appealHelper(
   hookName: string,
   userState: AppealUserState,
   additionalContext?: string,
-  slashCommandContext?: SlashCommandContext
+  slashCommandContext?: SlashCommandContext,
+  toolIdentity?: AppealToolIdentity
 ): Promise<{ overturned: boolean; gateNote?: string }> {
+  const rawToolName = toolIdentity?.rawToolName;
+  const canonicalToolName = toolIdentity?.canonicalToolName ?? toolName;
+  const userMessage = userState.userMessageFull || userState.userMessageSnippet;
+
   const bashCommand = parseBashCommandFromDescription(toolName, toolDescription);
   if (bashCommand) {
     const namedPrefix = shellPrefixUserNamed(
       bashCommand,
-      userState.userMessageFull || userState.userMessageSnippet,
+      userMessage,
     );
     if (namedPrefix) {
       logFastPathApproval(
@@ -179,6 +195,9 @@ export async function appealHelper(
 
   const contextSection = additionalContext
     ? `\n=== CALLER CONTEXT ===\n${additionalContext}\n=== END CONTEXT ===\n`
+    : "";
+  const toolIdentitySection = rawToolName && rawToolName !== canonicalToolName
+    ? `\n=== TOOL IDENTITY ===\nRAW TOOL: ${rawToolName}\nCANONICAL TOOL: ${canonicalToolName}\nNOTE: The raw adapter tool is what the user can see. This raw/canonical pair is ${toolIdentity?.rawToolNameIsAppealAlias === true ? "an adapter-declared alias for the same tool call; judge user approval by applying the normal explicit-authorization rules to either name." : "not an adapter-declared alias; judge the raw/canonical relationship through the normal explicit-authorization rules."}\n=== END TOOL IDENTITY ===\n`
     : "";
 
   let slashCommandSection = "";
@@ -230,7 +249,7 @@ Allowed tools: ${allowedToolsStr}
           prompt: "Review this appeal for a denied tool call.",
           context: `BLOCK REASON: ${originalReason}
 TOOL CALL: ${toolDescription}
-${slashCommandSection}${denialClassSection}${userStateSection}${lastUserMessageSection}${contextSection}
+${toolIdentitySection}${slashCommandSection}${denialClassSection}${userStateSection}${lastUserMessageSection}${contextSection}
 RECENT CONVERSATION:
 ${transcript}`,
         },

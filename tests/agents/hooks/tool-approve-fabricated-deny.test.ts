@@ -4,6 +4,7 @@ import {
   FORBIDDEN_DENY_PATTERNS,
   isFabricatedDenyReason,
 } from "../../../src/utils/fabricated-deny-patterns.js";
+import { codexSpec } from "../../../adapters/codex/index.js";
 
 describe("FORBIDDEN_DENY_PATTERNS shape invariant", () => {
   it("each entry has a non-empty humanReadable AND a valid regex", () => {
@@ -40,6 +41,18 @@ describe("FABRICATED_DENY_FINGERPRINTS", () => {
         expect(isFabricatedDenyReason(reason)).toBe(true);
       });
     }
+
+    it("matches Codex apply_patch canonicalized as Edit when the reason complains about Claude edit fields", () => {
+      expect(codexSpec.isFabricatedDenyReason?.(
+        "The old_string and new_string parameters are non-string values.",
+        {
+          rawToolName: "apply_patch",
+          rawToolInput: "*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** End Patch\n",
+          canonicalToolName: "Edit",
+          canonicalToolInput: { file_path: "src/a.ts", file_paths: ["src/a.ts"] },
+        },
+      )).toBe(true);
+    });
   });
 
   describe("isFabricatedDenyReason negative matches", () => {

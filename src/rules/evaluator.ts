@@ -3,14 +3,17 @@ import { runAgentWithRetryAndTelemetry } from "../utils/agent-runner.js";
 import { RULE_GATE_AGENT } from "../utils/agent-configs.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
 import { extractGateNote } from "../utils/gate-reasoning-cache.js";
-import { isFabricatedDenyReason } from "../utils/fabricated-deny-patterns.js";
 import { buildAppealUserState } from "../agents/hooks/tool-appeal-user-state.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
 import { APPEAL_COUNTS } from "../utils/transcript-presets.js";
 import { logFastPathDeny, logFastPathApproval } from "../utils/logger.js";
 import { EXECUTION_TYPES } from "../types.js";
 import { startsWithAny } from "../utils/retry.js";
-import { summarizeToolInputForLlm } from "../utils/tool-input-summary.js";
+import {
+  appealToolIdentityFromRuleContext,
+  isFabricatedDenyForRuleTool,
+  summarizeRuleToolCall,
+} from "./tool-call-context.js";
 
 export interface EvaluatorResult {
   decision: "allow" | "deny";
@@ -76,6 +79,8 @@ export async function evaluateRules(
   const deferredDenies: { rule: PreToolRule; fastDeny: string }[] = [];
   let gateNote: string | undefined;
 
+  const summarizeCurrentTool = () => summarizeRuleToolCall(ctx);
+
   for (const rule of sorted) {
     const result = await rule.check(ctx);
 
@@ -124,7 +129,7 @@ export async function evaluateRules(
           includeSlashCommandContext: true,
         });
         const transcript = formatTranscriptResult(transcriptResult);
-        const toolDescription = summarizeToolInputForLlm(ctx.toolName, ctx.toolInput);
+        const toolDescription = summarizeCurrentTool();
 
         // ============================================================================
         // DO NOT BYPASS appealHelper. DO NOT add a "nonAppealable" flag on
@@ -143,7 +148,8 @@ export async function evaluateRules(
           hookName,
           buildAppealUserState(ctx.state),
           `${rule.name} blocked: ${result.fastDeny}`,
-          transcriptResult.slashCommandContext
+          transcriptResult.slashCommandContext,
+          appealToolIdentityFromRuleContext(ctx),
         );
 
         if (appeal.overturned) {
@@ -200,7 +206,7 @@ export async function evaluateRules(
     `=== RULE: ${rule.name} ===\n${rule.promptSection}\n\nCONTEXT:\n${llmContext}`
   ).join("\n\n");
 
-  const toolDescription = summarizeToolInputForLlm(ctx.toolName, ctx.toolInput);
+  const toolDescription = summarizeCurrentTool();
 
   let llmOutput = "APPROVE";
   try {
@@ -245,7 +251,7 @@ export async function evaluateRules(
     ? llmOutput.slice(5).trim()
     : llmOutput;
 
-  if (isFabricatedDenyReason(denyReason)) {
+  if (isFabricatedDenyForRuleTool(denyReason, ctx)) {
     console.error(`[rule-gate] Discarded hallucinated deny reason: ${denyReason.slice(0, 200)}`);
     if (deferredDenies.length > 0) return applyDeferredDeny(deferredDenies[0], ctx, hookName, gateNote);
     return null;
@@ -277,7 +283,8 @@ export async function evaluateRules(
       hookName,
       buildAppealUserState(ctx.state),
       `rule-gate blocked: ${denyReason}`,
-      transcriptResult.slashCommandContext
+      transcriptResult.slashCommandContext,
+      appealToolIdentityFromRuleContext(ctx),
     );
 
     if (appeal.overturned) {
@@ -319,7 +326,7 @@ async function applyDeferredDeny(
       includeSlashCommandContext: true,
     });
     const transcript = formatTranscriptResult(transcriptResult);
-    const toolDescription = summarizeToolInputForLlm(ctx.toolName, ctx.toolInput);
+    const toolDescription = summarizeRuleToolCall(ctx);
 
     const appeal = await appealHelper(
       ctx.toolName,
@@ -331,6 +338,7 @@ async function applyDeferredDeny(
       buildAppealUserState(ctx.state),
       `${rule.name} blocked: ${fastDeny}`,
       transcriptResult.slashCommandContext,
+      appealToolIdentityFromRuleContext(ctx),
     );
 
     if (appeal.overturned) {

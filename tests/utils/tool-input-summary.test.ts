@@ -19,14 +19,4 @@ describe("tool input summaries", () => {
     expect(summarizeToolInputForLlm("Edit", { file_path: "a.ts", old_string: "old", new_string: "new" })).toContain("old_string=3 bytes / 1 lines");
   });
 
-  it("summarizes Codex apply_patch canonical edits without fake non-string old/new fields", () => {
-    const summary = summarizeToolInputForLlm("Edit", {
-      file_path: "src/a.ts",
-      file_paths: ["src/a.ts", "src/b.ts"],
-    });
-
-    expect(summary).toBe('ApplyPatch(file_paths=["src/a.ts","src/b.ts"])');
-    expect(summary).not.toContain("old_string=non-string");
-    expect(summary).not.toContain("new_string=non-string");
-  });
 });

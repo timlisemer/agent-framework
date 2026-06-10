@@ -393,6 +393,15 @@ src/foo.ts:1: Type error.
     expect(mocks.runAgent.mock.calls[3][1].context).toContain("=== CODE QUALITY AND PATTERN SPECIALIST AGENT ===");
   });
 
+  it("applies the requested tier to every reviewer and the aggregator", async () => {
+    await runFullConfirmAgent(tempDir, "haiku");
+
+    expect(mocks.runAgent).toHaveBeenCalledTimes(4);
+    for (const call of mocks.runAgent.mock.calls) {
+      expect(call[0].tier).toBe("haiku");
+    }
+  });
+
   it("requires concrete finding and warning contracts in confirm reviewer prompts", () => {
     for (const config of [CONFIRM_AGENT, CONFIRM_SPECIALIST_AGENT, CONFIRM_PATTERN_AGENT]) {
       expect(config.systemPrompt).toContain("## Concrete Findings");

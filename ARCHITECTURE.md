@@ -96,7 +96,7 @@ src/                                # TypeScript source
     lib/                            # Shared harness, classifier, hook-runner
 
   adapter/
-    types.ts                        # AdapterEncoder interface (single source of truth)
+    types.ts                        # AdapterSpec interface (single source of truth)
     runtime.ts                      # Adapter resolution helpers
 
   mcp/
@@ -152,7 +152,9 @@ still share the same runtime timeout enforcement once a tool call reaches
 
 The adapter layer translates between canonical hook handler outputs and the
 stdout/exit-code conventions of a specific AI coding tool. Each adapter
-implements `AdapterEncoder` from `src/adapter/types.ts`.
+implements `AdapterSpec` from `src/adapter/types.ts`, including the encoder,
+tool canonicalization, transcript parsing, workflow recognition, tool-call
+summaries, and adapter-specific false-denial/appeal-alias checks.
 
 Today the Claude Code (`adapters/claude/`) and Codex CLI
 (`adapters/codex/`) adapters exist. Adding support for another tool requires

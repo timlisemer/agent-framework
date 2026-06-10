@@ -48,6 +48,7 @@ import {
 } from "../rules/utils.js";
 import { ALL_RULES, evaluateRules } from "../rules/index.js";
 import type { RuleContext } from "../rules/types.js";
+import { appealToolIdentityFromRuleContext } from "../rules/tool-call-context.js";
 import type { FrameworkPreToolUseHookInput } from "./types.js";
 import { resolveHostContext } from "../utils/host-context.js";
 import { appendCapture } from "../scenario/capture.js";
@@ -384,6 +385,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
     hookEvent: "PreToolUse",
     toolName,
     rawToolName,
+    rawToolInput: input.tool_input,
     toolInput,
     toolUseId: input.tool_use_id,
     projectDir,
@@ -462,7 +464,9 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
             projectDir,
             "PreToolUse",
             buildAppealUserState(state),
-            `claude-md-validate blocked: ${validation.reason}`
+            `claude-md-validate blocked: ${validation.reason}`,
+            undefined,
+            appealToolIdentityFromRuleContext(ctx),
           );
 
           if (!appeal.overturned) {

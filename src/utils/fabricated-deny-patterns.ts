@@ -38,11 +38,6 @@ export const FORBIDDEN_DENY_PATTERNS: { humanReadable: string; regex: RegExp }[]
     regex: /workaround pattern/i,
   },
   {
-    humanReadable:
-      '"old_string/new_string parameters are non-string" for Codex apply_patch',
-    regex: /old_string[^.]*new_string[^.]*non-string/i,
-  },
-  {
     humanReadable: '"prior denials confirm"',
     regex: /prior denials confirm/i,
   },

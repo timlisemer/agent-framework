@@ -6,9 +6,11 @@ etc.).
 
 ## Adapter Contract
 
-Every adapter exports an object that implements `AdapterEncoder` from
-`src/adapter/types.ts`. Handlers receive an encoder instance and call it to
-produce the output; the adapter owns the stdout JSON shape and exit code.
+Every adapter exports an object that implements `AdapterSpec` from
+`src/adapter/types.ts`. The spec includes an `AdapterEncoder` for stdout and
+exit-code shaping, plus adapter-owned tool canonicalization, transcript
+normalization, workflow recognition, tool-call LLM summaries, and
+adapter-specific false-denial/appeal-alias checks.
 
 See [`src/adapter/types.ts`](../src/adapter/types.ts) for the full interface.
 
@@ -29,7 +31,7 @@ all raw transcript shape knowledge inside their adapter parser so
 ## Adding a New Adapter
 
 1. Create `adapters/<name>/` with an `index.ts` that exports an
-   `AdapterEncoder` implementation.
+   `AdapterSpec` implementation.
 2. Add hook entry points under `adapters/<name>/hooks/` that import the
    encoder and pass it to the canonical `mainXxx` handlers from `src/hooks/`.
 3. Register the hook scripts in the tool's configuration file
@@ -39,21 +41,13 @@ all raw transcript shape knowledge inside their adapter parser so
 
 ```typescript
 // adapters/codex/index.ts
-import type { AdapterEncoder } from "../../src/adapter/types.js";
+import type { AdapterSpec } from "../../src/adapter/types.js";
 
-export const codexEncoder: AdapterEncoder = {
+export const codexSpec: AdapterSpec = {
   name: "codex",
-  encodePreToolUseAllow: () => ({ exitCode: 0, stdout: "" }),
-  encodePreToolUseDeny: (reason) => ({
-    exitCode: 0,
-    stdout: JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason: reason,
-      },
-    }),
-  }),
+  encoder: codexEncoder,
+  canonicalizeToolCall,
+  summarizeToolCallForLlm,
   // ...
 };
 ```
@@ -63,8 +57,9 @@ export const codexEncoder: AdapterEncoder = {
 Shared hook logic in `src/` reads a canonical transcript shape. Claude Code
 already writes that shape directly (`message.role/content`, `isMeta`, and
 split assistant messages). Codex rollout JSONL is normalized into the same
-shape at the transcript utility boundary. Adapter encoders still own only host
-stdout/exit-code conventions; policy and workflow authorization stay shared.
+shape at the transcript utility boundary. Adapters own host stdout/exit-code
+conventions and raw host shape translation; policy and workflow authorization
+stay shared.
 
 ## Scenario Format
 

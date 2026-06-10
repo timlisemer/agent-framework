@@ -346,10 +346,12 @@ export async function runAgent(
   let errorCount = 0;
 
   try {
+    const executionConfig: AgentConfig =
+      config.mode === "sdk" ? { ...config, continuable: false } : config;
     result =
-      config.mode === "sdk"
-        ? await runSdkAgent({ ...config, continuable: false }, fullPrompt, options)
-        : await runDirectAgent(config, fullPrompt, options);
+      executionConfig.mode === "sdk"
+        ? await runSdkAgent(executionConfig, fullPrompt, options)
+        : await runDirectAgent(executionConfig, fullPrompt, options);
 
     // Detect error responses
     if (result.text.startsWith("[DIRECT ERROR]") || result.text.startsWith("[SDK ERROR]")) {
@@ -358,7 +360,7 @@ export async function runAgent(
     }
 
     ({ result, success, errorCount } = await applyFormatValidation(
-      config,
+      executionConfig,
       result,
       options,
       success,
@@ -531,6 +533,13 @@ async function applyFormatValidation(
   const { validator, formatReminder, fallbackOutput } = config.formatValidation;
 
   if (!validator.test(result.text)) {
+    if (config.mode === "sdk" && config.continuable !== true) {
+      result.text = fallbackOutput.replace("$RAW", result.text.slice(0, 500));
+      success = false;
+      errorCount++;
+      return { result, success, errorCount };
+    }
+
     // Skip the retry-tier loop when the input is already a sentinel —
     // a cheaper model cannot reformat "no output received" into a verdict.
     const isSentinelError =
@@ -1006,9 +1015,11 @@ export async function runAgentWithRetryAndTelemetry(
  * the LLM path. Returns an empty map when the env var is unset.
  */
 let llmStubsCache: Record<string, string> | null = null;
+let llmStubsCacheRaw: string | undefined;
 function readLlmStubsFromEnv(): Record<string, string> {
-  if (llmStubsCache !== null) return llmStubsCache;
   const raw = process.env.AGENT_FRAMEWORK_LLM_STUBS;
+  if (llmStubsCache !== null && raw === llmStubsCacheRaw) return llmStubsCache;
+  llmStubsCacheRaw = raw;
   if (!raw) {
     llmStubsCache = {};
     return llmStubsCache;

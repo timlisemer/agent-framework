@@ -164,6 +164,52 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
     );
   });
 
+  it("does not direct-retry malformed output from one-shot SDK agents", async () => {
+    setQueryGenerators(
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      async function* (_stderr) {
+        yield {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "malformed output",
+        };
+      },
+    );
+
+    const result = await runAgent(makeConfig(), { prompt: "Evaluate:" });
+
+    expect(result.output).toContain("## Verdict");
+    expect(result.output).toContain("DECLINED: Agent returned malformed output");
+    expect(result.output).toContain("malformed output");
+    expect(result.success).toBe(false);
+    expect(result.errorCount).toBeGreaterThan(0);
+    expect(runAnthropicApiSkinDirectSpy).not.toHaveBeenCalled();
+  });
+
+  it("treats runAgent SDK calls as one-shot even when continuable true is passed", async () => {
+    setQueryGenerators(
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      async function* (_stderr) {
+        yield {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "malformed output",
+        };
+      },
+    );
+
+    const result = await runAgent(makeConfig({ continuable: true }), { prompt: "Evaluate:" });
+
+    expect(result.output).toContain("## Verdict");
+    expect(result.output).toContain("DECLINED: Agent returned malformed output");
+    expect(result.output).toContain("malformed output");
+    expect(result.success).toBe(false);
+    expect(result.errorCount).toBeGreaterThan(0);
+    expect(runAnthropicApiSkinDirectSpy).not.toHaveBeenCalled();
+  });
+
   it("keeps direct provider execution isolated even when user runtime is requested", async () => {
     runAnthropicApiSkinDirectSpy.mockResolvedValueOnce({
       text: "OK",

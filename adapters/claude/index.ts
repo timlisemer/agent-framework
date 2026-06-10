@@ -10,6 +10,7 @@ import * as PS  from "./prompt-strings.js";
 import * as PLS from "./plan-source.js";
 import * as PM  from "./plan-mode.js";
 import type { AdapterSpec } from "../../src/adapter/types.js";
+import { summarizeToolInputForLlm } from "../../src/utils/tool-input-summary.js";
 
 export const claudeSpec: AdapterSpec = {
   name: "claude",
@@ -17,6 +18,10 @@ export const claudeSpec: AdapterSpec = {
   recognizeMcp: MCP.recognizeMcp,
   mcpWireName:  MCP.mcpWireName,
   canonicalizeToolCall: TC.canonicalizeToolCall,
+  summarizeToolCallForLlm: ({ canonicalToolName, canonicalToolInput }) =>
+    summarizeToolInputForLlm(canonicalToolName, canonicalToolInput),
+  isFabricatedDenyReason: () => false,
+  rawToolNameIsAppealAlias: () => false,
   recognizeWorkflowInvocation: WI.recognizeWorkflowInvocation,
   isWorkflowInvocationOnly: WI.isWorkflowInvocationOnly,
   renderWorkflowInvocation:    WI.renderWorkflowInvocation,

@@ -13,6 +13,8 @@ export interface RuleContext {
   toolName: string;
   /** Raw wire tool name as received from the adapter (pre-canonicalization). For telemetry. */
   rawToolName?: string;
+  /** Raw adapter-wire tool input as received before canonicalization. */
+  rawToolInput?: unknown;
   toolInput?: unknown;
   toolUseId?: string;
   // UserPromptSubmit-only

@@ -96,8 +96,9 @@ prediction-block read-only classifier. Deterministic blacklist checks and final
 tool approval still decide whether the specific command is safe and relevant.
 
 `apply_patch` arrives as `tool_name: "apply_patch"` with the patch in
-`tool_input.command`; the shared rules parse patch headers to recover edited
-paths.
+`tool_input.command`. The Codex adapter parses patch headers during
+canonicalization and LLM-facing summarization before shared rule hooks see the
+canonical `Edit` input.
 
 Codex skill invocations such as `$agent-framework-commit` are treated as
 workflow authorization for the restricted agent-framework MCP tools in the
