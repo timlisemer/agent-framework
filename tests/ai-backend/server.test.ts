@@ -15,7 +15,7 @@ function resolvedProviderFor(config: AiSessionConfig) {
   return {
     type: "openrouter",
     mode: "sdk",
-    modelId: "anthropic/claude-opus-4.5",
+    modelId: "google/gemini-3.5-flash",
     sdkRuntime: "codex",
     costTracking: "none",
   };

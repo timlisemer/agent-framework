@@ -19,9 +19,9 @@ export const PROVIDERS = {
     costTracking: "openrouter-generation",
     defaultSdkRuntime: "codex",
     models: {
-      haiku: { id: "x-ai/grok-4.1-fast" },
-      sonnet: { id: "google/gemini-3-flash-preview" },
-      opus: { id: "anthropic/claude-opus-4.5" },
+      haiku: { id: "deepseek/deepseek-v4-flash" },
+      sonnet: { id: "deepseek/deepseek-v4-pro" },
+      opus: { id: "google/gemini-3.5-flash" },
     },
   },
   "claude-subscription": {

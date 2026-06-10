@@ -120,10 +120,15 @@ describe("resolveProvider", () => {
   });
 
   it("returns correct model IDs for openrouter provider", () => {
-    const result = resolveProvider(MODEL_TIERS.HAIKU, "direct");
-    expect(result.type).toBe(PROVIDER_TYPES.OPENROUTER);
-    // OpenRouter model IDs contain a slash (org/model format)
-    expect(result.modelId).toContain("/");
+    const haiku = resolveProvider(MODEL_TIERS.HAIKU, "direct");
+    const sonnet = resolveProvider(MODEL_TIERS.SONNET, "direct");
+    const opus = resolveProvider(MODEL_TIERS.OPUS, "direct");
+    expect(haiku.type).toBe(PROVIDER_TYPES.OPENROUTER);
+    expect(sonnet.type).toBe(PROVIDER_TYPES.OPENROUTER);
+    expect(opus.type).toBe(PROVIDER_TYPES.OPENROUTER);
+    expect(haiku.modelId).toBe("deepseek/deepseek-v4-flash");
+    expect(sonnet.modelId).toBe("deepseek/deepseek-v4-pro");
+    expect(opus.modelId).toBe("google/gemini-3.5-flash");
   });
 
   it("returns correct model IDs for claude-subscription provider", () => {
