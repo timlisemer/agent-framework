@@ -2,6 +2,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import type { EventName } from "../adapter/types.js";
+import { readFileTailBuffer } from "./file-io.js";
 import { sessionInjectionsFile } from "./paths.js";
 
 export type InjectionChannel = "context";
@@ -53,25 +54,9 @@ function parseRecordsFromBuffer(buffer: Buffer): SessionInjectionRecord[] {
   return records;
 }
 
-function readTailBuffer(filePath: string, maxBytes = 64 * 1024): Buffer {
-  const fd = fs.openSync(filePath, "r");
-  try {
-    const stat = fs.fstatSync(fd);
-    const length = Math.min(maxBytes, stat.size);
-    const buffer = Buffer.alloc(length);
-    fs.readSync(fd, buffer, 0, length, stat.size - length);
-    return buffer;
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
 function readRecentRecords(filePath: string): SessionInjectionRecord[] {
-  try {
-    return parseRecordsFromBuffer(readTailBuffer(filePath));
-  } catch {
-    return [];
-  }
+  const buffer = readFileTailBuffer(filePath, 64 * 1024);
+  return buffer ? parseRecordsFromBuffer(buffer) : [];
 }
 
 function readLastSeq(filePath: string): number {

@@ -24,6 +24,7 @@ export interface ToolLogEntry {
   batchPosition?: number;
   batchSize?: number;
   path?: string;
+  paths?: string[];
   cmd?: string;
   status: string;
   gate: string;

@@ -274,13 +274,13 @@ command afterward for task fit and policy violations.
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
 | **Low**        | `LSP`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `ListMcpResources`, `ReadMcpResource`, `TodoWrite`, `TaskOutput`, `AskUserQuestion`, `ExitPlanMode`, `EnterPlanMode`, `Skill` | Read-only or no filesystem impact          |
 | **Low**        | `mcp__*`                                                                                                                                                                      | All MCP tools auto-approved                |
-| **Path-based** | `Read`, `Write`, `Edit`, `NotebookEdit`                                                                                                                                       | Low if inside project or `~/.claude/`, otherwise high |
+| **Path-based** | `Read`, `Write`, `Edit`, `NotebookEdit`                                                                                                                                       | Low if inside project or the active adapter's host config root, otherwise high |
 | **High**       | `Bash`, `Agent`/`Task`, `KillShell`                                                                                                                                           | Execute commands, spawn agents             |
 
 **Path-based classification**: File tools are auto-approved when:
-- File path is inside the project directory (`CLAUDE_PROJECT_DIR` or cwd), OR
-- File path is inside `~/.claude/` (the host agent's own files)
-- AND the path doesn't match sensitive patterns (`.env`, `credentials`, `.ssh`, `.aws`, `secrets`, `.key`, `.pem`, `password`)
+- File path is inside the project directory (`AGENT_FRAMEWORK_PROJECT_DIR`, `CLAUDE_PROJECT_DIR`, or cwd), OR
+- File path is inside the active adapter's host config root (`~/.claude/` for Claude, `~/.codex/` for Codex)
+- AND the path doesn't match sensitive patterns. Real environment files (`.env`, `.env.local`, etc.), credential/secret/password names, `.ssh`, `.aws`, `.gnupg`, `.kube`, SOPS files, age keys, private-key names, and key-store material are blocked. `.env.example` is allowed as a template.
 
 ### Hook Matcher Configuration
 
@@ -310,11 +310,14 @@ Common matcher patterns:
 
 ## Environment Variables
 
+Use the variables below as the copy/paste template for local configuration.
+
 ```bash
 # Required for hooks - avoids expensive filesystem traversal on every hook invocation
 AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
 
-# Optional - set by the host agent automatically
+# Optional - set by the host agent automatically; shared var wins when present
+# AGENT_FRAMEWORK_PROJECT_DIR=/path/to/project
 CLAUDE_PROJECT_DIR=/path/to/project
 
 # Optional - provider configuration (see Provider Configuration section)

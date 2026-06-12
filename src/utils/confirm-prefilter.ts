@@ -10,6 +10,8 @@
  * @module confirm-prefilter
  */
 
+import { isSensitivePath } from "./sensitive-paths.js";
+
 const UNWANTED_PATH_PATTERNS: RegExp[] = [
   /(^|\/)node_modules\//,
   /(^|\/)dist\//,
@@ -18,7 +20,8 @@ const UNWANTED_PATH_PATTERNS: RegExp[] = [
   /(^|\/)target\//,
   /(^|\/)vendor\//,
   /(^|\/)coverage\//,
-  /\.env(\.|$)/,
+  /(^|\/)\.env$/,
+  /(^|\/)\.env\.(?!example$)[^/]+$/,
   /\.log$/,
   /\.tmp$/,
   /\.cache$/,
@@ -91,7 +94,7 @@ export function runConfirmPrefilter(
     // Porcelain status: 2-char status code + space + path. Untracked uses "?? path".
     const path = line.startsWith("??") ? line.slice(3).trim() : line.slice(3).trim();
     if (!path) continue;
-    if (UNWANTED_PATH_PATTERNS.some((re) => re.test(path))) {
+    if (UNWANTED_PATH_PATTERNS.some((re) => re.test(path)) || isSensitivePath(path)) {
       unwantedFiles.push(path);
     }
   }

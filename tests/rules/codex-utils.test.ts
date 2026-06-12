@@ -30,6 +30,11 @@ describe("Codex apply_patch tool normalization", () => {
     expect(extractFilePaths("Edit", editInput)).toEqual(["src/main.ts"]);
   });
 
+  it("extractFilePaths preserves every canonical apply_patch path", () => {
+    const editInput = { file_path: "src/main.ts", file_paths: ["src/main.ts", ".env.local"] };
+    expect(extractFilePaths("Edit", editInput)).toEqual(["src/main.ts", ".env.local"]);
+  });
+
   it("exempts Codex plans and AGENTS.md from edit-intent blocking (codex adapter)", () => {
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
     expect(isEditIntentExemptPath("/home/user/.codex/plans/plan.md")).toBe(true);

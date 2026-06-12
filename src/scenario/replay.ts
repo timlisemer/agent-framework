@@ -39,14 +39,15 @@ import {
   scoreRichExpectation,
 } from "./lib/hook-runner.js";
 import { readToolLogEntries, type ToolLogEntry } from "../utils/session-store.js";
-import type { LabelValue } from "../agents/mcp/scenario-mcp-shared.js";
+import type { LabelValue } from "./labels.js";
 import {
-  runtimeRoot,
+  testRunsRoot,
   transcriptRunDir,
   transcriptCacheDir,
   transcriptReplayPidFile,
 } from "../utils/paths.js";
 import { writeJsonl } from "../utils/file-io.js";
+import { getOptionalArg, getRequiredArg } from "./cli-args.js";
 
 const MIN_PREFIX_LENGTH = 12;
 
@@ -76,31 +77,19 @@ function cacheDir(transcriptPath: string): string {
 function parseArgs(): ReplayArgs {
   const args = process.argv.slice(2);
 
-  function getArg(name: string, required: boolean = false): string | undefined {
-    const idx = args.indexOf(`--${name}`);
-    if (idx === -1 || idx + 1 >= args.length) {
-      if (required) {
-        console.error(`Error: --${name} is required`);
-        process.exit(2);
-      }
-      return undefined;
-    }
-    return args[idx + 1];
-  }
-
   const list = args.includes("--list");
   const scaffold = args.includes("--scaffold");
   const validate = args.includes("--validate");
   const generateLabels = args.includes("--generate-labels");
-  const expand = getArg("expand");
-  const depthRaw = getArg("depth");
+  const expand = getOptionalArg(args, "expand");
+  const depthRaw = getOptionalArg(args, "depth");
   const depth = depthRaw ? parseInt(depthRaw, 10) : 1;
-  const transcript = getArg("transcript", true)!;
-  const timeoutRaw = getArg("timeout");
+  const transcript = getRequiredArg(args, "transcript");
+  const timeoutRaw = getOptionalArg(args, "timeout");
   const timeout = timeoutRaw ? parseInt(timeoutRaw, 10) : 60000;
-  const cwd = getArg("cwd");
-  const filter = getArg("filter");
-  const truncateToLineRaw = getArg("truncate-to-line");
+  const cwd = getOptionalArg(args, "cwd");
+  const filter = getOptionalArg(args, "filter");
+  const truncateToLineRaw = getOptionalArg(args, "truncate-to-line");
   const truncateToLine = truncateToLineRaw
     ? parseInt(truncateToLineRaw, 10)
     : undefined;
@@ -120,7 +109,7 @@ function parseArgs(): ReplayArgs {
   }
 
   let expect: ReplayExpectations | undefined;
-  const expectRaw = getArg("expect");
+  const expectRaw = getOptionalArg(args, "expect");
   if (expectRaw) {
     if (!expectRaw.endsWith(".json")) {
       console.error(
@@ -470,12 +459,12 @@ function getBatchLeaderToolInfo(
 // ─── Stale Sweep ────────────────────────────────────────────────────────────
 
 function sweepStaleCaches(): void {
-  const testRunsRoot = path.join(runtimeRoot(), "test-runs");
+  const runsRoot = testRunsRoot();
   try {
-    const entries = fs.readdirSync(testRunsRoot);
+    const entries = fs.readdirSync(runsRoot);
 
     for (const entry of entries) {
-      const runDir = path.join(testRunsRoot, entry);
+      const runDir = path.join(runsRoot, entry);
       const cachePath = path.join(runDir, "cache");
       try {
         const cacheStat = fs.statSync(cachePath);

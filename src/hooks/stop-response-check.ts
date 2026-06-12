@@ -15,7 +15,7 @@ import type { FrameworkStopHookInput } from "./types.js";
 import { resolveHostContext } from "../utils/host-context.js";
 import { activeSpec } from "../adapter/spec.js";
 import { validatePlanExitPresentation, writeCurrentPlanSidecar } from "../utils/plan-source.js";
-import { appendCapture } from "../scenario/capture.js";
+import { appendCapture, capturePlanModeFromDetection } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
 import { onEpochRotation } from "../scenario/lifecycle.js";
@@ -129,11 +129,7 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
       event: "Stop",
       decision: "block",
       permission_mode: input.permission_mode ?? null,
-      plan_mode: {
-        active: planModeDetection.active,
-        mode: planModeDetection.mode,
-        source: planModeDetection.source,
-      },
+      plan_mode: capturePlanModeFromDetection(planModeDetection),
       injection_seqs: [],
       injection_hashes: [],
       state_snapshot_seq: snapshotSeq,
@@ -163,11 +159,7 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
         event: "Stop",
         decision: "block",
         permission_mode: input.permission_mode ?? null,
-        plan_mode: {
-          active: planModeDetection.active,
-          mode: planModeDetection.mode,
-          source: planModeDetection.source,
-        },
+        plan_mode: capturePlanModeFromDetection(planModeDetection),
         injection_seqs: [],
         injection_hashes: [],
         state_snapshot_seq: snapshotSeq,
@@ -191,11 +183,7 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
       event: "Stop",
       decision: "pass",
       permission_mode: input.permission_mode ?? null,
-      plan_mode: {
-        active: planModeDetection.active,
-        mode: planModeDetection.mode,
-        source: planModeDetection.source,
-      },
+      plan_mode: capturePlanModeFromDetection(planModeDetection),
       injection_seqs: [],
       injection_hashes: [],
       state_snapshot_seq: snapshotSeq,
@@ -242,11 +230,7 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
       event: "Stop",
       decision: "block",
       permission_mode: input.permission_mode ?? null,
-      plan_mode: {
-        active: planModeDetection.active,
-        mode: planModeDetection.mode,
-        source: planModeDetection.source,
-      },
+      plan_mode: capturePlanModeFromDetection(planModeDetection),
       injection_seqs: [],
       injection_hashes: [],
       state_snapshot_seq: snapshotSeq,
@@ -264,11 +248,7 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
     event: "Stop",
     decision: "pass",
     permission_mode: input.permission_mode ?? null,
-    plan_mode: {
-      active: planModeDetection.active,
-      mode: planModeDetection.mode,
-      source: planModeDetection.source,
-    },
+    plan_mode: capturePlanModeFromDetection(planModeDetection),
     injection_seqs: [],
     injection_hashes: [],
     state_snapshot_seq: snapshotSeq,

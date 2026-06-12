@@ -13,7 +13,7 @@ import {
   type PlanModeTransition,
 } from "../utils/plan-mode-entry-state.js";
 import { combineInjectionMessages, type SessionInjectionRecord } from "../utils/session-injections.js";
-import { appendCapture } from "../scenario/capture.js";
+import { appendCapture, capturePlanModeFromTransition } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
 import { onEpochRotation } from "../scenario/lifecycle.js";
@@ -89,16 +89,7 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
       event: "SessionStart",
       decision: "ok",
       permission_mode: input.permission_mode ?? null,
-      plan_mode: {
-        mode: transition.mode,
-        source: transition.detection_source,
-        detection_source: transition.detection_source,
-        previous: transition.previous,
-        current: transition.current,
-        active: transition.active,
-        entered: transition.entered,
-        exited: transition.exited,
-      },
+      plan_mode: capturePlanModeFromTransition(transition),
       injection_seqs: records.map((record) => record.seq),
       injection_hashes: records.map((record) => record.message_hash),
       state_snapshot_seq: snapshotSeq,
@@ -129,16 +120,7 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
       event: "SessionStart",
       decision: "ok",
       permission_mode: input.permission_mode ?? null,
-      plan_mode: {
-        mode: transition.mode,
-        source: transition.detection_source,
-        detection_source: transition.detection_source,
-        previous: transition.previous,
-        current: transition.current,
-        active: transition.active,
-        entered: transition.entered,
-        exited: transition.exited,
-      },
+      plan_mode: capturePlanModeFromTransition(transition),
       injection_seqs: records.map((record) => record.seq),
       injection_hashes: records.map((record) => record.message_hash),
       state_snapshot_seq: snapshotSeq,
@@ -159,16 +141,7 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
     event: "SessionStart",
     decision: "ok",
     permission_mode: input.permission_mode ?? null,
-    plan_mode: {
-      mode: transition.mode,
-      source: transition.detection_source,
-      detection_source: transition.detection_source,
-      previous: transition.previous,
-      current: transition.current,
-      active: transition.active,
-      entered: transition.entered,
-      exited: transition.exited,
-    },
+    plan_mode: capturePlanModeFromTransition(transition),
     injection_seqs: records.map((record) => record.seq),
     injection_hashes: records.map((record) => record.message_hash),
     state_snapshot_seq: snapshotSeq,

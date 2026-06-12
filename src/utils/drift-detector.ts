@@ -20,8 +20,18 @@ const NO_DRIFT: DriftSignal = { detected: false, reason: "" };
 const EDIT_TOOLS = ["Edit", "Write", "NotebookEdit"];
 
 /**
- * Extract the target path/command for drift detection.
+ * Extract target paths/command for drift detection.
  */
+export function extractDriftTargets(toolInput: unknown): string[] {
+  const input = toolInput as Record<string, unknown>;
+  if (Array.isArray(input?.file_paths)) {
+    const paths = input.file_paths.filter((p): p is string => typeof p === "string" && p.length > 0);
+    if (paths.length > 0) return paths;
+  }
+  const single = extractDriftTarget(toolInput);
+  return single ? [single] : [];
+}
+
 export function extractDriftTarget(toolInput: unknown): string {
   const input = toolInput as Record<string, unknown>;
   const filePath = (input?.file_path as string) ?? (input?.path as string) ?? "";
@@ -43,15 +53,18 @@ export function detectDrift(
   recentToolLog: ToolLogEntry[],
   driftState?: Record<string, DriftTargetState>,
 ): DriftSignal {
-  const target = extractDriftTarget(toolInput);
-
-  const state = driftState?.[target] ?? { level: 0, allowedSinceLevelChange: 0 };
-  const repetitionSignal = checkRepetition(toolName, target, recentToolLog, state);
-  if (repetitionSignal.detected) return repetitionSignal;
+  const targets = extractDriftTargets(toolInput);
+  for (const target of targets) {
+    const state = driftState?.[target] ?? { level: 0, allowedSinceLevelChange: 0 };
+    const repetitionSignal = checkRepetition(toolName, target, recentToolLog, state);
+    if (repetitionSignal.detected) return repetitionSignal;
+  }
 
   // Workaround escalation: 2+ recent denials to the same denied Bash pattern.
-  const workaroundSignal = checkWorkaroundEscalation(toolName, target, recentToolLog);
-  if (workaroundSignal.detected) return workaroundSignal;
+  for (const target of targets) {
+    const workaroundSignal = checkWorkaroundEscalation(toolName, target, recentToolLog);
+    if (workaroundSignal.detected) return workaroundSignal;
+  }
 
   return NO_DRIFT;
 }
@@ -83,7 +96,7 @@ function checkRepetition(
 
   const sameTargetAllowedEdits = recentToolLog.filter(
     (e) =>
-      e.path === target &&
+      toolLogEntryTargets(e).includes(target) &&
       EDIT_TOOLS.includes(e.tool) &&
       e.status === "allowed",
   );
@@ -120,6 +133,11 @@ function checkRepetition(
   }
 
   return NO_DRIFT;
+}
+
+function toolLogEntryTargets(entry: ToolLogEntry): string[] {
+  if (entry.paths?.length) return entry.paths;
+  return entry.path ? [entry.path] : [];
 }
 
 /**

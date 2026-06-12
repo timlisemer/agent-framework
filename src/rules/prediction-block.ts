@@ -1,6 +1,7 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
 import { decidePrediction } from "../utils/prediction-types.js";
+import { extractFilePaths } from "./utils.js";
 
 export const predictionBlockRule: PreToolRule = {
   name: "prediction-block",
@@ -17,10 +18,12 @@ export const predictionBlockRule: PreToolRule = {
     const prediction = ctx.state.currentPrediction ?? null;
     if (!prediction) return null;
 
-    const filePath =
-      (ctx.toolInput as { file_path?: string }).file_path ||
-      (ctx.toolInput as { path?: string }).path || "";
-    if (isEditTool(ctx.toolName) && isEditIntentExemptPath(filePath, ctx.sessionDir)) {
+    const filePaths = extractFilePaths(ctx.toolName, ctx.toolInput);
+    if (
+      isEditTool(ctx.toolName) &&
+      filePaths.length > 0 &&
+      filePaths.every((filePath) => isEditIntentExemptPath(filePath, ctx.sessionDir))
+    ) {
       return null;
     }
 

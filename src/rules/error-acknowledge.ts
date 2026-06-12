@@ -3,7 +3,7 @@ import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { readToolLogEntries } from "../utils/session-store.js";
 import { readTranscriptExact } from "../utils/transcript.js";
 import { stringifyToolInput } from "../utils/prediction-types.js";
-import { extractFilePath } from "./utils.js";
+import { extractFilePaths } from "./utils.js";
 import { summarizeRuleToolCall } from "./tool-call-context.js";
 
 const EDIT_CLASS_TOOLS: ReadonlySet<string> = new Set([
@@ -64,13 +64,13 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
     if (
       EDIT_CLASS_TOOLS.has(recentDenial.tool) &&
       EDIT_CLASS_TOOLS.has(ctx.toolName) &&
-      recentDenial.path
+      (recentDenial.paths?.length || recentDenial.path)
     ) {
-      const currentPath = extractFilePath(ctx.toolName, ctx.toolInput);
-      if (
-        currentPath &&
-        path.resolve(currentPath) === path.resolve(recentDenial.path)
-      ) {
+      const deniedPaths = recentDenial.paths?.length ? recentDenial.paths : [recentDenial.path!];
+      const currentPaths = extractFilePaths(ctx.toolName, ctx.toolInput);
+      if (currentPaths.some((currentPath) =>
+        deniedPaths.some((deniedPath) => path.resolve(currentPath) === path.resolve(deniedPath))
+      )) {
         return null;
       }
     }
@@ -78,10 +78,10 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
     // Check if this is a corrected retry (different parameters for same tool)
     if (recentDenial.tool === ctx.toolName) {
       const currentInput = stringifyToolInput(ctx.toolInput);
-      const denialPath = recentDenial.path || "";
+      const denialPaths = recentDenial.paths?.length ? recentDenial.paths : [recentDenial.path || ""];
       const denialCmd = recentDenial.cmd || "";
       // If the tool is the same but input differs, it's likely a corrected retry
-      if (!currentInput.includes(denialPath) && !currentInput.includes(denialCmd)) {
+      if (!denialPaths.some((denialPath) => denialPath && currentInput.includes(denialPath)) && !currentInput.includes(denialCmd)) {
         return null;
       }
     }

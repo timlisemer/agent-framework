@@ -43,7 +43,6 @@ import {
   isPathInDirectory,
   extractPathOrCmd,
   isPlanFile,
-  extractFilePath,
   extractFilePaths,
 } from "../rules/utils.js";
 import { ALL_RULES, evaluateRules } from "../rules/index.js";
@@ -51,7 +50,7 @@ import type { RuleContext } from "../rules/types.js";
 import { appealToolIdentityFromRuleContext } from "../rules/tool-call-context.js";
 import type { FrameworkPreToolUseHookInput } from "./types.js";
 import { resolveHostContext } from "../utils/host-context.js";
-import { appendCapture } from "../scenario/capture.js";
+import { appendCapture, capturePlanModeFromDetection } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, loadCurrentEpoch, rotateEpoch } from "../scenario/epoch.js";
 import { onEpochRotation } from "../scenario/lifecycle.js";
@@ -238,6 +237,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
       batchPosition: batchInfo?.position,
       batchSize: batchInfo?.batchSize,
       path: extractPathOrCmd(toolInput).path,
+      paths: extractFilePaths(toolName, toolInput),
       cmd: extractPathOrCmd(toolInput).cmd,
       status: exit.decision === "allow" ? "allowed" : "denied",
       gate: exit.agent,
@@ -257,11 +257,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
         tool_use_id: input.tool_use_id,
         decision: exit.decision,
         permission_mode: input.permission_mode ?? null,
-        plan_mode: {
-          active: planModeDetection.active,
-          mode: planModeDetection.mode,
-          source: planModeDetection.source,
-        },
+        plan_mode: capturePlanModeFromDetection(planModeDetection),
         injection_seqs: [],
         injection_hashes: [],
         state_snapshot_seq: snapshotSeq,
@@ -426,69 +422,71 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   // sensitive-path-block rule (priority 58) does not apply to plan/CLAUDE.md
   // files so they always reach this point.
   if (FILE_TOOLS.includes(toolName)) {
-      const filePath = extractFilePath(toolName, toolInput);
+    const filePaths = extractFilePaths(toolName, toolInput);
+    const instructionFiles = new Set(host.instructionFiles.map((f) => path.resolve(f)));
+    const instructionPaths = (toolName === "Write" || toolName === "Edit")
+      ? filePaths.filter((filePath) =>
+        instructionFiles.has(path.resolve(projectDir, filePath))
+      )
+      : [];
 
-    if (filePath) {
+    for (const filePath of instructionPaths) {
       // Host instruction-file validate: Write/Edit to any of the active
       // adapter's instruction files (Claude: CLAUDE.md; Codex: AGENTS.md and
       // CLAUDE.md). The validator handles all of them with the same prompt.
-      const instructionBasenames = host.instructionFiles.map((f) => path.basename(f));
-      if (
-        (toolName === "Write" || toolName === "Edit") &&
-        instructionBasenames.some((name) => filePath.endsWith(name))
-      ) {
-        let currentContent: string | null = null;
-        try {
-          currentContent = await fs.promises.readFile(filePath, "utf-8");
-        } catch {
-          // File doesn't exist - that's OK for new files
-        }
+      let currentContent: string | null = null;
+      try {
+        currentContent = await fs.promises.readFile(filePath, "utf-8");
+      } catch {
+        // File doesn't exist - that's OK for new files
+      }
 
-        const validation = await validateClaudeMd(
-          currentContent,
-          toolName as "Write" | "Edit",
-          toolInput as { content?: string; old_string?: string; new_string?: string },
+      const validation = await validateClaudeMd(
+        currentContent,
+        toolName as "Write" | "Edit",
+        toolInput as { content?: string; old_string?: string; new_string?: string },
+        projectDir,
+        "PreToolUse"
+      );
+
+      if (!validation.approved) {
+        const mdTranscriptResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
+        const mdTranscript = formatTranscriptResult(mdTranscriptResult);
+
+        const appeal = await appealHelper(
+          toolName,
+          `${path.basename(filePath)} ${toolName.toLowerCase()} to ${filePath}`,
+          mdTranscript,
+          validation.reason || "CLAUDE.md validation failed",
           projectDir,
-          "PreToolUse"
+          "PreToolUse",
+          buildAppealUserState(state),
+          `claude-md-validate blocked: ${validation.reason}`,
+          undefined,
+          appealToolIdentityFromRuleContext(ctx),
         );
 
-        if (!validation.approved) {
-          const mdTranscriptResult = await readTranscriptExact(input.transcript_path, APPEAL_COUNTS);
-          const mdTranscript = formatTranscriptResult(mdTranscriptResult);
-
-          const appeal = await appealHelper(
-            toolName,
-            `${path.basename(filePath)} ${toolName.toLowerCase()} to ${filePath}`,
-            mdTranscript,
-            validation.reason || "CLAUDE.md validation failed",
-            projectDir,
-            "PreToolUse",
-            buildAppealUserState(state),
-            `claude-md-validate blocked: ${validation.reason}`,
-            undefined,
-            appealToolIdentityFromRuleContext(ctx),
-          );
-
-          if (!appeal.overturned) {
-            await exitPipeline({
-              decision: "deny",
-              agent: "claude-md-validate",
-              reason: `${path.basename(filePath)} validation failed: ${validation.reason}`,
-              usesLlm: true,
-            });
-            return;
-          }
-          currentGateNote = appeal.gateNote;
+        if (!appeal.overturned) {
+          await exitPipeline({
+            decision: "deny",
+            agent: "claude-md-validate",
+            reason: `${path.basename(filePath)} validation failed: ${validation.reason}`,
+            usesLlm: true,
+          });
+          return;
         }
-
-        await exitPipeline({
-          decision: "allow",
-          agent: "claude-md-validate",
-          reason: `${path.basename(filePath)} validation passed`,
-          usesLlm: true,
-        });
-        return;
+        currentGateNote = appeal.gateNote;
       }
+    }
+
+    if (instructionPaths.length > 0 && instructionPaths.length === filePaths.length) {
+      await exitPipeline({
+        decision: "allow",
+        agent: "claude-md-validate",
+        reason: `${instructionPaths.map((p) => path.basename(p)).join(", ")} validation passed`,
+        usesLlm: true,
+      });
+      return;
     }
   }
 

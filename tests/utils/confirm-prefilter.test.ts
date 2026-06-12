@@ -18,6 +18,28 @@ describe("runConfirmPrefilter — unwantedFiles", () => {
     expect(r.unwantedFiles).toContain(".env");
   });
 
+  it("does NOT flag .env.example", () => {
+    const status = "M  .env.example\n";
+    const r = runConfirmPrefilter(status, "");
+    expect(r.unwantedFiles).toEqual([]);
+  });
+
+  it("does NOT flag benign names containing sensitive words", () => {
+    const status = "M  src/secretary.ts\nM  docs/passwordless.md\nM  mycredentials.txt\n";
+    const r = runConfirmPrefilter(status, "");
+    expect(r.unwantedFiles).toEqual([]);
+  });
+
+  it("flags files under sensitive directory names", () => {
+    const status = "M  secrets/config.json\nA  credentials/api.yaml\n?? passwords/token.txt\n";
+    const r = runConfirmPrefilter(status, "");
+    expect(r.unwantedFiles).toEqual([
+      "secrets/config.json",
+      "credentials/api.yaml",
+      "passwords/token.txt",
+    ]);
+  });
+
   it("flags added .pyc and dist/ paths", () => {
     const status = "A  dist/index.js\n?? src/foo/__pycache__/m.pyc\n";
     const r = runConfirmPrefilter(status, "");

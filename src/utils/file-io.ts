@@ -114,6 +114,36 @@ export function readJson<T>(filePath: string): T {
 
 // ─── Text helpers ─────────────────────────────────────────────────────────────
 
+export function readFileTailBuffer(filePath: string, maxBytes: number): Buffer | null {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(filePath, "r");
+    const stat = fs.fstatSync(fd);
+    const length = Math.min(maxBytes, stat.size);
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, stat.size - length);
+    return buffer;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Ignore close errors
+      }
+    }
+  }
+}
+
+export function fileSizeOrZero(filePath: string): number {
+  try {
+    return fs.statSync(filePath).size;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Append a plain text string to a file.
  * Creates parent directories if necessary.

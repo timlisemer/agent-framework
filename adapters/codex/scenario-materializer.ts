@@ -10,21 +10,8 @@
 
 import * as crypto from "crypto";
 import type { ScenarioMaterializeCtx, MaterializedScenarioLine } from "../../src/adapter/types.js";
-
-type ScenarioBlock =
-  | { type: "text"; text: string }
-  | { type: "thinking"; thinking: string }
-  | { type: "tool_use"; id?: string; name: string; input: Record<string, unknown> }
-  | { type: "tool_result"; tool_use_id: string; content: string | unknown[]; is_error?: boolean };
-
-function assignToolUseIds(blocks: ScenarioBlock[], counter: { n: number }): void {
-  for (const b of blocks) {
-    if (b.type === "tool_use" && !b.id) {
-      counter.n += 1;
-      (b as { id: string }).id = `toolu_scenario_${counter.n}`;
-    }
-  }
-}
+import { assignScenarioToolUseIds } from "../../src/scenario/materialize-utils.js";
+import type { ScenarioBlock } from "../../src/scenario/types.js";
 
 /**
  * Materialize a single ScenarioEntry into one or more Codex JSONL lines.
@@ -117,7 +104,7 @@ export function materializeScenarioEntry(
 
   if (e.role === "assistant") {
     const blocks = (e.content ?? []) as ScenarioBlock[];
-    assignToolUseIds(blocks, counter);
+    assignScenarioToolUseIds(blocks, counter);
     return [...prefix, ...emitAssistantBlocks(blocks, entryCtx, entryCtx.baseTs)];
   }
 
@@ -127,7 +114,7 @@ export function materializeScenarioEntry(
     let prevUuid = entryCtx.prevUuid;
     for (let j = 0; j < lines.length; j++) {
       const subBlocks = lines[j].blocks;
-      assignToolUseIds(subBlocks, counter);
+      assignScenarioToolUseIds(subBlocks, counter);
       const subCtx: ScenarioMaterializeCtx = {
         ...entryCtx,
         prevUuid,

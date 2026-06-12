@@ -9,7 +9,12 @@ import * as SM  from "./scenario-materializer.js";
 import * as PS  from "./prompt-strings.js";
 import * as PLS from "./plan-source.js";
 import * as PM  from "./plan-mode.js";
-import type { AdapterSpec, AdapterToolCallContext } from "../../src/adapter/types.js";
+import * as Paths from "./paths.js";
+import type {
+  AdapterSpec,
+  AdapterToolCallContext,
+} from "../../src/adapter/types.js";
+import { extractJsonContextMessage } from "../../src/adapter/context-message.js";
 import { summarizeToolInputForLlm } from "../../src/utils/tool-input-summary.js";
 import { extractApplyPatchPaths } from "./apply-patch-parser.js";
 
@@ -50,17 +55,12 @@ export const codexSpec: AdapterSpec = {
   renderWorkflowInvocation:    WI.renderWorkflowInvocation,
   parseTranscript: PT.parseTranscript,
   isInterruptionMessage: IR.isInterruptionMessage,
-  extractContextMessage: (_event, stdout) => {
-    if (!stdout.trim()) return null;
-    try {
-      const parsed = JSON.parse(stdout) as { systemMessage?: unknown };
-      return typeof parsed.systemMessage === "string" ? parsed.systemMessage : null;
-    } catch {
-      return null;
-    }
-  },
+  extractContextMessage: (_event, stdout) => extractJsonContextMessage(stdout),
   resolveHostContext:     HC.resolveHostContext,
   isEditIntentExemptPath: HC.isEditIntentExemptPath,
+  projectTranscriptsDir:  Paths.projectTranscriptsDir,
+  projectTranscriptFile:  Paths.projectTranscriptFile,
+  listProjectTranscripts: Paths.listProjectTranscripts,
   findNativePlanFile:     PLS.findNativePlanFile,
   isPlanExit:             PLS.isPlanExit,
   extractStopProposedPlan: PLS.extractStopProposedPlan,

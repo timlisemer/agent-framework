@@ -10,21 +10,8 @@
 
 import * as crypto from "crypto";
 import type { ScenarioMaterializeCtx, MaterializedScenarioLine } from "../../src/adapter/types.js";
-
-type ScenarioBlock =
-  | { type: "text"; text: string }
-  | { type: "thinking"; thinking: string }
-  | { type: "tool_use"; id?: string; name: string; input: Record<string, unknown> }
-  | { type: "tool_result"; tool_use_id: string; content: string | unknown[]; is_error?: boolean };
-
-function assignToolUseIds(blocks: ScenarioBlock[], counter: { n: number }): void {
-  for (const b of blocks) {
-    if (b.type === "tool_use" && !b.id) {
-      counter.n += 1;
-      (b as { id: string }).id = `toolu_scenario_${counter.n}`;
-    }
-  }
-}
+import { assignScenarioToolUseIds } from "../../src/scenario/materialize-utils.js";
+import type { ScenarioBlock } from "../../src/scenario/types.js";
 
 function emitAssistantJsonl(
   blocks: ScenarioBlock[],
@@ -33,7 +20,7 @@ function emitAssistantJsonl(
   entryTs: number,
   counter: { n: number },
 ): MaterializedScenarioLine {
-  assignToolUseIds(blocks, counter);
+  assignScenarioToolUseIds(blocks, counter);
   const hasToolUse = blocks.some((b) => b.type === "tool_use");
   const uuid = crypto.randomUUID();
   const message: Record<string, unknown> = {

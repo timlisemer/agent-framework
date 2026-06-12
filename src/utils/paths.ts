@@ -1,8 +1,9 @@
 /**
- * Paths — sole owner of every disk path in the agent-framework.
+ * Paths — shared agent-framework filesystem conventions.
  *
- * No os.homedir() call survives outside this file.
- * All other modules import path helpers from here.
+ * Adapter-neutral runtime, session, scenario, and repository paths live here.
+ * Adapter-specific host roots and transcript layouts live under
+ * adapters/<name>/paths.ts.
  *
  * @module paths
  */
@@ -64,27 +65,6 @@ export function adapterRoot(name: string): string {
 }
 
 /**
- * The dotclaude directory for the Claude adapter.
- */
-export function adapterDotclaudeDir(name: string): string {
-  return path.join(agentFrameworkRoot(), "adapters", name, "dotclaude");
-}
-
-/**
- * ~/.claude directory.
- */
-export function claudeRoot(): string {
-  return path.join(os.homedir(), ".claude");
-}
-
-/**
- * ~/.claude/projects directory.
- */
-export function claudeProjectsRoot(): string {
-  return path.join(os.homedir(), ".claude", "projects");
-}
-
-/**
  * Active host-agent config root (~/.claude or ~/.codex).
  */
 export function hostConfigRoot(): string {
@@ -117,18 +97,6 @@ export function providerConfigPath(): string {
 export function encodeAgentFrameworkProjectDir(absPath?: string): string {
   const projectDir = absPath ?? resolveHostContext().projectDir;
   return projectDir.replace(/\//g, "-").replace(/^-/, "");
-}
-
-/**
- * Encode a project root path into the format Claude Code uses for its
- * ~/.claude/projects/ directory names. Replaces both / and _ with - and
- * KEEPS the leading -.
- *
- * Example: /home/user/my_project -> -home-user-my-project
- */
-export function encodeClaudeProjectDir(absPath?: string): string {
-  const projectDir = absPath ?? (process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
-  return projectDir.replace(/[/_]/g, "-");
 }
 
 // ─── Timestamp ────────────────────────────────────────────────────────────
@@ -334,12 +302,16 @@ export function sessionTranscriptPathSidecar(sessionDirPath: string): string {
 
 // ─── Test-runs paths (flat layout) ────────────────────────────────────────
 
-function testRunsRoot(): string {
+export function testRunsRoot(): string {
   return path.join(runtimeRoot(), "test-runs");
 }
 
 export function transcriptRunDir(name: string): string {
   return path.join(testRunsRoot(), name);
+}
+
+export function testRunFile(name: string, filename: string): string {
+  return path.join(transcriptRunDir(name), filename);
 }
 
 export function transcriptCopyFile(name: string): string {
@@ -376,12 +348,23 @@ export function transcriptReplayPidFile(name: string): string {
 
 // ─── Scenario paths (flat layout) ─────────────────────────────────────────
 
-function scenariosRoot(): string {
+export function scenariosRoot(): string {
   return path.join(testRunsRoot(), "scenarios");
 }
 
 export function scenarioRunDir(name: string): string {
-  return path.join(scenariosRoot(), name);
+  if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+    throw new Error(`invalid scenario name (must match [A-Za-z0-9._-]+): ${name}`);
+  }
+  if (name === "." || name === "..") {
+    throw new Error(`invalid scenario name (must not be "." or ".."): ${name}`);
+  }
+  const root = path.resolve(scenariosRoot());
+  const candidate = path.resolve(root, name);
+  if (candidate !== root && !candidate.startsWith(root + path.sep)) {
+    throw new Error(`invalid scenario name (resolved outside scenarios root): ${name}`);
+  }
+  return candidate;
 }
 
 export function scenarioJsonFile(name: string): string {
@@ -402,22 +385,6 @@ export function scenarioCacheDir(name: string): string {
 
 export function scenarioPlansDir(name: string): string {
   return path.join(scenarioRunDir(name), "plans");
-}
-
-// ─── Real Claude Code paths ────────────────────────────────────────────────
-
-/**
- * The ~/.claude/projects/<encoded>/ directory for a given project path.
- */
-export function projectTranscriptsDir(absPath?: string): string {
-  return path.join(claudeProjectsRoot(), encodeClaudeProjectDir(absPath));
-}
-
-/**
- * Absolute path to a specific Claude Code transcript file.
- */
-export function projectTranscriptFile(name: string, absPath?: string): string {
-  return path.join(projectTranscriptsDir(absPath), `${name}.jsonl`);
 }
 
 // ─── Repo-relative + safety ────────────────────────────────────────────────

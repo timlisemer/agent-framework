@@ -71,6 +71,42 @@ export interface AgentLog {
   provider?: ProviderType;
 }
 
+function agentExecutionLogFields(
+  result: AgentExecutionResult,
+  overrides?: Partial<Pick<AgentLog, "success">>,
+): Pick<
+  AgentLog,
+  | "latencyMs"
+  | "modelTier"
+  | "modelName"
+  | "success"
+  | "errorCount"
+  | "promptTokens"
+  | "completionTokens"
+  | "totalTokens"
+  | "cachedTokens"
+  | "reasoningTokens"
+  | "cost"
+  | "generationId"
+  | "provider"
+> {
+  return {
+    latencyMs: result.latencyMs,
+    modelTier: result.modelTier,
+    modelName: result.modelName,
+    success: overrides?.success ?? result.success,
+    errorCount: result.errorCount,
+    promptTokens: result.promptTokens,
+    completionTokens: result.completionTokens,
+    totalTokens: result.totalTokens,
+    cachedTokens: result.cachedTokens,
+    reasoningTokens: result.reasoningTokens,
+    cost: result.cost,
+    generationId: result.generationId,
+    provider: result.provider,
+  };
+}
+
 /**
  * Log an agent execution to telemetry.
  *
@@ -179,21 +215,9 @@ export function logAgentResult(
     executionType: context.executionType,
     toolName: context.toolName,
     workingDir: context.workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    modelName: result.modelName,
-    success: result.success,
-    errorCount: result.errorCount,
+    ...agentExecutionLogFields(result),
     decisionReason: context.decisionReason ?? result.output.slice(0, 1000),
     extraData: context.extraData,
-    promptTokens: result.promptTokens,
-    completionTokens: result.completionTokens,
-    totalTokens: result.totalTokens,
-    cachedTokens: result.cachedTokens,
-    reasoningTokens: result.reasoningTokens,
-    cost: result.cost,
-    generationId: result.generationId,
-    provider: result.provider,
   });
 }
 
@@ -217,20 +241,8 @@ export function logApprove(
     executionType,
     toolName,
     workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    modelName: result.modelName,
-    success: result.success,
-    errorCount: result.errorCount,
+    ...agentExecutionLogFields(result),
     decisionReason: reason,
-    promptTokens: result.promptTokens,
-    completionTokens: result.completionTokens,
-    totalTokens: result.totalTokens,
-    cachedTokens: result.cachedTokens,
-    reasoningTokens: result.reasoningTokens,
-    cost: result.cost,
-    generationId: result.generationId,
-    provider: result.provider,
   });
 }
 
@@ -254,20 +266,8 @@ export function logDeny(
     executionType,
     toolName,
     workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    modelName: result.modelName,
-    success: result.success,
-    errorCount: result.errorCount,
+    ...agentExecutionLogFields(result),
     decisionReason: reason,
-    promptTokens: result.promptTokens,
-    completionTokens: result.completionTokens,
-    totalTokens: result.totalTokens,
-    cachedTokens: result.cachedTokens,
-    reasoningTokens: result.reasoningTokens,
-    cost: result.cost,
-    generationId: result.generationId,
-    provider: result.provider,
   });
 }
 
@@ -291,20 +291,8 @@ export function logConfirm(
     executionType,
     toolName,
     workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    modelName: result.modelName,
-    success: result.success,
-    errorCount: result.errorCount,
+    ...agentExecutionLogFields(result),
     decisionReason: reason,
-    promptTokens: result.promptTokens,
-    completionTokens: result.completionTokens,
-    totalTokens: result.totalTokens,
-    cachedTokens: result.cachedTokens,
-    reasoningTokens: result.reasoningTokens,
-    cost: result.cost,
-    generationId: result.generationId,
-    provider: result.provider,
   });
 }
 
@@ -328,20 +316,8 @@ export function logError(
     executionType,
     toolName,
     workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    modelName: result.modelName,
-    success: false,
-    errorCount: result.errorCount,
+    ...agentExecutionLogFields(result, { success: false }),
     decisionReason: reason,
-    promptTokens: result.promptTokens,
-    completionTokens: result.completionTokens,
-    totalTokens: result.totalTokens,
-    cachedTokens: result.cachedTokens,
-    reasoningTokens: result.reasoningTokens,
-    cost: result.cost,
-    generationId: result.generationId,
-    provider: result.provider,
   });
 }
 
@@ -365,20 +341,8 @@ export function logContinue(
     executionType,
     toolName,
     workingDir,
-    latencyMs: result.latencyMs,
-    modelTier: result.modelTier,
-    modelName: result.modelName,
-    success: result.success,
-    errorCount: result.errorCount,
+    ...agentExecutionLogFields(result),
     decisionReason: reason,
-    promptTokens: result.promptTokens,
-    completionTokens: result.completionTokens,
-    totalTokens: result.totalTokens,
-    cachedTokens: result.cachedTokens,
-    reasoningTokens: result.reasoningTokens,
-    cost: result.cost,
-    generationId: result.generationId,
-    provider: result.provider,
   });
 }
 

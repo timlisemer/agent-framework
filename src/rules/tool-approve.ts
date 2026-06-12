@@ -26,10 +26,11 @@ export const toolApproveRule: PreToolRule = {
     // it has no concept of the plans-dir exception and would sample
     // "DENY outside project" nondeterministically.
     if (FILE_TOOLS.includes(ctx.toolName)) {
-      for (const fp of extractFilePaths(ctx.toolName, ctx.toolInput)) {
+      const filePaths = extractFilePaths(ctx.toolName, ctx.toolInput);
+      if (filePaths.length > 0 && filePaths.every((fp) => {
         const abs = path.isAbsolute(fp) ? fp : path.resolve(ctx.projectDir, fp);
-        if (isPlanFile(abs, ctx.sessionDir)) return null;
-      }
+        return isPlanFile(abs, ctx.sessionDir);
+      })) return null;
     }
 
     if (activeSpec().isPlanExit({

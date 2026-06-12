@@ -530,7 +530,8 @@ Standard configurations for different use cases:
 | `ANTHROPIC_API_KEY` | Anthropic/OpenRouter direct | Anthropic API key, or explicitly empty for OpenRouter Claude routing |
 | `ANTHROPIC_AUTH_TOKEN` | OpenRouter Claude routing | OpenRouter key used as Anthropic auth token |
 | `ANTHROPIC_BASE_URL` | OpenRouter Claude routing | `https://openrouter.ai/api` |
-| `CLAUDE_PROJECT_DIR` | Auto | Set by the host agent |
+| `AGENT_FRAMEWORK_PROJECT_DIR` | Auto | Shared host project directory; takes precedence over `CLAUDE_PROJECT_DIR` when set |
+| `CLAUDE_PROJECT_DIR` | Auto | Host project directory fallback when `AGENT_FRAMEWORK_PROJECT_DIR` is unset |
 | `AGENT_FRAMEWORK_ROOT` | Yes (hooks) | Path to agent-framework directory |
 | `AGENT_FRAMEWORK_PROVIDER` | No | Global provider (`openrouter`, `claude-subscription`, `openai-subscription`) |
 | `AGENT_FRAMEWORK_DIRECT_PROVIDER` | No | Provider for direct mode agents |

@@ -107,6 +107,23 @@ describe("styleDriftRule — deterministic fastDeny paths", () => {
     const deny = result as { fastDeny: string };
     expect(deny.fastDeny).toContain("quote style");
   });
+
+  it("checks style drift when a later multi-file patch path is eligible", async () => {
+    const trustedPath = path.join(tempDir, "src/foo.ts");
+    const ctx = makeCtx({
+      toolInput: {
+        file_path: "/etc/passwd",
+        file_paths: ["/etc/passwd", trustedPath],
+        old_string: "// a comment - note this",
+        new_string: "// a comment — note this",
+      },
+    });
+    const result = await styleDriftRule.check(ctx);
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty("fastDeny");
+    const deny = result as { fastDeny: string };
+    expect(deny.fastDeny).toContain("emdash detected");
+  });
 });
 
 describe("styleDriftRule — null paths (no action)", () => {

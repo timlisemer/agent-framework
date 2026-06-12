@@ -24,7 +24,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import { validateScenario } from "../../scenario/types.js";
-import { projectTranscriptFile } from "../../utils/paths.js";
 import {
   findTestableTranscripts,
   transcriptRunDir,
@@ -44,7 +43,7 @@ import {
   readScenarioFile,
   listAllScenarios,
   filterScenariosBySource,
-  resolveTranscriptFromSession,
+  resolveScenarioTranscriptPath,
   type ScenarioSource,
   type ScenarioSourceTag,
 } from "./scenario-mcp-shared.js";
@@ -487,35 +486,7 @@ function handleHelp(): string {
 // ─── Transcript Path Resolution ────────────────────────────────────────────
 
 function resolveTranscriptPath(transcriptName: string, override?: string): string {
-  if (override) {
-    if (!fs.existsSync(override)) {
-      throw new Error(`transcript_path override "${override}" does not exist`);
-    }
-    return override;
-  }
-  // Prefer test-runs copy
-  const runPath = path.join(transcriptRunDir(transcriptName), "transcript.jsonl");
-  if (fs.existsSync(runPath)) {
-    return runPath;
-  }
-  // Try sidecar resolution for session-folder names ({ts}_{hash} pattern)
-  if (/^\d{4}-\d{2}-\d{2}-\d{4}_[0-9a-f]+$/.test(transcriptName)) {
-    const sidecarPath = resolveTranscriptFromSession(transcriptName);
-    if (sidecarPath) {
-      return sidecarPath;
-    }
-  }
-  // Fall back to project dir (uses current cwd for encoding)
-  const projectPath = projectTranscriptFile(transcriptName);
-  if (fs.existsSync(projectPath)) {
-    return projectPath;
-  }
-  throw new Error(
-    `Transcript not found for "${transcriptName}". Check the name and try find_work. ` +
-    `If the transcript lives outside the default project transcripts directory, ` +
-    `pass "transcript_path" to point at the file directly, or pass the session ` +
-    `folder name (e.g. "2025-01-15-1430_abc12345") to resolve via the session sidecar.`,
-  );
+  return resolveScenarioTranscriptPath(transcriptName, override, { prefer: "run" });
 }
 
 // ─── Main Handler ──────────────────────────────────────────────────────────
@@ -544,7 +515,8 @@ export interface TesterInput {
   truncate_to_line?: number;
   /**
    * Absolute path to the transcript .jsonl file. Use when the transcript
-   * lives outside the default ~/.claude/projects/<encoded-project>/ directory.
+   * lives outside the active adapter's default transcript storage (for
+   * example ~/.claude/projects/<encoded-project>/ or ~/.codex/sessions/...).
    * You may also pass a session folder name (e.g. "2025-01-15-1430_abc12345")
    * to resolve via the session sidecar. After auto_label/scaffold has copied
    * the transcript into ~/.agent-framework/test-runs/<name>/, the override
@@ -680,10 +652,11 @@ export const TESTER_HELP = `# Test Harness Tester -- Full Workflow Reference
 The tester supports two complementary ways to test hook behavior:
 
 1. TRANSCRIPT REPLAY (run_test / run_single_hook) -- replays a real recorded
-   ~/.claude/projects/*/session.jsonl against the real hook system and
-   scores decisions against labels.json. Use this to verify that a fix
-   works on real historical sessions and to catch regressions on
-   known-good transcripts.
+   transcript from the active adapter's default storage (for example
+   ~/.claude/projects/*/session.jsonl or ~/.codex/sessions/.../*.jsonl)
+   against the real hook system and scores decisions against labels.json.
+   Use this to verify that a fix works on real historical sessions and to
+   catch regressions on known-good transcripts.
 
 2. SCENARIOS (run_scenario) -- hand-author a small synthetic session state
    in a JSON blob, fire exactly one hook against it, and score the result.

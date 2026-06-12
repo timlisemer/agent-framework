@@ -23,7 +23,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { projectTranscriptFile, transcriptCacheDir, transcriptMcpStateFile } from "../../utils/paths.js";
+import { transcriptCacheDir, transcriptMcpStateFile } from "../../utils/paths.js";
 import {
   findUnlabeledTranscripts,
   transcriptRunDir,
@@ -45,7 +45,7 @@ import {
   detectWorkflowState,
   formatStatusFooter,
   appendTestRunFile,
-  resolveTranscriptFromSession,
+  resolveScenarioTranscriptPath,
 } from "./scenario-mcp-shared.js";
 
 /**
@@ -660,59 +660,11 @@ function handleHelp(): string {
 // ─── Transcript Path Resolution ────────────────────────────────────────────
 
 function resolveTranscriptPath(transcriptName: string, override?: string): string {
-  // Explicit override wins (e.g. sessions from a different project dir
-  // that the default resolver doesn't know about, like iocto transcripts).
-  if (override) {
-    if (!fs.existsSync(override)) {
-      throw new Error(`transcript_path override "${override}" does not exist`);
-    }
-    return override;
-  }
-  // Try sidecar resolution for session-folder names ({ts}_{hash} pattern)
-  if (/^\d{4}-\d{2}-\d{2}-\d{4}_[0-9a-f]+$/.test(transcriptName)) {
-    const sidecarPath = resolveTranscriptFromSession(transcriptName);
-    if (sidecarPath) {
-      return sidecarPath;
-    }
-  }
-  // For generate_labels/scaffold, use original transcript from project dir
-  const projectPath = projectTranscriptFile(transcriptName);
-  if (fs.existsSync(projectPath)) {
-    return projectPath;
-  }
-  // Fall back to test-runs copy
-  const runPath = path.join(transcriptRunDir(transcriptName), "transcript.jsonl");
-  if (fs.existsSync(runPath)) {
-    return runPath;
-  }
-  throw new Error(
-    `Transcript not found for "${transcriptName}". Check the name and try find_work. ` +
-    `If the transcript lives outside the default project transcripts directory, ` +
-    `pass "transcript_path" to point at the file directly, or pass the session ` +
-    `folder name (e.g. "2025-01-15-1430_abc12345") to resolve via the session sidecar.`,
-  );
+  return resolveScenarioTranscriptPath(transcriptName, override, { prefer: "project" });
 }
 
 function resolveTranscriptForList(transcriptName: string, override?: string): string {
-  if (override) {
-    if (!fs.existsSync(override)) {
-      throw new Error(`transcript_path override "${override}" does not exist`);
-    }
-    return override;
-  }
-  // Prefer test-runs copy (always there after generate/scaffold)
-  const runPath = path.join(transcriptRunDir(transcriptName), "transcript.jsonl");
-  if (fs.existsSync(runPath)) {
-    return runPath;
-  }
-  // Try sidecar resolution for session-folder names ({ts}_{hash} pattern)
-  if (/^\d{4}-\d{2}-\d{2}-\d{4}_[0-9a-f]+$/.test(transcriptName)) {
-    const sidecarPath = resolveTranscriptFromSession(transcriptName);
-    if (sidecarPath) {
-      return sidecarPath;
-    }
-  }
-  return resolveTranscriptPath(transcriptName);
+  return resolveScenarioTranscriptPath(transcriptName, override, { prefer: "run" });
 }
 
 // ─── Main Handler ──────────────────────────────────────────────────────────

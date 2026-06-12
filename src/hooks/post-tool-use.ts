@@ -3,16 +3,15 @@ import { appendToolLog, getSessionState } from "../utils/session-store.js";
 import { getAgentFrameworkSessionDir } from "../utils/paths.js";
 import { writeUser, writeTool, formatTodoState, extractAskUserAnswer, type TodoItem } from "../utils/synthetic.js";
 import type { AdapterEncoder } from "../adapter/types.js";
-import { appendCapture } from "../scenario/capture.js";
+import { appendCapture, capturePlanModeFromDetection } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { loadCurrentEpoch } from "../scenario/epoch.js";
 import type { FrameworkPostToolUseHookInput } from "./types.js";
-import { extractPathOrCmd } from "../rules/utils.js";
+import { extractFilePaths, extractPathOrCmd, isPlanFile } from "../rules/utils.js";
 import { activeSpec } from "../adapter/spec.js";
 import { detectPlanModeForHook } from "../utils/plan-mode-detector.js";
 import { extractPlanName } from "../utils/planfile.js";
 import { readPlanFileContent, writeCurrentPlanSidecar } from "../utils/plan-source.js";
-import { extractFilePath, isPlanFile } from "../rules/utils.js";
 import * as path from "path";
 
 export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
@@ -26,20 +25,21 @@ export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, enco
     transcriptPath: input.transcript_path,
     sessionDir,
   });
+  const canonical = spec.canonicalizeToolCall(input.tool_name, input.tool_input);
   await appendToolLog(sessionDir, {
     ts: Date.now(),
     tool: input.tool_name,
     path: extractPathOrCmd(input.tool_input).path,
+    paths: extractFilePaths(canonical.toolName, canonical.toolInput),
     cmd: extractPathOrCmd(input.tool_input).cmd,
     status: "allowed",
     gate: "post-tool-use",
     ms: 0,
   });
 
-  const canonical = spec.canonicalizeToolCall(input.tool_name, input.tool_input);
   if (canonical.toolName === "Write" || canonical.toolName === "Edit") {
-    const filePath = extractFilePath(canonical.toolName, canonical.toolInput);
-    if (filePath && isPlanFile(filePath, sessionDir)) {
+    for (const filePath of extractFilePaths(canonical.toolName, canonical.toolInput)) {
+      if (!isPlanFile(filePath, sessionDir)) continue;
       const content = await readPlanFileContent(filePath);
       if (content?.trim()) {
         const planName = extractPlanName(content) ?? path.basename(filePath, ".md");
@@ -64,11 +64,7 @@ export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, enco
       tool_use_id: (input as unknown as Record<string, string>).tool_use_id,
       decision: "ok",
       permission_mode: input.permission_mode ?? null,
-      plan_mode: {
-        active: planModeDetection.active,
-        mode: planModeDetection.mode,
-        source: planModeDetection.source,
-      },
+      plan_mode: capturePlanModeFromDetection(planModeDetection),
       injection_seqs: [],
       injection_hashes: [],
       state_snapshot_seq: snapshotSeq,

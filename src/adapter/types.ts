@@ -134,6 +134,11 @@ export interface HostContext {
   instructionLabel: string;
 }
 
+export interface AdapterTranscriptFile {
+  name: string;
+  path: string;
+}
+
 // ── Transcript shape (canonical, used by parseTranscript) ───────────────────
 
 export interface ContentBlock {
@@ -227,6 +232,15 @@ export interface AdapterSpec {
   /** True if a file path is exempt from edit-intent gating
    *  (plan files, memory files, instruction files for this adapter). */
   isEditIntentExemptPath(filePath: string): boolean;
+
+  /** Default raw transcript directory for a project under this adapter. */
+  projectTranscriptsDir(projectDir?: string): string;
+
+  /** Default raw transcript file for a session name under this adapter. */
+  projectTranscriptFile(name: string, projectDir?: string): string;
+
+  /** Raw transcript candidates for a project under this adapter. */
+  listProjectTranscripts(projectDir?: string): readonly AdapterTranscriptFile[];
 
   // ── Plan source / exit conventions ─────────────────────────────────────
   /** Resolve an adapter-native plan file for a named/current plan, if one exists. */

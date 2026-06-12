@@ -23,6 +23,10 @@ function allowedEdit(pathValue: string = TARGET): ToolLogEntry {
   return { ts: 0, tool: "Edit", path: pathValue, status: "allowed", gate: "edit-intent", ms: 0 };
 }
 
+function allowedMultiEdit(paths: string[]): ToolLogEntry {
+  return { ts: 0, tool: "Edit", path: paths[0], paths, status: "allowed", gate: "edit-intent", ms: 0 };
+}
+
 async function buildCtx(
   sessionDir: string,
   overrides: Partial<SessionState>,
@@ -74,6 +78,26 @@ describe("driftDetectRule.check — end-to-end level behavior", () => {
     const { fastDeny } = result as { fastDeny: string };
     expect(fastDeny.startsWith(`4 edits to "${TARGET}"`)).toBe(true);
     expect(fastDeny).toContain("stop making many small edits");
+  });
+
+  it("fastDenies when the repeated target is not the first file_path", async () => {
+    const first = "/home/tim/project/src/first.ts";
+    writeToolLog(sessionDir, [
+      allowedMultiEdit([`${first}.1`, TARGET]),
+      allowedMultiEdit([`${first}.2`, TARGET]),
+      allowedMultiEdit([`${first}.3`, TARGET]),
+      allowedMultiEdit([`${first}.4`, TARGET]),
+    ]);
+    const ctx = await buildCtx(sessionDir, { driftState: {} }, {
+      file_path: first,
+      file_paths: [first, TARGET],
+      old_string: "foo",
+      new_string: "bar",
+    });
+    const result = await driftDetectRule.check(ctx);
+    expect(result).not.toBeNull();
+    const { fastDeny } = result as { fastDeny: string };
+    expect(fastDeny.startsWith(`4 edits to "${TARGET}"`)).toBe(true);
   });
 
   it("allows at level 0 with only 3 allowed edits", async () => {

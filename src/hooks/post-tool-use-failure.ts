@@ -2,7 +2,7 @@ import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { appendToolLog, getSessionState } from "../utils/session-store.js";
 import { getAgentFrameworkSessionDir } from "../utils/paths.js";
 import type { AdapterEncoder } from "../adapter/types.js";
-import { appendCapture } from "../scenario/capture.js";
+import { appendCapture, capturePlanModeFromDetection } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { loadCurrentEpoch } from "../scenario/epoch.js";
 import { activeSpec } from "../adapter/spec.js";
@@ -60,11 +60,7 @@ export async function mainPostToolUseFailure(input: PostToolUseFailureHookInput,
       event: "PostToolUseFailure",
       decision: "error",
       permission_mode: input.permission_mode ?? null,
-      plan_mode: {
-        active: planModeDetection.active,
-        mode: planModeDetection.mode,
-        source: planModeDetection.source,
-      },
+      plan_mode: capturePlanModeFromDetection(planModeDetection),
       injection_seqs: [],
       injection_hashes: [],
       state_snapshot_seq: snapshotSeq,

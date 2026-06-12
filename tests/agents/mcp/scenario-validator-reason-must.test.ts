@@ -3,43 +3,11 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { validateScenario } from "../../../src/scenario/types.js";
+import { baseValidationScenario } from "../../helpers/scenario-fixtures.js";
 
 function baseScenario(): Record<string, unknown> {
-  return {
-    schema_version: 1,
+  return baseValidationScenario({
     name: "test-reason-must",
-    transcript: [
-      {
-        role: "user",
-        content: "do something",
-      },
-      {
-        role: "assistant",
-        content: [
-          {
-            type: "tool_use",
-            id: "toolu_test_1",
-            name: "Bash",
-            input: { command: "ls" },
-          },
-        ],
-      },
-    ],
-    target: { hook: "PreToolUse", tool_use_ref: "toolu_test_1" },
-    seed_state: {
-      currentPrediction: {
-        mood: "neutral",
-        trust: "normal",
-        intent: "",
-        blockedIntent: "",
-        explicitlyAllowedTools: [],
-        explicitlyBlockedSubstrings: [],
-        userMessageSnippet: "do something",
-      },
-      forceCheckPending: false,
-      frustrationStreak: 0,
-      currentWindowSize: 4,
-    },
     expect: {
       expected: "deny",
       by: "tool-approve",
@@ -48,7 +16,7 @@ function baseScenario(): Record<string, unknown> {
         not_contains: ["good"],
       },
     },
-  };
+  });
 }
 
 describe("validateScenario reason_must", () => {

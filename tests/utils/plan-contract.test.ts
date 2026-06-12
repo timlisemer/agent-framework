@@ -7,34 +7,18 @@ import {
   extractRequiredFinalPlanHeadings,
   validatePlanContract,
 } from "../../src/utils/plan-contract.js";
+import { REQUIRED_FINAL_PLAN_HEADINGS, validPlanFixture } from "../helpers/plan-fixtures.js";
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-
-const required = [
-  "User Goal",
-  "Answered Assumptions",
-  "Goal In My Words",
-  "Approach",
-  "Data Flow",
-  "Files To Create",
-  "Files To Modify",
-  "Implementation Order",
-  "Assistant Verification",
-  "Manual User Verification",
-  "Approaches Decided Against",
-  "Possible Future Followups",
-  "Relevant Files",
-  "Files That Need Changes",
-];
 
 function withProject(fn: (projectDir: string) => void): void {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plan-contract-"));
   try {
     fs.writeFileSync(
       path.join(dir, "PLANS.md"),
-      `# Planning Contract\n\n## Required Final Plan Structure\n\n${required.map((h, i) => `${i + 1}. \`## ${h}\``).join("\n")}\n\n## User Goal\n`,
+      `# Planning Contract\n\n## Required Final Plan Structure\n\n${REQUIRED_FINAL_PLAN_HEADINGS.map((h, i) => `${i + 1}. \`## ${h}\``).join("\n")}\n\n## User Goal\n`,
     );
     fn(dir);
   } finally {
@@ -43,23 +27,16 @@ function withProject(fn: (projectDir: string) => void): void {
 }
 
 function validPlan(planPath = "/tmp/test-plan.md", planName = "test-plan"): string {
-  const body = required.map((heading) => {
-    if (heading === "User Goal") return `## ${heading}\n\n> "Implement the requested hook change."`;
-    if (heading === "Answered Assumptions") {
-      return `## ${heading}\n\n1. The repo path is known. Answer: It is /repo. Source: User text.`;
-    }
-    if (heading === "Data Flow") {
-      return `## ${heading}\n\nInput\n  |\n  v\nDetector\n  |\n  v\nHook output`;
-    }
-    if (heading === "Assistant Verification") {
-      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\` after each larger code change.`;
-    }
-    if (heading === "Manual User Verification") {
-      return `## ${heading}\n\nNo manual user verification is required.`;
-    }
-    return `## ${heading}\n\nThis section contains concrete repository-specific details for ${heading} with \`src/file.ts\` references.`;
-  }).join("\n\n");
-  return `Plan Name: ${planName}\n\n${body}\n\nPlanfile Path: ${planPath}\nPlan Name: ${planName}`;
+  return validPlanFixture({
+    planPath,
+    planName,
+    userGoal: `> "Implement the requested hook change."`,
+    answeredAssumptions: "1. The repo path is known. Answer: It is /repo. Source: User text.",
+    dataFlow: "Input\n  |\n  v\nDetector\n  |\n  v\nHook output",
+    assistantVerification: `Run \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\` after each larger code change.`,
+    sectionBody: (heading) =>
+      `This section contains concrete repository-specific details for ${heading} with \`src/file.ts\` references.`,
+  });
 }
 
 describe("plan contract", () => {

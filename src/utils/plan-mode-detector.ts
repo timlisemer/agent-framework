@@ -1,6 +1,6 @@
-import * as fs from "fs";
-import type { AdapterSpec, PlanModeDetection } from "../adapter/types.js";
+import type { AdapterSpec, PlanModeDetection, PlanModeDetectionInput } from "../adapter/types.js";
 import { READ_ONLY_GIT_COMMANDS_DESCRIPTION } from "./bash-command-policy.js";
+import { readFileTailBuffer } from "./file-io.js";
 import { readPlanModeStoredState } from "./plan-mode-entry-state.js";
 
 export interface PlanModeContext {
@@ -37,6 +37,44 @@ export function getPlanModeContext(active: boolean): PlanModeContext {
 
 export function formatPlanModeContext(active: boolean): string {
   return getPlanModeContext(active).contextString;
+}
+
+function readTranscriptTail(transcriptPath: string): string {
+  return readFileTailBuffer(transcriptPath, 50 * 1024)?.toString("utf-8") ?? "";
+}
+
+function findPermissionMode(content: string): string | null {
+  const pattern = /"permissionMode"\s*:\s*"([^"]+)"/g;
+  let lastValue: string | null = null;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(content)) !== null) {
+    lastValue = match[1];
+  }
+  return lastValue;
+}
+
+export function detectPermissionPlanMode(
+  input: Pick<PlanModeDetectionInput, "permissionMode" | "transcriptPath">,
+): PlanModeDetection | null {
+  if (input.permissionMode !== undefined) {
+    return {
+      active: input.permissionMode === "plan",
+      mode: input.permissionMode,
+      source: "hook-permission-mode",
+    };
+  }
+
+  const content = input.transcriptPath ? readTranscriptTail(input.transcriptPath) : "";
+  const transcriptPermissionMode = content ? findPermissionMode(content) : null;
+  if (transcriptPermissionMode !== null) {
+    return {
+      active: transcriptPermissionMode === "plan",
+      mode: transcriptPermissionMode,
+      source: "transcript-permission-mode",
+    };
+  }
+
+  return null;
 }
 
 export async function detectPlanModeForHook(input: {
@@ -89,38 +127,5 @@ export function isPlanModeFromInput(input: { permission_mode?: string }): boolea
  * We take whichever marker has the most recent position in the tail.
  */
 export function isPlanModeActive(transcriptPath: string): boolean {
-  let fd: number | undefined;
-  try {
-    const stats = fs.statSync(transcriptPath);
-    const readSize = Math.min(stats.size, 50 * 1024);
-
-    fd = fs.openSync(transcriptPath, "r");
-    const buffer = Buffer.alloc(readSize);
-    fs.readSync(fd, buffer, 0, readSize, Math.max(0, stats.size - readSize));
-    fs.closeSync(fd);
-    fd = undefined;
-
-    const content = buffer.toString("utf-8");
-
-    // Find the most recent permissionMode occurrence (from either marker form).
-    // Both forms store the value as `"permissionMode":"<value>"`, so a single
-    // regex with `lastIndexOf` semantics is enough.
-    const pattern = /"permissionMode"\s*:\s*"([^"]+)"/g;
-    let lastValue: string | null = null;
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(content)) !== null) {
-      lastValue = match[1];
-    }
-
-    return lastValue === "plan";
-  } catch {
-    if (fd !== undefined) {
-      try {
-        fs.closeSync(fd);
-      } catch {
-        // Ignore close errors
-      }
-    }
-    return false;
-  }
+  return detectPermissionPlanMode({ transcriptPath })?.active === true;
 }

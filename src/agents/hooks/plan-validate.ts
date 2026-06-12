@@ -42,6 +42,7 @@ import {
 import { validatePlanContract } from "../../utils/plan-contract.js";
 import { activeSpec, mcpWireNameForText } from "../../adapter/spec.js";
 import { appendPlanfileValidationWorkflow } from "../../utils/planfile.js";
+import { formatProposedEdit } from "./edit-validation.js";
 
 /**
  * Categories from `RULE_VIOLATION_PATTERNS` that ALWAYS hard-deny without
@@ -144,11 +145,7 @@ export async function checkPlanIntent(
     return { approved: true };
   }
 
-  // Format proposed edit based on tool type
-  const proposedEdit =
-    toolName === "Write"
-      ? toolInput.content ?? ""
-      : `old_string: ${toolInput.old_string ?? ""}\nnew_string: ${toolInput.new_string ?? ""}`;
+  const proposedEdit = formatProposedEdit(toolName, toolInput);
 
   // Empty proposed edit - allow
   if (!proposedEdit.trim()) {

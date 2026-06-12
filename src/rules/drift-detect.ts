@@ -1,5 +1,5 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { detectDrift, extractDriftTarget } from "../utils/drift-detector.js";
+import { detectDrift, extractDriftTargets } from "../utils/drift-detector.js";
 import { readToolLogEntries } from "../utils/session-store.js";
 
 const EDIT_TOOLS = ["Edit", "Write", "NotebookEdit"];
@@ -31,18 +31,27 @@ export const driftDetectRule: PreToolRule = {
 
     // Allow-path: advance allowedSinceLevelChange for warned/final-warned
     // targets so the "3 free" / "1 free" bypass windows count down.
-    const target = extractDriftTarget(ctx.toolInput);
-    if (target && EDIT_TOOLS.includes(ctx.toolName)) {
-      const state = ctx.state.driftState?.[target];
-      if (state && state.level > 0 && state.level < 3) {
+    const targets = extractDriftTargets(ctx.toolInput);
+    if (targets.length > 0 && EDIT_TOOLS.includes(ctx.toolName)) {
+      const updates = Object.fromEntries(targets.flatMap((target) => {
+        const state = ctx.state.driftState?.[target];
+        if (state && state.level > 0 && state.level < 3) {
+          return [[
+            target,
+            {
+              level: state.level,
+              allowedSinceLevelChange: state.allowedSinceLevelChange + 1,
+            },
+          ]];
+        }
+        return [];
+      }));
+      if (Object.keys(updates).length > 0) {
         await ctx.stateManager.update((s) => ({
           ...s,
           driftState: {
             ...(s.driftState ?? {}),
-            [target]: {
-              level: state.level,
-              allowedSinceLevelChange: state.allowedSinceLevelChange + 1,
-            },
+            ...updates,
           },
         }));
       }
@@ -52,8 +61,8 @@ export const driftDetectRule: PreToolRule = {
   },
 
   async onDenialConfirmed(ctx: RuleContext, reason: string): Promise<void> {
-    const target = extractDriftTarget(ctx.toolInput);
-    if (!target || !EDIT_TOOLS.includes(ctx.toolName)) return;
+    const targets = extractDriftTargets(ctx.toolInput);
+    if (targets.length === 0 || !EDIT_TOOLS.includes(ctx.toolName)) return;
 
     // Only graduate the loop/thrashing branch. All three drift messages share
     // the substring `edits to "` (level 0/1/2/3 emissions in drift-detector.ts).
@@ -61,13 +70,16 @@ export const driftDetectRule: PreToolRule = {
     if (!/edits to "/.test(reason)) return;
 
     await ctx.stateManager.update((s) => {
-      const prior = s.driftState?.[target] ?? { level: 0 as const, allowedSinceLevelChange: 0 };
-      const nextLevel = Math.min(prior.level + 1, 3) as 0 | 1 | 2 | 3;
+      const nextEntries = Object.fromEntries(targets.map((target) => {
+        const prior = s.driftState?.[target] ?? { level: 0 as const, allowedSinceLevelChange: 0 };
+        const nextLevel = Math.min(prior.level + 1, 3) as 0 | 1 | 2 | 3;
+        return [target, { level: nextLevel, allowedSinceLevelChange: 0 }];
+      }));
       return {
         ...s,
         driftState: {
           ...(s.driftState ?? {}),
-          [target]: { level: nextLevel, allowedSinceLevelChange: 0 },
+          ...nextEntries,
         },
       };
     });

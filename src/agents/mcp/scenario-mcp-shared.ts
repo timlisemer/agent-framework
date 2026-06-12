@@ -16,24 +16,42 @@ import { execFileSync, spawn, spawnSync } from "child_process";
 import {
   validateScenario,
   validateReasonMustExpectation,
-  type ReasonMustExpectation,
 } from "../../scenario/types.js";
+import {
+  scenariosDir,
+  type ScenarioRealityValue,
+  type ScenarioSource,
+  type ScenarioSourceTag,
+} from "../../scenario/catalog.js";
+import {
+  validatePredictionAnnotationShape,
+  type LabelValue,
+  type PredictionAnnotation,
+  type RichExpectation,
+} from "../../scenario/labels.js";
+export { scenarioDir, scenariosDir } from "../../scenario/catalog.js";
+export type { ScenarioRealityValue, ScenarioSource, ScenarioSourceTag } from "../../scenario/catalog.js";
+export type { LabelValue, PredictionAnnotation, RichExpectation } from "../../scenario/labels.js";
 import { runCommand } from "../../utils/command.js";
 import {
   runtimeRoot,
-  projectTranscriptsDir,
+  testRunsRoot,
+  testRunFile,
   transcriptRunDir as pathsTranscriptRunDir,
   transcriptLabelFile as pathsTranscriptLabelFile,
   transcriptDraftLabelFile as pathsTranscriptDraftLabelFile,
   transcriptMcpStateFile as pathsTranscriptMcpStateFile,
+  scenarioJsonFile,
   scenarioLastRunFile,
+  scenarioReportFile,
   sessionTranscriptPathSidecar,
 } from "../../utils/paths.js";
+import { activeSpec } from "../../adapter/spec.js";
 
 // ─── Path Resolution ───────────────────────────────────────────────────────
 
 export function testRunsDir(): string {
-  return path.join(runtimeRoot(), "test-runs");
+  return testRunsRoot();
 }
 
 /**
@@ -70,12 +88,63 @@ export function resolveTranscriptFromSession(sessionFolderName: string): string 
   return null;
 }
 
+function hostProjectDir(): string {
+  return activeSpec().resolveHostContext({ cwd: process.cwd() }).projectDir;
+}
+
 export function transcriptProjectDir(): string {
-  return projectTranscriptsDir(process.cwd());
+  return activeSpec().projectTranscriptsDir(hostProjectDir());
 }
 
 export function transcriptRunDir(transcriptName: string): string {
   return pathsTranscriptRunDir(transcriptName);
+}
+
+export function resolveScenarioTranscriptPath(
+  transcriptName: string,
+  override: string | undefined,
+  options: { prefer: "project" | "run" },
+): string {
+  if (override) {
+    if (!fs.existsSync(override)) {
+      throw new Error(`transcript_path override "${override}" does not exist`);
+    }
+    return override;
+  }
+
+  const sessionPath = /^\d{4}-\d{2}-\d{2}-\d{4}_[0-9a-f]+$/.test(transcriptName)
+    ? resolveTranscriptFromSession(transcriptName)
+    : null;
+  const projectPath = (): string =>
+    resolveProjectTranscriptByName(transcriptName) ??
+    activeSpec().projectTranscriptFile(transcriptName, hostProjectDir());
+  const runPath = path.join(transcriptRunDir(transcriptName), "transcript.jsonl");
+
+  const candidates = options.prefer === "project"
+    ? [projectPath, () => sessionPath, () => runPath]
+    : [() => runPath, () => sessionPath, projectPath];
+  for (const getCandidate of candidates) {
+    const candidate = getCandidate();
+    if (candidate && fs.existsSync(candidate)) return candidate;
+  }
+
+  throw new Error(
+    `Transcript not found for "${transcriptName}". Check the name and try find_work. ` +
+    `If the transcript lives outside the default project transcripts directory, ` +
+    `pass "transcript_path" to point at the file directly, or pass the session ` +
+    `folder name (e.g. "2025-01-15-1430_abc12345") to resolve via the session sidecar.`,
+  );
+}
+
+function resolveProjectTranscriptByName(transcriptName: string): string | null {
+  const filename = transcriptName.endsWith(".jsonl") ? transcriptName : `${transcriptName}.jsonl`;
+  const matches = activeSpec().listProjectTranscripts(hostProjectDir()).filter((entry) =>
+    path.basename(entry.path) === filename || entry.name === transcriptName
+  );
+  if (matches.length > 1) {
+    throw new Error(`Multiple transcripts named "${filename}" found for this project`);
+  }
+  return matches[0]?.path ?? null;
 }
 
 // ─── Scoped File I/O ───────────────────────────────────────────────────────
@@ -89,7 +158,7 @@ function assertWithinTestRuns(filePath: string): void {
 }
 
 export function readTestRunFile(transcriptName: string, filename: string): string {
-  const filePath = path.join(testRunsDir(), transcriptName, filename);
+  const filePath = testRunFile(transcriptName, filename);
   assertWithinTestRuns(filePath);
   if (!fs.existsSync(filePath)) {
     throw new Error(`File not found: ${filePath}`);
@@ -98,25 +167,23 @@ export function readTestRunFile(transcriptName: string, filename: string): strin
 }
 
 export function writeTestRunFile(transcriptName: string, filename: string, content: string): string {
-  const dirPath = path.join(testRunsDir(), transcriptName);
-  const filePath = path.join(dirPath, filename);
+  const filePath = testRunFile(transcriptName, filename);
   assertWithinTestRuns(filePath);
-  fs.mkdirSync(dirPath, { recursive: true });
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content);
   return filePath;
 }
 
 export function appendTestRunFile(transcriptName: string, filename: string, content: string): string {
-  const dirPath = path.join(testRunsDir(), transcriptName);
-  const filePath = path.join(dirPath, filename);
+  const filePath = testRunFile(transcriptName, filename);
   assertWithinTestRuns(filePath);
-  fs.mkdirSync(dirPath, { recursive: true });
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.appendFileSync(filePath, content);
   return filePath;
 }
 
 export function testRunFileExists(transcriptName: string, filename: string): boolean {
-  const filePath = path.join(testRunsDir(), transcriptName, filename);
+  const filePath = testRunFile(transcriptName, filename);
   return fs.existsSync(filePath);
 }
 
@@ -347,49 +414,6 @@ export function getVersion(): string {
 
 // ─── Label File Operations ─────────────────────────────────────────────────
 
-/**
- * Hindsight verdict on a prediction that fired and produced a deny.
- * Mirrors test-harness/lib/types.ts:PredictionAnnotation.
- */
-export interface PredictionAnnotation {
-  verdict: "correct" | "too_broad" | "wrong" | "INVESTIGATE";
-  forbidden_blocks?: Array<{ tool?: string; target_pattern?: string }>;
-  intent_must_contain?: string;
-  expected_mood?: "angry" | "frustrated" | "neutral" | "satisfied" | "happy";
-  expected_trust?: "low" | "normal" | "high";
-  notes?: string;
-}
-
-/**
- * A rich expectation entry with optional rule match and truncation target.
- * Mirrors test-harness/lib/types.ts:RichExpectation so shared callers do
- * not need to import from the test-harness package.
- *
- * `prediction` is set ONLY when `expected === "deny"` AND
- * `by ∈ {"prediction-block", "batch-sibling"}`.
- */
-export interface RichExpectation {
-  expected: string;
-  by?: string;
-  at?: number | "full";
-  notes?: string;
-  prediction?: PredictionAnnotation;
-  /**
-   * Optional reason-text assertion clauses. Only valid when
-   * `expected ∈ {deny, block}`. The labeler's `--generate-labels` path does
-   * NOT auto-populate this — it remains hand-authored, since the labeler
-   * can't know which message-text invariants the human cares about.
-   */
-  reason_must?: ReasonMustExpectation;
-}
-
-/**
- * A label value may be a legacy string, a rich object, or an array of
- * rich objects (for scoring the same hook under multiple truncation
- * states). The on-disk labels.json is tolerant of all three forms.
- */
-export type LabelValue = string | RichExpectation | RichExpectation[];
-
 interface LabelFile {
   _meta?: Record<string, unknown>;
   labels: Record<string, LabelValue>;
@@ -532,64 +556,7 @@ export function setRichLabel(
  */
 function validatePredictionAnnotation(key: string, e: RichExpectation): void {
   if (e.prediction === undefined) return;
-  if (e.expected !== "deny") {
-    throw new Error(
-      `prediction annotation on key "${key}" requires expected="deny", got "${e.expected}"`,
-    );
-  }
-  if (e.by !== "prediction-block" && e.by !== "batch-sibling") {
-    throw new Error(
-      `prediction annotation on key "${key}" requires by ∈ {"prediction-block","batch-sibling"}, got ${JSON.stringify(e.by)}`,
-    );
-  }
-  const validVerdicts = ["correct", "too_broad", "wrong", "INVESTIGATE"];
-  if (!validVerdicts.includes(e.prediction.verdict)) {
-    throw new Error(
-      `prediction.verdict on key "${key}" must be one of ${validVerdicts.join(", ")}, got ${JSON.stringify(e.prediction.verdict)}`,
-    );
-  }
-  if (e.prediction.verdict === "too_broad") {
-    if (
-      !Array.isArray(e.prediction.forbidden_blocks) ||
-      e.prediction.forbidden_blocks.length === 0
-    ) {
-      throw new Error(
-        `prediction.forbidden_blocks on key "${key}" must be a non-empty array when verdict="too_broad"`,
-      );
-    }
-  }
-  if (e.prediction.intent_must_contain !== undefined) {
-    if (
-      typeof e.prediction.intent_must_contain !== "string" ||
-      e.prediction.intent_must_contain.length === 0
-    ) {
-      throw new Error(
-        `prediction.intent_must_contain on key "${key}" must be a non-empty string when set`,
-      );
-    }
-  }
-  if (e.prediction.expected_mood !== undefined) {
-    const validMoods = ["angry", "frustrated", "neutral", "satisfied", "happy"];
-    if (
-      typeof e.prediction.expected_mood !== "string" ||
-      !validMoods.includes(e.prediction.expected_mood as string)
-    ) {
-      throw new Error(
-        `prediction.expected_mood on key "${key}" must be one of ${validMoods.join(", ")}, got ${JSON.stringify(e.prediction.expected_mood)}`,
-      );
-    }
-  }
-  if (e.prediction.expected_trust !== undefined) {
-    const validTrusts = ["low", "normal", "high"];
-    if (
-      typeof e.prediction.expected_trust !== "string" ||
-      !validTrusts.includes(e.prediction.expected_trust as string)
-    ) {
-      throw new Error(
-        `prediction.expected_trust on key "${key}" must be one of ${validTrusts.join(", ")}, got ${JSON.stringify(e.prediction.expected_trust)}`,
-      );
-    }
-  }
+  validatePredictionAnnotationShape(`label "${key}"`, e.expected, e.by, e.prediction);
 }
 
 /**
@@ -840,18 +807,7 @@ export function findUnlabeledTranscripts(
   dateTo?: string,
 ): TranscriptInfo[] {
   const results: TranscriptInfo[] = [];
-  const transcriptDir = projectTranscriptsDir(process.cwd());
-
-  if (!fs.existsSync(transcriptDir)) {
-    return results;
-  }
-
-  const entries = fs.readdirSync(transcriptDir);
-  for (const entry of entries) {
-    if (!entry.endsWith(".jsonl")) continue;
-
-    const fullPath = path.join(transcriptDir, entry);
-    const name = entry.replace(".jsonl", "");
+  for (const { name, path: fullPath } of activeSpec().listProjectTranscripts(hostProjectDir())) {
 
     // Skip if already labeled
     if (testRunFileExists(name, "labels.json")) continue;
@@ -901,7 +857,7 @@ export function findTestableTranscripts(): Array<{ name: string; status: "UNTEST
 
   const entries = fs.readdirSync(testRunsDir());
   for (const entry of entries) {
-    const dirPath = path.join(testRunsDir(), entry);
+    const dirPath = pathsTranscriptRunDir(entry);
     try {
       const stat = fs.statSync(dirPath);
       if (!stat.isDirectory()) continue;
@@ -935,11 +891,6 @@ export function findTestableTranscripts(): Array<{ name: string; status: "UNTEST
 
 const FIXTURE_SUBFOLDERS = ["expected-to-pass", "non-deterministic", "expected-to-fail"] as const;
 
-/** Absolute path to the scenarios root under test-runs/. */
-export function scenariosDir(): string {
-  return path.join(testRunsDir(), "scenarios");
-}
-
 /**
  * Absolute path to the repo-tracked fixture scenarios directory:
  *   <root>/scenarios/
@@ -956,29 +907,12 @@ export function fixturesScenariosDir(rootOverride?: string): string {
 }
 
 /**
- * Resolve a scenario's on-disk directory. Validates the slug to keep
- * scenario names from escaping the scenarios root.
- */
-export function scenarioDir(name: string): string {
-  if (!/^[A-Za-z0-9._-]+$/.test(name)) {
-    throw new Error(`invalid scenario name (must match [A-Za-z0-9._-]+): ${name}`);
-  }
-  const scenariosBase = scenariosDir();
-  const resolved = path.join(scenariosBase, name);
-  if (!resolved.startsWith(scenariosBase)) {
-    throw new Error(`scenario name escapes scenarios dir: ${name}`);
-  }
-  return resolved;
-}
-
-/**
  * Write a scenario object to disk at scenarios/<name>/scenario.json.
  * Caller is expected to have validated the object shape first.
  */
 export function writeScenarioFile(name: string, scenario: unknown): string {
-  const dir = scenarioDir(name);
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, "scenario.json");
+  const file = scenarioJsonFile(name);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(scenario, null, 2) + "\n");
   return file;
 }
@@ -992,7 +926,9 @@ export function readScenarioFile(name: string, filename: string): string {
   if (!allowed.includes(filename)) {
     throw new Error(`Cannot read "${filename}". Allowed: ${allowed.join(", ")}`);
   }
-  const file = path.join(scenarioDir(name), filename);
+  const file = filename === "scenario.json"
+    ? scenarioJsonFile(name)
+    : scenarioReportFile(name);
   if (!fs.existsSync(file)) {
     throw new Error(`${filename} not found for scenario "${name}" at ${file}`);
   }
@@ -1013,25 +949,6 @@ export function readScenarioFile(name: string, filename: string): string {
  * must not be executed but are surfaced to the caller so the user sees
  * the broken fixture.
  */
-export type ScenarioSourceTag =
-  | "home"
-  | "expected-to-pass"
-  | "non-deterministic"
-  | "expected-to-fail";
-
-export type ScenarioRealityValue = "expected-to-pass" | "non-deterministic" | "expected-to-fail" | null;
-
-export interface ScenarioSource {
-  name: string;
-  source: ScenarioSourceTag;
-  inputPath: string;
-  outputDir: string;
-  hasReport: boolean;
-  error?: string;
-  /** Most recent run's reality, loaded from last-run.json sidecar if it exists. */
-  lastRun?: { reality: ScenarioRealityValue; at: string };
-}
-
 /**
  * Enumerate every scenario discoverable across four sources: home
  * (~/.agent-framework/test-runs/scenarios/) and the three repo-tracked

@@ -15,7 +15,9 @@ export const trustedPathRule: PreToolRule = {
     const filePaths = extractFilePaths(ctx.toolName, ctx.toolInput);
     for (const filePath of filePaths) {
       if (isSensitivePath(filePath)) {
-        return { fastDeny: `Sensitive path blocked: ${filePath} matches a sensitive-file pattern (.env, credentials, .ssh, .aws, secrets, .key, .pem, password).` };
+        return {
+          fastDeny: `Sensitive path blocked: ${filePath} matches a sensitive-file pattern (real .env files, credentials, .ssh, .aws, .gnupg, .kube, secrets, SOPS/age/key material, private keys, passwords).`,
+        };
       }
     }
     return null;

@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { isTrustedPath, isSensitivePath } from "./utils.js";
+import { extractFilePaths, isTrustedPath, isSensitivePath } from "./utils.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
 import { STYLE_DRIFT_COUNTS } from "../utils/transcript-presets.js";
 import {
@@ -45,11 +45,11 @@ export const styleDriftRule: PreToolRule = {
       return null;
     }
 
-    const filePath =
-      (ctx.toolInput as { file_path?: string }).file_path ||
-      (ctx.toolInput as { path?: string }).path || "";
+    const eligibleFilePaths = extractFilePaths(ctx.toolName, ctx.toolInput).filter((filePath) =>
+      isTrustedPath(filePath, ctx.projectDir) && !isSensitivePath(filePath)
+    );
 
-    if (!filePath || !isTrustedPath(filePath, ctx.projectDir) || isSensitivePath(filePath)) {
+    if (eligibleFilePaths.length === 0) {
       return null;
     }
 
@@ -154,7 +154,7 @@ export const styleDriftRule: PreToolRule = {
       `${hintSection}\n` +
       `STYLE PREFERENCES (from ${host.instructionLabel}):\n${stylePreferences || "Default: double quotes, follow existing file conventions"}\n\n` +
       `RECENT USER MESSAGES:\n${userMessages || "No user messages available"}\n\n` +
-      `EDIT DETAILS:\nFile: ${file_path}\n\n` +
+      `EDIT DETAILS:\nFile: ${eligibleFilePaths.join(", ") || file_path}\n\n` +
       `Old content:\n\`\`\`\n${truncatedOld}\n\`\`\`\n\n` +
       `New content:\n\`\`\`\n${truncatedNew}\n\`\`\``;
 

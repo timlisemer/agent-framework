@@ -7,7 +7,11 @@ import type { RuleContext } from "../rules/types.js";
 import type { AdapterEncoder } from "../adapter/types.js";
 import type { FrameworkUserPromptSubmitHookInput } from "./types.js";
 import { resolveHostContext } from "../utils/host-context.js";
-import { appendCapture } from "../scenario/capture.js";
+import {
+  appendCapture,
+  capturePlanModeFromDetection,
+  capturePlanModeFromTransition,
+} from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
 import { onEpochRotation, onUserPromptTurn } from "../scenario/lifecycle.js";
@@ -98,11 +102,7 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
         event: "UserPromptSubmit",
         decision: "block",
         permission_mode: input.permission_mode ?? null,
-        plan_mode: {
-          active: planModeDetection.active,
-          mode: planModeDetection.mode,
-          source: planModeDetection.source,
-        },
+        plan_mode: capturePlanModeFromDetection(planModeDetection),
         injection_seqs: [],
         injection_hashes: [],
         state_snapshot_seq: snapshotSeq,
@@ -137,11 +137,7 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
       event: "UserPromptSubmit",
       decision: "ok",
       permission_mode: input.permission_mode ?? null,
-      plan_mode: {
-        active: planModeDetection.active,
-        mode: planModeDetection.mode,
-        source: planModeDetection.source,
-      },
+      plan_mode: capturePlanModeFromDetection(planModeDetection),
       injection_seqs: [],
       injection_hashes: [],
       state_snapshot_seq: snapshotSeq,
@@ -210,16 +206,7 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
     event: "UserPromptSubmit",
     decision: "ok",
     permission_mode: input.permission_mode ?? null,
-    plan_mode: {
-      mode: transition.mode,
-      source: transition.detection_source,
-      detection_source: transition.detection_source,
-      previous: transition.previous,
-      current: transition.current,
-      active: transition.active,
-      entered: transition.entered,
-      exited: transition.exited,
-    },
+    plan_mode: capturePlanModeFromTransition(transition),
     injection_seqs: injectionRecords.map((record) => record.seq),
     injection_hashes: injectionRecords.map((record) => record.message_hash),
     state_snapshot_seq: snapshotSeq,

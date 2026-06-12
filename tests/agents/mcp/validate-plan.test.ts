@@ -5,42 +5,19 @@ import * as path from "path";
 import { activeSpec } from "../../../src/adapter/spec.js";
 import { getAgentFrameworkSessionDir, sessionPlanValidationStatusFile } from "../../../src/utils/paths.js";
 import { hashPlanContent, planValidationStatusKey } from "../../../src/utils/plan-validation-status.js";
-
-const required = [
-  "User Goal",
-  "Answered Assumptions",
-  "Goal In My Words",
-  "Approach",
-  "Data Flow",
-  "Files To Create",
-  "Files To Modify",
-  "Implementation Order",
-  "Assistant Verification",
-  "Manual User Verification",
-  "Approaches Decided Against",
-  "Possible Future Followups",
-  "Relevant Files",
-  "Files That Need Changes",
-];
+import { validPlanFixture } from "../../helpers/plan-fixtures.js";
 
 function validPlan(planPath = "/tmp/validate-plan.md", planName = "validate-plan"): string {
-  const body = required.map((heading) => {
-    if (heading === "User Goal") return `## ${heading}\n\n> "Implement validate plan MCP."`;
-    if (heading === "Answered Assumptions") {
-      return `## ${heading}\n\n1. The repo path is known. Answer: It is /repo. Source: User text.`;
-    }
-    if (heading === "Data Flow") {
-      return `## ${heading}\n\nInput\n  |\n  v\nPlan validator\n  |\n  v\nMCP output`;
-    }
-    if (heading === "Assistant Verification") {
-      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\` after each larger code change.`;
-    }
-    if (heading === "Manual User Verification") {
-      return `## ${heading}\n\nNo manual user verification is required.`;
-    }
-    return `## ${heading}\n\nThis section contains concrete repository-specific details for ${heading} with \`src/file.ts\` references.`;
-  }).join("\n\n");
-  return `Plan Name: ${planName}\n\n${body}\n\nPlanfile Path: ${planPath}\nPlan Name: ${planName}`;
+  return validPlanFixture({
+    planPath,
+    planName,
+    userGoal: `> "Implement validate plan MCP."`,
+    answeredAssumptions: "1. The repo path is known. Answer: It is /repo. Source: User text.",
+    dataFlow: "Input\n  |\n  v\nPlan validator\n  |\n  v\nMCP output",
+    assistantVerification: `Run \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\` after each larger code change.`,
+    sectionBody: (heading) =>
+      `This section contains concrete repository-specific details for ${heading} with \`src/file.ts\` references.`,
+  });
 }
 
 async function loadRunValidatePlanAgent(stub?: string) {

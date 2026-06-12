@@ -1,42 +1,16 @@
 import * as path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { activeSpec } from "../../../src/adapter/spec.js";
-
-const required = [
-  "User Goal",
-  "Answered Assumptions",
-  "Goal In My Words",
-  "Approach",
-  "Data Flow",
-  "Files To Create",
-  "Files To Modify",
-  "Implementation Order",
-  "Assistant Verification",
-  "Manual User Verification",
-  "Approaches Decided Against",
-  "Possible Future Followups",
-  "Relevant Files",
-  "Files That Need Changes",
-];
+import { validPlanFixture } from "../../helpers/plan-fixtures.js";
 
 function validPlan(planPath: string): string {
-  const body = required.map((heading) => {
-    if (heading === "User Goal") return `## ${heading}\n\n> "Fix plan validation feedback."`;
-    if (heading === "Answered Assumptions") {
-      return `## ${heading}\n\n- The plan path is known; answer: ${planPath}; source: hook input.`;
-    }
-    if (heading === "Data Flow") {
-      return `## ${heading}\n\nHook failure\n  |\n  v\nPlan validator\n  |\n  v\nPath-specific feedback`;
-    }
-    if (heading === "Assistant Verification") {
-      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\`.`;
-    }
-    if (heading === "Manual User Verification") {
-      return `## ${heading}\n\nNo manual user verification is required.`;
-    }
-    return `## ${heading}\n\nConcrete implementation details for ${heading} in \`src/file.ts\`.`;
-  }).join("\n\n");
-  return `Plan Name: feedback-plan\n\n${body}\n\nPlanfile Path: ${planPath}\nPlan Name: feedback-plan`;
+  return validPlanFixture({
+    planPath,
+    planName: "feedback-plan",
+    userGoal: `> "Fix plan validation feedback."`,
+    answeredAssumptions: `- The plan path is known; answer: ${planPath}; source: hook input.`,
+    dataFlow: "Hook failure\n  |\n  v\nPlan validator\n  |\n  v\nPath-specific feedback",
+    sectionBody: (heading) => `Concrete implementation details for ${heading} in \`src/file.ts\`.`,
+  });
 }
 
 async function loadCheckPlanIntent(stub: string) {

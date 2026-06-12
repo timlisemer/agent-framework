@@ -12,6 +12,10 @@ import type { Mood, ToolPrediction, Trust } from "../utils/prediction-types.js";
 import { registeredAdapterNames } from "../adapter/spec.js";
 import type { PlanModeStoredState } from "../utils/plan-mode-entry-state.js";
 import type { SessionInjectionRecord } from "../utils/session-injections.js";
+import {
+  validatePredictionAnnotationShape,
+  type PredictionAnnotation,
+} from "./labels.js";
 
 /** Which hook a scenario targets. */
 export type HookEventName =
@@ -151,19 +155,6 @@ export interface ScenarioTarget {
    * array form.
    */
   fanout?: boolean;
-}
-
-/**
- * Hindsight verdict on a prediction that fired and produced a deny.
- * Mirrors test-harness/lib/types.ts:PredictionAnnotation.
- */
-export interface PredictionAnnotation {
-  verdict: "correct" | "too_broad" | "wrong" | "INVESTIGATE";
-  forbidden_blocks?: Array<{ tool?: string; target_pattern?: string }>;
-  intent_must_contain?: string;
-  expected_mood?: Mood;
-  expected_trust?: Trust;
-  notes?: string;
 }
 
 /**
@@ -1131,67 +1122,7 @@ function validateInjectionExpectations(ctx: string, raw: Record<string, unknown>
   }
 }
 
-/**
- * Validate a `prediction` annotation on a single-form or fanout-form expect
- * entry. Mirrors the rules in test-harness-shared.ts:validatePredictionAnnotation.
- */
-function validateExpectPredictionAnnotation(
-  ctx: string,
-  expected: string,
-  by: string | undefined,
-  prediction: unknown,
-): void {
-  if (!prediction || typeof prediction !== "object") {
-    throw new Error(`${ctx}.prediction must be an object when set`);
-  }
-  const p = prediction as Record<string, unknown>;
-  if (expected !== "deny") {
-    throw new Error(
-      `${ctx}.prediction requires expected="deny", got ${JSON.stringify(expected)}`,
-    );
-  }
-  if (by !== "prediction-block" && by !== "batch-sibling") {
-    throw new Error(
-      `${ctx}.prediction requires by ∈ {"prediction-block","batch-sibling"}, got ${JSON.stringify(by)}`,
-    );
-  }
-  const validVerdicts = ["correct", "too_broad", "wrong", "INVESTIGATE"];
-  if (typeof p.verdict !== "string" || !validVerdicts.includes(p.verdict)) {
-    throw new Error(
-      `${ctx}.prediction.verdict must be one of ${validVerdicts.join(", ")}, got ${JSON.stringify(p.verdict)}`,
-    );
-  }
-  if (p.verdict === "too_broad") {
-    if (!Array.isArray(p.forbidden_blocks) || p.forbidden_blocks.length === 0) {
-      throw new Error(
-        `${ctx}.prediction.forbidden_blocks must be a non-empty array when verdict="too_broad"`,
-      );
-    }
-  }
-  if (p.intent_must_contain !== undefined) {
-    if (typeof p.intent_must_contain !== "string" || p.intent_must_contain.length === 0) {
-      throw new Error(
-        `${ctx}.prediction.intent_must_contain must be a non-empty string when set`,
-      );
-    }
-  }
-  if (p.expected_mood !== undefined) {
-    const validMoods = ["angry", "frustrated", "neutral", "satisfied", "happy"];
-    if (typeof p.expected_mood !== "string" || !validMoods.includes(p.expected_mood as string)) {
-      throw new Error(
-        `${ctx}.prediction.expected_mood must be one of ${validMoods.join(", ")}, got ${JSON.stringify(p.expected_mood)}`,
-      );
-    }
-  }
-  if (p.expected_trust !== undefined) {
-    const validTrusts = ["low", "normal", "high"];
-    if (typeof p.expected_trust !== "string" || !validTrusts.includes(p.expected_trust as string)) {
-      throw new Error(
-        `${ctx}.prediction.expected_trust must be one of ${validTrusts.join(", ")}, got ${JSON.stringify(p.expected_trust)}`,
-      );
-    }
-  }
-}
+const validateExpectPredictionAnnotation = validatePredictionAnnotationShape;
 
 /**
  * Validate the required `scenario.seed_state` block. Single-hook mode does

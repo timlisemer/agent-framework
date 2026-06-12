@@ -5,8 +5,8 @@
  */
 
 import type { Mood, Trust } from "../../utils/prediction-types.js";
+import type { ExpectationEntry, RichExpectation } from "../labels.js";
 import type {
-  ReasonMustExpectation,
   ReasonMustResult,
 } from "../types.js";
 
@@ -80,68 +80,7 @@ export interface ReplaySummary {
   ms: number;
 }
 
-/**
- * Hindsight verdict on a prediction that fired and produced a deny.
- *
- * Set ONLY when the deny's gate was `prediction-block` (or a batch sibling
- * inheriting from a prediction-block leader). The auto-labeler writes
- * `verdict: "correct"` by default; the reviewer flips to `too_broad` /
- * `wrong` / `INVESTIGATE` per the trust hierarchy in claude/agents/labeler.md.
- */
-export interface PredictionAnnotation {
-  /** Reviewer's hindsight verdict on the prediction that caused this deny. */
-  verdict: "correct" | "too_broad" | "wrong" | "INVESTIGATE";
-  /**
-   * For too_broad verdicts: what the prediction's explicitlyBlockedSubstrings
-   * MUST NOT contain after narrowing. Each entry is a {tool, target_pattern}
-   * filter; live scoring fails if any matches. `tool` is a LITERAL tool name
-   * (no regex metachars).
-   */
-  forbidden_blocks?: Array<{ tool?: string; target_pattern?: string }>;
-  /**
-   * Optional: substring that must appear in the live prediction's `intent`
-   * field. Auto-populated during scaffold with first 60 chars of live intent.
-   * Catches sentiment predictions drifting to a different concept.
-   */
-  intent_must_contain?: string;
-  /** Optional: assert the live prediction's mood field equals this value. */
-  expected_mood?: Mood;
-  /** Optional: assert the live prediction's trust field equals this value. */
-  expected_trust?: Trust;
-  /** Optional reviewer note. */
-  notes?: string;
-}
-
-/**
- * A rich expectation entry with optional rule match and truncation target.
- *
- * - `expected`: the decision the hook must produce ("allow" / "deny" for tool
- *   calls, "pass" / "block" for stops).
- * - `by`: optional rule name to match against tool-log `gate`. When set, the
- *   event only passes if the hook denied AND the denial came from this rule.
- * - `at`: optional truncation target. When set, this expectation is scored
- *   only when `replay.ts` is invoked with the matching `--truncate-to-line`
- *   value (or "full" for the default post-flush state).
- * - `prediction`: optional hindsight annotation on a prediction-block deny.
- *   Set ONLY when `expected === "deny"` AND `by ∈ {"prediction-block",
- *   "batch-sibling"}` (the latter only when the leader's gate was
- *   `prediction-block`). Undefined for any other label.
- */
-export interface RichExpectation {
-  expected: string;
-  by?: string;
-  at?: number | "full";
-  notes?: string;
-  prediction?: PredictionAnnotation;
-  /**
-   * Optional reason-text assertion clauses. Only valid when
-   * `expected ∈ {deny, block}`. See ReasonMustExpectation in
-   * src/agents/mcp/scenario-types.ts.
-   */
-  reason_must?: ReasonMustExpectation;
-}
-
-export type ExpectationEntry = string | RichExpectation | RichExpectation[];
+export type { ExpectationEntry, PredictionAnnotation, RichExpectation } from "../labels.js";
 
 /**
  * Expectations map: tool_use_id (or prefix) -> expected decision,

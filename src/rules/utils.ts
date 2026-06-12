@@ -4,6 +4,7 @@ import { isSessionPlanfilePath } from "../utils/planfile.js";
 import { RESTRICTED_MCPS } from "../utils/slash-commands.js";
 import { activeSpec } from "../adapter/spec.js";
 import type { CanonicalMcp } from "../adapter/types.js";
+export { isSensitivePath } from "../utils/sensitive-paths.js";
 
 // File tools that go through path-based risk classification (trusted/sensitive)
 // and write-specific gates (edit-intent, CLAUDE.md validation, plan-file validation,
@@ -11,18 +12,6 @@ import type { CanonicalMcp } from "../adapter/types.js";
 // belongs in LOW_RISK_TOOLS for immediate auto-approval.
 // apply_patch is excluded: Codex canonicalizes it to Edit before rules run.
 export const FILE_TOOLS = ["Write", "Edit", "NotebookEdit"];
-
-// Sensitive file patterns - always require LLM approval
-export const SENSITIVE_PATTERNS = [
-  ".env",
-  "credentials",
-  ".ssh",
-  ".aws",
-  "secrets",
-  ".key",
-  ".pem",
-  "password",
-];
 
 // Low-risk tools get immediate auto-approval with no further checks.
 // These are all read-only or side-effect-free -- they can't modify files,
@@ -115,11 +104,6 @@ export function isTrustedPath(filePath: string, projectDir: string): boolean {
   );
 }
 
-export function isSensitivePath(filePath: string): boolean {
-  const lower = filePath.toLowerCase();
-  return SENSITIVE_PATTERNS.some((p) => lower.includes(p));
-}
-
 /**
  * Extract path or command from tool input for logging.
  */
@@ -172,6 +156,10 @@ export function extractFilePaths(
   toolName: string,
   toolInput: unknown,
 ): string[] {
+  const input = toolInput as { file_paths?: unknown } | undefined;
+  if (Array.isArray(input?.file_paths)) {
+    return input.file_paths.filter((p): p is string => typeof p === "string" && p.length > 0);
+  }
   const single = extractFilePath(toolName, toolInput);
   return single ? [single] : [];
 }

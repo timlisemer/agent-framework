@@ -48,21 +48,17 @@ export const SLASH_COMMAND_WORKFLOW_TOOLS: Record<string, readonly string[]> = {
  */
 export type SlashCommandWorkflow = CanonicalWorkflow;
 
+const WRITE_REPAIR_TOOLS = ["Edit", "MultiEdit", "Write"] as const;
+
 export const SLASH_COMMAND_ALLOWED_TOOLS: Record<string, readonly string[]> = {
-  commit:    ["mcp-commit"],
-  push:      ["mcp-push", "mcp-commit"],
+  ...SLASH_COMMAND_WORKFLOW_TOOLS,
+  commit: ["mcp-commit"],
+  push: ["mcp-push", "mcp-commit"],
   quickpush: ["mcp-push", "mcp-commit"],
-  confirm:   ["mcp-confirm"],
-  quickconfirm: ["mcp-confirm", "Edit", "MultiEdit", "Write"],
+  confirm: ["mcp-confirm"],
+  quickconfirm: ["mcp-confirm", ...WRITE_REPAIR_TOOLS],
   fullconfirm: ["mcp-fullconfirm"],
-  fullquickconfirm: ["mcp-fullconfirm", "Edit", "MultiEdit", "Write"],
-  check:     ["mcp-check"],
-  transcript: ["mcp-transcript"],
-  "locate-scenario": ["mcp-locate_scenario"],
-  plan1:     ["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
-  plan3:     ["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
-  plan5:     ["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
-  implement: ["Agent"],
+  fullquickconfirm: ["mcp-fullconfirm", ...WRITE_REPAIR_TOOLS],
 };
 
 /**

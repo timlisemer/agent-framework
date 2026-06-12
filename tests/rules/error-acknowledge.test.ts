@@ -22,10 +22,13 @@ describe("errorAcknowledgeRule", () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
-  function makeCtx(toolName = activeSpec().mcpWireName("commit")): RuleContext {
+  function makeCtx(
+    toolName = activeSpec().mcpWireName("commit"),
+    toolInput: unknown = {},
+  ): RuleContext {
     return {
       toolName,
-      toolInput: {},
+      toolInput,
       toolUseId: "toolu_error_ack",
       projectDir: tempDir,
       transcriptPath,
@@ -42,6 +45,8 @@ describe("errorAcknowledgeRule", () => {
     tool: string;
     status: "allowed" | "denied";
     reason?: string;
+    path?: string;
+    paths?: string[];
   }): void {
     appendJsonlEntrySync(path.join(tempDir, "tool-log.jsonl"), {
       ts: Date.now(),
@@ -50,6 +55,8 @@ describe("errorAcknowledgeRule", () => {
       status: entry.status,
       gate: "test",
       reason: entry.reason,
+      path: entry.path,
+      paths: entry.paths,
       ms: 1,
     });
   }
@@ -97,5 +104,20 @@ describe("errorAcknowledgeRule", () => {
     expect(result).toEqual({
       fastDeny: 'Previous tool "Bash" was denied: test command is covered by the agent-framework check MCP (matched check target entry: vitest). You must run mcp__agent-framework__check. You must acknowledge the error before proceeding with a different tool.',
     });
+  });
+
+  it("treats retries that include a previously denied path in any position as same-target corrections", async () => {
+    const deniedPath = path.join(tempDir, "src", "denied.ts");
+    appendToolLog({
+      tool: "Edit",
+      status: "denied",
+      reason: "edit failed",
+      paths: [path.join(tempDir, "src", "other.ts"), deniedPath],
+    });
+
+    await expect(errorAcknowledgeRule.check(makeCtx("Edit", {
+      file_path: path.join(tempDir, "src", "first.ts"),
+      file_paths: [path.join(tempDir, "src", "first.ts"), deniedPath],
+    }))).resolves.toBeNull();
   });
 });

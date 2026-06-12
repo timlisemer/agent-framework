@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { activeSpec } from "../../../src/adapter/spec.js";
+import { validPlanFixture } from "../../helpers/plan-fixtures.js";
 import {
   getAgentFrameworkSessionDir,
   sessionCurrentPlanFile,
@@ -11,40 +12,19 @@ import {
   sessionPlanValidationStatusFile,
 } from "../../../src/utils/paths.js";
 
-const required = [
-  "User Goal",
-  "Answered Assumptions",
-  "Goal In My Words",
-  "Approach",
-  "Data Flow",
-  "Files To Create",
-  "Files To Modify",
-  "Implementation Order",
-  "Assistant Verification",
-  "Manual User Verification",
-  "Approaches Decided Against",
-  "Possible Future Followups",
-  "Relevant Files",
-  "Files That Need Changes",
-];
-
 function planBody(): string {
-  return required.map((heading) => {
-    if (heading === "User Goal") return `## ${heading}\n\n> "Create a planfile."`;
-    if (heading === "Answered Assumptions") {
-      return `## ${heading}\n\n1. The repo path is known. Answer: It is /repo. Source: User text.`;
-    }
-    if (heading === "Data Flow") {
-      return `## ${heading}\n\nInput\n  |\n  v\nPlanfile creator\n  |\n  v\nValidated planfile`;
-    }
-    if (heading === "Assistant Verification") {
-      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\` after each larger code change.`;
-    }
-    if (heading === "Manual User Verification") {
-      return `## ${heading}\n\nNo manual user verification is required.`;
-    }
-    return `## ${heading}\n\nConcrete details for ${heading} with \`src/file.ts\` references.`;
-  }).join("\n\n");
+  return validPlanFixture({
+    planName: "body-only-plan",
+    planPath: "/tmp/body-only-plan.md",
+    userGoal: `> "Create a planfile."`,
+    answeredAssumptions: "1. The repo path is known. Answer: It is /repo. Source: User text.",
+    dataFlow: "Input\n  |\n  v\nPlanfile creator\n  |\n  v\nValidated planfile",
+    assistantVerification:
+      `Run \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\` after each larger code change.`,
+    sectionBody: (heading) => `Concrete details for ${heading} with \`src/file.ts\` references.`,
+  })
+    .replace(/^Plan Name: body-only-plan\n\n/, "")
+    .replace(/\n\nPlanfile Path: \/tmp\/body-only-plan\.md\nPlan Name: body-only-plan$/, "");
 }
 
 async function loadRunCreatePlanfileAgent(stub = "VALID") {

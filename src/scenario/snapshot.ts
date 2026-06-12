@@ -14,6 +14,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { fileSizeOrZero, readFileTailBuffer } from "../utils/file-io.js";
 import { sessionStateSnapshotsFile, sessionToolLogFile, sessionGateReasoningFile, sessionDenialCacheFile, sessionPlanModeStateFile, sessionInjectionsFile } from "../utils/paths.js";
 import type { SessionState } from "../utils/session-store.js";
 import type { PlanModeStoredState } from "../utils/plan-mode-entry-state.js";
@@ -110,32 +111,13 @@ function readPlanModeState(filePath: string): PlanModeStoredState | null {
   }
 }
 
-function fileSize(filePath: string): number {
-  try {
-    return fs.statSync(filePath).size;
-  } catch {
-    return 0;
-  }
-}
-
 const TRANSCRIPT_UUID_TAIL_COUNT = 20;
 
-function readTailBuffer(filePath: string, maxBytes = 256 * 1024): Buffer {
-  const fd = fs.openSync(filePath, "r");
-  try {
-    const stat = fs.fstatSync(fd);
-    const length = Math.min(maxBytes, stat.size);
-    const buffer = Buffer.alloc(length);
-    fs.readSync(fd, buffer, 0, length, stat.size - length);
-    return buffer;
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
 function readTranscriptUuidsTail(transcriptPath: string): string[] {
+  const buffer = readFileTailBuffer(transcriptPath, 256 * 1024);
+  if (!buffer) return [];
   try {
-    const raw = readTailBuffer(transcriptPath).toString("utf-8");
+    const raw = buffer.toString("utf-8");
     const lines = raw.split("\n").filter((l) => l.trim().length > 0);
     const uuids: string[] = [];
     for (const line of lines) {
@@ -154,12 +136,9 @@ function readTranscriptUuidsTail(transcriptPath: string): string[] {
 }
 
 function loadLastSnapshot(filePath: string): StateSnapshot | null {
-  let raw: string;
-  try {
-    raw = readTailBuffer(filePath).toString("utf-8");
-  } catch {
-    return null;
-  }
+  const buffer = readFileTailBuffer(filePath, 256 * 1024);
+  if (!buffer) return null;
+  const raw = buffer.toString("utf-8");
   const lines = raw.split("\n").filter((l) => l.trim().length > 0);
   if (lines.length === 0) return null;
   try {
@@ -197,12 +176,12 @@ export function appendStateSnapshot(
   const injectionsPath = sessionInjectionsFile(sessionDir);
 
   const stateHash = shortHash(JSON.stringify(state));
-  const toolLogOffset = fileSize(toolLogPath);
+  const toolLogOffset = fileSizeOrZero(toolLogPath);
   const gateReasoningHash = fileHash(gateReasoningPath);
   const denialsHash = fileHash(denialsPath);
   const planModeState = readPlanModeState(planModePath);
   const planModeStateHash = shortHash(JSON.stringify(planModeState));
-  const injectionLogOffset = fileSize(injectionsPath);
+  const injectionLogOffset = fileSizeOrZero(injectionsPath);
   const injectionLogHash = fileHash(injectionsPath);
   const transcriptUuidsTail = readTranscriptUuidsTail(transcriptPath);
   const uuidsTailHash = shortHash(JSON.stringify(transcriptUuidsTail));

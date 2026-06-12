@@ -1,5 +1,6 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
+import { extractFilePaths } from "./utils.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
 import { buildAppealUserState } from "../agents/hooks/tool-appeal-user-state.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
@@ -15,15 +16,15 @@ export const editIntentRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    const filePath =
-      (ctx.toolInput as { file_path?: string }).file_path ||
-      (ctx.toolInput as { path?: string }).path || "";
-
-    if (!filePath || isEditIntentExemptPath(filePath, ctx.sessionDir)) {
+    if (!isEditTool(ctx.toolName)) {
       return null;
     }
 
-    if (!isEditTool(ctx.toolName)) {
+    const filePaths = extractFilePaths(ctx.toolName, ctx.toolInput);
+    const blockedPaths = filePaths.filter((filePath) =>
+      !isEditIntentExemptPath(filePath, ctx.sessionDir)
+    );
+    if (blockedPaths.length === 0) {
       return null;
     }
 
@@ -31,7 +32,8 @@ export const editIntentRule: PreToolRule = {
       return null;
     }
 
-    const editIntentReason = `Edit intent is false - user has not requested file modifications. Target: ${filePath}`;
+    const target = blockedPaths.join(", ");
+    const editIntentReason = `Edit intent is false - user has not requested file modifications. Target: ${target}`;
 
     // Appeal with MAJOR HINT (strong signal to uphold)
     const eiTranscript = formatTranscriptResult(
@@ -40,7 +42,7 @@ export const editIntentRule: PreToolRule = {
 
     const appeal = await appealHelper(
       ctx.toolName,
-      `${ctx.toolName} to ${filePath}`,
+      `${ctx.toolName} to ${target}`,
       eiTranscript,
       editIntentReason,
       ctx.projectDir,

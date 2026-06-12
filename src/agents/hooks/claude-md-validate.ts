@@ -21,6 +21,7 @@ import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
 import { getContentBlacklistHighlights } from "../../utils/command-patterns.js";
 import { getRuleViolationHighlights } from "../../utils/content-patterns.js";
+import { formatProposedEdit } from "./edit-validation.js";
 
 /**
  * Validate CLAUDE.md content against agent-framework rules.
@@ -47,11 +48,7 @@ export async function validateClaudeMd(
   workingDir: string,
   hookName: string
 ): Promise<{ approved: boolean; reason?: string }> {
-  // Format proposed edit based on tool type
-  const proposedEdit =
-    toolName === "Write"
-      ? toolInput.content ?? ""
-      : `old_string: ${toolInput.old_string ?? ""}\nnew_string: ${toolInput.new_string ?? ""}`;
+  const proposedEdit = formatProposedEdit(toolName, toolInput);
 
   // Empty proposed edit - allow
   if (!proposedEdit.trim()) {

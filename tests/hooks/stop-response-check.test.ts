@@ -3,7 +3,6 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
-import { activeSpec } from "../../src/adapter/spec.js";
 import {
   getAgentFrameworkSessionDir,
   sessionCurrentPlanFile,
@@ -34,45 +33,21 @@ import { exitAfterFlush } from "../../src/utils/hook-bootstrap.js";
 import { validatePlanFileWithContract } from "../../src/agents/mcp/validate-plan.js";
 import { readTranscriptExact } from "../../src/utils/transcript.js";
 import { FIRST_RESPONSE_STOP_COUNTS } from "../../src/utils/transcript-presets.js";
+import { validPlanFixture } from "../helpers/plan-fixtures.js";
 
 const mockExitAfterFlush = vi.mocked(exitAfterFlush);
 const mockValidatePlanFileWithContract = vi.mocked(validatePlanFileWithContract);
 
-const requiredHeadings = [
-  "User Goal",
-  "Answered Assumptions",
-  "Goal In My Words",
-  "Approach",
-  "Data Flow",
-  "Files To Create",
-  "Files To Modify",
-  "Implementation Order",
-  "Assistant Verification",
-  "Manual User Verification",
-  "Approaches Decided Against",
-  "Possible Future Followups",
-  "Relevant Files",
-  "Files That Need Changes",
-];
-
 function validPlan(planPath: string, planName = "test-plan", marker = "primary"): string {
-  const body = requiredHeadings.map((heading) => {
-    if (heading === "User Goal") return `## ${heading}\n\n> "Create a restored Codex Stop validation plan."`;
-    if (heading === "Answered Assumptions") {
-      return `## ${heading}\n\n1. The session directory is available. Answer: yes. Source: hook input.`;
-    }
-    if (heading === "Data Flow") {
-      return `## ${heading}\n\nStop response\n  |\n  v\nExtract proposed plan\n  |\n  v\nCompare with ${marker} planfile`;
-    }
-    if (heading === "Assistant Verification") {
-      return `## ${heading}\n\nRun \`${activeSpec().mcpWireName("check")}\` with \`working_dir\` set to \`/repo\`.`;
-    }
-    if (heading === "Manual User Verification") {
-      return `## ${heading}\n\nNo manual user verification is required.`;
-    }
-    return `## ${heading}\n\nUpdate \`src/${marker}.ts\` and \`tests/${marker}.test.ts\` with concrete ${heading} details.`;
-  }).join("\n\n");
-  return `Plan Name: ${planName}\n\n${body}\n\nPlanfile Path: ${planPath}\nPlan Name: ${planName}`;
+  return validPlanFixture({
+    planPath,
+    planName,
+    userGoal: `> "Create a restored Codex Stop validation plan."`,
+    answeredAssumptions: "1. The session directory is available. Answer: yes. Source: hook input.",
+    dataFlow: `Stop response\n  |\n  v\nExtract proposed plan\n  |\n  v\nCompare with ${marker} planfile`,
+    sectionBody: (heading) =>
+      `Update \`src/${marker}.ts\` and \`tests/${marker}.test.ts\` with concrete ${heading} details.`,
+  });
 }
 
 function proposedPlan(content: string): string {

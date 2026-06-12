@@ -17,6 +17,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import {
+  scenarioCacheDir,
   scenarioLastRunFile,
   scenarioPlansDir,
   scenarioRunDir,
@@ -51,24 +52,12 @@ import {
 } from "./lib/hook-runner.js";
 import { sessionStateDefaults, type SessionState } from "../utils/session-store.js";
 import type { ToolPrediction } from "../utils/prediction-types.js";
-import { scenarioDir } from "../agents/mcp/scenario-mcp-shared.js";
-import type { ScenarioSourceTag } from "../agents/mcp/scenario-mcp-shared.js";
+import type { ScenarioSourceTag } from "./catalog.js";
 import { activeSpec } from "../adapter/spec.js";
 import type { ScenarioMaterializeCtx } from "../adapter/types.js";
 import { readSessionInjectionsAfterOffset, shortContentHash } from "../utils/session-injections.js";
-
-function getArg(name: string, required: boolean = false): string | undefined {
-  const args = process.argv.slice(2);
-  const idx = args.indexOf(`--${name}`);
-  if (idx === -1 || idx + 1 >= args.length) {
-    if (required) {
-      console.error(`Error: --${name} is required`);
-      process.exit(2);
-    }
-    return undefined;
-  }
-  return args[idx + 1];
-}
+import { fileSizeOrZero } from "../utils/file-io.js";
+import { getOptionalArg, getRequiredArg } from "./cli-args.js";
 
 function hookScriptName(event: HookEventName): string {
   const map: Record<HookEventName, string> = {
@@ -351,14 +340,6 @@ function seedSidecars(cacheDir: string, scenario: Scenario): void {
       sidecars.injections.map((record) => JSON.stringify(record)).join("\n") +
         (sidecars.injections.length > 0 ? "\n" : ""),
     );
-  }
-}
-
-function fileSize(filePath: string): number {
-  try {
-    return fs.statSync(filePath).size;
-  } catch {
-    return 0;
   }
 }
 
@@ -697,9 +678,10 @@ function computeExpectationReality(
 }
 
 async function main() {
-  const scenarioPath = getArg("scenario", true)!;
+  const args = process.argv.slice(2);
+  const scenarioPath = getRequiredArg(args, "scenario");
   // --source is required: "home" | "expected-to-pass" | "non-deterministic" | "expected-to-fail"
-  const sourceArg = getArg("source", false) as ScenarioSourceTag | undefined;
+  const sourceArg = getOptionalArg(args, "source") as ScenarioSourceTag | undefined;
   if (!fs.existsSync(scenarioPath)) {
     console.error(`scenario file not found: ${scenarioPath}`);
     process.exit(2);
@@ -721,7 +703,7 @@ async function main() {
   // polluted by per-run artifacts.
   const outputDir = scenarioRunDir(scenario.name);
   fs.mkdirSync(outputDir, { recursive: true });
-  const cacheDir = path.join(scenarioDir(scenario.name), "cache");
+  const cacheDir = scenarioCacheDir(scenario.name);
   fs.rmSync(cacheDir, { recursive: true, force: true });
   fs.mkdirSync(cacheDir, { recursive: true });
 
@@ -873,7 +855,7 @@ async function main() {
       const toolLogOffset = fs.existsSync(toolLogPath)
         ? fs.statSync(toolLogPath).size
         : 0;
-      const injectionLogOffset = fileSize(sessionInjectionsFile(cacheDir));
+      const injectionLogOffset = fileSizeOrZero(sessionInjectionsFile(cacheDir));
 
       const stdin = buildHookInput(scenario, {
         sessionId,

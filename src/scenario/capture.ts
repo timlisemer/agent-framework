@@ -16,7 +16,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import { sessionCapturesFile } from "../utils/paths.js";
-import type { PlanModeStoredState } from "../utils/plan-mode-entry-state.js";
+import type { PlanModeDetection } from "../adapter/types.js";
+import type { PlanModeStoredState, PlanModeTransition } from "../utils/plan-mode-entry-state.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -77,6 +78,33 @@ export interface CapturePointer {
    * replayed or duplicated captures when the same hook fires twice.
    */
   raw_input_hash?: string;
+}
+
+export type CapturePlanMode = NonNullable<CapturePointer["plan_mode"]>;
+
+export function capturePlanModeFromDetection(
+  detection: PlanModeDetection,
+): CapturePlanMode {
+  return {
+    active: detection.active,
+    mode: detection.mode,
+    source: detection.source,
+  };
+}
+
+export function capturePlanModeFromTransition(
+  transition: PlanModeTransition,
+): CapturePlanMode {
+  return {
+    mode: transition.mode,
+    source: transition.detection_source,
+    detection_source: transition.detection_source,
+    previous: transition.previous,
+    current: transition.current,
+    active: transition.active,
+    entered: transition.entered,
+    exited: transition.exited,
+  };
 }
 
 // ─── FIFO rotation cap ────────────────────────────────────────────────────────

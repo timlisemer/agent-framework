@@ -66,6 +66,31 @@ describe("session planfile rule exemptions", () => {
     expect(result).toBeNull();
   });
 
+  it("prediction-block checks mixed planfile and non-exempt writes", async () => {
+    const sessionDir = path.join(process.cwd(), ".tmp-session");
+    const planPath = sessionPlanFile(sessionDir, "named-plan");
+    const result = await predictionBlockRule.check(makeCtx({
+      sessionDir,
+      toolInput: { file_path: planPath, file_paths: [planPath, "src/main.ts"] },
+      state: {
+        currentPrediction: {
+          mood: "angry",
+          trust: "low",
+          intent: "stop",
+          blockedIntent: "all tools blocked",
+          explicitlyAllowedTools: [],
+          explicitlyBlockedSubstrings: [],
+          userMessageSnippet: "stop",
+          blockAllTools: true,
+          timestamp: Date.now(),
+        },
+        frustrationStreak: 3,
+      } as unknown as RuleContext["state"],
+    }));
+
+    expect(result).toMatchObject({ fastDeny: expect.stringContaining("no tools right now") });
+  });
+
   it("plan-mode-block allows first creation of valid current session planfiles", async () => {
     const sessionDir = path.join(process.cwd(), ".tmp-session");
     const planPath = sessionPlanFile(sessionDir, "shared-ai-ui-runtime");
