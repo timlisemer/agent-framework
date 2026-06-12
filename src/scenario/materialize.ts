@@ -302,6 +302,38 @@ function rawAnchorStartIndex(
   return idx === -1 ? 0 : idx;
 }
 
+function timestampMillis(rawLine: Record<string, unknown>): number | null {
+  const timestamp = rawLine.timestamp;
+  if (typeof timestamp !== "string") return null;
+  const millis = Date.parse(timestamp);
+  return Number.isFinite(millis) ? millis : null;
+}
+
+function sliceRawTranscriptForCapture(
+  rawTranscriptLines: string[],
+  rawJsonLines: Record<string, unknown>[],
+  event: string,
+  captureTs: number,
+): { rawTranscriptLines: string[]; rawJsonLines: Record<string, unknown>[] } {
+  if (event !== "Stop") {
+    return { rawTranscriptLines, rawJsonLines };
+  }
+
+  let endIdx = rawJsonLines.length;
+  for (let i = 0; i < rawJsonLines.length; i++) {
+    const millis = timestampMillis(rawJsonLines[i]);
+    if (millis !== null && millis > captureTs) {
+      endIdx = i;
+      break;
+    }
+  }
+
+  return {
+    rawTranscriptLines: rawTranscriptLines.slice(0, endIdx),
+    rawJsonLines: rawJsonLines.slice(0, endIdx),
+  };
+}
+
 function seedCurrentPrediction(
   prediction: ToolPrediction | null,
 ): Scenario["seed_state"]["currentPrediction"] {
@@ -390,10 +422,16 @@ export async function materializeScenario(
       return {};
     }
   });
+  const boundedRaw = sliceRawTranscriptForCapture(
+    rawTranscriptLines,
+    rawJsonLines,
+    pointer.event,
+    pointer.ts,
+  );
   const anchorUuid = pointer.transcript_anchor_uuid ?? epoch?.anchor_uuid ?? null;
-  const rawStartIdx = rawAnchorStartIndex(rawJsonLines, anchorUuid);
-  const anchoredRawTranscriptLines = rawTranscriptLines.slice(rawStartIdx);
-  const anchoredRawJsonLines = rawJsonLines.slice(rawStartIdx);
+  const rawStartIdx = rawAnchorStartIndex(boundedRaw.rawJsonLines, anchorUuid);
+  const anchoredRawTranscriptLines = boundedRaw.rawTranscriptLines.slice(rawStartIdx);
+  const anchoredRawJsonLines = boundedRaw.rawJsonLines.slice(rawStartIdx);
   const parsedEntries = sliceEntriesForCapture(
     spec.parseTranscript(anchoredRawTranscriptLines),
     pointer.event,

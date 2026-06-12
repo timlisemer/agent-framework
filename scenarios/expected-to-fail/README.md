@@ -9,6 +9,14 @@ repeated confirmation. If repeated runs disagree, move the fixture to
 
 ## Recent Changes
 
+2026-06-13 Stop hook false-positive regression:
+
+- Added `stop-memory-answer-after-completed-task-should-pass.json`.
+  The live Stop hook blocked a direct answer to "Can you remember the first
+  message of this session?" as if the assistant were working around prior
+  actionable tool failure feedback. Correct behavior is to pass because the
+  user asked a factual memory question after the prior task was completed.
+
 2026-06-09 Fontconfig repro-before-edit regression:
 
 - Added `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow.json`.

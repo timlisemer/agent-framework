@@ -255,6 +255,68 @@ describe("materializeScenario", () => {
     expect(JSON.stringify(scenario.transcript[1])).toContain("<proposed_plan>");
   });
 
+  it("excludes later transcript entries when materializing Stop captures", async () => {
+    const codexDir = path.join(tmpDir, ".codex", "sessions", "2026", "06", "12");
+    fs.mkdirSync(codexDir, { recursive: true });
+    transcriptPath = path.join(codexDir, "rollout-stop-tail.jsonl");
+    fs.writeFileSync(path.join(tmpDir, "transcript-path.txt"), transcriptPath + "\n");
+
+    const userLine = JSON.stringify({
+      timestamp: "2026-06-12T20:52:35.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Can you remember the first message?" }],
+      },
+    });
+    const assistantLine = JSON.stringify({
+      timestamp: "2026-06-12T20:52:43.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Yes. You first asked about CI." }],
+      },
+    });
+    const laterHookPromptLine = JSON.stringify({
+      timestamp: "2026-06-12T20:52:44.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "<hook_prompt>blocked</hook_prompt>" }],
+      },
+    });
+    fs.writeFileSync(
+      transcriptPath,
+      [userLine, assistantLine, laterHookPromptLine].join("\n") + "\n",
+    );
+
+    const epoch = rotateEpoch(tmpDir, "initial", null);
+    const state = sessionStateDefaults();
+    const snapshotSeq = appendStateSnapshot(tmpDir, state, transcriptPath);
+
+    appendCapture(tmpDir, {
+      ts: Date.parse("2026-06-12T20:52:43.500Z"),
+      epoch_id: epoch.id,
+      parent_capture_seq: null,
+      event: "Stop",
+      decision: "block",
+      state_snapshot_seq: snapshotSeq,
+    });
+
+    const scenario = validateScenario(await materializeScenario(tmpDir, 1));
+
+    expect(scenario.target.hook).toBe("Stop");
+    expect(scenario.transcript).toHaveLength(2);
+    expect(scenario.transcript.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Yes. You first asked about CI." }],
+    });
+    expect(JSON.stringify(scenario.transcript)).not.toContain("hook_prompt");
+  });
+
   it("materializes coalesced Stop plans as a text-only final assistant entry", async () => {
     transcriptPath = path.join(tmpDir, "coalesced-stop.jsonl");
     fs.writeFileSync(path.join(tmpDir, "transcript-path.txt"), transcriptPath + "\n");
