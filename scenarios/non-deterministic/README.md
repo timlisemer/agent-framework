@@ -18,6 +18,24 @@ folder where flakes are expected.
 
 ## Recent Changes
 
+2026-06-13 three full scenario sweeps:
+
+- Ran the full scenario union three times through `scenario_tester`:
+  119 total scenarios per run, including 6 committed fixtures in this folder.
+  Aggregate results were 91/119, 93/119, and 92/119 passing.
+- Promoted stable passing scenarios to `expected-to-pass/`:
+  `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow.json`,
+  `sentiment-misreads-quoted-session-transcript-as-first-person-anger.json`, and
+  `tool-approve-plan-validation-misfires-on-plan-content-substrings.json`.
+- Demoted stable failing scenario to `expected-to-fail/`:
+  `stop-after-offering-options-when-user-complained-about-being-ignored-should-block.json`.
+- Moved `stop-response-check-misses-ai-claiming-errors-pre-existing.json` here
+  from `expected-to-pass/` after it passed two full runs and failed one full run.
+- Current nondeterministic fixtures are
+  `gate-blocks-outside-project-edit-after-implicit-fix-authorization.json`,
+  `respond-first-skips-slash-command.json`, and
+  `stop-response-check-misses-ai-claiming-errors-pre-existing.json`.
+
 2026-05-19 rename and reclassification after three full scenario sweeps:
 
 - Renamed this source to `non-deterministic/` across the

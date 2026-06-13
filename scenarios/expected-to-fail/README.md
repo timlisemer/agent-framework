@@ -35,7 +35,6 @@ run the `/plan3` Agent workflow, or call scenario_tester.
 
 - `gate-cites-stale-plan3-intent-after-skill-was-already-loaded-and-plan-consolidated-should-allow.json`
 - `prediction-context-stale-read-intent-blocks-just-build-after-explicit-reminder-should-allow.json`
-- `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow.json`
 
 These scenarios cover stale cached intent or already-satisfied prerequisites
 being treated as still blocking after the workflow moved forward.
@@ -43,18 +42,9 @@ being treated as still blocking after the workflow moved forward.
 ### Drift false positives
 
 - `drift-block-fires-on-legitimate-multi-edit-of-single-file.json`
-- `drift-block-misclassifies-shell-redirect-as-workaround-escalation.json`
 
-These scenarios cover drift detector overreach: legitimate multi-region edits
-to one file, and generic `2>&1` shell redirection mistaken for workaround
-escalation.
-
-### Workflow contract / missing required context
-
-- `confirm-quickconfirm-omits-required-extra-context-should-deny.json`
-
-This scenario covers denying a confirm retry that omits required `extra_context`
-after the user made that context relevant.
+This scenario covers drift detector overreach: legitimate multi-region edits
+to one file.
 
 ### Low-risk bypass misfire
 
@@ -70,38 +60,23 @@ because it is tangential to the user's direct demand.
 This scenario covers preserving and enforcing an explicit prediction block for
 `git push` after the user says not to push.
 
-### Stop hook alignment
-
-- `stop-memory-answer-after-completed-task-should-pass.json`
-- `stop-grouped-expected-fail-scenarios-after-user-asked-should-pass.json`
-
-These scenarios cover Stop hook false positives after the assistant has
-answered the user's latest direct request.
-
 ## Recent Changes
 
-2026-06-13 Stop hook grouping-answer false-positive regression:
+2026-06-13 three full scenario sweeps:
 
-- Added `stop-grouped-expected-fail-scenarios-after-user-asked-should-pass.json`.
-  The Stop hook blocked after the user asked to group expected-fail scenarios by
-  similarity and the assistant provided the grouping. Correct behavior is to
-  pass because the latest user request was complete; prior stop feedback should
-  not force another block after the concrete requested answer has been given.
-
-2026-06-13 Stop hook false-positive regression:
-
-- Added `stop-memory-answer-after-completed-task-should-pass.json`.
-  The live Stop hook blocked a direct answer to "Can you remember the first
-  message of this session?" as if the assistant were working around prior
-  actionable tool failure feedback. Correct behavior is to pass because the
-  user asked a factual memory question after the prior task was completed.
-
-2026-06-09 Fontconfig repro-before-edit regression:
-
-- Added `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow.json`.
-  The live hook denied an edit after the assistant had already reproduced the
-  requested Fontconfig error with `fc-match Arial`; correct behavior is to
-  allow the edit because the sequencing prerequisite was satisfied.
+- Ran the full scenario union three times through `scenario_tester`:
+  119 total scenarios per run, including 16 committed fixtures in this folder.
+  Aggregate results were 91/119, 93/119, and 92/119 passing.
+- Promoted stable passing scenarios to `expected-to-pass/`:
+  `confirm-quickconfirm-omits-required-extra-context-should-deny.json`,
+  `drift-block-misclassifies-shell-redirect-as-workaround-escalation.json`,
+  `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow.json`,
+  and `stop-memory-answer-after-completed-task-should-pass.json`.
+- Demoted stable failing scenario from `non-deterministic/`:
+  `stop-after-offering-options-when-user-complained-about-being-ignored-should-block.json`.
+- Removed README-only references to
+  `stop-grouped-expected-fail-scenarios-after-user-asked-should-pass.json`;
+  no matching fixture exists in this folder.
 
 2026-05-19 scenario reclassification after three full scenario sweeps:
 

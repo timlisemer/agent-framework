@@ -8,6 +8,24 @@ signal. Re-run before moving; if results disagree, move the fixture to
 
 ## Recent Changes
 
+2026-06-13 three full scenario sweeps:
+
+- Ran the full scenario union three times through `scenario_tester`:
+  119 total scenarios per run, including 76 committed fixtures in this folder,
+  16 in `expected-to-fail/`, 6 in `non-deterministic/`, and 21 home scenarios.
+  Aggregate results were 91/119, 93/119, and 92/119 passing.
+- Promoted stable passing scenarios from `expected-to-fail/`:
+  `confirm-quickconfirm-omits-required-extra-context-should-deny.json`,
+  `drift-block-misclassifies-shell-redirect-as-workaround-escalation.json`,
+  `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow.json`,
+  and `stop-memory-answer-after-completed-task-should-pass.json`.
+- Promoted stable passing scenarios from `non-deterministic/`:
+  `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow.json`,
+  `sentiment-misreads-quoted-session-transcript-as-first-person-anger.json`, and
+  `tool-approve-plan-validation-misfires-on-plan-content-substrings.json`.
+- Demoted `stop-response-check-misses-ai-claiming-errors-pre-existing.json` to
+  `non-deterministic/` after it passed two full runs and failed one full run.
+
 2026-05-30 Stop prior-error remediation coverage:
 
 - Added `stop-prior-planfile-remediation-refusal-should-block.json` for the regression where prior `validate_plan` feedback told the assistant to edit a named planfile directly, but the assistant stopped by arguing that active Plan Mode or higher-level write restrictions prevented the required file edit. The fixture proves the Stop hook blocks through transcript-derived prior actionable feedback.
@@ -43,6 +61,6 @@ signal. Re-run before moving; if results disagree, move the fixture to
 
 Older promotion notes retained for context:
 
-- `stop-response-check-misses-ai-claiming-errors-pre-existing.json` was promoted from `expected-to-fail/` after repeated deterministic passing runs. Its block currently fires through trailing-question detection rather than a dedicated blame-shift heuristic.
+- `stop-response-check-misses-ai-claiming-errors-pre-existing.json` was promoted from `expected-to-fail/` after repeated deterministic passing runs, then moved to `non-deterministic/` on 2026-06-13 after a new three-run sweep showed a flake.
 - `codex-respond-first-misses-text-before-parallel-tools-should-allow.json` and `codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow.json` were promoted after transcript assistant grouping started collapsing adjacent assistant entries into one logical turn.
 - `bash-implied-log-inspection-journalctl-should-allow.json` was promoted after prediction-block stopped demanding a second Bash authorization when the latest user message already implied Bash.
