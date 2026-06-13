@@ -80,6 +80,26 @@ describe("driftDetectRule.check — end-to-end level behavior", () => {
     expect(fastDeny).toContain("stop making many small edits");
   });
 
+  it("allows repeated same-file edits when prediction explicitly describes multi-region work", async () => {
+    writeToolLog(sessionDir, [allowedEdit(), allowedEdit(), allowedEdit(), allowedEdit()]);
+    const ctx = await buildCtx(sessionDir, {
+      driftState: {},
+      currentPrediction: {
+        mood: "satisfied",
+        trust: "high",
+        intent:
+          "User approved implementing the fix across non-adjacent regions of this file.",
+        blockedIntent: "",
+        explicitlyAllowedTools: [],
+        explicitlyBlockedSubstrings: [],
+        userMessageSnippet: "fix it",
+        timestamp: Date.now(),
+      },
+    });
+    const result = await driftDetectRule.check(ctx);
+    expect(result).toBeNull();
+  });
+
   it("fastDenies when the repeated target is not the first file_path", async () => {
     const first = "/home/tim/project/src/first.ts";
     writeToolLog(sessionDir, [

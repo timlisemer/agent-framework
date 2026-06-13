@@ -22,14 +22,10 @@ actionable reason. Typecheck commands should point to the check MCP, inline
 
 ### Prediction overblocking despite explicit authorization
 
-- `codex-apply-patch-angry-explicit-edit-should-allow.json`
-- `labeler-blocked-after-user-says-i-am-not-angry.json`
 - `plan3-agent-blocked-by-mood-after-frustrated-slash-invocation-should-allow.json`
-- `prediction-block-denies-explicit-scenario-tester-request-should-allow.json`
 
 These scenarios cover mood/frustration prediction false positives where the
-user explicitly authorized the action: perform the edit, use the labeler MCP,
-run the `/plan3` Agent workflow, or call scenario_tester.
+user explicitly authorized the action: run the `/plan3` Agent workflow.
 
 ### Stale intent / workflow progression
 
@@ -38,13 +34,6 @@ run the `/plan3` Agent workflow, or call scenario_tester.
 
 These scenarios cover stale cached intent or already-satisfied prerequisites
 being treated as still blocking after the workflow moved forward.
-
-### Drift false positives
-
-- `drift-block-fires-on-legitimate-multi-edit-of-single-file.json`
-
-This scenario covers drift detector overreach: legitimate multi-region edits
-to one file.
 
 ### Low-risk bypass misfire
 
@@ -72,11 +61,16 @@ This scenario covers preserving and enforcing an explicit prediction block for
   `drift-block-misclassifies-shell-redirect-as-workaround-escalation.json`,
   `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow.json`,
   and `stop-memory-answer-after-completed-task-should-pass.json`.
-- Demoted stable failing scenario from `non-deterministic/`:
-  `stop-after-offering-options-when-user-complained-about-being-ignored-should-block.json`.
+- Kept the offering-options stop fixture in `non-deterministic/` after
+  back-to-back runs disagreed on whether the required remediation substring
+  appeared.
 - Removed README-only references to
   `stop-grouped-expected-fail-scenarios-after-user-asked-should-pass.json`;
   no matching fixture exists in this folder.
+- Promoted two fixed prediction identity scenarios to `expected-to-pass/`.
+- Promoted two additional fixed scenarios to `expected-to-pass/`: one for
+  scenario labeler authorization under stale anger, and one for legitimate
+  multi-region same-file edits.
 
 2026-05-19 scenario reclassification after three full scenario sweeps:
 
@@ -97,7 +91,6 @@ Historical reclassification notes:
 
 - Demoted stable expected-to-pass regressions into this folder on 2026-05-13:
   `bash-npx-tsc-blocked-wrong-reason.json`,
-  `codex-apply-patch-angry-explicit-edit-should-allow.json`,
   `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message.json`,
   `read-unasked-file-instead-of-doing-task-should-deny.json`,
   `sentiment-explicit-forbid-push.json`, and

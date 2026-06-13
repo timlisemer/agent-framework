@@ -1,5 +1,9 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { detectDrift, extractDriftTargets } from "../utils/drift-detector.js";
+import {
+  describesMultiRegionEditIntent,
+  detectDrift,
+  extractDriftTargets,
+} from "../utils/drift-detector.js";
 import { readToolLogEntries } from "../utils/session-store.js";
 
 const EDIT_TOOLS = ["Edit", "Write", "NotebookEdit"];
@@ -24,6 +28,9 @@ export const driftDetectRule: PreToolRule = {
       ctx.toolInput,
       recentLog,
       ctx.state.driftState,
+      {
+        allowMultiRegionEditRepetition: isExplicitMultiRegionEdit(ctx),
+      },
     );
     if (drift.detected) {
       return { fastDeny: drift.reason };
@@ -85,3 +92,15 @@ export const driftDetectRule: PreToolRule = {
     });
   },
 };
+
+function isExplicitMultiRegionEdit(ctx: RuleContext): boolean {
+  const prediction = ctx.state.currentPrediction;
+  const text = [
+    prediction?.intent ?? "",
+    prediction?.userMessageFull ?? "",
+    prediction?.userMessageSnippet ?? "",
+    ctx.latestUserTurn?.logicText ?? "",
+    ctx.latestUserMessage ?? "",
+  ].join("\n");
+  return describesMultiRegionEditIntent(text);
+}

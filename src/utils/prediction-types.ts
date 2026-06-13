@@ -10,6 +10,7 @@
  */
 
 import { isLowRiskTool, isLowRiskInspectionTool } from "../rules/utils.js";
+import { CANONICAL_MCPS } from "../adapter/types.js";
 import {
   isEditTool,
   deriveEditIntentFromPrediction,
@@ -254,8 +255,29 @@ export const ACTION_DEMAND_INTENT_RE =
  */
 export const TOOL_NAME_ALIASES: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
   ["mcp-scenario_tester", ["scenario_tester", "scenario tester", "the scenario tester", "scenario tester mcp", "tester mcp", "the tester", "via the tester"]],
+  ["mcp-scenario_labeler", ["scenario_labeler", "scenario labeler", "the scenario labeler", "scenario labeler mcp", "labeler mcp", "the labeler", "via the labeler"]],
   ["Agent", ["validator agent", "another validator agent", "spawn an agent", "spawn a subagent", "launch an agent", "launch a subagent", "start an agent", "start a subagent", "run an agent", "run a subagent", "another subagent"]],
 ]);
+
+function predictionCanonicalToolName(toolName: string): string {
+  if (toolName === "apply_patch") return "Edit";
+  if (toolName.startsWith("mcp__")) {
+    const suffix = CANONICAL_MCPS.find((mcp) => toolName.endsWith(mcp));
+    if (suffix) return `mcp-${suffix}`;
+  }
+  const mcpWireMatch = /^mcp__[^_\s]+(?:_[^_\s]+)*__?(.+)$/.exec(toolName);
+  if (mcpWireMatch) return `mcp-${mcpWireMatch[1].replace(/^_+/, "")}`;
+  return toolName;
+}
+
+function predictionToolIdentityNames(toolName: string): string[] {
+  const canonical = predictionCanonicalToolName(toolName);
+  return [...new Set([toolName, canonical])];
+}
+
+function isPredictionEditTool(toolName: string): boolean {
+  return predictionToolIdentityNames(toolName).some((t) => isEditTool(t));
+}
 
 /**
  * Per-tool extractor: pulls distinctive target identifiers out of toolInput
@@ -315,16 +337,18 @@ export function userMessageNamesTool(
   toolName: string,
 ): boolean {
   if (!message) return false;
-  if (toolName.startsWith("mcp__") && message.toLowerCase().includes(toolName.toLowerCase())) {
-    return true;
-  }
-  if (!toolName.startsWith("mcp__") && pascalCaseToolRegex(toolName).test(message)) {
-    return true;
-  }
-  const aliases = TOOL_NAME_ALIASES.get(toolName);
-  if (!aliases || aliases.length === 0) return false;
   const lower = message.toLowerCase();
-  return aliases.some((a) => lower.includes(a.toLowerCase()));
+  for (const identity of predictionToolIdentityNames(toolName)) {
+    if (identity.startsWith("mcp__") && lower.includes(identity.toLowerCase())) {
+      return true;
+    }
+    if (!identity.startsWith("mcp__") && pascalCaseToolRegex(identity).test(message)) {
+      return true;
+    }
+    const aliases = TOOL_NAME_ALIASES.get(identity) ?? [];
+    if (aliases.some((a) => lower.includes(a.toLowerCase()))) return true;
+  }
+  return false;
 }
 
 /**
@@ -345,7 +369,10 @@ export function userMessageRevokesTool(
   toolName: string,
 ): boolean {
   if (!message) return false;
-  const candidates: string[] = [toolName, ...(TOOL_NAME_ALIASES.get(toolName) ?? [])];
+  const candidates: string[] = [];
+  for (const identity of predictionToolIdentityNames(toolName)) {
+    candidates.push(identity, ...(TOOL_NAME_ALIASES.get(identity) ?? []));
+  }
   for (const c of candidates) {
     const isMcp = c.startsWith("mcp__");
     const isAlias = c !== toolName;
@@ -505,7 +532,7 @@ export function latestUserMessageAuthorizesBashCommand(
  * function grows a new verb→tool mapping, this helper must too.
  */
 function verbRegexesProducingTool(toolName: string): RegExp[] {
-  switch (toolName) {
+  switch (predictionCanonicalToolName(toolName)) {
     case "Read":
       return [READ_VERB_RE];
     case "Edit":
@@ -690,16 +717,16 @@ export function decidePrediction(
   const displayUserMessage = liveDisplaySnippet || prediction.userMessageSnippet;
   const userMessageForLogic = predictionUserMessageForLogic(prediction);
   const fullMessageEditIntent =
-    prediction.userMessageFull !== undefined && isEditTool(toolName)
+    prediction.userMessageFull !== undefined && isPredictionEditTool(toolName)
       ? deriveEditIntentFromPrediction({ ...prediction, intent: "" })
       : null;
   const inputStr = stringifyToolInput(toolInput);
   const bashClassification = toolName === "Bash"
     ? classifyBashCommand(String((toolInput as { command?: unknown })?.command ?? ""))
     : null;
-  const toolIdentities = bashClassification?.predictionIdentities ?? [toolName];
+  const toolIdentities = bashClassification?.predictionIdentities ?? predictionToolIdentityNames(toolName);
   const matchesToolIdentity = (candidate: string): boolean =>
-    candidate === toolName || toolIdentities.includes(candidate);
+    predictionToolIdentityNames(candidate).some((identity) => toolIdentities.includes(identity));
   const blockedForThisToolByName = prediction.explicitlyBlockedSubstrings.some(
     (b) => matchesToolIdentity(b.tool),
   );
@@ -722,7 +749,7 @@ export function decidePrediction(
       bashClassification.riskClass === "read-only-complex" ||
       bashClassification.riskClass === "read-only-heavy"
     ) &&
-    liveAllowedTools.some((t) => isEditTool(t) || t === "Read");
+    liveAllowedTools.some((t) => isPredictionEditTool(t) || t === "Read");
 
   if (hasAuthoritativeLatestTurn && EXPLICIT_PROHIBITION_RE.test(liveLogicText)) {
     return {
@@ -776,8 +803,8 @@ export function decidePrediction(
   // `Edit`/`Write`. Treat any edit-class allow as authorizing any edit-class
   // tool, after per-target explicit blocks have been checked above.
   if (
-    isEditTool(toolName) &&
-    prediction.explicitlyAllowedTools.some((t) => isEditTool(t))
+    isPredictionEditTool(toolName) &&
+    prediction.explicitlyAllowedTools.some((t) => isPredictionEditTool(t))
   ) {
     return { decision: "allow" };
   }
@@ -847,7 +874,7 @@ export function decidePrediction(
   // explicitlyAllowedTools is empty (covers cases where SENTIMENT_AGENT
   // captured the verb in intent text but missed the structured authorization).
   // Step 2 (explicit blocks) and step 3 (blockAllTools) still win above.
-  if (isEditTool(toolName)) {
+  if (isPredictionEditTool(toolName)) {
     const undoText = `${prediction.intent} ${userMessageForLogic}`;
     if (UNDO_INTENT_RE.test(undoText)) {
       return {
@@ -907,6 +934,12 @@ export function decidePrediction(
       return {
         decision: "allow",
         reason: `User's logged message names ${toolName} favorably (redirect to a previously-authorized tool, not a revocation); ${toolName} proceeds.`,
+      };
+    }
+    if (latestUserMessageFavorablyNamesTool(prediction.intent, toolName)) {
+      return {
+        decision: "allow",
+        reason: `Cached prediction.intent names ${toolName} favorably; mood-driven re-deny would contradict the hook's own paraphrase of the user's requested tool.`,
       };
     }
     if (latestUserMessage && latestUserMessageReauthorizes(latestUserMessage, toolName)) {
@@ -1101,7 +1134,7 @@ export function decidePrediction(
   if (
     !userSaidProhibition &&
     !blockedForThisToolByName &&
-    slashCommandAllowedTools.includes(toolName)
+    slashCommandAllowedTools.some((t) => matchesToolIdentity(t))
   ) {
     return {
       decision: "allow",
@@ -1136,7 +1169,7 @@ export function decidePrediction(
   // `intent` here; that would broaden the mood policy beyond the full-message
   // truncation fix.
   if (
-    isEditTool(toolName) &&
+    isPredictionEditTool(toolName) &&
     fullMessageEditIntent === true
   ) {
     return {

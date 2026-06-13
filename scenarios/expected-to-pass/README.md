@@ -25,6 +25,10 @@ signal. Re-run before moving; if results disagree, move the fixture to
   `tool-approve-plan-validation-misfires-on-plan-content-substrings.json`.
 - Demoted `stop-response-check-misses-ai-claiming-errors-pre-existing.json` to
   `non-deterministic/` after it passed two full runs and failed one full run.
+- Promoted two fixed prediction identity scenarios from `expected-to-fail/`.
+- Promoted two newly fixed scenarios from `expected-to-fail`: one for scenario
+  labeler authorization under stale anger, and one for legitimate multi-region
+  same-file edits.
 
 2026-05-30 Stop prior-error remediation coverage:
 

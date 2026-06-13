@@ -27,13 +27,14 @@ folder where flakes are expected.
   `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow.json`,
   `sentiment-misreads-quoted-session-transcript-as-first-person-anger.json`, and
   `tool-approve-plan-validation-misfires-on-plan-content-substrings.json`.
-- Demoted stable failing scenario to `expected-to-fail/`:
-  `stop-after-offering-options-when-user-complained-about-being-ignored-should-block.json`.
+- Kept the offering-options stop fixture here after fresh back-to-back runs
+  disagreed on whether the required remediation substring appeared.
 - Moved `stop-response-check-misses-ai-claiming-errors-pre-existing.json` here
   from `expected-to-pass/` after it passed two full runs and failed one full run.
 - Current nondeterministic fixtures are
   `gate-blocks-outside-project-edit-after-implicit-fix-authorization.json`,
   `respond-first-skips-slash-command.json`, and
+  the offering-options stop fixture, plus
   `stop-response-check-misses-ai-claiming-errors-pre-existing.json`.
 
 2026-05-19 rename and reclassification after three full scenario sweeps:
@@ -42,7 +43,7 @@ folder where flakes are expected.
   runner, tester, MCP schema, docs, and fixture references.
 - Kept nondeterministic fixtures here:
   `gate-blocks-outside-project-edit-after-implicit-fix-authorization.json`,
-  `stop-after-offering-options-when-user-complained-about-being-ignored-should-block.json`,
+  the offering-options stop fixture,
   and `tool-approve-plan-validation-misfires-on-plan-content-substrings.json`.
 - Moved newly nondeterministic scenarios here:
   `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow.json`,
@@ -56,7 +57,7 @@ Historical notes:
 
 - 2026-05-15: moved three nondeterministic fixtures here from
   `expected-to-pass/`: `gate-blocks-outside-project-edit-after-implicit-fix-authorization.json`,
-  `stop-after-offering-options-when-user-complained-about-being-ignored-should-block.json`,
+  the offering-options stop fixture,
   and `tool-approve-plan-validation-misfires-on-plan-content-substrings.json`.
 - 2026-05-13: `sentiment-agent-resets-anger-after-calm-directive.json` and
   `sentiment-mood-relief-resets.json` were tracked here as nondeterministic

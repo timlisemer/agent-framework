@@ -1,0 +1,67 @@
+{
+  "schema_version": 2,
+  "name": "prediction-block-denies-explicit-scenario-tester-request-should-allow",
+  "description": "Prediction block should allow scenario_tester when the latest user message explicitly says to call the scenario tester, even if cached frustrated prediction state would otherwise deny the tool as not explicitly requested.",
+  "transcript": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "call the scenario tester, you are still banned from bash, unless it is the mv command"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "You explicitly requested `scenario_tester` again. I’m retrying the scenario tester call, with no Bash."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_vGGRP8gecp4wbrjZ9ElqXG8I",
+          "name": "mcp__agent_frameworkscenario_tester",
+          "input": {
+            "action": "materialize_scenario",
+            "session_dir": "/home/tim/.agent-framework/sessions/home-tim-Coding-public_repos-agent-framework/2026-06-02-1534_cdb2077e",
+            "run_materialized": true,
+            "working_dir": "/home/tim/Coding/public_repos/agent-framework"
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "call_vGGRP8gecp4wbrjZ9ElqXG8I"
+  },
+  "env": {
+    "permission_mode": "default",
+    "adapter": "codex",
+    "session_start_permission_mode": "default"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "frustrated",
+      "trust": "low",
+      "intent": "The user is insisting that the assistant stay on the workflow and not deviate from it. They are rejecting any suggestion that the task has changed or been abandoned.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "no you are not you are sticking to the workflow",
+      "blockAllTools": false,
+      "timestamp": 1780409215400,
+      "contextSwitch": "no",
+      "questionIsStalling": "n/a"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 1,
+    "currentWindowSize": 4
+  },
+  "expect": {
+    "expected": "allow",
+    "notes": "The latest user turn literally says to call the scenario tester. The target preserves the captured malformed Codex MCP wire name so prediction identity normalization must still map it to mcp-scenario_tester."
+  }
+}

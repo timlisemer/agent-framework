@@ -73,6 +73,23 @@ describe("decidePrediction", () => {
     expect(result.decision).toBe("allow");
   });
 
+  it("angry + explicit allow Edit authorizes raw Codex apply_patch replay", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User demands the AI immediately perform the edit right now.",
+      explicitlyAllowedTools: ["Edit", "Write"],
+      userMessageSnippet: "FUCK YOU DO THE FUCKING EDIT NOW",
+    });
+    const result = decidePrediction(
+      pred,
+      "apply_patch",
+      { command: "*** Begin Patch\n*** Update File: src/foo.ts\n@@\n-old\n+new\n*** End Patch\n" },
+      4,
+    );
+    expect(result.decision).toBe("allow");
+  });
+
   it("neutral + explicit block Bash 'git push' -> deny on git push, allow on ls", () => {
     const pred = makePrediction({
       mood: "neutral",
@@ -1765,6 +1782,58 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     );
     expect(result.decision).toBe("allow");
     expect(result.reason).toContain("discharged side-clarification");
+  });
+
+  it("raw Codex MCP wire name uses canonical scenario tester aliases", () => {
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "low",
+      intent: "The user is insisting that the assistant stay on the workflow.",
+      userMessageSnippet: "call the scenario tester, you are still banned from bash, unless it is the mv command",
+    });
+    const result = decidePrediction(
+      pred,
+      "mcp__agent_framework__scenario_tester",
+      { action: "run_scenario", scenario_name: "x" },
+      1,
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("favorably");
+  });
+
+  it("cached intent naming scenario labeler authorizes the labeler MCP under stale anger", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent:
+        "User demands the AI continue using the labeler mcp as previously instructed, without stopping or deviating.",
+      userMessageSnippet: "i told you to replicate the live behavior",
+    });
+    const result = decidePrediction(
+      pred,
+      "mcp__agent-framework__scenario_labeler",
+      { action: "list" },
+      2,
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("prediction.intent");
+  });
+
+  it("legacy raw Codex MCP wire name without second separator uses canonical aliases", () => {
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "low",
+      intent: "The user is insisting that the assistant stay on the workflow.",
+      userMessageSnippet: "call the scenario tester, you are still banned from bash, unless it is the mv command",
+    });
+    const result = decidePrediction(
+      pred,
+      "mcp__agent_frameworkscenario_tester",
+      { action: "run_scenario", scenario_name: "x" },
+      1,
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("favorably");
   });
 
   it("cachedSnippetSideTaskDischarged=false -> deny via step 4", () => {

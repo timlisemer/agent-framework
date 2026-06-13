@@ -18,6 +18,12 @@ export interface DriftSignal {
 const NO_DRIFT: DriftSignal = { detected: false, reason: "" };
 
 const EDIT_TOOLS = ["Edit", "Write", "NotebookEdit"];
+const MULTI_REGION_EDIT_INTENT_RE =
+  /\b(non[-\s]?adjacent|discontiguous|multi[-\s]?region|multiple\s+(?:separate\s+)?regions|across\s+(?:non[-\s]?adjacent|separate|multiple)\s+regions)\b/i;
+
+export interface DriftDetectionOptions {
+  allowMultiRegionEditRepetition?: boolean;
+}
 
 /**
  * Extract target paths/command for drift detection.
@@ -52,11 +58,18 @@ export function detectDrift(
   toolInput: unknown,
   recentToolLog: ToolLogEntry[],
   driftState?: Record<string, DriftTargetState>,
+  options: DriftDetectionOptions = {},
 ): DriftSignal {
   const targets = extractDriftTargets(toolInput);
   for (const target of targets) {
     const state = driftState?.[target] ?? { level: 0, allowedSinceLevelChange: 0 };
-    const repetitionSignal = checkRepetition(toolName, target, recentToolLog, state);
+    const repetitionSignal = checkRepetition(
+      toolName,
+      target,
+      recentToolLog,
+      state,
+      options.allowMultiRegionEditRepetition ?? false,
+    );
     if (repetitionSignal.detected) return repetitionSignal;
   }
 
@@ -91,8 +104,10 @@ function checkRepetition(
   target: string,
   recentToolLog: ToolLogEntry[],
   state: DriftTargetState,
+  allowMultiRegionEditRepetition: boolean,
 ): DriftSignal {
   if (!target || !EDIT_TOOLS.includes(toolName)) return NO_DRIFT;
+  if (allowMultiRegionEditRepetition) return NO_DRIFT;
 
   const sameTargetAllowedEdits = recentToolLog.filter(
     (e) =>
@@ -133,6 +148,10 @@ function checkRepetition(
   }
 
   return NO_DRIFT;
+}
+
+export function describesMultiRegionEditIntent(text: string): boolean {
+  return MULTI_REGION_EDIT_INTENT_RE.test(text);
 }
 
 function toolLogEntryTargets(entry: ToolLogEntry): string[] {
