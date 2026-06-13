@@ -24,6 +24,8 @@ describe("classifyBashCommand", () => {
   it("blocks nix eval and points to nix-eval-jobs", () => {
     const result = classifyBashCommand("nix eval .#nixosConfigurations.host.config.system.build.toplevel");
     expect(result.riskClass).toBe("blocked");
+    expect(result.workaroundCategory).toBeUndefined();
+    expect(result.reason).toBe("Use nix-eval-jobs instead");
     expect(result.alternative).toBe("Use nix-eval-jobs instead");
     expect(result.blacklistHighlights.some((h) => h.includes("[BLACKLIST: nix eval]"))).toBe(true);
   });

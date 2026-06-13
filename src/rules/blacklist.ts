@@ -27,7 +27,7 @@ export const blacklistRule: PreToolRule = {
     if (ctx.toolName !== "Bash") return;
     const command = (ctx.toolInput as { command?: string }).command ?? "";
     const classification = classifyBashCommand(command, ctx.projectDir);
-    if (classification.riskClass !== "high-risk-workaround" || !classification.workaroundCategory) return;
+    if (!classification.workaroundCategory) return;
 
     const count = await recordDenial(classification.workaroundCategory);
     if (count >= MAX_SIMILAR_DENIALS) {

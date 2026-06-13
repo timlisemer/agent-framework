@@ -11,7 +11,6 @@ repeated confirmation. If repeated runs disagree, move the fixture to
 
 ### Command policy / tool-approve attribution
 
-- `bash-npx-tsc-blocked-wrong-reason.json`
 - `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message.json`
 - `tool-approve-fails-to-block-cd-cat-head-bash-violations.json`
 
@@ -47,7 +46,7 @@ This scenario covers preserving and enforcing an explicit prediction block for
 2026-06-13 three full scenario sweeps:
 
 - Ran the full scenario union three times through `scenario_tester`:
-  119 total scenarios per run, including 16 committed fixtures in this folder.
+  119 total scenarios per run, including 6 committed fixtures in this folder.
   Aggregate results were 91/119, 93/119, and 92/119 passing.
 - Promoted stable passing scenarios to `expected-to-pass/`:
   `confirm-quickconfirm-omits-required-extra-context-should-deny.json`,
@@ -83,7 +82,6 @@ This scenario covers preserving and enforcing an explicit prediction block for
 Historical reclassification notes:
 
 - Demoted stable expected-to-pass regressions into this folder on 2026-05-13:
-  `bash-npx-tsc-blocked-wrong-reason.json`,
   `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message.json`,
   `sentiment-explicit-forbid-push.json`, and
   `tool-approve-fails-to-block-cd-cat-head-bash-violations.json`.

@@ -1,0 +1,85 @@
+import { describe, expect, it } from "vitest";
+import { evaluateBashPolicy } from "../../../src/utils/bash-command-policy.js";
+import { checkRoutedPolicyFindings } from "../../../src/utils/bash-policy/topics/check-routed.js";
+import { fileWritePolicyFindings } from "../../../src/utils/bash-policy/topics/file-write.js";
+import { findSedPolicyFindings } from "../../../src/utils/bash-policy/topics/find-sed.js";
+import { gitPolicyFindings } from "../../../src/utils/bash-policy/topics/git.js";
+import { runInstallRemotePolicyFindings } from "../../../src/utils/bash-policy/topics/run-install-remote.js";
+import { scriptExecPolicyFindings } from "../../../src/utils/bash-policy/topics/script-exec.js";
+import { matchPatternInCommand } from "../../../src/utils/bash-policy/registry.js";
+
+describe("bash policy topics", () => {
+  it("emits structured findings for each hard-deny topic", () => {
+    expect(gitPolicyFindings("git push")[0]).toMatchObject({ topic: "git", name: "git write op (MCP)" });
+    expect(fileWritePolicyFindings("tee out.txt")[0]).toMatchObject({ topic: "file-write", name: "tee file write" });
+    expect(scriptExecPolicyFindings("node script.js", matchPatternInCommand)[0]).toMatchObject({ topic: "script-exec", name: "node" });
+    expect(runInstallRemotePolicyFindings("npm install express", matchPatternInCommand)[0]).toMatchObject({ topic: "run-install-remote", name: "npm install" });
+    expect(findSedPolicyFindings("sed -i 's/a/b/' file.txt")[0]).toMatchObject({ topic: "find-sed", name: "sed in-place edit" });
+  });
+
+  it("emits structured check-routed findings", () => {
+    expect(checkRoutedPolicyFindings("npx --yes tsc --noEmit")[0]).toMatchObject({
+      topic: "check-routed",
+      kind: "route-to-check",
+      name: "tsc",
+      category: "type-check",
+    });
+  });
+
+  it("keeps secondary findings within the same topic family", () => {
+    expect(gitPolicyFindings("git push && git checkout main").map((finding) => finding.name)).toEqual([
+      "git write op (MCP)",
+      "git write op",
+    ]);
+    expect(scriptExecPolicyFindings("node script.js && python script.py", matchPatternInCommand).map((finding) => finding.name)).toEqual([
+      "python",
+      "node",
+    ]);
+    expect(fileWritePolicyFindings("echo hi > a && tee b").map((finding) => finding.name)).toEqual([
+      "shell redirect",
+      "echo redirect",
+      "tee file write",
+    ]);
+  });
+
+  it("preserves registry precedence with one terminal owner", () => {
+    const result = evaluateBashPolicy("cd repo && npx tsc --noEmit");
+
+    expect(result.terminal.ownerName).toBe("cd");
+    expect(result.terminal.ownerTopic).toBe("read-only");
+    expect(result.observations.filter((finding) => finding.role === "terminal-candidate")).toHaveLength(1);
+    expect(result.observations.some((finding) => finding.topic === "check-routed" && finding.name === "tsc")).toBe(true);
+  });
+
+  it.each([
+    ["find . -delete", "find destructive flag"],
+    ["sed -i 's/a/b/' file.txt", "sed in-place edit"],
+  ])("promotes destructive %s to find-sed terminal ownership", (command, ownerName) => {
+    const result = evaluateBashPolicy(command);
+
+    expect(result.terminal.ownerTopic).toBe("find-sed");
+    expect(result.terminal.ownerName).toBe(ownerName);
+    expect(result.terminal.riskClass).toBe("blocked");
+    expect(result.observations.filter((finding) => finding.role === "terminal-candidate")).toHaveLength(1);
+  });
+
+  it("keeps read-only hard blocks ahead of find-sed ownership", () => {
+    const result = evaluateBashPolicy("cd /tmp && find . -delete");
+
+    expect(result.terminal.ownerTopic).toBe("read-only");
+    expect(result.terminal.ownerName).toBe("cd");
+    expect(result.terminal.riskClass).toBe("blocked");
+  });
+
+  it("keeps nix eval as a direct hard block outside install/run policy", () => {
+    const command = "nix eval .#checks.x86_64-linux";
+    const result = evaluateBashPolicy(command);
+
+    expect(runInstallRemotePolicyFindings(command, matchPatternInCommand)).toEqual([]);
+    expect(result.terminal.ownerName).toBe("nix eval");
+    expect(result.terminal.ownerTopic).toBe("read-only");
+    expect(result.terminal.riskClass).toBe("blocked");
+    expect(result.terminal.alternative).toBe("Use nix-eval-jobs instead");
+    expect(result.terminal.workaroundCategory).toBeUndefined();
+  });
+});

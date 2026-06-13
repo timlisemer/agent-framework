@@ -21,3 +21,10 @@ authorization check; prediction-block must not ask for another authorization
 just because the command is outside its narrow read-only classifier. Bash safety
 is still enforced by the surrounding rule pipeline: blacklist-style deterministic
 blocks run before prediction-block, and final tool approval runs afterward.
+
+Command safety is centralized in `src/utils/bash-policy/`. The analyzer handles
+shell segments, wrappers, shell payloads, `eval`, and `xargs`; topic modules own
+git, check-routed commands, read-only Bash, file writes, scripting-language
+execution, run/install/remote commands, and destructive find/sed cases. The
+registry keeps one terminal owner for each Bash tool call while compatibility
+APIs still render established `blacklist` and check-MCP messages.

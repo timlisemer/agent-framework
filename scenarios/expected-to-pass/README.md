@@ -11,8 +11,8 @@ signal. Re-run before moving; if results disagree, move the fixture to
 2026-06-13 three full scenario sweeps:
 
 - Ran the full scenario union three times through `scenario_tester`:
-  119 total scenarios per run, including 76 committed fixtures in this folder,
-  16 in `expected-to-fail/`, 6 in `non-deterministic/`, and 21 home scenarios.
+  119 total scenarios per run, including 87 committed fixtures in this folder,
+  6 in `expected-to-fail/`, 4 in `non-deterministic/`, and 22 home scenarios.
   Aggregate results were 91/119, 93/119, and 92/119 passing.
 - Promoted stable passing scenarios from `expected-to-fail/`:
   `confirm-quickconfirm-omits-required-extra-context-should-deny.json`,

@@ -9,7 +9,8 @@
  */
 
 import type { ToolPrediction } from "./prediction-types.js";
-import { getBlacklistHighlights, PLAN_MODE_BASH_WRITE_PATTERNS } from "./bash-command-policy.js";
+import { getBlacklistHighlights } from "./bash-command-policy.js";
+import { isPlanModeBashWrite } from "./plan-mode-bash-write.js";
 import { activeSpec } from "../adapter/spec.js";
 import { isSessionPlanfilePath } from "./planfile.js";
 
@@ -128,10 +129,8 @@ export function planModeBashBlock(
   if (!planMode) return null;
   if (toolName !== "Bash") return null;
   if (getBlacklistHighlights(toolName, { command }, workingDir).length > 0) return null;
-  for (const pattern of PLAN_MODE_BASH_WRITE_PATTERNS) {
-    if (pattern.test(command)) {
-      return `Plan mode is active - write commands are blocked. Command: ${command.slice(0, 100)}. ${PLAN_MODE_SCRATCH_GUIDANCE}`;
-    }
+  if (isPlanModeBashWrite(command, workingDir)) {
+    return `Plan mode is active - write commands are blocked. Command: ${command.slice(0, 100)}. ${PLAN_MODE_SCRATCH_GUIDANCE}`;
   }
   return null;
 }

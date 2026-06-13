@@ -11,6 +11,7 @@ export {
   detectCheckRoutedWorkaroundCommand,
   detectWorkaroundCommand,
   detectWorkaroundPattern,
+  evaluateBashPolicy,
   getBlacklistDescription,
   getBlacklistHighlights,
   getCheckRoutedCommandHighlights,

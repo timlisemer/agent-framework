@@ -117,10 +117,10 @@ export function getCheckTargetContext(workingDir: string): CheckTargetContext {
 // Message resolution
 // ---------------------------------------------------------------------------
 
-import { activeSpec } from "../adapter/spec.js";
+import { renderCheckMcpAction } from "./policy-message-rendering.js";
 
 function getAction(): string {
-  return `You must run ${activeSpec().renderCheckMcpHint()}`;
+  return renderCheckMcpAction();
 }
 
 function isDirectCheckRunnerCommand(patternName: string): boolean {
@@ -146,11 +146,11 @@ export function resolveCheckMessage(
   const action = getAction();
 
   if (!ctx.runner) {
-    return `No Justfile/Makefile found. ${action}`;
+    return `${patternName} is check-routed. No Justfile/Makefile found. ${action}`;
   }
 
   if (!ctx.hasCheckTarget) {
-    return `${ctx.runner === "just" ? "Justfile" : "Makefile"} found but no check target. ${action}`;
+    return `${patternName} is check-routed. ${ctx.runner === "just" ? "Justfile" : "Makefile"} found but no check target. ${action}`;
   }
 
   if (isDirectCheckRunnerCommand(patternName)) {

@@ -270,6 +270,16 @@ a second Bash authorization. Separate safety layers still apply: deterministic
 blacklist checks run before prediction-block, and `tool-approve` evaluates the
 command afterward for task fit and policy violations.
 
+Bash safety is implemented through `src/utils/bash-policy/`: a shared analyzer
+tokenizes shell segments, unwraps supported command wrappers, and exposes shell,
+`eval`, and `xargs` payloads to focused topic classifiers. The public
+`blacklist` vocabulary remains stable, but the registry now selects one terminal
+owner for each Bash command: git, check-routed, read-only, file-write,
+script-exec, run/install/remote, find/sed, or fallback. Check/typecheck/build/
+lint/test/format commands such as `npx --yes tsc --noEmit` are routed
+deterministically to the agent-framework check MCP instead of being left to
+prediction-block or prose-oriented regex matching.
+
 ### Tool Risk Categories
 
 | Risk Level     | Tools                                                                                                                                                                         | Notes                                      |

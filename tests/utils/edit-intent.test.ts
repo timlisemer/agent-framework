@@ -179,6 +179,14 @@ describe("planModeBashBlock", () => {
     expect(result).toContain("Plan mode is active");
   });
 
+  it.each([
+    'bash -lc "rm -rf dist/"',
+    'sh -c "mkdir tmp"',
+  ])("blocks wrapped filesystem mutators in plan mode: %s", (command) => {
+    const result = planModeBashBlock(true, "Bash", command);
+    expect(result).toContain("Plan mode is active");
+  });
+
   it("defers sed -i to the general Bash blacklist in plan mode", () => {
     const result = planModeBashBlock(true, "Bash", "sed -i 's/foo/bar/' file.txt");
     expect(result).toBeNull();

@@ -182,6 +182,18 @@ describe("getBlacklistHighlights", () => {
     expect(getBlacklistHighlights("Bash", { command: "tsc --noEmit" })).toEqual(highlights);
   });
 
+  it("routes token-aware npx tsc forms through check-routed policy", () => {
+    for (const command of [
+      "npx tsc --noEmit",
+      "npx --yes tsc --noEmit",
+      'bash -lc "npx tsc --noEmit"',
+    ]) {
+      const highlights = getCheckRoutedCommandHighlights("Bash", { command });
+      expect(highlights.some((h) => h.includes("[CHECK-ROUTED: tsc]")), command).toBe(true);
+      expect(getBlacklistHighlights("Bash", { command }), command).toEqual(highlights);
+    }
+  });
+
   it("detects 'nix eval' in Bash command and points to nix-eval-jobs", () => {
     const highlights = getBlacklistHighlights("Bash", {
       command: "nix eval .#nixosConfigurations.host.config.system.build.toplevel",
@@ -215,6 +227,13 @@ describe("getBlacklistHighlights", () => {
       const highlights = getBlacklistHighlights("Bash", { command });
       expect(highlights.some((h) => h.includes("git write op"))).toBe(true);
     }
+  });
+
+  it.each(["git push", "git -C repo push"])("keeps workflow guidance for Bash git workflow writes: %s", (command) => {
+    const highlights = getBlacklistHighlights("Bash", { command });
+
+    expect(highlights.some((h) => h.includes("[BLACKLIST: git write op (MCP)]"))).toBe(true);
+    expect(highlights.some((h) => h.includes("Use workflow tools"))).toBe(true);
   });
 
   it("does not scan rg search text as executable git intent", () => {
@@ -312,11 +331,9 @@ describe("getBlacklistHighlights", () => {
 });
 
 describe("getBlacklistHighlights - Agent background blocking", () => {
-  it("blocks Agent with run_in_background: true", () => {
+  it("leaves Agent background blocking to the dedicated rule", () => {
     const highlights = getBlacklistHighlights("Agent", { prompt: "do stuff", run_in_background: true });
-    expect(highlights).toHaveLength(1);
-    expect(highlights[0]).toContain("BLACKLIST");
-    expect(highlights[0]).toContain("background agent");
+    expect(highlights).toEqual([]);
   });
 
   it("allows Agent with run_in_background: false", () => {
@@ -590,6 +607,18 @@ describe("getContentBlacklistHighlights path redaction", () => {
 
   it("still fires tsc pattern on a real `npx tsc` invocation in plan prose", () => {
     const highlights = getContentBlacklistHighlights("Run npx tsc to typecheck before merging.");
+    expect(highlights.length).toBeGreaterThan(0);
+    expect(highlights[0].rendered).toContain("[VIOLATION: tsc]");
+  });
+
+  it.each([
+    "Run npm exec tsc -- --noEmit before merging.",
+    "Run pnpm exec tsc --noEmit before merging.",
+    "Run yarn exec tsc --noEmit before merging.",
+    "Run bunx tsc --noEmit before merging.",
+  ])("fires tsc content policy for invocation-aware aliases: %s", (content) => {
+    const highlights = getContentBlacklistHighlights(content);
+
     expect(highlights.length).toBeGreaterThan(0);
     expect(highlights[0].rendered).toContain("[VIOLATION: tsc]");
   });

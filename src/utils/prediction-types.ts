@@ -24,7 +24,7 @@ import {
   CHECK_VERB_RE,
   READ_VERB_RE,
 } from "./edit-intent.js";
-import { classifyBashCommand, type BashCommandClassification } from "./command-patterns.js";
+import { classifyBashCommand, evaluateBashPolicy, type BashCommandClassification } from "./command-patterns.js";
 
 export type Mood = "angry" | "frustrated" | "neutral" | "satisfied" | "happy";
 export type Trust = "low" | "normal" | "high";
@@ -89,10 +89,14 @@ export interface ToolPrediction {
 
 function bashSafetyBlocksPredictionOverride(
   classification: BashCommandClassification,
+  command: string,
 ): boolean {
   if (classification.riskClass === "blocked") return true;
+  const terminal = evaluateBashPolicy(command).terminal;
+  if (classification.blacklistHighlights.some((highlight) => highlight.startsWith("[CHECK-ROUTED:")) && terminal.ownerTopic !== "check-routed") return true;
+  if (classification.workaroundCategory) return terminal.ownerTopic !== "check-routed";
   if (classification.riskClass !== "high-risk-workaround") return false;
-  return !classification.blacklistHighlights.some((h) => h.startsWith("[CHECK-ROUTED:"));
+  return terminal.ownerTopic !== "check-routed";
 }
 
 export interface PredictionDecision {
@@ -721,8 +725,9 @@ export function decidePrediction(
       ? deriveEditIntentFromPrediction({ ...prediction, intent: "" })
       : null;
   const inputStr = stringifyToolInput(toolInput);
+  const bashCommand = String((toolInput as { command?: unknown })?.command ?? "");
   const bashClassification = toolName === "Bash"
-    ? classifyBashCommand(String((toolInput as { command?: unknown })?.command ?? ""))
+    ? classifyBashCommand(bashCommand)
     : null;
   const toolIdentities = bashClassification?.predictionIdentities ?? predictionToolIdentityNames(toolName);
   const matchesToolIdentity = (candidate: string): boolean =>
@@ -957,7 +962,7 @@ export function decidePrediction(
             reason: "User's latest transcript message authorizes Bash rm, but no Bash command was provided.",
           };
         }
-        if (bashSafetyBlocksPredictionOverride(bashClassification)) {
+        if (bashSafetyBlocksPredictionOverride(bashClassification, command)) {
           return {
             decision: "deny",
             reason: `User's latest transcript message authorizes Bash rm, but Bash safety policy blocks this command. ${bashClassification.reason ?? "command is blocked"}`,
@@ -978,7 +983,7 @@ export function decidePrediction(
             reason: "User's latest transcript message implies Bash, but no Bash command was provided.",
           };
         }
-        if (bashSafetyBlocksPredictionOverride(bashClassification)) {
+        if (bashSafetyBlocksPredictionOverride(bashClassification, bashCommand)) {
           return {
             decision: "deny",
             reason: `User's latest transcript message implies Bash, but Bash safety policy blocks this command. ${bashClassification.reason ?? "command is blocked"}`,

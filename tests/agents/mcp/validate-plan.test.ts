@@ -175,6 +175,19 @@ describe("runValidatePlanAgent", () => {
     expect(result).toContain("Option A");
   });
 
+  it("reports adapter-specific check MCP guidance for check-routed plan prose", async () => {
+    const result = await validatePlanText(
+      validPlan().replace(
+        "This section contains concrete repository-specific details for Approach with `src/file.ts` references.",
+        "Run npx tsc --noEmit before changing `src/file.ts`.",
+      ),
+    );
+
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain(activeSpec().mcpWireName("check"));
+    expect(result).not.toContain("Use the check MCP");
+  });
+
   it("passes when the plan-validate LLM returns VALID", async () => {
     const result = await validatePlanText(validPlan());
     expect(result).toContain("- Status: PASS");

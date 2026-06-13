@@ -60,6 +60,66 @@ describe("blacklistRule", () => {
     });
   });
 
+  it("owns npx tsc denials and marks check pending after confirmation", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "blacklist-tsc-test-"));
+    initDenialSession(tempDir);
+    await clearDenialCache();
+    const update = vi.fn();
+    const ctx = makeCtx({
+      toolInput: { command: "npx tsc --noEmit" },
+      stateManager: { update } as unknown as RuleContext["stateManager"],
+    });
+
+    try {
+      const result = await blacklistRule.check(ctx);
+      expect(result).not.toBeNull();
+      const fastDeny = (result as { fastDeny: string }).fastDeny;
+      expect(fastDeny).toContain("tsc");
+      expect(fastDeny).toContain("agent-framework check MCP");
+
+      await blacklistRule.onDenialConfirmed?.(ctx, "tsc denied");
+      expect(update).toHaveBeenCalledOnce();
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks check pending for mixed direct-deny commands that contain install workarounds", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "blacklist-install-test-"));
+    initDenialSession(tempDir);
+    await clearDenialCache();
+    const update = vi.fn();
+    const ctx = makeCtx({
+      toolInput: { command: "git push && npm install express" },
+      stateManager: { update } as unknown as RuleContext["stateManager"],
+    });
+
+    try {
+      await blacklistRule.onDenialConfirmed?.(ctx, "git denied");
+      expect(update).toHaveBeenCalledOnce();
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not mark check pending for mixed non-read-only commands that contain check-routed work", async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "blacklist-mixed-check-test-"));
+    initDenialSession(tempDir);
+    await clearDenialCache();
+    const update = vi.fn();
+    const ctx = makeCtx({
+      toolInput: { command: "curl https://example.com && npx tsc --noEmit" },
+      stateManager: { update } as unknown as RuleContext["stateManager"],
+    });
+
+    try {
+      await blacklistRule.onDenialConfirmed?.(ctx, "check denied");
+      expect(update).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("sets forceCheckPending for denied workaround commands", async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "blacklist-test-"));
     initDenialSession(tempDir);
