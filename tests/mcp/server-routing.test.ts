@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   runCreatePlanfileAgent: vi.fn(),
   runConfirmAgent: vi.fn(),
   runFullConfirmAgent: vi.fn(),
+  prepareCommitConfirmContext: vi.fn(),
   runCommitAgent: vi.fn(),
   runCommitAgentWithSharedConfirm: vi.fn(),
   runPushAgent: vi.fn(),
@@ -69,6 +70,7 @@ vi.mock("../../src/agents/mcp/confirm.js", () => ({
 }));
 
 vi.mock("../../src/agents/mcp/commit.js", () => ({
+  prepareCommitConfirmContext: mocks.prepareCommitConfirmContext,
   runCommitAgent: mocks.runCommitAgent,
   runCommitAgentWithSharedConfirm: mocks.runCommitAgentWithSharedConfirm,
 }));
@@ -169,6 +171,7 @@ describe("MCP server repo-scope routing", () => {
     mocks.parseUncertainties.mockReturnValue([]);
     mocks.runConfirmAgent.mockResolvedValue("## Verdict\nCONFIRMED: ok");
     mocks.runFullConfirmAgent.mockResolvedValue("## Verdict\nCONFIRMED: full ok");
+    mocks.prepareCommitConfirmContext.mockResolvedValue({ extraContext: undefined, moves: [], movesByRepo: [] });
     mocks.runCommitAgentWithSharedConfirm.mockResolvedValue("## Verdict\nCONFIRMED: ok\n\nSIZE: SMALL\ncommit: scoped\nHASH: abc123");
     mocks.runCommitAgent.mockResolvedValue("## Verdict\nCONFIRMED: ok\n\nSIZE: SMALL\ncommit: scoped\nHASH: def456");
   });
@@ -257,19 +260,49 @@ describe("MCP server repo-scope routing", () => {
   });
 
   it("routes commit all scope through one confirm and shared-confirm commits", async () => {
+    mocks.prepareCommitConfirmContext.mockResolvedValueOnce({
+      extraContext: undefined,
+      moves: [{ oldPath: "old.ts", newPath: "new.ts", similarity: 100, mode: "moved" }],
+      movesByRepo: [
+        {
+          repoPath: "/repo/main/sub",
+          moves: [{ oldPath: "old.ts", newPath: "new.ts", similarity: 100, mode: "moved" }],
+        },
+        { repoPath: "/repo/main", moves: [] },
+      ],
+    });
+
     const result = await callTool("commit", {
       working_dir: "/repo/main",
       skip_elicitation: true,
     });
 
     expect(result.content[0].text).toContain("HASH: abc123");
+    expect(mocks.prepareCommitConfirmContext).toHaveBeenCalledTimes(1);
+    expect(mocks.prepareCommitConfirmContext).toHaveBeenCalledWith(
+      [
+        { path: "/repo/main/sub", name: "sub" },
+        { path: "/repo/main", name: "main" },
+      ],
+      undefined,
+      expect.any(Object),
+    );
     expect(mocks.runConfirmAgent).toHaveBeenCalledTimes(1);
     expect(mocks.runConfirmAgent).toHaveBeenCalledWith(
       "/repo/main",
       "opus",
       undefined,
       undefined,
-      expect.objectContaining({ repoScope: { mode: "all", repoInfo } }),
+      expect.objectContaining({
+        repoScope: { mode: "all", repoInfo },
+        preparedNormalizedMovesByRepo: [
+          {
+            repoPath: "/repo/main/sub",
+            moves: [{ oldPath: "old.ts", newPath: "new.ts", similarity: 100, mode: "moved" }],
+          },
+          { repoPath: "/repo/main", moves: [] },
+        ],
+      }),
     );
     expect(mocks.runCommitAgent).not.toHaveBeenCalled();
     expect(mocks.runCommitAgentWithSharedConfirm).toHaveBeenCalledTimes(2);

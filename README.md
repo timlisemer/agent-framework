@@ -35,7 +35,7 @@ The framework implements 20 specialized agents and MCP tools organized into thre
 | --------------- | ------ | ------------------------------------------------------------ |
 | check           | sonnet | Run linter + make/just check plus deterministic deleted/renamed filename-reference and supplemental editor diagnostics, return summary with recommendations |
 | confirm         | opus   | Binary quality gate using three SDK reviewers plus aggregator |
-| fullconfirm     | opus   | Full-repository quality gate using three SDK reviewers plus aggregator |
+| fullconfirm     | opus   | Full tracked-repository quality gate using three SDK reviewers plus aggregator |
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
 | validate_intent        | haiku  | Manual post-session review (requires transcript_path)        |
@@ -81,10 +81,12 @@ Agents call each other in verification chains:
 check ─────────────────────────► (runs independently)
 confirm ──► runCheckAgent() ───► (check must pass first)
 fullconfirm ─► runCheckAgent() ─► (check must pass first)
-commit ───► runConfirmAgent() ─► runCheckAgent() ─► (full chain)
+commit ───► normalize moved files ─► runConfirmAgent() ─► runCheckAgent() ─► (full chain)
 ```
 
-The `commit` agent enforces the complete verification chain before committing.
+The `commit` agent may stage detected moved+recreated path pairs before confirm
+so Git reports them as renames, then enforces the complete verification chain
+before committing.
 
 ## PreToolUse Hook Flow
 

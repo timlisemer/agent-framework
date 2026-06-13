@@ -77,6 +77,18 @@ export interface ConfirmPrefilterResult {
   unusedCodeWorkarounds: { file: string; line: string; label: string }[];
 }
 
+function pathsFromPorcelainStatusLine(line: string): string[] {
+  if (!line) return [];
+  const payload = line.startsWith("??") ? line.slice(3) : line.slice(3);
+  if (!payload) return [];
+  const renameSeparator = " -> ";
+  if (line[0] === "R" && payload.includes(renameSeparator)) {
+    const destination = payload.slice(payload.indexOf(renameSeparator) + renameSeparator.length);
+    return destination ? [destination] : [];
+  }
+  return [payload];
+}
+
 /**
  * Walk diff hunks tracking the active file via `+++ b/<path>` headers. For
  * each `+` line (excluding the `+++` file marker), apply the file-extension-
@@ -91,11 +103,12 @@ export function runConfirmPrefilter(
   const unwantedFiles: string[] = [];
   for (const line of porcelainStatus.split("\n")) {
     if (!line.trim()) continue;
-    // Porcelain status: 2-char status code + space + path. Untracked uses "?? path".
-    const path = line.startsWith("??") ? line.slice(3).trim() : line.slice(3).trim();
-    if (!path) continue;
-    if (UNWANTED_PATH_PATTERNS.some((re) => re.test(path)) || isSensitivePath(path)) {
-      unwantedFiles.push(path);
+    // Porcelain status: 2-char status code + space + path. Virtual normalized
+    // renames use `R  old -> new`; evaluate the destination path.
+    for (const path of pathsFromPorcelainStatusLine(line)) {
+      if (UNWANTED_PATH_PATTERNS.some((re) => re.test(path)) || isSensitivePath(path)) {
+        unwantedFiles.push(path);
+      }
     }
   }
 

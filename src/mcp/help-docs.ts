@@ -131,8 +131,10 @@ repo. Verdicts are either CONFIRMED or DECLINED with reason.
 
 export const FULLCONFIRM_HELP = `# fullconfirm -- Full Code Review Confirmation
 
-Reviews the full git-visible code scope for quality, security, documentation,
-tests, deduplication, helper placement, and separation-of-concern problems.
+Reviews the full tracked git-visible code scope for quality, security,
+documentation, tests, deduplication, helper placement, and
+separation-of-concern problems. Untracked files are not injected into the
+prompt context unless reviewers inspect them explicitly with tools.
 Runs check first; if check fails, fullconfirm returns the check output verbatim.
 
 ## Inputs
@@ -148,7 +150,7 @@ Runs check first; if check fails, fullconfirm returns the check output verbatim.
 1. Detect the main repository and submodules, including clean repositories
 2. If multiple repos and skip_elicitation=false, ask whether to confirm all repos together or individually
 3. Run check agent. If it FAILs, return the check output verbatim without LLM.
-4. Build git-visible file inventory and text line-count metadata without embedding full file contents.
+4. Build tracked git-visible file inventory and text line-count metadata without embedding full file contents or untracked files.
 5. Run three SDK reviewers in parallel: one general confirm reviewer, one deduplication/generalization specialist, and one code-quality/pattern specialist.
 6. Merge the reviewer results with a direct aggregator that preserves blocking findings and non-blocking warnings.
 
@@ -164,8 +166,9 @@ the same CONFIRMED or DECLINED verdict format as confirm.
 
 export const COMMIT_HELP = `# commit -- Quality-Gated Git Commit
 
-Runs confirm first; if CONFIRMED, generates a commit message sized to the diff
-and executes git commit. Optionally auto-pushes after successful commits.
+Normalizes detected moved+recreated files into Git-recognized moves, runs
+confirm, then generates a commit message sized to the diff and executes git
+commit. Optionally auto-pushes after successful commits.
 
 ## Inputs
 
@@ -180,14 +183,15 @@ and executes git commit. Optionally auto-pushes after successful commits.
 
 1. Detect repos with uncommitted changes
 2. If multiple repos and interactive, ask whether to commit all repos together or individually
-3. All mode runs one combined confirm, then commits each dirty repo using shared confirm summary guidance
-4. Individual mode elicits repo selection and per-repo preferences, then runs confirm per repo
-5. If CONFIRMED, generate message sized to diff:
+3. Before confirm, stage only accepted moved+recreated old/new path pairs so Git reports renames and edit hunks
+4. All mode runs one combined confirm, then commits each dirty repo using shared confirm summary guidance
+5. Individual mode elicits repo selection and per-repo preferences, then runs confirm per repo
+6. If CONFIRMED, generate message sized to diff:
    - SMALL (1-3 files, <50 lines): single lowercase line
    - MEDIUM (4-10 files or 50-200 lines): scope-prefixed line
    - LARGE (10+ files or 200+ lines): title + bullet body
-6. Execute git add -A && git commit
-7. If auto_push, elicit push selection for individual mode and run push agent per repo
+7. Execute git add -A && git commit
+8. If auto_push, elicit push selection for individual mode and run push agent per repo
 
 ## Output
 

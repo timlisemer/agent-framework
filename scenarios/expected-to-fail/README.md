@@ -35,13 +35,6 @@ user explicitly authorized the action: run the `/plan3` Agent workflow.
 These scenarios cover stale cached intent or already-satisfied prerequisites
 being treated as still blocking after the workflow moved forward.
 
-### Low-risk bypass misfire
-
-- `read-unasked-file-instead-of-doing-task-should-deny.json`
-
-This scenario covers a mechanically low-risk `Read` call that is still wrong
-because it is tangential to the user's direct demand.
-
 ### Explicit user prohibition state
 
 - `sentiment-explicit-forbid-push.json`
@@ -92,7 +85,6 @@ Historical reclassification notes:
 - Demoted stable expected-to-pass regressions into this folder on 2026-05-13:
   `bash-npx-tsc-blocked-wrong-reason.json`,
   `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message.json`,
-  `read-unasked-file-instead-of-doing-task-should-deny.json`,
   `sentiment-explicit-forbid-push.json`, and
   `tool-approve-fails-to-block-cd-cat-head-bash-violations.json`.
 - Moved stable failing nondeterministic fixtures into this folder on 2026-05-13:

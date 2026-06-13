@@ -33,6 +33,8 @@ import {
   getAllReposGitContextCancellable,
   getSingleRepoGitContextWithSiblingOverviewCancellable,
   getUncommittedChangesCancellable,
+  type NormalizedMoveSummary,
+  type RepoNormalizedMoveSummary,
   type RepoInfo,
 } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
@@ -125,6 +127,8 @@ type ConfirmRepoScope =
 
 type ConfirmOptions = CancellationOptions & {
   repoScope?: ConfirmRepoScope;
+  preparedNormalizedMoves?: NormalizedMoveSummary[];
+  preparedNormalizedMovesByRepo?: RepoNormalizedMoveSummary[];
 };
 
 type ConfirmReviewScopeKind = "uncommitted" | "full";
@@ -135,6 +139,7 @@ type ConfirmReviewContext = {
   status: string;
   diff: string;
   lineCount: number;
+  normalizedMoves: NormalizedMoveSummary[];
 };
 
 async function readPlanfileForConfirm(planPath: string): Promise<ConfirmPlanfileResolution> {
@@ -236,6 +241,21 @@ If the changed code clearly violates this requirement, fail Deduplication and qu
 `;
 }
 
+function formatNormalizedMovesContext(moves: NormalizedMoveSummary[]): string {
+  if (moves.length === 0) return "";
+  return `NORMALIZED MOVES:
+${moves.map((move) => {
+  const label = move.mode === "moved-with-edits" ? "moved with edits" : "moved";
+  return `${move.oldPath} -> ${move.newPath} (${label}, similarity ${move.similarity}%)`;
+}).join("\n")}`;
+}
+
+function appendNormalizedMovesContext(context: string, moves: NormalizedMoveSummary[]): string {
+  const moveContext = formatNormalizedMovesContext(moves);
+  if (!moveContext || context.includes(moveContext)) return context;
+  return `${context}\n\n${moveContext}`;
+}
+
 function countDiffReviewLines(diff: string): number {
   return diff
     .split("\n")
@@ -253,11 +273,14 @@ async function buildUncommittedReviewContext(
   let status = "";
   let diff = "";
   let gitContext = "";
+  let normalizedMoves: NormalizedMoveSummary[] = [];
+  const gitOptions = { ...options, normalizeMovedRecreated: true };
   if (allRepoInfo) {
-    const allContext = await getAllReposGitContextCancellable(allRepoInfo, options);
+    const allContext = await getAllReposGitContextCancellable(allRepoInfo, gitOptions);
     status = allContext.repos.map((repo) => repo.changes.status).join("\n");
     diff = allContext.repos.map((repo) => repo.changes.diff).join("\n");
     gitContext = allContext.context;
+    normalizedMoves = allContext.repos.flatMap((repo) => repo.changes.normalizedMoves ?? []);
   } else if (
     options.repoScope?.mode === "single"
     && options.repoScope.repoInfo
@@ -267,15 +290,17 @@ async function buildUncommittedReviewContext(
     const singleContext = await getSingleRepoGitContextWithSiblingOverviewCancellable(
       workingDir,
       singleRepoInfo,
-      options,
+      gitOptions,
     );
     status = singleContext.current.changes.status;
     diff = singleContext.current.changes.diff;
     gitContext = `${formatGitContextForRepos([singleContext.current])}${singleContext.siblingOverview ? `\n\n${singleContext.siblingOverview}` : ""}`;
+    normalizedMoves = singleContext.current.changes.normalizedMoves ?? [];
   } else {
-    const changes = await getUncommittedChangesCancellable(workingDir, options);
+    const changes = await getUncommittedChangesCancellable(workingDir, gitOptions);
     status = changes.status;
     diff = changes.diff;
+    normalizedMoves = changes.normalizedMoves ?? [];
     gitContext = `GIT STATUS (files changed):
 ${status || "(no changes)"}
 
@@ -289,6 +314,7 @@ ${diff || "(no diff)"}`;
     status,
     diff,
     lineCount: countDiffReviewLines(diff),
+    normalizedMoves,
   };
 }
 
@@ -309,6 +335,7 @@ async function buildFullReviewContext(
       .join("\n"),
     diff: "",
     lineCount: fullContext.totalLines,
+    normalizedMoves: [],
   };
 }
 
@@ -475,12 +502,13 @@ async function runSharedConfirmAgent(
   ].join("\n"));
   const deduplicationRequirementSection = formatDeduplicationRequirementContext(deduplicationRequirement);
 
-  const context = `${prefilterSection}${deduplicationRequirementSection}${formatPlanfileContext(planfile)}
+  const baseContext = `${prefilterSection}${deduplicationRequirementSection}${formatPlanfileContext(planfile)}
 
 REVIEW SCOPE: ${scopeKind === "full" ? "full git-visible code" : "uncommitted code changes"}
 REVIEW LINE COUNT: ${reviewContext.lineCount}
 
 ${reviewContext.context}${extraContext ? `\n\nUSER INSTRUCTIONS:\n${extraContext}` : ""}`;
+  const context = appendNormalizedMovesContext(baseContext, reviewContext.normalizedMoves);
   const result = await runConfirmReviewAgents(workingDir, tier, reviewContext, context, options);
 
   logAgentResult(result, {

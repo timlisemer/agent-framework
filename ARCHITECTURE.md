@@ -327,10 +327,11 @@ Models are centrally configured in `src/types.ts`:
 MCP agents chain together for verification:
 
 ```
-commit → confirm → check
-  │         │         │
-  │         │         └─ Runs linter + make/just check + deterministic deleted/renamed filename-reference + supplemental editor diagnostics (sonnet, direct)
-  │         └─ Analyzes git diff with three SDK reviewers + direct aggregator
+commit → normalize moved files → confirm → check
+  │              │               │         │
+  │              │               │         └─ Runs linter + make/just check + deterministic deleted/renamed filename-reference + supplemental editor diagnostics (sonnet, direct)
+  │              │               └─ Analyzes git diff with three SDK reviewers + direct aggregator
+  │              └─ Stages detected moved+recreated path pairs before confirm so Git reports renames
   └─ Generates commit message + executes commit (haiku, direct)
 
 fullconfirm → check
@@ -349,6 +350,7 @@ The `commit`, `confirm`, `fullconfirm`, and `push` tools use MCP elicitation (`s
 Tool called → getRepoInfo()
   → Multiple repos? → elicitInput: all repos vs individual repos
   → All repos:
+      → commit: normalize moved+recreated path pairs in each selected repo before confirm
       → Run one combined confirm/check scope across dirty repos, or fullconfirm/check scope across selected repositories
       → commit: reuse that confirm result while committing each dirty repo
   → Individual repos:

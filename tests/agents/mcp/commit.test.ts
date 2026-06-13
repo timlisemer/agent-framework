@@ -148,6 +148,33 @@ src/bar.ts:8: 'unusedValue' is declared but its value is never read.
     );
   });
 
+  it("real-normalizes moved+recreated files before confirm without duplicating move context", async () => {
+    fs.mkdirSync(path.join(repo, "src"));
+    fs.mkdirSync(path.join(repo, "lib"));
+    fs.writeFileSync(path.join(repo, "src", "helper.ts"), "export const value = 1;\n");
+    git(repo, ["add", "src/helper.ts"]);
+    git(repo, ["commit", "-m", "add helper"]);
+    fs.rmSync(path.join(repo, "src", "helper.ts"));
+    fs.writeFileSync(path.join(repo, "lib", "helper.ts"), "export const value = 1;\n");
+    mocks.runAgent.mockResolvedValue({
+      output: "SIZE: SMALL\nMESSAGE:\ncommit: move helper",
+    });
+
+    const result = await runCommitAgent(repo, "haiku", "focus", "plan.md");
+
+    expect(result).toContain("HASH:");
+    expect(mocks.runConfirmAgent).toHaveBeenCalledWith(
+      repo,
+      "haiku",
+      "focus",
+      "plan.md",
+      expect.any(Object),
+    );
+    expect(git(repo, ["show", "--name-status", "--find-renames", "--pretty=", "HEAD"])).toContain(
+      "R100\tsrc/helper.ts\tlib/helper.ts",
+    );
+  });
+
   it("commits with a shared confirm result without rerunning confirm", async () => {
     fs.writeFileSync(path.join(repo, "file.txt"), "content\n");
     mocks.runAgent.mockResolvedValue({

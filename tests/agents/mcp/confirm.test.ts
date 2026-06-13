@@ -88,6 +88,9 @@ describe("runConfirmAgent planfile context", () => {
     mocks.getUncommittedChangesCancellable.mockResolvedValue({
       status: " M src/example.ts",
       diff: "diff --git a/src/example.ts b/src/example.ts",
+      diffStat: "src/example.ts | 1 +",
+      untrackedDiff: "",
+      normalizedMoves: [],
     });
     mocks.getAllReposGitContextCancellable.mockResolvedValue({
       repos: [
@@ -299,6 +302,9 @@ src/foo.ts:1: Type error.
       expect.objectContaining({ repoScope: { mode: "all", repoInfo } }),
     );
     expect(mocks.getAllReposGitContextCancellable).toHaveBeenCalledWith(repoInfo, expect.any(Object));
+    expect(mocks.getAllReposGitContextCancellable.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ normalizeMovedRecreated: true }),
+    );
     const context = mocks.runAgent.mock.calls[0][1].context as string;
     expect(context).toContain("combined context");
   });
@@ -341,6 +347,35 @@ src/foo.ts:1: Type error.
     expect(context).toContain("REVIEW SCOPE: full git-visible code");
     expect(context).toContain("REVIEW LINE COUNT: 12");
     expect(context).toContain("FULLCONFIRM SCOPE:");
+    expect(context).not.toContain("GIT DIFF (all uncommitted changes)");
+    expect(context).not.toContain("diff --git");
+  });
+
+  it("injects virtual normalized move context for ordinary confirm", async () => {
+    mocks.getUncommittedChangesCancellable.mockResolvedValue({
+      status: " D src/helper.ts\n?? lib/helper.ts",
+      diff: "diff --git a/src/helper.ts b/lib/helper.ts\nrename from src/helper.ts\nrename to lib/helper.ts",
+      diffStat: "src/helper.ts => lib/helper.ts | 0",
+      untrackedDiff: "",
+      normalizedMoves: [
+        {
+          oldPath: "src/helper.ts",
+          newPath: "lib/helper.ts",
+          similarity: 100,
+          mode: "moved",
+        },
+      ],
+    });
+
+    await runConfirmAgent(tempDir, "haiku");
+
+    expect(mocks.getUncommittedChangesCancellable).toHaveBeenCalledWith(
+      tempDir,
+      expect.objectContaining({ normalizeMovedRecreated: true }),
+    );
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("NORMALIZED MOVES:");
+    expect(context).toContain("src/helper.ts -> lib/helper.ts");
   });
 
   it("runs fullconfirm file inventory through porcelain-shaped prefilter input", async () => {
@@ -373,6 +408,9 @@ src/foo.ts:1: Type error.
     mocks.getUncommittedChangesCancellable.mockResolvedValue({
       status: " M src/example.ts",
       diff: "+line 1",
+      diffStat: "src/example.ts | 1 +",
+      untrackedDiff: "",
+      normalizedMoves: [],
     });
     mocks.runAgent
       .mockResolvedValueOnce({ output: "## Verdict\nCONFIRMED: first" })

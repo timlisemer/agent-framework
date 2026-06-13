@@ -7,7 +7,10 @@ import {
   formatGitContextForRepos,
   formatSiblingRepoOverview,
   findDeletedOrRenamedFileReferenceIssuesCancellable,
+  detectMovedRecreatedFilesCancellable,
   getSingleRepoGitContextWithSiblingOverviewCancellable,
+  getRepoGitContextsCancellable,
+  getRepoFullScopeContextsCancellable,
   getGitStatusCancellable,
   getGitVisibleFileInventoryCancellable,
   getUncommittedChangesCancellable,
@@ -57,6 +60,187 @@ describe("bounded git utilities", () => {
     expect(Buffer.byteLength(changes.untrackedDiff, "utf-8")).toBeLessThan(3 * 1024 * 1024);
   });
 
+  it("detects an exact moved+recreated file as a move", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "lib"));
+    fs.writeFileSync(path.join(repoDir, "src", "helper.ts"), "export const value = 1;\n");
+    git(repoDir, ["add", "src/helper.ts"]);
+    git(repoDir, ["commit", "-m", "add helper"]);
+    fs.rmSync(path.join(repoDir, "src", "helper.ts"));
+    fs.writeFileSync(path.join(repoDir, "lib", "helper.ts"), "export const value = 1;\n");
+
+    const result = await detectMovedRecreatedFilesCancellable(repoDir);
+
+    expect(result.moves).toEqual([
+      {
+        oldPath: "src/helper.ts",
+        newPath: "lib/helper.ts",
+        similarity: 100,
+        mode: "moved",
+      },
+    ]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it("normalizes moved+edited files virtually without mutating the real index", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "lib"));
+    fs.writeFileSync(
+      path.join(repoDir, "src", "helper.ts"),
+      ["export function value() {", "  return 1;", "}", ""].join("\n"),
+    );
+    git(repoDir, ["add", "src/helper.ts"]);
+    git(repoDir, ["commit", "-m", "add editable helper"]);
+    fs.rmSync(path.join(repoDir, "src", "helper.ts"));
+    fs.writeFileSync(
+      path.join(repoDir, "lib", "helper.ts"),
+      ["export function value() {", "  return 2;", "}", ""].join("\n"),
+    );
+
+    const changes = await getUncommittedChangesCancellable(repoDir, { normalizeMovedRecreated: true });
+
+    expect(changes.normalizedMoves).toEqual([
+      expect.objectContaining({
+        oldPath: "src/helper.ts",
+        newPath: "lib/helper.ts",
+        mode: "moved-with-edits",
+      }),
+    ]);
+    expect(changes.diff).toContain("rename from src/helper.ts");
+    expect(changes.diff).toContain("rename to lib/helper.ts");
+    expect(changes.diff).toContain("-  return 1;");
+    expect(changes.diff).toContain("+  return 2;");
+    expect(changes.diff).not.toContain("new file mode");
+    expect(git(repoDir, ["diff", "--cached", "--name-only"]).trim()).toBe("");
+  });
+
+  it("normalizes moved+edited text files above the untracked diff synthesis limit", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "lib"));
+    const largeLine = "x".repeat(3 * 1024 * 1024);
+    fs.writeFileSync(path.join(repoDir, "src", "large.ts"), `${largeLine}\nexport const value = 1;\n`);
+    git(repoDir, ["add", "src/large.ts"]);
+    git(repoDir, ["commit", "-m", "add large"]);
+    fs.rmSync(path.join(repoDir, "src", "large.ts"));
+    fs.writeFileSync(path.join(repoDir, "lib", "large.ts"), `${largeLine}\nexport const value = 2;\n`);
+
+    const result = await detectMovedRecreatedFilesCancellable(repoDir);
+
+    expect(result.moves).toEqual([
+      expect.objectContaining({
+        oldPath: "src/large.ts",
+        newPath: "lib/large.ts",
+        mode: "moved-with-edits",
+      }),
+    ]);
+  });
+
+  it("preserves already-staged changes while building virtual normalized diffs", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "lib"));
+    fs.writeFileSync(path.join(repoDir, "tracked.txt"), "base\nstaged later\n");
+    fs.writeFileSync(path.join(repoDir, "src", "helper.ts"), "export const value = 1;\n");
+    git(repoDir, ["add", "src/helper.ts"]);
+    git(repoDir, ["commit", "-m", "add helper"]);
+    git(repoDir, ["add", "tracked.txt"]);
+    fs.rmSync(path.join(repoDir, "src", "helper.ts"));
+    fs.writeFileSync(path.join(repoDir, "lib", "helper.ts"), "export const value = 1;\n");
+
+    const changes = await getUncommittedChangesCancellable(repoDir, { normalizeMovedRecreated: true });
+
+    expect(changes.diff).toContain("rename from src/helper.ts");
+    expect(changes.diff).toContain("rename to lib/helper.ts");
+    expect(changes.diff).toContain("+staged later");
+    expect(git(repoDir, ["diff", "--cached", "--name-only"]).trim()).toBe("tracked.txt");
+  });
+
+  it("emits one normalized rename status for already-staged move pairs", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "lib"));
+    fs.writeFileSync(path.join(repoDir, "src", "renamed.ts"), "export const value = 1;\n");
+    git(repoDir, ["add", "src/renamed.ts"]);
+    git(repoDir, ["commit", "-m", "add renamed"]);
+    fs.rmSync(path.join(repoDir, "src", "renamed.ts"));
+    fs.writeFileSync(path.join(repoDir, "lib", "renamed.ts"), "export const value = 1;\n");
+    git(repoDir, ["add", "-A", "--", "src/renamed.ts", "lib/renamed.ts"]);
+
+    const changes = await getUncommittedChangesCancellable(repoDir, {
+      normalizeMovedRecreated: true,
+      preparedNormalizedMoves: [
+        { oldPath: "src/renamed.ts", newPath: "lib/renamed.ts", similarity: 100, mode: "moved" },
+      ],
+    });
+
+    expect(changes.status.split("\n").filter((line) => line.includes("renamed.ts"))).toEqual([
+      "R  src/renamed.ts -> lib/renamed.ts",
+    ]);
+  });
+
+  it("skips ambiguous same-basename move candidates", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "lib"));
+    fs.mkdirSync(path.join(repoDir, "other"));
+    fs.writeFileSync(path.join(repoDir, "src", "shared.ts"), "export const value = 1;\n");
+    git(repoDir, ["add", "src/shared.ts"]);
+    git(repoDir, ["commit", "-m", "add shared"]);
+    fs.rmSync(path.join(repoDir, "src", "shared.ts"));
+    fs.writeFileSync(path.join(repoDir, "lib", "shared.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "other", "shared.ts"), "export const value = 1;\n");
+
+    const result = await detectMovedRecreatedFilesCancellable(repoDir);
+
+    expect(result.moves).toEqual([]);
+    expect(result.skipped).toEqual([
+      {
+        oldPath: "src/shared.ts",
+        newPaths: ["lib/shared.ts", "other/shared.ts"],
+        reason: "ambiguous",
+      },
+    ]);
+  });
+
+  it("skips ambiguous many-old-to-one-new move candidates", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "lib"));
+    fs.writeFileSync(path.join(repoDir, "src", "shared.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "lib", "shared.ts"), "export const value = 1;\n");
+    git(repoDir, ["add", "src/shared.ts", "lib/shared.ts"]);
+    git(repoDir, ["commit", "-m", "add duplicate basenames"]);
+    fs.rmSync(path.join(repoDir, "src", "shared.ts"));
+    fs.rmSync(path.join(repoDir, "lib", "shared.ts"));
+    fs.writeFileSync(path.join(repoDir, "shared.ts"), "export const value = 1;\n");
+
+    const result = await detectMovedRecreatedFilesCancellable(repoDir);
+
+    expect(result.moves).toEqual([]);
+    expect(result.skipped).toEqual([
+      {
+        oldPath: "lib/shared.ts",
+        newPaths: ["shared.ts"],
+        reason: "ambiguous",
+      },
+      {
+        oldPath: "src/shared.ts",
+        newPaths: ["shared.ts"],
+        reason: "ambiguous",
+      },
+    ]);
+  });
+
+  it("leaves unrelated delete/create pairs unpaired", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "docs"));
+    fs.writeFileSync(path.join(repoDir, "src", "note.txt"), "alpha\nbeta\ngamma\n");
+    git(repoDir, ["add", "src/note.txt"]);
+    git(repoDir, ["commit", "-m", "add note"]);
+    fs.rmSync(path.join(repoDir, "src", "note.txt"));
+    fs.writeFileSync(path.join(repoDir, "docs", "note.txt"), "unrelated\ncontent\nonly\n");
+
+    const result = await detectMovedRecreatedFilesCancellable(repoDir);
+
+    expect(result.moves).toEqual([]);
+  });
+
   it("counts git-visible text files for fullconfirm inventory", async () => {
     fs.writeFileSync(path.join(repoDir, ".gitignore"), "ignored.txt\n");
     fs.writeFileSync(path.join(repoDir, "tracked.txt"), "base\nsecond\n");
@@ -72,6 +256,17 @@ describe("bounded git utilities", () => {
     expect(inventory.files.map((file) => file.path)).not.toContain("binary.bin");
     expect(inventory.totalLines).toBeGreaterThanOrEqual(5);
     expect(inventory.skippedBinary).toBe(1);
+  });
+
+  it("omits untracked files from fullconfirm scope context", async () => {
+    fs.writeFileSync(path.join(repoDir, "untracked-fullconfirm.txt"), "untracked\n");
+
+    const result = await getRepoFullScopeContextsCancellable([
+      { path: repoDir, name: "repo" },
+    ]);
+
+    expect(result.context).toContain("tracked.txt");
+    expect(result.context).not.toContain("untracked-fullconfirm.txt");
   });
 
   it("reports references to a truly deleted filename", async () => {
@@ -293,6 +488,63 @@ describe("multi-repo git context helpers", () => {
       expect(result.siblingOverview).toContain("sibling.txt");
       expect(result.siblingOverview).not.toContain("sibling full diff should stay out");
       expect(result.siblingOverview).not.toContain("diff --git");
+    } finally {
+      fs.rmSync(mainDir, { recursive: true, force: true });
+    }
+  });
+
+  it("applies prepared normalized moves only to their owning repo", async () => {
+    const mainDir = fs.mkdtempSync(path.join(os.tmpdir(), "af-git-utils-main-"));
+    try {
+      git(mainDir, ["init"]);
+      git(mainDir, ["config", "user.email", "test@example.com"]);
+      git(mainDir, ["config", "user.name", "Test User"]);
+      fs.mkdirSync(path.join(mainDir, "src"));
+      fs.mkdirSync(path.join(mainDir, "lib"));
+      fs.writeFileSync(path.join(mainDir, "src", "main.ts"), "export const main = 1;\n");
+      git(mainDir, ["add", "src/main.ts"]);
+      git(mainDir, ["commit", "-m", "add main"]);
+
+      const siblingDir = path.join(mainDir, "sibling");
+      fs.mkdirSync(siblingDir);
+      git(siblingDir, ["init"]);
+      git(siblingDir, ["config", "user.email", "test@example.com"]);
+      git(siblingDir, ["config", "user.name", "Test User"]);
+      fs.mkdirSync(path.join(siblingDir, "src"));
+      fs.mkdirSync(path.join(siblingDir, "lib"));
+      fs.writeFileSync(path.join(siblingDir, "src", "sibling.ts"), "export const sibling = 1;\n");
+      git(siblingDir, ["add", "src/sibling.ts"]);
+      git(siblingDir, ["commit", "-m", "add sibling"]);
+
+      fs.rmSync(path.join(mainDir, "src", "main.ts"));
+      fs.writeFileSync(path.join(mainDir, "lib", "main.ts"), "export const main = 1;\n");
+      fs.rmSync(path.join(siblingDir, "src", "sibling.ts"));
+      fs.writeFileSync(path.join(siblingDir, "lib", "sibling.ts"), "export const sibling = 1;\n");
+
+      const contexts = await getRepoGitContextsCancellable(
+        [
+          { path: siblingDir, name: "sibling" },
+          { path: mainDir, name: "main" },
+        ],
+        {
+          normalizeMovedRecreated: true,
+          preparedNormalizedMovesByRepo: [
+            {
+              repoPath: siblingDir,
+              moves: [{ oldPath: "src/sibling.ts", newPath: "lib/sibling.ts", similarity: 100, mode: "moved" }],
+            },
+            {
+              repoPath: mainDir,
+              moves: [{ oldPath: "src/main.ts", newPath: "lib/main.ts", similarity: 100, mode: "moved" }],
+            },
+          ],
+        },
+      );
+
+      expect(contexts[0].changes.diff).toContain("rename from src/sibling.ts");
+      expect(contexts[0].changes.diff).not.toContain("src/main.ts");
+      expect(contexts[1].changes.diff).toContain("rename from src/main.ts");
+      expect(contexts[1].changes.diff).not.toContain("src/sibling.ts");
     } finally {
       fs.rmSync(mainDir, { recursive: true, force: true });
     }

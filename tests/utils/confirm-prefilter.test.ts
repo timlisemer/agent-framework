@@ -47,6 +47,13 @@ describe("runConfirmPrefilter — unwantedFiles", () => {
     expect(r.unwantedFiles.some((p) => p.endsWith(".pyc"))).toBe(true);
   });
 
+  it("flags rename destinations under unwanted paths", () => {
+    const status = "R  src/index.js -> dist/index.js\n";
+    const r = runConfirmPrefilter(status, "");
+    expect(r.unwantedFiles).toContain("dist/index.js");
+    expect(r.unwantedFiles).not.toContain("src/index.js -> dist/index.js");
+  });
+
   it("does NOT flag clean source paths", () => {
     const status = "M  src/utils/foo.ts\n";
     const r = runConfirmPrefilter(status, "");

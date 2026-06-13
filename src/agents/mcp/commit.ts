@@ -7,11 +7,12 @@
  * ## FLOW
  *
  * 1. Pre-check: Skip if nothing to commit
- * 2. Run confirm agent (quality gate)
- * 3. If DECLINED, return immediately
- * 4. Generate commit message via unified runner
- * 5. Execute git add -A && git commit
- * 6. Return result with commit hash
+ * 2. Normalize moved+recreated files into Git-recognized moves
+ * 3. Run confirm agent (quality gate)
+ * 4. If DECLINED, return immediately
+ * 5. Generate commit message via unified runner
+ * 6. Execute git add -A && git commit
+ * 7. Return result with commit hash
  *
  * ## MESSAGE FORMAT
  *
@@ -24,10 +25,20 @@
  */
 
 import { EXECUTION_TYPES } from "../../types.js";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { runAgent } from "../../utils/agent-runner.js";
 import { COMMIT_AGENT } from "../../utils/agent-configs.js";
 import { runProcessCancellable } from "../../utils/command.js";
-import { getUncommittedChangesCancellable, classifyCommitSize, type RepoInfo } from "../../utils/git-utils.js";
+import {
+  getUncommittedChangesCancellable,
+  classifyCommitSize,
+  detectMovedRecreatedFilesCancellable,
+  type NormalizedMoveSummary,
+  type RepoNormalizedMoveSummary,
+  type RepoInfo,
+} from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { confirmResultFailed, runConfirmAgent } from "./confirm.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
@@ -46,6 +57,103 @@ function runGit(
 type CommitOptions = CancellationOptions & {
   repoScope?: { mode: "single"; repoInfo?: RepoInfo };
 };
+
+export async function prepareCommitConfirmContext(
+  repos: Array<{ path: string }>,
+  extraContext: string | undefined,
+  options: CancellationOptions = {},
+): Promise<{
+  extraContext: string | undefined;
+  moves: NormalizedMoveSummary[];
+  movesByRepo: RepoNormalizedMoveSummary[];
+  error?: string;
+}> {
+  const moves: NormalizedMoveSummary[] = [];
+  const movesByRepo: RepoNormalizedMoveSummary[] = [];
+  const stagedByRepo: PreparedMoveIndexSnapshot[] = [];
+  for (const repo of repos) {
+    throwIfAborted(options.signal);
+    const normalized = await normalizeMovedRecreatedFilesForCommit(repo.path, options);
+    if (normalized.error) {
+      await rollbackPreparedMoveStaging(stagedByRepo, options);
+      return { extraContext, moves, movesByRepo, error: normalized.error };
+    }
+    moves.push(...normalized.moves);
+    movesByRepo.push({ repoPath: repo.path, moves: normalized.moves });
+    if (normalized.stagedPaths.length > 0) {
+      stagedByRepo.push(normalized.indexSnapshot);
+    }
+  }
+  return {
+    extraContext,
+    moves,
+    movesByRepo,
+  };
+}
+
+async function normalizeMovedRecreatedFilesForCommit(
+  workingDir: string,
+  options: CancellationOptions = {},
+): Promise<{ moves: NormalizedMoveSummary[]; stagedPaths: string[]; indexSnapshot: PreparedMoveIndexSnapshot; error?: string }> {
+  const result = await detectMovedRecreatedFilesCancellable(workingDir, options);
+  if (result.moves.length === 0) {
+    return { moves: [], stagedPaths: [], indexSnapshot: { repoPath: workingDir, paths: [], cachedPatch: "" } };
+  }
+
+  throwIfAborted(options.signal);
+  const paths = result.moves.flatMap((move) => [move.oldPath, move.newPath]);
+  const indexSnapshot = await snapshotPreparedMoveIndex(workingDir, paths, options);
+  const add = await runGit(["add", "-A", "--", ...paths], workingDir, options);
+  if (add.exitCode !== 0) {
+    await rollbackPreparedMoveStaging([indexSnapshot], options);
+    return {
+      moves: result.moves,
+      stagedPaths: [],
+      indexSnapshot,
+      error: `ERROR: Failed to normalize moved files before confirm: ${add.output}`,
+    };
+  }
+  return { moves: result.moves, stagedPaths: paths, indexSnapshot };
+}
+
+type PreparedMoveIndexSnapshot = {
+  repoPath: string;
+  paths: string[];
+  cachedPatch: string;
+};
+
+async function snapshotPreparedMoveIndex(
+  workingDir: string,
+  paths: string[],
+  options: CancellationOptions,
+): Promise<PreparedMoveIndexSnapshot> {
+  const diff = await runGit(["diff", "--cached", "--binary", "--", ...paths], workingDir, options);
+  return {
+    repoPath: workingDir,
+    paths,
+    cachedPatch: diff.output || "",
+  };
+}
+
+async function rollbackPreparedMoveStaging(
+  repos: PreparedMoveIndexSnapshot[],
+  options: CancellationOptions,
+): Promise<void> {
+  for (const repo of repos.reverse()) {
+    throwIfAborted(options.signal);
+    if (repo.paths.length === 0) continue;
+    await runGit(["restore", "--staged", "--", ...repo.paths], repo.repoPath, options);
+    if (!repo.cachedPatch.trim()) continue;
+    const patchDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "af-index-rollback-"));
+    const patchPath = path.join(patchDir, "cached.patch");
+    try {
+      await fs.promises.writeFile(patchPath, repo.cachedPatch, "utf-8");
+      await runGit(["apply", "--cached", "--whitespace=nowarn", patchPath], repo.repoPath, options);
+    } finally {
+      await fs.promises.rm(patchDir, { recursive: true, force: true });
+    }
+  }
+}
 
 /**
  * Parse the LLM response to extract size and message.
@@ -215,14 +323,24 @@ export async function runCommitAgent(
     return "SKIPPED: nothing to commit";
   }
 
+  throwIfAborted(options.signal);
+  const preparedConfirm = await prepareCommitConfirmContext(
+    [{ path: workingDir }],
+    confirmExtraContext,
+    options,
+  );
+  if (preparedConfirm.error) {
+    return preparedConfirm.error;
+  }
+
   // Confirm changes before generating commit message (pass through tier/context)
   throwIfAborted(options.signal);
   const confirmResult = await runConfirmAgent(
     workingDir,
     confirmTierName,
-    confirmExtraContext,
+    preparedConfirm.extraContext,
     optionalPlanfile,
-    options
+    { ...options, preparedNormalizedMoves: preparedConfirm.moves }
   );
   if (confirmResultFailed(confirmResult)) {
     // Preserve confirm output verbatim so check and planfile failures keep

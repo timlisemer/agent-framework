@@ -20,7 +20,7 @@ import { runCheckAgent } from "../agents/mcp/check.js";
 import { runValidatePlanAgent } from "../agents/mcp/validate-plan.js";
 import { runCreatePlanfileAgent } from "../agents/mcp/create-planfile.js";
 import { confirmResultFailed, runConfirmAgent, runFullConfirmAgent } from "../agents/mcp/confirm.js";
-import { runCommitAgent, runCommitAgentWithSharedConfirm } from "../agents/mcp/commit.js";
+import { prepareCommitConfirmContext, runCommitAgent, runCommitAgentWithSharedConfirm } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
 import { runTranscriptAgent } from "../agents/mcp/transcript.js";
 import { runLocateScenarioMcp } from "../agents/mcp/locate-scenario.js";
@@ -43,7 +43,13 @@ import {
   TRANSCRIPT_HELP,
   LOCATE_SCENARIO_HELP,
 } from "./help-docs.js";
-import { allReposInScope, getRepoInfo, getRepoInfoCancellable, sortReposWithChangesSubmodulesFirst, type RepoInfo } from "../utils/git-utils.js";
+import {
+  allReposInScope,
+  getRepoInfo,
+  getRepoInfoCancellable,
+  sortReposWithChangesSubmodulesFirst,
+  type RepoInfo,
+} from "../utils/git-utils.js";
 import { throwIfAborted } from "../utils/cancellation.js";
 import { initializeTelemetry } from "../telemetry/index.js";
 import {
@@ -435,12 +441,16 @@ registerTimedTool(
     selectedRepos = sortReposSubmodulesFirst(selectedRepos, repoInfo);
 
     if (repoScope === "all") {
+      const preparedConfirm = await prepareCommitConfirmContext(selectedRepos, args.extra_context, options);
+      if (preparedConfirm.error) {
+        return { content: [{ type: "text", text: preparedConfirm.error }] };
+      }
       let confirmResult = await runConfirmAgent(
         repoInfo.mainRepo,
         args.model_tier || "opus",
-        args.extra_context,
+        preparedConfirm.extraContext,
         args.optional_planfile,
-        { ...options, repoScope: { mode: "all", repoInfo } },
+        { ...options, repoScope: { mode: "all", repoInfo }, preparedNormalizedMovesByRepo: preparedConfirm.movesByRepo },
       );
       if (!args.skip_elicitation && confirmResult.includes("DECLINED")) {
         const uncertainties = parseUncertainties(confirmResult);
@@ -448,13 +458,14 @@ registerTimedTool(
           const clarification = await elicitUncertaintyClarification(server.server, uncertainties, options);
           throwIfAborted(signal);
           if (clarification) {
-            const retryContext = args.extra_context ? `${args.extra_context}\n${clarification}` : clarification;
+            const retryBaseContext = preparedConfirm.extraContext || args.extra_context;
+            const retryContext = retryBaseContext ? `${retryBaseContext}\n${clarification}` : clarification;
             confirmResult = await runConfirmAgent(
               repoInfo.mainRepo,
               args.model_tier || "opus",
               retryContext,
               args.optional_planfile,
-              { ...options, repoScope: { mode: "all", repoInfo } },
+              { ...options, repoScope: { mode: "all", repoInfo }, preparedNormalizedMovesByRepo: preparedConfirm.movesByRepo },
             );
           }
         }

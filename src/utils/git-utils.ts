@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs";
+import os from "os";
 import { runCommand, runProcessCancellable, type ProcessOutputLimits } from "./command.js";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
 
@@ -72,9 +73,41 @@ export interface GitChanges {
    * classification can count untracked-only commits accurately.
    */
   untrackedDiff: string;
+
+  /** Move pairs normalized while constructing the diff, if any. */
+  normalizedMoves?: NormalizedMoveSummary[];
 }
 
 export type CommitSize = "SMALL" | "MEDIUM" | "LARGE";
+
+export interface NormalizedMoveSummary {
+  oldPath: string;
+  newPath: string;
+  similarity: number;
+  mode: "moved" | "moved-with-edits";
+}
+
+export interface RepoNormalizedMoveSummary {
+  repoPath: string;
+  moves: NormalizedMoveSummary[];
+}
+
+export interface SkippedMoveCandidate {
+  oldPath: string;
+  newPaths: string[];
+  reason: "ambiguous";
+}
+
+export interface MoveDetectionResult {
+  moves: NormalizedMoveSummary[];
+  skipped: SkippedMoveCandidate[];
+}
+
+type GitChangeCollectionOptions = CancellationOptions & {
+  normalizeMovedRecreated?: boolean;
+  preparedNormalizedMoves?: NormalizedMoveSummary[];
+  preparedNormalizedMovesByRepo?: RepoNormalizedMoveSummary[];
+};
 
 /**
  * Classify commit size from git diff stats and untracked-file accounting.
@@ -312,6 +345,208 @@ async function runGit(
   return runProcessCancellable({ shell: false, file: "git", args }, cwd, options);
 }
 
+function splitGitLines(output: string): string[] {
+  return output
+    .split("\n")
+    .map((line) => line.endsWith("\r") ? line.slice(0, -1) : line)
+    .filter((line) => line.length > 0);
+}
+
+async function readGitBlobText(
+  workingDir: string,
+  relativePath: string,
+  options: CancellationOptions,
+): Promise<string | undefined> {
+  const result = await runGit(["show", `HEAD:${relativePath}`], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_DIFF_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  if (result.exitCode !== 0) return undefined;
+  if ((result.output || "").includes("\0")) return undefined;
+  if ((result.output || "").includes("[agent-framework: stdout truncated after")) return undefined;
+  return result.output || "";
+}
+
+async function readWorkingTreeText(
+  workingDir: string,
+  relativePath: string,
+): Promise<string | undefined> {
+  try {
+    const buffer = await fs.promises.readFile(path.join(workingDir, relativePath));
+    if (buffer.includes(0) || buffer.byteLength > DEFAULT_GIT_DIFF_MAX_BYTES) return undefined;
+    return buffer.toString("utf-8");
+  } catch {
+    return undefined;
+  }
+}
+
+async function getHeadBlobHash(
+  workingDir: string,
+  relativePath: string,
+  options: CancellationOptions,
+): Promise<string | undefined> {
+  const result = await runGit(["rev-parse", `HEAD:${relativePath}`], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  return result.exitCode === 0 ? result.output.trim() || undefined : undefined;
+}
+
+async function getWorkingTreeBlobHash(
+  workingDir: string,
+  relativePath: string,
+  options: CancellationOptions,
+): Promise<string | undefined> {
+  const result = await runGit(["hash-object", "--", relativePath], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  return result.exitCode === 0 ? result.output.trim() || undefined : undefined;
+}
+
+function lcsLineCount(a: string[], b: string[]): number {
+  if (a.length === 0 || b.length === 0) return 0;
+  let previous = new Array<number>(b.length + 1).fill(0);
+  let current = new Array<number>(b.length + 1).fill(0);
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = a[i - 1] === b[j - 1]
+        ? previous[j - 1] + 1
+        : Math.max(previous[j], current[j - 1]);
+    }
+    [previous, current] = [current, previous.fill(0)];
+  }
+  return previous[b.length];
+}
+
+async function scoreMoveCandidate(
+  workingDir: string,
+  oldPath: string,
+  newPath: string,
+  options: CancellationOptions,
+): Promise<number | undefined> {
+  const [oldHash, newHash] = await Promise.all([
+    getHeadBlobHash(workingDir, oldPath, options),
+    getWorkingTreeBlobHash(workingDir, newPath, options),
+  ]);
+  if (oldHash && newHash && oldHash === newHash) return 100;
+
+  const [oldText, newText] = await Promise.all([
+    readGitBlobText(workingDir, oldPath, options),
+    readWorkingTreeText(workingDir, newPath),
+  ]);
+  if (oldText === undefined || newText === undefined) return undefined;
+
+  const oldLines = oldText.split("\n");
+  const newLines = newText.split("\n");
+  if (oldLines.length + newLines.length === 0) return undefined;
+  return Math.floor((2 * lcsLineCount(oldLines, newLines) / (oldLines.length + newLines.length)) * 100);
+}
+
+export async function detectMovedRecreatedFilesCancellable(
+  workingDir: string,
+  options: CancellationOptions = {},
+): Promise<MoveDetectionResult> {
+  const [deletedResult, untrackedResult] = await Promise.all([
+    runGit(["diff", "--name-only", "--diff-filter=D", "HEAD"], workingDir, {
+      ...options,
+      maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+      maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    }),
+    runGit(["ls-files", "--others", "--exclude-standard"], workingDir, {
+      ...options,
+      maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+      maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    }),
+  ]);
+
+  const deletedPaths = splitGitLines(deletedResult.output || "");
+  const untrackedPaths = splitGitLines(untrackedResult.output || "");
+  return detectMovedRecreatedFilesFromPathsCancellable(workingDir, deletedPaths, untrackedPaths, options);
+}
+
+async function detectMovedRecreatedFilesFromPathsCancellable(
+  workingDir: string,
+  deletedPaths: string[],
+  untrackedPaths: string[],
+  options: CancellationOptions = {},
+): Promise<MoveDetectionResult> {
+  const candidates: Array<{ oldPath: string; newPath: string; score: number }> = [];
+
+  for (const oldPath of deletedPaths) {
+    throwIfAborted(options.signal);
+    for (const newPath of untrackedPaths) {
+      if (path.basename(oldPath) !== path.basename(newPath)) continue;
+      const score = await scoreMoveCandidate(workingDir, oldPath, newPath, options);
+      if (score !== undefined && score >= 50) {
+        candidates.push({ oldPath, newPath, score });
+      }
+    }
+  }
+
+  const skipped: SkippedMoveCandidate[] = [];
+  const tiedOldPaths = new Set<string>();
+  const tiedNewPaths = new Set<string>();
+  for (const oldPath of deletedPaths) {
+    const matches = candidates.filter((candidate) => candidate.oldPath === oldPath);
+    if (matches.length < 2) continue;
+    const bestScore = Math.max(...matches.map((candidate) => candidate.score));
+    const best = matches.filter((candidate) => candidate.score === bestScore);
+    if (best.length > 1) {
+      tiedOldPaths.add(oldPath);
+      skipped.push({
+        oldPath,
+        newPaths: best.map((candidate) => candidate.newPath).sort(),
+        reason: "ambiguous",
+      });
+    }
+  }
+  for (const newPath of untrackedPaths) {
+    const matches = candidates.filter((candidate) => candidate.newPath === newPath);
+    if (matches.length < 2) continue;
+    const bestScore = Math.max(...matches.map((candidate) => candidate.score));
+    const best = matches.filter((candidate) => candidate.score === bestScore);
+    if (best.length > 1) {
+      tiedNewPaths.add(newPath);
+      for (const candidate of best) {
+        if (tiedOldPaths.has(candidate.oldPath)) continue;
+        tiedOldPaths.add(candidate.oldPath);
+        skipped.push({
+          oldPath: candidate.oldPath,
+          newPaths: [newPath],
+          reason: "ambiguous",
+        });
+      }
+    }
+  }
+
+  const pairedOld = new Set<string>();
+  const pairedNew = new Set<string>();
+  const moves: NormalizedMoveSummary[] = [];
+  for (const candidate of candidates.sort((a, b) =>
+    b.score - a.score
+    || a.oldPath.localeCompare(b.oldPath)
+    || a.newPath.localeCompare(b.newPath)
+  )) {
+    if (tiedOldPaths.has(candidate.oldPath)) continue;
+    if (tiedNewPaths.has(candidate.newPath)) continue;
+    if (pairedOld.has(candidate.oldPath) || pairedNew.has(candidate.newPath)) continue;
+    pairedOld.add(candidate.oldPath);
+    pairedNew.add(candidate.newPath);
+    moves.push({
+      oldPath: candidate.oldPath,
+      newPath: candidate.newPath,
+      similarity: candidate.score,
+      mode: candidate.score === 100 ? "moved" : "moved-with-edits",
+    });
+  }
+
+  return { moves, skipped };
+}
+
 export async function getGitStatusCancellable(
   workingDir: string,
   options: CancellationOptions = {}
@@ -465,36 +700,12 @@ function appendWithinLimit(
   };
 }
 
-/**
- * Cancellable async variant of getUncommittedChanges for MCP request paths.
- */
-export async function getUncommittedChangesCancellable(
+async function buildUntrackedDiffForFiles(
   workingDir: string,
-  options: CancellationOptions = {}
-): Promise<GitChanges> {
-  const status = await runGit(["status", "--porcelain"], workingDir, {
-    ...options,
-    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
-    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
-  });
-  const diffStat = await runGit(["diff", "--stat", "HEAD"], workingDir, {
-    ...options,
-    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
-    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
-  });
-  const trackedDiff = await runGit(["diff", "HEAD"], workingDir, {
-    ...options,
-    maxStdoutBytes: DEFAULT_GIT_DIFF_MAX_BYTES,
-    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
-  });
-  const untrackedFiles = await runGit(["ls-files", "--others", "--exclude-standard"], workingDir, {
-    ...options,
-    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
-    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
-  });
-
+  files: string[],
+  options: CancellationOptions,
+): Promise<string> {
   let untrackedDiff = "";
-  const files = (untrackedFiles.output || "").split("\n").filter(Boolean);
   for (const file of files.slice(0, DEFAULT_UNTRACKED_FILE_LIMIT)) {
     throwIfAborted(options.signal);
     const remaining = Math.max(
@@ -509,7 +720,7 @@ export async function getUncommittedChangesCancellable(
     const fileDiff = await runGit(["diff", "--no-index", NULL_DEVICE, file], workingDir, {
       ...options,
       maxStdoutBytes: remaining,
-      maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+      maxStderrBytes: 0,
     });
     const appended = appendWithinLimit(
       untrackedDiff,
@@ -523,12 +734,185 @@ export async function getUncommittedChangesCancellable(
   if (files.length > DEFAULT_UNTRACKED_FILE_LIMIT) {
     untrackedDiff += `\n[agent-framework: skipped ${files.length - DEFAULT_UNTRACKED_FILE_LIMIT} untracked files after limit ${DEFAULT_UNTRACKED_FILE_LIMIT}]\n`;
   }
+  return untrackedDiff;
+}
+
+async function getVirtualNormalizedTrackedDiff(
+  workingDir: string,
+  moves: NormalizedMoveSummary[],
+  options: CancellationOptions,
+): Promise<string | undefined> {
+  if (moves.length === 0) return undefined;
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "af-git-index-"));
+  const indexPath = path.join(tempDir, "index");
+  const env = { GIT_INDEX_FILE: indexPath };
+  try {
+    const realIndex = await runGit(["rev-parse", "--git-path", "index"], workingDir, {
+      ...options,
+      maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+      maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    });
+    if (realIndex.exitCode === 0 && realIndex.output.trim()) {
+      await fs.promises.copyFile(path.resolve(workingDir, realIndex.output.trim()), indexPath);
+    } else {
+      const readTree = await runGit(["read-tree", "HEAD"], workingDir, {
+        ...options,
+        env,
+        maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+        maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+      });
+      if (readTree.exitCode !== 0) return undefined;
+    }
+
+    const addTracked = await runGit(["add", "-u"], workingDir, {
+      ...options,
+      env,
+      maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+      maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    });
+    if (addTracked.exitCode !== 0) return undefined;
+
+    const addMoved = await runGit(["add", "--", ...moves.map((move) => move.newPath)], workingDir, {
+      ...options,
+      env,
+      maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+      maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    });
+    if (addMoved.exitCode !== 0) return undefined;
+
+    const diff = await runGit(["diff", "--cached", "--find-renames", "HEAD"], workingDir, {
+      ...options,
+      env,
+      maxStdoutBytes: DEFAULT_GIT_DIFF_MAX_BYTES,
+      maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    });
+    return diff.output || "";
+  } finally {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+function normalizeStatusForVirtualMoves(
+  status: string,
+  moves: NormalizedMoveSummary[],
+): string {
+  if (moves.length === 0) return status;
+  const deletedPaths = new Set(moves.map((move) => move.oldPath));
+  const newPaths = new Set(moves.map((move) => move.newPath));
+  const remaining = status
+    .split("\n")
+    .filter((line) => {
+      if (!line) return false;
+      const porcelainPath = line.slice(3);
+      const renameDestination = porcelainPath.includes(" -> ")
+        ? porcelainPath.slice(porcelainPath.indexOf(" -> ") + " -> ".length)
+        : "";
+      const renameSource = porcelainPath.includes(" -> ")
+        ? porcelainPath.slice(0, porcelainPath.indexOf(" -> "))
+        : "";
+      if (renameSource && deletedPaths.has(renameSource)) {
+        return false;
+      }
+      if (renameDestination && newPaths.has(renameDestination)) {
+        return false;
+      }
+      if ((line.startsWith(" D ") || line.startsWith("D  ")) && deletedPaths.has(porcelainPath)) {
+        return false;
+      }
+      if ((line.startsWith(" A ") || line.startsWith("A  ")) && newPaths.has(porcelainPath)) {
+        return false;
+      }
+      if (line.startsWith("?? ") && newPaths.has(porcelainPath)) {
+        return false;
+      }
+      return true;
+    });
+  return [
+    ...remaining,
+    ...moves.map((move) => `R  ${move.oldPath} -> ${move.newPath}`),
+  ].join("\n");
+}
+
+function resolvePreparedNormalizedMovesForRepo(
+  repoPath: string,
+  options: GitChangeCollectionOptions,
+): NormalizedMoveSummary[] | undefined {
+  return options.preparedNormalizedMovesByRepo
+    ?.find((entry) => entry.repoPath === repoPath)
+    ?.moves
+    ?? options.preparedNormalizedMoves;
+}
+
+/**
+ * Cancellable async variant of getUncommittedChanges for MCP request paths.
+ */
+export async function getUncommittedChangesCancellable(
+  workingDir: string,
+  options: GitChangeCollectionOptions = {}
+): Promise<GitChanges> {
+  const status = await runGit(["status", "--porcelain"], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  const diffStat = await runGit(["diff", "--stat", "HEAD"], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  const untrackedFiles = await runGit(["ls-files", "--others", "--exclude-standard"], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+
+  const files = splitGitLines(untrackedFiles.output || "");
+  let normalizedMoves: NormalizedMoveSummary[] = [];
+  let normalizedTrackedDiff: string | undefined;
+  let untrackedFilesForDiff = files;
+
+  if (options.normalizeMovedRecreated) {
+    if (options.preparedNormalizedMoves) {
+      normalizedMoves = options.preparedNormalizedMoves;
+    } else {
+      const deletedResult = await runGit(["diff", "--name-only", "--diff-filter=D", "HEAD"], workingDir, {
+        ...options,
+        maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+        maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+      });
+      const moveDetection = await detectMovedRecreatedFilesFromPathsCancellable(
+        workingDir,
+        splitGitLines(deletedResult.output || ""),
+        files,
+        options,
+      );
+      normalizedMoves = moveDetection.moves;
+    }
+    normalizedTrackedDiff = await getVirtualNormalizedTrackedDiff(workingDir, normalizedMoves, options);
+    if (normalizedTrackedDiff !== undefined) {
+      const normalizedNewPaths = new Set(normalizedMoves.map((move) => move.newPath));
+      untrackedFilesForDiff = files.filter((file) => !normalizedNewPaths.has(file));
+    } else {
+      normalizedMoves = [];
+    }
+  }
+  let trackedDiff = "";
+  if (normalizedTrackedDiff === undefined) {
+    const result = await runGit(["diff", "HEAD"], workingDir, {
+      ...options,
+      maxStdoutBytes: DEFAULT_GIT_DIFF_MAX_BYTES,
+      maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    });
+    trackedDiff = result.output || "";
+  }
+  const untrackedDiff = await buildUntrackedDiffForFiles(workingDir, untrackedFilesForDiff, options);
 
   return {
-    status: status.output || "",
-    diff: (trackedDiff.output || "") + untrackedDiff,
+    status: normalizeStatusForVirtualMoves(status.output || "", normalizedMoves),
+    diff: (normalizedTrackedDiff ?? trackedDiff) + untrackedDiff,
     diffStat: diffStat.output || "",
     untrackedDiff,
+    normalizedMoves,
   };
 }
 
@@ -552,9 +936,12 @@ ${fileLines || "(none)"}`;
 
 export async function getGitVisibleFileInventoryCancellable(
   workingDir: string,
-  options: CancellationOptions = {},
+  options: CancellationOptions & { includeUntracked?: boolean } = {},
 ): Promise<GitVisibleFileInventory> {
-  const lsFiles = await runGit(["ls-files", "--cached", "--others", "--exclude-standard", "-z"], workingDir, {
+  const lsArgs = options.includeUntracked === false
+    ? ["ls-files", "--cached", "-z"]
+    : ["ls-files", "--cached", "--others", "--exclude-standard", "-z"];
+  const lsFiles = await runGit(lsArgs, workingDir, {
     ...options,
     maxStdoutBytes: DEFAULT_GIT_FILE_LIST_MAX_BYTES,
     maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
@@ -618,7 +1005,10 @@ export async function getRepoFullScopeContextsCancellable(
     throwIfAborted(options.signal);
     contexts.push({
       ...repo,
-      inventory: await getGitVisibleFileInventoryCancellable(repo.path, options),
+      inventory: await getGitVisibleFileInventoryCancellable(repo.path, {
+        ...options,
+        includeUntracked: false,
+      }),
     });
   }
   return {
@@ -667,14 +1057,17 @@ ${repo.changes.diffStat || "(no diff stat)"}`).join("\n\n")}
 
 export async function getRepoGitContextsCancellable(
   repos: Array<{ path: string; name: string }>,
-  options: CancellationOptions = {},
+  options: GitChangeCollectionOptions = {},
 ): Promise<RepoGitContext[]> {
   const contexts: RepoGitContext[] = [];
   for (const repo of repos) {
     throwIfAborted(options.signal);
     contexts.push({
       ...repo,
-      changes: await getUncommittedChangesCancellable(repo.path, options),
+      changes: await getUncommittedChangesCancellable(repo.path, {
+        ...options,
+        preparedNormalizedMoves: resolvePreparedNormalizedMovesForRepo(repo.path, options),
+      }),
     });
   }
   return contexts;
@@ -712,7 +1105,7 @@ async function getRepoGitOverviewContextsCancellable(
 
 export async function getAllReposGitContextCancellable(
   repoInfo: RepoInfo,
-  options: CancellationOptions = {},
+  options: GitChangeCollectionOptions = {},
 ): Promise<{ repos: RepoGitContext[]; context: string }> {
   const repos = await getRepoGitContextsCancellable(
     sortReposWithChangesSubmodulesFirst(repoInfo),
@@ -724,12 +1117,15 @@ export async function getAllReposGitContextCancellable(
 export async function getSingleRepoGitContextWithSiblingOverviewCancellable(
   workingDir: string,
   repoInfo: RepoInfo,
-  options: CancellationOptions = {},
+  options: GitChangeCollectionOptions = {},
 ): Promise<{ current: RepoGitContext; siblingOverview: string }> {
   const sortedRepos = sortReposWithChangesSubmodulesFirst(repoInfo);
   const currentRepo = sortedRepos.find((repo) => repo.path === workingDir)
     ?? { path: workingDir, name: path.basename(workingDir) };
-  const currentChanges = await getUncommittedChangesCancellable(currentRepo.path, options);
+  const currentChanges = await getUncommittedChangesCancellable(currentRepo.path, {
+    ...options,
+    preparedNormalizedMoves: resolvePreparedNormalizedMovesForRepo(currentRepo.path, options),
+  });
   const siblingRepos = sortedRepos.filter((repo) => repo.path !== currentRepo.path);
   const siblingContexts = await getRepoGitOverviewContextsCancellable(siblingRepos, options);
 
