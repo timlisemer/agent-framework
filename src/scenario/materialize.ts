@@ -254,7 +254,16 @@ function projectCanonicalTranscriptToEntries(
 }
 
 function normalizeStopTranscriptEntries(entries: ScenarioEntry[]): ScenarioEntry[] {
-  const last = entries[entries.length - 1];
+  let lastAssistantIdx = -1;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i]?.role === "assistant") {
+      lastAssistantIdx = i;
+      break;
+    }
+  }
+  if (lastAssistantIdx === -1) return entries;
+  const entriesThroughStop = entries.slice(0, lastAssistantIdx + 1);
+  const last = entriesThroughStop[entriesThroughStop.length - 1];
   if (!last || last.role !== "assistant") return entries;
   if (!Array.isArray(last.content)) return entries;
 
@@ -265,7 +274,7 @@ function normalizeStopTranscriptEntries(entries: ScenarioEntry[]): ScenarioEntry
       break;
     }
   }
-  if (lastToolUseIdx === -1) return entries;
+  if (lastToolUseIdx === -1) return entriesThroughStop;
 
   let trailingStartIdx = last.content.length;
   while (
@@ -275,11 +284,11 @@ function normalizeStopTranscriptEntries(entries: ScenarioEntry[]): ScenarioEntry
   ) {
     trailingStartIdx -= 1;
   }
-  if (trailingStartIdx <= lastToolUseIdx || trailingStartIdx === last.content.length) return entries;
+  if (trailingStartIdx <= lastToolUseIdx || trailingStartIdx === last.content.length) return entriesThroughStop;
 
   const trailingText = last.content.slice(trailingStartIdx);
   const prefixBlocks = last.content.slice(0, trailingStartIdx);
-  const normalized = entries.slice(0, -1);
+  const normalized = entriesThroughStop.slice(0, -1);
   if (prefixBlocks.length > 0) {
     normalized.push({ role: "assistant", content: prefixBlocks });
   }

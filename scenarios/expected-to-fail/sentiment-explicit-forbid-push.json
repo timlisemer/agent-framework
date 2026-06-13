@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "sentiment-explicit-forbid-push",
-  "description": "Explicit literal substring block on Bash 'git push' denies the push regardless of overall mood.",
+  "description": "Explicit user-forbidden substring tracking for Bash 'git push'. The user says 'do whatever you want but don't push to remote.' The scenario seeds currentPrediction.explicitlyBlockedSubstrings with Bash/git push and asserts that prediction state keeps that explicit block while the hook denies the attempted push. This fixture is about preserving and enforcing the user's explicit no-push instruction in prediction state; it is not saying git push should bypass the normal command blacklist.",
   "transcript": [
     {
       "role": "user",
@@ -34,7 +34,8 @@
     "by": "prediction-block",
     "prediction": {
       "verdict": "correct"
-    }
+    },
+    "notes": "The important assertion is the seeded prediction block plus predictions.must_block for Bash/git push. A deny is required because the user explicitly forbade pushing. The scenario does not require git push to avoid blacklist handling generally; it verifies that prediction-block state records and enforces the explicit no-push instruction."
   },
   "predictions": {
     "must_block": [

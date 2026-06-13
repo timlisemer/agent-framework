@@ -400,6 +400,10 @@ async function findReferencesToBasename(
   return references;
 }
 
+function isScenarioFixturePath(relativePath: string): boolean {
+  return relativePath.startsWith("scenarios/") && relativePath.endsWith(".json");
+}
+
 /**
  * Deterministically find references to file names that were truly deleted or
  * renamed in the uncommitted diff. A same-basename path elsewhere in the repo
@@ -426,7 +430,7 @@ export async function findDeletedOrRenamedFileReferenceIssuesCancellable(
     throwIfAborted(options.signal);
     const references = await findReferencesToBasename(
       workingDir,
-      files.filter((relativePath) => relativePath !== change.oldPath),
+      files.filter((relativePath) => relativePath !== change.oldPath && !isScenarioFixturePath(relativePath)),
       change.oldBasename,
       options,
     );

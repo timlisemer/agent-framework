@@ -198,6 +198,23 @@ describe("bounded git utilities", () => {
     expect(issues[0].changeType).toBe("renamed");
     expect(issues[0].references.map((ref) => ref.path)).toEqual(["src/index.ts"]);
   });
+
+  it("ignores historical scenario fixture text when checking deleted filename references", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "scenarios", "expected-to-fail"), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, "src", "removed.ts"), "export const value = 1;\n");
+    fs.writeFileSync(
+      path.join(repoDir, "scenarios", "expected-to-fail", "capture.json"),
+      JSON.stringify({ transcript: [{ content: "removed.ts appeared in an old captured ls output" }] }),
+    );
+    git(repoDir, ["add", "src/removed.ts", "scenarios/expected-to-fail/capture.json"]);
+    git(repoDir, ["commit", "-m", "add removed file and capture"]);
+    fs.rmSync(path.join(repoDir, "src", "removed.ts"));
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
 });
 
 describe("multi-repo git context helpers", () => {

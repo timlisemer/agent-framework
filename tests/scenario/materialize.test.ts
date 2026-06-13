@@ -134,6 +134,7 @@ describe("materializeScenario", () => {
         JSON.stringify({
           ts: 100,
           tool: "Glob",
+          paths: ["/tmp/a.txt", "/tmp/b.txt"],
           status: "allowed",
           gate: "all-rules",
           ms: 1,
@@ -166,6 +167,7 @@ describe("materializeScenario", () => {
     });
 
     const scenario = await materializeScenario(tmpDir, 1);
+    validateScenario(scenario);
 
     expect(scenario.target).toEqual({
       hook: "PreToolUse",
@@ -185,6 +187,7 @@ describe("materializeScenario", () => {
       {
         ts: 100,
         tool: "Glob",
+        paths: ["/tmp/a.txt", "/tmp/b.txt"],
         status: "allowed",
         gate: "all-rules",
         ms: 1,
@@ -313,6 +316,68 @@ describe("materializeScenario", () => {
     expect(scenario.transcript.at(-1)).toMatchObject({
       role: "assistant",
       content: [{ type: "text", text: "Yes. You first asked about CI." }],
+    });
+    expect(JSON.stringify(scenario.transcript)).not.toContain("hook_prompt");
+  });
+
+  it("trims Stop captures back to the final assistant entry when hook feedback is inside the timestamp slice", async () => {
+    const codexDir = path.join(tmpDir, ".codex", "sessions", "2026", "06", "13");
+    fs.mkdirSync(codexDir, { recursive: true });
+    transcriptPath = path.join(codexDir, "rollout-stop-hook-feedback.jsonl");
+    fs.writeFileSync(path.join(tmpDir, "transcript-path.txt"), transcriptPath + "\n");
+
+    const userLine = JSON.stringify({
+      timestamp: "2026-06-13T00:00:00.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "now group them by similarity" }],
+      },
+    });
+    const assistantLine = JSON.stringify({
+      timestamp: "2026-06-13T00:00:10.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Grouped them by similarity." }],
+      },
+    });
+    const hookPromptLine = JSON.stringify({
+      timestamp: "2026-06-13T00:00:11.000Z",
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "<hook_prompt>blocked</hook_prompt>" }],
+      },
+    });
+    fs.writeFileSync(
+      transcriptPath,
+      [userLine, assistantLine, hookPromptLine].join("\n") + "\n",
+    );
+
+    const epoch = rotateEpoch(tmpDir, "initial", null);
+    const state = sessionStateDefaults();
+    const snapshotSeq = appendStateSnapshot(tmpDir, state, transcriptPath);
+
+    appendCapture(tmpDir, {
+      ts: Date.parse("2026-06-13T00:00:12.000Z"),
+      epoch_id: epoch.id,
+      parent_capture_seq: null,
+      event: "Stop",
+      decision: "block",
+      state_snapshot_seq: snapshotSeq,
+    });
+
+    const scenario = validateScenario(await materializeScenario(tmpDir, 1));
+
+    expect(scenario.target.hook).toBe("Stop");
+    expect(scenario.transcript).toHaveLength(2);
+    expect(scenario.transcript.at(-1)).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Grouped them by similarity." }],
     });
     expect(JSON.stringify(scenario.transcript)).not.toContain("hook_prompt");
   });

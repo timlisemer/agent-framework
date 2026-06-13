@@ -301,6 +301,7 @@ export interface Scenario {
       batchPosition?: number;
       batchSize?: number;
       path?: string;
+      paths?: string[];
       cmd?: string;
       status: string;
       gate: string;
@@ -1331,6 +1332,7 @@ function validateSeedToolLog(value: unknown): void {
     throw new Error("scenario.seed_state.toolLog must be an array when set");
   }
   const stringFields = ["tool", "toolUseId", "path", "cmd", "status", "gate", "reason"];
+  const stringArrayFields = ["paths"];
   const numberFields = ["ts", "ms", "batchPosition", "batchSize"];
   const requiredFields = ["tool", "status", "gate"];
   for (let i = 0; i < value.length; i++) {
@@ -1360,8 +1362,18 @@ function validateSeedToolLog(value: unknown): void {
         );
       }
     }
+    for (const k of stringArrayFields) {
+      if (
+        row[k] !== undefined &&
+        (!Array.isArray(row[k]) || !(row[k] as unknown[]).every((item) => typeof item === "string"))
+      ) {
+        throw new Error(
+          `scenario.seed_state.toolLog[${i}].${k} must be an array of strings when set`,
+        );
+      }
+    }
     for (const k of Object.keys(row)) {
-      if (!stringFields.includes(k) && !numberFields.includes(k)) {
+      if (!stringFields.includes(k) && !stringArrayFields.includes(k) && !numberFields.includes(k)) {
         throw new Error(
           `scenario.seed_state.toolLog[${i}].${k} is not a recognized ToolLogEntry field`,
         );

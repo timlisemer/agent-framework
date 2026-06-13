@@ -170,6 +170,7 @@ export const scenarioSchema = z.object({
       batchPosition: z.number().int().nonnegative().optional(),
       batchSize: z.number().int().positive().optional(),
       path: z.string().optional(),
+      paths: z.array(z.string()).optional(),
       cmd: z.string().optional(),
       status: z.string(),
       gate: z.string(),
