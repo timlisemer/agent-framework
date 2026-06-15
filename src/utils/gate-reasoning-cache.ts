@@ -5,9 +5,9 @@
  * entries for long-term context retention.
  */
 
-import * as fs from "fs";
 import * as path from "path";
 import { CacheManager } from "./cache-manager.js";
+import { readJsonl } from "./file-io.js";
 import { sessionGateReasoningFile, sessionToolLogFile } from "./paths.js";
 
 const NORMAL_PRIORITY_LIMIT = 8;
@@ -202,19 +202,7 @@ interface ToolLogEntry {
 }
 
 function readToolLog(sessionDir: string): ToolLogEntry[] {
-  const logPath = sessionToolLogFile(sessionDir);
-  let content: string;
-  try {
-    content = fs.readFileSync(logPath, "utf-8");
-  } catch {
-    return [];
-  }
-  const entries: ToolLogEntry[] = [];
-  for (const line of content.split("\n")) {
-    if (!line.trim()) continue;
-    try { entries.push(JSON.parse(line) as ToolLogEntry); } catch { /* skip malformed */ }
-  }
-  return entries;
+  return readJsonl<ToolLogEntry>(sessionToolLogFile(sessionDir));
 }
 
 /**

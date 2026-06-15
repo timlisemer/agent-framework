@@ -23,12 +23,13 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { readJsonl } from "../../utils/file-io.js";
 import { transcriptCacheDir, transcriptMcpStateFile } from "../../utils/paths.js";
 import {
   findUnlabeledTranscripts,
   transcriptRunDir,
   testRunFileExists,
-  readTestRunFile,
+  readAllowedTestRunFile,
   readLabelFile,
   writeLabelFile,
   updateSingleLabel,
@@ -44,7 +45,7 @@ import {
   rollbackRunLimit,
   detectWorkflowState,
   formatStatusFooter,
-  appendTestRunFile,
+  appendTestRunNotes,
   resolveScenarioTranscriptPath,
 } from "./scenario-mcp-shared.js";
 
@@ -337,23 +338,15 @@ function collectPredictionContext(transcriptName: string, target: string): strin
   // Look up the tool-log entry for the target (gate field).
   let toolLogGate: string | undefined;
   let toolLogToolUseId: string | undefined;
-  try {
-    const toolLogPath = path.join(transcriptCacheDir(transcriptName), "tool-log.jsonl");
-    const content = fs.readFileSync(toolLogPath, "utf-8");
-    const logLines = content.split("\n").filter(Boolean);
-    for (const line of logLines) {
-      try {
-        const entry = JSON.parse(line) as { toolUseId?: string; gate?: string };
-        if (entry.toolUseId && (entry.toolUseId === target || target.startsWith(entry.toolUseId))) {
-          toolLogGate = entry.gate;
-          toolLogToolUseId = entry.toolUseId;
-        }
-      } catch {
-        // skip
-      }
+  const toolLogPath = path.join(transcriptCacheDir(transcriptName), "tool-log.jsonl");
+  for (const entry of readJsonl<unknown>(toolLogPath)) {
+    if (!entry || typeof entry !== "object") continue;
+    const record = entry as { toolUseId?: unknown; gate?: unknown };
+    if (typeof record.toolUseId === "string" &&
+      (record.toolUseId === target || target.startsWith(record.toolUseId))) {
+      toolLogGate = typeof record.gate === "string" ? record.gate : undefined;
+      toolLogToolUseId = record.toolUseId;
     }
-  } catch {
-    // No tool-log
   }
   // Determine whether this is a prediction-block / batch-sibling target.
   const labelHasPrediction = (() => {
@@ -637,16 +630,11 @@ function handleFinalize(
 
 function handleReadFile(transcriptName: string, filename: string): string {
   const allowedFiles = ["labels.draft.json", "labels.json", "notes_and_questions.md"];
-  if (!allowedFiles.includes(filename)) {
-    throw new Error(`Cannot read "${filename}". Allowed files: ${allowedFiles.join(", ")}`);
-  }
-  return readTestRunFile(transcriptName, filename);
+  return readAllowedTestRunFile(transcriptName, filename, allowedFiles);
 }
 
 function handleAppendNotes(transcriptName: string, content: string): string {
-  const filePath = appendTestRunFile(transcriptName, "notes_and_questions.md", content);
-  const state = detectWorkflowState(transcriptName);
-  return `Appended to ${filePath}` + formatStatusFooter(state);
+  return appendTestRunNotes(transcriptName, content);
 }
 
 function handleGitHash(): string {

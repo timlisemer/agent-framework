@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { isCancellationError } from "../utils/cancellation.js";
@@ -10,6 +9,7 @@ import type { ProviderExecutionResult, ProviderRunInput, SdkRuntimeEnvironment }
 import type { ProviderUsage } from "./execution-types.js";
 import type { ResolvedProvider } from "./types.js";
 import type { AiRuntimeEvent } from "../ai-backend/runtime-events.js";
+import { hashSha256Prefix } from "../utils/hash-utils.js";
 
 export type CodexThreadOptionsConfig = {
   workingDir?: string | null;
@@ -508,7 +508,7 @@ function mapUnknownCodexItem(
 function syntheticCodexItemRef(itemType: string | null, item: Record<string, unknown>): string {
   const stableItem = stableCodexItemPayload(itemType, item);
   const canonical = canonicalJson(stableItem);
-  const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 12);
+  const hash = hashSha256Prefix(canonical, 12);
   return `${itemType ?? "item"}:${hash}`;
 }
 

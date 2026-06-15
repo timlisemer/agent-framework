@@ -13,6 +13,7 @@
  * prediction-types.ts for that.
  */
 
+import { summarizeAskUserQuestions } from "./ask-user-question.js";
 import { classifyBashCommand } from "./bash-command-policy.js";
 
 type Dict = Record<string, unknown>;
@@ -130,15 +131,7 @@ export function summarizeToolInputForLlm(toolName: string, toolInput: unknown): 
       ])})`;
     }
     case "AskUserQuestion": {
-      const qs = Array.isArray(i.questions) ? i.questions as Dict[] : [];
-      const perQ = qs.map((qi, idx) => {
-        const header = typeof qi.header === "string" ? qi.header : "";
-        const question = typeof qi.question === "string" ? qi.question : "";
-        const opts = Array.isArray(qi.options) ? qi.options as Dict[] : [];
-        const labels = opts.map((o) => typeof o.label === "string" ? o.label : "").filter(Boolean).join(" | ");
-        return `#${idx}:{header=${q(header)}, question=${q(question)}, options.length=${opts.length}${labels ? `, labels=${q(labels)}` : ""}}`;
-      }).join(", ");
-      return `AskUserQuestion(questions.length=${qs.length}${perQ ? "; " + perQ : ""})`;
+      return summarizeAskUserQuestions(toolInput, q);
     }
     case "TodoWrite": {
       const todos = Array.isArray(i.todos) ? i.todos as Dict[] : [];

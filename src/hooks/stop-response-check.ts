@@ -17,8 +17,8 @@ import { activeSpec } from "../adapter/spec.js";
 import { validatePlanExitPresentation, writeCurrentPlanSidecar } from "../utils/plan-source.js";
 import { appendCapture, capturePlanModeFromDetection } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
-import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
-import { onEpochRotation } from "../scenario/lifecycle.js";
+import { loadCurrentEpoch } from "../scenario/epoch.js";
+import { rotateEpochIfNeeded } from "../scenario/lifecycle.js";
 
 function priorErrorIdentity(context: PriorErrorContext): string {
   return [
@@ -82,16 +82,7 @@ export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEn
   setTranscriptPath(input.transcript_path);
   const sessionDir = getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path });
 
-  // Detect epoch change (transcript rewind) and reset derived caches when needed.
-  const epochChange = detectEpochChange(sessionDir, input.transcript_path);
-  if (epochChange.rotated) {
-    const newEpoch = rotateEpoch(
-      sessionDir,
-      epochChange.reason!,
-      epochChange.anchorUuid ?? null,
-    );
-    await onEpochRotation(sessionDir, newEpoch);
-  }
+  await rotateEpochIfNeeded(sessionDir, input.transcript_path);
 
   const stateManager = getSessionState(sessionDir);
   const state = await stateManager.load();

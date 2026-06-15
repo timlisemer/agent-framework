@@ -6,10 +6,12 @@ import { planModeBlockRule } from "../../src/rules/plan-mode-block.js";
 import type { RuleContext } from "../../src/rules/types.js";
 import { getBlacklistHighlights } from "../../src/utils/command-patterns.js";
 import { sessionPlanFile } from "../../src/utils/paths.js";
+import { sessionStateDefaults } from "../../src/utils/session-store.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
 function makeCtx(overrides: Partial<RuleContext>): RuleContext {
   const sessionDir = path.join(process.cwd(), ".tmp-session");
-  return {
+  return makeRuleContext({
     hookEvent: "PreToolUse",
     toolName: "Write",
     toolInput: {},
@@ -18,15 +20,12 @@ function makeCtx(overrides: Partial<RuleContext>): RuleContext {
     sessionDir,
     sessionId: "session-planfile-exempt",
     state: {
+      ...sessionStateDefaults(),
       currentEditIntent: false,
-      currentPrediction: null,
-      frustrationStreak: 0,
-    } as RuleContext["state"],
+    },
     stateManager: { update: async () => undefined } as unknown as RuleContext["stateManager"],
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
     ...overrides,
-  };
+  });
 }
 
 describe("session planfile rule exemptions", () => {
@@ -48,6 +47,7 @@ describe("session planfile rule exemptions", () => {
       sessionDir,
       toolInput: { file_path: planPath },
       state: {
+        ...sessionStateDefaults(),
         currentPrediction: {
           mood: "angry",
           trust: "low",
@@ -60,7 +60,7 @@ describe("session planfile rule exemptions", () => {
           timestamp: Date.now(),
         },
         frustrationStreak: 3,
-      } as unknown as RuleContext["state"],
+      },
     }));
 
     expect(result).toBeNull();
@@ -73,6 +73,7 @@ describe("session planfile rule exemptions", () => {
       sessionDir,
       toolInput: { file_path: planPath, file_paths: [planPath, "src/main.ts"] },
       state: {
+        ...sessionStateDefaults(),
         currentPrediction: {
           mood: "angry",
           trust: "low",
@@ -85,7 +86,7 @@ describe("session planfile rule exemptions", () => {
           timestamp: Date.now(),
         },
         frustrationStreak: 3,
-      } as unknown as RuleContext["state"],
+      },
     }));
 
     expect(result).toMatchObject({ fastDeny: expect.stringContaining("no tools right now") });

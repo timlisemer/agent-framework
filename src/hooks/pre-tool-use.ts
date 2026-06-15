@@ -52,8 +52,8 @@ import type { FrameworkPreToolUseHookInput } from "./types.js";
 import { resolveHostContext } from "../utils/host-context.js";
 import { appendCapture, capturePlanModeFromDetection } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
-import { detectEpochChange, loadCurrentEpoch, rotateEpoch } from "../scenario/epoch.js";
-import { onEpochRotation } from "../scenario/lifecycle.js";
+import { loadCurrentEpoch } from "../scenario/epoch.js";
+import { rotateEpochIfNeeded } from "../scenario/lifecycle.js";
 import { stripQuotedAndPastedContent } from "../utils/quote-detection.js";
 
 interface PipelineExit {
@@ -74,16 +74,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
 
   const sessionDir = getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path });
 
-  // Detect epoch change (transcript rewind) and reset derived caches when needed.
-  const epochChange = detectEpochChange(sessionDir, input.transcript_path);
-  if (epochChange.rotated) {
-    const newEpoch = rotateEpoch(
-      sessionDir,
-      epochChange.reason!,
-      epochChange.anchorUuid ?? null,
-    );
-    await onEpochRotation(sessionDir, newEpoch);
-  }
+  await rotateEpochIfNeeded(sessionDir, input.transcript_path);
 
   const stateManager = getSessionState(sessionDir);
   let state = await stateManager.load();

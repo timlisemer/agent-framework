@@ -18,8 +18,8 @@ describe("runConfirmPrefilter — unwantedFiles", () => {
     expect(r.unwantedFiles).toContain(".env");
   });
 
-  it("does NOT flag .env.example", () => {
-    const status = "M  .env.example\n";
+  it("does NOT flag documented provider configuration template", () => {
+    const status = "M  docs/provider-configuration.md\n";
     const r = runConfirmPrefilter(status, "");
     expect(r.unwantedFiles).toEqual([]);
   });

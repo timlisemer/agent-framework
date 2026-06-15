@@ -18,7 +18,7 @@ import {
   sessionStatuslineFile,
 } from "../utils/paths.js";
 import { getSessionState, sessionStateDefaults } from "../utils/session-store.js";
-import type { Epoch } from "./epoch.js";
+import { detectEpochChange, rotateEpoch, type Epoch } from "./epoch.js";
 
 /**
  * Reset derived caches after an epoch rotation.
@@ -55,6 +55,20 @@ export async function onEpochRotation(sessionDir: string, _epoch: Epoch): Promis
       // Expected when the file doesn't exist yet.
     }
   }
+}
+
+export async function rotateEpochIfNeeded(
+  sessionDir: string,
+  transcriptPath: string,
+): Promise<void> {
+  const epochChange = detectEpochChange(sessionDir, transcriptPath);
+  if (!epochChange.rotated) return;
+  const newEpoch = rotateEpoch(
+    sessionDir,
+    epochChange.reason!,
+    epochChange.anchorUuid ?? null,
+  );
+  await onEpochRotation(sessionDir, newEpoch);
 }
 
 /**

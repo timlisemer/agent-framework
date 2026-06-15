@@ -14,7 +14,7 @@
  */
 
 import * as fs from "fs";
-import * as path from "path";
+import { appendJsonlEntrySync, findJsonlEntry, readLastJsonlEntry } from "../utils/file-io.js";
 import { sessionCapturesFile } from "../utils/paths.js";
 import type { PlanModeDetection } from "../adapter/types.js";
 import type { PlanModeStoredState, PlanModeTransition } from "../utils/plan-mode-entry-state.js";
@@ -143,20 +143,8 @@ function rotateCapturesIfNeeded(filePath: string, cap: number): void {
  * Returns 0 when the file doesn't exist or is empty.
  */
 function readLastSeq(filePath: string): number {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(filePath, "utf-8");
-  } catch {
-    return 0;
-  }
-  const lines = raw.split("\n").filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return 0;
-  try {
-    const last = JSON.parse(lines[lines.length - 1]) as { seq?: number };
-    return typeof last.seq === "number" ? last.seq : 0;
-  } catch {
-    return 0;
-  }
+  const last = readLastJsonlEntry<{ seq?: number }>(filePath);
+  return typeof last?.seq === "number" ? last.seq : 0;
 }
 
 /**
@@ -175,10 +163,9 @@ export function appendCapture(sessionDir: string, pointer: Omit<CapturePointer, 
 
   const filePath = sessionCapturesFile(sessionDir);
   try {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
     const seq = readLastSeq(filePath) + 1;
     const record: CapturePointer = { ...pointer, seq };
-    fs.appendFileSync(filePath, JSON.stringify(record) + "\n");
+    appendJsonlEntrySync(filePath, record);
     rotateCapturesIfNeeded(filePath, cap);
   } catch {
     // Best-effort — capture failures must never crash a hook process.
@@ -193,22 +180,28 @@ export function loadCapturePointer(
   sessionDir: string,
   seq: number,
 ): CapturePointer | null {
-  const filePath = sessionCapturesFile(sessionDir);
-  let raw: string;
-  try {
-    raw = fs.readFileSync(filePath, "utf-8");
-  } catch {
-    return null;
-  }
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed = JSON.parse(trimmed) as CapturePointer;
-      if (parsed.seq === seq) return parsed;
-    } catch {
-      // skip malformed lines
-    }
-  }
-  return null;
+  return findJsonlEntry<CapturePointer>(
+    sessionCapturesFile(sessionDir),
+    (pointer) => pointer.seq === seq,
+  );
+}
+
+export function findCaptureByToolUseId(
+  sessionDir: string,
+  toolUseId: string,
+): CapturePointer | null {
+  return findJsonlEntry<CapturePointer>(
+    sessionCapturesFile(sessionDir),
+    (pointer) => pointer.tool_use_id === toolUseId,
+  );
+}
+
+export function findCaptureByInjectionSeq(
+  sessionDir: string,
+  injectionSeq: number,
+): CapturePointer | null {
+  return findJsonlEntry<CapturePointer>(
+    sessionCapturesFile(sessionDir),
+    (pointer) => pointer.injection_seqs?.includes(injectionSeq) === true,
+  );
 }

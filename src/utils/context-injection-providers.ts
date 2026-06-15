@@ -4,7 +4,7 @@ import type { EventName } from "../adapter/types.js";
 import type { PlanModeTransition } from "./plan-mode-entry-state.js";
 import { markPlansMdDelivered } from "./plan-mode-entry-state.js";
 import type { PendingInjection } from "./session-injections.js";
-import { shortContentHash } from "./session-injections.js";
+import { shortContentHash } from "./hash-utils.js";
 import { agentFrameworkRoot } from "./paths.js";
 
 export interface ContextInjectionProviderInput {

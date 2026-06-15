@@ -292,7 +292,7 @@ prediction-block or prose-oriented regex matching.
 **Path-based classification**: File tools are auto-approved when:
 - File path is inside the project directory (`AGENT_FRAMEWORK_PROJECT_DIR`, `CLAUDE_PROJECT_DIR`, or cwd), OR
 - File path is inside the active adapter's host config root (`~/.claude/` for Claude, `~/.codex/` for Codex)
-- AND the path doesn't match sensitive patterns. Real environment files (`.env`, `.env.local`, etc.), credential/secret/password names, `.ssh`, `.aws`, `.gnupg`, `.kube`, SOPS files, age keys, private-key names, and key-store material are blocked. `.env.example` is allowed as a template.
+- AND the path doesn't match sensitive patterns. Real environment files (`.env`, `.env.local`, etc.), credential/secret/password names, `.ssh`, `.aws`, `.gnupg`, `.kube`, SOPS files, age keys, private-key names, and key-store material are blocked. See [provider-configuration.md](docs/provider-configuration.md) for a copyable provider configuration template.
 
 ### Hook Matcher Configuration
 
@@ -322,33 +322,9 @@ Common matcher patterns:
 
 ## Environment Variables
 
-Use the variables below as the copy/paste template for local configuration.
-
-```bash
-# Required for hooks - avoids expensive filesystem traversal on every hook invocation
-AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
-
-# Optional - set by the host agent automatically; shared var wins when present
-# AGENT_FRAMEWORK_PROJECT_DIR=/path/to/project
-CLAUDE_PROJECT_DIR=/path/to/project
-
-# Optional - provider configuration (see Provider Configuration section)
-# AGENT_FRAMEWORK_PROVIDER=openrouter
-# AGENT_FRAMEWORK_DIRECT_PROVIDER=openrouter
-# AGENT_FRAMEWORK_SDK_PROVIDER=openrouter
-# AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=codex # claude | codex
-
-# OpenRouter Anthropic skin
-# OPENROUTER_API_KEY=<your-openrouter-api-key>
-# ANTHROPIC_BASE_URL=https://openrouter.ai/api
-# ANTHROPIC_AUTH_TOKEN=$OPENROUTER_API_KEY
-# ANTHROPIC_API_KEY= # Important: explicitly empty for OpenRouter Claude routing
-
-# Optional - telemetry (all three required if enabled)
-# TELEMETRY_HOST_ID=your-host-id
-# TELEMETRY_ENDPOINT=https://your-telemetry-endpoint.com
-# AGENT_FRAMEWORK_API_KEY=your-api-key
-```
+See [provider-configuration.md](docs/provider-configuration.md) for the
+copyable local configuration template, including hook paths, provider
+selection, OpenRouter routing, and optional telemetry variables.
 
 ## Provider Configuration
 

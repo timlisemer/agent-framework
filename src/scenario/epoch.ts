@@ -20,9 +20,11 @@
  */
 
 import * as crypto from "crypto";
-import * as fs from "fs";
 import * as path from "path";
+import { appendJsonlEntrySync, readLastJsonlEntry } from "../utils/file-io.js";
 import { isTestRunSessionDir, sessionEpochsFile } from "../utils/paths.js";
+import { readTranscriptUuids } from "./transcript-uuids.js";
+import { activeSpec } from "../adapter/spec.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,7 +42,7 @@ export interface Epoch {
   anchor_uuid: string | null;
   /** id of the epoch this one replaces. null for the very first epoch. */
   parent_epoch_id: string | null;
-  /** Adapter name (always "claude" for now). */
+  /** Adapter name active when the epoch was recorded. */
   adapter: string;
 }
 
@@ -57,39 +59,11 @@ let initialized = false;
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function loadLastEpoch(filePath: string): Epoch | null {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(filePath, "utf-8");
-  } catch {
-    return null;
-  }
-  const lines = raw.split("\n").filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return null;
-  try {
-    return JSON.parse(lines[lines.length - 1]) as Epoch;
-  } catch {
-    return null;
-  }
+  return readLastJsonlEntry<Epoch>(filePath);
 }
 
 function readLiveTranscriptUuids(transcriptPath: string): string[] {
-  try {
-    const raw = fs.readFileSync(transcriptPath, "utf-8");
-    const lines = raw.split("\n").filter((l) => l.trim().length > 0);
-    const uuids: string[] = [];
-    for (const line of lines) {
-      try {
-        const parsed = JSON.parse(line) as Record<string, unknown>;
-        const uuid = parsed.uuid as string | undefined;
-        if (uuid && typeof uuid === "string") uuids.push(uuid);
-      } catch {
-        // skip
-      }
-    }
-    return uuids;
-  } catch {
-    return [];
-  }
+  return readTranscriptUuids(transcriptPath);
 }
 
 /**
@@ -98,20 +72,8 @@ function readLiveTranscriptUuids(transcriptPath: string): string[] {
  */
 function loadSnapshotUuidsTail(sessionDir: string): string[] {
   const snapshotFile = path.join(sessionDir, "state-snapshots.jsonl");
-  let raw: string;
-  try {
-    raw = fs.readFileSync(snapshotFile, "utf-8");
-  } catch {
-    return [];
-  }
-  const lines = raw.split("\n").filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return [];
-  try {
-    const last = JSON.parse(lines[lines.length - 1]) as { transcript_uuids_tail?: string[] };
-    return last.transcript_uuids_tail ?? [];
-  } catch {
-    return [];
-  }
+  const last = readLastJsonlEntry<{ transcript_uuids_tail?: string[] }>(snapshotFile);
+  return last?.transcript_uuids_tail ?? [];
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -187,12 +149,11 @@ export function rotateEpoch(
     reason,
     anchor_uuid,
     parent_epoch_id: last?.id ?? null,
-    adapter: "claude",
+    adapter: activeSpec().name,
   };
 
   try {
-    fs.mkdirSync(path.dirname(epochsFile), { recursive: true });
-    fs.appendFileSync(epochsFile, JSON.stringify(epoch) + "\n");
+    appendJsonlEntrySync(epochsFile, epoch);
   } catch {
     // Best-effort.
   }
@@ -223,12 +184,11 @@ export function initEpochSession(sessionDir: string): void {
     reason: "initial",
     anchor_uuid: null,
     parent_epoch_id: null,
-    adapter: "claude",
+    adapter: activeSpec().name,
   };
 
   try {
-    fs.mkdirSync(path.dirname(epochsFile), { recursive: true });
-    fs.appendFileSync(epochsFile, JSON.stringify(epoch) + "\n");
+    appendJsonlEntrySync(epochsFile, epoch);
   } catch {
     // Best-effort.
   }

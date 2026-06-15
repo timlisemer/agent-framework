@@ -9,6 +9,7 @@
  */
 
 import type { AdapterEncoder, EncodedOutput, EventName } from "../../src/adapter/types.js";
+import { encodeDecisionBlockOutput, encodePreToolUseDenyOutput } from "../shared/encoder-output.js";
 
 export const claudeEncoder: AdapterEncoder = {
   name: "claude",
@@ -26,23 +27,11 @@ export const claudeEncoder: AdapterEncoder = {
   },
 
   encodePreToolUseDeny(reason: string): EncodedOutput {
-    return {
-      stdout: JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: reason,
-        },
-      }),
-      exitCode: 0,
-    };
+    return encodePreToolUseDenyOutput(reason);
   },
 
   encodeStopBlock(reason: string): EncodedOutput {
-    return {
-      stdout: JSON.stringify({ decision: "block", reason }),
-      exitCode: 0,
-    };
+    return encodeDecisionBlockOutput(reason);
   },
 
   encodeStopPass(): EncodedOutput {
@@ -62,6 +51,6 @@ export const claudeEncoder: AdapterEncoder = {
   },
 
   encodeUserPromptSubmitBlock(reason: string): EncodedOutput {
-    return { stdout: JSON.stringify({ decision: "block", reason }), exitCode: 0 };
+    return encodeDecisionBlockOutput(reason);
   },
 };

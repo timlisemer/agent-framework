@@ -40,6 +40,22 @@ import Anthropic from "@anthropic-ai/sdk";
 
 let clientInstance: Anthropic | null = null;
 
+export function buildAnthropicClientOptions(): ConstructorParameters<typeof Anthropic>[0] {
+  return {
+    apiKey: process.env.ANTHROPIC_API_KEY || null,
+    authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
+    baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
+    // Reduce from default 2 — framework's own retry loops (rule-gate,
+    // tool-appeal) already handle retries with exponential backoff.
+    // SDK retrying on the same broken connection compounds hangs.
+    maxRetries: 1,
+    defaultHeaders: {
+      "X-Title": "timlisemer/agent-framework",
+      "HTTP-Referer": "https://github.com/timlisemer/agent-framework",
+    },
+  };
+}
+
 /**
  * Get the singleton Anthropic client instance.
  *
@@ -51,19 +67,7 @@ let clientInstance: Anthropic | null = null;
  */
 export function getAnthropicClient(): Anthropic {
   if (!clientInstance) {
-    clientInstance = new Anthropic({
-      apiKey: process.env.ANTHROPIC_API_KEY || null,
-      authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
-      baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
-      // Reduce from default 2 — framework's own retry loops (rule-gate,
-      // tool-appeal) already handle retries with exponential backoff.
-      // SDK retrying on the same broken connection compounds hangs.
-      maxRetries: 1,
-      defaultHeaders: {
-        "X-Title": "timlisemer/agent-framework",
-        "HTTP-Referer": "https://github.com/timlisemer/agent-framework",
-      },
-    });
+    clientInstance = new Anthropic(buildAnthropicClientOptions());
   }
   return clientInstance;
 }

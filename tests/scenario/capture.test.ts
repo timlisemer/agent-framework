@@ -72,6 +72,29 @@ describe("capture", () => {
     expect(result).toBeNull();
   });
 
+  it("skips syntactically valid malformed-shape records", () => {
+    const capturesPath = path.join(tmpDir, "captures.jsonl");
+    fs.writeFileSync(
+      capturesPath,
+      [
+        "null",
+        JSON.stringify("not an object"),
+        JSON.stringify({
+          seq: 2,
+          ts: 123,
+          epoch_id: "epoch-abc",
+          parent_capture_seq: null,
+          event: "Stop",
+          decision: "pass",
+          state_snapshot_seq: null,
+        }),
+      ].join("\n") + "\n",
+    );
+
+    expect(loadCapturePointer(tmpDir, 1)).toBeNull();
+    expect(loadCapturePointer(tmpDir, 2)?.decision).toBe("pass");
+  });
+
   it("is a no-op when AGENT_FRAMEWORK_CAPTURE_CAP=0", () => {
     const origCap = process.env.AGENT_FRAMEWORK_CAPTURE_CAP;
     process.env.AGENT_FRAMEWORK_CAPTURE_CAP = "0";

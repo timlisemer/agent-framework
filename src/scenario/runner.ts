@@ -55,7 +55,8 @@ import type { ToolPrediction } from "../utils/prediction-types.js";
 import type { ScenarioSourceTag } from "./catalog.js";
 import { activeSpec } from "../adapter/spec.js";
 import type { ScenarioMaterializeCtx } from "../adapter/types.js";
-import { readSessionInjectionsAfterOffset, shortContentHash } from "../utils/session-injections.js";
+import { readSessionInjectionsAfterOffset } from "../utils/session-injections.js";
+import { shortContentHash } from "../utils/hash-utils.js";
 import { fileSizeOrZero } from "../utils/file-io.js";
 import { getOptionalArg, getRequiredArg } from "./cli-args.js";
 

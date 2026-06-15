@@ -7,9 +7,10 @@ import { ALL_RULES } from "../../src/rules/index.js";
 import { sessionStateDefaults } from "../../src/utils/session-store.js";
 import { clearDenialCache, initDenialSession } from "../../src/utils/denial-cache.js";
 import type { RuleContext } from "../../src/rules/types.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
 function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
-  return {
+  return makeRuleContext({
     toolName: "Bash",
     toolInput: { command: "cd /tmp && ls" },
     toolUseId: "toolu_blacklist",
@@ -21,10 +22,8 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
     stateManager: {
       update: vi.fn(),
     } as unknown as RuleContext["stateManager"],
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
     ...overrides,
-  };
+  });
 }
 
 describe("blacklistRule", () => {

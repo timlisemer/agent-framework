@@ -33,6 +33,7 @@ export { scenarioDir, scenariosDir } from "../../scenario/catalog.js";
 export type { ScenarioRealityValue, ScenarioSource, ScenarioSourceTag } from "../../scenario/catalog.js";
 export type { LabelValue, PredictionAnnotation, RichExpectation } from "../../scenario/labels.js";
 import { runCommand } from "../../utils/command.js";
+import { readFileHeadBuffer } from "../../utils/file-io.js";
 import {
   runtimeRoot,
   testRunsRoot,
@@ -180,6 +181,23 @@ export function appendTestRunFile(transcriptName: string, filename: string, cont
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.appendFileSync(filePath, content);
   return filePath;
+}
+
+export function readAllowedTestRunFile(
+  transcriptName: string,
+  filename: string,
+  allowedFiles: readonly string[],
+): string {
+  if (!allowedFiles.includes(filename)) {
+    throw new Error(`Cannot read "${filename}". Allowed files: ${allowedFiles.join(", ")}`);
+  }
+  return readTestRunFile(transcriptName, filename);
+}
+
+export function appendTestRunNotes(transcriptName: string, content: string): string {
+  const filePath = appendTestRunFile(transcriptName, "notes_and_questions.md", content);
+  const state = detectWorkflowState(transcriptName);
+  return `Appended to ${filePath}` + formatStatusFooter(state);
 }
 
 export function testRunFileExists(transcriptName: string, filename: string): boolean {
@@ -814,16 +832,12 @@ export function findUnlabeledTranscripts(
     if (testRunFileExists(name, "labels.draft.json")) continue;
 
     // Skip sidechain transcripts
-    try {
-      const fd = fs.openSync(fullPath, "r");
-      const buffer = Buffer.alloc(4096);
-      const bytesRead = fs.readSync(fd, buffer, 0, 4096, 0);
-      fs.closeSync(fd);
-      const firstLine = buffer.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
-      if (firstLine.includes("\"isSidechain\"")) continue;
-    } catch {
+    const head = readFileHeadBuffer(fullPath, 4096);
+    if (!head) {
       continue;
     }
+    const firstLine = head.toString("utf-8").split("\n")[0];
+    if (firstLine.includes("\"isSidechain\"")) continue;
 
     try {
       const stat = fs.statSync(fullPath);

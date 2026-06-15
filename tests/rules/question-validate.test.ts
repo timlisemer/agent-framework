@@ -1,6 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import * as os from "os";
-import * as path from "path";
 
 vi.mock("../../src/utils/agent-runner.js", () => ({
   runAgent: vi.fn(),
@@ -28,16 +26,14 @@ vi.mock("../../src/utils/logger.js", () => ({
 import { questionValidateRule } from "../../src/rules/question-validate.js";
 import { runAgent } from "../../src/utils/agent-runner.js";
 import { readTranscriptExact, formatTranscriptResult } from "../../src/utils/transcript.js";
-import type { RuleContext } from "../../src/rules/types.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
 const mockRunAgent = vi.mocked(runAgent);
 const mockReadTranscriptExact = vi.mocked(readTranscriptExact);
 const mockFormatTranscriptResult = vi.mocked(formatTranscriptResult);
 
-const tempDir = os.tmpdir();
-
-function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
-  return {
+function makeCtx(overrides: Parameters<typeof makeRuleContext>[0] = {}) {
+  return makeRuleContext({
     toolName: "AskUserQuestion",
     toolInput: {
       questions: [
@@ -52,17 +48,8 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
         },
       ],
     },
-    toolUseId: "toolu_test",
-    projectDir: tempDir,
-    transcriptPath: path.join(tempDir, "transcript.jsonl"),
-    sessionDir: tempDir,
-    sessionId: "test-session",
-    state: {} as RuleContext["state"],
-    stateManager: {} as RuleContext["stateManager"],
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
     ...overrides,
-  };
+  });
 }
 
 describe("questionValidateRule — deterministic null paths", () => {

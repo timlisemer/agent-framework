@@ -34,7 +34,7 @@ import { toolApproveRule } from "../../src/rules/tool-approve.js";
 import { validateCurrentPlanExit } from "../../src/utils/plan-source.js";
 import { checkPlanIntent } from "../../src/agents/hooks/plan-validate.js";
 import { activeSpec } from "../../src/adapter/spec.js";
-import type { RuleContext } from "../../src/rules/types.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
 const mockValidateCurrentPlanExit = vi.mocked(validateCurrentPlanExit);
 const mockCheckPlanIntent = vi.mocked(checkPlanIntent);
@@ -64,21 +64,17 @@ describe("toolApproveRule ExitPlanMode short-circuit", () => {
     vi.clearAllMocks();
   });
 
-  function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
-    return {
+  function makeCtx(overrides: Parameters<typeof makeRuleContext>[0] = {}) {
+    return makeRuleContext({
       toolName: "ExitPlanMode",
       toolInput: { plan: "# Plan" },
-      toolUseId: "toolu_test",
       projectDir: tempDir,
       transcriptPath: path.join(tempDir, "transcript.jsonl"),
       sessionDir: tempDir,
-      sessionId: "test-session",
-      state: {} as RuleContext["state"],
-      stateManager: {} as RuleContext["stateManager"],
       planMode: true,
       planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
       ...overrides,
-    };
+    });
   }
 
   it("returns fastAllow and does NOT invoke LLM when plan validation passes", async () => {
@@ -120,21 +116,16 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
     vi.clearAllMocks();
   });
 
-  function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
-    return {
+  function makeCtx(overrides: Parameters<typeof makeRuleContext>[0] = {}) {
+    return makeRuleContext({
       toolName: "Bash",
       toolInput: { command: "ls" },
       toolUseId: "toolu_det",
       projectDir: tempDir,
       transcriptPath: path.join(tempDir, "transcript.jsonl"),
       sessionDir: tempDir,
-      sessionId: "test-session",
-      state: {} as RuleContext["state"],
-      stateManager: {} as RuleContext["stateManager"],
-      planMode: false,
-      planModeCtx: { active: false, contextString: "" },
       ...overrides,
-    };
+    });
   }
 
   it("fastDeny for RESTRICTED_MCP_TOOLS when no CLAUDE.md", async () => {

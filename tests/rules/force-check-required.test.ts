@@ -2,14 +2,14 @@ import { describe, it, expect } from "vitest";
 import { forceCheckRequiredRule } from "../../src/rules/force-check-required.js";
 import { sessionStateDefaults } from "../../src/utils/session-store.js";
 import { activeSpec } from "../../src/adapter/spec.js";
-import type { RuleContext } from "../../src/rules/types.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
-function makeCtx(toolName: string, forceCheckPending = true): RuleContext {
+function makeCtx(toolName: string, forceCheckPending = true) {
   const state = {
     ...sessionStateDefaults(),
     forceCheckPending,
   };
-  return {
+  return makeRuleContext({
     toolName,
     toolInput: {},
     toolUseId: "toolu_force",
@@ -18,10 +18,7 @@ function makeCtx(toolName: string, forceCheckPending = true): RuleContext {
     sessionDir: "/tmp/session",
     sessionId: "session",
     state,
-    stateManager: {} as RuleContext["stateManager"],
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
-  };
+  });
 }
 
 describe("forceCheckRequiredRule", () => {

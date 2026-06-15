@@ -3,7 +3,6 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { driftDetectRule } from "../../src/rules/drift-detect.js";
-import type { RuleContext } from "../../src/rules/types.js";
 import {
   getSessionState,
   sessionStateDefaults,
@@ -11,6 +10,7 @@ import {
   type ToolLogEntry,
   type DriftTargetState,
 } from "../../src/utils/session-store.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
 const TARGET = "/home/tim/.claude/plans/drift-rule-test.md";
 
@@ -32,11 +32,11 @@ async function buildCtx(
   overrides: Partial<SessionState>,
   toolInput: unknown = { file_path: TARGET, old_string: "foo", new_string: "bar" },
   toolName: string = "Edit",
-): Promise<RuleContext> {
+){
   const stateManager = getSessionState(sessionDir);
   const state: SessionState = { ...sessionStateDefaults(), ...overrides };
   await stateManager.save(state);
-  return {
+  return makeRuleContext({
     toolName,
     toolInput,
     toolUseId: "toolu_test",
@@ -46,9 +46,7 @@ async function buildCtx(
     sessionId: "test-session",
     state,
     stateManager,
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
-  };
+  });
 }
 
 async function loadDriftState(

@@ -22,29 +22,20 @@ vi.mock("../../src/utils/transcript.js", async () => {
 });
 
 import { styleDriftRule } from "../../src/rules/style-drift.js";
-import type { RuleContext } from "../../src/rules/types.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
 const tempDir = os.tmpdir();
 
-function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
-  return {
+function makeCtx(overrides: Parameters<typeof makeRuleContext>[0] = {}) {
+  return makeRuleContext({
     toolName: "Edit",
     toolInput: {
       file_path: path.join(tempDir, "src/foo.ts"),
       old_string: "const x = 1",
       new_string: "const x = 1",
     },
-    toolUseId: "toolu_test",
-    projectDir: tempDir,
-    transcriptPath: path.join(tempDir, "transcript.jsonl"),
-    sessionDir: tempDir,
-    sessionId: "test-session",
-    state: {} as RuleContext["state"],
-    stateManager: {} as RuleContext["stateManager"],
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
     ...overrides,
-  };
+  });
 }
 
 describe("styleDriftRule — deterministic fastDeny paths", () => {

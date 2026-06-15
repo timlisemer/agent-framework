@@ -4,9 +4,9 @@ import * as os from "os";
 import * as path from "path";
 import { errorAcknowledgeRule } from "../../src/rules/error-acknowledge.js";
 import { activeSpec } from "../../src/adapter/spec.js";
-import type { RuleContext } from "../../src/rules/types.js";
 import { sessionStateDefaults } from "../../src/utils/session-store.js";
 import { appendJsonlEntrySync } from "../../src/utils/file-io.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
 describe("errorAcknowledgeRule", () => {
   let tempDir: string;
@@ -25,8 +25,8 @@ describe("errorAcknowledgeRule", () => {
   function makeCtx(
     toolName = activeSpec().mcpWireName("commit"),
     toolInput: unknown = {},
-  ): RuleContext {
-    return {
+  ) {
+    return makeRuleContext({
       toolName,
       toolInput,
       toolUseId: "toolu_error_ack",
@@ -35,10 +35,7 @@ describe("errorAcknowledgeRule", () => {
       sessionDir: tempDir,
       sessionId: "session",
       state: sessionStateDefaults(),
-      stateManager: {} as RuleContext["stateManager"],
-      planMode: false,
-      planModeCtx: { active: false, contextString: "" },
-    };
+    });
   }
 
   function appendToolLog(entry: {

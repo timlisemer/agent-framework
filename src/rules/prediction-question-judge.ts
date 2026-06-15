@@ -4,6 +4,7 @@ import { SENTIMENT_AGENT } from "../utils/agent-configs.js";
 import { parseSentimentOutput } from "../utils/prediction-parser.js";
 import { readRecentUserMessages } from "../utils/transcript.js";
 import { formatPredictionContext, predictionUserMessageForLogic } from "../utils/prediction-types.js";
+import { formatAskUserQuestionsForStallingJudge, normalizeAskUserQuestions } from "../utils/ask-user-question.js";
 
 /**
  * Prediction Question Judge (priority 28)
@@ -36,27 +37,8 @@ export const predictionQuestionJudgeRule: PreToolRule = {
       prediction.trust === "low";
     if (!restrictive) return null;
 
-    // Real shape per src/agents/hooks/question-validate.ts:38-48 — header and
-    // options.description are required.
-    const input = ctx.toolInput as {
-      questions?: Array<{
-        question: string;
-        header?: string;
-        options?: Array<{ label: string; description?: string }>;
-        multiSelect?: boolean;
-      }>;
-    };
-    if (!input?.questions?.length) return null;
-
-    const askPayload = input.questions
-      .map((q, i) => {
-        const headerLine = q.header ? `Header: ${q.header}\n` : "";
-        const opts = (q.options ?? [])
-          .map((o) => (o.description ? `${o.label} — ${o.description}` : o.label))
-          .join(" | ");
-        return `Q${i + 1}:\n${headerLine}Question: ${q.question}${opts ? `\nOptions: ${opts}` : ""}`;
-      })
-      .join("\n\n");
+    if (normalizeAskUserQuestions(ctx.toolInput).length === 0) return null;
+    const askPayload = formatAskUserQuestionsForStallingJudge(ctx.toolInput);
 
     const recent = await readRecentUserMessages(
       ctx.transcriptPath,

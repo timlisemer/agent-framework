@@ -2,18 +2,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { extractTextFromResponse } from "../utils/response-parser.js";
 import { isCancellationError } from "../utils/cancellation.js";
 import type { ProviderExecutionResult, ProviderRunInput } from "./execution-types.js";
+import { buildAnthropicClientOptions } from "../utils/anthropic-client.js";
 
 function createOpenRouterAnthropicClient(): Anthropic {
-  return new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY || null,
-    authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
-    baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
-    maxRetries: 1,
-    defaultHeaders: {
-      "X-Title": "timlisemer/agent-framework",
-      "HTTP-Referer": "https://github.com/timlisemer/agent-framework",
-    },
-  });
+  return new Anthropic(buildAnthropicClientOptions());
 }
 
 export async function runAnthropicApiSkinDirect(

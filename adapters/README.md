@@ -28,6 +28,10 @@ all raw transcript shape knowledge inside their adapter parser so
 | `claude/`       | Claude Code     | Active  |
 | `codex/`        | Codex CLI       | Active  |
 
+Shared adapter-wire helpers that are intentionally reused by multiple
+adapters live under `adapters/shared/`. Keep policy, workflow authorization,
+and adapter-independent behavior in `src/`.
+
 ## Adding a New Adapter
 
 1. Create `adapters/<name>/` with an `index.ts` that exports an

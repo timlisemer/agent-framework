@@ -1179,6 +1179,11 @@ Examples of good BLOCK feedback:
 - "Show the plan to user first with /plan or by reading the file, then ask"
 - "User already said they want 'maximum code reduction' - proceed with that"
 - "Complete the current task before asking about next steps"`,
+  formatValidation: {
+    validator: /^(ALLOW|BLOCK:)/,
+    formatReminder: "Reply with exactly: ALLOW or BLOCK: <feedback>",
+    fallbackOutput: "ALLOW",
+  },
   };
 }
 

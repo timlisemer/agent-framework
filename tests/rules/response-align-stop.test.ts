@@ -22,7 +22,8 @@ vi.mock("../../src/utils/quote-detection.js", () => ({
 import { responseAlignStopRule } from "../../src/rules/response-align-stop.js";
 import { runAgent } from "../../src/utils/agent-runner.js";
 import type { RuleContext } from "../../src/rules/types.js";
-import type { SessionState } from "../../src/utils/session-store.js";
+import { sessionStateDefaults, type SessionState } from "../../src/utils/session-store.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
 const mockRunAgent = vi.mocked(runAgent);
 
@@ -30,25 +31,13 @@ const tempDir = os.tmpdir();
 
 function makeState(overrides: Partial<SessionState> = {}): SessionState {
   return {
-    currentPrediction: null,
-    previousEditIntent: null,
-    currentEditIntent: null,
-    editIntentTimestamp: null,
-    editIntentOverturnCount: 0,
-    respondFirstChecked: false,
-    forceCheckPending: false,
-    frustrationStreak: 0,
-    currentWindowSize: 2,
-    lastProcessedPlanApprovalToolUseId: null,
-    driftState: {},
-    lastUserMessageTimestamp: null,
-    toolCallCount: 0,
+    ...sessionStateDefaults(),
     ...overrides,
-  } as SessionState;
+  };
 }
 
 function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
-  return {
+  return makeRuleContext({
     hookEvent: "Stop",
     toolName: "",
     toolInput: {},
@@ -58,13 +47,10 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
     sessionDir: tempDir,
     sessionId: "test-session",
     state: makeState(),
-    stateManager: {} as RuleContext["stateManager"],
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
     assistantText: "I completed the task.",
     userText: "Fix the bug in foo.ts",
     ...overrides,
-  };
+  });
 }
 
 function planfilePriorError(text: string): NonNullable<RuleContext["priorErrorContext"]> {

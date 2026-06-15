@@ -27,7 +27,7 @@ import { validateScenario } from "../../scenario/types.js";
 import {
   findTestableTranscripts,
   transcriptRunDir,
-  readTestRunFile,
+  readAllowedTestRunFile,
   runReplayCommand,
   runScenarioCommand,
   runScenarioCommandAsync,
@@ -37,7 +37,7 @@ import {
   rollbackRunLimit,
   detectWorkflowState,
   formatStatusFooter,
-  appendTestRunFile,
+  appendTestRunNotes,
   scenarioDir,
   writeScenarioFile,
   readScenarioFile,
@@ -163,16 +163,11 @@ function handleExpand(
 
 function handleReadFile(transcriptName: string, filename: string): string {
   const allowedFiles = ["report.json", "report-single.json", "labels.json", "labels.draft.json", "notes_and_questions.md"];
-  if (!allowedFiles.includes(filename)) {
-    throw new Error(`Cannot read "${filename}". Allowed files: ${allowedFiles.join(", ")}`);
-  }
-  return readTestRunFile(transcriptName, filename);
+  return readAllowedTestRunFile(transcriptName, filename, allowedFiles);
 }
 
 function handleAppendNotes(transcriptName: string, content: string): string {
-  const filePath = appendTestRunFile(transcriptName, "notes_and_questions.md", content);
-  const state = detectWorkflowState(transcriptName);
-  return `Appended to ${filePath}` + formatStatusFooter(state);
+  return appendTestRunNotes(transcriptName, content);
 }
 
 function handleRunScenario(

@@ -10,6 +10,7 @@ import * as os from "os";
 import * as fs from "fs";
 import * as path from "path";
 import type { AdapterTranscriptFile } from "../../src/adapter/types.js";
+import { readFileHeadBuffer } from "../../src/utils/file-io.js";
 
 export function codexSessionsRoot(): string {
   return path.join(os.homedir(), ".codex", "sessions");
@@ -68,20 +69,15 @@ export function listProjectTranscripts(absPath?: string): AdapterTranscriptFile[
 
 function codexTranscriptCwd(filePath: string): string | null {
   try {
-    const fd = fs.openSync(filePath, "r");
-    try {
-      const buffer = Buffer.alloc(64 * 1024);
-      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
-      const lines = buffer.subarray(0, bytesRead).toString("utf-8").split("\n");
-      for (const line of lines.slice(0, 64)) {
-        if (!line.trim()) continue;
-        const cwd = codexEventCwd(line);
-        if (cwd) return cwd;
-      }
-      return null;
-    } finally {
-      fs.closeSync(fd);
+    const buffer = readFileHeadBuffer(filePath, 64 * 1024);
+    if (!buffer) return null;
+    const lines = buffer.toString("utf-8").split("\n");
+    for (const line of lines.slice(0, 64)) {
+      if (!line.trim()) continue;
+      const cwd = codexEventCwd(line);
+      if (cwd) return cwd;
     }
+    return null;
   } catch {
     return null;
   }

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { predictionContextRule } from "../../src/rules/prediction-context.js";
-import type { RuleContext } from "../../src/rules/types.js";
+import { sessionStateDefaults } from "../../src/utils/session-store.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
-function makeCtx(): RuleContext {
-  return {
+function makeCtx() {
+  return makeRuleContext({
     hookEvent: "PreToolUse",
     toolName: "Edit",
     toolInput: {},
@@ -11,19 +12,19 @@ function makeCtx(): RuleContext {
     transcriptPath: "/tmp/transcript.jsonl",
     projectDir: "/tmp/project",
     sessionDir: "/tmp/session",
-    sessionId: "test-session",
     state: {
+      ...sessionStateDefaults(),
       currentPrediction: {
         intent: "older chat-only instruction",
+        blockedIntent: "",
         mood: "neutral",
-        trust: "medium",
+        trust: "normal",
         blockAllTools: false,
-        allowedTools: [],
-        blockedTools: [],
         userMessageSnippet: "do not edit anything",
         userMessageFull: "do not edit anything, just chat",
         explicitlyAllowedTools: [],
         explicitlyBlockedSubstrings: [],
+        timestamp: Date.now(),
       },
     },
     stateManager: {} as never,
@@ -36,7 +37,7 @@ function makeCtx(): RuleContext {
       displaySnippet: "now call quickpush and fix complaints by editing files",
       matchesCachedPrediction: false,
     },
-  } as unknown as RuleContext;
+  });
 }
 
 describe("predictionContextRule", () => {

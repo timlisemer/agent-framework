@@ -50,8 +50,9 @@ import {
   preClassifyCalm,
 } from "../../src/utils/sentiment-prefilter.js";
 import type { RuleContext } from "../../src/rules/types.js";
-import type { SessionState } from "../../src/utils/session-store.js";
+import { sessionStateDefaults, type SessionState } from "../../src/utils/session-store.js";
 import type { CacheManager } from "../../src/utils/cache-manager.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
 const mockRunAgent = vi.mocked(runAgent);
 const mockStripQuotedAndPastedContent = vi.mocked(stripQuotedAndPastedContent);
@@ -83,21 +84,9 @@ no`;
 
 function makeState(overrides: Partial<SessionState> = {}): SessionState {
   return {
-    currentPrediction: null,
-    previousEditIntent: null,
-    currentEditIntent: null,
-    editIntentTimestamp: null,
-    editIntentOverturnCount: 0,
-    respondFirstChecked: false,
-    forceCheckPending: false,
-    frustrationStreak: 0,
-    currentWindowSize: 2,
-    lastProcessedPlanApprovalToolUseId: null,
-    driftState: {},
-    lastUserMessageTimestamp: null,
-    toolCallCount: 0,
+    ...sessionStateDefaults(),
     ...overrides,
-  } as SessionState;
+  };
 }
 
 function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
@@ -110,7 +99,7 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
     update: updater,
   } as unknown as CacheManager<SessionState>;
 
-  return {
+  return makeRuleContext({
     hookEvent: "UserPromptSubmit",
     toolName: "",
     toolInput: {},
@@ -122,10 +111,8 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
     sessionId: "test-session",
     state,
     stateManager,
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
     ...overrides,
-  };
+  });
 }
 
 describe("sentimentRule — metadata", () => {

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { trustedPathRule } from "../../src/rules/trusted-path.js";
 import { isSensitivePath } from "../../src/rules/utils.js";
-import type { RuleContext } from "../../src/rules/types.js";
 import { sessionStateDefaults } from "../../src/utils/session-store.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
-function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
-  return {
+function makeCtx(overrides: Parameters<typeof makeRuleContext>[0] = {}) {
+  return makeRuleContext({
     toolName: "Edit",
     toolInput: { file_path: "src/main.ts" },
     toolUseId: "toolu_sensitive",
@@ -14,17 +14,14 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
     sessionDir: "/tmp/session",
     sessionId: "session",
     state: sessionStateDefaults(),
-    stateManager: {} as RuleContext["stateManager"],
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
     ...overrides,
-  };
+  });
 }
 
 describe("sensitive path classification", () => {
-  it("does not classify .env.example as sensitive", () => {
-    expect(isSensitivePath(".env.example")).toBe(false);
-    expect(isSensitivePath("/repo/.env.example")).toBe(false);
+  it("does not classify documented provider configuration template as sensitive", () => {
+    expect(isSensitivePath("docs/provider-configuration.md")).toBe(false);
+    expect(isSensitivePath("/repo/docs/provider-configuration.md")).toBe(false);
   });
 
   it("does not classify benign names containing sensitive words as sensitive", () => {
@@ -62,9 +59,9 @@ describe("sensitive path classification", () => {
 });
 
 describe("trustedPathRule", () => {
-  it("allows editing .env.example", async () => {
+  it("allows editing documented provider configuration template", async () => {
     const result = await trustedPathRule.check(makeCtx({
-      toolInput: { file_path: ".env.example" },
+      toolInput: { file_path: "docs/provider-configuration.md" },
     }));
     expect(result).toBeNull();
   });

@@ -8,8 +8,8 @@ import {
   loadSessionInjectionsBySeq,
   readSessionInjectionsAfterOffset,
   readSessionInjectionsThroughOffset,
-  shortContentHash,
 } from "../../src/utils/session-injections.js";
+import { shortContentHash } from "../../src/utils/hash-utils.js";
 import { sessionInjectionsFile } from "../../src/utils/paths.js";
 
 describe("session-injections", () => {

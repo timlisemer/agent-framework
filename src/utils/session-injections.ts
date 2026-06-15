@@ -1,9 +1,8 @@
-import * as crypto from "crypto";
-import * as fs from "fs";
-import * as path from "path";
 import type { EventName } from "../adapter/types.js";
-import { readFileTailBuffer } from "./file-io.js";
+import { appendJsonlEntriesSync, readJsonlAfterByteOffset, readJsonlThroughByteOffset, readJsonlTail } from "./file-io.js";
+import { shortContentHash } from "./hash-utils.js";
 import { sessionInjectionsFile } from "./paths.js";
+export { shortContentHash } from "./hash-utils.js";
 
 export type InjectionChannel = "context";
 
@@ -30,33 +29,8 @@ export interface SessionInjectionRecord extends PendingInjection {
   message_hash: string;
 }
 
-export function shortContentHash(content: string): string {
-  return crypto.createHash("sha256").update(Buffer.from(content, "utf-8")).digest("hex").slice(0, 16);
-}
-
-function parseRecordsFromBuffer(buffer: Buffer): SessionInjectionRecord[] {
-  let raw = buffer.toString("utf-8");
-  if (!raw.endsWith("\n")) {
-    const lastNewline = raw.lastIndexOf("\n");
-    raw = lastNewline === -1 ? "" : raw.slice(0, lastNewline + 1);
-  }
-
-  const records: SessionInjectionRecord[] = [];
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      records.push(JSON.parse(trimmed) as SessionInjectionRecord);
-    } catch {
-      // Skip malformed complete lines; a torn trailing line is dropped above.
-    }
-  }
-  return records;
-}
-
 function readRecentRecords(filePath: string): SessionInjectionRecord[] {
-  const buffer = readFileTailBuffer(filePath, 64 * 1024);
-  return buffer ? parseRecordsFromBuffer(buffer) : [];
+  return readJsonlTail<SessionInjectionRecord>(filePath, 64 * 1024);
 }
 
 function readLastSeq(filePath: string): number {
@@ -72,7 +46,6 @@ export function appendSessionInjections(
   if (pending.length === 0) return [];
 
   const filePath = sessionInjectionsFile(sessionDir);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
   let seq = readLastSeq(filePath);
   const recentKeys = new Set(
     readRecentRecords(filePath).map((record) => `${record.id}:${record.message_hash}`),
@@ -93,7 +66,7 @@ export function appendSessionInjections(
     event,
     message_hash: shortContentHash(injection.message),
   }));
-  fs.appendFileSync(filePath, records.map((record) => JSON.stringify(record)).join("\n") + "\n");
+  appendJsonlEntriesSync(filePath, records);
   return records;
 }
 
@@ -101,24 +74,20 @@ export function readSessionInjectionsThroughOffset(
   sessionDir: string,
   offset: number,
 ): SessionInjectionRecord[] {
-  try {
-    const buffer = fs.readFileSync(sessionInjectionsFile(sessionDir));
-    return parseRecordsFromBuffer(buffer.subarray(0, Math.max(0, Math.min(offset, buffer.length))));
-  } catch {
-    return [];
-  }
+  return readJsonlThroughByteOffset<SessionInjectionRecord>(
+    sessionInjectionsFile(sessionDir),
+    offset,
+  );
 }
 
 export function readSessionInjectionsAfterOffset(
   sessionDir: string,
   offset: number,
 ): SessionInjectionRecord[] {
-  try {
-    const buffer = fs.readFileSync(sessionInjectionsFile(sessionDir));
-    return parseRecordsFromBuffer(buffer.subarray(Math.max(0, Math.min(offset, buffer.length))));
-  } catch {
-    return [];
-  }
+  return readJsonlAfterByteOffset<SessionInjectionRecord>(
+    sessionInjectionsFile(sessionDir),
+    offset,
+  );
 }
 
 export function loadSessionInjectionsBySeq(

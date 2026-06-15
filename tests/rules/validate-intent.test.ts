@@ -1,6 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import * as os from "os";
-import * as path from "path";
 
 vi.mock("../../src/utils/agent-runner.js", () => ({
   runAgent: vi.fn(),
@@ -38,29 +36,18 @@ import { activeSpec } from "../../src/adapter/spec.js";
 import { runAgent } from "../../src/utils/agent-runner.js";
 import { getUncommittedChanges } from "../../src/utils/git-utils.js";
 import { readTranscriptExact } from "../../src/utils/transcript.js";
-import type { RuleContext } from "../../src/rules/types.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
 const mockRunAgent = vi.mocked(runAgent);
 const mockGetUncommittedChanges = vi.mocked(getUncommittedChanges);
 const mockReadTranscriptExact = vi.mocked(readTranscriptExact);
 
-const tempDir = os.tmpdir();
-
-function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
-  return {
+function makeCtx(overrides: Parameters<typeof makeRuleContext>[0] = {}) {
+  return makeRuleContext({
     toolName: activeSpec().mcpWireName("validate_intent"),
     toolInput: {},
-    toolUseId: "toolu_test",
-    projectDir: tempDir,
-    transcriptPath: path.join(tempDir, "transcript.jsonl"),
-    sessionDir: tempDir,
-    sessionId: "test-session",
-    state: {} as RuleContext["state"],
-    stateManager: {} as RuleContext["stateManager"],
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
     ...overrides,
-  };
+  });
 }
 
 describe("validateIntentRule — deterministic null paths", () => {

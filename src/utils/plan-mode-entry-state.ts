@@ -107,30 +107,37 @@ export async function readPlanModeStoredState(
   return readPlanModeEntryState(sessionPlanModeStateFile(sessionDir));
 }
 
+export function parsePlanModeStoredState(
+  raw: unknown,
+): PlanModeStoredState | null {
+  if (!raw || typeof raw !== "object") return null;
+  const parsed = raw as Partial<PlanModeStoredState>;
+  if (typeof parsed.active !== "boolean") return null;
+  return {
+    active: parsed.active,
+    updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
+    lastSource: parsed.lastSource === "SessionStart" || parsed.lastSource === "UserPromptSubmit"
+      ? parsed.lastSource
+      : "UserPromptSubmit",
+    mode: typeof parsed.mode === "string" ? parsed.mode : null,
+    detection_source: isPlanModeDetectionSource(parsed.detection_source)
+      ? parsed.detection_source
+      : "none",
+    deliveredPlansMdHash: typeof parsed.deliveredPlansMdHash === "string"
+      ? parsed.deliveredPlansMdHash
+      : null,
+    deliveredPlansMdAt: typeof parsed.deliveredPlansMdAt === "number"
+      ? parsed.deliveredPlansMdAt
+      : null,
+  };
+}
+
 async function readPlanModeEntryState(
   statePath: string,
 ): Promise<PlanModeStoredState | null> {
   try {
     const raw = await fs.promises.readFile(statePath, "utf-8");
-    const parsed = JSON.parse(raw) as Partial<PlanModeStoredState>;
-    if (typeof parsed.active !== "boolean") return null;
-    return {
-      active: parsed.active,
-      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
-      lastSource: parsed.lastSource === "SessionStart" || parsed.lastSource === "UserPromptSubmit"
-        ? parsed.lastSource
-        : "UserPromptSubmit",
-      mode: typeof parsed.mode === "string" ? parsed.mode : null,
-      detection_source: isPlanModeDetectionSource(parsed.detection_source)
-        ? parsed.detection_source
-        : "none",
-      deliveredPlansMdHash: typeof parsed.deliveredPlansMdHash === "string"
-        ? parsed.deliveredPlansMdHash
-        : null,
-      deliveredPlansMdAt: typeof parsed.deliveredPlansMdAt === "number"
-        ? parsed.deliveredPlansMdAt
-        : null,
-    };
+    return parsePlanModeStoredState(JSON.parse(raw));
   } catch {
     return null;
   }

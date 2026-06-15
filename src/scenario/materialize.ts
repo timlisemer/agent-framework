@@ -21,10 +21,12 @@ import { loadCurrentEpoch } from "./epoch.js";
 import { loadStateSnapshot } from "./snapshot.js";
 import { sessionToolLogFile } from "../utils/paths.js";
 import type { ToolLogEntry } from "../utils/session-store.js";
-import { combineInjectionMessages, loadSessionInjectionsBySeq, shortContentHash } from "../utils/session-injections.js";
+import { combineInjectionMessages, loadSessionInjectionsBySeq } from "../utils/session-injections.js";
+import { shortContentHash } from "../utils/hash-utils.js";
 import { activeSpec, adapterSpecByName } from "../adapter/spec.js";
 import type { ContentBlock, TranscriptEntry } from "../adapter/types.js";
 import type { ToolPrediction } from "../utils/prediction-types.js";
+import { readJsonlThroughByteOffset } from "../utils/file-io.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,25 +34,10 @@ function readToolLogEntriesThroughOffset(
   sessionDir: string,
   offset: number,
 ): ToolLogEntry[] {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(sessionToolLogFile(sessionDir), "utf-8");
-  } catch {
-    return [];
-  }
-
-  const bounded = raw.slice(0, Math.max(0, Math.min(offset, raw.length)));
-  const entries: ToolLogEntry[] = [];
-  for (const line of bounded.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      entries.push(JSON.parse(trimmed) as ToolLogEntry);
-    } catch {
-      // skip malformed lines
-    }
-  }
-  return entries;
+  return readJsonlThroughByteOffset<ToolLogEntry>(
+    sessionToolLogFile(sessionDir),
+    offset,
+  );
 }
 
 function dropTargetPreToolUseLogEntry(
@@ -63,34 +50,10 @@ function dropTargetPreToolUseLogEntry(
   return entries.slice(0, -1);
 }
 
-function lineContainsToolUseId(line: Record<string, unknown>, toolUseId: string): boolean {
-  const message = line.message as Record<string, unknown> | undefined;
-  const content = message?.content;
-  if (!Array.isArray(content)) return false;
-  return content.some((raw) => {
-    const block = raw as Record<string, unknown>;
-    return block.type === "tool_use" && block.id === toolUseId;
-  });
-}
-
 function entryContainsToolUseId(entry: TranscriptEntry | null, toolUseId: string): boolean {
   const content = entry?.message?.content;
   if (!Array.isArray(content)) return false;
   return content.some((block) => block.type === "tool_use" && block.id === toolUseId);
-}
-
-function sliceLinesForCapture(
-  lines: Record<string, unknown>[],
-  event: string,
-  toolUseId: string | undefined,
-): Record<string, unknown>[] {
-  if ((event !== "PreToolUse" && event !== "PostToolUse") || !toolUseId) {
-    return lines;
-  }
-
-  const idx = lines.findIndex((line) => lineContainsToolUseId(line, toolUseId));
-  if (idx === -1) return lines;
-  return lines.slice(0, idx + 1);
 }
 
 function sliceEntriesForCapture(
@@ -105,34 +68,6 @@ function sliceEntriesForCapture(
   const idx = entries.findIndex((entry) => entryContainsToolUseId(entry, toolUseId));
   if (idx === -1) return entries;
   return entries.slice(0, idx + 1);
-}
-
-function blocksFromContent(content: unknown): ScenarioBlock[] {
-  if (!Array.isArray(content)) return [];
-  const out: ScenarioBlock[] = [];
-  for (const raw of content) {
-    const b = raw as Record<string, unknown>;
-    if (b.type === "text" && typeof b.text === "string") {
-      out.push({ type: "text", text: b.text });
-    } else if (b.type === "thinking" && typeof b.thinking === "string") {
-      out.push({ type: "thinking", thinking: b.thinking });
-    } else if (b.type === "tool_use") {
-      out.push({
-        type: "tool_use",
-        id: b.id as string | undefined,
-        name: b.name as string,
-        input: (b.input ?? {}) as Record<string, unknown>,
-      });
-    } else if (b.type === "tool_result") {
-      out.push({
-        type: "tool_result",
-        tool_use_id: b.tool_use_id as string,
-        content: b.content as string | unknown[],
-        is_error: b.is_error as boolean | undefined,
-      });
-    }
-  }
-  return out;
 }
 
 function scenarioBlocksFromCanonicalContent(content: string | ContentBlock[]): ScenarioBlock[] {
@@ -164,52 +99,6 @@ function scenarioBlocksFromCanonicalContent(content: string | ContentBlock[]): S
     }
   }
   return out;
-}
-
-/**
- * Project a JSONL transcript slice (lines anchored at anchorUuid or from
- * the beginning) into ScenarioEntry[]. Returns entries in chronological order.
- */
-function projectTranscriptToEntries(
-  lines: Record<string, unknown>[],
-  anchorUuid: string | null,
-): ScenarioEntry[] {
-  let startIdx = 0;
-  if (anchorUuid) {
-    const idx = lines.findIndex((l) => l.uuid === anchorUuid);
-    if (idx !== -1) startIdx = idx;
-  }
-
-  const entries: ScenarioEntry[] = [];
-  for (let i = startIdx; i < lines.length; i++) {
-    const line = lines[i];
-    const type = line.type as string | undefined;
-    const message = line.message as Record<string, unknown> | undefined;
-
-    if (type === "user" && message) {
-      const content = message.content;
-      const entry: ScenarioUserEntry = {
-        role: "user",
-        content:
-          typeof content === "string"
-            ? content
-            : blocksFromContent(content),
-        isMeta: line.isMeta === true ? true : undefined,
-      };
-      entries.push(entry);
-    } else if (type === "assistant" && message) {
-      const blocks = blocksFromContent(message.content);
-      if (blocks.length > 0) {
-        const entry: ScenarioAssistantEntry = {
-          role: "assistant",
-          content: blocks,
-        };
-        entries.push(entry);
-      }
-    }
-    // Skip other line types (tool_result lines are embedded in user content blocks).
-  }
-  return entries;
 }
 
 function projectCanonicalTranscriptToEntries(
@@ -440,25 +329,15 @@ export async function materializeScenario(
   const anchorUuid = pointer.transcript_anchor_uuid ?? epoch?.anchor_uuid ?? null;
   const rawStartIdx = rawAnchorStartIndex(boundedRaw.rawJsonLines, anchorUuid);
   const anchoredRawTranscriptLines = boundedRaw.rawTranscriptLines.slice(rawStartIdx);
-  const anchoredRawJsonLines = boundedRaw.rawJsonLines.slice(rawStartIdx);
   const parsedEntries = sliceEntriesForCapture(
     spec.parseTranscript(anchoredRawTranscriptLines),
     pointer.event,
     pointer.tool_use_id,
   );
-  const lines = sliceLinesForCapture(
-    anchoredRawJsonLines,
-    pointer.event,
-    pointer.tool_use_id,
-  );
-  const entries = projectCanonicalTranscriptToEntries(
-    parsedEntries,
-    rawStartIdx === 0 ? anchorUuid : null,
-  );
-  const fallbackEntries = entries.length > 0 ? entries : projectTranscriptToEntries(lines, anchorUuid);
+  const entries = projectCanonicalTranscriptToEntries(parsedEntries, null);
   const scenarioEntries = pointer.event === "Stop"
-    ? normalizeStopTranscriptEntries(fallbackEntries)
-    : fallbackEntries;
+    ? normalizeStopTranscriptEntries(entries)
+    : entries;
 
   if (scenarioEntries.length === 0) {
     throw new Error(

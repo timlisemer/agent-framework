@@ -1,4 +1,5 @@
 import * as crypto from "crypto";
+import * as fs from "fs";
 
 /**
  * Create a short MD5 hash of a string.
@@ -11,4 +12,37 @@ import * as crypto from "crypto";
  */
 export function hashString(input: string): string {
   return crypto.createHash("md5").update(input).digest("hex").slice(0, 8);
+}
+
+export function hashSha256Prefix(input: string | Buffer, length = 16): string {
+  return crypto.createHash("sha256").update(input).digest("hex").slice(0, length);
+}
+
+export function shortContentHash(content: string): string {
+  return hashSha256Prefix(Buffer.from(content, "utf-8"));
+}
+
+export function hashFileSha256Prefix(filePath: string, length = 16): string | null {
+  let fd: number;
+  try {
+    fd = fs.openSync(filePath, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const hash = crypto.createHash("sha256");
+    const buffer = Buffer.alloc(64 * 1024);
+    let bytesRead = 0;
+    do {
+      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead > 0) {
+        hash.update(buffer.subarray(0, bytesRead));
+      }
+    } while (bytesRead > 0);
+    return hash.digest("hex").slice(0, length);
+  } catch {
+    return null;
+  } finally {
+    fs.closeSync(fd);
+  }
 }

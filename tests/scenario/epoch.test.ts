@@ -4,6 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../../src/scenario/epoch.js";
 import { transcriptCacheDir } from "../../src/utils/paths.js";
+import { activeSpec } from "../../src/adapter/spec.js";
 
 describe("epoch", () => {
   let tmpDir: string;
@@ -51,11 +52,23 @@ describe("epoch", () => {
     expect(epoch.reason).toBe("rewind");
     expect(epoch.anchor_uuid).toBe("uuid-anchor-123");
     expect(epoch.parent_epoch_id).toBeNull();
-    expect(epoch.adapter).toBe("claude");
+    expect(epoch.adapter).toBe(activeSpec().name);
 
     const loaded = loadCurrentEpoch(tmpDir);
     expect(loaded).not.toBeNull();
     expect(loaded!.id).toBe(epoch.id);
+  });
+
+  it("records the active adapter in epoch metadata", () => {
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      const epoch = rotateEpoch(tmpDir, "initial", null);
+      expect(epoch.adapter).toBe("codex");
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      else process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+    }
   });
 
   it("rotateEpoch sets parent_epoch_id on subsequent rotations", () => {
@@ -67,5 +80,22 @@ describe("epoch", () => {
   it("loadCurrentEpoch returns null when no epochs file exists", () => {
     const result = loadCurrentEpoch(tmpDir);
     expect(result).toBeNull();
+  });
+
+  it("skips malformed-shape transcript records while detecting rewinds", () => {
+    fs.writeFileSync(
+      path.join(tmpDir, "state-snapshots.jsonl"),
+      JSON.stringify({ seq: 1, transcript_uuids_tail: ["uuid-old"] }) + "\n",
+    );
+    fs.writeFileSync(
+      transcriptPath,
+      [
+        "null",
+        JSON.stringify("not an object"),
+        JSON.stringify({ uuid: "uuid-old" }),
+      ].join("\n") + "\n",
+    );
+
+    expect(detectEpochChange(tmpDir, transcriptPath)).toEqual({ rotated: false });
   });
 });

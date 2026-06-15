@@ -1,21 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { lowRiskRule } from "../../src/rules/low-risk.js";
-import type { RuleContext } from "../../src/rules/types.js";
 import { sessionStateDefaults } from "../../src/utils/session-store.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
-function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
-  return {
+function makeCtx(overrides: Parameters<typeof makeRuleContext>[0] = {}) {
+  return makeRuleContext({
     toolName: "mcp-create_planfile",
     projectDir: "/repo",
     transcriptPath: "/tmp/transcript.jsonl",
     sessionDir: "/tmp/session",
     sessionId: "session",
     state: sessionStateDefaults(),
-    stateManager: {} as RuleContext["stateManager"],
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
     ...overrides,
-  };
+  });
 }
 
 describe("lowRiskRule", () => {

@@ -1,4 +1,22 @@
 import type { AdapterEncoder, EncodedOutput, EventName } from "../../src/adapter/types.js";
+import { encodeDecisionBlockOutput, encodePreToolUseDenyOutput } from "../shared/encoder-output.js";
+
+function encodeCodexAdditionalContextBlock(
+  hookEventName: "PostToolUse" | "UserPromptSubmit",
+  reason: string,
+): EncodedOutput {
+  return {
+    stdout: JSON.stringify({
+      decision: "block",
+      reason,
+      hookSpecificOutput: {
+        hookEventName,
+        additionalContext: reason,
+      },
+    }),
+    exitCode: 0,
+  };
+}
 
 export const codexEncoder: AdapterEncoder = {
   name: "codex",
@@ -8,16 +26,7 @@ export const codexEncoder: AdapterEncoder = {
   },
 
   encodePreToolUseDeny(reason: string): EncodedOutput {
-    return {
-      stdout: JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "deny",
-          permissionDecisionReason: reason,
-        },
-      }),
-      exitCode: 0,
-    };
+    return encodePreToolUseDenyOutput(reason);
   },
 
   encodePermissionRequestAllow(): EncodedOutput {
@@ -45,24 +54,11 @@ export const codexEncoder: AdapterEncoder = {
   },
 
   encodePostToolUseBlock(reason: string): EncodedOutput {
-    return {
-      stdout: JSON.stringify({
-        decision: "block",
-        reason,
-        hookSpecificOutput: {
-          hookEventName: "PostToolUse",
-          additionalContext: reason,
-        },
-      }),
-      exitCode: 0,
-    };
+    return encodeCodexAdditionalContextBlock("PostToolUse", reason);
   },
 
   encodeStopBlock(reason: string): EncodedOutput {
-    return {
-      stdout: JSON.stringify({ decision: "block", reason }),
-      exitCode: 0,
-    };
+    return encodeDecisionBlockOutput(reason);
   },
 
   encodeStopPass(): EncodedOutput {
@@ -93,16 +89,6 @@ export const codexEncoder: AdapterEncoder = {
   },
 
   encodeUserPromptSubmitBlock(reason: string): EncodedOutput {
-    return {
-      stdout: JSON.stringify({
-        decision: "block",
-        reason,
-        hookSpecificOutput: {
-          hookEventName: "UserPromptSubmit",
-          additionalContext: reason,
-        },
-      }),
-      exitCode: 0,
-    };
+    return encodeCodexAdditionalContextBlock("UserPromptSubmit", reason);
   },
 };

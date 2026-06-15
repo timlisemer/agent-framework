@@ -6,12 +6,12 @@ vi.mock("../../src/utils/transcript.js", () => ({
 
 import { recentMessagesRule } from "../../src/rules/recent-messages.js";
 import { readTranscriptExact } from "../../src/utils/transcript.js";
-import type { RuleContext } from "../../src/rules/types.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
 const mockReadTranscriptExact = vi.mocked(readTranscriptExact);
 
-function makeCtx(): RuleContext {
-  return {
+function makeCtx() {
+  return makeRuleContext({
     hookEvent: "PreToolUse",
     toolName: "Edit",
     toolInput: {},
@@ -19,12 +19,7 @@ function makeCtx(): RuleContext {
     transcriptPath: "/tmp/transcript.jsonl",
     projectDir: "/tmp/project",
     sessionDir: "/tmp/session",
-    sessionId: "test-session",
-    state: {},
-    stateManager: {} as never,
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
-  } as unknown as RuleContext;
+  });
 }
 
 describe("recentMessagesRule", () => {

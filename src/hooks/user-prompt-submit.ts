@@ -13,8 +13,8 @@ import {
   capturePlanModeFromTransition,
 } from "../scenario/capture.js";
 import { appendStateSnapshot } from "../scenario/snapshot.js";
-import { detectEpochChange, rotateEpoch, loadCurrentEpoch } from "../scenario/epoch.js";
-import { onEpochRotation, onUserPromptTurn } from "../scenario/lifecycle.js";
+import { loadCurrentEpoch } from "../scenario/epoch.js";
+import { onUserPromptTurn, rotateEpochIfNeeded } from "../scenario/lifecycle.js";
 import { activeSpec } from "../adapter/spec.js";
 import { validateCurrentPlanExit, writeCurrentPlanSidecar } from "../utils/plan-source.js";
 import { clearGateReasoning } from "../utils/gate-reasoning-cache.js";
@@ -64,16 +64,7 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
 
   const sessionDir = getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path });
 
-  // Detect epoch change (transcript rewind) and reset derived caches when needed.
-  const epochChange = detectEpochChange(sessionDir, input.transcript_path);
-  if (epochChange.rotated) {
-    const newEpoch = rotateEpoch(
-      sessionDir,
-      epochChange.reason!,
-      epochChange.anchorUuid ?? null,
-    );
-    await onEpochRotation(sessionDir, newEpoch);
-  }
+  await rotateEpochIfNeeded(sessionDir, input.transcript_path);
 
   const stateManager = getSessionState(sessionDir);
   const spec = activeSpec();

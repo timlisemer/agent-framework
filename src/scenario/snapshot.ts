@@ -11,13 +11,13 @@
  * @module scenario/snapshot
  */
 
-import * as crypto from "crypto";
 import * as fs from "fs";
-import * as path from "path";
-import { fileSizeOrZero, readFileTailBuffer } from "../utils/file-io.js";
+import { appendJsonlEntrySync, fileSizeOrZero, findJsonlEntry, readLastJsonlEntryFromTail } from "../utils/file-io.js";
 import { sessionStateSnapshotsFile, sessionToolLogFile, sessionGateReasoningFile, sessionDenialCacheFile, sessionPlanModeStateFile, sessionInjectionsFile } from "../utils/paths.js";
 import type { SessionState } from "../utils/session-store.js";
-import type { PlanModeStoredState } from "../utils/plan-mode-entry-state.js";
+import { parsePlanModeStoredState, type PlanModeStoredState } from "../utils/plan-mode-entry-state.js";
+import { readTranscriptUuidTail } from "./transcript-uuids.js";
+import { hashFileSha256Prefix, hashSha256Prefix } from "../utils/hash-utils.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,98 +54,30 @@ export interface StateSnapshot {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function shortHash(data: string): string {
-  return crypto.createHash("sha256").update(data).digest("hex").slice(0, 16);
+  return hashSha256Prefix(data);
 }
 
 function fileHash(filePath: string): string | null {
-  let fd: number;
-  try {
-    fd = fs.openSync(filePath, "r");
-  } catch {
-    return null;
-  }
-  try {
-    const hash = crypto.createHash("sha256");
-    const buffer = Buffer.alloc(64 * 1024);
-    let bytesRead = 0;
-    do {
-      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
-      if (bytesRead > 0) {
-        hash.update(buffer.subarray(0, bytesRead));
-      }
-    } while (bytesRead > 0);
-    return hash.digest("hex").slice(0, 16);
-  } catch {
-    return null;
-  } finally {
-    fs.closeSync(fd);
-  }
+  return hashFileSha256Prefix(filePath);
 }
 
 function readPlanModeState(filePath: string): PlanModeStoredState | null {
   try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Partial<PlanModeStoredState>;
-    if (typeof parsed.active !== "boolean") return null;
-    return {
-      active: parsed.active,
-      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
-      lastSource: parsed.lastSource === "SessionStart" || parsed.lastSource === "UserPromptSubmit"
-        ? parsed.lastSource
-        : "UserPromptSubmit",
-      mode: typeof parsed.mode === "string" ? parsed.mode : null,
-      detection_source: parsed.detection_source === "codex-collaboration-mode" ||
-        parsed.detection_source === "hook-permission-mode" ||
-        parsed.detection_source === "transcript-permission-mode" ||
-        parsed.detection_source === "none"
-        ? parsed.detection_source
-        : "none",
-      deliveredPlansMdHash: typeof parsed.deliveredPlansMdHash === "string"
-        ? parsed.deliveredPlansMdHash
-        : null,
-      deliveredPlansMdAt: typeof parsed.deliveredPlansMdAt === "number"
-        ? parsed.deliveredPlansMdAt
-        : null,
-    };
+    return parsePlanModeStoredState(JSON.parse(fs.readFileSync(filePath, "utf-8")));
   } catch {
     return null;
   }
 }
 
 const TRANSCRIPT_UUID_TAIL_COUNT = 20;
+const JSONL_TAIL_BYTES = 256 * 1024;
 
 function readTranscriptUuidsTail(transcriptPath: string): string[] {
-  const buffer = readFileTailBuffer(transcriptPath, 256 * 1024);
-  if (!buffer) return [];
-  try {
-    const raw = buffer.toString("utf-8");
-    const lines = raw.split("\n").filter((l) => l.trim().length > 0);
-    const uuids: string[] = [];
-    for (const line of lines) {
-      try {
-        const parsed = JSON.parse(line) as Record<string, unknown>;
-        const uuid = parsed.uuid as string | undefined;
-        if (uuid && typeof uuid === "string") uuids.push(uuid);
-      } catch {
-        // skip
-      }
-    }
-    return uuids.slice(-TRANSCRIPT_UUID_TAIL_COUNT);
-  } catch {
-    return [];
-  }
+  return readTranscriptUuidTail(transcriptPath, JSONL_TAIL_BYTES, TRANSCRIPT_UUID_TAIL_COUNT);
 }
 
 function loadLastSnapshot(filePath: string): StateSnapshot | null {
-  const buffer = readFileTailBuffer(filePath, 256 * 1024);
-  if (!buffer) return null;
-  const raw = buffer.toString("utf-8");
-  const lines = raw.split("\n").filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return null;
-  try {
-    return JSON.parse(lines[lines.length - 1]) as StateSnapshot;
-  } catch {
-    return null;
-  }
+  return readLastJsonlEntryFromTail<StateSnapshot>(filePath, JSONL_TAIL_BYTES);
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -220,8 +152,7 @@ export function appendStateSnapshot(
   };
 
   try {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    fs.appendFileSync(filePath, JSON.stringify(snapshot) + "\n");
+    appendJsonlEntrySync(filePath, snapshot);
   } catch {
     // Best-effort — snapshot failures must never crash a hook process.
   }
@@ -238,22 +169,8 @@ export function loadStateSnapshot(
   sessionDir: string,
   seq: number,
 ): StateSnapshot | null {
-  const filePath = sessionStateSnapshotsFile(sessionDir);
-  let raw: string;
-  try {
-    raw = fs.readFileSync(filePath, "utf-8");
-  } catch {
-    return null;
-  }
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed = JSON.parse(trimmed) as StateSnapshot;
-      if (parsed.seq === seq) return parsed;
-    } catch {
-      // skip malformed lines
-    }
-  }
-  return null;
+  return findJsonlEntry<StateSnapshot>(
+    sessionStateSnapshotsFile(sessionDir),
+    (snapshot) => snapshot.seq === seq,
+  );
 }

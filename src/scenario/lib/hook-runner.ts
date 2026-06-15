@@ -15,7 +15,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { readJsonl } from "../../utils/file-io.js";
+import { readJsonl, readJsonlAfterByteOffset } from "../../utils/file-io.js";
 import { sessionToolLogFile, sessionStateFile, agentFrameworkRoot, distAdapterHookScript, packageJsonPath } from "../../utils/paths.js";
 import type {
   ReasonMustExpectation,
@@ -116,9 +116,9 @@ export function readToolLogEntriesAfterOffset(
   sessionDir: string,
   byteOffset: number,
 ): { gate?: string; reason?: string } {
-  const entries = readJsonl<{ gate?: string; reason?: string }>(
+  const entries = readJsonlAfterByteOffset<{ gate?: string; reason?: string }>(
     sessionToolLogFile(sessionDir),
-    { byteOffset },
+    byteOffset,
   );
   if (entries.length > 0) {
     const last = entries[entries.length - 1];

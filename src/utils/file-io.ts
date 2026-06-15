@@ -38,42 +38,44 @@ export function appendJsonlEntrySync<T>(filePath: string, entry: T): void {
 }
 
 /**
+ * Synchronously append multiple JSONL entries in one write.
+ */
+export function appendJsonlEntriesSync<T>(filePath: string, entries: readonly T[]): void {
+  if (entries.length === 0) return;
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.appendFileSync(filePath, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+}
+
+/**
  * Read a JSONL file and return parsed entries.
  *
  * @param filePath - Path to the .jsonl file
  * @param opts.tail - If set, return only the last N entries
- * @param opts.byteOffset - If set, read only bytes starting at this offset
  * @returns Array of parsed entries; empty array if file does not exist
  */
 export function readJsonl<T>(
   filePath: string,
-  opts?: { tail?: number; byteOffset?: number },
+  opts?: { tail?: number },
 ): T[] {
   let content: string;
   try {
-    if (opts?.byteOffset !== undefined) {
-      const fd = fs.openSync(filePath, "r");
-      try {
-        const stat = fs.fstatSync(fd);
-        if (stat.size <= opts.byteOffset) return [];
-        const len = stat.size - opts.byteOffset;
-        const buf = Buffer.alloc(len);
-        fs.readSync(fd, buf, 0, len, opts.byteOffset);
-        content = buf.toString("utf-8");
-      } finally {
-        fs.closeSync(fd);
-      }
-    } else {
-      content = fs.readFileSync(filePath, "utf-8");
-    }
+    content = fs.readFileSync(filePath, "utf-8");
   } catch {
     return [];
   }
 
-  const lines = content.split("\n").filter(Boolean);
-  const slice = opts?.tail !== undefined ? lines.slice(-opts.tail) : lines;
+  return parseJsonlText<T>(content, opts?.tail);
+}
+
+export function parseJsonlText<T>(content: string, tail?: number): T[] {
+  const lines = content.split("\n").filter((line) => line.trim().length > 0);
+  const slice = tail !== undefined ? lines.slice(-tail) : lines;
+  return parseJsonlLines<T>(slice);
+}
+
+export function parseJsonlLines<T>(lines: readonly string[]): T[] {
   const results: T[] = [];
-  for (const line of slice) {
+  for (const line of lines) {
     try {
       results.push(JSON.parse(line) as T);
     } catch {
@@ -81,6 +83,160 @@ export function readJsonl<T>(
     }
   }
   return results;
+}
+
+function readFileTailWindow(
+  filePath: string,
+  maxBytes: number,
+): { buffer: Buffer; start: number } | null {
+  return readFileWindow(filePath, (size) => {
+    const length = Math.min(maxBytes, size);
+    return { start: size - length, length };
+  });
+}
+
+function readFileWindow(
+  filePath: string,
+  select: (size: number) => { start: number; length: number },
+): { buffer: Buffer; start: number } | null {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(filePath, "r");
+    const stat = fs.fstatSync(fd);
+    const window = select(stat.size);
+    const start = Math.max(0, Math.min(window.start, stat.size));
+    const length = Math.max(0, Math.min(window.length, stat.size - start));
+    const buffer = Buffer.alloc(length);
+    if (length > 0) {
+      fs.readSync(fd, buffer, 0, length, start);
+    }
+    return { buffer, start };
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Ignore close errors
+      }
+    }
+  }
+}
+
+export function readJsonlTail<T>(filePath: string, maxBytes: number, tail?: number): T[] {
+  const window = readFileTailWindow(filePath, maxBytes);
+  if (!window) return [];
+  const previous = window.start > 0
+    ? readFileWindow(filePath, () => ({ start: window.start - 1, length: 1 }))
+    : null;
+  const previousByteIsNewline = window.start === 0 || previous?.buffer[0] === 10;
+  try {
+    const entries = parseJsonlBufferWindow<T>(window.buffer, {
+      dropLeadingPartial: !previousByteIsNewline,
+      dropTrailingPartial: true,
+    });
+    return tail !== undefined ? entries.slice(-tail) : entries;
+  } catch {
+    return [];
+  }
+}
+
+export function readLastJsonlEntryFromTail<T>(
+  filePath: string,
+  maxBytes: number,
+): T | null {
+  return readJsonlTail<T>(filePath, maxBytes).at(-1) ?? null;
+}
+
+/**
+ * Read a JSONL file and return parsed entries from a supplied string.
+ */
+export function readJsonlFromText<T>(content: string, opts?: { tail?: number }): T[] {
+  return parseJsonlText<T>(content, opts?.tail);
+}
+
+export function parseJsonlBufferWindow<T>(
+  buffer: Buffer,
+  opts?: { dropLeadingPartial?: boolean; dropTrailingPartial?: boolean },
+): T[] {
+  let raw = buffer.toString("utf-8");
+  if (opts?.dropLeadingPartial && raw.length > 0) {
+    const firstNewline = raw.indexOf("\n");
+    raw = firstNewline === -1 ? "" : raw.slice(firstNewline + 1);
+  }
+  if (opts?.dropTrailingPartial && raw.length > 0 && !raw.endsWith("\n")) {
+    const lastNewline = raw.lastIndexOf("\n");
+    raw = lastNewline === -1 ? "" : raw.slice(0, lastNewline + 1);
+  }
+  return parseJsonlText<T>(raw);
+}
+
+export function readJsonlThroughByteOffset<T>(
+  filePath: string,
+  offset: number,
+): T[] {
+  const window = readFileWindow(filePath, (size) => ({
+    start: 0,
+    length: Math.max(0, Math.min(offset, size)),
+  }));
+  if (!window) return [];
+  try {
+    return parseJsonlBufferWindow<T>(window.buffer, {
+      dropTrailingPartial: true,
+    });
+  } catch {
+    return [];
+  }
+}
+
+export function readJsonlAfterByteOffset<T>(
+  filePath: string,
+  offset: number,
+): T[] {
+  const previous = offset > 0
+    ? readFileWindow(filePath, () => ({ start: offset - 1, length: 1 }))
+    : null;
+  const previousByteIsNewline = offset <= 0 || previous?.buffer[0] === 10;
+  const window = readFileWindow(filePath, (size) => {
+    const start = Math.max(0, Math.min(offset, size));
+    return { start, length: size - start };
+  });
+  if (!window) return [];
+  try {
+    return parseJsonlBufferWindow<T>(window.buffer, {
+      dropLeadingPartial: !previousByteIsNewline,
+      dropTrailingPartial: true,
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Read the last physical JSONL line from a file if it is parseable.
+ * Returns null if the file is missing, empty, or the last line is malformed.
+ */
+export function readLastJsonlEntry<T>(filePath: string): T | null {
+  return readJsonl<T>(filePath, { tail: 1 })[0] ?? null;
+}
+
+/**
+ * Read JSONL entries until a predicate matches.
+ * Malformed lines are skipped by readJsonl.
+ */
+export function findJsonlEntry<T>(
+  filePath: string,
+  predicate: (entry: T) => boolean,
+): T | null {
+  for (const entry of readJsonl<T>(filePath)) {
+    try {
+      if (predicate(entry)) return entry;
+    } catch {
+      // Skip syntactically valid but shape-invalid entries.
+    }
+  }
+  return null;
 }
 
 /**
@@ -115,25 +271,11 @@ export function readJson<T>(filePath: string): T {
 // ─── Text helpers ─────────────────────────────────────────────────────────────
 
 export function readFileTailBuffer(filePath: string, maxBytes: number): Buffer | null {
-  let fd: number | undefined;
-  try {
-    fd = fs.openSync(filePath, "r");
-    const stat = fs.fstatSync(fd);
-    const length = Math.min(maxBytes, stat.size);
-    const buffer = Buffer.alloc(length);
-    fs.readSync(fd, buffer, 0, length, stat.size - length);
-    return buffer;
-  } catch {
-    return null;
-  } finally {
-    if (fd !== undefined) {
-      try {
-        fs.closeSync(fd);
-      } catch {
-        // Ignore close errors
-      }
-    }
-  }
+  return readFileTailWindow(filePath, maxBytes)?.buffer ?? null;
+}
+
+export function readFileHeadBuffer(filePath: string, maxBytes: number): Buffer | null {
+  return readFileWindow(filePath, () => ({ start: 0, length: maxBytes }))?.buffer ?? null;
 }
 
 export function fileSizeOrZero(filePath: string): number {

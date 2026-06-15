@@ -8,6 +8,10 @@ import { runProcessCancellable } from "../../utils/command.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
+import {
+  findCaptureByInjectionSeq as loadCaptureByInjectionSeq,
+  findCaptureByToolUseId as loadCaptureByToolUseId,
+} from "../../scenario/capture.js";
 
 type SearchKind = "transcript" | "tool-log" | "captures" | "injections";
 
@@ -216,36 +220,25 @@ async function resolveSessionDirForTranscript(
 }
 
 function findCaptureByToolUseId(sessionDir: string, toolUseId: string): Partial<LocateCandidate> {
-  const captures = path.join(sessionDir, "captures.jsonl");
-  if (!fs.existsSync(captures)) return {};
-  for (const line of fs.readFileSync(captures, "utf-8").split("\n")) {
-    const json = safeJson(line);
-    if (json?.tool_use_id !== toolUseId) continue;
-    return {
-      captureSeq: typeof json.seq === "number" ? json.seq : undefined,
-      event: typeof json.event === "string" ? json.event : undefined,
-      decision: typeof json.decision === "string" ? json.decision : undefined,
-      toolUseId,
-    };
-  }
-  return { toolUseId };
+  const capture = loadCaptureByToolUseId(sessionDir, toolUseId);
+  if (!capture) return { toolUseId };
+  return {
+    captureSeq: capture.seq,
+    event: capture.event,
+    decision: capture.decision,
+    toolUseId,
+  };
 }
 
 function findCaptureByInjectionSeq(sessionDir: string, injectionSeq: number): Partial<LocateCandidate> {
-  const captures = path.join(sessionDir, "captures.jsonl");
-  if (!fs.existsSync(captures)) return {};
-  for (const line of fs.readFileSync(captures, "utf-8").split("\n")) {
-    const json = safeJson(line);
-    const seqs = Array.isArray(json?.injection_seqs) ? json.injection_seqs : [];
-    if (!seqs.includes(injectionSeq)) continue;
-    return {
-      captureSeq: typeof json?.seq === "number" ? json.seq : undefined,
-      event: typeof json?.event === "string" ? json.event : undefined,
-      decision: typeof json?.decision === "string" ? json.decision : undefined,
-      injectionSeq,
-    };
-  }
-  return { injectionSeq };
+  const capture = loadCaptureByInjectionSeq(sessionDir, injectionSeq);
+  if (!capture) return { injectionSeq };
+  return {
+    captureSeq: capture.seq,
+    event: capture.event,
+    decision: capture.decision,
+    injectionSeq,
+  };
 }
 
 function candidateKey(c: LocateCandidate): string {

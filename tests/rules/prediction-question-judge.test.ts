@@ -11,7 +11,8 @@ vi.mock("../../src/utils/transcript.js", () => ({
 import { predictionQuestionJudgeRule } from "../../src/rules/prediction-question-judge.js";
 import { runAgent } from "../../src/utils/agent-runner.js";
 import { readRecentUserMessages } from "../../src/utils/transcript.js";
-import type { RuleContext } from "../../src/rules/types.js";
+import { sessionStateDefaults } from "../../src/utils/session-store.js";
+import { makeRuleContext } from "../helpers/rule-context.js";
 
 const mockRunAgent = vi.mocked(runAgent);
 const mockReadRecentUserMessages = vi.mocked(readRecentUserMessages);
@@ -35,8 +36,8 @@ no
 ---BLOCK-ALL-TOOLS---
 no`;
 
-function makeCtx(userMessageFull: string): RuleContext {
-  return {
+function makeCtx(userMessageFull: string) {
+  return makeRuleContext({
     hookEvent: "PreToolUse",
     toolName: "AskUserQuestion",
     toolInput: {
@@ -52,8 +53,8 @@ function makeCtx(userMessageFull: string): RuleContext {
     transcriptPath: "/tmp/transcript.jsonl",
     projectDir: "/tmp/project",
     sessionDir: "/tmp/session",
-    sessionId: "test-session",
     state: {
+      ...sessionStateDefaults(),
       currentPrediction: {
         mood: "frustrated",
         trust: "low",
@@ -64,14 +65,12 @@ function makeCtx(userMessageFull: string): RuleContext {
         userMessageSnippet: userMessageFull.slice(0, 200),
         userMessageFull,
         blockAllTools: false,
+        timestamp: Date.now(),
       },
       frustrationStreak: 3,
       currentWindowSize: 4,
     },
-    stateManager: {} as never,
-    planMode: false,
-    planModeCtx: { active: false, contextString: "" },
-  } as unknown as RuleContext;
+  });
 }
 
 describe("predictionQuestionJudgeRule", () => {
