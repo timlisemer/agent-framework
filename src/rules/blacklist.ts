@@ -9,7 +9,7 @@ export const blacklistRule: PreToolRule = {
   name: "blacklist",
   displayName: "Blacklist",
   priority: 34,
-  appealable: true,
+  appealable: false,
   usesLlm: false,
   promptSection: "",
 
