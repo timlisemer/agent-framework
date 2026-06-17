@@ -5,6 +5,10 @@ import {
   planModeBashBlock,
   isEditIntentExemptPath,
 } from "../utils/edit-intent.js";
+import {
+  createPlanfileAuthorization,
+  isCreatePlanfileTool,
+} from "../utils/create-planfile.js";
 
 export const planModeBlockRule: PreToolRule = {
   name: "plan-mode-block",
@@ -15,6 +19,20 @@ export const planModeBlockRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
+    if (isCreatePlanfileTool(ctx.toolName, ctx.rawToolName)) {
+      if (ctx.state.forceCheckPending) return null;
+      if (!createPlanfileAuthorization({
+        toolName: ctx.toolName,
+        rawToolName: ctx.rawToolName,
+        toolInput: ctx.toolInput,
+        planMode: ctx.planMode,
+        currentPrediction: ctx.state.currentPrediction,
+      })) {
+        return { fastDeny: "create_planfile is only available while plan mode is active or required by the current workflow." };
+      }
+      return null;
+    }
+
     if (!ctx.planMode) {
       return null;
     }

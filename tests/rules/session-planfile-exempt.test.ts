@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { editIntentRule } from "../../src/rules/edit-intent.js";
 import { predictionBlockRule } from "../../src/rules/prediction-block.js";
 import { planModeBlockRule } from "../../src/rules/plan-mode-block.js";
+import { ALL_RULES, evaluateRules } from "../../src/rules/index.js";
 import type { RuleContext } from "../../src/rules/types.js";
 import { getBlacklistHighlights } from "../../src/utils/command-patterns.js";
 import { sessionPlanFile } from "../../src/utils/paths.js";
@@ -29,6 +30,240 @@ function makeCtx(overrides: Partial<RuleContext>): RuleContext {
 }
 
 describe("session planfile rule exemptions", () => {
+  it("plan-mode-block denies create_planfile outside plan mode", async () => {
+    const result = await planModeBlockRule.check(makeCtx({
+      toolName: "mcp-create_planfile",
+      planMode: false,
+      planModeCtx: { active: false, contextString: "" },
+    }));
+
+    expect(result).toEqual({
+      fastDeny: "create_planfile is only available while plan mode is active or required by the current workflow.",
+    });
+  });
+
+  it("plan-mode-block lets create_planfile continue while plan mode is active", async () => {
+    const result = await planModeBlockRule.check(makeCtx({
+      toolName: "mcp-create_planfile",
+      planMode: true,
+      planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
+    }));
+
+    expect(result).toBeNull();
+  });
+
+  it("full rule chain deterministically allows create_planfile while plan mode is active", async () => {
+    const result = await evaluateRules(ALL_RULES, makeCtx({
+      toolName: "mcp-create_planfile",
+      planMode: true,
+      planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
+      state: {
+        ...sessionStateDefaults(),
+        respondFirstChecked: true,
+      },
+    }), "PreToolUse");
+
+    expect(result).toMatchObject({
+      decision: "allow",
+      agent: "create-planfile-allow",
+      reason: "Plan mode allows create_planfile to write and validate the session planfile.",
+      usesLlm: false,
+    });
+  });
+
+  it("hostile prediction does not mood-deny plan-mode create_planfile before fast-allow", async () => {
+    const result = await evaluateRules(ALL_RULES, makeCtx({
+      toolName: "mcp-create_planfile",
+      planMode: true,
+      planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
+      state: {
+        ...sessionStateDefaults(),
+        respondFirstChecked: true,
+        currentPrediction: {
+          mood: "angry",
+          trust: "low",
+          intent: "User is upset about the prior workflow attempt.",
+          blockedIntent: "",
+          explicitlyAllowedTools: [],
+          explicitlyBlockedSubstrings: [],
+          userMessageSnippet: "this workflow is wrong",
+          timestamp: Date.now(),
+        },
+        frustrationStreak: 3,
+      },
+    }), "PreToolUse");
+
+    expect(result).toMatchObject({
+      decision: "allow",
+      agent: "create-planfile-allow",
+      reason: "Plan mode allows create_planfile to write and validate the session planfile.",
+      usesLlm: false,
+    });
+  });
+
+  it("stale cached no-tools text does not veto current plan-mode create_planfile authorization", async () => {
+    const result = await evaluateRules(ALL_RULES, makeCtx({
+      toolName: "mcp-create_planfile",
+      latestUserMessage: "continue with the planfile",
+      planMode: true,
+      planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
+      state: {
+        ...sessionStateDefaults(),
+        respondFirstChecked: true,
+        currentPrediction: {
+          mood: "angry",
+          trust: "low",
+          intent: "User previously told the AI to stop all tools.",
+          blockedIntent: "",
+          explicitlyAllowedTools: [],
+          explicitlyBlockedSubstrings: [],
+          userMessageFull: "freeze. no tools.",
+          userMessageSnippet: "freeze. no tools.",
+          blockAllTools: false,
+          timestamp: Date.now() - 10_000,
+        },
+        frustrationStreak: 3,
+      },
+    }), "PreToolUse");
+
+    expect(result).toMatchObject({
+      decision: "allow",
+      agent: "create-planfile-allow",
+      reason: "Plan mode allows create_planfile to write and validate the session planfile.",
+      usesLlm: false,
+    });
+  });
+
+  it("stale cached blockAllTools does not veto live plan-mode create_planfile authorization", async () => {
+    const result = await evaluateRules(ALL_RULES, makeCtx({
+      toolName: "mcp-create_planfile",
+      latestUserMessage: "continue with the planfile",
+      planMode: true,
+      planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
+      state: {
+        ...sessionStateDefaults(),
+        respondFirstChecked: true,
+        currentPrediction: {
+          mood: "angry",
+          trust: "low",
+          intent: "User previously told the AI to stop all tools.",
+          blockedIntent: "No tools.",
+          explicitlyAllowedTools: [],
+          explicitlyBlockedSubstrings: [],
+          userMessageFull: "freeze. no tools.",
+          userMessageSnippet: "freeze. no tools.",
+          blockAllTools: true,
+          timestamp: Date.now() - 10_000,
+        },
+        frustrationStreak: 3,
+      },
+    }), "PreToolUse");
+
+    expect(result).toMatchObject({
+      decision: "allow",
+      agent: "create-planfile-allow",
+      reason: "Plan mode allows create_planfile to write and validate the session planfile.",
+      usesLlm: false,
+    });
+  });
+
+  it("full rule chain deterministically allows workflow-required create_planfile outside plan mode", async () => {
+    const result = await evaluateRules(ALL_RULES, makeCtx({
+      toolName: "mcp-create_planfile",
+      toolInput: { continue_workflow: true },
+      planMode: false,
+      planModeCtx: { active: false, contextString: "" },
+      state: {
+        ...sessionStateDefaults(),
+        respondFirstChecked: true,
+        currentPrediction: {
+          mood: "neutral",
+          trust: "normal",
+          intent: "User invoked a plan workflow.",
+          blockedIntent: "",
+          explicitlyAllowedTools: [],
+          explicitlyRequiredTools: [
+            { tool: "mcp-create_planfile", input: { continue_workflow: true } },
+          ],
+          explicitlyBlockedSubstrings: [],
+          userMessageSnippet: "/plan3",
+          timestamp: Date.now(),
+        },
+      },
+    }), "PreToolUse");
+
+    expect(result).toMatchObject({
+      decision: "allow",
+      agent: "create-planfile-allow",
+      reason: "Workflow requires create_planfile next; planfile creation is authorized.",
+      usesLlm: false,
+    });
+  });
+
+  it("explicit block denies create_planfile before plan-mode fast-allow", async () => {
+    const result = await evaluateRules(ALL_RULES, makeCtx({
+      toolName: "mcp-create_planfile",
+      planMode: true,
+      planModeCtx: { active: true, contextString: "PLAN MODE ACTIVE" },
+      state: {
+        ...sessionStateDefaults(),
+        respondFirstChecked: true,
+        currentPrediction: {
+          mood: "neutral",
+          trust: "normal",
+          intent: "User does not want a planfile created.",
+          blockedIntent: "Do not create a planfile.",
+          explicitlyAllowedTools: [],
+          explicitlyBlockedSubstrings: [
+            { tool: "mcp-create_planfile", reason: "Do not create a planfile." },
+          ],
+          userMessageSnippet: "do not create a planfile",
+          timestamp: Date.now(),
+        },
+      },
+    }), "PreToolUse");
+
+    expect(result).toMatchObject({
+      decision: "deny",
+      agent: "prediction-block",
+    });
+    expect(result?.reason).toContain("Do not create a planfile.");
+  });
+
+  it("explicit block denies workflow-required create_planfile before fast-allow", async () => {
+    const result = await evaluateRules(ALL_RULES, makeCtx({
+      toolName: "mcp-create_planfile",
+      toolInput: { continue_workflow: true },
+      planMode: false,
+      planModeCtx: { active: false, contextString: "" },
+      state: {
+        ...sessionStateDefaults(),
+        respondFirstChecked: true,
+        currentPrediction: {
+          mood: "neutral",
+          trust: "normal",
+          intent: "User invoked a plan workflow but then blocked planfile creation.",
+          blockedIntent: "Do not create a planfile.",
+          explicitlyAllowedTools: [],
+          explicitlyRequiredTools: [
+            { tool: "mcp-create_planfile", input: { continue_workflow: true } },
+          ],
+          explicitlyBlockedSubstrings: [
+            { tool: "mcp-create_planfile", reason: "Do not create a planfile." },
+          ],
+          userMessageSnippet: "do not create a planfile",
+          timestamp: Date.now(),
+        },
+      },
+    }), "PreToolUse");
+
+    expect(result).toMatchObject({
+      decision: "deny",
+      agent: "prediction-block",
+    });
+    expect(result?.reason).toContain("Do not create a planfile.");
+  });
+
   it("edit-intent allows current session planfile writes", async () => {
     const sessionDir = path.join(process.cwd(), ".tmp-session");
     const planPath = sessionPlanFile(sessionDir, "named-plan");

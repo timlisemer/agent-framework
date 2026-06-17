@@ -14,9 +14,6 @@ import {
 import type { CanonicalWorkflow, HostContext } from "../../src/adapter/types.js";
 import { claudeSpec } from "../../adapters/claude/index.js";
 import { codexSpec } from "../../adapters/codex/index.js";
-import { lowRiskRule } from "../../src/rules/low-risk.js";
-import { makeRuleContext } from "../helpers/rule-context.js";
-import { sessionStateDefaults } from "../../src/utils/session-store.js";
 import {
   codexPlan3InitialAgentBatchRequirements,
   implementWorkflowRequirementSignatures,
@@ -313,20 +310,19 @@ Spawn exactly one \`default\` agent.
     expect(overLaunchDecision.reason).toContain("TaskOutput");
   });
 
-  it("does not let low-risk auto-approval bypass a pending required workflow tool", async () => {
+  it("allows low-risk support tools as non-blocking without letting TaskOutput bypass ordered waits", () => {
     const prediction = makePrediction([
       { tool: "Agent", input: { subagent_type: "implementer" } },
     ]);
-    const result = await lowRiskRule.check(makeRuleContext({
-      toolName: "TaskOutput",
-      toolInput: { targets: ["agent-1"] },
-      state: {
-        ...sessionStateDefaults(),
-        currentPrediction: prediction,
-      },
-    }));
 
-    expect(result).toBeNull();
+    expect(prediction.nonBlockingTools?.map(requirementSignature)).toContainEqual(req("TodoWrite"));
+    expect(prediction.nonBlockingTools?.map(requirementSignature)).not.toContainEqual(req("TaskOutput"));
+    expect(decidePrediction(
+      prediction,
+      "TodoWrite",
+      { todos: [] },
+      0,
+    ).decision).toBe("allow");
     expect(decidePrediction(
       prediction,
       "TaskOutput",

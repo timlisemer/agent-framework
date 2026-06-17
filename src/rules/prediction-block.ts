@@ -1,7 +1,13 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
-import { decidePrediction } from "../utils/prediction-types.js";
+import {
+  decidePrediction,
+  EXPLICIT_PROHIBITION_RE,
+} from "../utils/prediction-types.js";
 import { extractFilePaths } from "./utils.js";
+import {
+  createPlanfileAuthorization,
+} from "../utils/create-planfile.js";
 
 export const predictionBlockRule: PreToolRule = {
   name: "prediction-block",
@@ -39,6 +45,24 @@ export const predictionBlockRule: PreToolRule = {
       ctx.latestUserTurn,
     );
     if (decision.decision === "deny") {
+      const createPlanfileAuthorized = !!createPlanfileAuthorization({
+        toolName: ctx.toolName,
+        rawToolName: ctx.rawToolName,
+        toolInput: ctx.toolInput,
+        planMode: ctx.planMode,
+        currentPrediction: ctx.state.currentPrediction,
+      });
+      const currentLogicText = (ctx.latestUserTurn?.logicText ?? ctx.latestUserMessage ?? "").trim();
+      const explicitNoTools = currentLogicText.length > 0
+        ? EXPLICIT_PROHIBITION_RE.test(currentLogicText)
+        : prediction.blockAllTools === true;
+      if (
+        createPlanfileAuthorized &&
+        !decision.matchedExplicit &&
+        !explicitNoTools
+      ) {
+        return null;
+      }
       return { fastDeny: decision.reason ?? "Tool blocked by user-state prediction" };
     }
     return null;

@@ -100,8 +100,8 @@ before committing.
 │  ├─ prediction-question-judge (28): Block stalling AskUserQuestion under frustration
 │  ├─ question-validate (30): Validate AskUserQuestion
 │  ├─ force-check-required (32): Lock to mcp__check after workaround denial
-│  ├─ low-risk-bypass (33): Auto-approve read-only tools when no required workflow queue is pending
 │  ├─ prediction-block (35): Block predicted-bad tools (deterministic, non-appealable)
+│  ├─ create-planfile-allow (36): Deterministically allow authorized create_planfile calls
 │  ├─ drift-detect (40): Detect drift from intent (appealable)
 │  ├─ error-acknowledge (50): Require error acknowledgment (appealable, LLM)
 │  ├─ trusted-path (58): Deny sensitive-path writes
@@ -118,8 +118,8 @@ before committing.
 │  Workflow-only slash/skill invocations seed an ordered
 │  `explicitlyRequiredTools` queue from canonicalized workflow instruction text. The
 │  prediction gate enforces the next required tool, `nonBlockingTools` may run
-│  without consuming the queue, and low-risk auto-approval does not bypass a
-│  pending required workflow tool.
+│  without consuming the queue. Default non-blocking support tools are derived
+│  from the shared low-risk tool list, excluding queue-consuming waits.
 │
 ├─ claude-md-validate: Validate CLAUDE.md edits
 │
@@ -291,7 +291,7 @@ prediction-block or prose-oriented regex matching.
 | Risk Level     | Tools                                                                                                                                                                         | Notes                                      |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
 | **Low**        | `LSP`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `ListMcpResources`, `ReadMcpResource`, `TodoWrite`, `TaskOutput`, `AskUserQuestion`, `ExitPlanMode`, `EnterPlanMode`, `Skill` | Read-only or no filesystem impact          |
-| **Low**        | `mcp__*`                                                                                                                                                                      | All MCP tools auto-approved                |
+| **Low**        | `mcp__*`                                                                                                                                                                      | Low-risk prediction class unless slash-command gated or heavyweight |
 | **Path-based** | `Read`, `Write`, `Edit`, `NotebookEdit`                                                                                                                                       | Low if inside project or the active adapter's host config root, otherwise high |
 | **High**       | `Bash`, `Agent`/`Task`, `KillShell`                                                                                                                                           | Execute commands, spawn agents             |
 

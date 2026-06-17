@@ -9,7 +9,7 @@
  * @module prediction-types
  */
 
-import { isLowRiskTool, isLowRiskInspectionTool } from "../rules/utils.js";
+import { LOW_RISK_TOOLS, isLowRiskTool, isLowRiskInspectionTool } from "../rules/utils.js";
 import { CANONICAL_MCPS } from "../adapter/types.js";
 import {
   isEditTool,
@@ -678,13 +678,16 @@ export function classifyBlockAllTools(
   return "ambiguous";
 }
 
+const LOW_RISK_TOOLS_THAT_CONSUME_WORKFLOW_QUEUE = new Set(["TaskOutput"]);
+
 const DEFAULT_WORKFLOW_NON_BLOCKING_TOOLS: readonly ToolRequirement[] = [
-  { tool: "Read", reason: "read workflow or task context" },
-  { tool: "Skill", reason: "reload workflow instructions" },
+  ...LOW_RISK_TOOLS
+    .filter((tool) => !LOW_RISK_TOOLS_THAT_CONSUME_WORKFLOW_QUEUE.has(tool))
+    .map((tool) => ({
+      tool,
+      reason: `${tool} is low-risk workflow support and does not advance the required queue`,
+    })),
   { tool: "CloseAgent", reason: "close an unneeded agent without advancing workflow" },
-  { tool: "ToolSearch", reason: "inspect available tools" },
-  { tool: "ListMcpResources", reason: "inspect MCP resources" },
-  { tool: "ReadMcpResource", reason: "read MCP resources" },
 ];
 
 const EXACT_INPUT_KEYS = new Set([
@@ -1613,10 +1616,11 @@ export function decidePrediction(
     };
   }
 
-  // 4. Mood-driven default policy. Allow set mirrors `low-risk-bypass`
-  // (single source of truth via isLowRiskTool) so the prediction system
-  // doesn't artificially block tools the framework treats as always-safe
-  // — UNLESS the user is in SUSTAINED FRUSTRATION (mood angry/frustrated
+  // 4. Mood-driven default policy. Allow set mirrors the shared low-risk
+  // tool classifier (single source of truth via isLowRiskTool) so the
+  // prediction system doesn't artificially block tools the framework treats
+  // as side-effect-free — UNLESS the user is in SUSTAINED FRUSTRATION
+  // (mood angry/frustrated
   // AND trust=low OR frustrationStreak >= 2). Mirrors the TOOL_APPEAL_AGENT
   // prompt's "MOOD-DRIVEN DENIALS GENERALIZE UNDER SUSTAINED FRUSTRATION"
   // rule (src/utils/agent-configs.ts:643-646) so the deterministic policy

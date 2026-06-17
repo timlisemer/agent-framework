@@ -148,10 +148,9 @@ describe("blacklistRule", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
-  it("runs after force-check and low-risk but before prediction-block", () => {
+  it("runs after force-check but before prediction-block", () => {
     const ordered = ALL_RULES.map((r) => r.name);
-    expect(ordered.indexOf("force-check-required")).toBeLessThan(ordered.indexOf("low-risk-bypass"));
-    expect(ordered.indexOf("low-risk-bypass")).toBeLessThan(ordered.indexOf("blacklist"));
+    expect(ordered.indexOf("force-check-required")).toBeLessThan(ordered.indexOf("blacklist"));
     expect(ordered.indexOf("blacklist")).toBeLessThan(ordered.indexOf("prediction-block"));
   });
 });

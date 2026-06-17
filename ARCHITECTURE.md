@@ -43,8 +43,8 @@ src/                                # TypeScript source
     prediction-question-judge.ts    # Priority 28:  Block stalling AskUserQuestion under frustration
     question-validate.ts            # Priority 30:  Validate AskUserQuestion
     force-check-required.ts         # Priority 32:  Lock to mcp__check after workaround denial
-    low-risk.ts                     # Priority 33:  Auto-approve read-only tools unless a workflow queue is pending
     prediction-block.ts             # Priority 35:  Block predicted-bad tools (non-appealable)
+    create-planfile-allow.ts        # Priority 36:  Deterministically allow authorized create_planfile calls
     drift-detect.ts                 # Priority 40:  Detect drift from intent
     error-acknowledge.ts            # Priority 50:  Require error acknowledgment
     trusted-path.ts                 # Priority 58:  Deny sensitive-path writes
@@ -405,8 +405,8 @@ Tool call received
 │   ├─> prediction-question-judge (28) Block stalling AskUserQuestion under frustration
 │   ├─> question-validate (30) Validate AskUserQuestion
 │   ├─> force-check-required (32) Lock to mcp__check after workaround denial
-│   ├─> low-risk-bypass (33)  Fast allow read-only tools unless a required workflow queue is pending
 │   ├─> prediction-block (35)  Block predicted-bad tools (deterministic, non-appealable)
+│   ├─> create-planfile-allow (36) Deterministically allow authorized create_planfile calls
 │   ├─> drift-detect (40)      Detect drift from user intent (appealable)
 │   ├─> error-acknowledge (50) Require error acknowledgment (appealable, LLM)
 │   ├─> trusted-path (58)      Fast deny sensitive paths
@@ -431,8 +431,9 @@ Tool call received
 │   reading canonicalized workflow instruction text and deriving an ordered
 │   `explicitlyRequiredTools` queue plus `nonBlockingTools`. The prediction
 │   policy requires the next queued tool before arbitrary progress; matching
-│   non-blocking tools are allowed without consuming the queue, and low-risk
-│   approvals are disabled while a required workflow tool is pending.
+│   non-blocking tools are allowed without consuming the queue. Default
+│   non-blocking support tools are derived from the shared low-risk tool list,
+│   excluding queue-consuming waits.
 │
 ├─> Rewind detection (after rules, before validators)
 │

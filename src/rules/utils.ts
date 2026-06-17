@@ -9,14 +9,13 @@ export { isSensitivePath } from "../utils/sensitive-paths.js";
 // File tools that go through path-based risk classification (trusted/sensitive)
 // and write-specific gates (edit-intent, CLAUDE.md validation, plan-file validation,
 // style-drift). Read is NOT here -- it's read-only with no side effects, so it
-// belongs in LOW_RISK_TOOLS for immediate auto-approval.
+// belongs in LOW_RISK_TOOLS for prediction/default non-blocking classification.
 // apply_patch is excluded: Codex canonicalizes it to Edit before rules run.
 export const FILE_TOOLS = ["Write", "Edit", "NotebookEdit"];
 
-// Low-risk tools get immediate auto-approval with no further checks.
-// These are all read-only or side-effect-free -- they can't modify files,
-// execute commands, or affect shared state. Contrast with FILE_TOOLS above,
-// which go through write-specific gates (edit-intent, style-drift, etc.).
+// Low-risk tools are read-only or side-effect-free for prediction policy and
+// default workflow non-blocking support. Contrast with FILE_TOOLS above, which
+// go through write-specific gates (edit-intent, style-drift, etc.).
 export const LOW_RISK_TOOLS = [
   // Read-only file/search/navigation
   "Read",
@@ -37,15 +36,14 @@ export const LOW_RISK_TOOLS = [
 ];
 
 /**
- * MCP canonical names that should NEVER auto-approve via low-risk-bypass even
- * when the user is calm. These run heavyweight side effects (multi-minute test
+ * MCP canonical names that should NEVER be classified as low-risk even when
+ * the user is calm. These run heavyweight side effects (multi-minute test
  * suites, label rewrites). Cost-gated, not user-state-gated.
  */
 const HEAVY_MCPS: ReadonlySet<CanonicalMcp> = new Set(["scenario_tester", "scenario_labeler"]);
 
 /**
- * True iff a tool is generally safe to allow without further checks.
- * Mirrors the predicate used by `low-risk-bypass` (priority 33).
+ * True iff a tool is generally safe for low-risk prediction treatment.
  *
  * Allows: anything in LOW_RISK_TOOLS, plus any canonical MCP tool not in
  * `RESTRICTED_MCPS` (commit/push/confirm -- slash-command gated) and not

@@ -1,6 +1,5 @@
 import type { PreToolRule } from "./types.js";
 import { respondFirstRule } from "./respond-first.js";
-import { lowRiskRule } from "./low-risk.js";
 import { planModeBlockRule } from "./plan-mode-block.js";
 import { backgroundAgentBlockRule } from "./background-agent-block.js";
 import { questionValidateRule } from "./question-validate.js";
@@ -8,6 +7,7 @@ import { forceCheckRequiredRule } from "./force-check-required.js";
 import { blacklistRule } from "./blacklist.js";
 import { predictionQuestionJudgeRule } from "./prediction-question-judge.js";
 import { predictionBlockRule } from "./prediction-block.js";
+import { createPlanfileAllowRule } from "./create-planfile-allow.js";
 import { driftDetectRule } from "./drift-detect.js";
 import { errorAcknowledgeRule } from "./error-acknowledge.js";
 import { trustedPathRule } from "./trusted-path.js";
@@ -30,7 +30,6 @@ export { evaluateRules, evaluateRulesForUserPromptSubmit, evaluateRulesForStop }
 
 export const ALL_RULES: PreToolRule[] = [
   respondFirstRule,
-  lowRiskRule,
   planModeBlockRule,
   backgroundAgentBlockRule,
   questionValidateRule,
@@ -38,6 +37,7 @@ export const ALL_RULES: PreToolRule[] = [
   blacklistRule,
   predictionQuestionJudgeRule,
   predictionBlockRule,
+  createPlanfileAllowRule,
   driftDetectRule,
   errorAcknowledgeRule,
   trustedPathRule,
