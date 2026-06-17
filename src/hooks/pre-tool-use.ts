@@ -55,6 +55,12 @@ import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { loadCurrentEpoch } from "../scenario/epoch.js";
 import { rotateEpochIfNeeded } from "../scenario/lifecycle.js";
 import { stripQuotedAndPastedContent } from "../utils/quote-detection.js";
+import {
+  advanceRequiredToolsAfterAllowedTool,
+  advanceRequiredToolsAfterAllowedToolSequence,
+  decideRequiredWorkflowToolSequence,
+  type PredictionToolCall,
+} from "../utils/prediction-types.js";
 
 interface PipelineExit {
   decision: "allow" | "deny";
@@ -62,6 +68,7 @@ interface PipelineExit {
   reason: string;
   usesLlm?: boolean;
   mirroredFromLeader?: boolean;
+  skipWorkflowQueueAdvance?: boolean;
 }
 
 export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
@@ -160,6 +167,20 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   } catch {
     // Detection failed — treat as solo tool (safe fallback)
   }
+  let workflowBatchAdvanceCalls: PredictionToolCall[] | null = null;
+
+  function canonicalBatchCalls(info: ParallelBatchInfo): PredictionToolCall[] {
+    return info.members.map((member) => {
+      if (member.toolUseId === input.tool_use_id) {
+        return { toolName, toolInput };
+      }
+      const memberCanonical = spec.canonicalizeToolCall(member.toolName, member.toolInput);
+      return {
+        toolName: memberCanonical.toolName,
+        toolInput: memberCanonical.toolInput,
+      };
+    });
+  }
 
   /**
    * Sole exit function - replaces all direct outputAllow()/outputDeny() calls.
@@ -171,6 +192,18 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
       await stateManager.update((s) => {
         const next = { ...s, toolCallCount: s.toolCallCount + 1 };
         assignedToolCallIndex = s.toolCallCount;
+        if (exit.decision === "allow" && next.currentPrediction) {
+          next.currentPrediction = workflowBatchAdvanceCalls
+            ? advanceRequiredToolsAfterAllowedToolSequence(
+                next.currentPrediction,
+                workflowBatchAdvanceCalls,
+              )
+            : advanceRequiredToolsAfterAllowedTool(
+                next.currentPrediction,
+                toolName,
+                toolInput,
+              );
+        }
         if (exit.decision === "allow" && planExit) {
           next.currentEditIntent = true as const;
           next.previousEditIntent = s.currentEditIntent ?? null;
@@ -206,6 +239,19 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
         await writeTool(input.transcript_path, input.session_id, toolName, "Exiting plan mode.");
         await writeUser(input.transcript_path, input.session_id, toolName, "Plan approved. Proceed with implementation.");
       }
+    }
+
+    if (
+      exit.mirroredFromLeader &&
+      exit.decision === "allow" &&
+      !exit.skipWorkflowQueueAdvance
+    ) {
+      await stateManager.update((s) => ({
+        ...s,
+        currentPrediction: s.currentPrediction
+          ? advanceRequiredToolsAfterAllowedTool(s.currentPrediction, toolName, toolInput)
+          : s.currentPrediction,
+      }));
     }
 
     // forceCheckPending clear: keyed on THIS hook's toolName, not the leader's.
@@ -264,6 +310,24 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   }
 
   if (batchInfo) {
+    const strictWorkflowBatch = (state.currentPrediction?.explicitlyRequiredTools?.length ?? 0) > 0;
+    if (strictWorkflowBatch && batchInfo.position === 0 && state.currentPrediction) {
+      const calls = canonicalBatchCalls(batchInfo);
+      const sequenceDecision = decideRequiredWorkflowToolSequence(
+        state.currentPrediction,
+        calls,
+      );
+      if (sequenceDecision.decision === "deny") {
+        await exitPipeline({
+          decision: "deny",
+          agent: "prediction-block",
+          reason: sequenceDecision.reason ?? "Workflow batch violates required tool order.",
+        });
+        return;
+      }
+      workflowBatchAdvanceCalls = calls;
+    }
+
     // Leader (position 0) always runs the full pipeline.
     // Siblings (position > 0) poll tool-log.jsonl for the leader's decision
     // and mirror it. No cross-process lock; the leader's appendToolLog is
@@ -276,11 +340,33 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
           const reason = cached.decision === "deny"
             ? `Error in parallel tool call: ${cached.reason}`
             : cached.reason;
+          const leaderValidatedWholeBatch = cached.decision === "allow" &&
+            cached.toolUseId === batchInfo.leaderId &&
+            cached.batchPosition === 0 &&
+            cached.batchSize === batchInfo.batchSize;
+          if (cached.decision === "allow" && !leaderValidatedWholeBatch) {
+            const latestState = await stateManager.load().catch(() => state);
+            if (latestState.currentPrediction) {
+              const siblingDecision = decideRequiredWorkflowToolSequence(
+                latestState.currentPrediction,
+                [{ toolName, toolInput }],
+              );
+              if (siblingDecision.decision === "deny") {
+                await exitPipeline({
+                  decision: "deny",
+                  agent: "prediction-block",
+                  reason: siblingDecision.reason ?? "Workflow sibling violates required tool order.",
+                });
+                return;
+              }
+            }
+          }
           await exitPipeline({
             decision: cached.decision,
             agent: "batch-sibling",
             reason,
             mirroredFromLeader: true,
+            skipWorkflowQueueAdvance: leaderValidatedWholeBatch,
           });
           return;
         }

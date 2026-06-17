@@ -53,6 +53,10 @@ import type { RuleContext } from "../../src/rules/types.js";
 import { sessionStateDefaults, type SessionState } from "../../src/utils/session-store.js";
 import type { CacheManager } from "../../src/utils/cache-manager.js";
 import { makeRuleContext } from "../helpers/rule-context.js";
+import {
+  implementWorkflowRequirementSignatures,
+  requirementSignature,
+} from "../helpers/workflow-requirements.js";
 
 const mockRunAgent = vi.mocked(runAgent);
 const mockStripQuotedAndPastedContent = vi.mocked(stripQuotedAndPastedContent);
@@ -72,6 +76,10 @@ User wants to fix the bug in foo.ts
 ---BLOCKED-INTENT---
 (none)
 ---EXPLICITLY-ALLOWED-TOOLS---
+(none)
+---EXPLICITLY-REQUIRED-TOOLS---
+(none)
+---NON-BLOCKING-TOOLS---
 (none)
 ---EXPLICITLY-BLOCKED---
 (none)
@@ -187,6 +195,38 @@ describe("sentimentRule — LLM-call path", () => {
     expect(prediction).toHaveProperty("userMessageFull");
     expect(prediction).toHaveProperty("userMessageSnippet");
     expect(prediction).toHaveProperty("timestamp");
+  });
+
+  it("derives ordered workflow requirements from skill text and removes required tools from broad allows", async () => {
+    mockRunAgent.mockResolvedValueOnce({
+      output: VALID_SENTIMENT_OUTPUT.replace(
+        "---EXPLICITLY-ALLOWED-TOOLS---\n(none)",
+        "---EXPLICITLY-ALLOWED-TOOLS---\nAgent, TaskOutput, Read",
+      ),
+      success: true,
+      latencyMs: 100,
+      errorCount: 0,
+      modelTier: "haiku" as never,
+      modelName: "claude-haiku-4-5",
+    });
+    const workflowText = [
+      "1. Spawn exactly one `implementer` agent.",
+      "2. Wait for the implementer to complete.",
+      "3. Spawn exactly one `implement-validator` agent.",
+      "4. Wait for the validator to complete.",
+    ].join("\n");
+    const ctx = makeCtx({ userPrompt: workflowText });
+    await sentimentRule.check(ctx);
+
+    const updateFn = vi.mocked(ctx.stateManager.update).mock.calls[0][0];
+    const updatedState = updateFn(makeState());
+    const prediction = updatedState.currentPrediction!;
+    expect(prediction.explicitlyAllowedTools).toEqual([]);
+    expect(prediction.explicitlyRequiredTools?.map(requirementSignature))
+      .toEqual(implementWorkflowRequirementSignatures());
+    expect(prediction.nonBlockingTools).toContainEqual(
+      expect.objectContaining({ tool: "CloseAgent" }),
+    );
   });
 
   it("stores and sends the full latest user message without sentiment truncation", async () => {

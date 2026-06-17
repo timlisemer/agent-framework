@@ -5,6 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
 import { mainPreToolUse } from "../../src/hooks/pre-tool-use.js";
 import { getAgentFrameworkSessionDir } from "../../src/utils/paths.js";
+import { getSessionState } from "../../src/utils/session-store.js";
+import type { ToolPrediction } from "../../src/utils/prediction-types.js";
+import {
+  codexPlan3AfterAgentBatchRequirements,
+  codexPlan3AfterFirstAgentRequirements,
+  codexPlan3InitialAgentBatchRequirements,
+} from "../helpers/workflow-requirements.js";
 
 const mocks = vi.hoisted(() => ({
   exitAfterFlush: vi.fn().mockResolvedValue(undefined),
@@ -51,11 +58,11 @@ describe("pre-tool-use planfile writes", () => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pre-tool-use-"));
     transcriptPath = path.join(tempDir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
-    sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
     prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
     prevProjectDir = process.env.AGENT_FRAMEWORK_PROJECT_DIR;
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
     process.env.AGENT_FRAMEWORK_PROJECT_DIR = tempDir;
+    sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
     mocks.exitAfterFlush.mockClear();
     mocks.validateClaudeMd.mockReset();
     mocks.appealHelper.mockClear();
@@ -169,4 +176,160 @@ describe("pre-tool-use planfile writes", () => {
     expect(mocks.validateClaudeMd).not.toHaveBeenCalled();
     expect(mocks.exitAfterFlush).toHaveBeenCalledWith(0, "");
   });
+
+  it("denies a strict workflow parallel batch when a sibling has the wrong agent type", async () => {
+    await seedPrediction({
+      explicitlyRequiredTools: codexPlan3InitialAgentBatchRequirements(),
+    });
+    writeAssistantBatch([
+      { id: "call_plan_1", agent_type: "default" },
+      { id: "call_plan_2", agent_type: "implementer" },
+      { id: "call_plan_3", agent_type: "default" },
+    ]);
+
+    await runSpawnAgentHook("call_plan_1");
+
+    const [exitCode, stdout] = mocks.exitAfterFlush.mock.calls[0];
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout).hookSpecificOutput.permissionDecisionReason)
+      .toContain("subagent_type=\"default\"");
+  });
+
+  it("advances the required queue once for a valid strict workflow parallel batch", async () => {
+    await seedPrediction({
+      explicitlyRequiredTools: codexPlan3InitialAgentBatchRequirements(),
+    });
+    writeAssistantBatch([
+      { id: "call_plan_1", agent_type: "default" },
+      { id: "call_plan_2", agent_type: "default" },
+      { id: "call_plan_3", agent_type: "default" },
+    ]);
+
+    await runSpawnAgentHook("call_plan_1");
+
+    expect(mocks.exitAfterFlush).toHaveBeenCalledWith(0, "");
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools)
+      .toEqual(codexPlan3AfterAgentBatchRequirements());
+  });
+
+  it("mirrors full-batch siblings after the leader consumes the workflow queue", async () => {
+    await seedPrediction({
+      explicitlyRequiredTools: codexPlan3InitialAgentBatchRequirements(),
+    });
+    writeAssistantBatch([
+      { id: "call_plan_1", agent_type: "default" },
+      { id: "call_plan_2", agent_type: "default" },
+      { id: "call_plan_3", agent_type: "default" },
+    ]);
+
+    for (const id of ["call_plan_1", "call_plan_2", "call_plan_3"]) {
+      await runSpawnAgentHook(id);
+    }
+
+    expect(mocks.exitAfterFlush.mock.calls.slice(-3)).toEqual([
+      [0, ""],
+      [0, ""],
+      [0, ""],
+    ]);
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools)
+      .toEqual(codexPlan3AfterAgentBatchRequirements());
+  });
+
+  it("advances required workflow tools for mirrored siblings in transcript flush races", async () => {
+    await seedPrediction({
+      explicitlyRequiredTools: codexPlan3InitialAgentBatchRequirements(),
+    });
+
+    writeAssistantBatch([
+      { id: "call_plan_1", agent_type: "default" },
+    ]);
+    await runSpawnAgentHook("call_plan_1");
+
+    writeAssistantBatch([
+      { id: "call_plan_1", agent_type: "default" },
+      { id: "call_plan_2", agent_type: "default" },
+    ]);
+    await runSpawnAgentHook("call_plan_2");
+
+    await runSpawnAgentHook("call_plan_3");
+
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools)
+      .toEqual(codexPlan3AfterAgentBatchRequirements());
+  });
+
+  it("denies invalid mirrored siblings in transcript flush races", async () => {
+    await seedPrediction({
+      explicitlyRequiredTools: codexPlan3InitialAgentBatchRequirements(),
+    });
+
+    writeAssistantBatch([
+      { id: "call_plan_1", agent_type: "default" },
+    ]);
+    await runSpawnAgentHook("call_plan_1");
+
+    writeAssistantBatch([
+      { id: "call_plan_1", agent_type: "default" },
+      { id: "call_plan_2", agent_type: "implementer" },
+    ]);
+    await runSpawnAgentHook("call_plan_2", "implementer");
+
+    const [, stdout] = mocks.exitAfterFlush.mock.calls.at(-1)!;
+    expect(JSON.parse(stdout).hookSpecificOutput.permissionDecisionReason)
+      .toContain("subagent_type=\"default\"");
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools)
+      .toEqual(codexPlan3AfterFirstAgentRequirements());
+  });
+
+  async function seedPrediction(overrides: Partial<ToolPrediction>): Promise<void> {
+    const stateManager = getSessionState(sessionDir);
+    await stateManager.update((s) => ({
+      ...s,
+      currentPrediction: {
+        mood: "neutral",
+        trust: "normal",
+        intent: "workflow test",
+        blockedIntent: "",
+        explicitlyAllowedTools: [],
+        explicitlyBlockedSubstrings: [],
+        userMessageSnippet: "workflow test",
+        timestamp: Date.now(),
+        ...overrides,
+      },
+    }));
+  }
+
+  async function runSpawnAgentHook(toolUseId: string, agentType = "default"): Promise<void> {
+    await mainPreToolUse(
+      {
+        session_id: "session-pre",
+        tool_use_id: toolUseId,
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "spawn_agent",
+        tool_input: { agent_type: agentType },
+      },
+      codexEncoder,
+    );
+  }
+
+  function writeAssistantBatch(calls: Array<{ id: string; agent_type: string }>): void {
+    fs.writeFileSync(
+      transcriptPath,
+      JSON.stringify({
+        message: {
+          role: "assistant",
+          content: calls.map((call) => ({
+            type: "tool_use",
+            id: call.id,
+            name: "spawn_agent",
+            input: { agent_type: call.agent_type },
+          })),
+        },
+      }) + "\n",
+    );
+  }
 });

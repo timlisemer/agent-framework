@@ -26,8 +26,8 @@ export const SLASH_COMMAND_GATED_MCPS: Record<string, readonly CanonicalMcp[]> =
 };
 
 /**
- * Per-command workflow tool sets. The tools each slash-command workflow
- * legitimately uses — including non-MCP tools (Agent, ExitPlanMode).
+ * Per-command workflow tool sets. The non-strict tools each slash-command
+ * workflow may use outside the ordered prediction queue.
  *
  * Values are canonical tool names: "mcp-<canonical>" for MCP tools,
  * PascalCase for built-in tools.
@@ -36,10 +36,10 @@ export const SLASH_COMMAND_WORKFLOW_TOOLS: Record<string, readonly string[]> = {
   check:     ["mcp-check"],
   transcript: ["mcp-transcript"],
   "locate-scenario": ["mcp-locate_scenario"],
-  plan1:     ["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
-  plan3:     ["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
-  plan5:     ["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
-  implement: ["Agent"],
+  plan1:     ["CloseAgent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
+  plan3:     ["CloseAgent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
+  plan5:     ["CloseAgent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
+  implement: ["CloseAgent"],
 };
 
 /**

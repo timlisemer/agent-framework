@@ -722,6 +722,8 @@ async function main() {
         intent: seedPrediction.intent,
         blockedIntent: seedPrediction.blockedIntent,
         explicitlyAllowedTools: seedPrediction.explicitlyAllowedTools,
+        explicitlyRequiredTools: seedPrediction.explicitlyRequiredTools,
+        nonBlockingTools: seedPrediction.nonBlockingTools,
         explicitlyBlockedSubstrings: seedPrediction.explicitlyBlockedSubstrings,
         blockAllTools: seedPrediction.blockAllTools,
         userMessageSnippet: seedPrediction.userMessageSnippet,

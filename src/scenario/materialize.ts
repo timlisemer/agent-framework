@@ -252,6 +252,12 @@ function seedCurrentPrediction(
     intent: prediction.intent,
     blockedIntent: prediction.blockedIntent,
     explicitlyAllowedTools: prediction.explicitlyAllowedTools,
+    ...(prediction.explicitlyRequiredTools !== undefined
+      ? { explicitlyRequiredTools: prediction.explicitlyRequiredTools }
+      : {}),
+    ...(prediction.nonBlockingTools !== undefined
+      ? { nonBlockingTools: prediction.nonBlockingTools }
+      : {}),
     explicitlyBlockedSubstrings: prediction.explicitlyBlockedSubstrings,
     userMessageSnippet: prediction.userMessageSnippet,
     ...(prediction.blockAllTools !== undefined ? { blockAllTools: prediction.blockAllTools } : {}),

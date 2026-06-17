@@ -1277,6 +1277,14 @@ export interface ParallelBatchInfo {
   batchSize: number;
   leaderId: string;
   allIds: string[];
+  members: ParallelBatchMember[];
+}
+
+export interface ParallelBatchMember {
+  position: number;
+  toolUseId: string;
+  toolName: string;
+  toolInput?: unknown;
 }
 
 /**
@@ -1295,6 +1303,7 @@ export async function detectParallelBatch(
     lineIndex: number;
     toolUseId: string;
     toolName: string;
+    toolInput?: unknown;
   }
   const toolUseEntries: ToolUseEntry[] = [];
 
@@ -1311,6 +1320,7 @@ export async function detectParallelBatch(
           lineIndex: i,
           toolUseId: block.id,
           toolName: block.name ?? "",
+          toolInput: block.input,
         });
       }
     }
@@ -1377,19 +1387,29 @@ export async function detectParallelBatch(
   }
 
   const sortedLineIndices = Array.from(batchLineIndices).sort((a, b) => a - b);
-  const batchIds: string[] = [];
+  const members: ParallelBatchMember[] = [];
   for (const lineIdx of sortedLineIndices) {
     for (const entry of toolUseEntries) {
       if (entry.lineIndex === lineIdx) {
-        batchIds.push(entry.toolUseId);
+        members.push({
+          position: members.length,
+          toolUseId: entry.toolUseId,
+          toolName: entry.toolName,
+          toolInput: entry.toolInput,
+        });
       }
     }
   }
 
   if (!targetEntry) {
-    batchIds.push(toolUseId);
+    members.push({
+      position: members.length,
+      toolUseId,
+      toolName: "",
+    });
   }
 
+  const batchIds = members.map((member) => member.toolUseId);
   if (batchIds.length < 2) return null;
 
   const position = batchIds.indexOf(toolUseId);
@@ -1398,6 +1418,7 @@ export async function detectParallelBatch(
     batchSize: batchIds.length,
     leaderId: batchIds[0],
     allIds: batchIds,
+    members,
   };
 }
 

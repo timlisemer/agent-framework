@@ -293,6 +293,7 @@ export function parseTranscript(rawLines: readonly string[]): readonly (Transcri
               type: "tool_use",
               id: callId,
               name: normalizeToolName(payload),
+              input: normalizeToolInput(payload),
             },
           ],
         },

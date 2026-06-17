@@ -32,6 +32,7 @@ import { mainUserPromptSubmit } from "../../src/hooks/user-prompt-submit.js";
 import { evaluateRulesForUserPromptSubmit } from "../../src/rules/index.js";
 import { exitAfterFlush } from "../../src/utils/hook-bootstrap.js";
 import { checkPlanIntent } from "../../src/agents/hooks/plan-validate.js";
+import { decidePrediction } from "../../src/utils/prediction-types.js";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
 import {
   getAgentFrameworkSessionDir,
@@ -40,6 +41,10 @@ import {
   sessionPlanModeStateFile,
   sessionStateFile,
 } from "../../src/utils/paths.js";
+import {
+  implementWorkflowRequirementSignatures,
+  requirementSignature,
+} from "../helpers/workflow-requirements.js";
 
 const mockEvaluateRulesForUserPromptSubmit = vi.mocked(evaluateRulesForUserPromptSubmit);
 const mockExitAfterFlush = vi.mocked(exitAfterFlush);
@@ -97,6 +102,56 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
     }
   });
 
+  it("seeds strict workflow requirements for Claude slash command tags with args", async () => {
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
+    try {
+      await mainUserPromptSubmit(
+        {
+          session_id: "session-claude-plan3-args",
+          transcript_path: transcriptPath,
+          cwd: tempDir,
+          prompt:
+            "<command-message>plan3</command-message>\n" +
+            "<command-name>/plan3</command-name>\n" +
+            "<command-args>fix the workflow queue</command-args>",
+        },
+        encoder,
+      );
+
+      expect(mockEvaluateRulesForUserPromptSubmit).not.toHaveBeenCalled();
+      const state = JSON.parse(fs.readFileSync(sessionStateFile(sessionDir), "utf-8")).data;
+      expect(state.currentPrediction.intent).toBe(
+        "User invoked the plan3 workflow. Complete that workflow and report its result.",
+      );
+      expect(state.currentPrediction.explicitlyRequiredTools.map((requirement: {
+        tool: string;
+        input?: unknown;
+      }) => ({
+        tool: requirement.tool,
+        input: requirement.input,
+      }))).toEqual([
+        { tool: "Agent", input: { subagent_type: "Plan" } },
+        { tool: "Agent", input: { subagent_type: "Plan" } },
+        { tool: "Agent", input: { subagent_type: "Plan" } },
+        { tool: "mcp-create_planfile", input: { continue_workflow: true } },
+        { tool: "Agent", input: { subagent_type: "Plan" } },
+        { tool: "Agent", input: { subagent_type: "Plan" } },
+        { tool: "Agent", input: { subagent_type: "Plan" } },
+        { tool: "ExitPlanMode", input: undefined },
+      ]);
+      expect(decidePrediction(
+        state.currentPrediction,
+        "Agent",
+        { subagent_type: "Plan" },
+        0,
+      ).decision).toBe("allow");
+    } finally {
+      if (prev === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      else process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+    }
+  });
+
   it("skips UserPromptSubmit rules for Codex agent-framework skill invocations", async () => {
     const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
     process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
@@ -117,6 +172,13 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
         "User invoked the quickpush workflow. Complete that workflow and report its result.",
       );
       expect(state.currentPrediction.userMessageFull).toContain("$agent-framework-quickpush");
+      expect(state.currentPrediction.explicitlyRequiredTools).toEqual([
+        {
+          tool: "mcp-commit",
+          input: { model_tier: "haiku", skip_elicitation: true, auto_push: true },
+          reason: "Call `mcp-commit` with:",
+        },
+      ]);
       expect(state.frustrationStreak).toBe(0);
       expect(mockExitAfterFlush).toHaveBeenCalledWith(0, "ok");
     } finally {
@@ -186,6 +248,8 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
       );
       expect(state.currentPrediction.userMessageFull).toContain("$agent-framework-implement");
       expect(state.currentPrediction.userMessageFull).not.toContain("what??");
+      expect(state.currentPrediction.explicitlyRequiredTools.map(requirementSignature))
+        .toEqual(implementWorkflowRequirementSignatures());
       expect(state.frustrationStreak).toBe(0);
       expect(state.currentWindowSize).toBe(2);
     } finally {

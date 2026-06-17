@@ -53,4 +53,39 @@ describe("scenario_tester inline MCP schema", () => {
 
     expect(scenarioSchema.safeParse(raw).success).toBe(false);
   });
+
+  it("accepts seed currentPrediction required and non-blocking tool queues", () => {
+    const raw = minimalInlineScenario();
+    const currentPrediction = (raw.seed_state as {
+      currentPrediction: Record<string, unknown>;
+    }).currentPrediction;
+    currentPrediction.explicitlyRequiredTools = [
+      {
+        tool: "Agent",
+        input: { subagent_type: "default" },
+        inputArrayLengths: { targets: 1 },
+        inputSubstrings: ["plan"],
+        reason: "workflow starts with planning",
+      },
+    ];
+    currentPrediction.nonBlockingTools = [
+      { tool: "Read", reason: "inspection can continue while queued" },
+    ];
+
+    const parsed = scenarioSchema.parse(raw);
+
+    expect(() => validateScenario(parsed)).not.toThrow();
+  });
+
+  it("rejects invalid seed tool requirement array lengths at the MCP schema layer", () => {
+    const raw = minimalInlineScenario();
+    const currentPrediction = (raw.seed_state as {
+      currentPrediction: Record<string, unknown>;
+    }).currentPrediction;
+    currentPrediction.explicitlyRequiredTools = [
+      { tool: "TaskOutput", inputArrayLengths: { targets: -1 } },
+    ];
+
+    expect(scenarioSchema.safeParse(raw).success).toBe(false);
+  });
 });

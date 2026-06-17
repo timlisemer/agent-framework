@@ -69,6 +69,50 @@ describe("materializeScenario", () => {
     expect(scenario.seed_state.frustrationStreak).toBe(0);
   });
 
+  it("preserves seeded prediction workflow queues", async () => {
+    const epoch = rotateEpoch(tmpDir, "initial", null);
+    const state = {
+      ...sessionStateDefaults(),
+      currentPrediction: {
+        mood: "neutral" as const,
+        trust: "normal" as const,
+        intent: "User invoked a workflow.",
+        blockedIntent: "",
+        explicitlyAllowedTools: [],
+        explicitlyRequiredTools: [
+          { tool: "Agent", input: { subagent_type: "Plan" }, reason: "start planner" },
+          { tool: "TaskOutput", inputArrayLengths: { targets: 1 }, reason: "wait for planner" },
+        ],
+        nonBlockingTools: [
+          { tool: "Read", reason: "inspection is non-blocking" },
+        ],
+        explicitlyBlockedSubstrings: [],
+        userMessageSnippet: "<command-name>/plan1</command-name>",
+        timestamp: 42,
+      },
+    };
+    const snapshotSeq = appendStateSnapshot(tmpDir, state, transcriptPath);
+
+    appendCapture(tmpDir, {
+      ts: Date.now(),
+      epoch_id: epoch.id,
+      parent_capture_seq: null,
+      event: "Stop",
+      decision: "pass",
+      state_snapshot_seq: snapshotSeq,
+    });
+
+    const scenario = validateScenario(await materializeScenario(tmpDir, 1));
+
+    expect(scenario.seed_state.currentPrediction.explicitlyRequiredTools).toEqual([
+      { tool: "Agent", input: { subagent_type: "Plan" }, reason: "start planner" },
+      { tool: "TaskOutput", inputArrayLengths: { targets: 1 }, reason: "wait for planner" },
+    ]);
+    expect(scenario.seed_state.currentPrediction.nonBlockingTools).toEqual([
+      { tool: "Read", reason: "inspection is non-blocking" },
+    ]);
+  });
+
   it("targets the captured tool use and seeds prior tool-log state", async () => {
     const userLine = JSON.stringify({
       uuid: "uuid-user-001",

@@ -29,6 +29,24 @@ import { classifyBashCommand, evaluateBashPolicy, type BashCommandClassification
 export type Mood = "angry" | "frustrated" | "neutral" | "satisfied" | "happy";
 export type Trust = "low" | "normal" | "high";
 
+export interface ToolRequirement {
+  /** Canonical tool name such as "Agent", "Read", or "mcp-commit". */
+  tool: string;
+  /** Exact scalar input constraints. Example: { subagent_type: "implementer" }. */
+  input?: Record<string, string | number | boolean>;
+  /** Exact array-length constraints on canonical input fields. */
+  inputArrayLengths?: Record<string, number>;
+  /** Literal substrings that must appear in the serialized tool input. */
+  inputSubstrings?: string[];
+  /** Human-readable source/reason for debugging and prediction context. */
+  reason?: string;
+}
+
+export interface PredictionToolCall {
+  toolName: string;
+  toolInput: unknown;
+}
+
 export interface ToolPrediction {
   mood: Mood;
   trust: Trust;
@@ -39,6 +57,19 @@ export interface ToolPrediction {
 
   /** LITERAL tool names — exact match, no regex. */
   explicitlyAllowedTools: string[];
+
+  /**
+   * Ordered tool calls that must happen before arbitrary workflow progress.
+   * The first entry is the only required call currently accepted. Calls
+   * matching nonBlockingTools may run without consuming this queue.
+   */
+  explicitlyRequiredTools?: ToolRequirement[];
+
+  /**
+   * Tool calls allowed while explicitlyRequiredTools is non-empty. These do
+   * not consume the required queue.
+   */
+  nonBlockingTools?: ToolRequirement[];
 
   /** LITERAL substring filters — no regex. */
   explicitlyBlockedSubstrings: Array<{
@@ -647,6 +678,377 @@ export function classifyBlockAllTools(
   return "ambiguous";
 }
 
+const DEFAULT_WORKFLOW_NON_BLOCKING_TOOLS: readonly ToolRequirement[] = [
+  { tool: "Read", reason: "read workflow or task context" },
+  { tool: "Skill", reason: "reload workflow instructions" },
+  { tool: "CloseAgent", reason: "close an unneeded agent without advancing workflow" },
+  { tool: "ToolSearch", reason: "inspect available tools" },
+  { tool: "ListMcpResources", reason: "inspect MCP resources" },
+  { tool: "ReadMcpResource", reason: "read MCP resources" },
+];
+
+const EXACT_INPUT_KEYS = new Set([
+  "auto_push",
+  "continue_workflow",
+  "model_tier",
+  "skip_elicitation",
+]);
+
+const WORD_NUMBER_COUNTS: Readonly<Record<string, number>> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+};
+
+function stripFrontmatterAndFencedBlocks(text: string): string {
+  let out = text.replace(/^---\n[\s\S]*?\n---\n?/, "");
+  out = out.replace(/```[\s\S]*?```/g, "");
+  return out;
+}
+
+function countFromWord(raw: string): number {
+  const lower = raw.toLowerCase();
+  if (WORD_NUMBER_COUNTS[lower] !== undefined) return WORD_NUMBER_COUNTS[lower];
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function canonicalMcpToolFromToken(token: string): string | null {
+  const direct = /^mcp-([a-z0-9_]+)$/i.exec(token);
+  const mcpName = direct?.[1] ?? (/^[A-Za-z0-9_]+$/.test(token) ? token : null);
+  if (!mcpName) return null;
+  const canonical = CANONICAL_MCPS.find((mcp) => mcp === mcpName);
+  return canonical ? `mcp-${canonical}` : null;
+}
+
+export function parseToolRequirementScalar(raw: string): string | boolean | number {
+  const trimmed = raw.trim().replace(/^`|`$/g, "").replace(/^"|"$/g, "");
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  const numeric = Number(trimmed);
+  if (/^-?\d+(?:\.\d+)?$/.test(trimmed) && Number.isFinite(numeric)) return numeric;
+  return trimmed;
+}
+
+function extractExactInputConstraints(lines: readonly string[], lineIndex: number): Record<string, string | number | boolean> | undefined {
+  const input: Record<string, string | number | boolean> = {};
+  const max = Math.min(lines.length, lineIndex + 8);
+  for (let i = lineIndex; i < max; i++) {
+    const line = lines[i];
+    for (const key of EXACT_INPUT_KEYS) {
+      const quoted = new RegExp(`\`?${key}\`?\\s*(?::|set to)\\s*\`?([^\\n\`]+?)\`?(?:\\s|$|[.,])`, "i").exec(line);
+      if (!quoted) continue;
+      input[key] = parseToolRequirementScalar(quoted[1]);
+    }
+  }
+  return Object.keys(input).length > 0 ? input : undefined;
+}
+
+function pushRequirement(
+  out: ToolRequirement[],
+  requirement: ToolRequirement,
+  count = 1,
+): void {
+  for (let i = 0; i < count; i++) {
+    out.push({
+      ...requirement,
+      input: requirement.input ? { ...requirement.input } : undefined,
+      inputArrayLengths: requirement.inputArrayLengths ? { ...requirement.inputArrayLengths } : undefined,
+    });
+  }
+}
+
+function agentRequirement(subagentType: string, reason: string): ToolRequirement {
+  return {
+    tool: "Agent",
+    input: { subagent_type: subagentType },
+    reason,
+  };
+}
+
+function taskOutputRequirement(reason: string, targetCount?: number): ToolRequirement {
+  const requirement: ToolRequirement = {
+    tool: "TaskOutput",
+    reason,
+  };
+  if (targetCount !== undefined) {
+    requirement.inputArrayLengths = { targets: targetCount };
+  }
+  return requirement;
+}
+
+function lineStartsWithCall(line: string): boolean {
+  return /^\s*(?:[-*]\s*)?(?:\d+\.\s*)?(?:immediately\s+)?call\b/i.test(line);
+}
+
+export function uniqueToolRequirements(requirements: readonly ToolRequirement[]): ToolRequirement[] {
+  const seen = new Set<string>();
+  const out: ToolRequirement[] = [];
+  for (const req of requirements) {
+    const key = JSON.stringify(req);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(req);
+  }
+  return out;
+}
+
+function waitTargetCount(line: string): number | undefined {
+  const explicit = /\ball\s+(one|two|three|four|five|\d+)\b/i.exec(line);
+  if (explicit) return countFromWord(explicit[1]);
+  const numericAgents = /\b(\d+)\s+(?:planning|verification|validation|validator|verifier|plan)?\s*agents?\b/i.exec(line);
+  if (numericAgents) return countFromWord(numericAgents[1]);
+  if (/\b(implementer|validator|verifier|planner|planning|verification|validation)\b/i.test(line) && !/\bagents\b/i.test(line)) {
+    return 1;
+  }
+  if (/\b(?:the|one|1)\s+(?:[a-z0-9_-]+\s+){0,3}agent\b/i.test(line) && !/\bagents\b/i.test(line)) {
+    return 1;
+  }
+  return undefined;
+}
+
+/**
+ * Pure TypeScript workflow-text extractor for the prediction system. It reads
+ * canonicalized skill/command text and derives an ordered canonical tool queue
+ * plus non-blocking support tools. It intentionally recognizes generic
+ * imperative structure (call MCP X, spawn N agents of type Y, call
+ * ExitPlanMode) rather than any named scenario or skill.
+ */
+export function deriveWorkflowToolRequirementsFromText(text: string): {
+  explicitlyRequiredTools: ToolRequirement[];
+  nonBlockingTools: ToolRequirement[];
+} {
+  const body = stripFrontmatterAndFencedBlocks(text);
+  const lines = body.split("\n").map((line) => line.trim()).filter((line) => line.length > 0);
+  const required: ToolRequirement[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lower = line.toLowerCase();
+    const isConditional = /^\s*(?:[-*]\s*)?(?:\d+\.\s*)?(?:if|retry|repeat)\b/i.test(line);
+    const isNegative = /\bdo\s+not\b|\bdon'?t\b|\bwithout\b/.test(lower);
+    const canRequireTool = !isConditional && !isNegative;
+
+    for (const match of line.matchAll(/\bmcp-[A-Za-z0-9_]+/g)) {
+      const tool = canonicalMcpToolFromToken(match[0]);
+      if (!tool) continue;
+      const lineRequiresCall = lineStartsWithCall(line);
+      if (!lineRequiresCall || !canRequireTool) continue;
+      pushRequirement(required, {
+        tool,
+        input: extractExactInputConstraints(lines, i),
+        reason: line,
+      });
+    }
+
+    const createPlanfile = /`create_planfile`\s+MCP/i.test(line)
+      ? canonicalMcpToolFromToken("create_planfile")
+      : null;
+    if (createPlanfile && lineStartsWithCall(line) && canRequireTool) {
+      pushRequirement(required, {
+        tool: createPlanfile,
+        input: extractExactInputConstraints(lines, i),
+        reason: line,
+      });
+    }
+
+    if (/\bCall\s+ExitPlanMode\b/i.test(line) && canRequireTool) {
+      pushRequirement(required, { tool: "ExitPlanMode", reason: line });
+    }
+
+    const waitForAgents = /\bwait\s+for\b[^.\n]*(agent|agents|implementer|validator|verifier|planner|planning)\b(?:[^.\n]*\b(complete|completes|finish|finishes|return|returns)\b)?/i.exec(line);
+    if (waitForAgents && canRequireTool) {
+      pushRequirement(required, taskOutputRequirement(line, waitTargetCount(line)));
+    }
+
+    const spawn = /\bSpawn exactly (one|two|three|four|five|\d+)\s+`([^`]+)`[^.\n]*\bagents?\b/i.exec(line);
+    if (spawn && canRequireTool) {
+      pushRequirement(required, agentRequirement(spawn[2], line), countFromWord(spawn[1]));
+    }
+
+    const launchAgent = /\bLaunch exactly 1 Agent tool call with `subagent_type:\s*"([^"]+)"`/i.exec(line);
+    if (launchAgent && canRequireTool) {
+      pushRequirement(required, agentRequirement(launchAgent[1], line));
+    }
+
+    const callAgentOnce = /\bCall the Agent tool once with subagent_type "([^"]+)"/i.exec(line);
+    if (callAgentOnce && canRequireTool) {
+      pushRequirement(required, agentRequirement(callAgentOnce[1], line));
+    }
+
+    const agentCall = /\bAgent call \d+:\s+subagent_type "([^"]+)"/i.exec(line);
+    if (agentCall && canRequireTool) {
+      pushRequirement(required, agentRequirement(agentCall[1], line));
+    }
+
+    const exactAgentBatch = /\bcall the Agent tool exactly (one|two|three|four|five|\d+) times\b.*\bsubagent_type "([^"]+)"/i.exec(line);
+    if (exactAgentBatch && canRequireTool) {
+      pushRequirement(
+        required,
+        agentRequirement(exactAgentBatch[2], line),
+        countFromWord(exactAgentBatch[1]),
+      );
+    }
+  }
+
+  return {
+    explicitlyRequiredTools: required,
+    nonBlockingTools: uniqueToolRequirements(DEFAULT_WORKFLOW_NON_BLOCKING_TOOLS),
+  };
+}
+
+function toolIdentitiesForCall(toolName: string, toolInput: unknown): string[] {
+  if (toolName !== "Bash") return predictionToolIdentityNames(toolName);
+  const command = String((toolInput as { command?: unknown } | null | undefined)?.command ?? "");
+  return classifyBashCommand(command).predictionIdentities;
+}
+
+function toolRequirementMatchesIdentities(
+  requirement: ToolRequirement,
+  toolInput: unknown,
+  toolIdentities: readonly string[],
+): boolean {
+  const requiredIdentityMatches = predictionToolIdentityNames(requirement.tool)
+    .some((identity) => toolIdentities.includes(identity));
+  if (!requiredIdentityMatches) return false;
+
+  const input = toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)
+    ? toolInput as Record<string, unknown>
+    : {};
+  for (const [key, expected] of Object.entries(requirement.input ?? {})) {
+    if (input[key] !== expected) return false;
+  }
+  for (const [key, expectedLength] of Object.entries(requirement.inputArrayLengths ?? {})) {
+    const actual = input[key];
+    if (!Array.isArray(actual) || actual.length !== expectedLength) return false;
+  }
+  const inputStr = stringifyToolInput(toolInput);
+  for (const literal of requirement.inputSubstrings ?? []) {
+    if (!inputStr.includes(literal)) return false;
+  }
+  return true;
+}
+
+export function toolRequirementMatches(
+  requirement: ToolRequirement,
+  toolName: string,
+  toolInput: unknown,
+): boolean {
+  return toolRequirementMatchesIdentities(
+    requirement,
+    toolInput,
+    toolIdentitiesForCall(toolName, toolInput),
+  );
+}
+
+export function formatToolRequirement(requirement: ToolRequirement): string {
+  const scalarConstraints = Object.entries(requirement.input ?? {})
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`);
+  const arrayConstraints = Object.entries(requirement.inputArrayLengths ?? {})
+    .map(([key, value]) => `${key}.length=${value}`);
+  const constraints = [...scalarConstraints, ...arrayConstraints]
+    .join(", ");
+  const substrings = requirement.inputSubstrings?.length
+    ? ` inputSubstrings=${JSON.stringify(requirement.inputSubstrings)}`
+    : "";
+  return `${requirement.tool}${constraints ? `(${constraints})` : ""}${substrings}`;
+}
+
+export function advanceRequiredToolsAfterAllowedTool(
+  prediction: ToolPrediction,
+  toolName: string,
+  toolInput: unknown,
+): ToolPrediction {
+  return advanceRequiredToolsAfterAllowedToolSequence(prediction, [{ toolName, toolInput }]);
+}
+
+export function decideRequiredWorkflowToolSequence(
+  prediction: ToolPrediction,
+  calls: readonly PredictionToolCall[],
+): PredictionDecision {
+  const consumed = consumeRequiredWorkflowTools(prediction, calls);
+  return consumed.violation ?? { decision: "allow" };
+}
+
+function consumeRequiredWorkflowTools(
+  prediction: ToolPrediction,
+  calls: readonly PredictionToolCall[],
+): {
+  remaining: ToolRequirement[];
+  violation?: PredictionDecision;
+} {
+  let remaining = [...(prediction.explicitlyRequiredTools ?? [])];
+  if (remaining.length === 0) return { remaining };
+  const nonBlockingTools = prediction.nonBlockingTools ?? [];
+
+  for (const call of calls) {
+    const callIdentities = toolIdentitiesForCall(call.toolName, call.toolInput);
+    const callInputStr = stringifyToolInput(call.toolInput);
+    for (const blk of prediction.explicitlyBlockedSubstrings) {
+      const blockedIdentityMatches = predictionToolIdentityNames(blk.tool)
+        .some((identity) => callIdentities.includes(identity));
+      if (!blockedIdentityMatches) continue;
+      if (blk.targetSubstring && !callInputStr.includes(blk.targetSubstring)) continue;
+      return {
+        remaining,
+        violation: {
+          decision: "deny",
+          reason: `Workflow batch member ${call.toolName} is explicitly blocked: ${blk.reason}`,
+          matchedExplicit: blk,
+        },
+      };
+    }
+
+    const nextRequired = remaining[0];
+    if (nextRequired && toolRequirementMatches(nextRequired, call.toolName, call.toolInput)) {
+      remaining = remaining.slice(1);
+      continue;
+    }
+
+    const nonBlockingMatch = nonBlockingTools.find((requirement) =>
+      toolRequirementMatches(requirement, call.toolName, call.toolInput)
+    );
+    if (nonBlockingMatch) continue;
+
+    if (!nextRequired) {
+      return {
+        remaining,
+        violation: {
+          decision: "deny",
+          reason: `Workflow required queue is already satisfied; ${call.toolName} is an extra tool in the same batch.`,
+        },
+      };
+    }
+
+    return {
+      remaining,
+      violation: {
+        decision: "deny",
+        reason: `Workflow requires ${formatToolRequirement(nextRequired)} next before ${call.toolName}.`,
+      },
+    };
+  }
+
+  return { remaining };
+}
+
+export function advanceRequiredToolsAfterAllowedToolSequence(
+  prediction: ToolPrediction,
+  calls: readonly PredictionToolCall[],
+): ToolPrediction {
+  const initialLength = prediction.explicitlyRequiredTools?.length ?? 0;
+  if (initialLength === 0) return prediction;
+
+  const consumed = consumeRequiredWorkflowTools(prediction, calls);
+  if (consumed.violation || consumed.remaining.length === initialLength) return prediction;
+  return {
+    ...prediction,
+    explicitlyRequiredTools: consumed.remaining,
+  };
+}
+
 /**
  * Compute the next sentiment window size from prior state and the current
  * turn's mood/streak/context-switch signals. Mirrors the SENTIMENT_AGENT
@@ -716,6 +1118,7 @@ export function decidePrediction(
 ): PredictionDecision {
   if (!prediction) return { decision: "allow" };
 
+  const isAgentTool = predictionToolIdentityNames(toolName).includes("Agent");
   const liveLogicText = (latestUserTurn?.logicText ?? latestUserMessage).trim();
   const liveDisplaySnippet = (latestUserTurn?.displaySnippet ?? "").trim();
   const displayUserMessage = liveDisplaySnippet || prediction.userMessageSnippet;
@@ -783,6 +1186,35 @@ export function decidePrediction(
       decision: "deny",
       reason: `User explicitly forbade this in their last message: "${displayUserMessage}". ${blk.reason}`,
       matchedExplicit: blk,
+    };
+  }
+
+  // 1.5. Ordered workflow requirements. When present, this is stricter than
+  // explicitlyAllowedTools: only the first required tool may advance the
+  // workflow, while nonBlockingTools may run without consuming that first
+  // requirement. This lets skill/command text say "do X, then Y, then Z"
+  // and prevents X -> Z -> Y drift without adding skill-specific policy.
+  const nextRequiredTool = prediction.explicitlyRequiredTools?.[0];
+  if (nextRequiredTool) {
+    if (toolRequirementMatchesIdentities(nextRequiredTool, toolInput, toolIdentities)) {
+      return {
+        decision: "allow",
+        reason: `Workflow requires ${formatToolRequirement(nextRequiredTool)} next; this tool call matches.`,
+      };
+    }
+    const nonBlockingTools = prediction.nonBlockingTools ?? [];
+    const nonBlockingMatch = nonBlockingTools.find((requirement) =>
+      toolRequirementMatchesIdentities(requirement, toolInput, toolIdentities)
+    );
+    if (nonBlockingMatch) {
+      return {
+        decision: "allow",
+        reason: `Workflow still requires ${formatToolRequirement(nextRequiredTool)} next; ${formatToolRequirement(nonBlockingMatch)} is non-blocking and does not consume that requirement.`,
+      };
+    }
+    return {
+      decision: "deny",
+      reason: `Workflow requires ${formatToolRequirement(nextRequiredTool)} next before ${toolName}.`,
     };
   }
 
@@ -1113,12 +1545,10 @@ export function decidePrediction(
 
   // 3.11. Active slash-command authorization.
   //
-  // Root-cause fix for the "user invokes /plan3 with frustrated framing;
-  // mood-driven step-4 deny blocks the very Agent dispatches /plan3 is
-  // designed to spawn" bug class. The slash-command tag is the user's
-  // explicit authorization for the workflow's tool set — the frustrated
-  // text accompanying the invocation is venting AT prior AI work, not
-  // retracting the command.
+  // Compatibility fallback for simple slash-command tool authorization. Strict
+  // workflow steps that need ordering or input constraints are handled above
+  // by explicitlyRequiredTools/nonBlockingTools derived from the command or
+  // skill body; this fallback must not authorize broad Agent dispatches.
   //
   // The appealHelper LLM already grants this exemption when it sees
   // `=== SLASH COMMAND INVOKED ===` listing the firing tool
@@ -1126,10 +1556,9 @@ export function decidePrediction(
   // same logic into the deterministic policy because prediction-block is
   // appealable: false, so the LLM rescue never fires here.
   //
-  // The slash-command tag persists across the multi-step workflow
-  // (steps 1-5 of /plan3 share one tag), so this exemption naturally covers
-  // the full workflow until a NEW slash command shadows the tag or the
-  // user issues an explicit revocation (caught by the guards below).
+  // The slash-command tag persists across the multi-step workflow until a
+  // NEW slash command shadows the tag or the user issues an explicit
+  // revocation (caught by the guards below).
   //
   // Strict guards mirror 3.6-3.10:
   //   - userSaidProhibition: a categorical "freeze. no tools." in the
@@ -1139,6 +1568,7 @@ export function decidePrediction(
   if (
     !userSaidProhibition &&
     !blockedForThisToolByName &&
+    !isAgentTool &&
     slashCommandAllowedTools.some((t) => matchesToolIdentity(t))
   ) {
     return {
@@ -1273,6 +1703,12 @@ export function formatPredictionContext(p: ToolPrediction): string {
   if (p.blockedIntent) lines.push(`Blocked intent: ${p.blockedIntent}`);
   if (p.explicitlyAllowedTools.length) {
     lines.push(`Explicitly allowed tools: ${p.explicitlyAllowedTools.join(", ")}`);
+  }
+  if (p.explicitlyRequiredTools?.length) {
+    lines.push(`Explicitly required tools: ${p.explicitlyRequiredTools.map(formatToolRequirement).join(" -> ")}`);
+  }
+  if (p.nonBlockingTools?.length) {
+    lines.push(`Non-blocking tools: ${p.nonBlockingTools.map(formatToolRequirement).join(", ")}`);
   }
   if (p.explicitlyBlockedSubstrings.length) {
     const blocks = p.explicitlyBlockedSubstrings

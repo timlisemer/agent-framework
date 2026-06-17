@@ -611,7 +611,7 @@ export function buildToolApprovePromptSection(): string {
 
 === SLASH COMMAND CONTEXT ===
 
-If \`=== SLASH COMMAND INVOKED ===\` appears in the context and its \`Allowed tools:\` field literally contains the tool name being evaluated, APPROVE immediately. Examples: \`${commitInvoke}\` authorizes the commit MCP tool; \`${pushInvoke}\` authorizes the push MCP tool; \`plan3\` authorizes \`Agent\` and \`ExitPlanMode\`; \`implement\` authorizes \`Agent\`.
+If \`=== SLASH COMMAND INVOKED ===\` appears in the context and its \`Allowed tools:\` field literally contains the tool name being evaluated, APPROVE immediately for broad workflow tools. Examples: \`${commitInvoke}\` authorizes the commit MCP tool; \`${pushInvoke}\` authorizes the push MCP tool; plan workflows may authorize \`ExitPlanMode\`. Agent dispatch is stricter: plan/implement Agent calls require workflow-body constraints such as exact \`subagent_type\`, and a slash command does not authorize arbitrary Agent calls by itself.
 
 === CORE PRINCIPLE: AIs DO NOT RUN BUILD/COMPILE COMMANDS ===
 
@@ -836,7 +836,8 @@ If a TOOL IDENTITY section is present, RAW TOOL is the adapter-visible tool name
 
 (B) A SLASH COMMAND INVOKED section is present AND either (i) its Allowed tools list literally contains the blocked tool name, OR (ii) the slash command's BODY/CONTENT visible in RECENT CONVERSATION (typically inside a tool_result for a Skill call, or pasted as the command's instructions) explicitly names this exact operation as a step the workflow prescribes. Examples:
   - A commit workflow's allowed-tools authorizes ${commitWire} (invoke with ${commitInvoke}) (case (i)).
-  - /plan3's body says "Spawn 3 validation agents in parallel ... ExitPlanMode" - that authorizes both Agent and ExitPlanMode (case (ii)) regardless of whether ExitPlanMode is in the allowed-tools list, because the workflow's own definition prescribes it as a step.
+  - A workflow body that says "Agent call 1: subagent_type Plan" authorizes only an Agent call whose input matches that prescribed agent type; it does not authorize arbitrary Agent calls.
+  - A workflow body that says "Call ExitPlanMode" authorizes ExitPlanMode at that prescribed step because the workflow's own definition names it as an operation.
 
 (C) An ExitPlanMode-approved plan visible in RECENT CONVERSATION explicitly lists this exact operation as a step (the plan content itself, NOT the AI's later summary of it).
 
@@ -1330,6 +1331,10 @@ OUTPUT (no preamble, no fences):
 <1-2 sentences: what the user explicitly does NOT want, or "(none)">
 ---EXPLICITLY-ALLOWED-TOOLS---
 <comma-separated literal tool names whose use the user authorized OR demanded in THIS message, or "(none)">
+---EXPLICITLY-REQUIRED-TOOLS---
+<ordered next tool calls, one per line: TOOL_NAME | key=value,key.length=N | input_substring,input_substring | reason, or "(none)">
+---NON-BLOCKING-TOOLS---
+<tool calls allowed without consuming the required-tool queue, same line format as EXPLICITLY-REQUIRED-TOOLS, or "(none)">
 ---EXPLICITLY-BLOCKED---
 <one per line: TOOL_NAME | TARGET_SUBSTRING_OR_BLANK | REASON_QUOTING_USER_WORDS, or "(none)">
 ---CONTEXT-SWITCH---
@@ -1399,7 +1404,16 @@ EXPLICITLY-ALLOWED / EXPLICITLY-BLOCKED:
 - TS pre-fills the obvious verb-to-tool mappings (read/edit/commit/push/check/etc.) by union before downstream rules see your output. Add ANY tools you judge required that the regex would miss; do NOT worry about being exhaustive on the common verbs.
 - Inaction-complaint while the prior assistant turn proposed a specific concrete action ("Want me to proceed with X?", "Should I do Y?", "Let me know if you want me to Z") → authorize the tool that the proposed action requires. The user's "stop delaying" is implicit consent to the pending proposal.
 - GENERAL RULE: if the user's imperative cannot be carried out without tool T, populate explicitlyAllowedTools with T. "undo that immediately" applied to a file the AI just changed REQUIRES Edit/Write — authorize them.
+- Do NOT use EXPLICITLY-ALLOWED-TOOLS as a substitute for ordered workflow instructions. If LATEST says "do X, then Y, then Z", put X/Y/Z in EXPLICITLY-REQUIRED-TOOLS and leave EXPLICITLY-ALLOWED-TOOLS for unordered broad authorization only.
 - TARGET_SUBSTRING is LITERAL (no regex). Quote user words in REASON.
+
+EXPLICITLY-REQUIRED-TOOLS / NON-BLOCKING-TOOLS:
+- Use EXPLICITLY-REQUIRED-TOOLS when the latest message itself is workflow/skill/command text that prescribes a strict next-tool order such as "call X, then spawn Y, then call Z".
+- Put only concrete parent-agent tool calls in the required queue, in order. If the workflow says "spawn exactly one implementer agent", write Agent | subagent_type=implementer | | spawn implementer agent.
+- Include exact scalar constraints when the text names them, especially Agent subagent_type, MCP booleans such as auto_push=true, and fixed model/elicitation flags. Do not use regex.
+- Include exact array-length constraints as key.length=N when the text names a count for an array-valued input, especially TaskOutput waits such as "wait for all three agents" => TaskOutput | targets.length=3 | | wait for all three agents.
+- Use NON-BLOCKING-TOOLS for support tools that may run without advancing the queue, such as rereading workflow text or closing an unneeded agent. If the workflow says to wait at a specific point, put the wait tool in EXPLICITLY-REQUIRED-TOOLS instead.
+- If there is no strict ordered workflow text in LATEST, output "(none)" for both sections.
 
 QUESTION-IS-STALLING (only when ASKUSERQUESTION CONTENT present):
 Judge the question as if it were a CHAT MESSAGE the AI sent the user.
@@ -1411,9 +1425,9 @@ BLOCK-ALL-TOOLS (yes|no):
 TS pre-decides the unambiguous cases: explicit prohibition morphology ("stop / halt / no tools / freeze / hands off / respond with text only") → yes; pure inaction-complaint ("quit dragging your feet", "stop stalling") → no. Output your judgment for ambiguous cases (default no).
 CRITICAL: do not invent blocks the user did not say; ignore tone of pasted CLI output. A complaint about the AI's inaction must NEVER be classified as a block on tool use.`,
   formatValidation: {
-    validator: /---MOOD---[\s\S]*---TRUST---[\s\S]*---INTENT---[\s\S]*---BLOCKED-INTENT---[\s\S]*---EXPLICITLY-ALLOWED-TOOLS---[\s\S]*---EXPLICITLY-BLOCKED---[\s\S]*---CONTEXT-SWITCH---[\s\S]*---QUESTION-IS-STALLING---[\s\S]*---BLOCK-ALL-TOOLS---/,
+    validator: /---MOOD---[\s\S]*---TRUST---[\s\S]*---INTENT---[\s\S]*---BLOCKED-INTENT---[\s\S]*---EXPLICITLY-ALLOWED-TOOLS---[\s\S]*---EXPLICITLY-REQUIRED-TOOLS---[\s\S]*---NON-BLOCKING-TOOLS---[\s\S]*---EXPLICITLY-BLOCKED---[\s\S]*---CONTEXT-SWITCH---[\s\S]*---QUESTION-IS-STALLING---[\s\S]*---BLOCK-ALL-TOOLS---/,
     formatReminder:
-      "Reply with all 9 marker sections in order: ---MOOD---, ---TRUST---, ---INTENT---, ---BLOCKED-INTENT---, ---EXPLICITLY-ALLOWED-TOOLS---, ---EXPLICITLY-BLOCKED---, ---CONTEXT-SWITCH---, ---QUESTION-IS-STALLING---, ---BLOCK-ALL-TOOLS---. INTENT must contain a 1-2 sentence description of what the user wants. Never empty, never '(none)', never 'unclear'. Extract the user's live directive from LATEST USER MESSAGE.",
+      "Reply with all 11 marker sections in order: ---MOOD---, ---TRUST---, ---INTENT---, ---BLOCKED-INTENT---, ---EXPLICITLY-ALLOWED-TOOLS---, ---EXPLICITLY-REQUIRED-TOOLS---, ---NON-BLOCKING-TOOLS---, ---EXPLICITLY-BLOCKED---, ---CONTEXT-SWITCH---, ---QUESTION-IS-STALLING---, ---BLOCK-ALL-TOOLS---. INTENT must contain a 1-2 sentence description of what the user wants. Never empty, never '(none)', never 'unclear'. Extract the user's live directive from LATEST USER MESSAGE.",
     fallbackOutput: `---MOOD---
 neutral
 ---TRUST---
@@ -1423,6 +1437,10 @@ unclear
 ---BLOCKED-INTENT---
 (none)
 ---EXPLICITLY-ALLOWED-TOOLS---
+(none)
+---EXPLICITLY-REQUIRED-TOOLS---
+(none)
+---NON-BLOCKING-TOOLS---
 (none)
 ---EXPLICITLY-BLOCKED---
 (none)

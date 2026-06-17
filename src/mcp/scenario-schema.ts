@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { toolRequirementSchema } from "../utils/prediction-requirements.js";
 
 export const predictionAnnotationSchema = z.object({
   verdict: z.enum(["correct", "too_broad", "wrong", "INVESTIGATE"]).describe("Hindsight verdict on the prediction that caused this deny."),
@@ -149,6 +150,8 @@ export const scenarioSchema = z.object({
       intent: z.string(),
       blockedIntent: z.string(),
       explicitlyAllowedTools: z.array(z.string()),
+      explicitlyRequiredTools: z.array(toolRequirementSchema).optional(),
+      nonBlockingTools: z.array(toolRequirementSchema).optional(),
       explicitlyBlockedSubstrings: z.array(z.object({
         tool: z.string(),
         targetSubstring: z.string().optional(),

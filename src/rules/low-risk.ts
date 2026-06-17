@@ -35,6 +35,10 @@ export const lowRiskRule: PreToolRule = {
       return { fastDeny: "create_planfile is only available while plan mode is active." };
     }
 
+    if ((ctx.state.currentPrediction?.explicitlyRequiredTools?.length ?? 0) > 0) {
+      return null;
+    }
+
     if (isLowRiskTool(ctx.toolName)) {
       return { fastAllow: "Low-risk tool auto-approval" };
     }

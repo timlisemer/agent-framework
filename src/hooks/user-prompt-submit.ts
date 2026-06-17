@@ -25,20 +25,29 @@ import {
 } from "../utils/plan-mode-entry-state.js";
 import { buildPendingContextInjections } from "../utils/context-injection-providers.js";
 import { appendSessionInjections, combineInjectionMessages } from "../utils/session-injections.js";
-import type { ToolPrediction } from "../utils/prediction-types.js";
+import {
+  deriveWorkflowToolRequirementsFromText,
+  type ToolPrediction,
+} from "../utils/prediction-types.js";
 
 function synthesizeWorkflowInvocationPrediction(
   prompt: string,
   workflow: string,
+  instructionText: string | null,
 ): ToolPrediction {
   const prefix = `[workflow invoked: ${workflow}] `;
   const snippet = prefix + prompt.slice(0, Math.max(0, 200 - prefix.length));
+  const requirements = instructionText
+    ? deriveWorkflowToolRequirementsFromText(instructionText)
+    : { explicitlyRequiredTools: [], nonBlockingTools: [] };
   return {
     mood: "neutral",
     trust: "normal",
     intent: `User invoked the ${workflow} workflow. Complete that workflow and report its result.`,
     blockedIntent: "",
     explicitlyAllowedTools: [],
+    explicitlyRequiredTools: requirements.explicitlyRequiredTools,
+    nonBlockingTools: requirements.nonBlockingTools,
     explicitlyBlockedSubstrings: [],
     blockAllTools: false,
     hasExplicitOverride: false,
@@ -160,9 +169,14 @@ export async function mainUserPromptSubmit(input: FrameworkUserPromptSubmitHookI
 
   const workflowInvocation = spec.recognizeWorkflowInvocation(input.prompt);
   if (spec.isWorkflowInvocationOnly(input.prompt) && workflowInvocation) {
+    const instructionText = spec.workflowInstructionText(workflowInvocation, host);
     await stateManager.update((s) => ({
       ...s,
-      currentPrediction: synthesizeWorkflowInvocationPrediction(input.prompt, workflowInvocation),
+      currentPrediction: synthesizeWorkflowInvocationPrediction(
+        input.prompt,
+        workflowInvocation,
+        instructionText,
+      ),
       frustrationStreak: 0,
       currentWindowSize: 2,
     }));

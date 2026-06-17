@@ -68,7 +68,7 @@ describe("SLASH_COMMAND_ALLOWED_TOOLS canonical keys", () => {
 
   it("plan3 maps to plan workflow tools", () => {
     expect(SLASH_COMMAND_ALLOWED_TOOLS["plan3"]).toEqual([
-      "Agent",
+      "CloseAgent",
       "ExitPlanMode",
       "mcp-create_planfile",
       "mcp-validate_plan",
@@ -114,6 +114,11 @@ describe("claudeSpec.isWorkflowInvocationOnly", () => {
     expect(claudeSpec.isWorkflowInvocationOnly("<command-name>/quickpush</command-name>")).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly("<command-name>/quickconfirm</command-name>")).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly("<command-name>/fullquickconfirm</command-name>")).toBe(true);
+    expect(claudeSpec.isWorkflowInvocationOnly(
+      "<command-message>plan3</command-message>\n" +
+      "<command-name>/plan3</command-name>\n" +
+      "<command-args>fix the workflow queue</command-args>",
+    )).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly("/quickpush")).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly("/quickconfirm")).toBe(true);
     expect(claudeSpec.isWorkflowInvocationOnly("/fullconfirm")).toBe(true);

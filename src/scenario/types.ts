@@ -16,6 +16,7 @@ import {
   validatePredictionAnnotationShape,
   type PredictionAnnotation,
 } from "./labels.js";
+import { validateToolRequirements } from "../utils/prediction-requirements.js";
 
 /** Which hook a scenario targets. */
 export type HookEventName =
@@ -277,6 +278,8 @@ export interface Scenario {
       intent: string;
       blockedIntent: string;
       explicitlyAllowedTools: string[];
+      explicitlyRequiredTools?: ToolPrediction["explicitlyRequiredTools"];
+      nonBlockingTools?: ToolPrediction["nonBlockingTools"];
       explicitlyBlockedSubstrings: ToolPrediction["explicitlyBlockedSubstrings"];
       userMessageSnippet: string;
       blockAllTools?: boolean;
@@ -1273,6 +1276,18 @@ function validateSeedCurrentPrediction(p: Record<string, unknown>): void {
       );
     }
   }
+  if (p.explicitlyRequiredTools !== undefined) {
+    validateToolRequirements(
+      p.explicitlyRequiredTools,
+      "scenario.seed_state.currentPrediction.explicitlyRequiredTools",
+    );
+  }
+  if (p.nonBlockingTools !== undefined) {
+    validateToolRequirements(
+      p.nonBlockingTools,
+      "scenario.seed_state.currentPrediction.nonBlockingTools",
+    );
+  }
   if (typeof p.userMessageSnippet !== "string") {
     throw new Error(
       'scenario.seed_state.currentPrediction.userMessageSnippet must be a string (use "" when there is no prior turn)',
@@ -1306,6 +1321,8 @@ function validateSeedCurrentPrediction(p: Record<string, unknown>): void {
     "intent",
     "blockedIntent",
     "explicitlyAllowedTools",
+    "explicitlyRequiredTools",
+    "nonBlockingTools",
     "explicitlyBlockedSubstrings",
     "userMessageSnippet",
     "blockAllTools",

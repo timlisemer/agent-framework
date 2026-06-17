@@ -213,6 +213,11 @@ export interface AdapterSpec {
    *  Claude("commit")→"/commit". Codex("commit")→"$agent-framework-commit". */
   renderWorkflowInvocation(canonical: CanonicalWorkflow): string;
 
+  /** Read canonicalized instruction text for a workflow/skill. Adapters own
+   *  parsing/normalizing host wire spellings before generic prediction code
+   *  derives canonical workflow requirements from the returned text. */
+  workflowInstructionText(canonical: CanonicalWorkflow, host: HostContext): string | null;
+
   // ── Transcript parsing (the bug-fix surface) ────────────────────────────
   /** Parse adapter-native JSONL lines into the canonical TranscriptEntry stream.
    *  Codex coalesces multi-line response_items into one entry per logical turn. */

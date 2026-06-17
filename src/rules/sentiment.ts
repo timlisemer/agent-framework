@@ -10,6 +10,9 @@ import {
   EXPLICIT_OVERRIDE_RE,
   classifyBlockAllTools,
   decideNextWindowSize,
+  deriveWorkflowToolRequirementsFromText,
+  uniqueToolRequirements,
+  type ToolRequirement,
 } from "../utils/prediction-types.js";
 import { preClassifyMood, extractDirectiveHint, preClassifyCalm } from "../utils/sentiment-prefilter.js";
 import {
@@ -19,6 +22,14 @@ import {
 import { clearGateReasoning } from "../utils/gate-reasoning-cache.js";
 
 const SENTIMENT_TIMEOUT_MS = 12000;
+
+function dropWorkflowBroadAllows(
+  explicitlyAllowedTools: readonly string[],
+  explicitlyRequiredTools: readonly ToolRequirement[],
+): string[] {
+  if (explicitlyRequiredTools.length === 0) return [...explicitlyAllowedTools];
+  return [];
+}
 
 export const sentimentRule: PreToolRule = {
   name: "sentiment",
@@ -100,6 +111,22 @@ export const sentimentRule: PreToolRule = {
             ...deriveAllowedToolsFromIntent(userPrompt),
           ]),
         ];
+
+        const workflowRequirements = deriveWorkflowToolRequirementsFromText(userPrompt);
+        if (workflowRequirements.explicitlyRequiredTools.length > 0) {
+          parsed.explicitlyRequiredTools = [
+            ...(parsed.explicitlyRequiredTools ?? []),
+            ...workflowRequirements.explicitlyRequiredTools,
+          ];
+          parsed.explicitlyAllowedTools = dropWorkflowBroadAllows(
+            parsed.explicitlyAllowedTools,
+            workflowRequirements.explicitlyRequiredTools,
+          );
+          parsed.nonBlockingTools = uniqueToolRequirements([
+            ...(parsed.nonBlockingTools ?? []),
+            ...workflowRequirements.nonBlockingTools,
+          ]);
+        }
 
         const blockClass = classifyBlockAllTools(userPrompt);
         if (blockClass === "yes") parsed.blockAllTools = true;

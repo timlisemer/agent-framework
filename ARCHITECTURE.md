@@ -43,8 +43,8 @@ src/                                # TypeScript source
     prediction-question-judge.ts    # Priority 28:  Block stalling AskUserQuestion under frustration
     question-validate.ts            # Priority 30:  Validate AskUserQuestion
     force-check-required.ts         # Priority 32:  Lock to mcp__check after workaround denial
-    prediction-block.ts             # Priority 35:  Block predicted-bad tools (appealable)
-    low-risk.ts                     # Priority 38:  Auto-approve read-only tools
+    low-risk.ts                     # Priority 33:  Auto-approve read-only tools unless a workflow queue is pending
+    prediction-block.ts             # Priority 35:  Block predicted-bad tools (non-appealable)
     drift-detect.ts                 # Priority 40:  Detect drift from intent
     error-acknowledge.ts            # Priority 50:  Require error acknowledgment
     trusted-path.ts                 # Priority 58:  Deny sensitive-path writes
@@ -153,8 +153,9 @@ still share the same runtime timeout enforcement once a tool call reaches
 The adapter layer translates between canonical hook handler outputs and the
 stdout/exit-code conventions of a specific AI coding tool. Each adapter
 implements `AdapterSpec` from `src/adapter/types.ts`, including the encoder,
-tool canonicalization, transcript parsing, workflow recognition, tool-call
-summaries, and adapter-specific false-denial/appeal-alias checks.
+tool canonicalization, transcript parsing, workflow recognition,
+workflow-instruction text lookup, tool-call summaries, and adapter-specific
+false-denial/appeal-alias checks.
 
 Today the Claude Code (`adapters/claude/`) and Codex CLI
 (`adapters/codex/`) adapters exist. Adding support for another tool requires
@@ -404,8 +405,8 @@ Tool call received
 │   ├─> prediction-question-judge (28) Block stalling AskUserQuestion under frustration
 │   ├─> question-validate (30) Validate AskUserQuestion
 │   ├─> force-check-required (32) Lock to mcp__check after workaround denial
-│   ├─> prediction-block (35)  Block predicted-bad tools (appealable)
-│   ├─> low-risk (38)          Fast allow read-only tools (sentiment-aware via prediction-block running first)
+│   ├─> low-risk-bypass (33)  Fast allow read-only tools unless a required workflow queue is pending
+│   ├─> prediction-block (35)  Block predicted-bad tools (deterministic, non-appealable)
 │   ├─> drift-detect (40)      Detect drift from user intent (appealable)
 │   ├─> error-acknowledge (50) Require error acknowledgment (appealable, LLM)
 │   ├─> trusted-path (58)      Fast deny sensitive paths
@@ -425,6 +426,13 @@ Tool call received
 │   Without this symmetry, a low-priority deterministic deny (e.g.
 │   prediction-block) could silently discard a high-priority rule's pending
 │   LLM judgment.
+│
+│   Workflow-only slash/skill invocations are handled on UserPromptSubmit by
+│   reading canonicalized workflow instruction text and deriving an ordered
+│   `explicitlyRequiredTools` queue plus `nonBlockingTools`. The prediction
+│   policy requires the next queued tool before arbitrary progress; matching
+│   non-blocking tools are allowed without consuming the queue, and low-risk
+│   approvals are disabled while a required workflow tool is pending.
 │
 ├─> Rewind detection (after rules, before validators)
 │

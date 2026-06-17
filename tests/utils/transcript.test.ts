@@ -695,7 +695,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
       userText("<command-name>/plan3</command-name>\nthats complete bullshit do not cheat"),
     ]);
     const result = await resolveActiveSlashCommandAllowedTools(filePath);
-    expect(result).toEqual(["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"]);
+    expect(result).toEqual(["CloseAgent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"]);
   });
 
   it("Codex rollout transcript with quickpush skill -> returns commit tools", async () => {
@@ -879,7 +879,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
     ]);
     const result = await resolveActiveSlashCommandAllowedTools(filePath);
     // The backward scan finds "ok continue" first (no tag), then finds /plan3 tag
-    expect(result).toEqual(["Agent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"]);
+    expect(result).toEqual(["CloseAgent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"]);
   });
 
   it("transcript with /plan3 then later /commit -> returns commit tools (most recent tag wins)", async () => {

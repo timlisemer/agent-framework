@@ -3,7 +3,14 @@ import { readToolLogEntries } from "./session-store.js";
 export function findBatchDecision(
   sessionDir: string,
   allIds: string[],
-): { decision: "allow" | "deny"; reason: string; gate: string } | null {
+): {
+  decision: "allow" | "deny";
+  reason: string;
+  gate: string;
+  toolUseId: string;
+  batchPosition?: number;
+  batchSize?: number;
+} | null {
   const idSet = new Set(allIds);
   const entries = readToolLogEntries(sessionDir, 200);
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -21,6 +28,9 @@ export function findBatchDecision(
       decision: e.status === "allowed" ? "allow" : "deny",
       reason: e.reason ?? "Batch member decision",
       gate: e.gate,
+      toolUseId: e.toolUseId,
+      batchPosition: e.batchPosition,
+      batchSize: e.batchSize,
     };
   }
   return null;

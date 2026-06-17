@@ -5,7 +5,7 @@ A TypeScript framework for custom AI agents using the Anthropic API. Agents are 
 1. **MCP Server** - For `check`, `confirm`, `fullconfirm`, `commit`, `push`, `validate_intent`, `create_planfile`, `validate_plan`, `scenario_labeler`, `scenario_tester`, `locate_scenario` tools (portable, works with any MCP client)
 2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `style-drift`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
 3. **Stop Hook** - For `response-align-stop` and Codex `<proposed_plan>` acceptance validation
-4. **UserPromptSubmit Hook** - For `sentiment` rule (classifies user mood/intent before each tool call sequence)
+4. **UserPromptSubmit Hook** - For `sentiment` rule and slash/skill workflow prediction seeding before each tool call sequence
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
 
@@ -100,8 +100,8 @@ before committing.
 │  ├─ prediction-question-judge (28): Block stalling AskUserQuestion under frustration
 │  ├─ question-validate (30): Validate AskUserQuestion
 │  ├─ force-check-required (32): Lock to mcp__check after workaround denial
-│  ├─ prediction-block (35): Block predicted-bad tools (appealable)
-│  ├─ low-risk (38): Auto-approve read-only tools
+│  ├─ low-risk-bypass (33): Auto-approve read-only tools when no required workflow queue is pending
+│  ├─ prediction-block (35): Block predicted-bad tools (deterministic, non-appealable)
 │  ├─ drift-detect (40): Detect drift from intent (appealable)
 │  ├─ error-acknowledge (50): Require error acknowledgment (appealable, LLM)
 │  ├─ trusted-path (58): Deny sensitive-path writes
@@ -114,6 +114,12 @@ before committing.
 │  Symmetric short-circuit guards: a later fastAllow OR fastDeny is deferred
 │  whenever a higher-priority rule has emitted llmContext, so the rule-gate
 │  aggregator's judgment is always authoritative.
+│
+│  Workflow-only slash/skill invocations seed an ordered
+│  `explicitlyRequiredTools` queue from canonicalized workflow instruction text. The
+│  prediction gate enforces the next required tool, `nonBlockingTools` may run
+│  without consuming the queue, and low-risk auto-approval does not bypass a
+│  pending required workflow tool.
 │
 ├─ claude-md-validate: Validate CLAUDE.md edits
 │

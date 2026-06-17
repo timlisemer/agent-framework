@@ -17,6 +17,17 @@
 import * as fs from "fs";
 import * as path from "path";
 
+export function readFirstUtf8File(filePaths: readonly string[]): string | null {
+  for (const filePath of filePaths) {
+    try {
+      return fs.readFileSync(filePath, "utf-8");
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return null;
+}
+
 // ─── JSONL helpers ────────────────────────────────────────────────────────────
 
 /**

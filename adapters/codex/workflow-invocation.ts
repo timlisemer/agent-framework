@@ -1,5 +1,9 @@
+import * as path from "path";
 import type { CanonicalWorkflow } from "../../src/adapter/types.js";
+import type { HostContext } from "../../src/adapter/types.js";
 import { CANONICAL_WORKFLOWS } from "../../src/adapter/types.js";
+import { readAdapterWorkflowInstructionText } from "../shared/workflow-instructions.js";
+import { recognizeMcp } from "./recognize-mcp.js";
 
 const KNOWN: ReadonlySet<string> = new Set(CANONICAL_WORKFLOWS);
 const RE_DOLLAR = /(?:^|\s)\$agent-framework-([\w-]+)\b/;
@@ -36,4 +40,15 @@ export function isWorkflowInvocationOnly(content: string): boolean {
 
 export function renderWorkflowInvocation(c: CanonicalWorkflow): string {
   return `$agent-framework-${c}`;
+}
+
+export function workflowInstructionText(c: CanonicalWorkflow, host: HostContext): string | null {
+  const relative = path.join("skills", `agent-framework-${c}`, "SKILL.md");
+  return readAdapterWorkflowInstructionText({
+    adapterName: "codex",
+    bundledConfigDir: "dotcodex",
+    relativePath: relative,
+    host,
+    recognizeMcp,
+  });
 }

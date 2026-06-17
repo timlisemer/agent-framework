@@ -1955,7 +1955,7 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
 });
 
 describe("decidePrediction step 3.11: slash-command authorization", () => {
-  it("angry user + /plan3 + Agent -> allow via step 3.11", () => {
+  it("angry user + /plan3 + bare Agent -> deny; agent spawns require skill-derived input constraints", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -1974,8 +1974,63 @@ describe("decidePrediction step 3.11: slash-command authorization", () => {
       false,
       ["Agent", "ExitPlanMode"],
     );
-    expect(result.decision).toBe("allow");
-    expect(result.reason).toMatch(/Active slash command/);
+    expect(result.decision).toBe("deny");
+    expect(result.reason).toContain("Blocking Agent unless explicitly requested");
+  });
+
+  it("angry user + /plan3 + required Plan Agent -> allow via ordered workflow requirement", () => {
+    const pred = makePrediction({
+      mood: "angry",
+      trust: "low",
+      intent: "User invoked /plan3 and wants the plan3 skillfile workflow followed.",
+      userMessageSnippet: "/plan3 thats complete bullshit i do not want you to cheat the scenario",
+      explicitlyAllowedTools: [],
+      explicitlyRequiredTools: [
+        { tool: "Agent", input: { subagent_type: "Plan" }, reason: "Agent call 1: subagent_type \"Plan\"" },
+      ],
+      nonBlockingTools: [
+        { tool: "CloseAgent", reason: "close an unneeded agent without advancing workflow" },
+      ],
+      explicitlyBlockedSubstrings: [],
+    });
+    const allowed = decidePrediction(
+      pred,
+      "Agent",
+      { subagent_type: "Plan", description: "Plan agent 1 of 3" },
+      1,
+      "/plan3 thats complete bullshit",
+      [],
+      false,
+      ["Agent", "ExitPlanMode"],
+    );
+    expect(allowed.decision).toBe("allow");
+    expect(allowed.reason).toMatch(/Workflow requires Agent/);
+
+    const wrongType = decidePrediction(
+      pred,
+      "Agent",
+      { subagent_type: "general-purpose", description: "wrong agent" },
+      1,
+      "/plan3 thats complete bullshit",
+      [],
+      false,
+      ["Agent", "ExitPlanMode"],
+    );
+    expect(wrongType.decision).toBe("deny");
+    expect(wrongType.reason).toContain("subagent_type=\"Plan\"");
+
+    const nonBlockingClose = decidePrediction(
+      pred,
+      "CloseAgent",
+      { agent_id: "old-agent" },
+      1,
+      "/plan3 thats complete bullshit",
+      [],
+      false,
+      ["Agent", "ExitPlanMode"],
+    );
+    expect(nonBlockingClose.decision).toBe("allow");
+    expect(nonBlockingClose.reason).toContain("non-blocking");
   });
 
   it("angry user + /plan3 + Bash -> deny (Bash not in workflow tools)", () => {

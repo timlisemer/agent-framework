@@ -9,8 +9,9 @@ etc.).
 Every adapter exports an object that implements `AdapterSpec` from
 `src/adapter/types.ts`. The spec includes an `AdapterEncoder` for stdout and
 exit-code shaping, plus adapter-owned tool canonicalization, transcript
-normalization, workflow recognition, tool-call LLM summaries, and
-adapter-specific false-denial/appeal-alias checks.
+normalization, workflow recognition, workflow-instruction text lookup,
+tool-call LLM summaries, and adapter-specific false-denial/appeal-alias
+checks.
 
 See [`src/adapter/types.ts`](../src/adapter/types.ts) for the full interface.
 
@@ -20,6 +21,18 @@ path when possible, then calls that adapter's `parseTranscript` before
 projecting a captured hook fire into scenario JSON. New adapters should keep
 all raw transcript shape knowledge inside their adapter parser so
 `src/scenario/materialize.ts` stays adapter-independent.
+
+Adapters also expose `workflowInstructionText` for canonical slash/skill
+workflows. Each adapter normalizes host wire spellings in that instruction
+text before returning it. Shared UserPromptSubmit code then derives ordered
+required workflow tools and non-blocking tools from canonical text, keeping
+policy enforcement in `src/`. Put common adapter-wire lookup helpers in
+`adapters/shared/`; keep workflow authorization and prediction behavior in
+`src/`.
+
+Workflow queue prediction intentionally prefers the bundled repo instruction
+definitions before host config copies, so enforcement follows reviewed source;
+the host config path is a fallback for installed or out-of-tree runtimes.
 
 ## Available Adapters
 

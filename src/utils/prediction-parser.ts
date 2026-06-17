@@ -9,7 +9,13 @@
  * @module prediction-parser
  */
 
-import type { Mood, ToolPrediction, Trust } from "./prediction-types.js";
+import {
+  parseToolRequirementScalar,
+  type Mood,
+  type ToolPrediction,
+  type ToolRequirement,
+  type Trust,
+} from "./prediction-types.js";
 
 const VALID_MOODS: ReadonlySet<Mood> = new Set([
   "angry",
@@ -52,11 +58,28 @@ export function parseSentimentOutput(raw: string): ParsedPrediction | null {
     "---BLOCKED-INTENT---",
     "---EXPLICITLY-ALLOWED-TOOLS---",
   );
+  const hasRequiredSections = raw.includes("---EXPLICITLY-REQUIRED-TOOLS---") &&
+    raw.includes("---NON-BLOCKING-TOOLS---");
+
   const allowedRaw = extractSection(
     raw,
     "---EXPLICITLY-ALLOWED-TOOLS---",
-    "---EXPLICITLY-BLOCKED---",
+    hasRequiredSections ? "---EXPLICITLY-REQUIRED-TOOLS---" : "---EXPLICITLY-BLOCKED---",
   );
+  const requiredRaw = hasRequiredSections
+    ? extractSection(
+        raw,
+        "---EXPLICITLY-REQUIRED-TOOLS---",
+        "---NON-BLOCKING-TOOLS---",
+      )
+    : "(none)";
+  const nonBlockingRaw = hasRequiredSections
+    ? extractSection(
+        raw,
+        "---NON-BLOCKING-TOOLS---",
+        "---EXPLICITLY-BLOCKED---",
+      )
+    : "(none)";
   const blockedRaw = extractSection(raw, "---EXPLICITLY-BLOCKED---", "---CONTEXT-SWITCH---");
 
   if (
@@ -65,6 +88,8 @@ export function parseSentimentOutput(raw: string): ParsedPrediction | null {
     intentRaw === null ||
     blockedIntentRaw === null ||
     allowedRaw === null ||
+    requiredRaw === null ||
+    nonBlockingRaw === null ||
     blockedRaw === null
   ) {
     return null;
@@ -85,6 +110,8 @@ export function parseSentimentOutput(raw: string): ParsedPrediction | null {
     blockedIntentRaw.trim().toLowerCase() === "(none)" ? "" : blockedIntentRaw.trim();
 
   const explicitlyAllowedTools = parseAllowedTools(allowedRaw);
+  const explicitlyRequiredTools = parseToolRequirements(requiredRaw);
+  const nonBlockingTools = parseToolRequirements(nonBlockingRaw);
   const explicitlyBlockedSubstrings = parseBlockedEntries(blockedRaw);
 
   // The trailing sections parse leniently — defaults on missing/malformed.
@@ -108,11 +135,71 @@ export function parseSentimentOutput(raw: string): ParsedPrediction | null {
     intent,
     blockedIntent,
     explicitlyAllowedTools,
+    explicitlyRequiredTools,
+    nonBlockingTools,
     explicitlyBlockedSubstrings,
     blockAllTools,
     contextSwitch,
     questionIsStalling,
   };
+}
+
+function parseToolRequirements(raw: string): ToolRequirement[] {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.toLowerCase() === "(none)") return [];
+  const lines = trimmed.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  const out: ToolRequirement[] = [];
+  for (const line of lines) {
+    if (line.toLowerCase() === "(none)") continue;
+    const parts = line.split("|").map((p) => p.trim());
+    const tool = parts[0];
+    if (!tool) continue;
+    const { input, inputArrayLengths } = parseRequirementInput(parts[1] ?? "");
+    const inputSubstrings = parseRequirementSubstrings(parts[2] ?? "");
+    const reason = parts.slice(3).join(" | ").trim();
+    out.push({
+      tool,
+      ...(Object.keys(input).length > 0 ? { input } : {}),
+      ...(Object.keys(inputArrayLengths).length > 0 ? { inputArrayLengths } : {}),
+      ...(inputSubstrings.length > 0 ? { inputSubstrings } : {}),
+      ...(reason ? { reason } : {}),
+    });
+  }
+  return out;
+}
+
+function parseRequirementInput(raw: string): {
+  input: Record<string, string | number | boolean>;
+  inputArrayLengths: Record<string, number>;
+} {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.toLowerCase() === "(none)") {
+    return { input: {}, inputArrayLengths: {} };
+  }
+  const out: Record<string, string | number | boolean> = {};
+  const inputArrayLengths: Record<string, number> = {};
+  for (const part of trimmed.split(",")) {
+    const [keyRaw, ...valueParts] = part.split("=");
+    const key = keyRaw?.trim();
+    const valueRaw = valueParts.join("=").trim();
+    if (!key || !valueRaw) continue;
+    const lengthKey = /^(.+)\.length$/.exec(key);
+    if (lengthKey) {
+      const value = parseToolRequirementScalar(valueRaw);
+      if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
+        inputArrayLengths[lengthKey[1]] = value;
+      }
+      continue;
+    }
+    out[key] = parseToolRequirementScalar(valueRaw);
+  }
+  return { input: out, inputArrayLengths };
+}
+
+function parseRequirementSubstrings(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.toLowerCase() === "(none)") return [];
+  return trimmed.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
 function parseAllowedTools(raw: string): string[] {

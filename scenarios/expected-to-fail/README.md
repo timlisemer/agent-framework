@@ -19,19 +19,11 @@ actionable reason. Typecheck commands should point to the check MCP, inline
 `node -e` should not receive bogus `tail` remediation, and dense `cd` / `cat` /
 `head` commands should be caught by tool-approve.
 
-### Prediction overblocking despite explicit authorization
-
-- `plan3-agent-blocked-by-mood-after-frustrated-slash-invocation-should-allow.json`
-
-These scenarios cover mood/frustration prediction false positives where the
-user explicitly authorized the action: run the `/plan3` Agent workflow.
-
 ### Stale intent / workflow progression
 
-- `gate-cites-stale-plan3-intent-after-skill-was-already-loaded-and-plan-consolidated-should-allow.json`
 - `prediction-context-stale-read-intent-blocks-just-build-after-explicit-reminder-should-allow.json`
 
-These scenarios cover stale cached intent or already-satisfied prerequisites
+This scenario covers stale cached intent or already-satisfied prerequisites
 being treated as still blocking after the workflow moved forward.
 
 ### Explicit user prohibition state
@@ -46,7 +38,8 @@ This scenario covers preserving and enforcing an explicit prediction block for
 2026-06-13 three full scenario sweeps:
 
 - Ran the full scenario union three times through `scenario_tester`:
-  119 total scenarios per run, including 6 committed fixtures in this folder.
+  119 total scenarios per run before reclassification; after the promotions
+  below, this folder retained 4 committed fixtures.
   Aggregate results were 91/119, 93/119, and 92/119 passing.
 - Promoted stable passing scenarios to `expected-to-pass/`:
   `confirm-quickconfirm-omits-required-extra-context-should-deny.json`,
@@ -85,9 +78,6 @@ Historical reclassification notes:
   `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message.json`,
   `sentiment-explicit-forbid-push.json`, and
   `tool-approve-fails-to-block-cd-cat-head-bash-violations.json`.
-- Moved stable failing nondeterministic fixtures into this folder on 2026-05-13:
-  `gate-cites-stale-plan3-intent-after-skill-was-already-loaded-and-plan-consolidated-should-allow.json`
-  and `plan3-agent-blocked-by-mood-after-frustrated-slash-invocation-should-allow.json`.
 - `stop-response-check-misses-ai-claiming-errors-pre-existing.json` and
   `bash-implied-log-inspection-journalctl-should-allow.json` were promoted out
   after their fixes landed.
