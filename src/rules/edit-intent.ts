@@ -21,6 +21,10 @@ export const editIntentRule: PreToolRule = {
     }
 
     const filePaths = extractFilePaths(ctx.toolName, ctx.toolInput);
+    if (filePaths.length === 0) {
+      return { fastDeny: `${ctx.toolName} must identify at least one target file.` };
+    }
+
     const blockedPaths = filePaths.filter((filePath) =>
       !isEditIntentExemptPath(filePath, ctx.sessionDir)
     );
