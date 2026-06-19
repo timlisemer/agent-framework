@@ -18,15 +18,32 @@ folder where flakes are expected.
 
 ## Recent Changes
 
+2026-06-17 five full scenario sweeps:
+
+- Ran the committed scenario union five times through `scenario_tester`: 95
+  total scenarios per run. Aggregate results were 84/95, 83/95, 83/95, 84/95,
+  and 82/95 passing.
+- Kept existing nondeterministic fixtures here after mixed pass/fail behavior:
+  `gate-blocks-outside-project-edit-after-implicit-fix-authorization.json`,
+  `respond-first-skips-slash-command.json`,
+  `stop-after-offering-options-when-user-complained-about-being-ignored-should-block.json`,
+  and `stop-response-check-misses-ai-claiming-errors-pre-existing.json`.
+- Moved newly nondeterministic fixtures here from `expected-to-pass/`:
+  `labeler-blocked-after-user-says-i-am-not-angry`,
+  `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow`,
+  and `tool-approve-plan-validation-misfires-on-plan-content-substrings`.
+- Current nondeterministic fixtures: the four retained fixtures above plus the
+  three newly moved fixtures. This folder now contains 7 committed fixtures.
+
 2026-06-13 three full scenario sweeps:
 
 - Ran the full scenario union three times through `scenario_tester`:
   119 total scenarios per run, including 6 committed fixtures in this folder.
   Aggregate results were 91/119, 93/119, and 92/119 passing.
 - Promoted stable passing scenarios to `expected-to-pass/`:
-  `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow.json`,
-  `sentiment-misreads-quoted-session-transcript-as-first-person-anger.json`, and
-  `tool-approve-plan-validation-misfires-on-plan-content-substrings.json`.
+  `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow`,
+  `sentiment-misreads-quoted-session-transcript-as-first-person-anger`, and
+  `tool-approve-plan-validation-misfires-on-plan-content-substrings`.
 - Kept the offering-options stop fixture here after fresh back-to-back runs
   disagreed on whether the required remediation substring appeared.
 - Moved `stop-response-check-misses-ai-claiming-errors-pre-existing.json` here
@@ -44,13 +61,13 @@ folder where flakes are expected.
 - Kept nondeterministic fixtures here:
   `gate-blocks-outside-project-edit-after-implicit-fix-authorization.json`,
   the offering-options stop fixture,
-  and `tool-approve-plan-validation-misfires-on-plan-content-substrings.json`.
+  and `tool-approve-plan-validation-misfires-on-plan-content-substrings`.
 - Moved newly nondeterministic scenarios here:
-  `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow.json`,
+  `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow`,
   `respond-first-skips-slash-command.json`, and
-  `sentiment-misreads-quoted-session-transcript-as-first-person-anger.json`.
+  `sentiment-misreads-quoted-session-transcript-as-first-person-anger`.
 - Promoted newly stable passing scenarios to `expected-to-pass/`:
-  `sentiment-agent-resets-anger-after-calm-directive.json` and
+  `sentiment-agent-resets-anger-after-calm-directive` and
   `sentiment-mood-relief-resets.json`.
 
 Historical notes:
@@ -58,7 +75,7 @@ Historical notes:
 - 2026-05-15: moved three nondeterministic fixtures here from
   `expected-to-pass/`: `gate-blocks-outside-project-edit-after-implicit-fix-authorization.json`,
   the offering-options stop fixture,
-  and `tool-approve-plan-validation-misfires-on-plan-content-substrings.json`.
-- 2026-05-13: `sentiment-agent-resets-anger-after-calm-directive.json` and
+  and `tool-approve-plan-validation-misfires-on-plan-content-substrings`.
+- 2026-05-13: `sentiment-agent-resets-anger-after-calm-directive` and
   `sentiment-mood-relief-resets.json` were tracked here as nondeterministic
   before the 2026-05-19 runs stabilized.

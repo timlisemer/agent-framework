@@ -135,7 +135,7 @@ describe("preClassifyCalm", () => {
 
   it("end-to-end regression: raw fixture prompt stripped through quote-stripper returns true", () => {
     // This is the exact raw user content from
-    // sentiment-misreads-quoted-session-transcript-as-first-person-anger.json line 8.
+    // sentiment-misreads-quoted-session-transcript-as-first-person-anger line 8.
     // Guards against future quote-stripper regressions that re-introduce
     // "shitheads" / "fuck you" into the residual stripped text and break predicate (d).
     const raw =

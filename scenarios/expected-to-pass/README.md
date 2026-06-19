@@ -8,6 +8,23 @@ signal. Re-run before moving; if results disagree, move the fixture to
 
 ## Recent Changes
 
+2026-06-17 five full scenario sweeps:
+
+- Ran the committed scenario union five times through `scenario_tester`: 95
+  total scenarios per run. Aggregate results were 84/95, 83/95, 83/95, 84/95,
+  and 82/95 passing.
+- Moved consistently failing fixtures to `expected-to-fail/`:
+  `appeal-overturns-tool-approve-deny-when-user-literally-named-just-build`,
+  `appeal-overturns-tool-approve-deny-when-user-named-bash-command-with-flags`,
+  `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow`,
+  `sentiment-agent-resets-anger-after-calm-directive`, and
+  `sentiment-misreads-quoted-session-transcript-as-first-person-anger`.
+- Moved nondeterministic fixtures to `non-deterministic/`:
+  `labeler-blocked-after-user-says-i-am-not-angry`,
+  `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow`,
+  and `tool-approve-plan-validation-misfires-on-plan-content-substrings`.
+- This folder now contains 79 committed fixtures.
+
 2026-06-13 three full scenario sweeps:
 
 - Ran the full scenario union three times through `scenario_tester`:
@@ -17,12 +34,12 @@ signal. Re-run before moving; if results disagree, move the fixture to
 - Promoted stable passing scenarios from `expected-to-fail/`:
   `confirm-quickconfirm-omits-required-extra-context-should-deny.json`,
   `drift-block-misclassifies-shell-redirect-as-workaround-escalation.json`,
-  `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow.json`,
+  `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow`,
   and `stop-memory-answer-after-completed-task-should-pass.json`.
 - Promoted stable passing scenarios from `non-deterministic/`:
-  `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow.json`,
-  `sentiment-misreads-quoted-session-transcript-as-first-person-anger.json`, and
-  `tool-approve-plan-validation-misfires-on-plan-content-substrings.json`.
+  `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow`,
+  `sentiment-misreads-quoted-session-transcript-as-first-person-anger`, and
+  `tool-approve-plan-validation-misfires-on-plan-content-substrings`.
 - Demoted `stop-response-check-misses-ai-claiming-errors-pre-existing.json` to
   `non-deterministic/` after it passed two full runs and failed one full run.
 - Promoted two fixed prediction identity scenarios from `expected-to-fail/`.
@@ -37,16 +54,16 @@ signal. Re-run before moving; if results disagree, move the fixture to
 2026-05-19 scenario reclassification after three full scenario sweeps:
 
 - Promoted newly stable passing scenarios from `expected-to-fail/`:
-  `appeal-overturns-tool-approve-deny-when-user-named-bash-command-with-flags.json`,
+  `appeal-overturns-tool-approve-deny-when-user-named-bash-command-with-flags`,
   `drift-free-edit-post-warning.json`, and
   `tool-approve-plan-validation-misfires-on-node-substring.json`.
 - Promoted newly stable passing scenarios from `non-deterministic/`:
-  `sentiment-agent-resets-anger-after-calm-directive.json` and
+  `sentiment-agent-resets-anger-after-calm-directive` and
   `sentiment-mood-relief-resets.json`.
 - Moved newly consistent regressions out to `expected-to-fail/`:
   `prediction-context-stale-read-intent-blocks-just-build-after-explicit-reminder-should-allow.json`.
 - Moved nondeterministic scenarios out to `non-deterministic/`:
-  `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow.json`
+  `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow`
   and `respond-first-skips-slash-command.json`.
 
 2026-05-18 scenario cleanup and new regressions:

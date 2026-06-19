@@ -11,6 +11,8 @@ repeated confirmation. If repeated runs disagree, move the fixture to
 
 ### Command policy / tool-approve attribution
 
+- `appeal-overturns-tool-approve-deny-when-user-literally-named-just-build`
+- `appeal-overturns-tool-approve-deny-when-user-named-bash-command-with-flags`
 - `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message.json`
 - `tool-approve-fails-to-block-cd-cat-head-bash-violations.json`
 
@@ -21,10 +23,19 @@ actionable reason. Typecheck commands should point to the check MCP, inline
 
 ### Stale intent / workflow progression
 
+- `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow`
 - `prediction-context-stale-read-intent-blocks-just-build-after-explicit-reminder-should-allow.json`
 
-This scenario covers stale cached intent or already-satisfied prerequisites
+These scenarios cover stale cached intent or already-satisfied prerequisites
 being treated as still blocking after the workflow moved forward.
+
+### Sentiment and prediction reset
+
+- `sentiment-agent-resets-anger-after-calm-directive`
+- `sentiment-misreads-quoted-session-transcript-as-first-person-anger`
+
+These scenarios cover sentiment state being retained or inferred incorrectly
+after the latest user message should clear or avoid anger classification.
 
 ### Explicit user prohibition state
 
@@ -35,6 +46,24 @@ This scenario covers preserving and enforcing an explicit prediction block for
 
 ## Recent Changes
 
+2026-06-17 five full scenario sweeps:
+
+- Ran the committed scenario union five times through `scenario_tester`: 95
+  total scenarios per run. Aggregate results were 84/95, 83/95, 83/95, 84/95,
+  and 82/95 passing.
+- Moved consistently failing fixtures here from `expected-to-pass/`:
+  `appeal-overturns-tool-approve-deny-when-user-literally-named-just-build`,
+  `appeal-overturns-tool-approve-deny-when-user-named-bash-command-with-flags`,
+  `implementer-launch-after-plan-approved-blocked-by-stale-plan5-intent-should-allow`,
+  `sentiment-agent-resets-anger-after-calm-directive`, and
+  `sentiment-misreads-quoted-session-transcript-as-first-person-anger`.
+- Existing expected-fail fixtures stayed consistently failing:
+  `plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message.json`,
+  `prediction-context-stale-read-intent-blocks-just-build-after-explicit-reminder-should-allow.json`,
+  `sentiment-explicit-forbid-push.json`, and
+  `tool-approve-fails-to-block-cd-cat-head-bash-violations.json`.
+- This folder now contains 9 committed fixtures.
+
 2026-06-13 three full scenario sweeps:
 
 - Ran the full scenario union three times through `scenario_tester`:
@@ -44,7 +73,7 @@ This scenario covers preserving and enforcing an explicit prediction block for
 - Promoted stable passing scenarios to `expected-to-pass/`:
   `confirm-quickconfirm-omits-required-extra-context-should-deny.json`,
   `drift-block-misclassifies-shell-redirect-as-workaround-escalation.json`,
-  `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow.json`,
+  `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow`,
   and `stop-memory-answer-after-completed-task-should-pass.json`.
 - Kept the offering-options stop fixture in `non-deterministic/` after
   back-to-back runs disagreed on whether the required remediation substring
@@ -62,11 +91,11 @@ This scenario covers preserving and enforcing an explicit prediction block for
 - Moved newly consistent expected-pass regression into this folder:
   `prediction-context-stale-read-intent-blocks-just-build-after-explicit-reminder-should-allow.json`.
 - Promoted newly stable passing scenarios out to `expected-to-pass/`:
-  `appeal-overturns-tool-approve-deny-when-user-named-bash-command-with-flags.json`,
+  `appeal-overturns-tool-approve-deny-when-user-named-bash-command-with-flags`,
   `drift-free-edit-post-warning.json`, and
   `tool-approve-plan-validation-misfires-on-node-substring.json`.
 - Moved nondeterministic scenario out to `non-deterministic/`:
-  `sentiment-misreads-quoted-session-transcript-as-first-person-anger.json`.
+  `sentiment-misreads-quoted-session-transcript-as-first-person-anger`.
 
 2026-05-17 Codex subagent respond-first detection:
 
