@@ -586,14 +586,31 @@ function verbRegexesProducingTool(toolName: string): RegExp[] {
   }
 }
 
+function userMessageRevokesToolClass(
+  message: string,
+  toolName: string,
+): boolean {
+  if (!message) return false;
+  for (const re of verbRegexesProducingTool(toolName)) {
+    const globalRe = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
+    for (const m of message.matchAll(globalRe)) {
+      if (m.index === undefined) continue;
+      const window = message.slice(Math.max(0, m.index - 40), m.index);
+      if (TOOL_REVOCATION_VERBS_RE.test(window)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Predicate (A'): the message is a fresh CLASS-LEVEL imperative whose verb
  * morphology unambiguously implies `toolName`. Mirrors path (A) but uses
  * `deriveAllowedToolsFromIntent` (the same single source of truth that
  * user-prompt-submit unions into `explicitlyAllowedTools` in live mode)
  * instead of literal-tool-name matching. Catches "now implement" / "fix it"
- * / "refactor that" / "patch the file" / "make the change" — any class-
- * level imperative the user can type without naming the canonical tool.
+ * / "refactor that" / "patch the file" / "make the change" / "make it so"
+ * — any class-level imperative the user can type without naming the
+ * canonical tool.
  *
  * Guards (in order):
  *   1. EXPLICIT_PROHIBITION_RE on the message ("no tools", "freeze",
@@ -621,14 +638,7 @@ export function latestUserMessageReauthorizesClass(
   if (EXPLICIT_PROHIBITION_RE.test(message)) return false;
   if (!deriveAllowedToolsFromIntent(message).includes(toolName)) return false;
   if (userMessageRevokesTool(message, toolName)) return false;
-  for (const re of verbRegexesProducingTool(toolName)) {
-    const globalRe = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
-    for (const m of message.matchAll(globalRe)) {
-      if (m.index === undefined) continue;
-      const window = message.slice(Math.max(0, m.index - 40), m.index);
-      if (TOOL_REVOCATION_VERBS_RE.test(window)) return false;
-    }
-  }
+  if (userMessageRevokesToolClass(message, toolName)) return false;
   return true;
 }
 
@@ -1519,29 +1529,44 @@ export function decidePrediction(
   //     through to normal mood policy.
   //   - recentUserMessages.length >= 2: at least one OLDER user-text turn
   //     exists (the freshest IS the discharged side-clarification anchor).
-  //   - An older user-text turn favorably names the firing tool AND no
-  //     subsequent message revokes the tool or matches
+  //   - prediction.contextSwitch !== "yes": a new unrelated topic really
+  //     does replace the older request.
+  //   - An older user-text turn favorably names the firing tool OR, for
+  //     edit-class tools, contains class-level edit authorization AND no
+  //     subsequent message revokes that tool/class or matches
   //     EXPLICIT_PROHIBITION_RE.
   //
-  // Generic over tool: piggybacks on TOOL_NAME_ALIASES + canonical-name
-  // matching via latestUserMessageFavorablyNamesTool, so any tool whose
-  // outer authorization the user phrased favorably is covered.
+  // Literal-name matching remains generic over tools via TOOL_NAME_ALIASES
+  // + canonical-name matching. Class-level older-turn authorization is
+  // intentionally edit-only; broadening Bash/workflow tools here would need
+  // separate command-safety semantics.
   if (
     cachedSnippetSideTaskDischarged &&
     !userSaidProhibition &&
     !blockedForThisToolByName &&
+    prediction.contextSwitch !== "yes" &&
     recentUserMessages.length >= 2
   ) {
     const olderMessages = recentUserMessages.slice(0, -1);
     for (let i = olderMessages.length - 1; i >= 0; i--) {
       const candidate = olderMessages[i];
-      if (!latestUserMessageFavorablyNamesTool(candidate, toolName)) continue;
+      const candidateNamesTool = latestUserMessageFavorablyNamesTool(candidate, toolName);
+      const candidateAuthorizesEditClass =
+        isPredictionEditTool(toolName) &&
+        latestUserMessageReauthorizesClass(candidate, toolName);
+      if (!candidateNamesTool && !candidateAuthorizesEditClass) continue;
       const subsequent = recentUserMessages.slice(i + 1);
       if (subsequent.some((m) => userMessageRevokesTool(m, toolName))) continue;
+      if (
+        isPredictionEditTool(toolName) &&
+        subsequent.some((m) => userMessageRevokesToolClass(m, toolName))
+      ) {
+        continue;
+      }
       if (subsequent.some((m) => EXPLICIT_PROHIBITION_RE.test(m))) continue;
       return {
         decision: "allow",
-        reason: `Cached prediction is anchored to a discharged side-clarification (intervening tool round-trip obeyed it); an earlier still-active user turn favorably names ${toolName}; mood-driven re-deny would treat the nested clarification as a replacement intent.`,
+        reason: `Cached prediction is anchored to a discharged side-clarification (intervening tool round-trip obeyed it); an earlier still-active user turn authorizes ${toolName}; mood-driven re-deny would treat the nested clarification as a replacement intent.`,
       };
     }
   }

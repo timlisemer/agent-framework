@@ -81,12 +81,12 @@ export function deriveEditIntentFromPrediction(
 
   const userMessage = (p.userMessageFull ?? p.userMessageSnippet).toLowerCase();
   if (/\b(don'?t|do\s+not|no|never|stop|avoid)\s+(edit\w*|chang\w*|modif\w*|writ\w*|creat\w*|updat\w*|delet\w*|touch\w*|refactor\w*|add\w*|remov\w*|replac\w*)\b/.test(userMessage)) return false;
-  if (/\b(fix\w*|implement\w*|refactor\w*|add\w*|edit\w*|writ\w*|creat\w*|modif\w*|delet\w*|remov\w*|updat\w*|chang\w*|build\w*|set\s+up|setup|configur\w*|renam\w*|replac\w*|rewrit\w*|integrat\w*|migrat\w*|extract\w*|split\w*|merg\w*|introduc\w*|insert\w*|adjust\w*|tweak\w*|correct\w*|improv\w*|enhanc\w*|optimi[sz]\w*|appl\w*|patch\w*|restructur\w*|clean\s*up|hook\s*up|wire\s*up|tidy\w*|format\w*|simplif\w*|polish\w*|port\w*|rollback\w*|upgrad\w*|bump\w*|hotfix\w*|extend\w*|revert\w*|commit\w*|ship\w*|swap\w*)\b/.test(userMessage)) return true;
+  if (/\b(fix\w*|implement\w*|refactor\w*|add\w*|edit\w*|writ\w*|creat\w*|modif\w*|delet\w*|remov\w*|updat\w*|chang\w*|build\w*|set\s+up|setup|configur\w*|renam\w*|replac\w*|rewrit\w*|integrat\w*|migrat\w*|extract\w*|split\w*|merg\w*|introduc\w*|insert\w*|adjust\w*|tweak\w*|correct\w*|improv\w*|enhanc\w*|optimi[sz]\w*|appl\w*|patch\w*|restructur\w*|clean\s*up|hook\s*up|wire\s*up|tidy\w*|format\w*|simplif\w*|polish\w*|port\w*|rollback\w*|upgrad\w*|bump\w*|hotfix\w*|extend\w*|revert\w*|commit\w*|ship\w*|swap\w*|make\s+(?:it\s+)?so)\b/.test(userMessage)) return true;
 
   const intent = p.intent.toLowerCase();
   // Stem-match implementation verbs to catch morphological variants
   // (fixes/fixing/fixed, refactoring/refactored, changes/changing/changed, etc.)
-  if (/\b(fix\w*|implement\w*|refactor\w*|add\w*|edit\w*|writ\w*|creat\w*|modif\w*|delet\w*|remov\w*|updat\w*|chang\w*|build\w*|set\s+up|setup|configur\w*|renam\w*|replac\w*|rewrit\w*|integrat\w*|migrat\w*|extract\w*|split\w*|merg\w*|introduc\w*|insert\w*|adjust\w*|tweak\w*|correct\w*|improv\w*|enhanc\w*|optimi[sz]\w*|appl\w*|patch\w*|restructur\w*|clean\s*up|hook\s*up|wire\s*up|tidy\w*|format\w*|simplif\w*|polish\w*|port\w*|rollback\w*|upgrad\w*|bump\w*|hotfix\w*|extend\w*|revert\w*|commit\w*|ship\w*|swap\w*)\b/.test(intent)) return true;
+  if (/\b(fix\w*|implement\w*|refactor\w*|add\w*|edit\w*|writ\w*|creat\w*|modif\w*|delet\w*|remov\w*|updat\w*|chang\w*|build\w*|set\s+up|setup|configur\w*|renam\w*|replac\w*|rewrit\w*|integrat\w*|migrat\w*|extract\w*|split\w*|merg\w*|introduc\w*|insert\w*|adjust\w*|tweak\w*|correct\w*|improv\w*|enhanc\w*|optimi[sz]\w*|appl\w*|patch\w*|restructur\w*|clean\s*up|hook\s*up|wire\s*up|tidy\w*|format\w*|simplif\w*|polish\w*|port\w*|rollback\w*|upgrad\w*|bump\w*|hotfix\w*|extend\w*|revert\w*|commit\w*|ship\w*|swap\w*|make\s+(?:it\s+)?so)\b/.test(intent)) return true;
   if (/\b(explain\w*|read\w*|plan\w*|investigat\w*|explor\w*|review\w*|describ\w*|analy[sz]\w*|understand\w*|trac\w*|show\w*|examin\w*|check\w*|find\w*|look\w*|search\w*|list\w*|summari[sz]\w*|compar\w*|inspect\w*|walk\w*|document\w*)\b/.test(intent)) return false;
 
   return null;
@@ -142,7 +142,7 @@ export function planModeBashBlock(
 
 export const READ_VERB_RE = /\b(read|show|look\s+at|open|view|inspect|examin\w*)\b/i;
 export const EDIT_VERB_RE =
-  /\b(edit|chang\w*|fix\w*|implement(?:s|ing|ed)?|modif(?:y|ies|ying|ied)|refactor(?:s|ing|ed)?|patch(?:es|ing|ed)?|writ\w*|creat\w*|sav\w*|add\s+to\s+(?:file|the\s+file)|rewrit\w*|redo|undo|undone|revert\w*|restor\w*|rollback|roll\s+back|put\s+back|delet\w*|remov\w*)\b/i;
+  /\b(edit|chang\w*|fix\w*|implement(?:s|ing|ed)?|modif(?:y|ies|ying|ied)|refactor(?:s|ing|ed)?|patch(?:es|ing|ed)?|writ\w*|creat\w*|sav\w*|add\s+to\s+(?:file|the\s+file)|rewrit\w*|redo|undo|undone|revert\w*|restor\w*|rollback|roll\s+back|put\s+back|delet\w*|remov\w*|make\s+(?:it\s+)?so)\b/i;
 // Bounded distance so unrelated mentions of "file" don't pull in Bash.
 export const RENAME_MOVE_VERB_RE = /\b(renam\w*|mov\w*)\b[^.!?]{0,50}\b(file|files)\b/i;
 export const TEST_RUN_VERB_RE = /\b(test|tests|run\s+\w+)\b/i;

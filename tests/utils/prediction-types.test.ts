@@ -1696,6 +1696,10 @@ describe("latestUserMessageReauthorizesClass", () => {
     expect(latestUserMessageReauthorizesClass("fix it", "Edit")).toBe(true);
   });
 
+  it("'make it so' -> Edit: true", () => {
+    expect(latestUserMessageReauthorizesClass("make it so the mouse decides focus", "Edit")).toBe(true);
+  });
+
   it("'stop implementing' -> Edit: false (verb-class revocation)", () => {
     expect(latestUserMessageReauthorizesClass("stop implementing", "Edit")).toBe(false);
   });
@@ -1782,6 +1786,55 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     );
     expect(result.decision).toBe("allow");
     expect(result.reason).toContain("discharged side-clarification");
+  });
+
+  it("materialized Astral shape: older make-it-so request + discharged retry -> allows Edit", () => {
+    const original =
+      "Please make yourself familiar with our codebase and its uncommited code. We have allready worked quite a lot in this session, and i need you to give it the final touches. I want you to make it so the logic is, that the mouse decides which text field to focus.";
+    const retry =
+      "i tested it, and it is not working. I open the overview and a text view from a different monitor than my mouse gets focused. I think the focus needs to be decided before the overviews even get started.";
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "normal",
+      intent:
+        "The user is reporting that the overview focus fix did not work and wants the focus decision to happen before any overview windows start, likely based on the monitor under the mouse rather than startup timing.",
+      userMessageSnippet: retry,
+      contextSwitch: "no",
+    });
+    const result = decidePrediction(
+      pred,
+      "Edit",
+      {},
+      1,
+      retry,
+      [original, retry],
+      true,
+    );
+    expect(result.decision).toBe("allow");
+    expect(result.reason).toContain("earlier still-active user turn authorizes Edit");
+  });
+
+  it("later class-level edit revocation overrides older make-it-so request", () => {
+    const original =
+      "I want you to make it so the logic is, that the mouse decides which text field to focus.";
+    const revocation = "don't refactor that";
+    const pred = makePrediction({
+      mood: "frustrated",
+      trust: "normal",
+      intent: "The user is clarifying the implementation details.",
+      userMessageSnippet: revocation,
+      contextSwitch: "no",
+    });
+    const result = decidePrediction(
+      pred,
+      "Edit",
+      {},
+      1,
+      revocation,
+      [original, revocation],
+      true,
+    );
+    expect(result.decision).toBe("deny");
   });
 
   it("raw Codex MCP wire name uses canonical scenario tester aliases", () => {
