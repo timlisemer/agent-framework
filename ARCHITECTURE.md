@@ -284,7 +284,7 @@ Provider resolution follows this priority order:
 - `openrouter` direct mode uses `@anthropic-ai/sdk` against OpenRouter's Anthropic API skin.
 - `openrouter` SDK mode selects Claude Agent SDK or Codex SDK with `AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME`.
 - `claude-subscription` always uses Claude Agent SDK, clears API/OpenRouter env vars, and persists provider sessions only for opt-in continuable SDK sessions.
-- `openai-subscription` always uses Codex SDK. Isolated sessions use a temporary `CODEX_HOME` and one-shot calls set `history.persistence = "none"`; user-runtime sessions use the normal Codex home/config. Opt-in continuable SDK sessions keep live Codex thread state until disposal.
+- `openai-subscription` always uses Codex SDK. Isolated sessions use a temporary `CODEX_HOME` and one-shot calls set `history.persistence = "none"`; user-runtime sessions use the normal Codex home/config unless `sdkRuntimeHome: "managedAstral"` requests the managed Astral Codex home under `~/.agent-framework/astral-ai/codex` for session-choice listing and resume. Opt-in continuable SDK sessions keep live Codex thread state until disposal.
 
 ### Provider Model IDs
 

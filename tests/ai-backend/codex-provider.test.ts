@@ -1,14 +1,20 @@
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildCodexConfig,
   buildCodexEnv,
+  buildCodexSessionEnv,
   buildCodexThreadOptions,
   codexDirectToolUseErrorResult,
   codexTurnHasDirectForbiddenItems,
   createCodexUiStreamState,
   mapCodexUiStreamEvent,
+  startOrResumeCodexThread,
 } from "../../src/providers/codex-agent-runtime.js";
 import { PROVIDER_TYPES } from "../../src/utils/provider-config.js";
+import { withEnvForTest } from "../helpers/provider-env.js";
 
 describe("AI backend Codex provider helpers", () => {
   it("builds OpenRouter Codex config without forcing ChatGPT login", () => {
@@ -53,14 +59,12 @@ describe("AI backend Codex provider helpers", () => {
   });
 
   it("uses process runtime home and config for user runtime sessions", () => {
-    const previousCodexHome = process.env.CODEX_HOME;
-    const previousOpenAiKey = process.env.OPENAI_API_KEY;
-    const previousOpenRouterKey = process.env.OPENROUTER_API_KEY;
+    const restoreEnv = withEnvForTest({
+      CODEX_HOME: "/home/user/.codex",
+      OPENAI_API_KEY: "openai-key",
+      OPENROUTER_API_KEY: "openrouter-key",
+    });
     try {
-      process.env.CODEX_HOME = "/home/user/.codex";
-      process.env.OPENAI_API_KEY = "openai-key";
-      process.env.OPENROUTER_API_KEY = "openrouter-key";
-
       const env = buildCodexEnv("user", null, true);
       const config = buildCodexConfig("user", null, false, true);
 
@@ -69,13 +73,41 @@ describe("AI backend Codex provider helpers", () => {
       expect(env.OPENROUTER_API_KEY).toBeUndefined();
       expect(config?.show_raw_agent_reasoning).toBe(true);
     } finally {
-      if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
-      else process.env.CODEX_HOME = previousCodexHome;
-      if (previousOpenAiKey === undefined) delete process.env.OPENAI_API_KEY;
-      else process.env.OPENAI_API_KEY = previousOpenAiKey;
-      if (previousOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
-      else process.env.OPENROUTER_API_KEY = previousOpenRouterKey;
+      restoreEnv();
     }
+  });
+
+  it("removes API-key env for managed OpenAI subscription sessions", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-codex-test-"));
+    const restoreEnv = withEnvForTest({
+      HOME: home,
+      CODEX_HOME: "/native/codex",
+      OPENAI_API_KEY: "openai-key",
+      CODEX_API_KEY: "codex-key",
+      OPENROUTER_API_KEY: "openrouter-key",
+      ANTHROPIC_API_KEY: "anthropic-key",
+    });
+    try {
+      const env = buildCodexSessionEnv("user", null, true, "managedAstral");
+
+      expect(env.CODEX_HOME).toBe(path.join(home, ".agent-framework", "astral-ai", "codex"));
+      expect(env.OPENAI_API_KEY).toBeUndefined();
+      expect(env.CODEX_API_KEY).toBeUndefined();
+      expect(env.OPENROUTER_API_KEY).toBeUndefined();
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      restoreEnv();
+    }
+  });
+
+  it("requires SDK support when resuming a native Codex thread", () => {
+    const startThread = vi.fn(() => ({ id: "new-thread", run: vi.fn() }));
+
+    expect(() =>
+      startOrResumeCodexThread({ startThread }, { workingDirectory: "/repo" }, "existing-thread")
+    ).toThrow("Codex SDK does not support native thread resume.");
+    expect(startThread).not.toHaveBeenCalled();
   });
 
   it("keeps Codex runtime policy separated by execution mode and runtime environment", () => {

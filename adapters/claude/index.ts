@@ -10,6 +10,7 @@ import * as PS  from "./prompt-strings.js";
 import * as PLS from "./plan-source.js";
 import * as PM  from "./plan-mode.js";
 import * as Paths from "./paths.js";
+import * as History from "./session-history.js";
 import type { AdapterSpec } from "../../src/adapter/types.js";
 import { extractJsonContextMessage } from "../../src/adapter/context-message.js";
 import { summarizeToolInputForLlm } from "../../src/utils/tool-input-summary.js";
@@ -36,6 +37,7 @@ export const claudeSpec: AdapterSpec = {
   projectTranscriptsDir:  Paths.projectTranscriptsDir,
   projectTranscriptFile:  Paths.projectTranscriptFile,
   listProjectTranscripts: Paths.listProjectTranscripts,
+  sessionHistory: History,
   findNativePlanFile:     PLS.findNativePlanFile,
   isPlanExit:             PLS.isPlanExit,
   extractStopProposedPlan: PLS.extractStopProposedPlan,

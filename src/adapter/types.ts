@@ -139,6 +139,34 @@ export interface AdapterTranscriptFile {
   path: string;
 }
 
+export type AdapterSessionHistoryMessage = {
+  role: "user" | "assistant";
+  text: string;
+  createdAt?: string;
+};
+
+export type AdapterResumeTarget = {
+  provider: string;
+  target: Record<string, string>;
+};
+
+export type AdapterSessionHistoryRecord = {
+  adapterName: string;
+  targetKey: string;
+  summary: string;
+  workingDir: string;
+  createdAt?: string;
+  updatedAt?: string;
+  resumeTarget: AdapterResumeTarget;
+  messages: readonly AdapterSessionHistoryMessage[];
+};
+
+export interface AdapterSessionHistoryProvider {
+  listManagedSessions(input: {
+    maxResults: number;
+  }): Promise<readonly AdapterSessionHistoryRecord[]> | readonly AdapterSessionHistoryRecord[];
+}
+
 // ── Transcript shape (canonical, used by parseTranscript) ───────────────────
 
 export interface ContentBlock {
@@ -246,6 +274,9 @@ export interface AdapterSpec {
 
   /** Raw transcript candidates for a project under this adapter. */
   listProjectTranscripts(projectDir?: string): readonly AdapterTranscriptFile[];
+
+  /** Adapter-owned managed session history discovery for AI panel resume. */
+  sessionHistory?: AdapterSessionHistoryProvider;
 
   // ── Plan source / exit conventions ─────────────────────────────────────
   /** Resolve an adapter-native plan file for a named/current plan, if one exists. */

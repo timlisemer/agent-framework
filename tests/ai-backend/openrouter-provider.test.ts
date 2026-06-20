@@ -3,6 +3,8 @@ import {
   buildClaudeQueryOptions,
   buildCodexTurnInput,
   createProviderRunner,
+  createResumeProviderRunner,
+  ResumeProviderMismatchError,
 } from "../../src/ai-backend/provider.js";
 import { buildCodexThreadOptions } from "../../src/providers/codex-agent-runtime.js";
 import { PROVIDER_TYPES, resetProviderConfig } from "../../src/utils/provider-config.js";
@@ -62,6 +64,44 @@ describe("AI backend OpenRouter provider resolution", () => {
 
     expect(runner.resolvedProvider.type).toBe(PROVIDER_TYPES.OPENAI_SUBSCRIPTION);
     expect(runner.resolvedProvider.sdkRuntime).toBe("codex");
+  });
+
+  it("creates resume runners only for targets matching the configured SDK runtime", () => {
+    process.env.AGENT_FRAMEWORK_SDK_PROVIDER = "openai-subscription";
+    resetProviderConfig();
+
+    const runner = createResumeProviderRunner({
+      model: null,
+      workingDir: "/repo",
+      systemPrompt: null,
+      continuable: true,
+      sdkRuntimeEnvironment: "user",
+      sdkRuntimeHome: "managedAstral",
+    }, {
+      provider: "codex",
+      threadId: "codex-thread",
+      transcriptPath: "/tmp/codex-session.jsonl",
+    });
+
+    expect(runner.resolvedProvider.type).toBe(PROVIDER_TYPES.OPENAI_SUBSCRIPTION);
+    expect(runner.resolvedProvider.sdkRuntime).toBe("codex");
+
+    process.env.AGENT_FRAMEWORK_SDK_PROVIDER = "claude-subscription";
+    resetProviderConfig();
+    expect(() =>
+      createResumeProviderRunner({
+        model: null,
+        workingDir: "/repo",
+        systemPrompt: null,
+        continuable: true,
+        sdkRuntimeEnvironment: "user",
+        sdkRuntimeHome: "managedAstral",
+      }, {
+        provider: "codex",
+        threadId: "codex-thread",
+        transcriptPath: "/tmp/codex-session.jsonl",
+      })
+    ).toThrow(ResumeProviderMismatchError);
   });
 
   it("includes configured system prompts in Codex turn input", () => {

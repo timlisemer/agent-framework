@@ -1,20 +1,32 @@
 import type {
   AiBackendMessage,
+  AiRequestId,
   AiEvent,
   AiMessageId,
   AiRequest,
   AiSessionConfig,
+  AiSessionChoicesConfig,
+  AiSessionSnapshot,
   AiToolDecision,
   SessionId,
   TokenUsage,
   ToolCallId,
   TurnId,
 } from "../ai-protocol/index.js";
+import path from "node:path";
 import { TranscriptStore } from "./transcript-store.js";
-import { createResolvedProviderRunner, resolveSessionProvider, type AiProviderRunner } from "./provider.js";
+import {
+  createResolvedProviderRunner,
+  createResumeProviderRunner,
+  resolveSessionProvider,
+  ResumeProviderMismatchError,
+  type AiProviderRunner,
+} from "./provider.js";
 import { ProviderState } from "./provider-state.js";
 import type { AiRuntimeEvent } from "./runtime-events.js";
 import { protocolError, toPublicError } from "./public-errors.js";
+import { sessionHistoryService } from "./session-history.js";
+import { assertManagedRuntimeHomeConfig } from "../providers/managed-runtime-home.js";
 
 type WriteFrame = (frame: AiBackendMessage) => void;
 type RunningTurn = {
@@ -24,6 +36,7 @@ type RunningTurn = {
 };
 type RunningTurnPromise = {
   sessionId: SessionId;
+  generation: number;
   promise: Promise<void>;
 };
 type Ticker = ReturnType<typeof setInterval>;
@@ -43,6 +56,8 @@ export class AiBackendSessionManager {
   readonly #tickers = new Map<string, Ticker>();
   readonly #toolRunningSince = new Map<string, string>();
   readonly #processRunningSince = new Map<string, string>();
+  readonly #closing = new Set<SessionId>();
+  readonly #sessionGenerations = new Map<SessionId, number>();
 
   constructor(write: WriteFrame) {
     this.#write = write;
@@ -58,8 +73,17 @@ export class AiBackendSessionManager {
 
   private async handleRequest(request: AiRequest): Promise<void> {
     switch (request.type) {
+      case "listSessionChoices":
+        await this.listSessionChoices(request.requestId, request.config);
+        break;
       case "startSession":
         await this.startSession(request.sessionId, request.config);
+        break;
+      case "resumeSession":
+        await this.resumeSession(request.requestId, request.sessionId, request.resumeId, request.config);
+        break;
+      case "closeSession":
+        await this.closeSession(request.requestId, request.sessionId);
         break;
       case "sendInput":
         this.startTurn(request.sessionId, request.turnId, request.input);
@@ -86,6 +110,15 @@ export class AiBackendSessionManager {
   }
 
   private async startSession(sessionId: SessionId, config: AiSessionConfig): Promise<void> {
+    if (this.#closing.has(sessionId)) {
+      this.writeResponseError(sessionId, "conflict", `AI session is closing: ${sessionId}`);
+      return;
+    }
+    const normalizedConfig = this.normalizeStartConfig(config);
+    if (normalizedConfig instanceof Error) {
+      this.writeResponseError(sessionId, "invalid_request", normalizedConfig.message);
+      return;
+    }
     if (this.hasRunningTurn(sessionId)) {
       this.writeResponseError(sessionId, "conflict", `AI session has a running turn: ${sessionId}`);
       return;
@@ -93,16 +126,139 @@ export class AiBackendSessionManager {
 
     let runner: AiProviderRunner;
     try {
-      const resolvedProvider = resolveSessionProvider(config);
+      const resolvedProvider = resolveSessionProvider(normalizedConfig);
       runner = createResolvedProviderRunner(resolvedProvider);
     } catch (error) {
       this.writeResponseError(sessionId, "runtime_error", error instanceof Error ? error.message : String(error));
       return;
     }
+    const snapshot = this.#store.create(sessionId, normalizedConfig);
+    this.replaceRunnerAndWriteSessionStarted(sessionId, runner, snapshot);
+  }
+
+  private async listSessionChoices(requestId: AiRequestId, config: AiSessionChoicesConfig): Promise<void> {
+    try {
+      const choices = await sessionHistoryService.listChoices(config);
+      this.#write({
+        type: "response",
+        response: {
+          type: "sessionChoices",
+          requestId,
+          sessions: choices.sessions,
+          workingDirectories: choices.workingDirectories,
+        },
+      });
+    } catch (error) {
+      this.writeRequestError(requestId, undefined, "runtime_error", error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async resumeSession(
+    requestId: AiRequestId,
+    sessionId: SessionId,
+    resumeId: string,
+    config: AiSessionConfig
+  ): Promise<void> {
+    if (this.#closing.has(sessionId)) {
+      this.writeRequestError(requestId, sessionId, "conflict", `AI session is closing: ${sessionId}`);
+      return;
+    }
+    if (this.hasRunningTurn(sessionId)) {
+      this.writeRequestError(requestId, sessionId, "conflict", `AI session has a running turn: ${sessionId}`);
+      return;
+    }
+    const resolved = sessionHistoryService.resolve(resumeId);
+    if (!resolved) {
+      this.writeRequestError(requestId, sessionId, "not_found", "Resume target was not found.");
+      return;
+    }
+    if (config.sdkRuntimeHome !== "managedAstral" || config.sdkRuntimeEnvironment !== "user") {
+      this.writeRequestError(requestId, sessionId, "invalid_request", "Managed resume requires sdkRuntimeHome managedAstral and sdkRuntimeEnvironment user.");
+      return;
+    }
+    const normalizedConfig = this.normalizeStartConfig({
+      ...config,
+      continuable: true,
+      workingDir: config.workingDir ?? resolved.descriptor.workingDir,
+    });
+    if (normalizedConfig instanceof Error) {
+      this.writeRequestError(requestId, sessionId, "invalid_request", normalizedConfig.message);
+      return;
+    }
+    if (path.resolve(normalizedConfig.workingDir ?? process.cwd()) !== path.resolve(resolved.descriptor.workingDir)) {
+      this.writeRequestError(requestId, sessionId, "invalid_request", "Resume working directory does not match the selected session.");
+      return;
+    }
+    let runner: AiProviderRunner;
+    try {
+      runner = createResumeProviderRunner(normalizedConfig, resolved.target);
+    } catch (error) {
+      if (error instanceof ResumeProviderMismatchError) {
+        this.writeRequestError(requestId, sessionId, "invalid_request", error.message);
+        return;
+      }
+      this.writeRequestError(requestId, sessionId, "runtime_error", error instanceof Error ? error.message : String(error));
+      return;
+    }
+    const snapshot = this.#store.createHydrated(sessionId, normalizedConfig, resolved.transcript);
+    this.replaceRunnerAndWriteSessionStarted(sessionId, runner, snapshot);
+  }
+
+  private async closeSession(requestId: AiRequestId, sessionId: SessionId): Promise<void> {
+    if (this.#closing.has(sessionId)) {
+      this.writeRequestError(requestId, sessionId, "conflict", `AI session is closing: ${sessionId}`);
+      return;
+    }
+    if (!this.#store.get(sessionId)) {
+      this.writeRequestError(requestId, sessionId, "not_found", `Unknown AI session: ${sessionId}`);
+      return;
+    }
+    this.#closing.add(sessionId);
+    let closeError: unknown = null;
+    try {
+      for (const turn of this.#turns.values()) {
+        if (turn.sessionId === sessionId) turn.controller.abort();
+      }
+      for (const [key, turn] of [...this.#turns.entries()]) {
+        if (turn.sessionId === sessionId) this.#turns.delete(key);
+      }
+      for (const [key, turn] of [...this.#turnPromises.entries()]) {
+        if (turn.sessionId === sessionId) this.#turnPromises.delete(key);
+      }
+      for (const key of [...this.#tickers.keys()]) {
+        if (sessionKeyMatches(key, sessionId)) this.stopTicker(key);
+      }
+      for (const key of [...this.#toolRunningSince.keys()]) {
+        if (sessionKeyMatches(key, sessionId)) this.#toolRunningSince.delete(key);
+      }
+      for (const key of [...this.#processRunningSince.keys()]) {
+        if (sessionKeyMatches(key, sessionId)) this.#processRunningSince.delete(key);
+      }
+      await this.#runners.get(sessionId)?.dispose?.();
+    } catch (error) {
+      closeError = error;
+    } finally {
+      this.#runners.delete(sessionId);
+      this.#providerStates.delete(sessionId);
+      this.#store.delete(sessionId);
+      this.#closing.delete(sessionId);
+    }
+    if (closeError) {
+      this.writeRequestError(requestId, sessionId, "runtime_error", closeError instanceof Error ? closeError.message : String(closeError));
+      return;
+    }
+    this.#write({ type: "response", response: { type: "sessionClosed", requestId, sessionId } });
+  }
+
+  private replaceRunnerAndWriteSessionStarted(
+    sessionId: SessionId,
+    runner: AiProviderRunner,
+    snapshot: AiSessionSnapshot
+  ): void {
     void this.#runners.get(sessionId)?.dispose?.();
+    this.#sessionGenerations.set(sessionId, (this.#sessionGenerations.get(sessionId) ?? 0) + 1);
     this.#runners.set(sessionId, runner);
     this.#providerStates.set(sessionId, new ProviderState());
-    const snapshot = this.#store.create(sessionId, config);
     this.#write({
       type: "response",
       response: {
@@ -114,6 +270,10 @@ export class AiBackendSessionManager {
   }
 
   private startTurn(sessionId: SessionId, turnId: TurnId, input: string): void {
+    if (this.#closing.has(sessionId)) {
+      this.writeResponseError(sessionId, "conflict", `AI session is closing: ${sessionId}`);
+      return;
+    }
     const snapshot = this.#store.get(sessionId);
     if (!snapshot) {
       this.writeProtocolError(sessionId, turnId, "not_found", `Unknown AI session: ${sessionId}`);
@@ -148,8 +308,9 @@ export class AiBackendSessionManager {
     this.emitSessionUpdated(sessionId);
 
     const key = turnKey(sessionId, turnId);
-    const turnPromise = this.runTurn(sessionId, turnId, input, controller, baseConfig);
-    this.#turnPromises.set(key, { sessionId, promise: turnPromise });
+    const generation = this.#sessionGenerations.get(sessionId) ?? 0;
+    const turnPromise = this.runTurn(sessionId, turnId, input, controller, baseConfig, generation);
+    this.#turnPromises.set(key, { sessionId, generation, promise: turnPromise });
     void turnPromise;
   }
 
@@ -158,7 +319,8 @@ export class AiBackendSessionManager {
     turnId: TurnId,
     input: string,
     controller: AbortController,
-    turnConfig?: AiSessionConfig
+    turnConfig: AiSessionConfig | undefined,
+    generation: number
   ): Promise<void> {
     let usage: TokenUsage | null = null;
     let failed = false;
@@ -169,16 +331,19 @@ export class AiBackendSessionManager {
       if (!runner) throw new Error(`Unknown AI session runtime: ${sessionId}`);
       this.startTicker(sessionId, turnId);
       for await (const event of runner.runTurn({ config, prompt: input, turnId, signal: controller.signal })) {
+        if (!this.isCurrentSessionGeneration(sessionId, generation)) return;
         const eventUsage = this.applyRuntimeEvent(sessionId, turnId, event);
         if (eventUsage) usage = eventUsage;
         if (event.type === "error" || event.type === "message.failed") failed = true;
       }
+      if (!this.isCurrentSessionGeneration(sessionId, generation)) return;
       if (!failed) {
         const updated = this.#store.setStatus(sessionId, "idle");
         this.emit(sessionId, { type: "sessionUpdated", sessionId, snapshot: updated });
       }
       this.emit(sessionId, { type: "turnFinished", sessionId, turnId, usage });
     } catch (error) {
+      if (!this.isCurrentSessionGeneration(sessionId, generation)) return;
       if (controller.signal.aborted) {
         const now = new Date().toISOString();
         const cancelled = this.#store.cancelActiveOperations(sessionId, turnId, now);
@@ -210,9 +375,13 @@ export class AiBackendSessionManager {
       }
     } finally {
       const key = turnKey(sessionId, turnId);
-      this.stopTicker(key);
-      this.#turns.delete(key);
-      this.#turnPromises.delete(key);
+      if (this.#turns.get(key)?.controller === controller) {
+        this.stopTicker(key);
+        this.#turns.delete(key);
+      }
+      if (this.#turnPromises.get(key)?.generation === generation) {
+        this.#turnPromises.delete(key);
+      }
     }
   }
 
@@ -578,11 +747,17 @@ export class AiBackendSessionManager {
   }
 
   private emit(sessionId: SessionId, event: AiEventInput): void {
+    if (this.#closing.has(sessionId) && event.type !== "sessionUpdated") return;
+    if (!this.#store.get(sessionId)) return;
     const createdAt = event.createdAt ?? new Date().toISOString();
     const seq = this.#store.nextSeq(sessionId);
     const fullEvent = { ...event, seq, createdAt } as AiEvent;
     const recorded = this.#store.recordEvent(sessionId, fullEvent);
     this.#write({ type: "event", event: recorded });
+  }
+
+  private isCurrentSessionGeneration(sessionId: SessionId, generation: number): boolean {
+    return this.#store.get(sessionId) !== undefined && this.#sessionGenerations.get(sessionId) === generation;
   }
 
   private markToolRunning(sessionId: SessionId, id: ToolCallId, now: string): void {
@@ -601,11 +776,7 @@ export class AiBackendSessionManager {
     code: Parameters<typeof protocolError>[0] | "cancelled" | "runtime_error",
     message: string
   ): void {
-    const error = code === "runtime_error" || code === "cancelled"
-      ? (code === "cancelled"
-          ? { code, message, recoverable: true }
-          : toPublicError(message))
-      : protocolError(code, message);
+    const error = this.errorInfoForCode(code, message);
     if (this.#store.get(sessionId)) {
       const snapshot = this.#store.get(sessionId);
       const nextStatus = code === "runtime_error" ? "error" : snapshot?.status === "running" ? "running" : "idle";
@@ -624,10 +795,49 @@ export class AiBackendSessionManager {
     code: Parameters<typeof protocolError>[0] | "runtime_error",
     message: string
   ): void {
-    const error = code === "runtime_error"
-      ? toPublicError(message)
-      : protocolError(code, message);
+    const error = this.errorInfoForCode(code, message);
     this.#write({ type: "response", response: { type: "error", sessionId, message: error.message, error } });
+  }
+
+  private writeRequestError(
+    requestId: AiRequestId,
+    sessionId: SessionId | undefined,
+    code: Parameters<typeof protocolError>[0] | "runtime_error",
+    message: string
+  ): void {
+    const error = this.errorInfoForCode(code, message);
+    this.#write({
+      type: "response",
+      response: {
+        type: "requestError",
+        requestId,
+        ...(sessionId !== undefined ? { sessionId } : {}),
+        code: error.code,
+        message: error.message,
+        recoverable: error.recoverable,
+      },
+    });
+  }
+
+  private errorInfoForCode(
+    code: Parameters<typeof protocolError>[0] | "cancelled" | "runtime_error",
+    message: string
+  ) {
+    if (code === "cancelled") return { code, message, recoverable: true };
+    return code === "runtime_error" ? toPublicError(message) : protocolError(code, message);
+  }
+
+  private normalizeStartConfig(config: AiSessionConfig): AiSessionConfig | Error {
+    try {
+      assertManagedRuntimeHomeConfig(config);
+    } catch (error) {
+      return error instanceof Error ? error : new Error(String(error));
+    }
+    return {
+      ...config,
+      workingDir: path.resolve(config.workingDir ?? process.cwd()),
+      sdkRuntimeHome: config.sdkRuntimeHome ?? "native",
+    };
   }
 
   private writeSnapshotResponse(sessionId: SessionId): void {
@@ -733,6 +943,15 @@ export class AiBackendSessionManager {
 
 function turnKey(sessionId: SessionId, turnId: TurnId): string {
   return JSON.stringify([sessionId, turnId]);
+}
+
+function sessionKeyMatches(key: string, sessionId: SessionId): boolean {
+  try {
+    const tuple = JSON.parse(key) as unknown;
+    return Array.isArray(tuple) && tuple[0] === sessionId;
+  } catch {
+    return false;
+  }
 }
 
 function elapsed(start: string | undefined, now: string): number | null {

@@ -29,4 +29,5 @@ Compliance stance:
 Silence/session behavior:
 
 - Agent-framework passes `persistSession: false` for one-shot Claude SDK calls. Opt-in continuable SDK sessions preserve the native Claude session ID across turns until the owning session is disposed.
+- In managed Astral user-runtime sessions (`sdkRuntimeHome: "managedAstral"`), agent-framework copies top-level Claude auth/settings files into `~/.agent-framework/astral-ai/claude`, sets `CLAUDE_CONFIG_DIR` and `CLAUDE_HOME` to that managed home, and uses it for session history listing/resume.
 - It scrubs OpenRouter and Anthropic API-key environment variables when this provider is selected so the runtime uses the signed-in Claude Code account path instead of accidentally falling back to API billing.

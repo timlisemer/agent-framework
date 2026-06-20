@@ -24,6 +24,10 @@ function specs(): Readonly<Record<string, AdapterSpec>> {
   });
 }
 
+export function allAdapterSpecs(): readonly AdapterSpec[] {
+  return Object.values(specs());
+}
+
 export function activeSpec(): AdapterSpec {
   const name = process.env.AGENT_FRAMEWORK_ADAPTER ?? DEFAULT_ADAPTER;
   const spec = specs()[name];

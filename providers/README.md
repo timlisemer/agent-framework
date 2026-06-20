@@ -5,7 +5,9 @@ Agent-framework has one provider abstraction for both execution modes:
 - `direct`: one prompt in, one text result out.
 - `sdk`: autonomous investigation through a host-agent runtime. Framework-owned
   agents default to an isolated read-only runtime; explicit user-runtime UI
-  sessions use the user's host-agent home and runtime policy.
+  sessions either use the user's native host-agent home or, with
+  `sdkRuntimeHome: "managedAstral"`, a managed home under
+  `~/.agent-framework/astral-ai/<provider>` for session history and resume.
 
 Supported providers:
 

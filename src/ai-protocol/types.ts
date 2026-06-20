@@ -3,11 +3,13 @@ export type TurnId = string;
 export type AiMessageId = string;
 export type ToolCallId = string;
 export type AiBackendProcessId = string;
+export type AiRequestId = string;
 export type AiEventSeq = number;
 export type AiSnapshotRevision = number;
 
 export type AiPlanMode = "disabled" | "planning" | "awaitingApproval" | "approved";
 export type SdkRuntimeEnvironment = "isolated" | "user";
+export type SdkRuntimeHome = "native" | "managedAstral";
 export type AiMessageRole = "user" | "assistant" | "system" | "tool";
 export type AiMessageStatus = "streaming" | "completed" | "failed" | "cancelled";
 export type AiSessionStatus = "idle" | "running" | "waiting" | "error" | "cancelled";
@@ -130,6 +132,26 @@ export type AiSessionConfig = {
   systemPrompt: string | null;
   continuable: boolean;
   sdkRuntimeEnvironment: SdkRuntimeEnvironment;
+  sdkRuntimeHome?: SdkRuntimeHome;
+};
+
+export type AiSessionChoicesConfig = {
+  sdkRuntimeHome: SdkRuntimeHome;
+  maxResults?: number;
+};
+
+export type AiSessionDescriptor = {
+  resumeId: string;
+  summary: string;
+  workingDir: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type AiWorkingDirectoryCandidate = {
+  path: string;
+  sessionCount: number;
+  lastUsedAt?: string;
 };
 
 export type AiSessionSnapshot = {
@@ -154,7 +176,10 @@ export type AiToolDecision = {
 };
 
 export type AiRequest =
+  | { type: "listSessionChoices"; requestId: AiRequestId; config: AiSessionChoicesConfig }
   | { type: "startSession"; sessionId: SessionId; config: AiSessionConfig }
+  | { type: "resumeSession"; requestId: AiRequestId; sessionId: SessionId; resumeId: string; config: AiSessionConfig }
+  | { type: "closeSession"; requestId: AiRequestId; sessionId: SessionId }
   | { type: "sendInput"; sessionId: SessionId; turnId: TurnId; input: string }
   | { type: "submitToolDecision"; sessionId: SessionId; turnId: TurnId; decision: AiToolDecision }
   | { type: "setPlanState"; sessionId: SessionId; state: AiPlanState }
@@ -165,6 +190,9 @@ export type AiResponse =
   | { type: "sessionStarted"; sessionId: SessionId; snapshot: AiSessionSnapshot }
   | { type: "sessionSnapshot"; sessionId: SessionId; snapshot: AiSessionSnapshot }
   | { type: "sessionEvents"; sessionId: SessionId; events: AiEvent[]; snapshot: AiSessionSnapshot }
+  | { type: "sessionChoices"; requestId: AiRequestId; sessions: AiSessionDescriptor[]; workingDirectories: AiWorkingDirectoryCandidate[] }
+  | { type: "sessionClosed"; requestId: AiRequestId; sessionId: SessionId }
+  | { type: "requestError"; requestId: AiRequestId; sessionId?: SessionId; code: AiErrorInfo["code"]; message: string; recoverable: boolean }
   | { type: "accepted"; sessionId: SessionId; turnId: TurnId | null }
   | { type: "error"; sessionId: SessionId | null; message: string; error: AiErrorInfo };
 

@@ -14,6 +14,11 @@ const sessionConfigSchema = z.object({
   systemPrompt: nullableString,
   continuable: z.boolean().default(false),
   sdkRuntimeEnvironment: z.enum(["isolated", "user"]).default("isolated"),
+  sdkRuntimeHome: z.enum(["native", "managedAstral"]).default("native"),
+}).strict();
+const sessionChoicesConfigSchema = z.object({
+  sdkRuntimeHome: z.enum(["native", "managedAstral"]).default("native"),
+  maxResults: z.number().int().positive().optional(),
 }).strict();
 const planStateSchema = z.object({
   mode: z.enum(["disabled", "planning", "awaitingApproval", "approved"]),
@@ -27,9 +32,26 @@ const toolDecisionSchema = z.object({
 }).strict();
 const requestSchema = z.discriminatedUnion("type", [
   z.object({
+    type: z.literal("listSessionChoices"),
+    requestId: z.string(),
+    config: sessionChoicesConfigSchema,
+  }).strict(),
+  z.object({
     type: z.literal("startSession"),
     sessionId: z.string(),
     config: sessionConfigSchema,
+  }).strict(),
+  z.object({
+    type: z.literal("resumeSession"),
+    requestId: z.string(),
+    sessionId: z.string(),
+    resumeId: z.string(),
+    config: sessionConfigSchema,
+  }).strict(),
+  z.object({
+    type: z.literal("closeSession"),
+    requestId: z.string(),
+    sessionId: z.string(),
   }).strict(),
   z.object({
     type: z.literal("sendInput"),

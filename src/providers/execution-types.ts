@@ -3,7 +3,7 @@ import type { AgentConfig } from "../utils/agent-runner.js";
 import type { SdkRuntimeEnvironment } from "../ai-protocol/index.js";
 import type { ProviderType, ResolvedProvider } from "./types.js";
 
-export type { SdkRuntimeEnvironment } from "../ai-protocol/index.js";
+export type { SdkRuntimeEnvironment, SdkRuntimeHome } from "../ai-protocol/index.js";
 
 export interface ProviderUsage {
   promptTokens?: number;

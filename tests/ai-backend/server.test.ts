@@ -7,7 +7,9 @@ import type { AiRuntimeEvent, AiRunTurnInput } from "../../src/ai-backend/runtim
 
 const provider = vi.hoisted(() => ({
   createResolvedProviderRunner: vi.fn(),
+  createResumeProviderRunner: vi.fn(),
   runTurn: vi.fn(),
+  ResumeProviderMismatchError: class ResumeProviderMismatchError extends Error {},
 }));
 
 function resolvedProviderFor(config: AiSessionConfig) {
@@ -23,7 +25,9 @@ function resolvedProviderFor(config: AiSessionConfig) {
 
 vi.mock("../../src/ai-backend/provider.js", () => ({
   createResolvedProviderRunner: provider.createResolvedProviderRunner,
+  createResumeProviderRunner: provider.createResumeProviderRunner,
   resolveSessionProvider: resolvedProviderFor,
+  ResumeProviderMismatchError: provider.ResumeProviderMismatchError,
 }));
 
 const defaultConfig: AiSessionConfig = {
@@ -57,6 +61,7 @@ async function* events(...items: AiRuntimeEvent[]): AsyncIterable<AiRuntimeEvent
 describe("AI backend session manager", () => {
   beforeEach(() => {
     provider.createResolvedProviderRunner.mockReset();
+    provider.createResumeProviderRunner.mockReset();
     provider.createResolvedProviderRunner.mockImplementation((resolvedProvider: ReturnType<typeof resolvedProviderFor>) => ({
       resolvedProvider,
       runTurn: provider.runTurn,
@@ -582,6 +587,383 @@ describe("AI backend session manager", () => {
     for (const release of releases) release();
     await vi.waitFor(() => {
       expect(frames.filter((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toHaveLength(2);
+    });
+  });
+
+  it("does not clear active runtime state for similarly prefixed sessions when closing", async () => {
+    vi.useFakeTimers();
+    const { frames, manager } = createHarness();
+    provider.runTurn.mockImplementation(async function* (input: AiRunTurnInput) {
+      yield {
+        type: "tool.created",
+        ref: "tool-ref",
+        name: "inspect",
+        input: { text: "inspect(path=\".\")", fields: { path: "." } },
+      };
+      yield { type: "tool.updated", ref: "tool-ref", status: "running" };
+      yield { type: "backend_process.created", ref: "process-ref", title: "background work" };
+      yield { type: "backend_process.updated", ref: "process-ref", status: "running" };
+      await new Promise<void>((resolve) => {
+        if (input.signal.aborted) {
+          resolve();
+          return;
+        }
+        input.signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+    });
+    try {
+      await startSession(manager, "session-1");
+      await startSession(manager, "session-10");
+      await manager.handle({
+        type: "request",
+        request: { type: "sendInput", sessionId: "session-1", turnId: "turn-1", input: "first" },
+      });
+      await manager.handle({
+        type: "request",
+        request: { type: "sendInput", sessionId: "session-10", turnId: "turn-1", input: "second" },
+      });
+      await vi.waitFor(() => {
+        expect(frames).toContainEqual(expect.objectContaining({
+          type: "event",
+          event: expect.objectContaining({ type: "backendProcessUpdated", sessionId: "session-10" }),
+        }));
+      });
+      frames.length = 0;
+
+      await manager.handle({
+        type: "request",
+        request: { type: "closeSession", requestId: "close-prefix", sessionId: "session-1" },
+      });
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(frames).toContainEqual(expect.objectContaining({
+        type: "event",
+        event: expect.objectContaining({ type: "toolCallProgress", sessionId: "session-10", elapsedMs: expect.any(Number) }),
+      }));
+      expect(frames).toContainEqual(expect.objectContaining({
+        type: "event",
+        event: expect.objectContaining({ type: "backendProcessProgress", sessionId: "session-10", elapsedMs: expect.any(Number) }),
+      }));
+
+      await manager.handle({
+        type: "request",
+        request: { type: "closeSession", requestId: "close-other", sessionId: "session-10" },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reports close disposal failures and does not leave the session closing", async () => {
+    provider.createResolvedProviderRunner.mockImplementationOnce((resolvedProvider: ReturnType<typeof resolvedProviderFor>) => ({
+      resolvedProvider,
+      runTurn: provider.runTurn,
+      dispose: () => {
+        throw new Error("dispose failed");
+      },
+    }));
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-close-failure");
+    await manager.handle({
+      type: "request",
+      request: { type: "closeSession", requestId: "close-failure", sessionId: "session-close-failure" },
+    });
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-close-failure", turnId: "turn-after-close", input: "hello" },
+    });
+
+    expect(frames).toContainEqual({
+      type: "response",
+      response: {
+        type: "requestError",
+        requestId: "close-failure",
+        sessionId: "session-close-failure",
+        code: "runtime_error",
+        message: "Runtime operation failed",
+        recoverable: false,
+      },
+    });
+    expect(frames).toContainEqual({
+      type: "response",
+      response: expect.objectContaining({
+        type: "error",
+        sessionId: "session-close-failure",
+        error: expect.objectContaining({ code: "not_found" }),
+      }),
+    });
+    expect(JSON.stringify(frames)).not.toContain("AI session is closing");
+  });
+
+  it("returns a conflict response for input while close is in progress", async () => {
+    let releaseDispose!: () => void;
+    let markDisposeStarted!: () => void;
+    const disposeStarted = new Promise<void>((resolve) => {
+      markDisposeStarted = resolve;
+    });
+    const disposeBlocked = new Promise<void>((resolve) => {
+      releaseDispose = resolve;
+    });
+    provider.createResolvedProviderRunner.mockImplementationOnce((resolvedProvider: ReturnType<typeof resolvedProviderFor>) => ({
+      resolvedProvider,
+      runTurn: provider.runTurn,
+      dispose: () => {
+        markDisposeStarted();
+        return disposeBlocked;
+      },
+    }));
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-closing");
+    const closePromise = manager.handle({
+      type: "request",
+      request: { type: "closeSession", requestId: "close-in-progress", sessionId: "session-closing" },
+    });
+    await disposeStarted;
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-closing", turnId: "turn-during-close", input: "hello" },
+    });
+    await manager.handle({
+      type: "request",
+      request: { type: "startSession", sessionId: "session-closing", config: defaultConfig },
+    });
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "resumeSession",
+        requestId: "resume-during-close",
+        sessionId: "session-closing",
+        resumeId: "stale",
+        config: {
+          ...defaultConfig,
+          continuable: true,
+          sdkRuntimeEnvironment: "user",
+          sdkRuntimeHome: "managedAstral",
+        },
+      },
+    });
+
+    expect(frames).toContainEqual({
+      type: "response",
+      response: {
+        type: "error",
+        sessionId: "session-closing",
+        message: "AI session is closing: session-closing",
+        error: {
+          code: "conflict",
+          message: "AI session is closing: session-closing",
+          recoverable: false,
+        },
+      },
+    });
+    expect(frames.filter((frame) =>
+      frame.type === "response" &&
+      frame.response.type === "error" &&
+      frame.response.sessionId === "session-closing" &&
+      frame.response.error.code === "conflict"
+    )).toHaveLength(2);
+    expect(frames).toContainEqual({
+      type: "response",
+      response: {
+        type: "requestError",
+        requestId: "resume-during-close",
+        sessionId: "session-closing",
+        code: "conflict",
+        message: "AI session is closing: session-closing",
+        recoverable: false,
+      },
+    });
+
+    releaseDispose();
+    await closePromise;
+    expect(frames).toContainEqual({
+      type: "response",
+      response: { type: "sessionClosed", requestId: "close-in-progress", sessionId: "session-closing" },
+    });
+  });
+
+  it("closes without waiting for a non-cooperative aborted turn", async () => {
+    let turnStarted!: () => void;
+    const turnStartedSignal = new Promise<void>((resolve) => {
+      turnStarted = resolve;
+    });
+    provider.runTurn.mockImplementation(async function* () {
+      yield { type: "message.created", ref: "assistant", content: "" };
+      turnStarted();
+      await new Promise<never>(() => undefined);
+    });
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-non-cooperative-close");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-non-cooperative-close", turnId: "turn-1", input: "wait" },
+    });
+    await turnStartedSignal;
+    await manager.handle({
+      type: "request",
+      request: { type: "closeSession", requestId: "close-non-cooperative", sessionId: "session-non-cooperative-close" },
+    });
+
+    expect(frames).toContainEqual({
+      type: "response",
+      response: {
+        type: "sessionClosed",
+        requestId: "close-non-cooperative",
+        sessionId: "session-non-cooperative-close",
+      },
+    });
+  });
+
+  it("ignores stale turn events after close and same-id restart", async () => {
+    let turnStarted!: () => void;
+    let releaseOldTurn!: () => void;
+    let oldTurnClosed!: () => void;
+    let releaseNewTurn!: () => void;
+    let newTurnStarted!: () => void;
+    const turnStartedSignal = new Promise<void>((resolve) => {
+      turnStarted = resolve;
+    });
+    const releaseOldTurnSignal = new Promise<void>((resolve) => {
+      releaseOldTurn = resolve;
+    });
+    const oldTurnClosedSignal = new Promise<void>((resolve) => {
+      oldTurnClosed = resolve;
+    });
+    const newTurnStartedSignal = new Promise<void>((resolve) => {
+      newTurnStarted = resolve;
+    });
+    provider.runTurn.mockImplementationOnce(async function* () {
+      try {
+        yield { type: "message.created", ref: "assistant", content: "old-start" };
+        turnStarted();
+        await releaseOldTurnSignal;
+        yield { type: "message.completed", ref: "assistant", content: "old-finish", usage: null };
+      } finally {
+        oldTurnClosed();
+      }
+    });
+    provider.runTurn.mockImplementationOnce(async function* () {
+      newTurnStarted();
+      await new Promise<void>((resolve) => {
+        releaseNewTurn = resolve;
+      });
+      yield { type: "message.completed", ref: "assistant", content: "new-finish", usage: null };
+    });
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-reused");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-reused", turnId: "old-turn", input: "old" },
+    });
+    await turnStartedSignal;
+    await manager.handle({
+      type: "request",
+      request: { type: "closeSession", requestId: "close-reused", sessionId: "session-reused" },
+    });
+    await startSession(manager, "session-reused");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-reused", turnId: "old-turn", input: "new" },
+    });
+    await newTurnStartedSignal;
+
+    releaseOldTurn();
+    await oldTurnClosedSignal;
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-reused", turnId: "overlap", input: "overlap" },
+    });
+    await manager.handle({
+      type: "request",
+      request: { type: "getSessionSnapshot", sessionId: "session-reused" },
+    });
+
+    expect(JSON.stringify(frames)).not.toContain("old-finish");
+    expect(frames).toContainEqual(expect.objectContaining({
+      type: "event",
+      event: expect.objectContaining({
+        type: "error",
+        sessionId: "session-reused",
+        turnId: "overlap",
+        message: "AI session already has a running turn: session-reused",
+        error: {
+          code: "conflict",
+          message: "AI session already has a running turn: session-reused",
+          recoverable: false,
+        },
+      }),
+    }));
+    const snapshot = frames.at(-1);
+    expect(snapshot).toMatchObject({
+      type: "response",
+      response: {
+        type: "sessionSnapshot",
+        sessionId: "session-reused",
+        snapshot: {
+          status: "running",
+          transcript: [
+            expect.objectContaining({ role: "user", content: [{ type: "text", text: "new" }] }),
+          ],
+        },
+      },
+    });
+
+    releaseNewTurn();
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
+    });
+  });
+
+  it("reports resume running-turn conflicts as non-recoverable request errors", async () => {
+    let release!: () => void;
+    provider.runTurn.mockImplementation(async function* () {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      yield { type: "message.completed", ref: "assistant", content: "done", usage: null };
+    });
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-resume-conflict");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-resume-conflict", turnId: "turn-1", input: "wait" },
+    });
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "resumeSession",
+        requestId: "resume-running",
+        sessionId: "session-resume-conflict",
+        resumeId: "stale",
+        config: {
+          ...defaultConfig,
+          continuable: true,
+          sdkRuntimeEnvironment: "user",
+          sdkRuntimeHome: "managedAstral",
+        },
+      },
+    });
+
+    expect(frames).toContainEqual({
+      type: "response",
+      response: {
+        type: "requestError",
+        requestId: "resume-running",
+        sessionId: "session-resume-conflict",
+        code: "conflict",
+        message: "AI session has a running turn: session-resume-conflict",
+        recoverable: false,
+      },
+    });
+
+    release();
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
     });
   });
 

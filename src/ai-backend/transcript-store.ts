@@ -63,6 +63,24 @@ export class TranscriptStore {
     return structuredClone(snapshot);
   }
 
+  createHydrated(
+    sessionId: SessionId,
+    config: AiSessionConfig,
+    transcript: readonly AiTranscriptEntry[]
+  ): AiSessionSnapshot {
+    this.create(sessionId, config);
+    this.update(sessionId, (current) => {
+      current.transcript = transcript.map((entry) => structuredClone(entry));
+    });
+    return required(this.get(sessionId));
+  }
+
+  delete(sessionId: SessionId): void {
+    this.#sessions.delete(sessionId);
+    this.#configs.delete(sessionId);
+    this.#events.delete(sessionId);
+  }
+
   get(sessionId: SessionId): AiSessionSnapshot | undefined {
     const snapshot = this.#sessions.get(sessionId);
     return snapshot ? structuredClone(snapshot) : undefined;

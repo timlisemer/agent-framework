@@ -28,6 +28,32 @@ export function readFirstUtf8File(filePaths: readonly string[]): string | null {
   return null;
 }
 
+export function listJsonlFilesRecursive(root: string): string[] {
+  if (!fs.existsSync(root)) return [];
+  const results: string[] = [];
+  const visit = (dir: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        visit(fullPath);
+        continue;
+      }
+      if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        results.push(fullPath);
+      }
+    }
+  };
+  visit(root);
+  return results;
+}
+
 // ─── JSONL helpers ────────────────────────────────────────────────────────────
 
 /**
@@ -254,7 +280,7 @@ export function findJsonlEntry<T>(
  * Write an array of entries to a JSONL file, overwriting any existing content.
  * Creates parent directories if necessary.
  */
-export function writeJsonl<T>(filePath: string, entries: T[]): void {
+export function writeJsonl<T>(filePath: string, entries: readonly T[]): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, entries.map((e) => JSON.stringify(e)).join("\n") + (entries.length > 0 ? "\n" : ""));
 }

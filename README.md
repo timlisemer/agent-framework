@@ -13,12 +13,15 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
 
 The `ai-backend` package entry runs a provider-neutral JSONL session backend
 for UI clients. Clients send typed `startSession`, `sendInput`,
-snapshot, event-cursor, plan-state, tool-decision, and cancel frames; the
-backend emits ordered session, turn, message, tool, backend-process,
-continuation, plan-state, and error events using the local protocol exported
-from `src/ai-protocol`. The protocol is owned in this repository and does not
-expose runtime provider names or native runtime IDs. Build before running the
-backend:
+`listSessionChoices`, `resumeSession`, `closeSession`, snapshot, event-cursor,
+plan-state, tool-decision, and cancel frames. The backend emits ordered session,
+turn, message, tool, backend-process, continuation, plan-state, and error
+events plus request-correlated `sessionChoices`, `sessionClosed`, and
+`requestError` responses using the local protocol exported from
+`src/ai-protocol`. `sdkRuntimeHome: "managedAstral"` enables managed
+Claude/Codex homes and resumable history discovery for user-runtime sessions.
+The protocol is owned in this repository and uses opaque resume targets instead
+of native runtime IDs. Build before running the backend:
 
 ```bash
 npm run build
@@ -380,7 +383,7 @@ export AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=codex # claude | codex
 - `openrouter` direct mode uses `https://openrouter.ai/api`, `ANTHROPIC_AUTH_TOKEN`, and an explicitly empty `ANTHROPIC_API_KEY`.
 - `openrouter` SDK mode uses `AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=claude|codex`.
 - `claude-subscription` scrubs API/OpenRouter env vars and uses persistent Claude sessions only for opt-in continuable SDK sessions.
-- `openai-subscription` uses Codex SDK with ChatGPT/Codex sign-in and scrubs API env vars. Isolated sessions use a temporary `CODEX_HOME` and disable history persistence for one-shot calls; user-runtime sessions use the normal Codex home/config. Opt-in continuable SDK sessions keep live Codex thread state until the owning session is disposed.
+- `openai-subscription` uses Codex SDK with ChatGPT/Codex sign-in and scrubs API env vars. Isolated sessions use a temporary `CODEX_HOME` and disable history persistence for one-shot calls; user-runtime sessions use the normal Codex home/config unless `sdkRuntimeHome: "managedAstral"` requests the managed Astral Codex home under `~/.agent-framework/astral-ai/codex` for history listing and resume. Opt-in continuable SDK sessions keep live Codex thread state until the owning session is disposed.
 
 ### Example Setups
 

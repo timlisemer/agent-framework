@@ -21,6 +21,7 @@ describe("AI backend JSONL wire", () => {
     if (frame.type === "request" && frame.request.type === "startSession") {
       expect(frame.request.config.continuable).toBe(false);
       expect(frame.request.config.sdkRuntimeEnvironment).toBe("isolated");
+      expect(frame.request.config.sdkRuntimeHome).toBe("native");
     }
   });
 
@@ -68,6 +69,53 @@ describe("AI backend JSONL wire", () => {
     expect(frame).toMatchObject({
       type: "request",
       request: { type: "startSession", config: { sdkRuntimeEnvironment: "user" } },
+    });
+  });
+
+  it("parses request-correlated session choice, resume, and close requests", () => {
+    expect(parseClientFrame(JSON.stringify({
+      type: "request",
+      request: {
+        type: "listSessionChoices",
+        requestId: "request-1",
+        config: { sdkRuntimeHome: "managedAstral", maxResults: 10 },
+      },
+    }))).toMatchObject({
+      type: "request",
+      request: { type: "listSessionChoices", requestId: "request-1" },
+    });
+
+    expect(parseClientFrame(JSON.stringify({
+      type: "request",
+      request: {
+        type: "resumeSession",
+        requestId: "request-2",
+        sessionId: "session-jsonl",
+        resumeId: "resume-1",
+        config: {
+          model: null,
+          workingDir: "/tmp/project",
+          systemPrompt: null,
+          continuable: true,
+          sdkRuntimeEnvironment: "user",
+          sdkRuntimeHome: "managedAstral",
+        },
+      },
+    }))).toMatchObject({
+      type: "request",
+      request: { type: "resumeSession", requestId: "request-2" },
+    });
+
+    expect(parseClientFrame(JSON.stringify({
+      type: "request",
+      request: {
+        type: "closeSession",
+        requestId: "request-3",
+        sessionId: "session-jsonl",
+      },
+    }))).toMatchObject({
+      type: "request",
+      request: { type: "closeSession", requestId: "request-3" },
     });
   });
 

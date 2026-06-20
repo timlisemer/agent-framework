@@ -21,6 +21,7 @@ import { optionalNumber } from "../utils/output.js";
 import type { AiSessionConfig, AiToolDecision } from "../ai-protocol/index.js";
 import type { AiRuntimeEvent, AiRunTurnInput } from "./runtime-events.js";
 import { DecisionBroker } from "./decision-broker.js";
+import type { ResumeTarget } from "./session-history.js";
 
 export { buildClaudeQueryOptions } from "../providers/claude-agent-runtime.js";
 
@@ -29,6 +30,13 @@ export interface AiProviderRunner {
   runTurn(input: AiRunTurnInput): AsyncIterable<AiRuntimeEvent>;
   submitToolDecision?(decision: AiToolDecision): Promise<void>;
   dispose?(): Promise<void> | void;
+}
+
+export class ResumeProviderMismatchError extends Error {
+  constructor(targetProvider: ResumeTarget["provider"], configuredRuntime: ReturnType<typeof selectSdkRuntime>) {
+    super(`Resume target provider ${targetProvider} is incompatible with configured SDK runtime ${configuredRuntime}.`);
+    this.name = "ResumeProviderMismatchError";
+  }
 }
 
 export function createProviderRunner(config: AiSessionConfig): AiProviderRunner {
@@ -40,6 +48,17 @@ export function createResolvedProviderRunner(resolvedProvider: ResolvedProvider)
   return selectSdkRuntime(resolvedProvider) === "claude"
     ? new ClaudeUiProvider(resolvedProvider)
     : new CodexUiProvider(resolvedProvider);
+}
+
+export function createResumeProviderRunner(config: AiSessionConfig, target: ResumeTarget): AiProviderRunner {
+  const resolvedProvider = resolveSessionProvider(config);
+  const configuredRuntime = selectSdkRuntime(resolvedProvider);
+  if (configuredRuntime !== target.provider) {
+    throw new ResumeProviderMismatchError(target.provider, configuredRuntime);
+  }
+  return target.provider === "claude"
+    ? new ClaudeUiProvider(resolvedProvider, target.sessionId)
+    : new CodexUiProvider(resolvedProvider, target.threadId);
 }
 
 export function resolveSessionProvider(config: AiSessionConfig): ResolvedProvider {
@@ -56,7 +75,9 @@ class ClaudeUiProvider implements AiProviderRunner {
   #runtimeSessionRef: string | null = null;
   readonly #decisions = new DecisionBroker();
 
-  constructor(readonly resolvedProvider: ResolvedProvider) {}
+  constructor(readonly resolvedProvider: ResolvedProvider, runtimeSessionRef: string | null = null) {
+    this.#runtimeSessionRef = runtimeSessionRef;
+  }
 
   async *runTurn(input: AiRunTurnInput): AsyncIterable<AiRuntimeEvent> {
     const { config, prompt, signal } = input;
@@ -134,7 +155,7 @@ class ClaudeUiProvider implements AiProviderRunner {
 class CodexUiProvider implements AiProviderRunner {
   #liveSession: Awaited<ReturnType<typeof createCodexLiveSession>> | null = null;
 
-  constructor(readonly resolvedProvider: ResolvedProvider) {}
+  constructor(readonly resolvedProvider: ResolvedProvider, readonly resumeThreadId: string | null = null) {}
 
   async *runTurn(input: AiRunTurnInput): AsyncIterable<AiRuntimeEvent> {
     const { config, prompt, signal } = input;
@@ -142,7 +163,9 @@ class CodexUiProvider implements AiProviderRunner {
       this.#liveSession ??= await createCodexLiveSession(
         this.resolvedProvider,
         { ...config, runtimeExecutionMode: "sdk" },
-        "agent-framework-ai-codex-"
+        "agent-framework-ai-codex-",
+        true,
+        this.resumeThreadId ?? undefined
       );
       yield* runCodexUiTurn(this.#liveSession.thread, buildCodexTurnInput(config, prompt), signal);
       yield { type: "continuation.updated", available: Boolean(this.#liveSession.thread.id) };

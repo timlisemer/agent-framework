@@ -8,15 +8,23 @@ const PROVIDER_ENV_KEYS = [
 ] as const;
 
 export function clearProviderEnvForTest(): () => void {
+  return withEnvForTest(Object.fromEntries(PROVIDER_ENV_KEYS.map((key) => [key, undefined])));
+}
+
+export function withEnvForTest(values: Record<string, string | undefined>): () => void {
   const saved = new Map<string, string | undefined>();
-  for (const key of PROVIDER_ENV_KEYS) {
+  for (const [key, value] of Object.entries(values)) {
     saved.set(key, process.env[key]);
-    delete process.env[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
   }
   resetProviderConfig();
 
   return () => {
-    for (const key of PROVIDER_ENV_KEYS) {
+    for (const key of Object.keys(values)) {
       const value = saved.get(key);
       if (value === undefined) {
         delete process.env[key];

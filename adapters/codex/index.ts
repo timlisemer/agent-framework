@@ -10,6 +10,7 @@ import * as PS  from "./prompt-strings.js";
 import * as PLS from "./plan-source.js";
 import * as PM  from "./plan-mode.js";
 import * as Paths from "./paths.js";
+import * as History from "./session-history.js";
 import type {
   AdapterSpec,
   AdapterToolCallContext,
@@ -62,6 +63,7 @@ export const codexSpec: AdapterSpec = {
   projectTranscriptsDir:  Paths.projectTranscriptsDir,
   projectTranscriptFile:  Paths.projectTranscriptFile,
   listProjectTranscripts: Paths.listProjectTranscripts,
+  sessionHistory: History,
   findNativePlanFile:     PLS.findNativePlanFile,
   isPlanExit:             PLS.isPlanExit,
   extractStopProposedPlan: PLS.extractStopProposedPlan,

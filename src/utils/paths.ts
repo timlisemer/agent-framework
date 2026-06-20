@@ -40,6 +40,20 @@ export function runtimeRoot(): string {
 }
 
 /**
+ * Shared root for managed AI runtime homes.
+ */
+export function astralAiRoot(): string {
+  return path.join(runtimeRoot(), "astral-ai");
+}
+
+/**
+ * Managed runtime home for a provider or adapter runtime name.
+ */
+export function managedProviderRoot(provider: string): string {
+  return path.join(astralAiRoot(), provider);
+}
+
+/**
  * Repo root: <repo> via AGENT_FRAMEWORK_ROOT or import.meta.url climb.
  */
 export function agentFrameworkRoot(): string {

@@ -9,14 +9,23 @@ import {
 import { numberOrNull, outputBlocks, stringField, textFromOutput } from "../utils/output.js";
 import { summarizeToolInputForUi } from "../utils/tool-input-summary.js";
 import { PROVIDER_TYPES } from "./registry.js";
-import type { ClaudeProviderContinuationState, ProviderExecutionResult, ProviderRunInput } from "./execution-types.js";
+import type {
+  ClaudeProviderContinuationState,
+  ProviderExecutionResult,
+  ProviderRunInput,
+  SdkRuntimeEnvironment,
+  SdkRuntimeHome,
+} from "./execution-types.js";
 import type { ResolvedProvider } from "./types.js";
 import type { AiRuntimeEvent } from "../ai-backend/runtime-events.js";
 import type { TokenUsage } from "../ai-protocol/index.js";
+import { assertManagedRuntimeHomeConfig, prepareManagedRuntimeHome } from "./managed-runtime-home.js";
 
 type ClaudeQueryOptionsConfig = {
   workingDir?: string | null;
   systemPrompt?: string | null;
+  sdkRuntimeEnvironment?: SdkRuntimeEnvironment;
+  sdkRuntimeHome?: SdkRuntimeHome;
 };
 
 type ClaudeQueryOptionOverrides = {
@@ -294,11 +303,15 @@ export function buildClaudeQueryOptions<T extends ClaudeQueryOptionsConfig>(
   env: NodeJS.ProcessEnv,
   overrides: ClaudeQueryOptionOverrides = {}
 ): Record<string, unknown> {
+  assertManagedRuntimeHomeConfig(config);
+  const managedHome = config.sdkRuntimeHome === "managedAstral"
+    ? prepareManagedRuntimeHome("claude", env)
+    : null;
   return {
     model: resolvedProvider.modelId,
     cwd: config.workingDir ?? process.cwd(),
     systemPrompt: config.systemPrompt ?? undefined,
-    env,
+    env: managedHome?.env ?? env,
     persistSession: false,
     abortController,
     ...overrides,

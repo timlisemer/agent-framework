@@ -34,6 +34,7 @@ Compliance stance:
 Silence/session behavior:
 
 - In isolated runtime sessions, agent-framework creates a temporary `CODEX_HOME`, copies only `auth.json` when present, and sets history persistence to `none` for one-shot calls.
-- In user-runtime sessions, agent-framework leaves the normal Codex home/config in place instead of creating a temporary `CODEX_HOME`.
+- In native user-runtime sessions, agent-framework leaves the normal Codex home/config in place instead of creating a temporary `CODEX_HOME`.
+- In managed Astral user-runtime sessions (`sdkRuntimeHome: "managedAstral"`), agent-framework copies top-level Codex auth into `~/.agent-framework/astral-ai/codex`, sets `CODEX_HOME` to that managed home, and uses it for session history listing/resume.
 - Opt-in continuable SDK sessions keep a live Codex thread until the owning session is disposed.
 - It deletes `OPENAI_API_KEY`, `CODEX_API_KEY`, OpenRouter, and Anthropic API environment variables for this provider so Codex uses ChatGPT/Codex sign-in rather than API billing.

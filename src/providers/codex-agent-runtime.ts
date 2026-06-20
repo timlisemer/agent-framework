@@ -5,15 +5,17 @@ import { isCancellationError } from "../utils/cancellation.js";
 import { errorMessage, optionalNumber, outputBlocks, stringField, textOutput } from "../utils/output.js";
 import { summarizeToolInputForUi } from "../utils/tool-input-summary.js";
 import { PROVIDER_TYPES } from "./registry.js";
-import type { ProviderExecutionResult, ProviderRunInput, SdkRuntimeEnvironment } from "./execution-types.js";
+import type { ProviderExecutionResult, ProviderRunInput, SdkRuntimeEnvironment, SdkRuntimeHome } from "./execution-types.js";
 import type { ProviderUsage } from "./execution-types.js";
 import type { ResolvedProvider } from "./types.js";
 import type { AiRuntimeEvent } from "../ai-backend/runtime-events.js";
 import { hashSha256Prefix } from "../utils/hash-utils.js";
+import { assertManagedRuntimeHomeConfig, copyCodexAuthToHome, prepareManagedRuntimeHome } from "./managed-runtime-home.js";
 
 export type CodexThreadOptionsConfig = {
   workingDir?: string | null;
   sdkRuntimeEnvironment?: SdkRuntimeEnvironment;
+  sdkRuntimeHome?: SdkRuntimeHome;
   runtimeExecutionMode?: CodexRuntimeExecutionMode;
 };
 
@@ -151,12 +153,7 @@ export async function loadCodexConstructor(): Promise<CodexConstructor> {
 }
 
 export function copyCodexAuthIfPresent(tempHome: string): void {
-  const sourceHome = process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
-  const sourceAuth = path.join(sourceHome, "auth.json");
-  if (fs.existsSync(sourceAuth)) {
-    fs.mkdirSync(tempHome, { recursive: true });
-    fs.copyFileSync(sourceAuth, path.join(tempHome, "auth.json"));
-  }
+  copyCodexAuthToHome(tempHome);
 }
 
 export async function withCodexThread<T>(
@@ -178,9 +175,11 @@ export async function createCodexLiveSession(
   resolvedProvider: ResolvedProvider,
   config: CodexThreadOptionsConfig,
   tempPrefix: string,
-  persistHistory = true
+  persistHistory = true,
+  resumeThreadId?: string
 ): Promise<CodexLiveSession> {
   const runtimeEnvironment = config.sdkRuntimeEnvironment ?? "isolated";
+  assertManagedRuntimeHomeConfig({ sdkRuntimeHome: config.sdkRuntimeHome, sdkRuntimeEnvironment: runtimeEnvironment });
   const tempHome = runtimeEnvironment === "isolated"
     ? fs.mkdtempSync(path.join(os.tmpdir(), tempPrefix))
     : null;
@@ -193,11 +192,18 @@ export async function createCodexLiveSession(
       resolvedProvider.type === PROVIDER_TYPES.OPENROUTER,
       persistHistory
     );
+    const env = buildCodexSessionEnv(
+      runtimeEnvironment,
+      tempHome,
+      resolvedProvider.type === PROVIDER_TYPES.OPENAI_SUBSCRIPTION,
+      config.sdkRuntimeHome
+    );
     const codex = new Codex({
-      env: buildCodexEnv(runtimeEnvironment, tempHome, resolvedProvider.type === PROVIDER_TYPES.OPENAI_SUBSCRIPTION),
+      env,
       ...(codexConfig ? { config: codexConfig } : {}),
     });
-    const thread = codex.startThread(buildCodexThreadOptions(config, resolvedProvider));
+    const options = buildCodexThreadOptions(config, resolvedProvider);
+    const thread = startOrResumeCodexThread(codex, options, resumeThreadId);
     return {
       tempHome,
       thread,
@@ -226,6 +232,18 @@ export function buildCodexThreadOptions<T extends CodexThreadOptionsConfig>(
       ? { modelReasoningEffort: resolvedProvider.reasoningEffort }
       : {}),
   };
+}
+
+export function startOrResumeCodexThread(
+  codex: InstanceType<CodexConstructor>,
+  options: Record<string, unknown>,
+  resumeThreadId?: string
+): CodexThread {
+  if (!resumeThreadId) return codex.startThread(options);
+  if (!codex.resumeThread) {
+    throw new Error("Codex SDK does not support native thread resume.");
+  }
+  return codex.resumeThread(resumeThreadId, options);
 }
 
 function codexRuntimePolicyOptions(
@@ -344,6 +362,18 @@ export function buildCodexEnv(
   if (!tempHome) throw new Error("Isolated Codex runtime requires a temporary home");
   env.CODEX_HOME = tempHome;
   return env;
+}
+
+export function buildCodexSessionEnv(
+  runtimeEnvironment: SdkRuntimeEnvironment,
+  tempHome: string | null,
+  openaiSubscription: boolean,
+  sdkRuntimeHome: CodexThreadOptionsConfig["sdkRuntimeHome"]
+): Record<string, string> {
+  const env = buildCodexEnv(runtimeEnvironment, tempHome, openaiSubscription);
+  if (sdkRuntimeHome !== "managedAstral") return env;
+  assertManagedRuntimeHomeConfig({ sdkRuntimeHome, sdkRuntimeEnvironment: runtimeEnvironment });
+  return prepareManagedRuntimeHome("codex", env).env as Record<string, string>;
 }
 
 function mapCodexUiItem(
