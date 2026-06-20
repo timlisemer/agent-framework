@@ -1,0 +1,86 @@
+{
+  "schema_version": 2,
+  "name": "prediction-block-requires-exec-command-after-fulfilled-should-allow",
+  "description": "Minimized from live materialized scenario `requires-exec-command-repeated-after-checklist`: the hook requires `functions.exec_command` before Bash, but an earlier Codex exec_command/canonical Bash read has already completed successfully. Correct behavior is to allow the next read-only planfile inspection instead of blocking with the same already-satisfied prerequisite.",
+  "transcript": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back."
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "The read-only checklist is in place, and the earlier `functions.exec_command` planfile read has completed. I'm continuing with the same planfile inspection."
+        },
+        {
+          "type": "tool_use",
+          "id": "call_planfile_read_after_required_exec_command",
+          "name": "exec_command",
+          "input": {
+            "cmd": "sed -n '1,260p' /home/tim/.agent-framework/sessions/home-tim-Coding-private_repos-astral/2026-06-20-1301_b228dc2b/plans/astral-ai-panel-sessions-and-tabs.md",
+            "workdir": "/home/tim/Coding/public_repos/agent-framework",
+            "max_output_tokens": 12000
+          }
+        }
+      ]
+    }
+  ],
+  "target": {
+    "hook": "PreToolUse",
+    "tool_use_ref": "call_planfile_read_after_required_exec_command"
+  },
+  "env": {
+    "adapter": "codex",
+    "cwd": "/home/tim/Coding/public_repos/agent-framework",
+    "permission_mode": "default",
+    "session_start_permission_mode": "default",
+    "codex_collaboration_mode": "default"
+  },
+  "seed_state": {
+    "currentPrediction": {
+      "mood": "neutral",
+      "trust": "high",
+      "intent": "The user wants a fresh critique of the edited planfile, using a read-only review workflow.",
+      "blockedIntent": "",
+      "explicitlyAllowedTools": [
+        "functions.exec_command",
+        "Read"
+      ],
+      "explicitlyRequiredTools": [
+        {
+          "tool": "functions.exec_command"
+        }
+      ],
+      "nonBlockingTools": [],
+      "explicitlyBlockedSubstrings": [],
+      "userMessageSnippet": "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back.",
+      "blockAllTools": false,
+      "contextSwitch": "no",
+      "questionIsStalling": "n/a"
+    },
+    "forceCheckPending": false,
+    "frustrationStreak": 0,
+    "currentWindowSize": 4,
+    "toolLog": [
+      {
+        "tool": "Bash",
+        "toolUseId": "call_required_exec_command_done",
+        "cmd": "sed -n '1,260p' /home/tim/.agent-framework/sessions/home-tim-Coding-private_repos-astral/2026-06-20-1301_b228dc2b/plans/astral-ai-panel-sessions-and-tabs.md",
+        "status": "allowed",
+        "gate": "all-rules",
+        "reason": "All checks passed"
+      }
+    ]
+  },
+  "expect": {
+    "expected": "allow",
+    "notes": "The required Codex `functions.exec_command` step has already been completed, represented by the prior allowed canonical Bash tool-log entry. The target is another read-only planfile inspection for the same user request and should not be denied as if `functions.exec_command` were still pending."
+  }
+}
