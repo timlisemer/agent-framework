@@ -8,6 +8,8 @@
  * @module adapter/types
  */
 
+import type { RuntimeHomeProfile, RuntimeToolPolicy } from "../runtime-home/profiles.js";
+
 export type EventName =
   | "PreToolUse"
   | "PermissionRequest"
@@ -74,23 +76,24 @@ export interface PlanModeDetection {
 
 export type CanonicalMcp =
   | "check" | "commit" | "push" | "confirm" | "fullconfirm"
+  | "implement" | "validate_implementation"
   | "transcript" | "validate_intent" | "validate_plan" | "create_planfile"
   | "scenario_tester" | "scenario_labeler" | "locate_scenario";
 
 export const CANONICAL_MCPS: readonly CanonicalMcp[] = [
   "check", "commit", "push", "confirm", "fullconfirm", "transcript",
-  "validate_intent", "validate_plan", "create_planfile", "scenario_tester", "scenario_labeler",
+  "implement", "validate_implementation", "validate_intent", "validate_plan", "create_planfile", "scenario_tester", "scenario_labeler",
   "locate_scenario",
 ] as const;
 
 export type CanonicalWorkflow =
   | "commit" | "push" | "quickpush" | "confirm" | "quickconfirm" | "fullconfirm" | "fullquickconfirm"
   | "check"  | "transcript" | "locate-scenario"
-  | "plan1"  | "plan3" | "plan5" | "implement";
+  | "plan1"  | "plan3" | "plan5" | "implement" | "validate";
 
 export const CANONICAL_WORKFLOWS: readonly CanonicalWorkflow[] = [
   "commit", "push", "quickpush", "confirm", "quickconfirm", "fullconfirm", "fullquickconfirm", "check", "transcript", "locate-scenario",
-  "plan1", "plan3", "plan5", "implement",
+  "plan1", "plan3", "plan5", "implement", "validate",
 ] as const;
 
 export interface CanonicalToolCall {
@@ -120,6 +123,26 @@ export interface MaterializedScenarioLine {
   jsonl: string;
   uuid: string;
   toolUseIds: ReadonlyArray<{ refKey: string; resolvedId: string }>;
+}
+
+export interface AdapterRuntimeHomeSpec {
+  dotRoot(adapterRoot: string): string;
+  authFiles: readonly string[];
+  durableManagedEntries: readonly string[];
+  applyRuntimeEnv(env: NodeJS.ProcessEnv, root: string | null): NodeJS.ProcessEnv;
+  resolveNativeRoot(input: {
+    env: NodeJS.ProcessEnv;
+    homeDir: string;
+    managedRoot: string;
+  }): string;
+  writeMinimalConfig?(root: string): void;
+  rewriteConfig?(root: string, profile: RuntimeHomeProfile): void;
+  sandboxModeForToolPolicy?(policy: RuntimeToolPolicy): string | null;
+  removeMcpServerConfig(root: string): void;
+  sanitizeLocalSettings?(root: string): void;
+  removeHooksConfig(root: string): void;
+  removeStopHookFromSettings?(root: string): void;
+  buildHookTrustBlock?(hooksConfigPath: string, hooksSourcePath: string): string;
 }
 
 // ── Host context (used by resolveHostContext) ────────────────────────────────
@@ -201,6 +224,8 @@ export interface AdapterSpec {
   readonly name: string;
   /** Existing AdapterEncoder for stdout shaping. */
   readonly encoder: AdapterEncoder;
+  /** Adapter-owned runtime-home filesystem and config behavior. */
+  readonly runtimeHome: AdapterRuntimeHomeSpec;
 
   // ── Tool naming ─────────────────────────────────────────────────────────
   /** Recognize an adapter-wire MCP tool name. Returns canonical or null.

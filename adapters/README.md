@@ -34,6 +34,13 @@ Workflow queue prediction intentionally prefers the bundled repo instruction
 definitions before host config copies, so enforcement follows reviewed source;
 the host config path is a fallback for installed or out-of-tree runtimes.
 
+Real `~/.claude` and `~/.codex` homes remain managed outside runtime code.
+Managed Astral homes under `~/.agent-framework/astral-ai/{claude,codex}` mirror
+the bundled adapter dotfolders while preserving auth/local-secret files.
+Internal framework homes live under
+`~/.agent-framework/internal/{direct,read-only,write}` and are selected by
+runtime profile.
+
 ## Available Adapters
 
 | Directory       | Tool            | Status  |

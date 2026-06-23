@@ -10,7 +10,7 @@ export const trustedPathRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (!FILE_TOOLS.includes(ctx.toolName)) return null;
+    if (!FILE_TOOLS.includes(ctx.toolName) && ctx.toolName !== "Read") return null;
 
     const filePaths = extractFilePaths(ctx.toolName, ctx.toolInput);
     for (const filePath of filePaths) {

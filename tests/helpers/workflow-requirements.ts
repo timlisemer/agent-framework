@@ -4,19 +4,22 @@ export type RequirementSignature = {
   tool: string;
   input?: Record<string, string | number | boolean>;
   inputArrayLengths?: Record<string, number>;
+  inputRequiredKeys?: string[];
 };
 
-type RequirementLike = Pick<ToolRequirement, "tool" | "input" | "inputArrayLengths">;
+type RequirementLike = Pick<ToolRequirement, "tool" | "input" | "inputArrayLengths" | "inputRequiredKeys">;
 
 export function req(
   tool: string,
   input?: Record<string, string | number | boolean>,
   inputArrayLengths?: Record<string, number>,
+  inputRequiredKeys?: string[],
 ): RequirementSignature {
   return {
     tool,
     ...(input ? { input } : {}),
     ...(inputArrayLengths ? { inputArrayLengths } : {}),
+    ...(inputRequiredKeys ? { inputRequiredKeys } : {}),
   };
 }
 
@@ -37,15 +40,13 @@ export function requirementSignature(requirement: RequirementLike): RequirementS
     tool: requirement.tool,
     ...(requirement.input ? { input: requirement.input } : {}),
     ...(requirement.inputArrayLengths ? { inputArrayLengths: requirement.inputArrayLengths } : {}),
+    ...(requirement.inputRequiredKeys ? { inputRequiredKeys: requirement.inputRequiredKeys } : {}),
   };
 }
 
 export function implementWorkflowRequirementSignatures(): RequirementSignature[] {
   return [
-    req("Agent", { subagent_type: "implementer" }),
-    waitReq(1),
-    req("Agent", { subagent_type: "implement-validator" }),
-    waitReq(1),
+    req("mcp-implement", undefined, undefined, ["working_dir"]),
   ];
 }
 

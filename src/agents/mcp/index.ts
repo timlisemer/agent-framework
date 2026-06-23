@@ -2,7 +2,8 @@
  * MCP-Exposed Agents
  *
  * These agents are exposed via the MCP server (src/mcp/server.ts).
- * They use direct Anthropic API calls (not SDK streaming) because:
+ * Most use direct Anthropic API calls; workflow agents may orchestrate SDK
+ * subprocess agents when the workflow needs code investigation or edits.
  *
  * ## WHY DIRECT API?
  *
@@ -23,14 +24,17 @@
  *   │         │         └─ Runs linter + make/just check + deterministic deleted/renamed filename-reference + supplemental diagnostics (sonnet)
  *   │         └─ Analyzes git diff (opus)
  *   └─ Generates commit message + executes commit (haiku)
+ *
+ * implement → internal write SDK agent → check → read-only implementation validator
  */
 
-export { runCheckAgent } from './check.js';
-export { runValidatePlanAgent } from './validate-plan.js';
-export { runCreatePlanfileAgent } from './create-planfile.js';
-export { runConfirmAgent, runFullConfirmAgent } from './confirm.js';
-export { runCommitAgent } from './commit.js';
-export { runPushAgent } from './push.js';
-export { runLocateScenarioMcp } from './locate-scenario.js';
-export { handleScenarioLabeler } from './scenario-labeler.js';
-export { handleScenarioTester } from './scenario-tester.js';
+export { runCheckAgent } from "./check.js";
+export { runValidatePlanAgent } from "./validate-plan.js";
+export { runCreatePlanfileAgent } from "./create-planfile.js";
+export { runImplementAgent, runValidateImplementationAgent } from "./implement.js";
+export { runConfirmAgent, runFullConfirmAgent } from "./confirm.js";
+export { runCommitAgent } from "./commit.js";
+export { runPushAgent } from "./push.js";
+export { runLocateScenarioMcp } from "./locate-scenario.js";
+export { handleScenarioLabeler } from "./scenario-labeler.js";
+export { handleScenarioTester } from "./scenario-tester.js";

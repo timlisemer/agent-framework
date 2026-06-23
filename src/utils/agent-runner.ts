@@ -36,21 +36,23 @@
  * - Agents that benefit from exploring the codebase autonomously
  *
  * **Characteristics:**
- * - Has access to Read and read-only Bash (search/navigation)
+ * - Has access to tools selected by sdkToolPolicy
  * - Can make multiple turns to investigate
  * - More expensive, but can explore codebase
  * - Uses bypassPermissions mode for autonomous execution
  *
  * ## SECURITY CONSIDERATIONS
  *
- * SDK mode is restricted to Read + classified read-only Bash. SDK tool calls
+ * SDK mode defaults to Read + classified read-only Bash. Write-capable
+ * implementation agents must opt into sdkToolPolicy: "write". SDK tool calls
  * flow through the normal hook and rule pipeline:
  * - Bash is allowed only for read-only search/navigation and safe read-only pipelines
- * - Mutation, execution, and network commands are denied deterministically
- * - No Write/Edit access - prevents file modifications
+ * - Execution and network commands are denied deterministically
+ * - Write/Edit/MultiEdit access is available only for explicit write-policy agents
  * - Git data is passed via prompt rather than gathered via git commands
  *
- * This ensures the SDK agent can investigate but not modify anything.
+ * This lets reviewer SDK agents investigate without edits while allowing the
+ * MCP-owned implementation workflow to use a scoped write-capable SDK agent.
  *
  * ## USAGE
  *
@@ -91,12 +93,14 @@ import {
 } from "./cancellation.js";
 import { runProviderDirect, runProviderSdk } from "../providers/index.js";
 import type { ProviderContinuationState, ProviderExecutionResult } from "../providers/execution-types.js";
+import type { RuntimeHomeProfile, SdkToolPolicy } from "../providers/execution-types.js";
 import type { SdkRuntimeEnvironment } from "../ai-protocol/index.js";
+import { makeRuntimeRunId, sdkToolsForPolicy } from "../runtime-home/runtime-profiles.js";
 
 /**
- * Tools available to SDK mode agents.
+ * Default tools available to read-only SDK mode agents.
  *
- * These tools allow code investigation without modification:
+ * Read-only policy allows code investigation without modification:
  * - Read: Read file contents
  * - Bash: Classified read-only commands only. The pre-tool-use hook gates
  *   Bash through the normal Bash policy classifier (ls, grep, rg, find,
@@ -108,9 +112,10 @@ import type { SdkRuntimeEnvironment } from "../ai-protocol/index.js";
  * Claude Code v2.1.117 on native macOS/Linux builds (search routes through
  * Bash via bundled ugrep/bfs). Git data should be passed via the prompt
  * context rather than gathered via git commands.
+ *
+ * Explicit write-policy agents receive the policy-selected edit tools from
+ * sdkToolsForPolicy; ordinary reviewer/validator agents stay read-only.
  */
-const SDK_TOOLS = ["Read", "Bash"] as const;
-
 /**
  * Internal result from agent execution functions.
  * Contains text output and optional usage data from LLM provider.
@@ -146,7 +151,7 @@ export interface AgentConfig {
    * Execution mode for this agent.
    *
    * - 'direct': Single API call, no tools, fastest
-   * - 'sdk': Multi-turn with Read and read-only Bash tools
+   * - 'sdk': Multi-turn with tools selected by sdkToolPolicy
    */
   mode: "direct" | "sdk";
 
@@ -164,6 +169,21 @@ export interface AgentConfig {
    * user runtime environments. Defaults to isolated for framework agents.
    */
   sdkRuntimeEnvironment?: SdkRuntimeEnvironment;
+
+  /**
+   * Internal runtime home profile for framework-owned provider runs.
+   */
+  runtimeHomeProfile?: RuntimeHomeProfile;
+
+  /**
+   * Tool/sandbox policy for SDK-capable provider runs.
+   */
+  sdkToolPolicy?: SdkToolPolicy;
+
+  /**
+   * Stable run id shared with provider subprocesses and hooks.
+   */
+  runtimeRunId?: string;
 
   /**
    * System prompt defining agent behavior.
@@ -195,9 +215,10 @@ export interface AgentConfig {
   workingDir?: string;
 
   /**
-   * Additional tools beyond the SDK defaults.
+   * Additional tools beyond the SDK policy defaults.
    *
-   * By default, SDK mode has Read and read-only Bash.
+   * By default, SDK mode has Read and read-only Bash. Write-capable
+   * implementation agents use sdkToolPolicy instead of this field.
    * Use this to enable additional tools like:
    * - 'Task': Allow spawning built-in agents (Explore, Plan, general-purpose)
    * - 'WebFetch': Fetch web content
@@ -488,6 +509,9 @@ async function runDirectAgent(
       ...config,
       continuable: false,
       sdkRuntimeEnvironment: "isolated",
+      runtimeHomeProfile: config.runtimeHomeProfile ?? "internalDirect",
+      sdkToolPolicy: config.sdkToolPolicy ?? "none",
+      runtimeRunId: config.runtimeRunId ?? makeRuntimeRunId(config.name),
     },
     prompt,
     resolvedProvider,
@@ -559,6 +583,9 @@ async function applyFormatValidation(
             maxTokens: 500,
             continuable: false,
             sdkRuntimeEnvironment: "isolated",
+            runtimeHomeProfile: config.runtimeHomeProfile ?? "internalDirect",
+            sdkToolPolicy: config.sdkToolPolicy ?? "none",
+            runtimeRunId: config.runtimeRunId ?? makeRuntimeRunId(config.name),
           },
           prompt: `Invalid format. ${formatReminder}\n\nOriginal output:\n${result.text.slice(0, 2000)}`,
           resolvedProvider: retryResolved,
@@ -583,17 +610,20 @@ async function applyFormatValidation(
 /**
  * Execute an agent using Claude SDK for multi-turn interactions.
  *
- * This mode gives the agent access to Read and classified read-only Bash
- * for autonomous code investigation. Uses bypassPermissions mode for
- * unattended execution.
+ * This mode gives the agent access to tools selected by sdkToolPolicy.
+ * Uses bypassPermissions mode for unattended execution; internal runtime homes
+ * retain framework hooks so Bash/edit tool calls still flow through policy.
  *
  * ## Tool Restrictions
  *
- * The agent is intentionally limited to read-only tools:
+ * Reviewer and validator agents use the default read-only policy:
  * - Read: View file contents
  * - Bash: Classified read-only commands only (simple inspection,
  *   read-only-heavy evaluation such as nix-eval-jobs, and safe read-only
  *   pipelines). Gated by the pre-tool-use hook via the normal Bash policy.
+ *
+ * Implementation agents must opt into sdkToolPolicy: "write" to receive
+ * text edit tools for the provided plan.
  *
  * Git data (status/diff/log/show) must be passed via the prompt context
  * rather than gathered via bash git commands -- those are denied by the hook.
@@ -620,11 +650,15 @@ async function runSdkAgent(
     throw new Error(`SDK mode requires workingDir for agent '${config.name}'`);
   }
   const resolvedProvider = resolveProvider(config.tier, "sdk");
-  const tools = [...SDK_TOOLS, ...(config.extraTools ?? [])];
+  const sdkToolPolicy = config.sdkToolPolicy ?? "read-only";
+  const tools = [...sdkToolsForPolicy(sdkToolPolicy), ...(config.extraTools ?? [])];
   return runProviderSdk({
     config: {
       ...config,
       sdkRuntimeEnvironment: config.sdkRuntimeEnvironment ?? "isolated",
+      runtimeHomeProfile: config.runtimeHomeProfile ?? "internalReadOnly",
+      sdkToolPolicy,
+      runtimeRunId: config.runtimeRunId ?? makeRuntimeRunId(config.name),
     },
     prompt,
     resolvedProvider,
@@ -774,6 +808,9 @@ export async function runAgentWithRetry(
           maxTokens,
           continuable: false,
           sdkRuntimeEnvironment: "isolated",
+          runtimeHomeProfile: config.runtimeHomeProfile ?? "internalDirect",
+          sdkToolPolicy: config.sdkToolPolicy ?? "none",
+          runtimeRunId: config.runtimeRunId ?? makeRuntimeRunId(config.name),
         },
         prompt: `Invalid format: "${decision}". You are evaluating: ${contextDesc}. ${formatReminder}`,
         resolvedProvider: retryResolved,

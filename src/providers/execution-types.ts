@@ -2,8 +2,10 @@ import type { CancellationOptions } from "../utils/cancellation.js";
 import type { AgentConfig } from "../utils/agent-runner.js";
 import type { SdkRuntimeEnvironment } from "../ai-protocol/index.js";
 import type { ProviderType, ResolvedProvider } from "./types.js";
+import type { RuntimeHomeProfile, SdkToolPolicy } from "../runtime-home/runtime-profiles.js";
 
 export type { SdkRuntimeEnvironment, SdkRuntimeHome } from "../ai-protocol/index.js";
+export type { RuntimeHomeProfile, SdkToolPolicy } from "../runtime-home/runtime-profiles.js";
 
 export interface ProviderUsage {
   promptTokens?: number;
@@ -30,6 +32,8 @@ export type ProviderContinuationState =
 export interface ClaudeProviderContinuationState {
   kind: "claude";
   nativeSessionId: string | null;
+  runtimeHome?: unknown;
+  dispose?: () => void | Promise<void>;
 }
 
 export interface CodexProviderContinuationState {
@@ -40,7 +44,12 @@ export interface CodexProviderContinuationState {
 }
 
 export interface ProviderRunInput {
-  config: AgentConfig & { sdkRuntimeEnvironment?: SdkRuntimeEnvironment };
+  config: AgentConfig & {
+    sdkRuntimeEnvironment?: SdkRuntimeEnvironment;
+    runtimeHomeProfile?: RuntimeHomeProfile;
+    sdkToolPolicy?: SdkToolPolicy;
+    runtimeRunId?: string;
+  };
   prompt: string;
   resolvedProvider: ResolvedProvider;
   options: CancellationOptions;

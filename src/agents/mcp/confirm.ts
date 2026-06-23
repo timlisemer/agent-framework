@@ -43,11 +43,12 @@ import {
   runConfirmPrefilter,
   formatConfirmPrefilter,
 } from "../../utils/confirm-prefilter.js";
-import { getAgentFrameworkSessionDir, sessionTranscriptPathSidecar } from "../../utils/paths.js";
+import { getAgentFrameworkSessionDir, readSessionTranscriptPath } from "../../utils/paths.js";
 import { readStoredCurrentPlan } from "../../utils/plan-source.js";
 import { readRecentUserMessagesArray } from "../../utils/transcript.js";
 import { runCheckAgent } from "./check.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
+import { parseCheckAgentResult } from "../../utils/check-result.js";
 
 import { activeSpec } from "../../adapter/spec.js";
 function getHookName(scopeKind: ConfirmReviewScopeKind = "uncommitted"): string {
@@ -222,14 +223,10 @@ function filterGeneratedConfirmGuidance(extraContext: string | undefined): strin
 
 async function readRecentUserContextForConfirm(sessionDir: string | undefined): Promise<string> {
   if (!sessionDir) return "";
-  try {
-    const transcriptPath = fs.readFileSync(sessionTranscriptPathSidecar(sessionDir), "utf-8").trim();
-    if (!transcriptPath) return "";
-    const messages = await readRecentUserMessagesArray(transcriptPath, 5);
-    return messages.join("\n");
-  } catch {
-    return "";
-  }
+  const transcriptPath = readSessionTranscriptPath(sessionDir);
+  if (!transcriptPath) return "";
+  const messages = await readRecentUserMessagesArray(transcriptPath, 5);
+  return messages.join("\n");
 }
 
 function formatDeduplicationRequirementContext(requirement: string | undefined): string {
@@ -351,6 +348,8 @@ async function runSingleConfirmSdk(
       ...CONFIRM_AGENT,
       tier,
       workingDir,
+      runtimeHomeProfile: "internalReadOnly",
+      sdkToolPolicy: "read-only",
       systemPrompt: `${CONFIRM_AGENT.systemPrompt}\n\n${CONFIRM_DEDUPLICATION_PROMPT_EXTENSION}`,
       formatValidation: CONFIRM_AGENT.formatValidation
         ? { ...CONFIRM_AGENT.formatValidation, fallbackOutput: CONFIRM_FORMAT_FALLBACK }
@@ -375,6 +374,8 @@ async function runConfirmReviewAgents(
         ...CONFIRM_SPECIALIST_AGENT,
         tier,
         workingDir,
+        runtimeHomeProfile: "internalReadOnly",
+        sdkToolPolicy: "read-only",
       },
       {
         prompt: "Evaluate this review scope for duplication, helper, and separation-of-concern risks:",
@@ -387,6 +388,8 @@ async function runConfirmReviewAgents(
         ...CONFIRM_PATTERN_AGENT,
         tier,
         workingDir,
+        runtimeHomeProfile: "internalReadOnly",
+        sdkToolPolicy: "read-only",
       },
       {
         prompt: "Evaluate this review scope for code quality and local pattern assurance risks:",
@@ -471,15 +474,12 @@ async function runSharedConfirmAgent(
       })
     : await runCheckAgent(workingDir, undefined, options);
 
-  const errorMatch = checkResult.match(/Errors:\s*(\d+)/i);
-  const errorCount = errorMatch ? parseInt(errorMatch[1], 10) : 0;
-  const statusMatch = checkResult.match(/Status:\s*(PASS|FAIL)/i);
-  const checkStatus = statusMatch ? statusMatch[1].toUpperCase() : "UNKNOWN";
+  const parsedCheck = parseCheckAgentResult(checkResult);
 
   // Step 2: If check failed, decline immediately
-  if (checkStatus === "FAIL" || errorCount > 0) {
+  if (parsedCheck.failed) {
     // No confirm output or LLM call here: check output is the authoritative failure.
-    return formatCheckFailure(checkResult, errorCount);
+    return formatCheckFailure(checkResult, parsedCheck.errorCount);
   }
 
   const planfile = await resolveConfirmPlanfile(workingDir, sessionContext.sessionDir, optionalPlanfile);

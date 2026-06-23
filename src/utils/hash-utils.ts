@@ -18,6 +18,14 @@ export function hashSha256Prefix(input: string | Buffer, length = 16): string {
   return crypto.createHash("sha256").update(input).digest("hex").slice(0, length);
 }
 
+export function hashSha256(input: string | Buffer): string {
+  return crypto.createHash("sha256").update(input).digest("hex");
+}
+
+export function stableJsonStringify(value: unknown): string {
+  return JSON.stringify(stableJsonValue(value));
+}
+
 export function shortContentHash(content: string): string {
   return hashSha256Prefix(Buffer.from(content, "utf-8"));
 }
@@ -45,4 +53,17 @@ export function hashFileSha256Prefix(filePath: string, length = 16): string | nu
   } finally {
     fs.closeSync(fd);
   }
+}
+
+function stableJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => item === undefined ? null : stableJsonValue(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .filter((key) => (value as Record<string, unknown>)[key] !== undefined)
+        .sort()
+        .map((key) => [key, stableJsonValue((value as Record<string, unknown>)[key])]),
+    );
+  }
+  return value;
 }

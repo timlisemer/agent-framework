@@ -2,7 +2,7 @@
 
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
-1. **MCP Server** - For `check`, `confirm`, `fullconfirm`, `commit`, `push`, `validate_intent`, `create_planfile`, `validate_plan`, `scenario_labeler`, `scenario_tester`, `locate_scenario` tools (portable, works with any MCP client)
+1. **MCP Server** - For `check`, `confirm`, `fullconfirm`, `commit`, `push`, `implement`, `validate_implementation`, `validate_intent`, `create_planfile`, `validate_plan`, `scenario_labeler`, `scenario_tester`, `locate_scenario` tools (portable, works with any MCP client)
 2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `style-drift`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
 3. **Stop Hook** - For `response-align-stop` and Codex `<proposed_plan>` acceptance validation
 4. **UserPromptSubmit Hook** - For `sentiment` rule and slash/skill workflow prediction seeding before each tool call sequence
@@ -20,6 +20,9 @@ events plus request-correlated `sessionChoices`, `sessionClosed`, and
 `requestError` responses using the local protocol exported from
 `src/ai-protocol`. `sdkRuntimeHome: "managedAstral"` enables managed
 Claude/Codex homes and resumable history discovery for user-runtime sessions.
+Managed Astral homes mirror the bundled adapter dotfolders under
+`adapters/claude/dotclaude` and `adapters/codex/dotcodex` while preserving
+local auth files.
 The protocol is owned in this repository and uses opaque resume targets instead
 of native runtime IDs. Build before running the backend:
 
@@ -30,7 +33,7 @@ npm run ai-backend
 
 ## Agents
 
-The framework implements 20 specialized agents and MCP tools organized into three categories:
+The framework implements specialized agents and MCP tools organized into three categories:
 
 ### MCP Tools (User-Facing)
 
@@ -42,6 +45,8 @@ The framework implements 20 specialized agents and MCP tools organized into thre
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
 | push            | -      | Execute git push with logging                                |
 | validate_intent        | haiku  | Manual post-session review (requires transcript_path)        |
+| implement              | sonnet | Plan implementation workflow through internal write SDK agent |
+| validate_implementation| sonnet | Read-only validation of completed implementation against plan |
 | create_planfile        | -      | Create a named planfile and validate it                     |
 | validate_plan          | sonnet | Validate an existing planfile against the planning contract  |
 | scenario_labeler   | -      | Test harness operations for the @labeler agent role          |
@@ -85,11 +90,18 @@ check ────────────────────────�
 confirm ──► runCheckAgent() ───► (check must pass first)
 fullconfirm ─► runCheckAgent() ─► (check must pass first)
 commit ───► normalize moved files ─► runConfirmAgent() ─► runCheckAgent() ─► (full chain)
+implement ─► internal write SDK agent ─► runCheckAgent() ─► read-only implementation validator
+validate_implementation ─► runCheckAgent() ─► read-only implementation validator
 ```
 
 The `commit` agent may stage detected moved+recreated path pairs before confirm
 so Git reports them as renames, then enforces the complete verification chain
 before committing.
+
+The `implement` workflow is MCP-owned: it runs a write-capable internal SDK
+agent for the approved planfile, runs parent-owned checks, then validates the
+result with a read-only SDK validator. `validate_implementation` runs the check
+and validator half for already-applied changes.
 
 ## PreToolUse Hook Flow
 
@@ -102,12 +114,12 @@ before committing.
 │  ├─ background-agent-block (25): Deny Agent(run_in_background=true)
 │  ├─ prediction-question-judge (28): Block stalling AskUserQuestion under frustration
 │  ├─ question-validate (30): Validate AskUserQuestion
-│  ├─ force-check-required (32): Lock to mcp__check after workaround denial
+│  ├─ force-check-required (32): Lock to check-satisfying MCPs after workaround denial
 │  ├─ prediction-block (35): Block predicted-bad tools (deterministic, non-appealable)
 │  ├─ create-planfile-allow (36): Deterministically allow authorized create_planfile calls
 │  ├─ drift-detect (40): Detect drift from intent (appealable)
 │  ├─ error-acknowledge (50): Require error acknowledgment (appealable, LLM)
-│  ├─ trusted-path (58): Deny sensitive-path writes
+│  ├─ trusted-path (58): Deny sensitive-path access
 │  ├─ edit-intent (60): Block edits without intent (appealable)
 │  ├─ style-drift (65): Detect style changes (appealable, LLM)
 │  ├─ gate (70): Gate agent contribution to rule-gate LLM
@@ -129,7 +141,7 @@ before committing.
 └─ Post-allow bookkeeping (tool count, ExitPlanMode cleanup)
 ```
 
-Planfile writes are no longer validated on every `Write` or `Edit`.
+Planfile writes are no longer validated on every file edit tool call.
 Plan1/plan3/plan5 consolidation calls `create_planfile`, which resolves the
 current session through the shared agent-framework session resolver, writes the
 named planfile, normalizes the header/footer, and runs the plan contract
@@ -254,7 +266,7 @@ For manual MCP config (alternative to `claude mcp add`):
 When the host supports per-server tool timeout configuration, set the
 agent-framework MCP host timeout to an effectively disabled value
 (`2147483647`). Agent-framework enforces its own adapter-independent active-work
-timeouts: tools default to 300 seconds, `commit`, `confirm`, and `fullconfirm` use 1500 seconds,
+timeouts: tools default to 300 seconds, `commit`, `confirm`, `fullconfirm`, `implement`, and `validate_implementation` use 1500 seconds,
 and time spent waiting for MCP elicitation forms does not count against the
 active-work budget.
 
@@ -295,7 +307,7 @@ prediction-block or prose-oriented regex matching.
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
 | **Low**        | `LSP`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `ListMcpResources`, `ReadMcpResource`, `TodoWrite`, `TaskOutput`, `AskUserQuestion`, `ExitPlanMode`, `EnterPlanMode`, `Skill` | Read-only or no filesystem impact          |
 | **Low**        | `mcp__*`                                                                                                                                                                      | Low-risk prediction class unless slash-command gated or heavyweight |
-| **Path-based** | `Read`, `Write`, `Edit`, `NotebookEdit`                                                                                                                                       | Low if inside project or the active adapter's host config root, otherwise high |
+| **Path-based** | `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`                                                                                                                          | Low if inside project or the active adapter's host config root, otherwise high |
 | **High**       | `Bash`, `Agent`/`Task`, `KillShell`                                                                                                                                           | Execute commands, spawn agents             |
 
 **Path-based classification**: File tools are auto-approved when:
@@ -323,7 +335,7 @@ In `settings.json`, the `matcher` field is a regex that determines which tools t
 Common matcher patterns:
 
 - `".*"` - All tools (recommended for full control)
-- `"(Bash|Edit|Write)"` - Only specific high-risk tools
+- `"(Bash|Edit|MultiEdit|Write|NotebookEdit)"` - Only specific high-risk tools
 - `"mcp__.*"` - Only MCP tools
 - `""` (empty) - Matches all tools
 
@@ -383,7 +395,13 @@ export AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=codex # claude | codex
 - `openrouter` direct mode uses `https://openrouter.ai/api`, `ANTHROPIC_AUTH_TOKEN`, and an explicitly empty `ANTHROPIC_API_KEY`.
 - `openrouter` SDK mode uses `AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=claude|codex`.
 - `claude-subscription` scrubs API/OpenRouter env vars and uses persistent Claude sessions only for opt-in continuable SDK sessions.
-- `openai-subscription` uses Codex SDK with ChatGPT/Codex sign-in and scrubs API env vars. Isolated sessions use a temporary `CODEX_HOME` and disable history persistence for one-shot calls; user-runtime sessions use the normal Codex home/config unless `sdkRuntimeHome: "managedAstral"` requests the managed Astral Codex home under `~/.agent-framework/astral-ai/codex` for history listing and resume. Opt-in continuable SDK sessions keep live Codex thread state until the owning session is disposed.
+- `openai-subscription` uses Codex SDK with ChatGPT/Codex sign-in and scrubs API env vars. Internal direct/read-only SDK runs use per-run framework-owned homes under `~/.agent-framework/internal/{direct,read-only}/codex/<runId>` plus volatile state, not raw `/tmp/agent-framework-*` homes. Internal write runs use disposable per-run homes under `~/.agent-framework/internal/write/codex/<runId>` and persist framework implementation session state under `~/.agent-framework/internal/sessions/write/<runId>`. User-runtime sessions use the normal Codex home/config unless `sdkRuntimeHome: "managedAstral"` requests the managed Astral Codex home under `~/.agent-framework/astral-ai/codex` for history listing and resume. Managed Astral refreshes replace framework-owned adapter config while preserving `sessions/` history and auth/local-secret files. Opt-in continuable SDK sessions keep live Codex thread state until the owning session is disposed.
+
+`implement` is an MCP-owned workflow: the slash command/skill calls the MCP,
+which runs the internal write implementer, runs parent-owned check, then runs
+the read-only implementation validator. `validate_implementation` exposes the
+validation half. Both tools accept `extra_context` only as exact quoted user
+text.
 
 ### Example Setups
 
@@ -449,4 +467,10 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion
 
 ## Testing
 
-This project does not have automated tests.
+Automated tests use Vitest. `npm test` runs `vitest run`.
+
+Use `just check` for the full repository check. It runs:
+
+- `npx tsc --noEmit`
+- `npx vitest run`
+- `npx tsx scripts/check-fixture-purity.ts`

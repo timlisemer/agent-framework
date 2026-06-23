@@ -42,12 +42,12 @@ src/                                # TypeScript source
     background-agent-block.ts       # Priority 25:  Deny Agent(run_in_background=true) from main session
     prediction-question-judge.ts    # Priority 28:  Block stalling AskUserQuestion under frustration
     question-validate.ts            # Priority 30:  Validate AskUserQuestion
-    force-check-required.ts         # Priority 32:  Lock to mcp__check after workaround denial
+    force-check-required.ts         # Priority 32:  Lock to check-satisfying MCPs after workaround denial
     prediction-block.ts             # Priority 35:  Block predicted-bad tools (non-appealable)
     create-planfile-allow.ts        # Priority 36:  Deterministically allow authorized create_planfile calls
     drift-detect.ts                 # Priority 40:  Detect drift from intent
     error-acknowledge.ts            # Priority 50:  Require error acknowledgment
-    trusted-path.ts                 # Priority 58:  Deny sensitive-path writes
+    trusted-path.ts                 # Priority 58:  Deny sensitive-path access
     edit-intent.ts                  # Priority 60:  Block edits without intent
     style-drift.ts                  # Priority 65:  Detect style changes
     prediction-context.ts           # Priority 68:  Prediction context for rule-gate LLM
@@ -135,8 +135,8 @@ dist/                               # Compiled JavaScript (build output)
 Agent-framework expects host MCP tool timeouts to be effectively disabled when
 the host supports timeout configuration. The shared timeout policy lives in
 `src/mcp/timeout.ts`, so per-tool budgets are adapter-independent: tools default
-to 300 seconds of active work, while `commit`, `confirm`, and `fullconfirm` use
-1500 seconds.
+to 300 seconds of active work, while `confirm`, `fullconfirm`, `commit`,
+`implement`, and `validate_implementation` use 1500 seconds.
 The active-work clock pauses while MCP elicitation is waiting on the user, and
 nested MCP-agent calls reuse the outer timeout context instead of stacking a
 second timer.
@@ -186,8 +186,8 @@ All agents use the unified `runAgent()` function from `utils/agent-runner.ts`. T
 
 | Mode   | Description                              | Used By                        |
 |--------|------------------------------------------|--------------------------------|
-| direct | Single API call, no tools, fast          | All hook agents, check, commit, locate_scenario |
-| sdk    | Multi-turn with Read/Glob/Grep tools     | confirm, fullconfirm           |
+| direct | Single API call, no tools, fast          | Hook agents, check, commit message generation, locate_scenario |
+| sdk    | Multi-turn host-agent runtime with scoped tools | confirm, fullconfirm, implement, validate_implementation |
 
 ### Why Two Modes?
 
@@ -196,12 +196,14 @@ All agents use the unified `runAgent()` function from `utils/agent-runner.ts`. T
 - MCP agents with deterministic commands don't need tool selection
 - Single API call is cheaper and more predictable
 
-**SDK Mode** (for confirm/fullconfirm agents):
+**SDK Mode** (for confirm/fullconfirm and implementation agents):
 - Code quality decisions benefit from autonomous investigation
 - Can read additional files to understand context
 - Can search codebase for patterns
-- Restricted to read-only tools (Read, Glob, Grep)
+- Confirm, fullconfirm, and implementation validation use read-only tools.
+- The implementation workflow uses an internal write-capable SDK agent with `Read`, read-only `Bash`, file edit tools, and no framework MCP tools.
 - Confirm and fullconfirm always run three SDK reviewers in parallel: one general reviewer, one deduplication/generalization specialist, and one code-quality/pattern specialist. A direct aggregator merges their blocking findings and non-blocking warnings into the final verdict.
+- Implement runs one write-capable SDK agent, then parent-owned check, then one read-only SDK validator.
 
 ### Agent Runner Pattern
 
@@ -284,7 +286,7 @@ Provider resolution follows this priority order:
 - `openrouter` direct mode uses `@anthropic-ai/sdk` against OpenRouter's Anthropic API skin.
 - `openrouter` SDK mode selects Claude Agent SDK or Codex SDK with `AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME`.
 - `claude-subscription` always uses Claude Agent SDK, clears API/OpenRouter env vars, and persists provider sessions only for opt-in continuable SDK sessions.
-- `openai-subscription` always uses Codex SDK. Isolated sessions use a temporary `CODEX_HOME` and one-shot calls set `history.persistence = "none"`; user-runtime sessions use the normal Codex home/config unless `sdkRuntimeHome: "managedAstral"` requests the managed Astral Codex home under `~/.agent-framework/astral-ai/codex` for session-choice listing and resume. Opt-in continuable SDK sessions keep live Codex thread state until disposal.
+- `openai-subscription` always uses Codex SDK. Public user-runtime sessions use the normal Codex home/config unless `sdkRuntimeHome: "managedAstral"` requests the managed Astral Codex home under `~/.agent-framework/astral-ai/codex` for session-choice listing and resume. Managed Astral refreshes replace framework-owned adapter config while preserving auth/local-secret files and durable history directories such as Codex `sessions/` and Claude `projects/`. Internal direct and read-only framework runs use per-run homes under `~/.agent-framework/internal/{direct,read-only}/{claude,codex}/<runId>` with no durable user-session history. Internal write runs use per-run homes under `~/.agent-framework/internal/write/{claude,codex}/<runId>` and persist useful state under `~/.agent-framework/internal/sessions/write/<runId>`. Opt-in continuable SDK sessions keep live Codex thread state until disposal.
 
 ### Provider Model IDs
 
@@ -321,6 +323,7 @@ Models are centrally configured in `src/types.ts`:
 |--------|--------|------------------------------------------------------------------------------|
 | haiku  | direct | rule-gate, tool-appeal, commit, style-drift, question-validate, sentiment, validate-intent, response-align-stop |
 | sonnet | direct | check, plan-validate, claude-md-validate |
+| sonnet | sdk    | implement and implement-validator agents used by MCP-owned implementation workflows |
 | opus   | sdk    | confirm and fullconfirm reviewers (general, deduplication, and code-quality/pattern investigation) |
 
 ## Agent Chains
@@ -339,6 +342,12 @@ fullconfirm → check
   │           │
   │           └─ Runs linter + make/just check + deterministic deleted/renamed filename-reference + supplemental editor diagnostics (sonnet, direct)
   └─ Reviews git-visible repository scope with three SDK reviewers + direct aggregator
+
+implement → internal write implementer → check → implementation validator
+  │                                    │      │
+  │                                    │      └─ Read-only SDK validation against the plan (`src/agents/mcp/implementation-workflow.ts`)
+  │                                    └─ Parent-owned check (`src/agents/mcp/check.ts`)
+  └─ MCP entrypoint in `src/agents/mcp/implement.ts`; direct adapter agents are compatibility wrappers
 ```
 
 ## MCP Elicitation
@@ -378,17 +387,22 @@ All four tools accept `skip_elicitation: true` to bypass interactive questions a
 
 ## SDK Agent Restrictions
 
-The confirm and fullconfirm agents are restricted to read-only tools:
+Confirm and fullconfirm SDK reviewers use the shared read-only policy:
 
 - **Read**: View file contents
-- **Glob**: Find files by pattern
-- **Grep**: Search file contents
+- **Bash**: Run guarded read-only inspection commands
 
-**NOT available:**
-- **Bash**: Git data passed via prompt instead
-- **Write/Edit**: No modifications allowed
+Write/edit tools are not available to confirm reviewers. Git status and diff
+data are still passed in the prompt so review agents do not need write access.
 
-This ensures the SDK agent can investigate but not modify anything.
+The implementation workflow uses two separate SDK policies:
+
+- **Implementer**: write-capable internal runtime with `Read`, guarded `Bash`,
+  `Write`, `Edit`, `MultiEdit`, `Glob`, `Grep`, `LS`, and `TodoWrite`
+- **Validator**: read-only internal runtime with `Read` and guarded `Bash`
+
+This lets implementation agents modify code while confirm and validation agents
+can investigate without editing files.
 
 ## Hook Flow (PreToolUse)
 
@@ -404,7 +418,7 @@ Tool call received
 │   ├─> background-agent-block (25) Fast deny Agent(run_in_background=true)
 │   ├─> prediction-question-judge (28) Block stalling AskUserQuestion under frustration
 │   ├─> question-validate (30) Validate AskUserQuestion
-│   ├─> force-check-required (32) Lock to mcp__check after workaround denial
+│   ├─> force-check-required (32) Lock to check-satisfying MCPs after workaround denial
 │   ├─> prediction-block (35)  Block predicted-bad tools (deterministic, non-appealable)
 │   ├─> create-planfile-allow (36) Deterministically allow authorized create_planfile calls
 │   ├─> drift-detect (40)      Detect drift from user intent (appealable)
@@ -442,8 +456,8 @@ Tool call received
 └─> Post-allow bookkeeping (tool count, ExitPlanMode cleanup)
 ```
 
-Planfile `Write` and `Edit` calls are not validated on every write. The
-file-backed planfile remains the source of truth. Plan1/plan3/plan5
+Planfile text edit calls are not validated on every write. The file-backed
+planfile remains the source of truth. Plan1/plan3/plan5
 consolidation creates the plan through the `create_planfile` MCP tool, which
 uses the shared planfile path helper, writes the named planfile, normalizes the
 `Plan Name` header and `Planfile Path` footer, then invokes the same
@@ -607,6 +621,13 @@ Each live session persists core state files under
 agent-framework session resolver maps hook transcript paths to these directories
 and writes `transcript-path.txt`; MCP tools without a transcript path use the
 latest sidecar for the active project as the current session.
+
+Internal framework SDK runs do not enter this user-session namespace. Direct
+and read-only internal profiles use volatile state under
+`~/.agent-framework/internal/volatile/<run-id>` and clean it when the run ends.
+Write-capable internal implementation runs persist under
+`~/.agent-framework/internal/sessions/write/<run-id>`. Unavoidable scratch
+space is rooted under `/tmp/agent-framework`.
 
 1. **`state.json`** — SessionState (prediction, edit-intent, force-check lockout, frustration streak, window size, tool count).
 2. **`gate-reasoning.json`** — priority-evicted denial memory with NOTE/WARNING/appeal outcomes.

@@ -1,5 +1,6 @@
 import type { AdapterSpec, PlanModeDetection, PlanModeDetectionInput } from "../adapter/types.js";
 import { READ_ONLY_GIT_COMMANDS_DESCRIPTION } from "./bash-command-policy.js";
+import { EDIT_TOOL_NAMES_DISPLAY } from "./edit-tools.js";
 import { readFileTailBuffer } from "./file-io.js";
 import { readPlanModeStoredState } from "./plan-mode-entry-state.js";
 
@@ -13,7 +14,7 @@ const PLAN_MODE_CONTEXT_STRING = `
 The session is in PLAN MODE (read-only exploration and planning). The user's intent is planning and exploration, NOT implementation. ExitPlanMode is the expected way to finish planning.
 
 BLOCKED (handled deterministically by TypeScript upstream — the LLM should never need to deny these itself):
-- Edit, Write, NotebookEdit
+- ${EDIT_TOOL_NAMES_DISPLAY}
 - Bash commands that write or are blocked/high-risk workaround classes (git commit/push, mkdir, echo >, npm install, build/compile, etc.)
 
 ALLOWED in plan mode (APPROVE by default):

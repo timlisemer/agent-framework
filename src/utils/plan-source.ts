@@ -2,10 +2,12 @@ import * as fs from "fs";
 import { activeSpec } from "../adapter/spec.js";
 import type { PlanSourceDescriptor } from "../adapter/types.js";
 import { checkPlanIntent } from "../agents/hooks/plan-validate.js";
+import type { EditValidationToolInput } from "../agents/hooks/edit-validation.js";
 import { createPlanfileAndValidate } from "../agents/mcp/create-planfile.js";
 import { validatePlanFileWithContract } from "../agents/mcp/validate-plan.js";
 import { formatTranscriptResult, readTranscriptExact } from "./transcript.js";
 import { PLAN_VALIDATE_COUNTS } from "./transcript-presets.js";
+import type { TextEditToolName } from "./edit-tools.js";
 import { readJson, writeJson } from "./file-io.js";
 import { sessionCurrentPlanFile, sessionPlanFile } from "./paths.js";
 import {
@@ -320,8 +322,8 @@ export async function validatePlanExitPresentation(input: {
 
 export async function validatePlanEdit(input: {
   currentPlan: string | null;
-  toolName: "Write" | "Edit";
-  toolInput: { content?: string; old_string?: string; new_string?: string };
+  toolName: TextEditToolName;
+  toolInput: EditValidationToolInput;
   transcriptPath: string;
   projectDir: string;
   hookName: string;

@@ -1,7 +1,7 @@
 ---
 name: tester
 description: Runs test harness against labeled transcripts and iterates on hook code to fix failures
-tools: [Read, Bash, Write, Edit, mcp__agent-framework__scenario_tester]
+tools: [Read, Bash, Write, Edit, MultiEdit, mcp__agent-framework__scenario_tester]
 model: opus
 ---
 
@@ -28,7 +28,7 @@ Then find work:
 3. **read_file** (filename: report.json) -- analyze failures
 4. **read_file** (filename: notes_and_questions.md) -- check for known uncertainties
 5. Investigate hook code with **Read** and read-only **Bash** (grep, rg, find, ls)
-6. Fix hook code with **Write**, **Edit** tools. Batch ALL fixes before re-running.
+6. Fix hook code with **Write**, **Edit**, or **MultiEdit** tools. Batch ALL fixes before re-running.
 7. **run_single_hook** (hook_key: failing id, working_dir: your cwd) -- test ONLY the specific hook you are fixing. Cheap and fast.
 8. **read_file** (filename: report-single.json) -- check single-hook result.
 9. If the single hook still fails, investigate further and repeat steps 6-8.
@@ -50,7 +50,7 @@ Then find work:
 
 ## Hard Constraints
 
-- Bash is restricted to a read-only allowlist (ls, tree, grep, rg, find, wc, sort, uniq, cut, tr, head, tail, file, stat, jq, echo, printf). File mutation, execution, and network commands are denied. Use Write/Edit for code changes and mcp__agent-framework__scenario_tester for harness operations.
+- Bash is restricted to a read-only allowlist (ls, tree, grep, rg, find, wc, sort, uniq, cut, tr, head, tail, file, stat, jq, echo, printf). File mutation, execution, and network commands are denied. Use Write/Edit/MultiEdit for code changes and mcp__agent-framework__scenario_tester for harness operations.
 - Do NOT label transcripts. That is the labeler's job.
 - Do NOT modify labels.json. Only add notes to notes_and_questions.md.
 - Do NOT call build commands. The harness builds automatically.
@@ -58,7 +58,7 @@ Then find work:
 - Process ONE transcript per invocation.
 - Use mcp__agent-framework__scenario_tester ONLY for harness operations.
 - Use Read and read-only Bash (grep, rg, find, ls) for investigating hook source code.
-- Use Write/Edit for fixing hook source code.
+- Use Write/Edit/MultiEdit for fixing hook source code.
 - If run_test returns a build failure error, STOP IMMEDIATELY. Report the error to the user and do not continue testing. Build failures must be fixed before testing can proceed.
 - Every fix must address the root cause. NEVER treat symptoms: do not silence warnings, suppress errors, weaken assertions, or change test/label expectations to make failures disappear. If a test fails, fix the hook code -- not the test conditions.
 - Do NOT add backwards-compatibility shims, deprecated re-exports, or legacy fallbacks. If something is replaced, remove the old code entirely.

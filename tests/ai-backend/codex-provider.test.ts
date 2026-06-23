@@ -53,7 +53,7 @@ describe("AI backend Codex provider helpers", () => {
   it("removes API-key env for OpenAI subscription sessions", () => {
     const env = buildCodexEnv("isolated", "/tmp/codex-home", true);
 
-    expect(env.CODEX_HOME).toBe("/tmp/codex-home");
+    expect(env.CODEX_HOME).toBe(process.env.CODEX_HOME);
     expect(env.OPENAI_API_KEY).toBeUndefined();
     expect(env.OPENROUTER_API_KEY).toBeUndefined();
   });
@@ -77,7 +77,7 @@ describe("AI backend Codex provider helpers", () => {
     }
   });
 
-  it("removes API-key env for managed OpenAI subscription sessions", () => {
+  it("scrubs API keys without overriding materialized runtime homes", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-codex-test-"));
     const restoreEnv = withEnvForTest({
       HOME: home,
@@ -90,7 +90,7 @@ describe("AI backend Codex provider helpers", () => {
     try {
       const env = buildCodexSessionEnv("user", null, true, "managedAstral");
 
-      expect(env.CODEX_HOME).toBe(path.join(home, ".agent-framework", "astral-ai", "codex"));
+      expect(env.CODEX_HOME).toBe("/native/codex");
       expect(env.OPENAI_API_KEY).toBeUndefined();
       expect(env.CODEX_API_KEY).toBeUndefined();
       expect(env.OPENROUTER_API_KEY).toBeUndefined();

@@ -1,4 +1,8 @@
-import { optionConsumesSeparateValue } from "../../shell-command-parser.js";
+import {
+  hasShellOption,
+  nonOptionTokens,
+  stripOptionValueTokens,
+} from "../../shell-command-parser.js";
 import {
   commandBare,
   commandOrNestedPayloadMatches,
@@ -116,61 +120,19 @@ function gitSubcommandInfo(tokens: string[]): { subcommand: string; index: numbe
   return null;
 }
 
-function hasOption(tokens: string[], options: ReadonlySet<string>): boolean {
-  for (const token of tokens) {
-    if (token === "--") return false;
-    if (options.has(token)) return true;
-    const eqIndex = token.indexOf("=");
-    if (eqIndex > 0 && options.has(token.slice(0, eqIndex))) return true;
-    if (/^-[A-Za-z]\S*/.test(token)) {
-      for (const flag of token.slice(1)) {
-        if (options.has(`-${flag}`)) return true;
-      }
-    }
-  }
-  return false;
-}
-
-function nonOptionArgs(tokens: string[]): string[] {
-  const marker = tokens.indexOf("--");
-  if (marker >= 0) {
-    return [
-      ...tokens.slice(0, marker).filter((token) => !token.startsWith("-")),
-      ...tokens.slice(marker + 1),
-    ];
-  }
-  return tokens.filter((token) => !token.startsWith("-"));
-}
-
-function stripOptionValues(tokens: string[], optionsWithValue: ReadonlySet<string>): string[] {
-  const result: string[] = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token === "--") {
-      result.push(...tokens.slice(i));
-      break;
-    }
-    result.push(token);
-    if (optionConsumesSeparateValue(token, optionsWithValue) && i + 1 < tokens.length) {
-      i++;
-    }
-  }
-  return result;
-}
-
 function readOnlyGitWithReadFilters(
   args: string[],
   writeFlags: ReadonlySet<string>,
   readFilterFlags: ReadonlySet<string>,
 ): boolean {
-  if (hasOption(args, writeFlags)) return false;
-  const positional = nonOptionArgs(args);
+  if (hasShellOption(args, writeFlags)) return false;
+  const positional = nonOptionTokens(args);
   if (positional.length === 0) return true;
-  return hasOption(args, readFilterFlags);
+  return hasShellOption(args, readFilterFlags);
 }
 
 function readOnlyGitFirstArg(args: string[], allowed: ReadonlySet<string>, allowMissing = false): boolean {
-  const subcommand = nonOptionArgs(args)[0];
+  const subcommand = nonOptionTokens(args)[0];
   return subcommand === undefined ? allowMissing : allowed.has(subcommand);
 }
 
@@ -179,13 +141,13 @@ function readOnlyGitBranch(args: string[]): boolean {
 }
 
 function readOnlyGitConfig(args: string[]): boolean {
-  if (hasOption(args, GIT_CONFIG_WRITE_FLAGS)) return false;
-  const positional = nonOptionArgs(stripOptionValues(args, GIT_CONFIG_OPTIONS_WITH_VALUE));
+  if (hasShellOption(args, GIT_CONFIG_WRITE_FLAGS)) return false;
+  const positional = nonOptionTokens(stripOptionValueTokens(args, GIT_CONFIG_OPTIONS_WITH_VALUE));
   const subcommand = positional[0];
   if (!subcommand) return true;
   if (GIT_CONFIG_WRITE_SUBCOMMANDS.has(subcommand)) return false;
   if (GIT_CONFIG_READ_SUBCOMMANDS.has(subcommand)) return true;
-  if (hasOption(args, GIT_CONFIG_READ_FLAGS)) return true;
+  if (hasShellOption(args, GIT_CONFIG_READ_FLAGS)) return true;
   return positional.length === 1;
 }
 
@@ -194,9 +156,9 @@ function readOnlyGitReflog(args: string[]): boolean {
 }
 
 function readOnlyGitRemote(args: string[]): boolean {
-  const subcommand = nonOptionArgs(args)[0];
+  const subcommand = nonOptionTokens(args)[0];
   if (!subcommand) return true;
-  if (subcommand === "show") return hasOption(args, GIT_REMOTE_SHOW_READ_FLAGS);
+  if (subcommand === "show") return hasShellOption(args, GIT_REMOTE_SHOW_READ_FLAGS);
   return GIT_REMOTE_READ_SUBCOMMANDS.has(subcommand);
 }
 

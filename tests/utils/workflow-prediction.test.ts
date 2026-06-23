@@ -2,7 +2,6 @@ import * as fs from "fs";
 import * as path from "path";
 import { describe, expect, it } from "vitest";
 import {
-  advanceRequiredToolsAfterAllowedTool,
   advanceRequiredToolsAfterAllowedToolSequence,
   decidePrediction,
   decideRequiredWorkflowToolSequence,
@@ -41,10 +40,10 @@ function makePrediction(required: ToolRequirement[]): ToolPrediction {
 }
 
 const COMMON_WORKFLOW_EXPECTATIONS: Record<string, RequirementSignature[]> = {
-  check: [req("mcp-check")],
-  commit: [req("mcp-commit")],
-  confirm: [req("mcp-confirm")],
-  fullconfirm: [req("mcp-fullconfirm")],
+  check: [req("mcp-check", undefined, undefined, ["working_dir"])],
+  commit: [req("mcp-commit", undefined, undefined, ["working_dir"])],
+  confirm: [req("mcp-confirm", undefined, undefined, ["working_dir"])],
+  fullconfirm: [req("mcp-fullconfirm", undefined, undefined, ["working_dir"])],
   fullquickconfirm: [req("mcp-fullconfirm", { model_tier: "haiku", skip_elicitation: true })],
   implement: implementWorkflowRequirementSignatures(),
   "locate-scenario": [req("mcp-locate_scenario")],
@@ -52,7 +51,8 @@ const COMMON_WORKFLOW_EXPECTATIONS: Record<string, RequirementSignature[]> = {
   quickconfirm: [req("mcp-confirm", { model_tier: "haiku", skip_elicitation: true })],
   quickpush: [req("mcp-commit", { model_tier: "haiku", skip_elicitation: true, auto_push: true })],
   transcript: [req("mcp-transcript")],
-  "validate-plan": [req("mcp-validate_plan")],
+  validate: [req("mcp-validate_implementation", undefined, undefined, ["working_dir"])],
+  "validate-plan": [req("mcp-validate_plan", undefined, undefined, ["working_dir"])],
 };
 
 const CODEX_PLAN_EXPECTATIONS: Record<string, RequirementSignature[]> = {
@@ -226,52 +226,18 @@ Spawn exactly one \`default\` agent.
     ]);
   });
 
-  it("keeps ordered requirements authoritative over broad allowed tools", () => {
+  it("keeps implement workflow on the MCP-owned path", () => {
     const { explicitlyRequiredTools } = deriveWorkflowToolRequirementsFromText(
       codexWorkflowInstructionText("implement"),
     );
     const prediction = makePrediction(explicitlyRequiredTools);
 
-    const outOfOrderValidator = decidePrediction(
-      prediction,
-      "Agent",
-      { subagent_type: "implement-validator" },
-      5,
-    );
-    expect(outOfOrderValidator.decision).toBe("deny");
-    expect(outOfOrderValidator.reason).toContain("implementer");
-
-    const firstImplementer = decidePrediction(
-      prediction,
-      "Agent",
-      { subagent_type: "implementer" },
-      5,
-    );
-    expect(firstImplementer.decision).toBe("allow");
-
-    const afterImplementer = advanceRequiredToolsAfterAllowedTool(
-      prediction,
-      "Agent",
-      { subagent_type: "implementer" },
-    );
-    expect(afterImplementer.explicitlyRequiredTools?.map(requirementSignature)).toEqual([
-      waitReq(1),
-      req("Agent", { subagent_type: "implement-validator" }),
-      waitReq(1),
+    expect(explicitlyRequiredTools.map(requirementSignature)).toEqual([
+      req("mcp-implement", undefined, undefined, ["working_dir"]),
     ]);
-
-    expect(decidePrediction(afterImplementer, "Agent", { subagent_type: "implement-validator" }, 5).decision)
-      .toBe("deny");
-    const wrongWaitCount = decidePrediction(
-      afterImplementer,
-      "TaskOutput",
-      { targets: ["agent-1", "agent-2"] },
-      5,
-    );
-    expect(wrongWaitCount.decision).toBe("deny");
-    expect(wrongWaitCount.reason).toContain("targets.length=1");
-    expect(decidePrediction(afterImplementer, "TaskOutput", { targets: ["agent-1"] }, 5).decision)
-      .toBe("allow");
+    expect(decidePrediction(prediction, "Agent", { subagent_type: "implementer" }, 5).decision).toBe("deny");
+    expect(decidePrediction(prediction, "mcp-implement", { planfile: "/repo/plan.md" }, 5).decision).toBe("deny");
+    expect(decidePrediction(prediction, "mcp-implement", { working_dir: "/repo", planfile: "/repo/plan.md" }, 5).decision).toBe("allow");
   });
 
   it("validates all members of a strict parallel Agent batch before advancing", () => {

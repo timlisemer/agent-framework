@@ -3,15 +3,10 @@ import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { readToolLogEntries } from "../utils/session-store.js";
 import { readTranscriptExact } from "../utils/transcript.js";
 import { stringifyToolInput } from "../utils/prediction-types.js";
+import { isForceCheckSatisfyingMcpToolName } from "../utils/force-check-tools.js";
+import { isEditToolName } from "../utils/edit-tools.js";
 import { extractFilePaths } from "./utils.js";
 import { summarizeRuleToolCall } from "./tool-call-context.js";
-
-const EDIT_CLASS_TOOLS: ReadonlySet<string> = new Set([
-  "Edit",
-  "Write",
-  "MultiEdit",
-  "NotebookEdit",
-]);
 
 export const errorAcknowledgeRule: PreToolRule = {
   name: "error-acknowledge",
@@ -35,13 +30,13 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     // Read recent tool log for denials. A later successful framework
-    // check/commit/push/confirm/fullconfirm satisfies older workaround denials, matching
+    // check/commit/confirm/fullconfirm/validate_implementation satisfies older workaround denials, matching
     // pre-tool-use's forceCheckPending clear semantics.
     const recentLog = readToolLogEntries(ctx.sessionDir, 5);
     let recentDenial: ReturnType<typeof readToolLogEntries>[number] | undefined;
     for (let i = recentLog.length - 1; i >= 0; i--) {
       const entry = recentLog[i];
-      if (entry.status === "allowed" && /^mcp__.*(?:commit|push|fullconfirm|confirm|check)$/.test(entry.tool)) {
+      if (entry.status === "allowed" && isForceCheckSatisfyingMcpToolName(entry.tool)) {
         break;
       }
       if (entry.status === "denied") {
@@ -62,8 +57,8 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
     // independently governs the bypass-window count, so error-acknowledge
     // must not double-block.
     if (
-      EDIT_CLASS_TOOLS.has(recentDenial.tool) &&
-      EDIT_CLASS_TOOLS.has(ctx.toolName) &&
+      isEditToolName(recentDenial.tool) &&
+      isEditToolName(ctx.toolName) &&
       (recentDenial.paths?.length || recentDenial.path)
     ) {
       const deniedPaths = recentDenial.paths?.length ? recentDenial.paths : [recentDenial.path!];

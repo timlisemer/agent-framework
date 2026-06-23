@@ -33,8 +33,9 @@ Compliance stance:
 
 Silence/session behavior:
 
-- In isolated runtime sessions, agent-framework creates a temporary `CODEX_HOME`, copies only `auth.json` when present, and sets history persistence to `none` for one-shot calls.
+- In isolated runtime sessions, agent-framework creates per-run internal Codex homes under `~/.agent-framework/internal/{direct,read-only,write}/codex/<runId>`, copies only `auth.json` when present, and removes disposable runtime homes when the run ends.
 - In native user-runtime sessions, agent-framework leaves the normal Codex home/config in place instead of creating a temporary `CODEX_HOME`.
-- In managed Astral user-runtime sessions (`sdkRuntimeHome: "managedAstral"`), agent-framework copies top-level Codex auth into `~/.agent-framework/astral-ai/codex`, sets `CODEX_HOME` to that managed home, and uses it for session history listing/resume.
+- In managed Astral user-runtime sessions (`sdkRuntimeHome: "managedAstral"`), agent-framework sets `CODEX_HOME` to `~/.agent-framework/astral-ai/codex`, refreshes framework-owned adapter config there, preserves `sessions/` history plus top-level auth/local-secret files, and uses it for session history listing/resume.
+- Internal write runs remove disposable per-run Codex homes when the run ends and persist framework implementation session state under `~/.agent-framework/internal/sessions/write/<runId>`.
 - Opt-in continuable SDK sessions keep a live Codex thread until the owning session is disposed.
 - It deletes `OPENAI_API_KEY`, `CODEX_API_KEY`, OpenRouter, and Anthropic API environment variables for this provider so Codex uses ChatGPT/Codex sign-in rather than API billing.

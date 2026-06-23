@@ -58,8 +58,8 @@ export interface SessionState {
   currentPrediction: ToolPrediction | null;
   /**
    * Set true by tool-approve.onDenialConfirmed when a workaround Bash command is
-   * denied. Cleared when the agent-framework check MCP (or any commit/push/confirm)
-   * is allowed. While true, the force-check-required rule denies all tools
+   * denied. Cleared when a check-satisfying agent-framework MCP is allowed.
+   * While true, the force-check-required rule denies all tools
    * except check / ToolSearch.
    */
   forceCheckPending: boolean;
@@ -200,12 +200,14 @@ export function formatToolDetail(toolName: string, toolInput: unknown): string {
   switch (toolName) {
     case "Edit":
       return `Edit ${input?.file_path ?? "unknown"}`;
+    case "MultiEdit":
+      return `MultiEdit ${input?.file_path ?? "unknown"}`;
     case "Bash": {
       const cmd = String(input?.command ?? "");
       return cmd.length > 80 ? cmd.slice(0, 80) + "..." : cmd;
     }
     case "Read":
-      return `Read ${input?.file_path ?? "unknown"}`;
+      return `Read ${input?.file_path ?? input?.path ?? "unknown"}`;
     case "Glob":
       return `Glob ${input?.pattern ?? "unknown"}`;
     case "Grep":

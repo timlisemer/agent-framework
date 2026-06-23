@@ -2,6 +2,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { exitAfterFlush } from "../utils/hook-bootstrap.js";
 import { validateClaudeMd } from "../agents/hooks/claude-md-validate.js";
+import type { EditValidationToolInput } from "../agents/hooks/edit-validation.js";
 import type { AdapterEncoder } from "../adapter/types.js";
 import { activeSpec } from "../adapter/spec.js";
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
@@ -45,6 +46,7 @@ import {
   isPlanFile,
   extractFilePaths,
 } from "../rules/utils.js";
+import { isTextEditToolName } from "../utils/edit-tools.js";
 import { ALL_RULES, evaluateRules } from "../rules/index.js";
 import type { RuleContext } from "../rules/types.js";
 import { appealToolIdentityFromRuleContext } from "../rules/tool-call-context.js";
@@ -61,6 +63,7 @@ import {
   decideRequiredWorkflowToolSequence,
   type PredictionToolCall,
 } from "../utils/prediction-types.js";
+import { isForceCheckSatisfyingCanonicalMcp } from "../utils/force-check-tools.js";
 
 interface PipelineExit {
   decision: "allow" | "deny";
@@ -256,13 +259,13 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
 
     // forceCheckPending clear: keyed on THIS hook's toolName, not the leader's.
     // Applies to both leader and mirrored siblings — if THIS hook is an MCP
-    // commit/push/confirm/check that was allowed (directly or mirrored), it
+    // commit/confirm/check/validate_implementation that was allowed (directly or mirrored), it
     // satisfies the force-check lockout. Keeping this outside the
     // `!mirroredFromLeader` guard preserves today's semantics where every
     // allowed MCP-matching tool clears the flag.
     {
       const mcp = spec.recognizeMcp(rawToolName);
-      if (exit.decision === "allow" && mcp && (["commit", "push", "confirm", "fullconfirm", "check"] as const).includes(mcp as "commit" | "push" | "confirm" | "fullconfirm" | "check")) {
+      if (exit.decision === "allow" && isForceCheckSatisfyingCanonicalMcp(mcp)) {
         await stateManager.update((s) => ({ ...s, forceCheckPending: false }));
       }
     }
@@ -498,17 +501,15 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   // EXCEPTIONS: plan-validate and claude-md-validate run AFTER all rules pass.
   // sensitive-path-block rule (priority 58) does not apply to plan/CLAUDE.md
   // files so they always reach this point.
-  if (FILE_TOOLS.includes(toolName)) {
+  if (FILE_TOOLS.includes(toolName) && isTextEditToolName(toolName)) {
     const filePaths = extractFilePaths(toolName, toolInput);
     const instructionFiles = new Set(host.instructionFiles.map((f) => path.resolve(f)));
-    const instructionPaths = (toolName === "Write" || toolName === "Edit")
-      ? filePaths.filter((filePath) =>
-        instructionFiles.has(path.resolve(projectDir, filePath))
-      )
-      : [];
+    const instructionPaths = filePaths.filter((filePath) =>
+      instructionFiles.has(path.resolve(projectDir, filePath))
+    );
 
     for (const filePath of instructionPaths) {
-      // Host instruction-file validate: Write/Edit to any of the active
+      // Host instruction-file validate: text edit tools to any of the active
       // adapter's instruction files (Claude: CLAUDE.md; Codex: AGENTS.md and
       // CLAUDE.md). The validator handles all of them with the same prompt.
       let currentContent: string | null = null;
@@ -520,8 +521,8 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
 
       const validation = await validateClaudeMd(
         currentContent,
-        toolName as "Write" | "Edit",
-        toolInput as { content?: string; old_string?: string; new_string?: string },
+        toolName,
+        toolInput as EditValidationToolInput,
         projectDir,
         "PreToolUse"
       );

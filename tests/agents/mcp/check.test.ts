@@ -353,6 +353,53 @@ src/example.ts:1:1 warning TS6385: deprecated
     expect(result).toContain("src/index.ts:3: import './old-helper.ts';");
   });
 
+  it("includes failing command output when the check summarizer returns a sentinel", async () => {
+    fs.writeFileSync(path.join(tempDir, "Makefile"), "check:\n\tfalse\n");
+    mocks.runProcessCancellable.mockResolvedValue({
+      output: "src/example.ts:1:1 error TS2304: Cannot find name 'missing'.",
+      exitCode: 1,
+    });
+    mocks.runAgent.mockResolvedValue({
+      output: "[SDK ERROR] No output received (messages=0, lastType=none)",
+    });
+
+    const result = await runCheckAgent(tempDir);
+
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("MAKE CHECK OUTPUT (exit code 1):");
+    expect(result).toContain("Cannot find name 'missing'");
+    expect(result).toContain("[SDK ERROR] No output received");
+  });
+
+  it("falls back deterministically when runner format validation marks the summarizer failed", async () => {
+    fs.writeFileSync(path.join(tempDir, "Makefile"), "check:\n\tfalse\n");
+    mocks.runProcessCancellable.mockResolvedValue({
+      output: "src/example.ts:1:1 error TS2304: Cannot find name 'missing'.",
+      exitCode: 1,
+    });
+    mocks.runAgent.mockResolvedValue({
+      output: `## Results
+- Errors: 0
+- Warnings: 0
+
+## Errors
+Check agent returned malformed output.
+
+## Raw Output
+[SDK ERROR] No output received (messages=0, lastType=none)`,
+      success: false,
+      errorCount: 1,
+    });
+
+    const result = await runCheckAgent(tempDir);
+
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("MAKE CHECK OUTPUT (exit code 1):");
+    expect(result).toContain("Cannot find name 'missing'");
+    expect(result).toContain("Check agent returned malformed output.");
+    expect(result).toContain("[SDK ERROR] No output received");
+  });
+
   it("summarizes all-repos check context with one check-agent call", async () => {
     const subDir = path.join(tempDir, "sub");
     fs.mkdirSync(subDir);

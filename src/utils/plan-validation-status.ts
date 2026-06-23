@@ -1,6 +1,6 @@
-import * as crypto from "crypto";
 import * as path from "path";
 import { readJson, writeJson } from "./file-io.js";
+import { hashSha256 } from "./hash-utils.js";
 import { sessionPlanValidationStatusFile } from "./paths.js";
 
 export type PlanValidationRecordedStatus = "pass" | "fail";
@@ -16,7 +16,7 @@ export interface PlanValidationStatusRecord {
 type PlanValidationStatusStore = Record<string, PlanValidationStatusRecord>;
 
 export function hashPlanContent(content: string): string {
-  return crypto.createHash("sha256").update(content, "utf8").digest("hex");
+  return hashSha256(Buffer.from(content, "utf8"));
 }
 
 export function planValidationStatusKey(planPath: string, contentHash: string): string {

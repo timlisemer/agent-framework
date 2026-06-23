@@ -61,6 +61,8 @@ import { MODEL_TIERS } from "../types.js";
 import { FORBIDDEN_DENY_PROMPT_LIST } from "./fabricated-deny-patterns.js";
 import { activeSpec } from "../adapter/spec.js";
 import { READ_ONLY_GIT_COMMANDS_DESCRIPTION } from "./bash-command-policy.js";
+import { IMPLEMENTATION_VALIDATOR_FORMAT_FALLBACK } from "./implementation-validator-format.js";
+import { EDIT_TOOL_NAMES_DISPLAY, TEXT_EDIT_TOOL_NAMES_DISPLAY } from "./edit-tools.js";
 
 // ============================================================================
 // MCP AGENTS
@@ -287,6 +289,72 @@ DECLINED: Agent returned malformed output
 
 ## Raw Output
 $RAW`,
+  },
+};
+
+export const IMPLEMENT_AGENT: Omit<AgentConfig, "workingDir"> = {
+  name: "implement",
+  tier: MODEL_TIERS.SONNET,
+  mode: "sdk",
+  maxTurns: 80,
+  runtimeHomeProfile: "internalWrite",
+  sdkToolPolicy: "write",
+  systemPrompt: `You implement plans by making all code changes specified in the plan file.
+
+Workflow:
+1. Read the plan file provided in your prompt.
+2. Read all source files referenced in the plan.
+3. Implement every change described in the plan, no more and no less.
+4. Do not modify the plan file itself.
+5. Report what was implemented.
+
+Hard constraints:
+- Do not add features, refactors, or improvements not in the plan.
+- Do not skip changes described in the plan.
+- Do not commit or push changes.
+- Use read-only shell commands for investigation. Use edit tools for code changes.
+- Follow the project's existing code style.
+- Fix root causes. Do not silence warnings, suppress errors, weaken assertions, or change test expectations to hide failures.
+- Do not add backwards-compatibility shims, deprecated re-exports, or legacy fallbacks.`,
+};
+
+export const IMPLEMENT_VALIDATE_AGENT: Omit<AgentConfig, "workingDir"> = {
+  name: "implement-validator",
+  tier: MODEL_TIERS.SONNET,
+  mode: "sdk",
+  maxTurns: 50,
+  runtimeHomeProfile: "internalReadOnly",
+  sdkToolPolicy: "read-only",
+  systemPrompt: `You verify that a plan was implemented correctly by comparing every change in the plan against the actual codebase.
+
+Workflow:
+1. Read the plan file provided in your prompt.
+2. Catalog every discrete change.
+3. Verify each change against the target files.
+4. Review the parent-owned check summary included in the prompt.
+5. Report PASS or FAIL.
+
+Report format:
+### Status: PASS | FAIL
+### Changes Verified
+- [x] path/to/file -- description (IMPLEMENTED)
+- [ ] path/to/file -- description (MISSING: explanation)
+- [~] path/to/file -- description (PARTIAL: explanation)
+### Check Results
+PASS | FAIL
+### Issues Found
+List deviations from the plan, or "None".
+
+Hard constraints:
+- Do not modify files.
+- Do not fix issues you find.
+- Do not call MCP tools.
+- Additional uncommitted code not in the plan is acceptable.
+- Missing plan items or incorrect implementations are failures.`,
+  formatValidation: {
+    validator: /### Status:\s*(PASS|FAIL)/i,
+    formatReminder: "Reply with the implementation validation report beginning with exactly: ### Status: PASS or ### Status: FAIL",
+    fallbackOutput: IMPLEMENTATION_VALIDATOR_FORMAT_FALLBACK,
   },
 };
 
@@ -618,7 +686,7 @@ If \`=== SLASH COMMAND INVOKED ===\` appears in the context and its \`Allowed to
 AIs must NOT run build, compile, or typecheck shell commands (e.g., npm run build, cargo build, make build, tsc, go build).
 - Use the ${checkHint} instead to verify code compiles
 - "Build" means compilation commands in a shell, NOT editing code, spawning agents, or writing files
-- This rule applies ONLY to Bash tool calls, not to Agent, Edit, Write, or other tools
+- This rule applies ONLY to Bash tool calls, not to Agent, edit tools (${TEXT_EDIT_TOOL_NAMES_DISPLAY}), or other tools
 
 === BLACKLIST VIOLATIONS (IMMEDIATE DENY) ===
 
@@ -651,7 +719,7 @@ For Read:
 - DENY if reading sensitive files (credentials, private keys, ~/.ssh/, .env, ~/.aws/, etc.)
 - ALLOW reading within project (except sensitive files)
 
-For Edit/Write/NotebookEdit:
+For ${EDIT_TOOL_NAMES_DISPLAY}:
 - DENY if editing sensitive files (.env, credentials, secrets, keys)
 - DENY if editing system files (/etc, /sys, /proc, /usr, /var)
 
@@ -711,7 +779,7 @@ sqlite3: APPROVE only for read-only operations.
 
 12. ssh commands (remote execution)
     - DENY: ssh <host> <command>
-    - AI tools (Read, Write, Edit) cannot operate over SSH
+    - AI tools (Read, ${TEXT_EDIT_TOOL_NAMES_DISPLAY}) cannot operate over SSH
 
 === CLASSIFIED READ-ONLY BASH ON NATIVE CLAUDE CODE v2.1.117+ ===
 
@@ -789,7 +857,7 @@ If no rule above justifies a DENY, output APPROVE. False approvals are recoverab
 
 If "PLAN MODE ACTIVE" appears in context, the allow/deny list in the plan-mode block of the context is authoritative. In particular:
 - Read-only tools (Read, LS, WebFetch, WebSearch, classified read-only Bash, MCP read tools) → APPROVE.
-- Edit, Write, NotebookEdit, and write Bash commands are already blocked by TypeScript upstream before this prompt runs. You should never need to deny them here.
+- ${EDIT_TOOL_NAMES_DISPLAY} and write Bash commands are already blocked by TypeScript upstream before this prompt runs. You should never need to deny them here.
 - Agent / Task subagent dispatch for exploration or research (e.g. subagent_type "Explore", "general-purpose", "Plan", code-reviewer-style agents) → APPROVE by default. DENY only when the dispatch prompt itself instructs the subagent to edit/write/commit/push/build, or the subagent_type is inherently write-oriented (e.g. "implementer", "tester"). Any write the subagent later attempts hits this same hook and is blocked there, so do not pre-block exploration dispatches defensively.`;
 }
 
@@ -1135,7 +1203,7 @@ BLOCK if ANY of these apply:
 2. UNSEEN CONTENT - Question asks about content not yet shown to user:
    - "Which approach in the plan do you prefer?" but plan wasn't displayed
    - References to files, plans, or analysis results user hasn't seen
-   - Look for: Write/Edit to plan files WITHOUT subsequent Read or /plan command
+   - Look for: ${TEXT_EDIT_TOOL_NAMES_DISPLAY} to plan files WITHOUT subsequent Read or /plan command
    EXCEPTION: If the assistant's prior text messages SUMMARIZE or DESCRIBE the referenced
    content, the user HAS seen it. Only block if content was written to a file with NO summary
    in chat. KEY TEST: Does the user need the RAW CONTENT to answer, or is the conversation
@@ -1403,7 +1471,7 @@ EXPLICITLY-ALLOWED / EXPLICITLY-BLOCKED:
 - Populate when the user's instruction in THIS message DEMANDS an action that requires a specific tool to satisfy. The user does not have to name the tool literally — name it whenever satisfying their imperative is impossible without it.
 - TS pre-fills the obvious verb-to-tool mappings (read/edit/commit/push/check/etc.) by union before downstream rules see your output. Add ANY tools you judge required that the regex would miss; do NOT worry about being exhaustive on the common verbs.
 - Inaction-complaint while the prior assistant turn proposed a specific concrete action ("Want me to proceed with X?", "Should I do Y?", "Let me know if you want me to Z") → authorize the tool that the proposed action requires. The user's "stop delaying" is implicit consent to the pending proposal.
-- GENERAL RULE: if the user's imperative cannot be carried out without tool T, populate explicitlyAllowedTools with T. "undo that immediately" applied to a file the AI just changed REQUIRES Edit/Write — authorize them.
+- GENERAL RULE: if the user's imperative cannot be carried out without tool T, populate explicitlyAllowedTools with T. "undo that immediately" applied to a file the AI just changed REQUIRES ${TEXT_EDIT_TOOL_NAMES_DISPLAY} — authorize them.
 - Do NOT use EXPLICITLY-ALLOWED-TOOLS as a substitute for ordered workflow instructions. If LATEST says "do X, then Y, then Z", put X/Y/Z in EXPLICITLY-REQUIRED-TOOLS and leave EXPLICITLY-ALLOWED-TOOLS for unordered broad authorization only.
 - TARGET_SUBSTRING is LITERAL (no regex). Quote user words in REASON.
 

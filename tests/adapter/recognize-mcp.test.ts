@@ -12,6 +12,8 @@ describe("adapter MCP recognition", () => {
     expect(claudeMcp.mcpWireName("locate_scenario")).toBe("mcp__agent-framework__locate_scenario");
     expect(claudeMcp.recognizeMcp("mcp__agent-framework__fullconfirm")).toBe("fullconfirm");
     expect(claudeMcp.mcpWireName("fullconfirm")).toBe("mcp__agent-framework__fullconfirm");
+    expect(claudeMcp.recognizeMcp("mcp__agent-framework__implement")).toBe("implement");
+    expect(claudeMcp.mcpWireName("validate_implementation")).toBe("mcp__agent-framework__validate_implementation");
   });
 
   it("recognizes Codex validate_plan wire name", () => {
@@ -23,5 +25,7 @@ describe("adapter MCP recognition", () => {
     expect(codexMcp.mcpWireName("locate_scenario")).toBe("mcp__agent_framework__locate_scenario");
     expect(codexMcp.recognizeMcp("mcp__agent_framework__fullconfirm")).toBe("fullconfirm");
     expect(codexMcp.mcpWireName("fullconfirm")).toBe("mcp__agent_framework__fullconfirm");
+    expect(codexMcp.recognizeMcp("mcp__agent_framework__implement")).toBe("implement");
+    expect(codexMcp.mcpWireName("validate_implementation")).toBe("mcp__agent_framework__validate_implementation");
   });
 });

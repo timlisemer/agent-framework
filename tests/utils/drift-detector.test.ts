@@ -26,7 +26,7 @@ describe("detectDrift - graduated repetition block", () => {
     expect(signal.detected).toBe(true);
     expect(signal.reason.startsWith(`4 edits to "${TARGET}"`)).toBe(true);
     expect(signal.reason).toContain("stop making many small edits");
-    expect(signal.reason).toContain("ONE Edit/Write call");
+    expect(signal.reason).toContain("ONE Edit, MultiEdit, or Write call");
   });
 
   it("allows at level 1 until 3 free edits are consumed", () => {

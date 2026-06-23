@@ -4,9 +4,8 @@ import {
   detectDrift,
   extractDriftTargets,
 } from "../utils/drift-detector.js";
+import { isEditToolName } from "../utils/edit-tools.js";
 import { readToolLogEntries } from "../utils/session-store.js";
-
-const EDIT_TOOLS = ["Edit", "Write", "NotebookEdit"];
 
 export const driftDetectRule: PreToolRule = {
   name: "drift-block",
@@ -39,7 +38,7 @@ export const driftDetectRule: PreToolRule = {
     // Allow-path: advance allowedSinceLevelChange for warned/final-warned
     // targets so the "3 free" / "1 free" bypass windows count down.
     const targets = extractDriftTargets(ctx.toolInput);
-    if (targets.length > 0 && EDIT_TOOLS.includes(ctx.toolName)) {
+    if (targets.length > 0 && isEditToolName(ctx.toolName)) {
       const updates = Object.fromEntries(targets.flatMap((target) => {
         const state = ctx.state.driftState?.[target];
         if (state && state.level > 0 && state.level < 3) {
@@ -69,7 +68,7 @@ export const driftDetectRule: PreToolRule = {
 
   async onDenialConfirmed(ctx: RuleContext, reason: string): Promise<void> {
     const targets = extractDriftTargets(ctx.toolInput);
-    if (targets.length === 0 || !EDIT_TOOLS.includes(ctx.toolName)) return;
+    if (targets.length === 0 || !isEditToolName(ctx.toolName)) return;
 
     // Only graduate the loop/thrashing branch. All three drift messages share
     // the substring `edits to "` (level 0/1/2/3 emissions in drift-detector.ts).

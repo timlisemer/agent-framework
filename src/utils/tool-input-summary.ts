@@ -86,8 +86,9 @@ export function summarizeToolInputForLlm(toolName: string, toolInput: unknown): 
       ])})`;
     }
     case "Read": {
+      const filePath = i.file_path ?? i.path ?? "";
       return `Read(${kv([
-        ["file_path", q(String(i.file_path ?? ""))],
+        ["file_path", q(String(filePath))],
         ["offset", typeof i.offset === "number" ? String(i.offset) : undefined],
         ["limit", typeof i.limit === "number" ? String(i.limit) : undefined],
         ["pages", typeof i.pages === "string" ? q(i.pages) : undefined],

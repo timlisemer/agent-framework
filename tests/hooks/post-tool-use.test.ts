@@ -110,4 +110,42 @@ describe("mainPostToolUse planfile sidecar", () => {
       planName: "second-plan",
     });
   });
+
+  it("records the current-plan sidecar after a successful planfile MultiEdit", async () => {
+    const planPath = sessionPlanFile(sessionDir, "multi-edit-plan");
+    fs.mkdirSync(path.dirname(planPath), { recursive: true });
+    fs.writeFileSync(
+      planPath,
+      [
+        "Plan Name: multi-edit-plan",
+        "",
+        "## User Goal",
+        "",
+        "> \"Do the thing.\"",
+        "",
+        "Planfile Path: " + planPath,
+        "Plan Name: multi-edit-plan",
+      ].join("\n"),
+    );
+
+    await mainPostToolUse(
+      {
+        session_id: "session-post",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "MultiEdit",
+        tool_input: {
+          file_path: planPath,
+          edits: [{ old_string: "thing", new_string: "thing now" }],
+        },
+      },
+      codexEncoder,
+    );
+
+    expect(JSON.parse(fs.readFileSync(sessionCurrentPlanFile(sessionDir), "utf-8"))).toEqual({
+      kind: "file",
+      path: planPath,
+      planName: "multi-edit-plan",
+    });
+  });
 });

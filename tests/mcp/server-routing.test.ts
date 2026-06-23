@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   runCheckAgent: vi.fn(),
   runValidatePlanAgent: vi.fn(),
   runCreatePlanfileAgent: vi.fn(),
+  runImplementAgent: vi.fn(),
+  runValidateImplementationAgent: vi.fn(),
   runConfirmAgent: vi.fn(),
   runFullConfirmAgent: vi.fn(),
   prepareCommitConfirmContext: vi.fn(),
@@ -58,6 +60,11 @@ vi.mock("../../src/agents/mcp/validate-plan.js", () => ({
 
 vi.mock("../../src/agents/mcp/create-planfile.js", () => ({
   runCreatePlanfileAgent: mocks.runCreatePlanfileAgent,
+}));
+
+vi.mock("../../src/agents/mcp/implement.js", () => ({
+  runImplementAgent: mocks.runImplementAgent,
+  runValidateImplementationAgent: mocks.runValidateImplementationAgent,
 }));
 
 vi.mock("../../src/agents/mcp/confirm.js", () => ({
@@ -147,7 +154,7 @@ const repoInfo = {
   ],
 };
 
-async function callTool(name: "confirm" | "fullconfirm" | "commit", args: Record<string, unknown>) {
+async function callTool(name: "confirm" | "fullconfirm" | "commit" | "implement" | "validate_implementation", args: Record<string, unknown>) {
   const tool = mocks.tools.get(name);
   expect(tool).toBeDefined();
   return await tool!.handler(args, { signal: undefined });
@@ -174,6 +181,36 @@ describe("MCP server repo-scope routing", () => {
     mocks.prepareCommitConfirmContext.mockResolvedValue({ extraContext: undefined, moves: [], movesByRepo: [] });
     mocks.runCommitAgentWithSharedConfirm.mockResolvedValue("## Verdict\nCONFIRMED: ok\n\nSIZE: SMALL\ncommit: scoped\nHASH: abc123");
     mocks.runCommitAgent.mockResolvedValue("## Verdict\nCONFIRMED: ok\n\nSIZE: SMALL\ncommit: scoped\nHASH: def456");
+    mocks.runImplementAgent.mockResolvedValue("implemented");
+    mocks.runValidateImplementationAgent.mockResolvedValue("validated");
+  });
+
+  it("routes implement to the MCP-owned implementation workflow", async () => {
+    const result = await callTool("implement", {
+      working_dir: "/repo",
+      planfile: "/repo/plan.md",
+      model_tier: "sonnet",
+      extra_context: ["quoted user text"],
+    });
+
+    expect(result.content[0].text).toBe("implemented");
+    expect(mocks.runImplementAgent).toHaveBeenCalledWith(
+      { working_dir: "/repo", planfile: "/repo/plan.md", model_tier: "sonnet", extra_context: ["quoted user text"] },
+      expect.objectContaining({ signal: expect.any(AbortSignal), workingDir: "/repo" }),
+    );
+  });
+
+  it("routes validate_implementation to the shared validation workflow", async () => {
+    const result = await callTool("validate_implementation", {
+      working_dir: "/repo",
+      planfile: "/repo/plan.md",
+    });
+
+    expect(result.content[0].text).toBe("validated");
+    expect(mocks.runValidateImplementationAgent).toHaveBeenCalledWith(
+      { working_dir: "/repo", planfile: "/repo/plan.md" },
+      expect.objectContaining({ signal: expect.any(AbortSignal), workingDir: "/repo" }),
+    );
   });
 
   it("routes confirm skip_elicitation through all scope without individual forms", async () => {

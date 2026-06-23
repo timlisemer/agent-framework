@@ -80,6 +80,21 @@ function mergePriorErrorContexts(
 export async function mainStop(input: FrameworkStopHookInput, encoder: AdapterEncoder): Promise<void> {
   const host = resolveHostContext(input);
   setTranscriptPath(input.transcript_path);
+  if (
+    process.env.AGENT_FRAMEWORK_DISABLE_STOP_BLOCK === "1" &&
+    process.env.AGENT_FRAMEWORK_RUNTIME_PROFILE === "internalWrite"
+  ) {
+    const sessionDir = getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path });
+    try {
+      const state = await getSessionState(sessionDir).load().catch(() => undefined);
+      if (state) appendStateSnapshot(sessionDir, state, input.transcript_path);
+    } catch {
+      // best-effort internal write capture
+    }
+    const out = encoder.encodeStopPass();
+    await exitAfterFlush(out.exitCode, out.stdout);
+    return;
+  }
   const sessionDir = getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path });
 
   await rotateEpochIfNeeded(sessionDir, input.transcript_path);

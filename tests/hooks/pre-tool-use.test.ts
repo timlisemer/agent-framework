@@ -78,14 +78,14 @@ describe("pre-tool-use planfile writes", () => {
     else process.env.AGENT_FRAMEWORK_PROJECT_DIR = prevProjectDir;
   });
 
-  it("does not run plan validation on every planfile Write/Edit", () => {
+  it("does not run plan validation on every planfile edit", () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), "src", "hooks", "pre-tool-use.ts"),
       "utf-8",
     );
     expect(source).not.toContain("validatePlanEdit");
     expect(source).not.toContain("runPlanValidation");
-    expect(source).not.toContain("Plan-validate: Write/Edit to the active adapter's plans root.");
+    expect(source).not.toContain("Plan-validate: file edit to the active adapter's plans root.");
   });
 
   it("validates every instruction file in a multi-file edit", async () => {
@@ -120,6 +120,39 @@ describe("pre-tool-use planfile writes", () => {
       0,
       expect.stringContaining("CLAUDE.md validation failed: bad second file"),
     );
+  });
+
+  it("validates instruction files edited with MultiEdit", async () => {
+    const agentsPath = path.join(tempDir, "AGENTS.md");
+    fs.writeFileSync(agentsPath, "agents");
+    mocks.validateClaudeMd.mockResolvedValueOnce({ approved: true });
+
+    await mainPreToolUse(
+      {
+        session_id: "session-pre",
+        tool_use_id: "tool-pre-multiedit",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "MultiEdit",
+        tool_input: {
+          file_path: agentsPath,
+          edits: [{ old_string: "agents", new_string: "agents updated" }],
+        },
+      },
+      codexEncoder,
+    );
+
+    expect(mocks.validateClaudeMd).toHaveBeenCalledTimes(1);
+    expect(mocks.validateClaudeMd).toHaveBeenCalledWith(
+      "agents",
+      "MultiEdit",
+      expect.objectContaining({
+        edits: [{ old_string: "agents", new_string: "agents updated" }],
+      }),
+      tempDir,
+      "PreToolUse",
+    );
+    expect(mocks.exitAfterFlush).toHaveBeenCalledWith(0, "");
   });
 
   it("does not use instruction-file validation as the final allow for mixed edits", async () => {

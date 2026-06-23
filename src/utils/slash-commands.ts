@@ -10,6 +10,7 @@
  */
 
 import type { CanonicalMcp, CanonicalWorkflow } from "../adapter/types.js";
+import { WRITE_REPAIR_TOOL_NAMES } from "./edit-tools.js";
 
 /**
  * MCP tools gated by slash-command authorization.
@@ -23,7 +24,11 @@ export const SLASH_COMMAND_GATED_MCPS: Record<string, readonly CanonicalMcp[]> =
   quickconfirm: ["confirm"],
   fullconfirm: ["fullconfirm"],
   fullquickconfirm: ["fullconfirm"],
+  implement: ["implement"],
+  validate: ["validate_implementation"],
 };
+
+export const SLASH_COMMAND_WORKFLOWS = Object.keys(SLASH_COMMAND_GATED_MCPS) as CanonicalWorkflow[];
 
 /**
  * Per-command workflow tool sets. The non-strict tools each slash-command
@@ -39,8 +44,14 @@ export const SLASH_COMMAND_WORKFLOW_TOOLS: Record<string, readonly string[]> = {
   plan1:     ["CloseAgent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
   plan3:     ["CloseAgent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
   plan5:     ["CloseAgent", "ExitPlanMode", "mcp-create_planfile", "mcp-validate_plan"],
-  implement: ["CloseAgent"],
 };
+
+const SLASH_COMMAND_GATED_MCP_TOOLS: Record<string, readonly string[]> = Object.fromEntries(
+  Object.entries(SLASH_COMMAND_GATED_MCPS).map(([workflow, mcps]) => [
+    workflow,
+    mcps.map((mcp) => `mcp-${mcp}`),
+  ]),
+);
 
 /**
  * Combined view: every canonical tool name a slash command authorizes.
@@ -48,21 +59,17 @@ export const SLASH_COMMAND_WORKFLOW_TOOLS: Record<string, readonly string[]> = {
  */
 export type SlashCommandWorkflow = CanonicalWorkflow;
 
-const WRITE_REPAIR_TOOLS = ["Edit", "MultiEdit", "Write"] as const;
-
 export const SLASH_COMMAND_ALLOWED_TOOLS: Record<string, readonly string[]> = {
   ...SLASH_COMMAND_WORKFLOW_TOOLS,
-  commit: ["mcp-commit"],
-  push: ["mcp-push", "mcp-commit"],
-  quickpush: ["mcp-push", "mcp-commit"],
-  confirm: ["mcp-confirm"],
-  quickconfirm: ["mcp-confirm", ...WRITE_REPAIR_TOOLS],
-  fullconfirm: ["mcp-fullconfirm"],
-  fullquickconfirm: ["mcp-fullconfirm", ...WRITE_REPAIR_TOOLS],
+  ...SLASH_COMMAND_GATED_MCP_TOOLS,
+  quickconfirm: [...SLASH_COMMAND_GATED_MCP_TOOLS.quickconfirm, ...WRITE_REPAIR_TOOL_NAMES],
+  fullquickconfirm: [...SLASH_COMMAND_GATED_MCP_TOOLS.fullquickconfirm, ...WRITE_REPAIR_TOOL_NAMES],
 };
 
 /**
  * Canonical MCP names that require slash-command authorization.
  * Wire-name translation happens in adapters/.
  */
-export const RESTRICTED_MCPS: ReadonlySet<CanonicalMcp> = new Set(["commit", "push", "confirm", "fullconfirm"]);
+export const RESTRICTED_MCPS: ReadonlySet<CanonicalMcp> = new Set(
+  Object.values(SLASH_COMMAND_GATED_MCPS).flat(),
+);

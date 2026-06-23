@@ -210,10 +210,9 @@ describe("sentimentRule — LLM-call path", () => {
       modelName: "claude-haiku-4-5",
     });
     const workflowText = [
-      "1. Spawn exactly one `implementer` agent.",
-      "2. Wait for the implementer to complete.",
-      "3. Spawn exactly one `implement-validator` agent.",
-      "4. Wait for the validator to complete.",
+      "Immediately call `mcp__agent_framework__implement`.",
+      "Pass `working_dir` with the current repository working directory.",
+      "Do not spawn agents yourself.",
     ].join("\n");
     const ctx = makeCtx({ userPrompt: workflowText });
     await sentimentRule.check(ctx);
@@ -225,7 +224,7 @@ describe("sentimentRule — LLM-call path", () => {
     expect(prediction.explicitlyRequiredTools?.map(requirementSignature))
       .toEqual(implementWorkflowRequirementSignatures());
     expect(prediction.nonBlockingTools).toContainEqual(
-      expect.objectContaining({ tool: "CloseAgent" }),
+      expect.objectContaining({ tool: "Read" }),
     );
   });
 

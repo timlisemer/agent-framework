@@ -26,7 +26,8 @@ deployment path; the activation script owns them.
 `$agent-framework-transcript`,
 `$agent-framework-locate-scenario`,
 `$agent-framework-plan1`, `$agent-framework-plan3`,
-`$agent-framework-plan5`, and `$agent-framework-implement`). These mirror
+`$agent-framework-plan5`, `$agent-framework-implement`, and
+`$agent-framework-validate`). These mirror
 the Claude slash-command workflows. The NixOS activation script creates real directories under
 `~/.codex/skills/` and copies each `SKILL.md` into place. Do not symlink these
 skill directories: Codex skill discovery does not follow symlinked skill
@@ -57,8 +58,11 @@ not include a transcript path, the resolver uses the latest
 
 Codex planfiles live under the agent-framework session `plans/` directory.
 The session `current-plan.json` sidecar stores only the active planfile
-descriptor, not plan content. Implementation workflows resolve that planfile
-path and pass it to implementer and validator agents as `Plan file: <path>`.
+descriptor, not plan content. Implementation workflows are MCP-owned:
+`$agent-framework-implement` calls `mcp__agent_framework__implement`, which
+runs the internal write implementer, parent-owned check, and read-only
+implementation validator. `$agent-framework-validate` calls
+`mcp__agent_framework__validate_implementation` for validation only.
 
 Scenario materialization for Codex sessions uses the shared `scenario_tester`
 MCP action `materialize_scenario`. The materializer infers Codex from
@@ -78,16 +82,19 @@ has no accepted planfiles yet, the Stop hook derives a session planfile name,
 creates that file through the shared creator path, validates it, and blocks
 with the created path plus validation feedback.
 
-`dotcodex/agents/*.toml` contains Codex custom-agent equivalents for the
-Claude subagent roles. The NixOS activation script links these as individual
-files under `~/.codex/agents/`.
+`dotcodex/agents/*.toml` contains Codex custom-agent roles. The implementation
+agents are compatibility wrappers that delegate to the MCP-owned
+`implement`/`validate_implementation` workflows; they do not run checks or edit
+files directly. The NixOS activation script links these as individual files
+under `~/.codex/agents/`.
 
 ## Current Codex Hook Limits
 
-Codex `PreToolUse` can intercept Bash, `apply_patch`, and MCP tool calls, but
-it is not a complete enforcement boundary. The adapter also registers
-`PermissionRequest`, `PostToolUse`, and `Stop` hooks so approval prompts and
-post-tool feedback still pass through the framework where Codex exposes them.
+Codex `PreToolUse` can intercept `Read`, Bash, `apply_patch`, canonical edit
+tools, and MCP tool calls, but it is not a complete enforcement boundary. The
+adapter also registers `PermissionRequest`, `PostToolUse`, and `Stop` hooks so
+approval prompts and post-tool feedback still pass through the framework where
+Codex exposes them.
 
 For Bash, the shared policy keeps authorization and safety separate. If the
 latest user message already implies Bash, the Codex hook should not require a

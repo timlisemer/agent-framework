@@ -13,15 +13,13 @@ import { getBlacklistHighlights } from "./bash-command-policy.js";
 import { isPlanModeBashWrite } from "./plan-mode-bash-write.js";
 import { activeSpec } from "../adapter/spec.js";
 import { isSessionPlanfilePath } from "./planfile.js";
-
-// Tools that modify files (apply_patch is handled by Codex adapter → Edit before rules run)
-const EDIT_TOOLS = ["Write", "Edit", "NotebookEdit"];
+import { isEditToolName, TEXT_EDIT_TOOL_NAMES } from "./edit-tools.js";
 
 /**
  * Check if a tool name is a file-editing tool.
  */
 export function isEditTool(toolName: string): boolean {
-  return EDIT_TOOLS.includes(toolName);
+  return isEditToolName(toolName);
 }
 
 /**
@@ -161,8 +159,7 @@ export function deriveAllowedToolsFromIntent(message: string): string[] {
   const tools = new Set<string>();
   if (READ_VERB_RE.test(message)) tools.add("Read");
   if (EDIT_VERB_RE.test(message)) {
-    tools.add("Edit");
-    tools.add("Write");
+    for (const toolName of TEXT_EDIT_TOOL_NAMES) tools.add(toolName);
   }
   if (RENAME_MOVE_VERB_RE.test(message)) tools.add("Bash");
   if (TEST_RUN_VERB_RE.test(message)) tools.add("Bash");

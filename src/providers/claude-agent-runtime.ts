@@ -20,12 +20,16 @@ import type { ResolvedProvider } from "./types.js";
 import type { AiRuntimeEvent } from "../ai-backend/runtime-events.js";
 import type { TokenUsage } from "../ai-protocol/index.js";
 import { assertManagedRuntimeHomeConfig, prepareManagedRuntimeHome } from "./managed-runtime-home.js";
+import { materializeRuntimeHome, resolveRuntimeHomeProfile, type MaterializedRuntimeHome } from "../runtime-home/runtime-profiles.js";
 
 type ClaudeQueryOptionsConfig = {
   workingDir?: string | null;
   systemPrompt?: string | null;
   sdkRuntimeEnvironment?: SdkRuntimeEnvironment;
   sdkRuntimeHome?: SdkRuntimeHome;
+  runtimeHomeProfile?: ProviderRunInput["config"]["runtimeHomeProfile"];
+  sdkToolPolicy?: ProviderRunInput["config"]["sdkToolPolicy"];
+  runtimeRunId?: string;
 };
 
 type ClaudeQueryOptionOverrides = {
@@ -41,6 +45,17 @@ type ClaudeQueryOptionOverrides = {
   stderr?: (data: string) => void;
   persistSession?: boolean;
   resume?: string;
+};
+
+export type ClaudeRuntimeHome = MaterializedRuntimeHome | ReturnType<typeof prepareManagedRuntimeHome>;
+
+export type ClaudeRuntimeHomeLease = {
+  readonly retainedRuntimeHome: ClaudeRuntimeHome | null;
+  get(): ClaudeRuntimeHome;
+  releaseAttempt(runtimeHome: ClaudeRuntimeHome): void;
+  markRetainedHomeStable(): void;
+  disposeCreatedRetainedHome(): void;
+  dispose(): void;
 };
 
 export type ClaudeUiStreamState = {
@@ -87,9 +102,7 @@ export async function runClaudeAgent(
 
 ## TOOLS AVAILABLE
 
-You have access to these tools for investigating code:
-- **Read**: View file contents.
-- **Bash**: Classified read-only commands only: simple inspection, read-only-heavy evaluation such as nix-eval-jobs, and safe read-only pipelines. Mutation, execution, installs, builds, network fetch, and git writes are denied.
+${claudeSdkToolDescription(config.sdkToolPolicy ?? "read-only")}
 
 Use these tools when you need to:
 - Understand context around changed code
@@ -105,6 +118,14 @@ Your final response should be your complete analysis in the required format.`;
     input.continuationState?.kind === "claude"
     ? input.continuationState.nativeSessionId
     : null;
+  const runtimeHomeLease = createClaudeRuntimeHomeLease({
+    config: { ...config, workingDir, systemPrompt },
+    env: subprocessEnv,
+    continuable,
+    retainedRuntimeHome: continuable && input.continuationState?.kind === "claude"
+      ? (input.continuationState.runtimeHome as ClaudeRuntimeHome | undefined) ?? null
+      : null,
+  });
 
   const runOnce = async (): Promise<SdkAttemptOutcome> => {
     let stderrBuffer = "";
@@ -128,99 +149,109 @@ Your final response should be your complete analysis in the required format.`;
       const abortController = new AbortController();
       const unlinkAbortSignal = linkAbortSignal(options.signal, abortController);
       try {
-        const q = query({
-          prompt,
-          options: buildClaudeQueryOptions(
-            { ...config, workingDir, systemPrompt },
-            resolvedProvider,
-            abortController,
-            subprocessEnv,
-            {
-              tools,
-              allowedTools: tools,
-              permissionMode: "bypassPermissions",
-              allowDangerouslySkipPermissions: true,
-              maxTurns: mode === "direct" ? 1 : (config.maxTurns ?? 10),
-              persistSession: continuable,
-              ...(previousNativeSessionId ? { resume: previousNativeSessionId } : {}),
-              pathToClaudeCodeExecutable: `${homedir()}/.local/bin/claude`,
-              stderr: (data: string) => {
-                stderrBuffer = (stderrBuffer + data).slice(-2048);
+        const runtimeHome = runtimeHomeLease.get();
+        try {
+          const q = query({
+            prompt,
+            options: buildClaudeQueryOptions(
+              { ...config, workingDir, systemPrompt },
+              resolvedProvider,
+              abortController,
+              subprocessEnv,
+              {
+                tools,
+                allowedTools: tools,
+                permissionMode: "bypassPermissions",
+                allowDangerouslySkipPermissions: true,
+                maxTurns: mode === "direct" ? 1 : (config.maxTurns ?? 10),
+                persistSession: continuable,
+                ...(previousNativeSessionId ? { resume: previousNativeSessionId } : {}),
+                pathToClaudeCodeExecutable: `${homedir()}/.local/bin/claude`,
+                stderr: (data: string) => {
+                  stderrBuffer = (stderrBuffer + data).slice(-2048);
+                },
               },
-            }
-          ),
-        });
+              runtimeHome,
+            ),
+          });
 
-        for await (const message of q) {
-          messageCount++;
-          lastMessageType = message.type;
-          const msgAny = message as Record<string, unknown>;
-          if (message.type === "system" && msgAny.subtype === "api_retry") {
-            apiRetryCount++;
-            if (typeof msgAny.error === "string") lastApiRetryStatus = msgAny.error;
-          }
-
-          if (message.type === "result") {
-            nativeSessionId = collectClaudeMessageResult(message, {
-              text: finalResult || lastAssistantContent,
-              nativeSessionId,
-            }).nativeSessionId;
-            lastResultSubtype = (message as { subtype?: string }).subtype;
-            if ("is_error" in message && typeof message.is_error === "boolean") {
-              lastResultIsError = message.is_error;
-            }
-            if ("terminal_reason" in message && typeof (message as { terminal_reason?: unknown }).terminal_reason === "string") {
-              lastResultTerminalReason = (message as { terminal_reason: string }).terminal_reason;
-            }
-            if ("errors" in message && Array.isArray((message as { errors?: unknown }).errors)) {
-              lastResultErrors = (message as { errors: string[] }).errors;
+          for await (const message of q) {
+            messageCount++;
+            lastMessageType = message.type;
+            const msgAny = message as Record<string, unknown>;
+            if (message.type === "system" && msgAny.subtype === "api_retry") {
+              apiRetryCount++;
+              if (typeof msgAny.error === "string") lastApiRetryStatus = msgAny.error;
             }
 
-            const resultUsage = msgAny.usage as Record<string, unknown> | undefined;
-            if (resultUsage) {
-              totalPromptTokens = (resultUsage.input_tokens ?? 0) as number;
-              totalCompletionTokens = (resultUsage.output_tokens ?? 0) as number;
-              totalCachedTokens = (resultUsage.cache_read_input_tokens ?? 0) as number;
-            }
-            const modelUsage = msgAny.modelUsage as Record<string, Record<string, unknown>> | undefined;
-            if (modelUsage && totalCachedTokens === 0) {
-              for (const modelData of Object.values(modelUsage)) {
-                if (typeof modelData.cacheReadInputTokens === "number") {
-                  totalCachedTokens += modelData.cacheReadInputTokens;
+            if (message.type === "result") {
+              nativeSessionId = collectClaudeMessageResult(message, {
+                text: finalResult || lastAssistantContent,
+                nativeSessionId,
+              }).nativeSessionId;
+              lastResultSubtype = (message as { subtype?: string }).subtype;
+              if ("is_error" in message && typeof message.is_error === "boolean") {
+                lastResultIsError = message.is_error;
+              }
+              if ("terminal_reason" in message && typeof (message as { terminal_reason?: unknown }).terminal_reason === "string") {
+                lastResultTerminalReason = (message as { terminal_reason: string }).terminal_reason;
+              }
+              if ("errors" in message && Array.isArray((message as { errors?: unknown }).errors)) {
+                lastResultErrors = (message as { errors: string[] }).errors;
+              }
+
+              const resultUsage = msgAny.usage as Record<string, unknown> | undefined;
+              if (resultUsage) {
+                totalPromptTokens = (resultUsage.input_tokens ?? 0) as number;
+                totalCompletionTokens = (resultUsage.output_tokens ?? 0) as number;
+                totalCachedTokens = (resultUsage.cache_read_input_tokens ?? 0) as number;
+              }
+              const modelUsage = msgAny.modelUsage as Record<string, Record<string, unknown>> | undefined;
+              if (modelUsage && totalCachedTokens === 0) {
+                for (const modelData of Object.values(modelUsage)) {
+                  if (typeof modelData.cacheReadInputTokens === "number") {
+                    totalCachedTokens += modelData.cacheReadInputTokens;
+                  }
                 }
               }
+
+              if (
+                lastResultSubtype === "success" &&
+                lastResultIsError !== true &&
+                "result" in message &&
+                typeof message.result === "string"
+              ) {
+                finalResult = collectClaudeMessageResult(message).text;
+              }
+              break;
             }
 
-          if (
-            lastResultSubtype === "success" &&
-            lastResultIsError !== true &&
-            "result" in message &&
-            typeof message.result === "string"
-          ) {
-              finalResult = collectClaudeMessageResult(message).text;
+            if (message.type === "assistant") {
+              const assistantError = (message as { error?: string }).error;
+              if (typeof assistantError === "string" && assistantError.length > 0) {
+                lastAssistantError = assistantError;
+                continue;
+              }
+              const collected = collectClaudeMessageResult(message, {
+                text: lastAssistantContent,
+                nativeSessionId,
+              });
+              lastAssistantContent = collected.text;
+              nativeSessionId = collected.nativeSessionId;
             }
-            break;
           }
-
-          if (message.type === "assistant") {
-            const assistantError = (message as { error?: string }).error;
-            if (typeof assistantError === "string" && assistantError.length > 0) {
-              lastAssistantError = assistantError;
-              continue;
-            }
-            const collected = collectClaudeMessageResult(message, {
-              text: lastAssistantContent,
-              nativeSessionId,
-            });
-            lastAssistantContent = collected.text;
-            nativeSessionId = collected.nativeSessionId;
-          }
+        } finally {
+          runtimeHomeLease.releaseAttempt(runtimeHome);
         }
       } finally {
         unlinkAbortSignal();
       }
     } catch (error) {
-      if (isCancellationError(error)) throw error;
+      if (isCancellationError(error)) {
+        runtimeHomeLease.disposeCreatedRetainedHome();
+        throw error;
+      }
+      runtimeHomeLease.disposeCreatedRetainedHome();
       const errorMessage = error instanceof Error ? error.message : String(error);
       return { kind: "thrown", text: `${errorPrefix(mode)} ${errorMessage}` };
     }
@@ -235,7 +266,12 @@ Your final response should be your complete analysis in the required format.`;
 
     if (finalResult || lastAssistantContent) {
       const continuationState: ClaudeProviderContinuationState | undefined = continuable
-        ? { kind: "claude", nativeSessionId }
+        ? {
+            kind: "claude",
+            nativeSessionId,
+            runtimeHome: runtimeHomeLease.retainedRuntimeHome ?? undefined,
+            dispose: runtimeHomeLease.dispose,
+          }
         : undefined;
       return { kind: "ok", text: finalResult || lastAssistantContent, usage, continuationState };
     }
@@ -255,7 +291,14 @@ Your final response should be your complete analysis in the required format.`;
         stderrBuffer,
       }),
       usage,
-      continuationState: continuable ? { kind: "claude", nativeSessionId } : undefined,
+      continuationState: continuable
+        ? {
+            kind: "claude",
+            nativeSessionId,
+            runtimeHome: runtimeHomeLease.retainedRuntimeHome ?? undefined,
+            dispose: runtimeHomeLease.dispose,
+          }
+        : undefined,
       diagnostics: { lastResultSubtype, lastResultIsError },
     };
   };
@@ -301,20 +344,86 @@ export function buildClaudeQueryOptions<T extends ClaudeQueryOptionsConfig>(
   resolvedProvider: ResolvedProvider,
   abortController: AbortController,
   env: NodeJS.ProcessEnv,
-  overrides: ClaudeQueryOptionOverrides = {}
+  overrides: ClaudeQueryOptionOverrides = {},
+  runtimeHome?: ClaudeRuntimeHome,
 ): Record<string, unknown> {
-  assertManagedRuntimeHomeConfig(config);
-  const managedHome = config.sdkRuntimeHome === "managedAstral"
-    ? prepareManagedRuntimeHome("claude", env)
-    : null;
   return {
     model: resolvedProvider.modelId,
     cwd: config.workingDir ?? process.cwd(),
     systemPrompt: config.systemPrompt ?? undefined,
-    env: managedHome?.env ?? env,
+    env: runtimeHome?.env ?? env,
     persistSession: false,
     abortController,
     ...overrides,
+  };
+}
+
+export function prepareClaudeRuntimeHome<T extends ClaudeQueryOptionsConfig>(
+  config: T,
+  env: NodeJS.ProcessEnv,
+): ClaudeRuntimeHome {
+  assertManagedRuntimeHomeConfig(config);
+  const runtimeProfile = resolveRuntimeHomeProfile({
+    runtimeHomeProfile: config.runtimeHomeProfile,
+    sdkRuntimeHome: config.sdkRuntimeHome,
+    sdkRuntimeEnvironment: config.sdkRuntimeEnvironment,
+    sdkToolPolicy: config.sdkToolPolicy,
+  });
+  return runtimeProfile === "managedAstral"
+    ? prepareManagedRuntimeHome("claude", env)
+    : materializeRuntimeHome({
+      provider: "claude",
+      profile: runtimeProfile,
+      toolPolicy: config.sdkToolPolicy,
+      env,
+      runId: config.runtimeRunId,
+    });
+}
+
+export function cleanupClaudeRuntimeHome(runtimeHome: ClaudeRuntimeHome): void {
+  if ("cleanup" in runtimeHome) runtimeHome.cleanup();
+}
+
+export function createClaudeRuntimeHomeLease<T extends ClaudeQueryOptionsConfig>(input: {
+  config: T;
+  env: NodeJS.ProcessEnv;
+  continuable: boolean;
+  retainedRuntimeHome?: ClaudeRuntimeHome | null;
+}): ClaudeRuntimeHomeLease {
+  let retainedRuntimeHome = input.retainedRuntimeHome ?? null;
+  let createdRetainedRuntimeHome: ClaudeRuntimeHome | null = null;
+
+  const dispose = (): void => {
+    if (!retainedRuntimeHome) return;
+    cleanupClaudeRuntimeHome(retainedRuntimeHome);
+    retainedRuntimeHome = null;
+    createdRetainedRuntimeHome = null;
+  };
+
+  return {
+    get retainedRuntimeHome() {
+      return retainedRuntimeHome;
+    },
+    get(): ClaudeRuntimeHome {
+      if (!input.continuable) {
+        return prepareClaudeRuntimeHome(input.config, input.env);
+      }
+      if (!retainedRuntimeHome) {
+        retainedRuntimeHome = prepareClaudeRuntimeHome(input.config, input.env);
+        createdRetainedRuntimeHome = retainedRuntimeHome;
+      }
+      return retainedRuntimeHome;
+    },
+    releaseAttempt(runtimeHome: ClaudeRuntimeHome): void {
+      if (!input.continuable) cleanupClaudeRuntimeHome(runtimeHome);
+    },
+    markRetainedHomeStable(): void {
+      createdRetainedRuntimeHome = null;
+    },
+    disposeCreatedRetainedHome(): void {
+      if (createdRetainedRuntimeHome) dispose();
+    },
+    dispose,
   };
 }
 
@@ -597,6 +706,20 @@ function toResult(outcome: SdkAttemptOutcome, resolvedProvider: ProviderRunInput
     modelName: resolvedProvider.modelId,
     continuationState: outcome.kind === "thrown" ? undefined : outcome.continuationState,
   };
+}
+
+function claudeSdkToolDescription(policy: ClaudeQueryOptionsConfig["sdkToolPolicy"]): string {
+  if (policy === "write") {
+    return `You have access to implementation tools:
+- **Read/Bash/Glob/Grep/LS**: inspect code. Bash still flows through agent-framework guardrails.
+- **Write/Edit/MultiEdit/TodoWrite**: modify files only as required by the provided plan.
+Parent-owned workflow steps such as check are run outside this SDK agent.`;
+  }
+  return `You have access to read-only tools for investigating code:
+- **Read**: View file contents.
+- **Bash**: Classified read-only commands only: simple inspection, read-only-heavy evaluation such as nix-eval-jobs, and safe read-only pipelines. Mutation, execution, installs, builds, network fetch, and git writes are denied.
+
+MCP tools are unavailable in this runtime.`;
 }
 
 type SdkAttemptOutcome =

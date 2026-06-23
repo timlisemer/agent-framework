@@ -9,6 +9,7 @@ import * as path from "path";
 import { CacheManager } from "./cache-manager.js";
 import { readJsonl } from "./file-io.js";
 import { sessionGateReasoningFile, sessionToolLogFile } from "./paths.js";
+import { isTextEditToolName } from "./edit-tools.js";
 
 const NORMAL_PRIORITY_LIMIT = 8;
 const HIGH_PRIORITY_LIMIT = 12;
@@ -232,12 +233,12 @@ export async function addPatternWarnings(
   }
 
   // Repeated file edits
-  if (toolName === "Edit" || toolName === "Write") {
+  if (isTextEditToolName(toolName)) {
     const input = toolInput as { file_path?: string };
     const targetFile = input?.file_path;
     if (targetFile) {
       const editCount = logEntries.filter((entry) => {
-        if (entry.tool_name === "Edit" || entry.tool_name === "Write") {
+        if (entry.tool_name && isTextEditToolName(entry.tool_name)) {
           return (entry.tool_input as { file_path?: string })?.file_path === targetFile;
         }
         return false;

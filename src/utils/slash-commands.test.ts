@@ -74,14 +74,24 @@ describe("SLASH_COMMAND_ALLOWED_TOOLS canonical keys", () => {
       "mcp-validate_plan",
     ]);
   });
+
+  it("implement maps to the implement MCP instead of CloseAgent", () => {
+    expect(SLASH_COMMAND_ALLOWED_TOOLS["implement"]).toEqual(["mcp-implement"]);
+  });
+
+  it("validate maps to implementation validation MCP", () => {
+    expect(SLASH_COMMAND_ALLOWED_TOOLS["validate"]).toEqual(["mcp-validate_implementation"]);
+  });
 });
 
 describe("RESTRICTED_MCPS", () => {
-  it("contains commit, push, confirm, fullconfirm", () => {
+  it("contains slash-gated workflow MCPs", () => {
     expect(RESTRICTED_MCPS.has("commit")).toBe(true);
     expect(RESTRICTED_MCPS.has("push")).toBe(true);
     expect(RESTRICTED_MCPS.has("confirm")).toBe(true);
     expect(RESTRICTED_MCPS.has("fullconfirm")).toBe(true);
+    expect(RESTRICTED_MCPS.has("implement")).toBe(true);
+    expect(RESTRICTED_MCPS.has("validate_implementation")).toBe(true);
     expect(RESTRICTED_MCPS.has("create_planfile")).toBe(false);
     expect(RESTRICTED_MCPS.has("check")).toBe(false);
   });

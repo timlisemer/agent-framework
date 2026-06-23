@@ -34,6 +34,7 @@ export type { ScenarioRealityValue, ScenarioSource, ScenarioSourceTag } from "..
 export type { LabelValue, PredictionAnnotation, RichExpectation } from "../../scenario/labels.js";
 import { runCommand } from "../../utils/command.js";
 import { readFileHeadBuffer } from "../../utils/file-io.js";
+import { isPathAtOrInside } from "../../utils/path-containment.js";
 import {
   runtimeRoot,
   testRunsRoot,
@@ -151,9 +152,7 @@ function resolveProjectTranscriptByName(transcriptName: string): string | null {
 // ─── Scoped File I/O ───────────────────────────────────────────────────────
 
 function assertWithinTestRuns(filePath: string): void {
-  const resolved = path.resolve(filePath);
-  const testRunsBase = testRunsDir();
-  if (!resolved.startsWith(testRunsBase)) {
+  if (!isPathAtOrInside(filePath, testRunsDir())) {
     throw new Error(`Path escapes test-runs directory: ${filePath}`);
   }
 }

@@ -42,7 +42,8 @@ import {
 import { validatePlanContract } from "../../utils/plan-contract.js";
 import { activeSpec, mcpWireNameForText } from "../../adapter/spec.js";
 import { appendPlanfileValidationWorkflow } from "../../utils/planfile.js";
-import { formatProposedEdit } from "./edit-validation.js";
+import { formatProposedEdit, type EditValidationToolInput } from "./edit-validation.js";
+import { applyTextEditReplacements, type TextEditToolName } from "../../utils/edit-tools.js";
 
 /**
  * Categories from `RULE_VIOLATION_PATTERNS` that ALWAYS hard-deny without
@@ -114,7 +115,7 @@ export function collectPlanValidationViolations(
  * Validate that a plan aligns with user intent.
  *
  * @param currentPlan - The full current plan file (null if new file)
- * @param toolName - The tool being used (Write or Edit)
+ * @param toolName - The tool being used (Write, Edit, or MultiEdit)
  * @param toolInput - The tool input with content or old_string/new_string
  * @param conversationContext - Formatted conversation context
  * @param workingDir - Working directory for context
@@ -131,8 +132,8 @@ export function collectPlanValidationViolations(
  */
 export async function checkPlanIntent(
   currentPlan: string | null,
-  toolName: "Write" | "Edit",
-  toolInput: { content?: string; old_string?: string; new_string?: string },
+  toolName: TextEditToolName,
+  toolInput: EditValidationToolInput,
   conversationContext: string,
   workingDir: string,
   hookName: string,
@@ -153,12 +154,8 @@ export async function checkPlanIntent(
     return { approved: true };
   }
 
-  // Compute the full resulting plan for regex checks (not just the diff)
-  const resultingPlan = toolName === "Write"
-    ? toolInput.content ?? ""
-    : currentPlan
-      ? currentPlan.replace(toolInput.old_string ?? "", toolInput.new_string ?? "")
-      : toolInput.new_string ?? "";
+  // Compute the full resulting plan for regex checks (not just the diff).
+  const resultingPlan = resultingContentForEdit(currentPlan, toolName, toolInput);
 
   try {
     const {
@@ -190,7 +187,7 @@ export async function checkPlanIntent(
     }
 
     // Deterministic deny: blacklisted commands outside Manual User
-    // Verification, in any mode (Edit or Write). LLM cannot improve on this.
+    // Verification, in any text edit mode. LLM cannot improve on this.
     if (filteredBlacklistHighlights.length > 0) {
       const feedback = blacklistHighlights
         .map((v) => v.replace(/^\[VIOLATION: [^\]]+\]\s*/, ""))
@@ -209,9 +206,9 @@ export async function checkPlanIntent(
       ? `=== VIOLATIONS DETECTED ===\n${allViolations.join("\n")}\n=== END VIOLATIONS ===\n\n`
       : "";
 
-    // Edit mode: fast-path approve if no violations in full plan (Edit only).
+    // Edit mode: fast-path approve if no violations in full plan for partial edits.
     // Write replaces the entire file, so structural issues need LLM review even without regex violations.
-    if (mode === "edit" && allViolations.length === 0 && toolName === "Edit") {
+    if (mode === "edit" && allViolations.length === 0 && toolName !== "Write") {
       logFastPathApproval("plan-validate", hookName, toolName, workingDir, "No violations in full plan");
       return { approved: true };
     }
@@ -269,6 +266,14 @@ export async function checkPlanIntent(
       ),
     };
   }
+}
+
+function resultingContentForEdit(
+  currentContent: string | null,
+  toolName: TextEditToolName,
+  toolInput: EditValidationToolInput,
+): string {
+  return applyTextEditReplacements(currentContent, toolName, toolInput) ?? "";
 }
 
 function activeValidatePlanGuidance(planFilePath?: string): string {

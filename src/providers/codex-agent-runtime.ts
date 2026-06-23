@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { isCancellationError } from "../utils/cancellation.js";
 import { errorMessage, optionalNumber, outputBlocks, stringField, textOutput } from "../utils/output.js";
@@ -9,13 +7,19 @@ import type { ProviderExecutionResult, ProviderRunInput, SdkRuntimeEnvironment, 
 import type { ProviderUsage } from "./execution-types.js";
 import type { ResolvedProvider } from "./types.js";
 import type { AiRuntimeEvent } from "../ai-backend/runtime-events.js";
-import { hashSha256Prefix } from "../utils/hash-utils.js";
-import { assertManagedRuntimeHomeConfig, copyCodexAuthToHome, prepareManagedRuntimeHome } from "./managed-runtime-home.js";
+import { hashSha256Prefix, stableJsonStringify } from "../utils/hash-utils.js";
+import { assertManagedRuntimeHomeConfig, copyCodexAuthToHome } from "./managed-runtime-home.js";
+import { makeRuntimeRunId, materializeRuntimeHome, resolveRuntimeHomeProfile } from "../runtime-home/runtime-profiles.js";
+import { adapterSpecByName } from "../adapter/spec.js";
+import type { RuntimeToolPolicy } from "../runtime-home/profiles.js";
 
 export type CodexThreadOptionsConfig = {
   workingDir?: string | null;
   sdkRuntimeEnvironment?: SdkRuntimeEnvironment;
   sdkRuntimeHome?: SdkRuntimeHome;
+  runtimeHomeProfile?: ProviderRunInput["config"]["runtimeHomeProfile"];
+  sdkToolPolicy?: ProviderRunInput["config"]["sdkToolPolicy"];
+  runtimeRunId?: string;
   runtimeExecutionMode?: CodexRuntimeExecutionMode;
 };
 
@@ -70,7 +74,7 @@ export function createCodexUiStreamState(): CodexUiStreamState {
 }
 
 type CodexLiveSession = {
-  tempHome: string | null;
+  runtimeHome: ReturnType<typeof materializeRuntimeHome>;
   thread: CodexThread;
   dispose(): void;
 };
@@ -92,7 +96,7 @@ export async function runCodexAgent(
       ? `${config.systemPrompt}\n\n${prompt}`
       : `${config.systemPrompt}
 
-You are running as a read-only validation agent for agent-framework. Do not edit files. Use only read-only inspection.
+${codexSdkPolicyPrompt(config.sdkToolPolicy ?? "read-only")}
 
 ${prompt}`;
     const previousSession = continuable && input.continuationState?.kind === "codex"
@@ -180,23 +184,35 @@ export async function createCodexLiveSession(
 ): Promise<CodexLiveSession> {
   const runtimeEnvironment = config.sdkRuntimeEnvironment ?? "isolated";
   assertManagedRuntimeHomeConfig({ sdkRuntimeHome: config.sdkRuntimeHome, sdkRuntimeEnvironment: runtimeEnvironment });
-  const tempHome = runtimeEnvironment === "isolated"
-    ? fs.mkdtempSync(path.join(os.tmpdir(), tempPrefix))
-    : null;
+  const profile = resolveRuntimeHomeProfile({
+    runtimeHomeProfile: config.runtimeHomeProfile,
+    sdkRuntimeHome: config.sdkRuntimeHome,
+    sdkRuntimeEnvironment: runtimeEnvironment,
+    sdkToolPolicy: config.sdkToolPolicy ?? (config.runtimeExecutionMode === "direct" ? "none" : "read-only"),
+    runtimeExecutionMode: config.runtimeExecutionMode,
+  });
+  let runtimeHome: ReturnType<typeof materializeRuntimeHome> | null = null;
   try {
-    if (tempHome) copyCodexAuthIfPresent(tempHome);
+    runtimeHome = materializeRuntimeHome({
+      provider: "codex",
+      profile,
+      toolPolicy: config.sdkToolPolicy,
+      runId: config.runtimeRunId ?? makeRuntimeRunId(tempPrefix),
+    });
     const Codex = await loadCodexConstructor();
     const codexConfig = buildCodexConfig(
       runtimeEnvironment,
-      tempHome,
+      runtimeHome.root,
       resolvedProvider.type === PROVIDER_TYPES.OPENROUTER,
-      persistHistory
+      persistHistory && runtimeHome.sessionPolicy !== "none" && runtimeHome.sessionPolicy !== "volatile",
+      config.sdkToolPolicy ?? (config.runtimeExecutionMode === "direct" ? "none" : "read-only")
     );
     const env = buildCodexSessionEnv(
       runtimeEnvironment,
-      tempHome,
+      runtimeHome.root,
       resolvedProvider.type === PROVIDER_TYPES.OPENAI_SUBSCRIPTION,
-      config.sdkRuntimeHome
+      config.sdkRuntimeHome,
+      runtimeHome.env
     );
     const codex = new Codex({
       env,
@@ -204,15 +220,16 @@ export async function createCodexLiveSession(
     });
     const options = buildCodexThreadOptions(config, resolvedProvider);
     const thread = startOrResumeCodexThread(codex, options, resumeThreadId);
+    const materializedRuntimeHome = runtimeHome;
     return {
-      tempHome,
+      runtimeHome: materializedRuntimeHome,
       thread,
       dispose: () => {
-        if (tempHome) fs.rmSync(tempHome, { recursive: true, force: true });
+        materializedRuntimeHome.cleanup();
       },
     };
   } catch (error) {
-    if (tempHome) fs.rmSync(tempHome, { recursive: true, force: true });
+    runtimeHome?.cleanup();
     throw error;
   }
 }
@@ -227,7 +244,7 @@ export function buildCodexThreadOptions<T extends CodexThreadOptionsConfig>(
     workingDirectory: config.workingDir ?? process.cwd(),
     skipGitRepoCheck: true,
     model: resolvedProvider.modelId,
-    ...codexRuntimePolicyOptions(runtimeEnvironment, runtimeExecutionMode),
+    ...codexRuntimePolicyOptions(runtimeEnvironment, runtimeExecutionMode, config.sdkToolPolicy ?? (runtimeExecutionMode === "direct" ? "none" : "read-only")),
     ...(resolvedProvider.reasoningEffort
       ? { modelReasoningEffort: resolvedProvider.reasoningEffort }
       : {}),
@@ -246,14 +263,25 @@ export function startOrResumeCodexThread(
   return codex.resumeThread(resumeThreadId, options);
 }
 
+function codexSandboxModeForToolPolicy(policy: RuntimeToolPolicy): string {
+  const sandboxMode = adapterSpecByName("codex").runtimeHome.sandboxModeForToolPolicy?.(policy);
+  if (!sandboxMode) throw new Error("Codex runtime-home spec does not define sandboxModeForToolPolicy.");
+  return sandboxMode;
+}
+
 function codexRuntimePolicyOptions(
   runtimeEnvironment: SdkRuntimeEnvironment,
-  mode: CodexRuntimeExecutionMode
+  mode: CodexRuntimeExecutionMode,
+  toolPolicy: CodexThreadOptionsConfig["sdkToolPolicy"] = "read-only",
 ): Record<string, unknown> {
   if (runtimeEnvironment === "user") return {};
+  const effectiveToolPolicy = toolPolicy ?? "read-only";
+  const approvalPolicy = mode === "direct" || effectiveToolPolicy === "none" || effectiveToolPolicy === "write"
+    ? "never"
+    : "on-request";
   return {
-    sandboxMode: "read-only",
-    approvalPolicy: mode === "direct" ? "never" : "on-request",
+    sandboxMode: codexSandboxModeForToolPolicy(effectiveToolPolicy),
+    approvalPolicy,
     networkAccessEnabled: false,
     webSearchMode: "disabled",
     webSearchEnabled: false,
@@ -342,38 +370,39 @@ export function mapCodexUiStreamEvent(event: unknown, state: CodexUiStreamState)
 }
 
 export function buildCodexEnv(
-  runtimeEnvironment: SdkRuntimeEnvironment,
-  tempHome: string | null,
+  _runtimeEnvironment: SdkRuntimeEnvironment,
+  _tempHome: string | null,
   openaiSubscription: boolean
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (typeof value === "string") env[key] = value;
   }
-  if (openaiSubscription) {
-    delete env.OPENAI_API_KEY;
-    delete env.CODEX_API_KEY;
-    delete env.OPENROUTER_API_KEY;
-    delete env.ANTHROPIC_API_KEY;
-    delete env.ANTHROPIC_AUTH_TOKEN;
-    delete env.ANTHROPIC_BASE_URL;
-  }
-  if (runtimeEnvironment === "user") return env;
-  if (!tempHome) throw new Error("Isolated Codex runtime requires a temporary home");
-  env.CODEX_HOME = tempHome;
+  if (openaiSubscription) scrubOpenAiSubscriptionEnv(env);
   return env;
 }
 
 export function buildCodexSessionEnv(
-  runtimeEnvironment: SdkRuntimeEnvironment,
-  tempHome: string | null,
+  _runtimeEnvironment: SdkRuntimeEnvironment,
+  _tempHome: string | null,
   openaiSubscription: boolean,
-  sdkRuntimeHome: CodexThreadOptionsConfig["sdkRuntimeHome"]
+  _sdkRuntimeHome: CodexThreadOptionsConfig["sdkRuntimeHome"],
+  baseEnv?: NodeJS.ProcessEnv,
 ): Record<string, string> {
-  const env = buildCodexEnv(runtimeEnvironment, tempHome, openaiSubscription);
-  if (sdkRuntimeHome !== "managedAstral") return env;
-  assertManagedRuntimeHomeConfig({ sdkRuntimeHome, sdkRuntimeEnvironment: runtimeEnvironment });
-  return prepareManagedRuntimeHome("codex", env).env as Record<string, string>;
+  const env = baseEnv
+    ? Object.fromEntries(Object.entries(baseEnv).filter((entry): entry is [string, string] => typeof entry[1] === "string"))
+    : buildCodexEnv(_runtimeEnvironment, _tempHome, openaiSubscription);
+  if (openaiSubscription) scrubOpenAiSubscriptionEnv(env);
+  return env;
+}
+
+function scrubOpenAiSubscriptionEnv(env: Record<string, string>): void {
+  delete env.OPENAI_API_KEY;
+  delete env.CODEX_API_KEY;
+  delete env.OPENROUTER_API_KEY;
+  delete env.ANTHROPIC_API_KEY;
+  delete env.ANTHROPIC_AUTH_TOKEN;
+  delete env.ANTHROPIC_BASE_URL;
 }
 
 function mapCodexUiItem(
@@ -537,7 +566,7 @@ function mapUnknownCodexItem(
 
 function syntheticCodexItemRef(itemType: string | null, item: Record<string, unknown>): string {
   const stableItem = stableCodexItemPayload(itemType, item);
-  const canonical = canonicalJson(stableItem);
+  const canonical = stableJsonStringify(stableItem);
   const hash = hashSha256Prefix(canonical, 12);
   return `${itemType ?? "item"}:${hash}`;
 }
@@ -563,28 +592,23 @@ function stableCodexItemPayload(itemType: string | null, item: Record<string, un
   }
 }
 
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  return `{${Object.keys(value as Record<string, unknown>).sort().map((key) =>
-    `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`
-  ).join(",")}}`;
-}
-
 export function buildCodexConfig(
   runtimeEnvironment: SdkRuntimeEnvironment,
   tempHome: string | null,
   openrouter: boolean,
-  persistHistory = false
+  persistHistory = false,
+  toolPolicy: CodexThreadOptionsConfig["sdkToolPolicy"] = "read-only",
 ): Record<string, unknown> | undefined {
   const config: Record<string, unknown> = {
     show_raw_agent_reasoning: true,
   };
   if (runtimeEnvironment === "isolated") {
+    const effectiveToolPolicy = toolPolicy ?? "read-only";
     if (!tempHome) throw new Error("Isolated Codex runtime requires a temporary home");
     if (!persistHistory) config.history = { persistence: "none" };
     config.log_dir = path.join(tempHome, "logs");
     if (!openrouter) config.forced_login_method = "chatgpt";
+    config.sandbox_mode = codexSandboxModeForToolPolicy(effectiveToolPolicy);
   }
   if (openrouter) {
     config.model_provider = "openrouter";
@@ -597,4 +621,11 @@ export function buildCodexConfig(
     };
   }
   return Object.fromEntries(Object.entries(config).filter(([, value]) => value !== undefined));
+}
+
+function codexSdkPolicyPrompt(policy: CodexThreadOptionsConfig["sdkToolPolicy"]): string {
+  if (policy === "write") {
+    return "You are running as a write-capable implementation agent for agent-framework. You may edit files only as required by the provided plan. MCP tools are unavailable; parent-owned workflow code runs check and validation.";
+  }
+  return "You are running as a read-only validation agent for agent-framework. Do not edit files. Use only read-only inspection. MCP tools are unavailable in this runtime.";
 }

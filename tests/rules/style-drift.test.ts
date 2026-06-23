@@ -115,6 +115,46 @@ describe("styleDriftRule — deterministic fastDeny paths", () => {
     const deny = result as { fastDeny: string };
     expect(deny.fastDeny).toContain("emdash detected");
   });
+
+  it("checks emoji additions inside MultiEdit edits", async () => {
+    const ctx = makeCtx({
+      toolName: "MultiEdit",
+      toolInput: {
+        file_path: path.join(tempDir, "src/foo.ts"),
+        edits: [
+          {
+            old_string: "const x = 'hello'",
+            new_string: "const x = 'hello 🎉'",
+          },
+        ],
+      },
+    });
+    const result = await styleDriftRule.check(ctx);
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty("fastDeny");
+    const deny = result as { fastDeny: string };
+    expect(deny.fastDeny).toContain("emoji added");
+  });
+
+  it("checks em-dash additions inside MultiEdit edits", async () => {
+    const ctx = makeCtx({
+      toolName: "MultiEdit",
+      toolInput: {
+        file_path: path.join(tempDir, "src/foo.ts"),
+        edits: [
+          {
+            old_string: "// a comment - note this",
+            new_string: "// a comment — note this",
+          },
+        ],
+      },
+    });
+    const result = await styleDriftRule.check(ctx);
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty("fastDeny");
+    const deny = result as { fastDeny: string };
+    expect(deny.fastDeny).toContain("emdash detected");
+  });
 });
 
 describe("styleDriftRule — null paths (no action)", () => {
@@ -199,5 +239,50 @@ describe("styleDriftRule — ambiguous case returns llmContext", () => {
     const result = await styleDriftRule.check(ctx);
     expect(result).not.toBeNull();
     expect(result).toHaveProperty("llmContext");
+  });
+
+  it("returns llmContext for ambiguous MultiEdit edits", async () => {
+    const ctx = makeCtx({
+      toolName: "MultiEdit",
+      toolInput: {
+        file_path: path.join(tempDir, "src/foo.ts"),
+        edits: [
+          {
+            old_string: "const x = 1\nconst y = 2",
+            new_string: "const x = 1;\nconst y = 2;",
+          },
+        ],
+      },
+    });
+    const result = await styleDriftRule.check(ctx);
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty("llmContext");
+  });
+
+  it("includes every ambiguous MultiEdit edit in llmContext", async () => {
+    const ctx = makeCtx({
+      toolName: "MultiEdit",
+      toolInput: {
+        file_path: path.join(tempDir, "src/foo.ts"),
+        edits: [
+          {
+            old_string: "const x = 1",
+            new_string: "const x = 1;",
+          },
+          {
+            old_string: "const y = 2",
+            new_string: "const y = 2;",
+          },
+        ],
+      },
+    });
+    const result = await styleDriftRule.check(ctx);
+    expect(result).not.toBeNull();
+    expect(result).toHaveProperty("llmContext");
+    const context = (result as { llmContext: string }).llmContext;
+    expect(context).toContain("Edit 1:");
+    expect(context).toContain("const x = 1;");
+    expect(context).toContain("Edit 2:");
+    expect(context).toContain("const y = 2;");
   });
 });

@@ -35,7 +35,81 @@ export function optionConsumesSeparateValue(token: string, optionsWithValue: Rea
   return false;
 }
 
-const XARGS_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
+export function inlineLongOptionValue(token: string): { option: string; value: string } | null {
+  if (!token.startsWith("--")) return null;
+  const separator = token.indexOf("=");
+  if (separator <= 0) return null;
+  return {
+    option: token.slice(0, separator),
+    value: token.slice(separator + 1),
+  };
+}
+
+export function canonicalOptionName(token: string): string {
+  const separator = token.indexOf("=");
+  if (separator > 0) return token.slice(0, separator);
+  return token;
+}
+
+export function attachedShortOptionValue(
+  token: string,
+  option: string,
+  optionsWithValue?: ReadonlySet<string>,
+): string | null {
+  if (optionsWithValue && !optionsWithValue.has(option)) return null;
+  if (!/^-[A-Za-z]$/.test(option)) return null;
+  if (!token.startsWith(option) || token.length <= option.length || token.startsWith("--")) return null;
+  return token.slice(option.length);
+}
+
+export function tokenHasOption(token: string, options: ReadonlySet<string>): boolean {
+  if (options.has(token)) return true;
+  const inline = inlineLongOptionValue(token);
+  if (inline && options.has(inline.option)) return true;
+  if (/^-[A-Za-z]\S*/.test(token)) {
+    for (const flag of token.slice(1)) {
+      if (options.has(`-${flag}`)) return true;
+    }
+  }
+  return false;
+}
+
+export function hasShellOption(tokens: readonly string[], options: ReadonlySet<string>): boolean {
+  for (const token of tokens) {
+    if (token === "--") return false;
+    if (tokenHasOption(token, options)) return true;
+  }
+  return false;
+}
+
+export function nonOptionTokens(tokens: readonly string[]): string[] {
+  const marker = tokens.indexOf("--");
+  if (marker >= 0) {
+    return [
+      ...tokens.slice(0, marker).filter((token) => !token.startsWith("-")),
+      ...tokens.slice(marker + 1),
+    ];
+  }
+  return tokens.filter((token) => !token.startsWith("-"));
+}
+
+export function stripOptionValueTokens(tokens: readonly string[], optionsWithValue: ReadonlySet<string>): string[] {
+  const result: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token === "--") {
+      result.push(...tokens.slice(i));
+      break;
+    }
+    result.push(token);
+    if (optionConsumesSeparateValue(token, optionsWithValue) && i + 1 < tokens.length) {
+      i++;
+    }
+  }
+  return result;
+}
+
+export const XARGS_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
   "-a", "--arg-file",
   "-d", "--delimiter",
   "-E", "--eof",

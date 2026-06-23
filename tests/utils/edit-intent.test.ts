@@ -35,6 +35,10 @@ describe("isEditTool", () => {
     expect(isEditTool("NotebookEdit")).toBe(true);
   });
 
+  it("returns true for 'MultiEdit'", () => {
+    expect(isEditTool("MultiEdit")).toBe(true);
+  });
+
   it("returns false for 'Read'", () => {
     expect(isEditTool("Read")).toBe(false);
   });
@@ -87,6 +91,10 @@ describe("shouldBlockEdit", () => {
     expect(shouldBlockEdit(false, "NotebookEdit", "/home/user/project/notebook.ipynb")).toBe(true);
   });
 
+  it("blocks MultiEdit on project file when editIntent is false", () => {
+    expect(shouldBlockEdit(false, "MultiEdit", "/home/user/project/src/main.ts")).toBe(true);
+  });
+
   it("does not block Edit when editIntent is true", () => {
     expect(shouldBlockEdit(true, "Edit", "/home/user/project/src/main.ts")).toBe(false);
   });
@@ -129,6 +137,11 @@ describe("planModeEditBlock", () => {
 
   it("blocks NotebookEdit to non-exempt path when plan mode active", () => {
     const result = planModeEditBlock(true, "NotebookEdit", "/project/notebook.ipynb");
+    expect(result).toContain("Plan mode is active");
+  });
+
+  it("blocks MultiEdit to non-exempt path when plan mode active", () => {
+    const result = planModeEditBlock(true, "MultiEdit", "/project/src/foo.ts");
     expect(result).toContain("Plan mode is active");
   });
 
@@ -358,6 +371,10 @@ describe("deriveAllowedToolsFromIntent", () => {
     expect(deriveAllowedToolsFromIntent("hmm")).toEqual([]);
   });
 
+  it("includes MultiEdit for edit-class verbs", () => {
+    expect(deriveAllowedToolsFromIntent("fix the typo")).toContain("MultiEdit");
+  });
+
   it("does NOT match 'rename' without 'file' nearby (bounded distance)", () => {
     expect(deriveAllowedToolsFromIntent("renaming variables in the function body is fine")).not.toContain("Bash");
   });
@@ -370,8 +387,9 @@ describe("deriveAllowedToolsFromIntent", () => {
     expect(deriveAllowedToolsFromIntent("what about that modification?")).not.toContain("Edit");
   });
 
-  it("does NOT include Edit/Write for 'build' (build is a CHECK/Bash verb only)", () => {
+  it("does NOT include file edit tools for 'build' (build is a CHECK/Bash verb only)", () => {
     expect(deriveAllowedToolsFromIntent("build the feature")).not.toContain("Edit");
     expect(deriveAllowedToolsFromIntent("build the feature")).not.toContain("Write");
+    expect(deriveAllowedToolsFromIntent("build the feature")).not.toContain("MultiEdit");
   });
 });

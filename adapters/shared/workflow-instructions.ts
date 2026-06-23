@@ -1,7 +1,10 @@
 import * as path from "path";
+import * as url from "url";
 import type { CanonicalMcp, HostContext } from "../../src/adapter/types.js";
 import { readFirstUtf8File } from "../../src/utils/file-io.js";
 import { adapterRoot } from "../../src/utils/paths.js";
+
+const thisDir = path.dirname(url.fileURLToPath(import.meta.url));
 
 export function readAdapterWorkflowInstructionText(input: {
   adapterName: string;
@@ -11,6 +14,7 @@ export function readAdapterWorkflowInstructionText(input: {
   recognizeMcp: (raw: string) => CanonicalMcp | null;
 }): string | null {
   const text = readFirstUtf8File([
+    path.resolve(thisDir, "..", input.adapterName, input.bundledConfigDir, input.relativePath),
     path.join(adapterRoot(input.adapterName), input.bundledConfigDir, input.relativePath),
     path.join(input.host.configRoot, input.relativePath),
   ]);

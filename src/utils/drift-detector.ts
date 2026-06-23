@@ -9,6 +9,7 @@
 
 import type { DriftTargetState, ToolLogEntry } from "./session-store.js";
 import { findDestructiveFlagsFromCommand } from "./find-command-policy.js";
+import { isEditToolName, TEXT_EDIT_TOOL_NAMES_DISPLAY } from "./edit-tools.js";
 
 export interface DriftSignal {
   detected: boolean;
@@ -17,7 +18,6 @@ export interface DriftSignal {
 
 const NO_DRIFT: DriftSignal = { detected: false, reason: "" };
 
-const EDIT_TOOLS = ["Edit", "Write", "NotebookEdit"];
 const MULTI_REGION_EDIT_INTENT_RE =
   /\b(non[-\s]?adjacent|discontiguous|multi[-\s]?region|multiple\s+(?:separate\s+)?regions|across\s+(?:non[-\s]?adjacent|separate|multiple)\s+regions)\b/i;
 
@@ -91,7 +91,7 @@ export function detectDrift(
  * Level 3 (clamped): every subsequent edit gets the "thrashing" message.
  *
  * All three messages tell the AI to KEEP editing the file but consolidate the
- * remaining changes into one Edit/Write call. They share the substring
+ * remaining changes into one text edit call. They share the substring
  * `edits to "` so the drift-detect rule can recognize its own emissions in
  * onDenialConfirmed without relying on a Warning/Error prefix that the AI
  * misreads as a hard prohibition.
@@ -106,18 +106,18 @@ function checkRepetition(
   state: DriftTargetState,
   allowMultiRegionEditRepetition: boolean,
 ): DriftSignal {
-  if (!target || !EDIT_TOOLS.includes(toolName)) return NO_DRIFT;
+  if (!target || !isEditToolName(toolName)) return NO_DRIFT;
   if (allowMultiRegionEditRepetition) return NO_DRIFT;
 
   const sameTargetAllowedEdits = recentToolLog.filter(
     (e) =>
       toolLogEntryTargets(e).includes(target) &&
-      EDIT_TOOLS.includes(e.tool) &&
+      isEditToolName(e.tool) &&
       e.status === "allowed",
   );
   const count = sameTargetAllowedEdits.length;
 
-  const thrashingMessage = `${count} edits to "${target}" — you are thrashing. The fix is not to stop editing; it is to consolidate. Read the full current file, plan every remaining change, then apply them in ONE Edit or Write call.`;
+  const thrashingMessage = `${count} edits to "${target}" — you are thrashing. The fix is not to stop editing; it is to consolidate. Read the full current file, plan every remaining change, then apply them in ONE ${TEXT_EDIT_TOOL_NAMES_DISPLAY} call.`;
 
   if (state.level === 3) {
     return { detected: true, reason: thrashingMessage };
@@ -134,7 +134,7 @@ function checkRepetition(
     if (state.allowedSinceLevelChange >= 3) {
       return {
         detected: true,
-        reason: `${count} edits to "${target}" — last nudge. Do NOT make another partial edit. Read the file, list every remaining change, then apply them all in a single Edit/Write call.`,
+        reason: `${count} edits to "${target}" — last nudge. Do NOT make another partial edit. Read the file, list every remaining change, then apply them all in a single ${TEXT_EDIT_TOOL_NAMES_DISPLAY} call.`,
       };
     }
     return NO_DRIFT;
@@ -143,7 +143,7 @@ function checkRepetition(
   if (count >= 4) {
     return {
       detected: true,
-      reason: `${count} edits to "${target}" — stop making many small edits. Read the full file, plan all remaining changes, and apply them in ONE Edit/Write call. You may continue editing this file; just consolidate.`,
+      reason: `${count} edits to "${target}" — stop making many small edits. Read the full file, plan all remaining changes, and apply them in ONE ${TEXT_EDIT_TOOL_NAMES_DISPLAY} call. You may continue editing this file; just consolidate.`,
     };
   }
 

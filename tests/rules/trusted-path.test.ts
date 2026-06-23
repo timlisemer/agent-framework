@@ -30,6 +30,8 @@ describe("sensitive path classification", () => {
       "docs/passwordless.md",
       "mycredentials.txt",
       "secretsauce/config.json",
+      "src/auth/login.ts",
+      "src/token/parser.ts",
     ]) {
       expect(isSensitivePath(filePath), filePath).toBe(false);
     }
@@ -39,6 +41,8 @@ describe("sensitive path classification", () => {
     for (const filePath of [
       ".env",
       ".env.local",
+      "auth.json",
+      "token.json",
       "secrets.sops.yaml",
       ".sops.yaml",
       "keys.txt.agekey",
@@ -69,6 +73,16 @@ describe("trustedPathRule", () => {
   it("blocks editing real sensitive files", async () => {
     const result = await trustedPathRule.check(makeCtx({
       toolInput: { file_path: ".env.local" },
+    }));
+    expect(result).toEqual({
+      fastDeny: expect.stringContaining("Sensitive path blocked"),
+    });
+  });
+
+  it("blocks MultiEdit on real sensitive files", async () => {
+    const result = await trustedPathRule.check(makeCtx({
+      toolName: "MultiEdit",
+      toolInput: { file_path: ".env.local", edits: [] },
     }));
     expect(result).toEqual({
       fastDeny: expect.stringContaining("Sensitive path blocked"),

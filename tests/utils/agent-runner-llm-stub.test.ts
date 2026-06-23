@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { clearProviderEnvForTest } from "../helpers/provider-env.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { clearProviderEnvForTest, withEnvForTest } from "../helpers/provider-env.js";
 
 // Spy that should NEVER be called when AGENT_FRAMEWORK_LLM_STUBS targets the
 // telemetry agent. The stub must short-circuit at runAgentWithRetryAndTelemetry
@@ -159,6 +162,8 @@ describe("runAgentWithRetryAndTelemetry — env-keyed LLM stub", () => {
   });
 
   it("continuable SDK sessions pass Claude resume only after the first turn", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-claude-continuable-"));
+    const restoreHome = withEnvForTest({ HOME: home });
     let callCount = 0;
     queryMock.mockImplementation(async function* () {
       callCount++;
@@ -178,19 +183,33 @@ describe("runAgentWithRetryAndTelemetry — env-keyed LLM stub", () => {
       makeConfig({ mode: "sdk", workingDir: "/tmp", continuable: true })
     );
 
-    await session.run({ prompt: "First" });
-    await session.run({ prompt: "Second" });
-    await session.dispose();
+    try {
+      await session.run({ prompt: "First" });
+      await session.run({ prompt: "Second" });
 
-    expect(queryMock).toHaveBeenCalledTimes(2);
-    expect(queryMock.mock.calls[0]?.[0]?.options).toMatchObject({
-      persistSession: true,
-    });
-    expect(queryMock.mock.calls[0]?.[0]?.options).not.toHaveProperty("resume");
-    expect(queryMock.mock.calls[1]?.[0]?.options).toMatchObject({
-      persistSession: true,
-      resume: "native-1",
-    });
+      expect(queryMock).toHaveBeenCalledTimes(2);
+      expect(queryMock.mock.calls[0]?.[0]?.options).toMatchObject({
+        persistSession: true,
+      });
+      expect(queryMock.mock.calls[0]?.[0]?.options).not.toHaveProperty("resume");
+      expect(queryMock.mock.calls[1]?.[0]?.options).toMatchObject({
+        persistSession: true,
+        resume: "native-1",
+      });
+
+      const firstHome = queryMock.mock.calls[0]?.[0]?.options?.env?.CLAUDE_CONFIG_DIR;
+      const secondHome = queryMock.mock.calls[1]?.[0]?.options?.env?.CLAUDE_CONFIG_DIR;
+      expect(typeof firstHome).toBe("string");
+      expect(secondHome).toBe(firstHome);
+      expect(fs.existsSync(firstHome as string)).toBe(true);
+
+      await session.dispose();
+      expect(fs.existsSync(firstHome as string)).toBe(false);
+    } finally {
+      await session.dispose();
+      restoreHome();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("runAgent remains one-shot even when config continuable is true", async () => {

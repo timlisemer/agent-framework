@@ -3,9 +3,9 @@ import { runAnthropicApiSkinDirect } from "./anthropic-api-skin.js";
 import { runClaudeAgent } from "./claude-agent-runtime.js";
 import { runCodexAgent } from "./codex-agent-runtime.js";
 import type { ProviderExecutionResult, ProviderRunInput } from "./execution-types.js";
-import type { ResolvedProvider } from "./types.js";
+import type { ResolvedProvider, SdkRuntime } from "./types.js";
 
-export type SdkRuntimeSelection = "claude" | "codex";
+export type SdkRuntimeSelection = SdkRuntime;
 
 export async function runProviderDirect(input: ProviderRunInput): Promise<ProviderExecutionResult> {
   switch (input.resolvedProvider.type) {

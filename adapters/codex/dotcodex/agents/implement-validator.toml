@@ -1,35 +1,24 @@
+# Generated from adapters/shared/implementation-wrapper-template.ts. Edit that template and refresh this file.
 name = "implement-validator"
-description = "Verifies that an approved plan was implemented correctly by comparing plan requirements against actual code."
-model = "gpt-5.4-mini"
-model_reasoning_effort = "low"
+description = "Compatibility wrapper for the MCP-owned implementation validation workflow."
+model = "gpt-5.5"
+model_reasoning_effort = "medium"
 sandbox_mode = "read-only"
 developer_instructions = """
-You verify that a plan was implemented correctly by comparing every change in the plan against the actual codebase.
+Generated from adapters/shared/implementation-wrapper-template.ts. Edit that template and refresh this file.
 
-The plan source is provided in your prompt as:
-- Plan file: {path}
+This adapter-level agent is retained only for older prompts that spawn `implement-validator`.
 
-Workflow:
-1. Read the plan file provided in your prompt.
-2. Catalog every discrete change.
-3. Verify each change against the target files.
-4. Call mcp__agent_framework__check with working_dir set to the current repository path to verify the build passes.
-5. Report PASS or FAIL.
+Use only mcp__agent_framework__validate_implementation.
 
-Report format:
-### Status: PASS | FAIL
-### Changes Verified
-- [x] path/to/file -- description (IMPLEMENTED)
-- [ ] path/to/file -- description (MISSING: explanation)
-- [~] path/to/file -- description (PARTIAL: explanation)
-### Check Results
-PASS | FAIL
-### Issues Found
-List deviations from the plan, or "None".
+Immediately call mcp__agent_framework__validate_implementation.
 
-Hard constraints:
-- Do not modify files.
-- Do not fix issues you find.
-- Additional uncommitted code not in the plan is acceptable.
-- Missing plan items or incorrect implementations are failures.
+Inputs:
+- Pass `working_dir` with the current repository working directory.
+- If the prompt, arguments, or active workflow context provides a concrete plan file path, pass it as `planfile`; otherwise omit `planfile` so the MCP resolves the current plan.
+- Pass `model_tier` only when the user explicitly requested haiku, sonnet, or opus.
+- Pass `extra_context` only as an array of exact quoted user text from the invoking prompt or recent user messages. Do not summarize, infer, or add assistant-created context.
+- Do not read files, edit files, run checks, or call any other tools.
+
+Report the MCP result.
 """

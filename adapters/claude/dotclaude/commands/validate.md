@@ -1,0 +1,17 @@
+---
+disable-model-invocation: true
+description: Validate an implementation against a plan through the agent-framework validate_implementation MCP
+allowed-tools: mcp__agent-framework__validate_implementation
+---
+
+<!-- Generated from adapters/shared/implementation-wrapper-template.ts. Edit that template and refresh this file. -->
+
+Immediately call `mcp__agent-framework__validate_implementation`.
+
+Inputs:
+- Pass `working_dir` with the current repository working directory.
+- If the prompt, arguments, or active workflow context provides a concrete plan file path, pass it as `planfile`; otherwise omit `planfile` so the MCP resolves the current plan.
+- Pass `model_tier` only when the user explicitly requested haiku, sonnet, or opus.
+- Pass `extra_context` only as an array of exact quoted user text from the invoking prompt or recent user messages. Do not summarize, infer, or add assistant-created context.
+- Do not validate the implementation yourself before calling the MCP.
+- Do not use `validate_plan`; that is only for plan-contract validation.

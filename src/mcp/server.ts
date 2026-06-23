@@ -19,6 +19,7 @@ import { z } from "zod";
 import { runCheckAgent } from "../agents/mcp/check.js";
 import { runValidatePlanAgent } from "../agents/mcp/validate-plan.js";
 import { runCreatePlanfileAgent } from "../agents/mcp/create-planfile.js";
+import { runImplementAgent, runValidateImplementationAgent } from "../agents/mcp/implement.js";
 import { confirmResultFailed, runConfirmAgent, runFullConfirmAgent } from "../agents/mcp/confirm.js";
 import { prepareCommitConfirmContext, runCommitAgent, runCommitAgentWithSharedConfirm } from "../agents/mcp/commit.js";
 import { runPushAgent } from "../agents/mcp/push.js";
@@ -40,6 +41,8 @@ import {
   VALIDATE_INTENT_HELP,
   VALIDATE_PLAN_HELP,
   CREATE_PLANFILE_HELP,
+  IMPLEMENT_HELP,
+  VALIDATE_IMPLEMENTATION_HELP,
   TRANSCRIPT_HELP,
   LOCATE_SCENARIO_HELP,
 } from "./help-docs.js";
@@ -74,6 +77,15 @@ const coercibleBoolean = z.preprocess(
   (val) => (typeof val === "string" ? val === "true" : val),
   z.boolean().optional()
 );
+
+function implementationWorkflowInputSchema() {
+  return {
+    working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
+    planfile: z.string().optional().describe("Path to the plan file. If omitted, resolves the active current-plan sidecar for working_dir."),
+    model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Model tier for the implementation workflow (default: sonnet)"),
+    extra_context: z.array(z.string()).optional().describe("Optional exact quoted user text only; each entry must appear verbatim in recovered user transcript text. Do not populate with assistant-inferred context")
+  };
+}
 
 // Ensure PATH includes standard locations for subprocess spawning
 // Required for Claude Agent SDK to find node when running in Docker via `docker exec`
@@ -357,6 +369,32 @@ registerTimedTool(
       content: args.content,
       continueWorkflow: args.continue_workflow,
     }, { signal });
+    return { content: [{ type: "text", text: result }] };
+  }
+);
+
+registerTimedTool(
+  "implement",
+  {
+    title: "Implement",
+    description: "Implement an approved plan through an internal write-capable implementation agent, run parent-owned checks, then validate implementation with a read-only validator.",
+    inputSchema: implementationWorkflowInputSchema()
+  },
+  async (args, _extra, signal) => {
+    const result = await runImplementAgent(args, { signal, workingDir: args.working_dir });
+    return { content: [{ type: "text", text: result }] };
+  }
+);
+
+registerTimedTool(
+  "validate_implementation",
+  {
+    title: "Validate Implementation",
+    description: "Validate that a plan was implemented correctly using the shared read-only implementation validator workflow.",
+    inputSchema: implementationWorkflowInputSchema()
+  },
+  async (args, _extra, signal) => {
+    const result = await runValidateImplementationAgent(args, { signal, workingDir: args.working_dir });
     return { content: [{ type: "text", text: result }] };
   }
 );
@@ -891,6 +929,8 @@ const HELP_RESOURCES: Array<{
   { tool: "validate_intent", title: "validate_intent -- Help", summary: "User intention alignment check", body: VALIDATE_INTENT_HELP },
   { tool: "validate_plan", title: "validate_plan -- Help", summary: "Plan contract validator", body: VALIDATE_PLAN_HELP },
   { tool: "create_planfile", title: "create_planfile -- Help", summary: "Planfile creator", body: CREATE_PLANFILE_HELP },
+  { tool: "implement", title: "implement -- Help", summary: "Plan implementation workflow", body: IMPLEMENT_HELP },
+  { tool: "validate_implementation", title: "validate_implementation -- Help", summary: "Implementation validator", body: VALIDATE_IMPLEMENTATION_HELP },
   { tool: "scenario_tester", title: "scenario_tester -- Help", summary: "Scenario tester (transcripts + scenarios)", body: TESTER_HELP },
   { tool: "scenario_labeler", title: "scenario_labeler -- Help", summary: "Scenario transcript labeler", body: LABELER_HELP },
   { tool: "transcript", title: "transcript -- Help", summary: "Session transcript path resolver", body: TRANSCRIPT_HELP },

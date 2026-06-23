@@ -36,6 +36,8 @@ export interface ToolRequirement {
   input?: Record<string, string | number | boolean>;
   /** Exact array-length constraints on canonical input fields. */
   inputArrayLengths?: Record<string, number>;
+  /** Input keys that must be present, with environment-specific values. */
+  inputRequiredKeys?: string[];
   /** Literal substrings that must appear in the serialized tool input. */
   inputSubstrings?: string[];
   /** Human-readable source/reason for debugging and prediction context. */
@@ -152,7 +154,7 @@ export function predictionUserMessageForLogic(prediction: ToolPrediction): strin
 }
 
 /**
- * Verbs that — applied to file changes the AI made — REQUIRE Edit/Write to obey.
+ * Verbs that — applied to file changes the AI made — require text edit tools to obey.
  * Mirrors the SENTIMENT_AGENT prompt's undo verb-mapping in
  * src/utils/agent-configs.ts:1444-1445 (commit 2e27eae) and the morphology
  * style of deriveEditIntentFromPrediction (src/utils/edit-intent.ts:83).
@@ -571,6 +573,7 @@ function verbRegexesProducingTool(toolName: string): RegExp[] {
     case "Read":
       return [READ_VERB_RE];
     case "Edit":
+    case "MultiEdit":
     case "Write":
       return [EDIT_VERB_RE];
     case "Bash":
@@ -707,6 +710,10 @@ const EXACT_INPUT_KEYS = new Set([
   "skip_elicitation",
 ]);
 
+const REQUIRED_INPUT_KEYS = new Set([
+  "working_dir",
+]);
+
 const WORD_NUMBER_COUNTS: Readonly<Record<string, number>> = {
   one: 1,
   two: 2,
@@ -714,6 +721,7 @@ const WORD_NUMBER_COUNTS: Readonly<Record<string, number>> = {
   four: 4,
   five: 5,
 };
+const MCP_TOOL_TOKEN_RE = /\bmcp(?:-[A-Za-z0-9_]+|__[^\s`"'|,.)]+)/g;
 
 function stripFrontmatterAndFencedBlocks(text: string): string {
   let out = text.replace(/^---\n[\s\S]*?\n---\n?/, "");
@@ -730,7 +738,8 @@ function countFromWord(raw: string): number {
 
 function canonicalMcpToolFromToken(token: string): string | null {
   const direct = /^mcp-([a-z0-9_]+)$/i.exec(token);
-  const mcpName = direct?.[1] ?? (/^[A-Za-z0-9_]+$/.test(token) ? token : null);
+  const wire = /^mcp__.*__([a-z0-9_]+)$/i.exec(token);
+  const mcpName = direct?.[1] ?? wire?.[1] ?? (/^[A-Za-z0-9_]+$/.test(token) ? token : null);
   if (!mcpName) return null;
   const canonical = CANONICAL_MCPS.find((mcp) => mcp === mcpName);
   return canonical ? `mcp-${canonical}` : null;
@@ -745,18 +754,28 @@ export function parseToolRequirementScalar(raw: string): string | boolean | numb
   return trimmed;
 }
 
-function extractExactInputConstraints(lines: readonly string[], lineIndex: number): Record<string, string | number | boolean> | undefined {
+function extractInputConstraints(lines: readonly string[], lineIndex: number): Pick<ToolRequirement, "input" | "inputRequiredKeys"> {
   const input: Record<string, string | number | boolean> = {};
+  const inputRequiredKeys: string[] = [];
   const max = Math.min(lines.length, lineIndex + 8);
   for (let i = lineIndex; i < max; i++) {
     const line = lines[i];
+    if (/\b(optional|omit unless)\b/i.test(line)) continue;
     for (const key of EXACT_INPUT_KEYS) {
       const quoted = new RegExp(`\`?${key}\`?\\s*(?::|set to)\\s*\`?([^\\n\`]+?)\`?(?:\\s|$|[.,])`, "i").exec(line);
       if (!quoted) continue;
       input[key] = parseToolRequirementScalar(quoted[1]);
     }
+    for (const key of REQUIRED_INPUT_KEYS) {
+      if (new RegExp(`\`?${key}\`?`, "i").test(line) && /\b(pass|include|set)\b/i.test(line)) {
+        if (!inputRequiredKeys.includes(key)) inputRequiredKeys.push(key);
+      }
+    }
   }
-  return Object.keys(input).length > 0 ? input : undefined;
+  return {
+    ...(Object.keys(input).length > 0 ? { input } : {}),
+    ...(inputRequiredKeys.length > 0 ? { inputRequiredKeys } : {}),
+  };
 }
 
 function pushRequirement(
@@ -769,6 +788,7 @@ function pushRequirement(
       ...requirement,
       input: requirement.input ? { ...requirement.input } : undefined,
       inputArrayLengths: requirement.inputArrayLengths ? { ...requirement.inputArrayLengths } : undefined,
+      inputRequiredKeys: requirement.inputRequiredKeys ? [...requirement.inputRequiredKeys] : undefined,
     });
   }
 }
@@ -844,14 +864,15 @@ export function deriveWorkflowToolRequirementsFromText(text: string): {
     const isNegative = /\bdo\s+not\b|\bdon'?t\b|\bwithout\b/.test(lower);
     const canRequireTool = !isConditional && !isNegative;
 
-    for (const match of line.matchAll(/\bmcp-[A-Za-z0-9_]+/g)) {
+    for (const match of line.matchAll(MCP_TOOL_TOKEN_RE)) {
       const tool = canonicalMcpToolFromToken(match[0]);
       if (!tool) continue;
       const lineRequiresCall = lineStartsWithCall(line);
       if (!lineRequiresCall || !canRequireTool) continue;
+      const inputConstraints = extractInputConstraints(lines, i);
       pushRequirement(required, {
         tool,
-        input: extractExactInputConstraints(lines, i),
+        ...inputConstraints,
         reason: line,
       });
     }
@@ -860,9 +881,10 @@ export function deriveWorkflowToolRequirementsFromText(text: string): {
       ? canonicalMcpToolFromToken("create_planfile")
       : null;
     if (createPlanfile && lineStartsWithCall(line) && canRequireTool) {
+      const inputConstraints = extractInputConstraints(lines, i);
       pushRequirement(required, {
         tool: createPlanfile,
-        input: extractExactInputConstraints(lines, i),
+        ...inputConstraints,
         reason: line,
       });
     }
@@ -937,6 +959,9 @@ function toolRequirementMatchesIdentities(
     const actual = input[key];
     if (!Array.isArray(actual) || actual.length !== expectedLength) return false;
   }
+  for (const key of requirement.inputRequiredKeys ?? []) {
+    if (!(key in input)) return false;
+  }
   const inputStr = stringifyToolInput(toolInput);
   for (const literal of requirement.inputSubstrings ?? []) {
     if (!inputStr.includes(literal)) return false;
@@ -961,7 +986,9 @@ export function formatToolRequirement(requirement: ToolRequirement): string {
     .map(([key, value]) => `${key}=${JSON.stringify(value)}`);
   const arrayConstraints = Object.entries(requirement.inputArrayLengths ?? {})
     .map(([key, value]) => `${key}.length=${value}`);
-  const constraints = [...scalarConstraints, ...arrayConstraints]
+  const requiredKeys = (requirement.inputRequiredKeys ?? [])
+    .map((key) => `${key}=<required>`);
+  const constraints = [...scalarConstraints, ...arrayConstraints, ...requiredKeys]
     .join(", ");
   const substrings = requirement.inputSubstrings?.length
     ? ` inputSubstrings=${JSON.stringify(requirement.inputSubstrings)}`

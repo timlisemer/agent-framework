@@ -3,10 +3,12 @@ import { resolveProvider, type ResolvedProvider } from "../utils/provider-config
 import { summarizeToolInputForUi } from "../utils/tool-input-summary.js";
 import {
   buildClaudeQueryOptions,
+  createClaudeRuntimeHomeLease,
   createClaudeUiStreamState,
   mapClaudeUiStreamMessage,
   recordClaudePlanUpdate,
   sanitizeClaudeEnv,
+  type ClaudeRuntimeHomeLease,
 } from "../providers/claude-agent-runtime.js";
 import {
   createCodexLiveSession,
@@ -73,6 +75,7 @@ export function buildCodexTurnInput(config: AiSessionConfig, prompt: string): st
 
 class ClaudeUiProvider implements AiProviderRunner {
   #runtimeSessionRef: string | null = null;
+  #runtimeHomeLease: ClaudeRuntimeHomeLease | null = null;
   readonly #decisions = new DecisionBroker();
 
   constructor(readonly resolvedProvider: ResolvedProvider, runtimeSessionRef: string | null = null) {
@@ -93,45 +96,65 @@ class ClaudeUiProvider implements AiProviderRunner {
     const streamState = createClaudeUiStreamState(this.#runtimeSessionRef);
     const producer = (async () => {
       const { query } = await import("@anthropic-ai/claude-agent-sdk");
-      const stream = query({
-        prompt,
-        options: buildClaudeQueryOptions(config, this.resolvedProvider, abortController, env, {
-          canUseTool: async (toolName: string, toolInput: Record<string, unknown>, options: { signal: AbortSignal; toolUseID: string; title?: string; decisionReason?: string }) => {
-            const ref = options.toolUseID;
-            streamState.seenTools.add(options.toolUseID);
-            queue.push({ type: "tool.created", ref, name: toolName, input: summarizeToolInputForUi(toolName, toolInput) });
-            queue.push({ type: "tool.updated", ref, status: "waiting", waitReason: options.title ?? options.decisionReason ?? null });
-            const decision = await this.#decisions.waitForDecision(ref, options.signal);
-            if (decision.decision === "approve") {
-              if (toolName === "ExitPlanMode" && typeof toolInput.plan === "string" && recordClaudePlanUpdate(streamState, toolInput.plan)) {
-                queue.push({ type: "plan.updated", state: { mode: "awaitingApproval", planText: toolInput.plan, approved: false } });
+      const runtimeHomeLease = config.continuable === true
+        ? (this.#runtimeHomeLease ??= createClaudeRuntimeHomeLease({
+            config,
+            env,
+            continuable: true,
+          }))
+        : createClaudeRuntimeHomeLease({
+            config,
+            env,
+            continuable: false,
+          });
+      const runtimeHome = runtimeHomeLease.get();
+      try {
+        const stream = query({
+          prompt,
+          options: buildClaudeQueryOptions(config, this.resolvedProvider, abortController, env, {
+            canUseTool: async (toolName: string, toolInput: Record<string, unknown>, options: { signal: AbortSignal; toolUseID: string; title?: string; decisionReason?: string }) => {
+              const ref = options.toolUseID;
+              streamState.seenTools.add(options.toolUseID);
+              queue.push({ type: "tool.created", ref, name: toolName, input: summarizeToolInputForUi(toolName, toolInput) });
+              queue.push({ type: "tool.updated", ref, status: "waiting", waitReason: options.title ?? options.decisionReason ?? null });
+              const decision = await this.#decisions.waitForDecision(ref, options.signal);
+              if (decision.decision === "approve") {
+                if (toolName === "ExitPlanMode" && typeof toolInput.plan === "string" && recordClaudePlanUpdate(streamState, toolInput.plan)) {
+                  queue.push({ type: "plan.updated", state: { mode: "awaitingApproval", planText: toolInput.plan, approved: false } });
+                }
+                return { behavior: "allow" as const, updatedInput: toolInput, toolUseID: options.toolUseID };
               }
-              return { behavior: "allow" as const, updatedInput: toolInput, toolUseID: options.toolUseID };
-            }
-            return {
-              behavior: "deny" as const,
-              message: decision.reason ?? "Tool use denied.",
-              toolUseID: options.toolUseID,
-            };
-          },
-          includePartialMessages: true,
-          includeHookEvents: true,
-          permissionMode: "default",
-          persistSession: config.continuable === true,
-          ...(config.continuable === true && this.#runtimeSessionRef
-            ? { resume: this.#runtimeSessionRef }
-            : {}),
-        }),
-      });
-      for await (const message of stream) {
-        signal.throwIfAborted();
-        const mapped = mapClaudeUiStreamMessage(message, streamState);
-        for (const event of mapped.events) queue.push(event);
-        if (mapped.sessionRef) this.#runtimeSessionRef = mapped.sessionRef;
-        if (mapped.terminal) break;
-      }
-      if (config.continuable === true) {
-        queue.push({ type: "continuation.updated", available: Boolean(this.#runtimeSessionRef) });
+              return {
+                behavior: "deny" as const,
+                message: decision.reason ?? "Tool use denied.",
+                toolUseID: options.toolUseID,
+              };
+            },
+            includePartialMessages: true,
+            includeHookEvents: true,
+            permissionMode: "default",
+            persistSession: config.continuable === true,
+            ...(config.continuable === true && this.#runtimeSessionRef
+              ? { resume: this.#runtimeSessionRef }
+              : {}),
+          }, runtimeHome),
+        });
+        for await (const message of stream) {
+          signal.throwIfAborted();
+          const mapped = mapClaudeUiStreamMessage(message, streamState);
+          for (const event of mapped.events) queue.push(event);
+          if (mapped.sessionRef) this.#runtimeSessionRef = mapped.sessionRef;
+          if (mapped.terminal) break;
+        }
+        if (config.continuable === true) {
+          queue.push({ type: "continuation.updated", available: Boolean(this.#runtimeSessionRef) });
+        }
+        runtimeHomeLease.markRetainedHomeStable();
+      } catch (error) {
+        runtimeHomeLease.disposeCreatedRetainedHome();
+        throw error;
+      } finally {
+        runtimeHomeLease.releaseAttempt(runtimeHome);
       }
     })();
     producer.then(() => queue.end(), (error) => queue.fail(error));
@@ -149,6 +172,11 @@ class ClaudeUiProvider implements AiProviderRunner {
       return Promise.reject(new Error(`Tool is not waiting for a decision: ${decision.toolCallId}`));
     }
     return Promise.resolve();
+  }
+
+  dispose(): void {
+    this.#runtimeHomeLease?.dispose();
+    this.#runtimeHomeLease = null;
   }
 }
 

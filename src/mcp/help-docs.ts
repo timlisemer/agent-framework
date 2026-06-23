@@ -202,6 +202,30 @@ Per-repo results with commit hash on success, DECLINED reason on failure.
 - End of a unit of work, when the user explicitly asks you to commit
 - Never proactively -- only on explicit user request`;
 
+const IMPLEMENTATION_WORKFLOW_INPUT_HELP = `## Inputs
+
+- working_dir (optional): working directory, defaults to the server cwd
+- planfile (optional): path to the plan file. If omitted, the active current-plan sidecar for working_dir is used.
+- model_tier (optional): haiku | sonnet | opus (default sonnet)
+- extra_context (optional string array): exact quoted user text only
+
+Do not populate extra_context with assistant-inferred summaries. Each entry is
+accepted only if it exactly appears in recent recovered user text.`;
+
+export const IMPLEMENT_HELP = `# implement -- Plan Implementation Workflow
+
+Runs an internal write-capable implementation agent for a planfile, then runs
+parent-owned check, then runs a read-only implementation validator.
+
+${IMPLEMENTATION_WORKFLOW_INPUT_HELP}`;
+
+export const VALIDATE_IMPLEMENTATION_HELP = `# validate_implementation -- Implementation Validation
+
+Runs the read-only implementation validator for a planfile and includes a
+parent-owned check summary in the validator prompt.
+
+${IMPLEMENTATION_WORKFLOW_INPUT_HELP}`;
+
 export const PUSH_HELP = `# push -- Git Push to Remote
 
 Simple wrapper around \`git push\`. Does NOT invoke an LLM and does NOT run

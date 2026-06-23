@@ -23,6 +23,7 @@ const SENSITIVE_BASENAME_PATTERNS: RegExp[] = [
   /^\.env\.(?!example$).+/i,
   /^\.sops\.ya?ml$/i,
   /^.+\.sops\.(json|ya?ml|toml|env|ini)$/i,
+  /^(auth|token|tokens)([-_.].*)?\.(json|ya?ml|toml|env|ini|txt)$/i,
   /^.+\.(agekey|key|pem|p12|pfx|jks|keystore)$/i,
   /^(id_rsa|id_dsa|id_ecdsa|id_ed25519)$/i,
   /^(kubeconfig|config\.kube)$/i,

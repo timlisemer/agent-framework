@@ -71,6 +71,37 @@ describe("bash policy topics", () => {
     expect(result.terminal.riskClass).toBe("blocked");
   });
 
+  it.each([
+    "cat /tmp/runtime/auth.json",
+    "grep token /tmp/runtime/auth.json",
+    "grep -e token /tmp/runtime/auth.json",
+    "rg token /tmp/runtime/auth.json",
+    "rg -e token /tmp/runtime/auth.json",
+    "rg --regexp=token /tmp/runtime/auth.json",
+    "rg --files /tmp/runtime/auth.json",
+    "rg --files -- /tmp/runtime/auth.json",
+    "rg --files ~/.ssh",
+    "rg -g auth.json token /tmp/runtime",
+    "rg -gauth.json token /tmp/runtime",
+    "rg --glob auth.json token /tmp/runtime",
+    "grep --include=auth.json token /tmp/runtime/*",
+    "xargs -a /tmp/runtime/auth.json cat",
+    "xargs --arg-file /tmp/runtime/auth.json cat",
+    "xargs --arg-file=/tmp/runtime/auth.json cat",
+    "xargs -a .env.local cat",
+    "nl /tmp/runtime/auth.json",
+    "sort /tmp/runtime/auth.json",
+    "cut -d: -f1 /tmp/runtime/auth.json",
+    "diff /tmp/runtime/auth.json /tmp/runtime/auth-copy.json",
+  ])("blocks read-only Bash access to provider auth files: %s", (command) => {
+    const result = evaluateBashPolicy(command);
+
+    expect(result.terminal.ownerTopic).toBe("read-only");
+    expect(result.terminal.ownerName).toBe("read-only guard");
+    expect(result.terminal.riskClass).toBe("blocked");
+    expect(result.terminal.reason).toContain("sensitive path read blocked");
+  });
+
   it("keeps nix eval as a direct hard block outside install/run policy", () => {
     const command = "nix eval .#checks.x86_64-linux";
     const result = evaluateBashPolicy(command);

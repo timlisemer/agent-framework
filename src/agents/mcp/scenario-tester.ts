@@ -748,7 +748,7 @@ Key source files:
 - src/utils/drift-detector.ts -- drift/anomaly detection heuristics
 
 ### A.7 Fix hook code
-Use Write, Edit tools to fix hook source files. Plan fixes carefully.
+Use Write/Edit/MultiEdit tools to fix hook source files. Plan fixes carefully.
 Batch ALL fixes before re-running.
 
 ### A.8 Iterate with single-hook runs
@@ -808,7 +808,7 @@ Shows surrounding context for a specific hook point.
 - Do NOT modify labels.json -- only add notes
 - Do NOT call build commands -- the harness builds automatically
 - Do NOT label transcripts -- that is the labeler's job
-- Use Read and read-only Bash (grep, rg, find, ls) for investigation; Write/Edit for fixes. Bash is gated to a read-only allowlist by the pre-tool-use hook -- mutation, execution, and network commands are denied.
+- Use Read and read-only Bash (grep, rg, find, ls) for investigation; Write/Edit/MultiEdit for fixes. Bash is gated to a read-only allowlist by the pre-tool-use hook -- mutation, execution, and network commands are denied.
 - Use this MCP tool ONLY for harness operations
 - Use run_single_hook for iterative development (cheap, does not count
   against run limit)

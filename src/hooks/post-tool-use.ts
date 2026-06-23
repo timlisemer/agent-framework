@@ -12,6 +12,7 @@ import { activeSpec } from "../adapter/spec.js";
 import { detectPlanModeForHook } from "../utils/plan-mode-detector.js";
 import { extractPlanName } from "../utils/planfile.js";
 import { readPlanFileContent, writeCurrentPlanSidecar } from "../utils/plan-source.js";
+import { isTextEditToolName } from "../utils/edit-tools.js";
 import * as path from "path";
 
 export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
@@ -37,7 +38,7 @@ export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, enco
     ms: 0,
   });
 
-  if (canonical.toolName === "Write" || canonical.toolName === "Edit") {
+  if (isTextEditToolName(canonical.toolName)) {
     for (const filePath of extractFilePaths(canonical.toolName, canonical.toolInput)) {
       if (!isPlanFile(filePath, sessionDir)) continue;
       const content = await readPlanFileContent(filePath);

@@ -29,6 +29,6 @@ base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 ```
 
-Isolated Codex SDK sessions place that routing in the temporary Codex config. Native user-runtime Codex SDK sessions preserve the user's normal Codex home/config while still passing the OpenRouter provider routing needed for the session. Managed Astral user-runtime sessions (`sdkRuntimeHome: "managedAstral"`) set `CODEX_HOME` to `~/.agent-framework/astral-ai/codex` for session history listing/resume while still passing the OpenRouter provider routing needed for the session.
+Isolated Codex SDK sessions place that routing in a per-run internal Codex config under `~/.agent-framework/internal/.../codex/<runId>`. Native user-runtime Codex SDK sessions preserve the user's normal Codex home/config while still passing the OpenRouter provider routing needed for the session. Managed Astral user-runtime sessions (`sdkRuntimeHome: "managedAstral"`) set `CODEX_HOME` to `~/.agent-framework/astral-ai/codex` for session history listing/resume, refresh framework-owned adapter config without deleting `sessions/`, and still pass the OpenRouter provider routing needed for the session.
 
 OpenRouter SDK mode is still billed by OpenRouter credits. Cost telemetry is only fetched for direct OpenRouter calls that return a generation id; SDK calls are logged with tokens/latency when available but excluded from OpenRouter generation-cost lookup.

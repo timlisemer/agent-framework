@@ -4,7 +4,9 @@ description: Run linter, type checks, deterministic deleted/renamed filename-ref
 allowed-tools: mcp__agent-framework__check
 ---
 
-1. IMMEDIATELY call mcp__agent-framework__check with no parameters.
+1. IMMEDIATELY call mcp__agent-framework__check.
+
+   - Pass `working_dir` with the current repository working directory.
 
    - Do NOT run any Bash commands (make check, just check, npm run build, cargo check, tsc, etc.)
    - Do NOT read files or gather context first

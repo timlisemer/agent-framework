@@ -21,13 +21,14 @@ import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
 import { getContentBlacklistHighlights } from "../../utils/command-patterns.js";
 import { getRuleViolationHighlights } from "../../utils/content-patterns.js";
-import { formatProposedEdit } from "./edit-validation.js";
+import { formatProposedEdit, type EditValidationToolInput } from "./edit-validation.js";
+import type { TextEditToolName } from "../../utils/edit-tools.js";
 
 /**
  * Validate CLAUDE.md content against agent-framework rules.
  *
  * @param currentContent - The full current file content (null if new file)
- * @param toolName - The tool being used (Write or Edit)
+ * @param toolName - The tool being used (Write, Edit, or MultiEdit)
  * @param toolInput - The tool input with content or old_string/new_string
  * @param workingDir - Working directory for context
  * @param hookName - Hook that triggered this check (for telemetry)
@@ -43,8 +44,8 @@ import { formatProposedEdit } from "./edit-validation.js";
  */
 export async function validateClaudeMd(
   currentContent: string | null,
-  toolName: "Write" | "Edit",
-  toolInput: { content?: string; old_string?: string; new_string?: string },
+  toolName: TextEditToolName,
+  toolInput: EditValidationToolInput,
   workingDir: string,
   hookName: string
 ): Promise<{ approved: boolean; reason?: string }> {

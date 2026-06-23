@@ -14,6 +14,8 @@ import * as path from "path";
 import * as url from "url";
 import { hashString } from "./hash-utils.js";
 import { resolveHostContext } from "./host-context.js";
+import { isPathAtOrInside } from "./path-containment.js";
+import { internalRuntimeDirNameForProfile, type RuntimeHomeProfile } from "../runtime-home/profiles.js";
 
 // ─── In-memory caches ─────────────────────────────────────────────────────
 
@@ -54,14 +56,51 @@ export function managedProviderRoot(provider: string): string {
 }
 
 /**
+ * Internal runtime roots for framework-owned provider subprocesses.
+ */
+export function internalRoot(): string {
+  return path.join(runtimeRoot(), "internal");
+}
+
+export function internalRuntimeHomeRoot(profile: RuntimeHomeProfile, provider: string): string {
+  return path.join(internalRoot(), internalRuntimeDirNameForProfile(profile), provider);
+}
+
+export function internalSessionRoot(policy: "write"): string {
+  return path.join(internalRoot(), "sessions", policy);
+}
+
+export function internalVolatileRoot(): string {
+  return path.join(internalRoot(), "volatile");
+}
+
+export function runtimeScratchRoot(): string {
+  return path.join(os.tmpdir(), "agent-framework");
+}
+
+/**
  * Repo root: <repo> via AGENT_FRAMEWORK_ROOT or import.meta.url climb.
  */
 export function agentFrameworkRoot(): string {
   const envRoot = process.env.AGENT_FRAMEWORK_ROOT;
   if (envRoot) return envRoot;
-  // Climb from src/utils/paths.ts -> src/utils -> src -> repo
-  const thisFile = url.fileURLToPath(import.meta.url);
-  return path.resolve(path.dirname(thisFile), "..", "..");
+  return resolveAgentFrameworkRootFromModulePath(url.fileURLToPath(import.meta.url));
+}
+
+export function resolveAgentFrameworkRootFromModulePath(modulePath: string): string {
+  let dir = path.dirname(path.resolve(modulePath));
+  while (true) {
+    if (hasAdapterDotfolderAssets(dir)) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`Unable to locate agent-framework root with adapter dotfolder assets from ${modulePath}`);
+}
+
+function hasAdapterDotfolderAssets(dir: string): boolean {
+  return fs.existsSync(path.join(dir, "adapters", "claude", "dotclaude")) &&
+    fs.existsSync(path.join(dir, "adapters", "codex", "dotcodex"));
 }
 
 /**
@@ -152,6 +191,13 @@ export function getAgentFrameworkSessionDir(input: AgentFrameworkSessionDirInput
 
   if (!input.transcriptPath) return resolveCurrentSessionDirFromSidecar(input.projectDir);
 
+  const internalSessionDir = internalSessionDirForTranscript(input.transcriptPath);
+  if (internalSessionDir) {
+    fs.mkdirSync(internalSessionDir, { recursive: true });
+    writeSidecarIfNeeded(internalSessionDir, input.transcriptPath);
+    return internalSessionDir;
+  }
+
   const testRunDir = testRunSessionDirForTranscript(input.transcriptPath);
   if (testRunDir) {
     fs.mkdirSync(testRunDir, { recursive: true });
@@ -160,6 +206,30 @@ export function getAgentFrameworkSessionDir(input: AgentFrameworkSessionDirInput
   }
 
   return sessionDirForTranscript(input.transcriptPath, input.projectDir);
+}
+
+function internalSessionDirForTranscript(transcriptPath: string): string | null {
+  const policy = process.env.AGENT_FRAMEWORK_SESSION_POLICY;
+  if (policy === "none") {
+    const runId = process.env.AGENT_FRAMEWORK_RUN_ID ?? hashString(transcriptPath);
+    return process.env.AGENT_FRAMEWORK_VOLATILE_DIR ?? path.join(internalVolatileRoot(), runId);
+  }
+  if (policy === "volatile") {
+    const volatileDir = process.env.AGENT_FRAMEWORK_VOLATILE_DIR;
+    return volatileDir ? path.resolve(volatileDir) : null;
+  }
+  if (policy === "write") {
+    const runId = process.env.AGENT_FRAMEWORK_RUN_ID ?? hashString(transcriptPath);
+    return path.join(internalSessionRoot("write"), runId);
+  }
+
+  if (!isPathAtOrInside(transcriptPath, internalRoot())) return null;
+  const resolved = path.resolve(transcriptPath);
+  const internal = path.resolve(internalRoot());
+  const parts = resolved.slice(internal.length).split(path.sep).filter(Boolean);
+  if (parts[0] === "write") return path.join(internalSessionRoot("write"), parts[2] ?? hashString(transcriptPath));
+  if (parts[0] === "read-only" || parts[0] === "direct") return null;
+  return null;
 }
 
 function sessionDirForTranscript(transcriptPath: string, projectDir?: string): string {
@@ -198,16 +268,12 @@ function sessionDirForTranscript(transcriptPath: string, projectDir?: string): s
 }
 
 function testRunSessionDirForTranscript(transcriptPath: string): string | null {
-  const resolved = path.resolve(transcriptPath);
-  const root = path.resolve(testRunsRoot());
-  if (!(resolved.startsWith(root + path.sep) || resolved === root)) return null;
-  return path.dirname(resolved);
+  if (!isPathAtOrInside(transcriptPath, testRunsRoot())) return null;
+  return path.dirname(path.resolve(transcriptPath));
 }
 
 export function isTestRunSessionDir(sessionDirPath: string): boolean {
-  const resolved = path.resolve(sessionDirPath);
-  const root = path.resolve(testRunsRoot());
-  return resolved.startsWith(root + path.sep) || resolved === root;
+  return isPathAtOrInside(sessionDirPath, testRunsRoot());
 }
 
 function resolveCurrentSessionDirFromSidecar(projectDir?: string): string {
@@ -237,6 +303,26 @@ function resolveCurrentSessionDirFromSidecar(projectDir?: string): string {
     throw new Error(`no transcript-path.txt sidecar found under ${parentDir}`);
   }
   return candidates[0].sessionDirPath;
+}
+
+export function resolveSessionTranscriptPathForProject(projectDir?: string): { sessionDir: string; transcriptPath: string } | null {
+  try {
+    const sessionDir = getAgentFrameworkSessionDir({ projectDir });
+    const transcriptPath = readSessionTranscriptPath(sessionDir);
+    if (!transcriptPath) return null;
+    return { sessionDir, transcriptPath };
+  } catch {
+    return null;
+  }
+}
+
+export function readSessionTranscriptPath(sessionDir: string): string | null {
+  try {
+    const transcriptPath = fs.readFileSync(sessionTranscriptPathSidecar(sessionDir), "utf-8").trim();
+    return transcriptPath && fs.existsSync(transcriptPath) ? transcriptPath : null;
+  } catch {
+    return null;
+  }
 }
 
 function writeSidecarIfNeeded(dirPath: string, transcriptPath: string): void {
@@ -375,7 +461,7 @@ export function scenarioRunDir(name: string): string {
   }
   const root = path.resolve(scenariosRoot());
   const candidate = path.resolve(root, name);
-  if (candidate !== root && !candidate.startsWith(root + path.sep)) {
+  if (!isPathAtOrInside(candidate, root)) {
     throw new Error(`invalid scenario name (resolved outside scenarios root): ${name}`);
   }
   return candidate;
@@ -432,9 +518,7 @@ export function packageJsonPath(): string {
  * Throw if p is not under runtimeRoot().
  */
 export function assertWithinRuntimeRoot(p: string): void {
-  const resolved = path.resolve(p);
-  const root = runtimeRoot();
-  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
+  if (!isPathAtOrInside(p, runtimeRoot())) {
     throw new Error(`Path escapes runtime root: ${p}`);
   }
 }

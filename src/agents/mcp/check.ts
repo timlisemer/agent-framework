@@ -66,6 +66,7 @@ import { type CancellationOptions, throwIfAborted } from "../../utils/cancellati
 import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
 import { resetDriftDetectionWindow } from "../../scenario/lifecycle.js";
 import { runSupplementalDiagnosticProviders } from "../../utils/supplemental-diagnostics.js";
+import { parseCheckAgentResult } from "../../utils/check-result.js";
 
 import { activeSpec, registeredAdapterNames } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("check"); }
@@ -479,6 +480,7 @@ export async function runCheckAgent(
   // Step 2: Run linter if configured (check workingDir first, then main repo)
   let lintOutput = "";
   const lintSections: string[] = [];
+  const commandErrors: string[] = [];
   const seenLintInvocations = new Set<string>();
   for (const repo of scopedRepos) {
     const linter = detectLinter(repo.path, mainRepo);
@@ -492,7 +494,11 @@ export async function runCheckAgent(
       const lint = await runProcessCancellable({ shell: true, command: linter.cmd }, linter.dir, options);
       const lintLocation = linter.dir === repo.path ? "" : ` (from ${path.basename(linter.dir)})`;
       const repoLabel = options.repoScope?.mode === "all" ? ` for ${repo.name}` : "";
-      lintSections.push(`LINTER OUTPUT${repoLabel}${lintLocation} (exit code ${lint.exitCode}):\n${lint.output}`);
+      const section = `LINTER OUTPUT${repoLabel}${lintLocation} (exit code ${lint.exitCode}):\n${lint.output}`;
+      lintSections.push(section);
+      if (lint.exitCode !== 0) {
+        commandErrors.push(section);
+      }
     }
   }
   lintOutput = lintSections.length > 0 ? `${lintSections.join("\n\n")}\n` : "";
@@ -504,7 +510,9 @@ export async function runCheckAgent(
   for (const repo of scopedRepos) {
     const checkRunner = findCheckRunner(repo.path, mainRepo);
     if (checkRunner && "error" in checkRunner) {
-      checkSections.push(`CHECK OUTPUT${options.repoScope?.mode === "all" ? ` for ${repo.name}` : ""}: ${checkRunner.error}`);
+      const section = `CHECK OUTPUT${options.repoScope?.mode === "all" ? ` for ${repo.name}` : ""}: ${checkRunner.error}`;
+      checkSections.push(section);
+      commandErrors.push(section);
     } else if (checkRunner) {
       for (const invocation of checkInvocationsForRunner(checkRunner)) {
         const envKey = invocation.adapter ? `adapter=${invocation.adapter}` : "";
@@ -523,11 +531,18 @@ export async function runCheckAgent(
         const checkLocation = invocation.dir === repo.path ? "" : ` (from ${path.basename(invocation.dir)})`;
         const adapterLabel = invocation.adapter ? ` [adapter=${invocation.adapter}]` : "";
         const repoLabel = options.repoScope?.mode === "all" ? ` for ${repo.name}` : "";
-        checkSections.push(`${label} OUTPUT${adapterLabel}${repoLabel}${checkLocation} (exit code ${check.exitCode}):\n${check.output}`);
+        const section = `${label} OUTPUT${adapterLabel}${repoLabel}${checkLocation} (exit code ${check.exitCode}):\n${check.output}`;
+        checkSections.push(section);
+        if (check.exitCode !== 0) {
+          commandErrors.push(section);
+        }
       }
     } else {
       throwIfAborted(options.signal);
-      checkSections.push(`CHECK OUTPUT${options.repoScope?.mode === "all" ? ` for ${repo.name}` : ""}: No Justfile or Makefile found. The check agent expects a Justfile with a 'check' recipe, or a Makefile with a 'check' target.`);
+      const error = "No Justfile or Makefile found. The check agent expects a Justfile with a 'check' recipe, or a Makefile with a 'check' target.";
+      const section = `CHECK OUTPUT${options.repoScope?.mode === "all" ? ` for ${repo.name}` : ""}: ${error}`;
+      checkSections.push(section);
+      commandErrors.push(section);
     }
   }
   checkOutput = checkSections.join("\n\n");
@@ -570,6 +585,31 @@ export async function runCheckAgent(
     options
   );
 
+  const summarizerFailed =
+    result.success === false ||
+    (result.errorCount ?? 0) > 0 ||
+    result.output.startsWith("[DIRECT ERROR]") ||
+    result.output.startsWith("[SDK ERROR]");
+  if (summarizerFailed) {
+    const fallback = deterministicCheckFallback({
+      commandErrors,
+      deterministicErrors,
+      supplementalOutput,
+      rawError: result.output,
+    });
+    const isPassing = parseCheckAgentResult(fallback).status === "PASS";
+    logAgentResult(result, {
+      agent: "check",
+      hookName: getHookName(),
+      toolName: getHookName(),
+      workingDir,
+      executionType: EXECUTION_TYPES.LLM,
+      decisionOverride: isPassing ? "CONFIRM" : "DENY",
+      decisionReason: isPassing ? "All checks passed" : "Checks failed",
+    });
+    return fallback;
+  }
+
   // TS post-parse normalization:
   //   1. Move unused-code lines from ## Warnings into ## Errors (recompute counts).
   //   2. Append deterministic TS-side errors that the LLM cannot downgrade.
@@ -580,7 +620,7 @@ export async function runCheckAgent(
   const normalized = applyStatusOverride(withDeterministicErrors);
 
   // Determine pass/fail status from the TS-authoritative output
-  const isPassing = /- Status:\s*PASS/i.test(normalized);
+  const isPassing = parseCheckAgentResult(normalized).status === "PASS";
 
   logAgentResult(result, {
     agent: "check",
@@ -603,4 +643,31 @@ If you introduced this unused code, investigate why it happened and delete it. W
   }
 
   return normalized;
+}
+
+function deterministicCheckFallback(input: {
+  commandErrors: readonly string[];
+  deterministicErrors: readonly string[];
+  supplementalOutput: string;
+  rawError: string;
+}): string {
+  const errors = [...input.commandErrors, ...input.deterministicErrors];
+  const warnings = input.supplementalOutput ? [input.supplementalOutput] : [];
+  const info = [
+    "Check summarizer failed or returned malformed output; using deterministic command exit-code fallback.",
+    input.rawError,
+  ];
+  return `## Results
+- Errors: ${errors.length}
+- Warnings: ${warnings.length}
+- Status: ${errors.length > 0 ? "FAIL" : "PASS"}
+
+## Errors
+${errors.length > 0 ? errors.join("\n") : "(none)"}
+
+## Warnings
+${warnings.length > 0 ? warnings.join("\n") : "(none)"}
+
+## Info
+${info.join("\n")}`;
 }

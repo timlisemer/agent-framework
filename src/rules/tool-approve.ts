@@ -4,7 +4,7 @@ import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { buildToolApprovePromptSection } from "../utils/agent-configs.js";
 import { FILE_TOOLS, extractFilePaths, isPlanFile } from "./utils.js";
 import { planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
-import { RESTRICTED_MCPS } from "../utils/slash-commands.js";
+import { RESTRICTED_MCPS, SLASH_COMMAND_WORKFLOWS } from "../utils/slash-commands.js";
 import { activeSpec } from "../adapter/spec.js";
 import { classifyBashCommand } from "../utils/command-patterns.js";
 import { validateCurrentPlanExit } from "../utils/plan-source.js";
@@ -73,7 +73,7 @@ export const toolApproveRule: PreToolRule = {
       const spec = activeSpec();
       const mcp = spec.recognizeMcp(ctx.rawToolName ?? ctx.toolName);
       if (mcp && RESTRICTED_MCPS.has(mcp) && !ctx.slashCommandAllowedTools?.includes(ctx.toolName)) {
-        const hint = spec.renderWorkflowAuthorizationHint(["commit", "push", "confirm", "quickpush", "quickconfirm", "fullconfirm", "fullquickconfirm"]);
+        const hint = spec.renderWorkflowAuthorizationHint(SLASH_COMMAND_WORKFLOWS);
         return {
           fastDeny: `${ctx.rawToolName ?? ctx.toolName} requires explicit workflow authorization (${hint}).`,
         };

@@ -11,6 +11,7 @@ import * as PLS from "./plan-source.js";
 import * as PM  from "./plan-mode.js";
 import * as Paths from "./paths.js";
 import * as History from "./session-history.js";
+import * as RuntimeHome from "./runtime-home.js";
 import type {
   AdapterSpec,
   AdapterToolCallContext,
@@ -36,6 +37,19 @@ function canonicalFilePaths(input: AdapterToolCallContext): string[] {
 export const codexSpec: AdapterSpec = {
   name: "codex",
   encoder: codexEncoder,
+  runtimeHome: {
+    dotRoot: RuntimeHome.dotRoot,
+    authFiles: RuntimeHome.CODEX_AUTH_FILES,
+    durableManagedEntries: RuntimeHome.CODEX_DURABLE_MANAGED_ENTRIES,
+    applyRuntimeEnv: RuntimeHome.applyRuntimeEnv,
+    resolveNativeRoot: RuntimeHome.resolveNativeRoot,
+    writeMinimalConfig: RuntimeHome.writeMinimalConfig,
+    rewriteConfig: RuntimeHome.rewriteConfig,
+    sandboxModeForToolPolicy: RuntimeHome.sandboxModeForToolPolicy,
+    removeMcpServerConfig: RuntimeHome.removeMcpServerConfig,
+    removeHooksConfig: RuntimeHome.removeHooksConfig,
+    buildHookTrustBlock: RuntimeHome.buildHookTrustBlock,
+  },
   recognizeMcp: MCP.recognizeMcp,
   mcpWireName:  MCP.mcpWireName,
   canonicalizeToolCall: TC.canonicalizeToolCall,

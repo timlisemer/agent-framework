@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { NativePlanFileLookup, NativePlanFileLookupInput } from "../adapter/types.js";
 import { sessionPlanFile, sessionPlansDir } from "./paths.js";
+import { isPathAtOrInside } from "./path-containment.js";
 
 export const PLAN_NAME_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -82,8 +83,7 @@ export async function getPathToPlanfile(
 export function isSessionPlanfilePath(filePath: string, sessionDir: string): boolean {
   const resolved = path.resolve(filePath);
   const plansDir = sessionPlansDir(sessionDir);
-  const plansDirResolved = path.resolve(plansDir);
-  if (!(resolved.startsWith(plansDirResolved + path.sep) || resolved === plansDirResolved)) return false;
+  if (!isPathAtOrInside(resolved, plansDir)) return false;
   const base = path.basename(resolved);
   return base.endsWith(".md") && PLAN_NAME_RE.test(base.slice(0, -3));
 }

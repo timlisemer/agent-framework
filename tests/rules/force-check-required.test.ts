@@ -65,6 +65,37 @@ describe("forceCheckRequiredRule", () => {
     }
   });
 
+  it("allows validate_implementation MCP while pending", async () => {
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      await expect(forceCheckRequiredRule.check(makeCtx(activeSpec().mcpWireName("validate_implementation")))).resolves.toBeNull();
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
+  });
+
+  it("denies push while pending because push does not run checks", async () => {
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      const result = await forceCheckRequiredRule.check(makeCtx(activeSpec().mcpWireName("push")));
+      expect(result).toEqual({
+        fastDeny: `Workaround Bash command was denied earlier. You must run ${activeSpec().renderCheckMcpHint()} before any other tool.`,
+      });
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
+  });
+
   it("allows ToolSearch while pending", async () => {
     await expect(forceCheckRequiredRule.check(makeCtx("ToolSearch"))).resolves.toBeNull();
   });

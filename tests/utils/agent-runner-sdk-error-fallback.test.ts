@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { clearProviderEnvForTest } from "../helpers/provider-env.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { clearProviderEnvForTest, withEnvForTest } from "../helpers/provider-env.js";
 import { extractDecision as realExtractDecision } from "../../src/utils/telemetry-tracker.js";
 
 // Programmable mock for the Claude SDK `query()`. Each test installs the
@@ -12,7 +15,7 @@ type QueryGenerator = (stderr: StderrCallback) => AsyncGenerator<unknown, void, 
 
 let queryGenerators: QueryGenerator[] = [];
 let queryCallCount = 0;
-const queryArgs: Array<{ options?: { stderr?: (data: string) => void; abortController?: AbortController } }> = [];
+const queryArgs: Array<{ options?: { stderr?: (data: string) => void; abortController?: AbortController; env?: NodeJS.ProcessEnv } }> = [];
 
 function setQueryGenerators(...gens: QueryGenerator[]): void {
   queryGenerators = gens;
@@ -20,7 +23,7 @@ function setQueryGenerators(...gens: QueryGenerator[]): void {
 }
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
-  query: vi.fn().mockImplementation((args: { options?: { stderr?: (data: string) => void; abortController?: AbortController } }) => {
+  query: vi.fn().mockImplementation((args: { options?: { stderr?: (data: string) => void; abortController?: AbortController; env?: NodeJS.ProcessEnv } }) => {
     queryArgs.push(args);
     const idx = Math.min(queryCallCount, queryGenerators.length - 1);
     const gen = queryGenerators[idx];
@@ -237,6 +240,8 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
   });
 
   it("resumes a continuable Claude session when retrying after no output", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-claude-retry-"));
+    const restoreHome = withEnvForTest({ HOME: home });
     setQueryGenerators(
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       async function* (_stderr) {
@@ -260,17 +265,30 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
     );
 
     const session = createContinuableAgentSession(makeConfig({ continuable: true }));
-    const result = await session.run({ prompt: "Evaluate:" });
-    await session.dispose();
+    try {
+      const result = await session.run({ prompt: "Evaluate:" });
 
-    expect(result.output).toBe("## Verdict\nCONFIRMED: retry recovered");
-    expect(queryMock).toHaveBeenCalledTimes(2);
-    expect(queryArgs[0].options).toMatchObject({ persistSession: true });
-    expect(queryArgs[0].options).not.toHaveProperty("resume");
-    expect(queryArgs[1].options).toMatchObject({
-      persistSession: true,
-      resume: "native-first",
-    });
+      expect(result.output).toBe("## Verdict\nCONFIRMED: retry recovered");
+      expect(queryMock).toHaveBeenCalledTimes(2);
+      expect(queryArgs[0].options).toMatchObject({ persistSession: true });
+      expect(queryArgs[0].options).not.toHaveProperty("resume");
+      expect(queryArgs[1].options).toMatchObject({
+        persistSession: true,
+        resume: "native-first",
+      });
+      const firstHome = queryArgs[0].options?.env?.CLAUDE_CONFIG_DIR;
+      const retryHome = queryArgs[1].options?.env?.CLAUDE_CONFIG_DIR;
+      expect(typeof firstHome).toBe("string");
+      expect(retryHome).toBe(firstHome);
+      expect(fs.existsSync(firstHome as string)).toBe(true);
+
+      await session.dispose();
+      expect(fs.existsSync(firstHome as string)).toBe(false);
+    } finally {
+      await session.dispose();
+      restoreHome();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("enriches sentinel with error-subtype diagnostics from result message", async () => {

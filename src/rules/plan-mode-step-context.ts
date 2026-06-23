@@ -1,6 +1,7 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { readToolLogEntries } from "../utils/session-store.js";
 import { detectIntentFulfillment } from "../utils/intent-fulfillment.js";
+import { EDIT_TOOL_NAMES_DISPLAY } from "../utils/edit-tools.js";
 
 const PLAN_MODE_STEP_CONTEXT_STRING = `=== PLAN MODE STEP AWARENESS ===
 Plan mode proceeds in steps:
@@ -10,7 +11,7 @@ Plan mode proceeds in steps:
      - Read-only tools (Read, Grep, Glob, LS, read-only Bash) remain appropriate for continued planning on the AI's own initiative.
      - AskUserQuestion remains appropriate for clarifying questions.
      - Additional Task/Agent dispatches remain appropriate but are no longer THE primary user interest unless re-requested.
-     - Write/Edit/NotebookEdit to non-plan files remains inappropriate (already blocked deterministically upstream by plan-mode-block — you should never need to deny those here).
+     - ${EDIT_TOOL_NAMES_DISPLAY} to non-plan files remains inappropriate (already blocked deterministically upstream by plan-mode-block — you should never need to deny those here).
   3. ExitPlanMode is NOT a contradiction of an earlier user request to "run validators" or "explore X" once that exploration has been completed — it is the workflow's terminal step.
 
 When INTENT FULFILLMENT is also present, the cached intent's request has already been served. APPROVE the firing tool when it fits the new step (especially ExitPlanMode); DENY only when the firing tool clearly does something the user explicitly forbade.
