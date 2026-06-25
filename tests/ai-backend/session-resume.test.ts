@@ -6,6 +6,9 @@ import { AiBackendSessionManager } from "../../src/ai-backend/session-manager.js
 import type { AiBackendMessage } from "../../src/ai-protocol/index.js";
 import { writeManagedCodexTranscript } from "../helpers/managed-session-fixtures.js";
 import { withEnvForTest } from "../helpers/provider-env.js";
+import { appendJsonlEntrySync } from "../../src/utils/file-io.js";
+import { getAgentFrameworkSessionDir, sessionToolLogFile } from "../../src/utils/paths.js";
+import type { ToolLogEntry } from "../../src/utils/session-store.js";
 
 describe("AI backend resume requests", () => {
   afterEach(() => {
@@ -48,7 +51,14 @@ describe("AI backend resume requests", () => {
   });
 
   it("starts a hydrated session for a compatible managed Codex resume target", async () => {
-    const harness = await setupManagedCodexResumeHarness("openai-subscription", "resume");
+    const harness = await setupManagedCodexResumeHarness("openai-subscription", "resume", {
+      toolCall: {
+        callId: "call-1",
+        name: "exec_command",
+        toolArguments: { command: "git status --short" },
+        output: " M src/app.ts\n",
+      },
+    });
     try {
       await harness.manager.handle({
         type: "request",
@@ -76,13 +86,170 @@ describe("AI backend resume requests", () => {
           sessionId: "session-resumed",
           snapshot: {
             workingDir: harness.projectDir,
+            agentFrameworkSessionDir: expect.stringContaining(path.join(".agent-framework", "sessions")),
             transcript: [
-              expect.objectContaining({ role: "user", content: [{ type: "text", text: "Resume this" }] }),
-              expect.objectContaining({ role: "assistant", content: [{ type: "text", text: "Ready." }] }),
+              expect.objectContaining({ sequenceId: 2, role: "user", content: [{ type: "text", text: "Resume this" }] }),
+              expect.objectContaining({ sequenceId: 3, role: "assistant", content: [{ type: "text", text: "Ready." }] }),
             ],
           },
         },
       });
+      if (!started || started.type !== "response" || started.response.type !== "sessionStarted") {
+        throw new Error("expected sessionStarted response");
+      }
+      expect(started.response.snapshot.toolCalls).toEqual([
+        expect.objectContaining({
+          id: "call-1",
+          turnId: "history-turn-1",
+          name: "exec_command",
+          status: "completed",
+          output: [{ type: "text", text: " M src/app.ts\n" }],
+          result: {
+            state: "completed",
+            output: [{ type: "text", text: " M src/app.ts\n" }],
+            error: null,
+          },
+        }),
+      ]);
+      expect(started.response.snapshot.agentFrameworkSessionDir).toBeTruthy();
+      const sidecar = path.join(started.response.snapshot.agentFrameworkSessionDir!, "transcript-path.txt");
+      expect(fs.readFileSync(sidecar, "utf-8").trim()).toBe(harness.transcriptPath);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("starts a hydrated session with denied Codex tools from agent-framework tool logs", async () => {
+    const harness = await setupManagedCodexResumeHarness("openai-subscription", "resume-denied", {
+      toolCall: {
+        callId: "call-denied",
+        name: "exec_command",
+        toolArguments: { command: "sed -n '1,20p' .env" },
+        output: "Command blocked by PreToolUse hook: .env reads are denied",
+        outputStatus: "failed",
+      },
+      toolLog: {
+        ts: Date.parse("2026-06-20T10:04:00.000Z"),
+        tool: "Bash",
+        toolUseId: "call-denied",
+        cmd: "sed -n '1,20p' .env",
+        status: "denied",
+        gate: "blacklist",
+        reason: ".env reads are denied",
+        expectedStatus: "deny",
+        ms: 4,
+      },
+    });
+    try {
+      await harness.manager.handle({
+        type: "request",
+        request: {
+          type: "resumeSession",
+          requestId: "request-resume-denied",
+          sessionId: "session-resumed-denied",
+          resumeId: harness.resumeId,
+          config: {
+            model: null,
+            workingDir: null,
+            systemPrompt: null,
+            continuable: true,
+            sdkRuntimeEnvironment: "user",
+            sdkRuntimeHome: "managedAstral",
+          },
+        },
+      });
+
+      const started = harness.frames.find((frame) => frame.type === "response" && frame.response.type === "sessionStarted");
+      if (!started || started.type !== "response" || started.response.type !== "sessionStarted") {
+        throw new Error("expected sessionStarted response");
+      }
+      expect(started.response.snapshot.toolCalls).toEqual([
+        expect.objectContaining({
+          id: "call-denied",
+          name: "exec_command",
+          status: "denied",
+          output: [{ type: "text", text: "Command blocked by PreToolUse hook: .env reads are denied" }],
+          result: {
+            state: "denied",
+            output: [{ type: "text", text: "Command blocked by PreToolUse hook: .env reads are denied" }],
+            error: {
+              code: "runtime_error",
+              message: "Tool denied (Bash / blacklist): .env reads are denied",
+              recoverable: false,
+              metadata: expect.objectContaining({
+                agentFrameworkRule: "blacklist",
+                agentFrameworkToolName: "Bash",
+                agentFrameworkToolStatus: "denied",
+                agentFrameworkToolUseId: "call-denied",
+                agentFrameworkCommand: "sed -n '1,20p' .env",
+                agentFrameworkExpectedStatus: "deny",
+              }),
+            },
+          },
+          metadata: expect.objectContaining({
+            agentFrameworkRule: "blacklist",
+            agentFrameworkToolStatus: "denied",
+          }),
+        }),
+      ]);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  it("hydrates denied Codex tools when SDK call IDs differ from hook tool IDs", async () => {
+    const harness = await setupManagedCodexResumeHarness("openai-subscription", "resume-denied-mismatch", {
+      toolCall: {
+        callId: "sdk-call-denied",
+        name: "exec_command",
+        toolArguments: { command: "sed -n '1,20p' .env" },
+        output: "Command blocked by PreToolUse hook: .env reads are denied",
+      },
+      toolLog: {
+        ts: Date.parse("2026-06-20T10:04:00.000Z"),
+        tool: "Bash",
+        toolUseId: "hook-call-denied",
+        cmd: "sed -n '1,20p' .env",
+        status: "denied",
+        gate: "blacklist",
+        reason: ".env reads are denied",
+        expectedStatus: "deny",
+        ms: 4,
+      },
+    });
+    try {
+      await harness.manager.handle({
+        type: "request",
+        request: {
+          type: "resumeSession",
+          requestId: "request-resume-denied-mismatch",
+          sessionId: "session-resumed-denied-mismatch",
+          resumeId: harness.resumeId,
+          config: {
+            model: null,
+            workingDir: null,
+            systemPrompt: null,
+            continuable: true,
+            sdkRuntimeEnvironment: "user",
+            sdkRuntimeHome: "managedAstral",
+          },
+        },
+      });
+
+      const started = harness.frames.find((frame) => frame.type === "response" && frame.response.type === "sessionStarted");
+      if (!started || started.type !== "response" || started.response.type !== "sessionStarted") {
+        throw new Error("expected sessionStarted response");
+      }
+      expect(started.response.snapshot.toolCalls).toEqual([
+        expect.objectContaining({
+          id: "sdk-call-denied",
+          status: "denied",
+          metadata: expect.objectContaining({
+            agentFrameworkToolStatus: "denied",
+            agentFrameworkToolUseId: "hook-call-denied",
+          }),
+        }),
+      ]);
     } finally {
       harness.cleanup();
     }
@@ -163,13 +330,17 @@ describe("AI backend resume requests", () => {
   });
 });
 
+type ManagedCodexToolCallFixture = NonNullable<Parameters<typeof writeManagedCodexTranscript>[0]["toolCall"]>;
+
 async function setupManagedCodexResumeHarness(
   sdkProvider: string,
-  suffix: string
+  suffix: string,
+  options: { toolCall?: ManagedCodexToolCallFixture; toolLog?: ToolLogEntry & { expectedStatus?: string } } = {}
 ): Promise<{
   frames: AiBackendMessage[];
   manager: AiBackendSessionManager;
   projectDir: string;
+  transcriptPath: string;
   resumeId: string;
   cleanup: () => void;
 }> {
@@ -177,7 +348,11 @@ async function setupManagedCodexResumeHarness(
   const restoreEnv = withEnvForTest({ AGENT_FRAMEWORK_SDK_PROVIDER: sdkProvider, HOME: home });
   const projectDir = path.join(home, "project");
   const transcriptPath = path.join(home, ".agent-framework", "astral-ai", "codex", "sessions", "codex-session.jsonl");
-  writeManagedCodexTranscript({ filePath: transcriptPath, projectDir });
+  writeManagedCodexTranscript({ filePath: transcriptPath, projectDir, toolCall: options.toolCall });
+  if (options.toolLog) {
+    const sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir });
+    appendJsonlEntrySync(sessionToolLogFile(sessionDir), options.toolLog);
+  }
   const frames: AiBackendMessage[] = [];
   const manager = new AiBackendSessionManager((frame) => frames.push(frame));
 
@@ -199,6 +374,7 @@ async function setupManagedCodexResumeHarness(
     frames,
     manager,
     projectDir,
+    transcriptPath,
     resumeId,
     cleanup: () => {
       restoreEnv();

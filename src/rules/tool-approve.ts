@@ -72,6 +72,9 @@ export const toolApproveRule: PreToolRule = {
     {
       const spec = activeSpec();
       const mcp = spec.recognizeMcp(ctx.rawToolName ?? ctx.toolName);
+      if (mcp === "check") {
+        return { fastAllow: "agent-framework check MCP is always available for verification" };
+      }
       if (mcp && RESTRICTED_MCPS.has(mcp) && !ctx.slashCommandAllowedTools?.includes(ctx.toolName)) {
         const hint = spec.renderWorkflowAuthorizationHint(SLASH_COMMAND_WORKFLOWS);
         return {

@@ -175,6 +175,42 @@ describe("AI backend session manager", () => {
     );
   });
 
+  it("stamps transcript messages with their creation event sequence ids", async () => {
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-message-seq");
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "sendInput",
+        sessionId: "session-message-seq",
+        turnId: "turn-1",
+        input: "hello",
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
+    });
+
+    const messageCreated = frames.flatMap((frame) =>
+      frame.type === "event" && frame.event.type === "messageCreated" ? [frame.event] : []
+    );
+    expect(messageCreated.map((event) => event.message.sequenceId)).toEqual(
+      messageCreated.map((event) => event.seq)
+    );
+
+    const latestUpdate = [...frames].reverse().find((frame): frame is Extract<AiBackendMessage, { type: "event" }> =>
+      frame.type === "event" && frame.event.type === "sessionUpdated"
+    );
+    if (!latestUpdate || latestUpdate.event.type !== "sessionUpdated") {
+      throw new Error("expected sessionUpdated event");
+    }
+    expect(latestUpdate.event.snapshot.transcript.map((entry) => entry.sequenceId)).toEqual(
+      messageCreated.map((event) => event.seq)
+    );
+  });
+
   it("emits message creation for implicitly materialized assistant messages", async () => {
     provider.runTurn.mockImplementation(() =>
       events(
@@ -1120,6 +1156,204 @@ describe("AI backend session manager", () => {
       { type: "text", text: "done" },
     ]);
     expect(updated.event.toolCall.result?.output).toEqual(updated.event.toolCall.output);
+  });
+
+  it("stores Codex-style terminal tool output once", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        {
+          type: "tool.created",
+          ref: "tool-ref",
+          name: "Read",
+          input: { text: "Read(file_path=\"src/example.ts\")" },
+        },
+        { type: "tool.completed", ref: "tool-ref", output: [{ type: "text", text: "file contents" }] }
+      )
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-codex-tool-output");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-codex-tool-output", turnId: "turn-tools", input: "read" },
+    });
+
+    await vi.waitFor(() => {
+      expect(frames.some((frame) =>
+        frame.type === "event" &&
+        frame.event.type === "toolCallUpdated" &&
+        frame.event.toolCall.status === "completed"
+      )).toBe(true);
+    });
+    const updated = [...frames].reverse().find((frame) =>
+      frame.type === "event" &&
+      frame.event.type === "toolCallUpdated" &&
+      frame.event.toolCall.status === "completed"
+    );
+    if (!updated || updated.type !== "event" || updated.event.type !== "toolCallUpdated") {
+      throw new Error("expected completed tool update");
+    }
+    expect(updated.event.toolCall.output).toEqual([{ type: "text", text: "file contents" }]);
+    expect(updated.event.toolCall.result?.output).toEqual([{ type: "text", text: "file contents" }]);
+  });
+
+  it("stores failed tool results with cumulative output", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        {
+          type: "tool.created",
+          ref: "tool-ref",
+          name: "inspect",
+          input: { text: "inspect(path=\".\")" },
+        },
+        { type: "tool.output", ref: "tool-ref", output: [{ type: "text", text: "started" }] },
+        { type: "tool.failed", ref: "tool-ref", error: "exit code 1", publicMessage: "exit code 1" }
+      )
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-tool-failed-output");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-tool-failed-output", turnId: "turn-tools", input: "run" },
+    });
+
+    await vi.waitFor(() => {
+      expect(frames.some((frame) =>
+        frame.type === "event" &&
+        frame.event.type === "toolCallUpdated" &&
+        frame.event.toolCall.status === "failed"
+      )).toBe(true);
+    });
+    const updated = [...frames].reverse().find((frame) =>
+      frame.type === "event" &&
+      frame.event.type === "toolCallUpdated" &&
+      frame.event.toolCall.status === "failed"
+    );
+    if (!updated || updated.type !== "event" || updated.event.type !== "toolCallUpdated") {
+      throw new Error("expected failed tool update");
+    }
+    expect(updated.event.toolCall.output).toEqual([{ type: "text", text: "started" }]);
+    expect(updated.event.toolCall.result?.output).toEqual(updated.event.toolCall.output);
+  });
+
+  it("surfaces denied tool failures on the tool result with rule metadata", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        {
+          type: "tool.created",
+          ref: "tool-ref",
+          name: "apply_patch",
+          input: { text: "apply_patch(file=\"src/a.ts\")" },
+          metadata: {
+            provider: "codex",
+            providerItemId: "tool-ref",
+            providerItemType: "function_call",
+          },
+        },
+        {
+          type: "tool.failed",
+          ref: "tool-ref",
+          error: "hook denied",
+          publicMessage: "Plan mode blocks file edits.",
+          metadata: {
+            agentFrameworkHook: "PreToolUse",
+            agentFrameworkRule: "plan-mode-block",
+            agentFrameworkToolStatus: "denied",
+            agentFrameworkExpectedStatus: "deny",
+            agentFrameworkCaptureSeq: 7,
+            agentFrameworkStateSnapshotSeq: 6,
+          },
+        }
+      )
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-tool-denied");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-tool-denied", turnId: "turn-denied", input: "edit" },
+    });
+
+    await vi.waitFor(() => {
+      expect(frames.some((frame) =>
+        frame.type === "event" &&
+        frame.event.type === "toolCallUpdated" &&
+        frame.event.toolCall.status === "denied"
+      )).toBe(true);
+    });
+    const deniedTool = frames.find((frame) =>
+      frame.type === "event" &&
+      frame.event.type === "toolCallUpdated" &&
+      frame.event.toolCall.status === "denied"
+    );
+    if (!deniedTool || deniedTool.type !== "event" || deniedTool.event.type !== "toolCallUpdated") {
+      throw new Error("expected denied tool update");
+    }
+    expect(deniedTool.event.toolCall.result?.error).toMatchObject({
+      code: "runtime_error",
+      message: "Plan mode blocks file edits.",
+      metadata: {
+        agentFrameworkRule: "plan-mode-block",
+        agentFrameworkExpectedStatus: "deny",
+      },
+    });
+
+    const errorMessage = frames.find((frame) =>
+      frame.type === "event" &&
+      frame.event.type === "messageCreated" &&
+      frame.event.message.role === "tool" &&
+      frame.event.message.content.some((block) => block.type === "error")
+    );
+    expect(errorMessage).toBeUndefined();
+  });
+
+  it("keeps failed hook failures distinct from denied tool failures", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        {
+          type: "tool.created",
+          ref: "tool-ref",
+          name: "Bash",
+          input: { text: "npm test" },
+        },
+        {
+          type: "tool.failed",
+          ref: "tool-ref",
+          error: "exit code 1",
+          publicMessage: "exit code 1",
+          metadata: {
+            agentFrameworkHook: "PostToolUse",
+            agentFrameworkRule: "check",
+            agentFrameworkToolStatus: "failed",
+          },
+        }
+      )
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-tool-failed");
+    await manager.handle({
+      type: "request",
+      request: { type: "sendInput", sessionId: "session-tool-failed", turnId: "turn-failed", input: "test" },
+    });
+
+    await vi.waitFor(() => {
+      expect(frames.some((frame) =>
+        frame.type === "event" &&
+        frame.event.type === "toolCallUpdated" &&
+        frame.event.toolCall.status === "failed"
+      )).toBe(true);
+    });
+    const failedTool = frames.find((frame) =>
+      frame.type === "event" &&
+      frame.event.type === "toolCallUpdated" &&
+      frame.event.toolCall.status === "failed"
+    );
+    if (!failedTool || failedTool.type !== "event" || failedTool.event.type !== "toolCallUpdated") {
+      throw new Error("expected failed tool update");
+    }
+    expect(failedTool.event.toolCall.result?.state).toBe("failed");
   });
 
   it("handles generic tool decisions without provider tool ids", async () => {

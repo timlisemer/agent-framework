@@ -3,6 +3,7 @@ import path from "node:path";
 import type {
   AiSessionChoicesConfig,
   AiSessionDescriptor,
+  AiToolCall,
   AiTranscriptEntry,
   AiWorkingDirectoryCandidate,
 } from "../ai-protocol/index.js";
@@ -20,12 +21,14 @@ export type ResolvedResumeSession = {
   descriptor: AiSessionDescriptor;
   target: ResumeTarget;
   transcript: AiTranscriptEntry[];
+  toolCalls: AiToolCall[];
 };
 
 type ResumeEntry = {
   descriptor: AiSessionDescriptor;
   target: ResumeTarget;
   transcript: AiTranscriptEntry[];
+  toolCalls: AiToolCall[];
 };
 
 export class AiSessionHistoryService {
@@ -68,6 +71,7 @@ export class AiSessionHistoryService {
           descriptor: structuredClone(entry.descriptor),
           target: structuredClone(entry.target),
           transcript: structuredClone(entry.transcript),
+          toolCalls: structuredClone(entry.toolCalls),
         }
       : null;
   }
@@ -88,6 +92,7 @@ export class AiSessionHistoryService {
       descriptor,
       target,
       transcript: hydrateTranscript(record),
+      toolCalls: hydrateToolCalls(record),
     });
     this.pruneResumeCache();
     return descriptor;
@@ -151,6 +156,7 @@ function hydrateTranscript(record: AdapterSessionHistoryRecord): AiTranscriptEnt
     const createdAt = message.createdAt ?? record.updatedAt ?? new Date(0).toISOString();
     return {
       id: `history-message-${index + 1}`,
+      sequenceId: message.sequenceId,
       turnId: null,
       role: message.role,
       content: message.text ? [{ type: "text" as const, text: message.text }] : [],
@@ -161,6 +167,10 @@ function hydrateTranscript(record: AdapterSessionHistoryRecord): AiTranscriptEnt
       usage: null,
     };
   });
+}
+
+function hydrateToolCalls(record: AdapterSessionHistoryRecord): AiToolCall[] {
+  return (record.toolCalls ?? []).map((toolCall) => structuredClone(toolCall));
 }
 
 function compareHistoryRecords(a: AdapterSessionHistoryRecord, b: AdapterSessionHistoryRecord): number {

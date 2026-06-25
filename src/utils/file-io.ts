@@ -111,15 +111,7 @@ export function parseJsonlText<T>(content: string, tail?: number): T[] {
 }
 
 export function parseJsonlLines<T>(lines: readonly string[]): T[] {
-  const results: T[] = [];
-  for (const line of lines) {
-    try {
-      results.push(JSON.parse(line) as T);
-    } catch {
-      // skip malformed lines
-    }
-  }
-  return results;
+  return parseJsonlLinesWithSequenceIds<T>(lines, 1).map((result) => result.entry);
 }
 
 function readFileTailWindow(
@@ -161,22 +153,107 @@ function readFileWindow(
   }
 }
 
-export function readJsonlTail<T>(filePath: string, maxBytes: number, tail?: number): T[] {
+type JsonlTailWindow = {
+  buffer: Buffer;
+  start: number;
+  previousByteIsNewline: boolean;
+};
+
+function readJsonlTailWindow(filePath: string, maxBytes: number): JsonlTailWindow | null {
   const window = readFileTailWindow(filePath, maxBytes);
-  if (!window) return [];
+  if (!window) return null;
   const previous = window.start > 0
     ? readFileWindow(filePath, () => ({ start: window.start - 1, length: 1 }))
     : null;
-  const previousByteIsNewline = window.start === 0 || previous?.buffer[0] === 10;
+  return {
+    ...window,
+    previousByteIsNewline: window.start === 0 || previous?.buffer[0] === 10,
+  };
+}
+
+export function readJsonlTail<T>(filePath: string, maxBytes: number, tail?: number): T[] {
+  const window = readJsonlTailWindow(filePath, maxBytes);
+  if (!window) return [];
   try {
     const entries = parseJsonlBufferWindow<T>(window.buffer, {
-      dropLeadingPartial: !previousByteIsNewline,
+      dropLeadingPartial: !window.previousByteIsNewline,
       dropTrailingPartial: true,
     });
     return tail !== undefined ? entries.slice(-tail) : entries;
   } catch {
     return [];
   }
+}
+
+export interface JsonlEntryWithSequenceId<T> {
+  sequenceId: number;
+  entry: T;
+}
+
+export function readJsonlTailWithSequenceIds<T>(
+  filePath: string,
+  maxBytes: number,
+  tail?: number
+): JsonlEntryWithSequenceId<T>[] {
+  const window = readJsonlTailWindow(filePath, maxBytes);
+  if (!window) return [];
+  try {
+    const entries = parseJsonlBufferWindowWithSequenceIds<T>(window.buffer, {
+      startSequenceId: boundedTailStartSequenceId(window.start),
+      dropLeadingPartial: !window.previousByteIsNewline,
+      dropTrailingPartial: true,
+    });
+    return tail !== undefined ? entries.slice(-tail) : entries;
+  } catch {
+    return [];
+  }
+}
+
+export type JsonlTailReader<T> = {
+  read(): T[];
+};
+
+export function createJsonlTailReader<T>(
+  filePath: string,
+  parse: (line: string) => T | null,
+  opts?: { offset?: number }
+): JsonlTailReader<T> {
+  let offset = opts?.offset ?? fileSizeOrZero(filePath);
+  let pending = "";
+
+  return {
+    read(): T[] {
+      const size = fileSizeOrZero(filePath);
+      if (size < offset) {
+        offset = 0;
+        pending = "";
+      }
+      if (size === offset) return [];
+
+      let chunk = "";
+      try {
+        const window = readFileWindow(filePath, () => ({ start: offset, length: size - offset }));
+        if (!window) return [];
+        chunk = window.buffer.toString("utf8");
+      } catch {
+        return [];
+      }
+      offset = size;
+
+      const text = pending + chunk;
+      const lines = text.split("\n");
+      pending = text.endsWith("\n") ? "" : lines.pop() ?? "";
+
+      const entries: T[] = [];
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const entry = parse(trimmed);
+        if (entry) entries.push(entry);
+      }
+      return entries;
+    },
+  };
 }
 
 export function readLastJsonlEntryFromTail<T>(
@@ -197,16 +274,63 @@ export function parseJsonlBufferWindow<T>(
   buffer: Buffer,
   opts?: { dropLeadingPartial?: boolean; dropTrailingPartial?: boolean },
 ): T[] {
+  return parseJsonlText<T>(sliceJsonlWindowText(buffer, opts).text);
+}
+
+function parseJsonlBufferWindowWithSequenceIds<T>(
+  buffer: Buffer,
+  opts: { startSequenceId: number; dropLeadingPartial?: boolean; dropTrailingPartial?: boolean },
+): JsonlEntryWithSequenceId<T>[] {
+  const window = sliceJsonlWindowText(buffer, opts);
+  return parseJsonlLinesWithSequenceIds<T>(
+    window.text.split("\n"),
+    opts.startSequenceId + window.skippedLeadingLines
+  );
+}
+
+function sliceJsonlWindowText(
+  buffer: Buffer,
+  opts?: { dropLeadingPartial?: boolean; dropTrailingPartial?: boolean },
+): { text: string; skippedLeadingLines: number } {
   let raw = buffer.toString("utf-8");
+  let skippedLeadingLines = 0;
   if (opts?.dropLeadingPartial && raw.length > 0) {
     const firstNewline = raw.indexOf("\n");
-    raw = firstNewline === -1 ? "" : raw.slice(firstNewline + 1);
+    if (firstNewline === -1) {
+      raw = "";
+    } else {
+      raw = raw.slice(firstNewline + 1);
+      skippedLeadingLines = 1;
+    }
   }
   if (opts?.dropTrailingPartial && raw.length > 0 && !raw.endsWith("\n")) {
     const lastNewline = raw.lastIndexOf("\n");
     raw = lastNewline === -1 ? "" : raw.slice(0, lastNewline + 1);
   }
-  return parseJsonlText<T>(raw);
+  return { text: raw, skippedLeadingLines };
+}
+
+function parseJsonlLinesWithSequenceIds<T>(
+  lines: readonly string[],
+  startSequenceId: number
+): JsonlEntryWithSequenceId<T>[] {
+  const results: JsonlEntryWithSequenceId<T>[] = [];
+  let sequenceId = startSequenceId;
+  for (const line of lines) {
+    if (line.trim().length > 0) {
+      try {
+        results.push({ sequenceId, entry: JSON.parse(line) as T });
+      } catch {
+        // skip malformed lines
+      }
+    }
+    sequenceId += 1;
+  }
+  return results;
+}
+
+function boundedTailStartSequenceId(startOffset: number): number {
+  return startOffset <= 0 ? 1 : startOffset + 1;
 }
 
 export function readJsonlThroughByteOffset<T>(

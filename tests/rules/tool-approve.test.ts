@@ -151,6 +151,32 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
     expect(result).toBeNull();
   });
 
+  it("fast-allows check MCP without injecting stale project-rule context", async () => {
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    fs.writeFileSync(
+      path.join(tempDir, "CLAUDE.md"),
+      [
+        "## Testing MCP Server",
+        "",
+        "Use `mcp__agent-framework__check` to run the MCP server test.",
+        "",
+        "Only do this when explicitly mentioned by the user.",
+        "",
+      ].join("\n"),
+    );
+    const checkTool = activeSpec().mcpWireName("check");
+    const ctx = makeCtx({
+      toolName: checkTool,
+      rawToolName: checkTool,
+      toolInput: { working_dir: tempDir },
+    });
+
+    const result = await toolApproveRule.check(ctx);
+    expect(result).toEqual({
+      fastAllow: "agent-framework check MCP is always available for verification",
+    });
+  });
+
   it("returns null (no contribution) when no CLAUDE.md exists and no blacklist hit", async () => {
     const ctx = makeCtx({
       toolName: "Read",

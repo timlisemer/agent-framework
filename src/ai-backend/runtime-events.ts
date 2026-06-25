@@ -1,5 +1,6 @@
 import type {
   AiBackendProcessStatus,
+  AiMetadata,
   AiPlanState,
   AiSessionConfig,
   AiToolInputSummary,
@@ -17,12 +18,12 @@ export type AiRuntimeEvent =
   | { type: "message.reasoning_delta"; ref?: RuntimeRef; delta: string; createdAt?: string }
   | { type: "message.completed"; ref?: RuntimeRef; content?: string; usage?: TokenUsage | null; createdAt?: string }
   | { type: "message.failed"; ref?: RuntimeRef; error: unknown; createdAt?: string }
-  | { type: "tool.created"; ref: RuntimeRef; name: string; input: AiToolInputSummary; createdAt?: string }
+  | { type: "tool.created"; ref: RuntimeRef; name: string; input: AiToolInputSummary; metadata?: AiMetadata; createdAt?: string }
   | { type: "tool.updated"; ref: RuntimeRef; status: AiToolStatus; waitReason?: string | null; createdAt?: string }
   | { type: "tool.progress"; ref: RuntimeRef; progress: string | null; createdAt?: string }
   | { type: "tool.output"; ref: RuntimeRef; output: AiToolOutputBlock[]; createdAt?: string }
   | { type: "tool.completed"; ref: RuntimeRef; output?: AiToolOutputBlock[]; usage?: TokenUsage | null; createdAt?: string }
-  | { type: "tool.failed"; ref: RuntimeRef; error: unknown; createdAt?: string }
+  | { type: "tool.failed"; ref: RuntimeRef; error: unknown; publicMessage?: string; metadata?: AiMetadata; createdAt?: string }
   | { type: "tool.cancelled"; ref: RuntimeRef; createdAt?: string }
   | { type: "backend_process.created"; ref: RuntimeRef; title: string; cancellable?: boolean; createdAt?: string }
   | { type: "backend_process.updated"; ref: RuntimeRef; status: AiBackendProcessStatus; createdAt?: string }

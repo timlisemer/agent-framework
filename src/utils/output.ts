@@ -29,6 +29,13 @@ export function stringField(value: Record<string, unknown>, key: string): string
   return typeof value[key] === "string" ? value[key] : null;
 }
 
+export function trimmedStringField(value: Record<string, unknown>, key: string): string | null {
+  const field = value[key];
+  if (typeof field !== "string") return null;
+  const trimmed = field.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export function errorMessage(value: unknown): string {
   if (value && typeof value === "object" && "message" in value && typeof value.message === "string") {
     return value.message;

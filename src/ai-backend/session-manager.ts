@@ -2,6 +2,7 @@ import type {
   AiBackendMessage,
   AiRequestId,
   AiEvent,
+  AiMetadata,
   AiMessageId,
   AiRequest,
   AiSessionConfig,
@@ -27,6 +28,8 @@ import type { AiRuntimeEvent } from "./runtime-events.js";
 import { protocolError, toPublicError } from "./public-errors.js";
 import { sessionHistoryService } from "./session-history.js";
 import { assertManagedRuntimeHomeConfig } from "../providers/managed-runtime-home.js";
+import { getAgentFrameworkSessionDir } from "../utils/paths.js";
+import { enrichAgentFrameworkToolMetadata } from "../utils/agent-framework-tool-log.js";
 
 type WriteFrame = (frame: AiBackendMessage) => void;
 type RunningTurn = {
@@ -200,7 +203,13 @@ export class AiBackendSessionManager {
       this.writeRequestError(requestId, sessionId, "runtime_error", error instanceof Error ? error.message : String(error));
       return;
     }
-    const snapshot = this.#store.createHydrated(sessionId, normalizedConfig, resolved.transcript);
+    const snapshot = this.#store.createHydrated(
+      sessionId,
+      normalizedConfig,
+      resolved.transcript,
+      resolved.toolCalls,
+      agentFrameworkSessionDirForResume(resolved.target, normalizedConfig.workingDir)
+    );
     this.replaceRunnerAndWriteSessionStarted(sessionId, runner, snapshot);
   }
 
@@ -447,6 +456,7 @@ export class AiBackendSessionManager {
           turnId,
           name: event.name,
           summary: event.input,
+          metadata: this.toolEventMetadata(sessionId, event.ref, event.metadata),
           now,
         });
         this.emit(sessionId, { type: "toolCallCreated", sessionId, turnId, toolCall });
@@ -499,11 +509,17 @@ export class AiBackendSessionManager {
         return event.usage ?? null;
       }
       case "tool.failed": {
-        const error = toPublicError(event.error);
         const id = state.toolId(event.ref);
+        const metadata = this.toolEventMetadata(sessionId, event.ref, event.metadata);
+        const error = toPublicError(event.error, {
+          publicMessage: event.publicMessage,
+          metadata,
+        });
+        const denied = isDeniedToolOutcome(metadata);
         const toolCall = this.#store.updateTool(sessionId, id, now, {
-          status: "failed",
-          result: { state: "failed", output: [], error },
+          status: denied ? "denied" : "failed",
+          metadata,
+          result: { state: denied ? "denied" : "failed", output: [], error },
         });
         this.#toolRunningSince.delete(toolKey(sessionId, id));
         this.emit(sessionId, { type: "toolCallUpdated", sessionId, turnId, toolCall });
@@ -756,6 +772,15 @@ export class AiBackendSessionManager {
     this.#write({ type: "event", event: recorded });
   }
 
+  private toolEventMetadata(
+    sessionId: SessionId,
+    runtimeToolRef: string,
+    eventMetadata: AiMetadata | undefined
+  ): AiMetadata | undefined {
+    const sessionDir = this.#store.get(sessionId)?.agentFrameworkSessionDir;
+    return enrichAgentFrameworkToolMetadata({ metadata: eventMetadata, sessionDir, toolUseId: runtimeToolRef });
+  }
+
   private isCurrentSessionGeneration(sessionId: SessionId, generation: number): boolean {
     return this.#store.get(sessionId) !== undefined && this.#sessionGenerations.get(sessionId) === generation;
   }
@@ -965,4 +990,23 @@ function toolKey(sessionId: SessionId, id: ToolCallId): string {
 
 function processKey(sessionId: SessionId, id: string): string {
   return JSON.stringify([sessionId, id]);
+}
+
+function agentFrameworkSessionDirForResume(
+  target: { provider: "codex"; threadId: string; transcriptPath: string } | { provider: "claude"; sessionId: string; transcriptPath: string },
+  workingDir: string | null
+): string | null {
+  try {
+    return getAgentFrameworkSessionDir({
+      transcriptPath: target.transcriptPath,
+      projectDir: workingDir ?? undefined,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function isDeniedToolOutcome(metadata: AiMetadata | undefined): boolean {
+  return metadata?.agentFrameworkToolStatus === "denied" ||
+    metadata?.agentFrameworkDecision === "deny";
 }

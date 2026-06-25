@@ -7,11 +7,30 @@ import type { ProviderExecutionResult, ProviderRunInput, SdkRuntimeEnvironment, 
 import type { ProviderUsage } from "./execution-types.js";
 import type { ResolvedProvider } from "./types.js";
 import type { AiRuntimeEvent } from "../ai-backend/runtime-events.js";
-import { hashSha256Prefix, stableJsonStringify } from "../utils/hash-utils.js";
 import { assertManagedRuntimeHomeConfig, copyCodexAuthToHome } from "./managed-runtime-home.js";
 import { makeRuntimeRunId, materializeRuntimeHome, resolveRuntimeHomeProfile } from "../runtime-home/runtime-profiles.js";
-import { adapterSpecByName } from "../adapter/spec.js";
 import type { RuntimeToolPolicy } from "../runtime-home/profiles.js";
+import type { AiMetadata } from "../ai-protocol/index.js";
+import { resolveSessionTranscriptPathForProject, sessionToolLogFile } from "../utils/paths.js";
+import type { ToolLogEntry } from "../utils/session-store.js";
+import {
+  codexToolLogIdentity,
+  codexToolLogInput,
+  codexToolLogMetadata,
+  codexToolLogToolName,
+  codexRuntimeToolHelpers,
+  type CodexToolIdentity,
+} from "../../adapters/codex/tool-identity.js";
+import { sandboxModeForToolPolicy } from "../../adapters/codex/runtime-home.js";
+import {
+  createToolLogTailReader,
+  isLiveToolLogStatus,
+  type ToolLogTailReader,
+  toolLogErrorMessage,
+  toolLogTerminalStatus,
+} from "../utils/agent-framework-tool-log.js";
+
+const codexRuntimeTools = codexRuntimeToolHelpers;
 
 export type CodexThreadOptionsConfig = {
   workingDir?: string | null;
@@ -61,6 +80,14 @@ export type CodexUiStreamState = {
   seenProcesses: Set<string>;
   assistantText: Map<string, string>;
   assistantReasoning: Map<string, string>;
+  toolRefAliases: Map<string, string>;
+  pendingHookToolRefsBySignature: Map<string, string[]>;
+  pendingHookToolRefsByCanonicalName: Map<string, string[]>;
+  completedHookRefsBySignature: Map<string, string[]>;
+  completedHookRefsByCanonicalName: Map<string, string[]>;
+  completedHookAliases: Set<string>;
+  completedHookRefs: Set<string>;
+  pendingFunctionOutputsByCallId: Map<string, PendingCodexFunctionOutput[]>;
 };
 
 export function createCodexUiStreamState(): CodexUiStreamState {
@@ -70,8 +97,20 @@ export function createCodexUiStreamState(): CodexUiStreamState {
     seenProcesses: new Set(),
     assistantText: new Map(),
     assistantReasoning: new Map(),
+    toolRefAliases: new Map(),
+    pendingHookToolRefsBySignature: new Map(),
+    pendingHookToolRefsByCanonicalName: new Map(),
+    completedHookRefsBySignature: new Map(),
+    completedHookRefsByCanonicalName: new Map(),
+    completedHookAliases: new Set(),
+    completedHookRefs: new Set(),
+    pendingFunctionOutputsByCallId: new Map(),
   };
 }
+
+export type CodexToolLogPoller = {
+  poll(): AiRuntimeEvent[];
+};
 
 type CodexLiveSession = {
   runtimeHome: ReturnType<typeof materializeRuntimeHome>;
@@ -264,7 +303,7 @@ export function startOrResumeCodexThread(
 }
 
 function codexSandboxModeForToolPolicy(policy: RuntimeToolPolicy): string {
-  const sandboxMode = adapterSpecByName("codex").runtimeHome.sandboxModeForToolPolicy?.(policy);
+  const sandboxMode = sandboxModeForToolPolicy(policy);
   if (!sandboxMode) throw new Error("Codex runtime-home spec does not define sandboxModeForToolPolicy.");
   return sandboxMode;
 }
@@ -369,6 +408,91 @@ export function mapCodexUiStreamEvent(event: unknown, state: CodexUiStreamState)
   return mapCodexUiItem(raw.type, item as Record<string, unknown>, state);
 }
 
+export function createCodexToolLogPoller(
+  projectDir: string | null | undefined,
+  state: CodexUiStreamState
+): CodexToolLogPoller | null {
+  const initial = resolveSessionTranscriptPathForProject(projectDir ?? undefined);
+  const startedAt = Date.now();
+  let sessionDir = initial?.sessionDir ?? null;
+  let logPath = sessionDir ? sessionToolLogFile(sessionDir) : null;
+  let reader: ToolLogTailReader | null = logPath
+    ? createToolLogTailReader(logPath, { minTimestamp: startedAt - 1000 })
+    : null;
+
+  return {
+    poll(): AiRuntimeEvent[] {
+      const resolved = resolveSessionTranscriptPathForProject(projectDir ?? undefined);
+      if (resolved?.sessionDir && resolved.sessionDir !== sessionDir) {
+        sessionDir = resolved.sessionDir;
+        logPath = sessionToolLogFile(sessionDir);
+        reader = createToolLogTailReader(logPath, { offset: 0, minTimestamp: startedAt - 1000 });
+      }
+      if (!logPath || !reader) return [];
+
+      const events: AiRuntimeEvent[] = [];
+      for (const entry of reader.read()) {
+        events.push(...mapCodexToolLogEntryForUi(entry, state));
+      }
+      return events;
+    },
+  };
+}
+
+export function mapCodexToolLogEntryForUi(
+  entry: ToolLogEntry,
+  state: CodexUiStreamState
+): AiRuntimeEvent[] {
+  if (!isLiveToolLogStatus(entry.status)) return [];
+  const identity = codexToolLogIdentity(entry);
+  if (!entry.toolUseId) {
+    const ref = consumePendingHookToolRef(state, identity) ?? null;
+    if (!ref) return [];
+    if (entry.gate === "post-tool-use" && entry.status === "allowed") {
+      registerCompletedHookRef(state, identity, ref);
+      return [{ type: "tool.completed", ref, output: [] }];
+    }
+    if (toolLogTerminalStatus(entry) === "failed") {
+      const metadata = codexToolLogMetadata(entry);
+      const message = toolLogErrorMessage(entry);
+      return [{
+        type: "tool.failed",
+        ref,
+        error: message,
+        publicMessage: message,
+        metadata,
+      }];
+    }
+    return [];
+  }
+
+  const metadata = codexToolLogMetadata(entry);
+  const ref = canonicalToolRef(state, entry.toolUseId, identity, false);
+  const events = ensureTool(
+    state,
+    ref,
+    codexToolLogToolName(entry),
+    codexToolLogInput(entry),
+    metadata
+  );
+
+  if (entry.status === "allowed") {
+    registerPendingHookToolRef(state, identity, ref);
+    events.push({ type: "tool.updated", ref, status: "running" });
+    return events;
+  }
+
+  const message = toolLogErrorMessage(entry);
+  events.push({
+    type: "tool.failed",
+    ref,
+    error: message,
+    publicMessage: message,
+    metadata,
+  });
+  return events;
+}
+
 export function buildCodexEnv(
   _runtimeEnvironment: SdkRuntimeEnvironment,
   _tempHome: string | null,
@@ -411,11 +535,16 @@ function mapCodexUiItem(
   state: CodexUiStreamState
 ): AiRuntimeEvent[] {
   const itemType = stringField(item, "type");
-  const id = stringField(item, "id") ?? syntheticCodexItemRef(itemType, item);
+  const rawId = stringField(item, "id") ?? codexRuntimeTools.syntheticItemRef(itemType, item);
+  const identity = codexRuntimeTools.itemToolIdentity(itemType, item);
+  const id = isFunctionCallItemType(itemType)
+    ? rawId
+    : canonicalToolRef(state, rawId, identity, true);
+  const completedHookAlias = isCompletedHookAliasForSdkToolItem(state, itemType, rawId);
   switch (itemType) {
     case "agent_message": {
       const text = stringField(item, "text") ?? "";
-      const ref = stringField(item, "id") ?? syntheticCodexItemRef(itemType, item);
+      const ref = stringField(item, "id") ?? codexRuntimeTools.syntheticItemRef(itemType, item);
       const trackingId = ref;
       const events: AiRuntimeEvent[] = [];
       ensureAssistantMessage(events, state, ref);
@@ -431,7 +560,7 @@ function mapCodexUiItem(
     }
     case "reasoning": {
       const text = stringField(item, "text") ?? stringField(item, "summary") ?? "";
-      const ref = stringField(item, "id") ?? syntheticCodexItemRef(itemType, item);
+      const ref = stringField(item, "id") ?? codexRuntimeTools.syntheticItemRef(itemType, item);
       const trackingId = ref;
       const events: AiRuntimeEvent[] = [];
       ensureAssistantMessage(events, state, ref);
@@ -452,13 +581,23 @@ function mapCodexUiItem(
       const command = stringField(item, "command") ?? "Command";
       const status = stringField(item, "status");
       const output = stringField(item, "aggregated_output");
-      const events = ensureTool(state, id, "shell", { command });
+      const actionSummary = codexRuntimeTools.commandActionSummary(item.commandActions ?? item.actions);
+      const events = ensureTool(state, id, "shell", {
+        command,
+        ...(actionSummary ? { actionSummary, actionCount: actionSummary.split("\n").length } : {}),
+      }, codexRuntimeTools.itemMetadata(item, itemType, id));
       if (status === "completed") {
         events.push({ type: "tool.completed", ref: id, output: output ? textOutput(output) : [] });
-      } else if (status === "failed") {
+      } else if (codexRuntimeTools.isFailureStatus(status)) {
         if (output) events.push({ type: "tool.output", ref: id, output: textOutput(output) });
-        events.push({ type: "tool.failed", ref: id, error: "Operation failed" });
-      } else {
+        events.push({
+          type: "tool.failed",
+          ref: id,
+          error: "Operation failed",
+          publicMessage: output ?? "Command failed",
+          metadata: codexRuntimeTools.itemMetadata(item, itemType, id),
+        });
+      } else if (!completedHookAlias) {
         events.push({ type: "tool.updated", ref: id, status: "running" });
         if (output) events.push({ type: "tool.progress", ref: id, progress: output });
       }
@@ -469,57 +608,202 @@ function mapCodexUiItem(
       const tool = stringField(item, "tool");
       const name = server && tool ? `mcp__${server}__${tool}` : "mcp_tool";
       const status = stringField(item, "status");
-      const events = ensureTool(state, id, name, { server, tool, arguments: item.arguments });
+      const metadata = codexRuntimeTools.itemMetadata(item, itemType, id);
+      const events = ensureTool(state, id, name, { server, tool, arguments: item.arguments }, metadata);
       if (status === "completed") {
         events.push({ type: "tool.completed", ref: id, output: outputBlocks(item.result) });
-      } else if (status === "failed") {
-        events.push({ type: "tool.failed", ref: id, error: errorMessage(item.error) });
-      } else {
+      } else if (codexRuntimeTools.isFailureStatus(status)) {
+        const message = errorMessage(item.error);
+        events.push({ type: "tool.failed", ref: id, error: message, publicMessage: message, metadata });
+      } else if (!completedHookAlias) {
         events.push({ type: "tool.updated", ref: id, status: "running" });
       }
       return events;
     }
     case "file_change": {
       const changes = Array.isArray(item.changes) ? item.changes : [];
-      const paths = changes
-        .map((change) => change && typeof change === "object" ? stringField(change as Record<string, unknown>, "path") : null)
-        .filter((path): path is string => Boolean(path));
+      const paths = codexRuntimeTools.extractFileChangePaths(item);
       const events = ensureTool(state, id, "file_edit", {
         changes: item.changes,
         changeCount: changes.length,
         files: paths.slice(0, 3).join(", "),
         path: paths[0] ?? null,
-      });
+      }, codexRuntimeTools.itemMetadata(item, itemType, id));
       const status = stringField(item, "status");
-      if (status === "failed") {
-        events.push({ type: "tool.failed", ref: id, error: "File change failed" });
+      if (codexRuntimeTools.isFailureStatus(status)) {
+        events.push({
+          type: "tool.failed",
+          ref: id,
+          error: "File change failed",
+          publicMessage: "File change failed",
+          metadata: codexRuntimeTools.itemMetadata(item, itemType, id),
+        });
       } else if (status === "completed" || eventType === "item.completed") {
         events.push({ type: "tool.completed", ref: id, output: outputBlocks(item.changes) });
-      } else {
+      } else if (!completedHookAlias) {
         events.push({ type: "tool.updated", ref: id, status: "running" });
       }
       return events;
     }
     case "web_search": {
-      const events = ensureTool(state, id, "search", { query: item.query });
+      const events = ensureTool(state, id, "search", { query: item.query }, codexRuntimeTools.itemMetadata(item, itemType, id));
       if (eventType === "item.completed") {
         events.push({ type: "tool.completed", ref: id, output: [] });
-      } else {
+      } else if (!completedHookAlias) {
         events.push({ type: "tool.updated", ref: id, status: "running" });
       }
       return events;
     }
+    case "function_call":
+    case "custom_tool_call":
+      return mapCodexFunctionCallItem(eventType, item, itemType, id, state);
+    case "function_call_output":
+    case "custom_tool_call_output":
+      return mapCodexFunctionCallOutputItem(item, itemType, id, state);
     case "error":
       return [{ type: "error", error: stringField(item, "message") ?? "Runtime item error" }];
     default:
-      return mapUnknownCodexItem(eventType, item, itemType, id, state);
+      return mapUnknownCodexItem(eventType, item, itemType, id, completedHookAlias, state);
   }
 }
 
-function ensureTool(state: CodexUiStreamState, ref: string, name: string, input: unknown): AiRuntimeEvent[] {
+function ensureTool(
+  state: CodexUiStreamState,
+  ref: string,
+  name: string,
+  input: unknown,
+  metadata?: AiMetadata
+): AiRuntimeEvent[] {
   if (state.seenTools.has(ref)) return [];
   state.seenTools.add(ref);
-  return [{ type: "tool.created", ref, name, input: summarizeToolInputForUi(name, input) }];
+  return [{
+    type: "tool.created",
+    ref,
+    name,
+    input: summarizeToolInputForUi(name, input),
+    ...(metadata ? { metadata } : {}),
+  }];
+}
+
+function canonicalToolRef(
+  state: CodexUiStreamState,
+  ref: string,
+  identity: CodexToolIdentity,
+  consumePendingHook: boolean
+): string {
+  const existing = state.toolRefAliases.get(ref) ??
+    (consumePendingHook ? consumePendingHookToolRef(state, identity) : undefined) ??
+    (consumePendingHook ? consumeCompletedHookRef(state, identity) : undefined);
+  const canonical = existing ?? ref;
+  state.toolRefAliases.set(ref, canonical);
+  if (existing && state.completedHookRefs.has(existing)) state.completedHookAliases.add(ref);
+  return canonical;
+}
+
+function isCompletedHookAliasForSdkToolItem(
+  state: CodexUiStreamState,
+  itemType: string | null,
+  rawId: string
+): boolean {
+  return isSdkToolItemType(itemType) && state.completedHookAliases.has(rawId);
+}
+
+function isSdkToolItemType(itemType: string | null): boolean {
+  return itemType === "command_execution" ||
+    itemType === "mcp_tool_call" ||
+    itemType === "file_change" ||
+    itemType === "web_search" ||
+    itemType === null ||
+    itemType === "runtime_item";
+}
+
+function registerPendingHookToolRef(state: CodexUiStreamState, identity: CodexToolIdentity, ref: string): void {
+  appendPendingHookRef(state.pendingHookToolRefsBySignature, identity.signature, ref);
+  appendPendingHookRef(state.pendingHookToolRefsByCanonicalName, identity.canonicalToolName, ref);
+}
+
+function appendPendingHookRef(target: Map<string, string[]>, key: string, ref: string): void {
+  const refs = target.get(key) ?? [];
+  if (!refs.includes(ref)) refs.push(ref);
+  target.set(key, refs);
+}
+
+function consumePendingHookToolRef(state: CodexUiStreamState, identity: CodexToolIdentity): string | undefined {
+  return consumeHookRefFromIndexes({
+    bySignature: state.pendingHookToolRefsBySignature,
+    byCanonicalName: state.pendingHookToolRefsByCanonicalName,
+    seenTools: state.seenTools,
+    identity,
+  });
+}
+
+function registerCompletedHookRef(state: CodexUiStreamState, identity: CodexToolIdentity, ref: string): void {
+  state.completedHookRefs.add(ref);
+  appendPendingHookRef(state.completedHookRefsBySignature, identity.signature, ref);
+  appendPendingHookRef(state.completedHookRefsByCanonicalName, identity.canonicalToolName, ref);
+}
+
+function consumeCompletedHookRef(state: CodexUiStreamState, identity: CodexToolIdentity): string | undefined {
+  return consumeHookRefFromIndexes({
+    bySignature: state.completedHookRefsBySignature,
+    byCanonicalName: state.completedHookRefsByCanonicalName,
+    seenTools: state.seenTools,
+    identity,
+  });
+}
+
+function consumeHookRefFromIndexes(input: {
+  bySignature: Map<string, string[]>;
+  byCanonicalName: Map<string, string[]>;
+  seenTools: Set<string>;
+  identity: CodexToolIdentity;
+}): string | undefined {
+  const bySignature = consumePendingHookRefForKey(input.bySignature, input.identity.signature, input.seenTools);
+  if (bySignature) {
+    removePendingHookRefForKey(input.byCanonicalName, input.identity.canonicalToolName, bySignature);
+    return bySignature;
+  }
+  if (codexRuntimeTools.isFileMutationTool(input.identity.canonicalToolName) && codexRuntimeTools.toolIdentityPaths(input.identity).length > 0) {
+    return undefined;
+  }
+  const canonicalRefs = input.byCanonicalName.get(input.identity.canonicalToolName) ?? [];
+  const liveCanonicalRefs = canonicalRefs.filter((ref) => input.seenTools.has(ref));
+  if (liveCanonicalRefs.length !== 1) return undefined;
+  const byCanonical = liveCanonicalRefs[0];
+  removePendingHookRefForKey(input.byCanonicalName, input.identity.canonicalToolName, byCanonical);
+  removePendingHookRefFromAll(input.bySignature, byCanonical);
+  return byCanonical;
+}
+
+function consumePendingHookRefForKey(target: Map<string, string[]>, key: string, seenTools: Set<string>): string | undefined {
+  const refs = target.get(key);
+  if (!refs) return undefined;
+  while (refs.length > 0) {
+    const ref = refs.shift();
+    if (ref && seenTools.has(ref)) {
+      if (refs.length === 0) target.delete(key);
+      return ref;
+    }
+  }
+  target.delete(key);
+  return undefined;
+}
+
+function removePendingHookRefForKey(target: Map<string, string[]>, key: string, ref: string): void {
+  const refs = target.get(key);
+  if (!refs) return;
+  const remaining = refs.filter((candidate) => candidate !== ref);
+  if (remaining.length > 0) {
+    target.set(key, remaining);
+  } else {
+    target.delete(key);
+  }
+}
+
+function removePendingHookRefFromAll(target: Map<string, string[]>, ref: string): void {
+  for (const key of [...target.keys()]) {
+    removePendingHookRefForKey(target, key, ref);
+  }
 }
 
 function ensureAssistantMessage(events: AiRuntimeEvent[], state: CodexUiStreamState, ref: string): void {
@@ -547,49 +831,119 @@ function mapUnknownCodexItem(
   item: Record<string, unknown>,
   itemType: string | null,
   id: string,
+  completedHookAlias: boolean,
   state: CodexUiStreamState
 ): AiRuntimeEvent[] {
   const status = stringField(item, "status");
+  const metadata = codexRuntimeTools.itemMetadata(item, itemType, id);
   const events = ensureTool(state, id, "runtime_item", {
     itemType: itemType ?? "unknown",
     status: status ?? eventType,
-  });
+  }, metadata);
   if (eventType === "item.completed" || status === "completed") {
     events.push({ type: "tool.completed", ref: id, output: [{ type: "json", value: item }] });
-  } else if (status === "failed" || status === "error") {
-    events.push({ type: "tool.failed", ref: id, error: errorMessage(item.error) });
-  } else {
+  } else if (codexRuntimeTools.isFailureStatus(status)) {
+    const message = errorMessage(item.error);
+    events.push({ type: "tool.failed", ref: id, error: message, publicMessage: message, metadata });
+  } else if (!completedHookAlias) {
     events.push({ type: "tool.updated", ref: id, status: "running" });
   }
   return events;
 }
 
-function syntheticCodexItemRef(itemType: string | null, item: Record<string, unknown>): string {
-  const stableItem = stableCodexItemPayload(itemType, item);
-  const canonical = stableJsonStringify(stableItem);
-  const hash = hashSha256Prefix(canonical, 12);
-  return `${itemType ?? "item"}:${hash}`;
+type PendingCodexFunctionOutput = {
+  item: Record<string, unknown>;
+  itemType: string;
+};
+
+function mapCodexFunctionCallItem(
+  eventType: string,
+  item: Record<string, unknown>,
+  itemType: string,
+  id: string,
+  state: CodexUiStreamState
+): AiRuntimeEvent[] {
+  const name = codexRuntimeTools.normalizeToolName(item);
+  const input = codexRuntimeTools.parseToolInput(item);
+  const rawCallId = stringField(item, "call_id") ?? id;
+  const callId = canonicalToolRef(
+    state,
+    rawCallId,
+    codexRuntimeTools.toolIdentity(name, input),
+    true
+  );
+  const metadata = codexRuntimeTools.itemMetadata(item, itemType, callId);
+  const events = ensureTool(state, callId, name, input, metadata);
+  if (state.completedHookAliases.has(rawCallId)) {
+    events.push(...consumePendingCodexFunctionOutputs(state, rawCallId, callId));
+    return events;
+  }
+  const status = stringField(item, "status");
+  if (codexRuntimeTools.isFailureStatus(status)) {
+    const message = errorMessage(item.error);
+    events.push({ type: "tool.failed", ref: callId, error: message, publicMessage: message, metadata });
+  } else if (status !== "completed" && eventType !== "item.completed") {
+    events.push({ type: "tool.updated", ref: callId, status: "running" });
+  }
+  events.push(...consumePendingCodexFunctionOutputs(state, rawCallId, callId));
+  return events;
 }
 
-function stableCodexItemPayload(itemType: string | null, item: Record<string, unknown>): Record<string, unknown> {
-  switch (itemType) {
-    case "command_execution":
-      return { type: itemType, command: item.command };
-    case "mcp_tool_call":
-      return { type: itemType, server: item.server, tool: item.tool, arguments: item.arguments };
-    case "file_change":
-      return { type: itemType, changes: item.changes };
-    case "web_search":
-      return { type: itemType, query: item.query };
-    default: {
-      const stable: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(item)) {
-        if (["status", "text", "summary", "aggregated_output", "result", "error", "progress"].includes(key)) continue;
-        stable[key] = value;
-      }
-      return stable;
-    }
+function mapCodexFunctionCallOutputItem(
+  item: Record<string, unknown>,
+  itemType: string,
+  id: string,
+  state: CodexUiStreamState
+): AiRuntimeEvent[] {
+  const rawCallId = stringField(item, "call_id") ?? id;
+  const callId = state.toolRefAliases.get(rawCallId) ?? rawCallId;
+  if (state.completedHookAliases.has(rawCallId) || state.completedHookRefs.has(callId)) {
+    return codexFunctionOutputEvents(item, itemType, callId);
   }
+  if (!state.seenTools.has(callId)) {
+    const pending = state.pendingFunctionOutputsByCallId.get(rawCallId) ?? [];
+    pending.push({ item, itemType });
+    state.pendingFunctionOutputsByCallId.set(rawCallId, pending);
+    return [];
+  }
+  return codexFunctionOutputEvents(item, itemType, callId);
+}
+
+function consumePendingCodexFunctionOutputs(
+  state: CodexUiStreamState,
+  rawCallId: string,
+  callId: string
+): AiRuntimeEvent[] {
+  const pending = state.pendingFunctionOutputsByCallId.get(rawCallId);
+  if (!pending) return [];
+  state.pendingFunctionOutputsByCallId.delete(rawCallId);
+  return pending.flatMap((output) => codexFunctionOutputEvents(output.item, output.itemType, callId));
+}
+
+function codexFunctionOutputEvents(
+  item: Record<string, unknown>,
+  itemType: string,
+  callId: string
+): AiRuntimeEvent[] {
+  const { output, error } = codexRuntimeTools.interpretToolOutput(item, item.output ?? item.result);
+  const metadata = codexRuntimeTools.itemMetadata(item, itemType, callId);
+  if (error) {
+    const events: AiRuntimeEvent[] = output.length > 0
+      ? [{ type: "tool.output", ref: callId, output }]
+      : [];
+    const message = error.message;
+    events.push({ type: "tool.failed", ref: callId, error: message, publicMessage: message, metadata });
+    return events;
+  } else {
+    return [{ type: "tool.completed", ref: callId, output }];
+  }
+}
+
+function isFunctionCallItemType(itemType: string | null): boolean {
+  return itemType === "function_call" ||
+    itemType === "custom_tool_call" ||
+    itemType === "function_call_output" ||
+    itemType === "custom_tool_call_output";
 }
 
 export function buildCodexConfig(

@@ -37,7 +37,7 @@ export type TokenUsage = {
 export type AiContentBlock =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string; metadata?: AiMetadata };
 
 export type AiMessage = {
   role: AiMessageRole;
@@ -46,6 +46,7 @@ export type AiMessage = {
 
 export type AiTranscriptEntry = {
   id: AiMessageId;
+  sequenceId: AiEventSeq | null;
   turnId: TurnId | null;
   role: AiMessageRole;
   content: AiContentBlock[];
@@ -70,10 +71,21 @@ export type AiToolOutputBlock =
   | { type: "text"; text: string }
   | { type: "json"; value: unknown };
 
+export type AiMetadataValue =
+  | string
+  | number
+  | boolean
+  | null
+  | AiMetadataValue[]
+  | { [key: string]: AiMetadataValue };
+
+export type AiMetadata = Record<string, AiMetadataValue>;
+
 export type AiErrorInfo = {
   code: "cancelled" | "invalid_request" | "not_found" | "conflict" | "runtime_error";
   message: string;
   recoverable: boolean;
+  metadata?: AiMetadata;
 };
 
 export type AiToolResult = {
@@ -88,6 +100,7 @@ export type AiToolCall = {
   name: string;
   input: AiToolInputSummary;
   status: AiToolStatus;
+  metadata?: AiMetadata;
   wait: AiWaitState;
   output: AiToolOutputBlock[];
   result: AiToolResult | null;
@@ -157,6 +170,7 @@ export type AiWorkingDirectoryCandidate = {
 export type AiSessionSnapshot = {
   sessionId: SessionId;
   workingDir: string | null;
+  agentFrameworkSessionDir: string | null;
   status: AiSessionStatus;
   revision: AiSnapshotRevision;
   lastEventSeq: AiEventSeq;

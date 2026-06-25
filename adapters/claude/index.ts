@@ -32,6 +32,7 @@ export const claudeSpec: AdapterSpec = {
   },
   recognizeMcp: MCP.recognizeMcp,
   mcpWireName:  MCP.mcpWireName,
+  recognizeMcpServerTool: MCP.recognizeMcpServerTool,
   canonicalizeToolCall: TC.canonicalizeToolCall,
   summarizeToolCallForLlm: ({ canonicalToolName, canonicalToolInput }) =>
     summarizeToolInputForLlm(canonicalToolName, canonicalToolInput),

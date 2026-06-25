@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { readJsonlTail } from "../../src/utils/file-io.js";
+import { readJsonlTail, readJsonlTailWithSequenceIds } from "../../src/utils/file-io.js";
 
 describe("file-io JSONL tail reads", () => {
   let tmpDir: string;
@@ -34,6 +34,18 @@ describe("file-io JSONL tail reads", () => {
 
     expect(readJsonlTail<{ id: string }>(filePath, Buffer.byteLength(second) + 2)).toEqual([
       { id: "boundary" },
+    ]);
+  });
+
+  it("uses bounded offset-based sequence IDs when the tail window skips a large prefix", () => {
+    const prefix = Array.from({ length: 10_000 }, (_, index) => JSON.stringify({ id: `old-${index}` })).join("\n") + "\n";
+    const finalLine = JSON.stringify({ id: "recent" }) + "\n";
+    fs.writeFileSync(filePath, prefix + finalLine);
+
+    const entries = readJsonlTailWithSequenceIds<{ id: string }>(filePath, Buffer.byteLength(finalLine));
+
+    expect(entries).toEqual([
+      { sequenceId: Buffer.byteLength(prefix) + 1, entry: { id: "recent" } },
     ]);
   });
 });

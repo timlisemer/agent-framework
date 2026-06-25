@@ -631,7 +631,7 @@ space is rooted under `/tmp/agent-framework`.
 
 1. **`state.json`** — SessionState (prediction, edit-intent, force-check lockout, frustration streak, window size, tool count).
 2. **`gate-reasoning.json`** — priority-evicted denial memory with NOTE/WARNING/appeal outcomes.
-3. **`tool-log.jsonl`** — append-only audit trail consumed by drift-detect, error-acknowledge, pre-tool-use, gate-reasoning, and the test-harness.
+3. **`tool-log.jsonl`** — append-only audit trail consumed by drift-detect, error-acknowledge, pre-tool-use, gate-reasoning, the test-harness, and AI backend UI/resume metadata hydration.
 
 Plan-mode and reproducibility sidecars live in the same session directory:
 `plans/<name>.md` stores named session planfiles, `current-plan.json` stores

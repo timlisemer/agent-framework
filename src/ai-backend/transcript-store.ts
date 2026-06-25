@@ -6,6 +6,7 @@ import type {
   AiErrorInfo,
   AiEvent,
   AiEventSeq,
+  AiMetadata,
   AiMessageId,
   AiMessageRole,
   AiMessageStatus,
@@ -25,6 +26,7 @@ import type {
   ToolCallId,
   TurnId,
 } from "../ai-protocol/index.js";
+import { resolveSessionTranscriptPathForProject } from "../utils/paths.js";
 
 const defaultPlan: AiPlanState = {
   mode: "disabled",
@@ -42,6 +44,7 @@ export class TranscriptStore {
     const snapshot: AiSessionSnapshot = {
       sessionId,
       workingDir: config.workingDir ?? process.cwd(),
+      agentFrameworkSessionDir: null,
       status: "idle",
       revision: 0,
       lastEventSeq: 0,
@@ -66,11 +69,15 @@ export class TranscriptStore {
   createHydrated(
     sessionId: SessionId,
     config: AiSessionConfig,
-    transcript: readonly AiTranscriptEntry[]
+    transcript: readonly AiTranscriptEntry[],
+    toolCalls: readonly AiToolCall[] = [],
+    agentFrameworkSessionDir: string | null = null
   ): AiSessionSnapshot {
     this.create(sessionId, config);
     this.update(sessionId, (current) => {
       current.transcript = transcript.map((entry) => structuredClone(entry));
+      current.toolCalls = toolCalls.map((toolCall) => structuredClone(toolCall));
+      current.agentFrameworkSessionDir = agentFrameworkSessionDir;
     });
     return required(this.get(sessionId));
   }
@@ -83,6 +90,7 @@ export class TranscriptStore {
 
   get(sessionId: SessionId): AiSessionSnapshot | undefined {
     const snapshot = this.#sessions.get(sessionId);
+    if (snapshot) this.refreshAgentFrameworkSessionDir(snapshot);
     return snapshot ? structuredClone(snapshot) : undefined;
   }
 
@@ -95,12 +103,15 @@ export class TranscriptStore {
   }
 
   recordEvent(sessionId: SessionId, event: AiEvent): AiEvent {
+    let recordedEvent = structuredClone(event);
     this.update(sessionId, (snapshot) => {
+      this.refreshAgentFrameworkSessionDir(snapshot);
+      recordedEvent = withEventMetadata(snapshot, recordedEvent);
       snapshot.lastEventSeq = event.seq;
     });
-    const recorded = event.type === "sessionUpdated"
-      ? { ...event, snapshot: required(this.get(sessionId)) }
-      : event;
+    const recorded = recordedEvent.type === "sessionUpdated"
+      ? { ...recordedEvent, snapshot: required(this.get(sessionId)) }
+      : recordedEvent;
     this.#events.get(sessionId)?.push(structuredClone(recorded));
     return structuredClone(recorded);
   }
@@ -146,6 +157,7 @@ export class TranscriptStore {
       const text = typeof input.content === "string" ? input.content : "";
       entry = {
         id: input.id,
+        sequenceId: null,
         turnId: input.turnId,
         role: input.role,
         content: text ? [{ type: "text", text }] : [],
@@ -162,6 +174,39 @@ export class TranscriptStore {
 
   appendMessageDelta(sessionId: SessionId, id: AiMessageId, delta: string, now: string): AiTranscriptEntry {
     return this.appendContentDelta(sessionId, id, "text", delta, now);
+  }
+
+  appendErrorMessage(
+    sessionId: SessionId,
+    input: {
+      id: AiMessageId;
+      turnId: TurnId | null;
+      message: string;
+      metadata?: AiMetadata;
+      createdAt: string;
+    }
+  ): AiTranscriptEntry {
+    let entry: AiTranscriptEntry | undefined;
+    this.update(sessionId, (snapshot) => {
+      entry = {
+        id: input.id,
+        sequenceId: null,
+        turnId: input.turnId,
+        role: "tool",
+        content: [{
+          type: "error",
+          message: input.message,
+          ...(input.metadata ? { metadata: input.metadata } : {}),
+        }],
+        status: "failed",
+        createdAt: input.createdAt,
+        updatedAt: input.createdAt,
+        completedAt: input.createdAt,
+        usage: null,
+      };
+      snapshot.transcript.push(entry);
+    });
+    return structuredClone(required(entry));
   }
 
   appendReasoningDelta(sessionId: SessionId, id: AiMessageId, delta: string, now: string): AiTranscriptEntry {
@@ -230,6 +275,7 @@ export class TranscriptStore {
       turnId: TurnId;
       name: string;
       summary: AiToolInputSummary;
+      metadata?: AiMetadata;
       now: string;
     }
   ): AiToolCall {
@@ -240,6 +286,7 @@ export class TranscriptStore {
         turnId: input.turnId,
         name: input.name,
         input: input.summary,
+        ...(input.metadata ? { metadata: input.metadata } : {}),
         status: "created",
         wait: null,
         output: [],
@@ -261,6 +308,7 @@ export class TranscriptStore {
     id: ToolCallId,
     now: string,
     update: Partial<Pick<AiToolCall, "status" | "wait" | "progress" | "elapsedMs" | "processId">> & {
+      metadata?: AiMetadata;
       output?: AiToolOutputBlock[];
       result?: AiToolResult | null;
     }
@@ -268,12 +316,13 @@ export class TranscriptStore {
     let tool: AiToolCall | undefined;
     this.update(sessionId, (snapshot) => {
       const target = requireEntry(snapshot.toolCalls.find((item) => item.id === id), id);
-      const { output, result, ...fields } = update;
+      const { output, result, metadata, ...fields } = update;
       Object.assign(target, fields);
+      if (metadata) target.metadata = mergeMetadata(target.metadata, metadata);
       if (output) target.output = mergeOutput(target.output, output);
       if (result !== undefined) {
-        target.result = result?.state === "completed"
-          ? { ...result, output: target.output }
+        target.result = result && shouldAttachAccumulatedOutput(result)
+          ? { ...result, output: target.output.length > 0 ? target.output : result.output }
           : result;
       }
       target.updatedAt = now;
@@ -375,10 +424,39 @@ export class TranscriptStore {
     snapshot.revision = (snapshot.revision + 1) as AiSnapshotRevision;
     return structuredClone(snapshot);
   }
+
+  private refreshAgentFrameworkSessionDir(snapshot: AiSessionSnapshot): void {
+    if (snapshot.agentFrameworkSessionDir || !snapshot.workingDir) return;
+    snapshot.agentFrameworkSessionDir =
+      resolveSessionTranscriptPathForProject(snapshot.workingDir)?.sessionDir ?? null;
+  }
+}
+
+function withEventMetadata(snapshot: AiSessionSnapshot, event: AiEvent): AiEvent {
+  if (event.type !== "messageCreated" && event.type !== "messageCompleted") {
+    return event;
+  }
+  const message = assignMessageSequenceId(snapshot, event.message, event.seq);
+  return { ...event, message };
+}
+
+function assignMessageSequenceId(
+  snapshot: AiSessionSnapshot,
+  message: AiTranscriptEntry,
+  sequenceId: AiEventSeq
+): AiTranscriptEntry {
+  const target = snapshot.transcript.find((entry) => entry.id === message.id);
+  const value = target?.sequenceId ?? message.sequenceId ?? sequenceId;
+  if (target) target.sequenceId = target.sequenceId ?? value;
+  return { ...message, sequenceId: value };
 }
 
 function isTerminalToolStatus(status: AiToolStatus): boolean {
   return ["completed", "failed", "cancelled", "denied", "unsupported"].includes(status);
+}
+
+function shouldAttachAccumulatedOutput(result: AiToolResult): boolean {
+  return result.state !== "movedToProcess";
 }
 
 function required<T>(value: T | undefined): T {
@@ -396,6 +474,10 @@ function mergeOutput(existing: AiToolOutputBlock[], incoming: AiToolOutputBlock[
   if (startsWithBlocks(incoming, existing)) return [...incoming];
   if (startsWithBlocks(existing, incoming)) return existing;
   return [...existing, ...incoming];
+}
+
+function mergeMetadata(existing: AiMetadata | undefined, incoming: AiMetadata): AiMetadata {
+  return { ...(existing ?? {}), ...incoming };
 }
 
 function startsWithBlocks(value: AiToolOutputBlock[], prefix: AiToolOutputBlock[]): boolean {

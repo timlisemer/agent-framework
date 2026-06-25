@@ -22,7 +22,7 @@ import { startsWithAny } from "../../utils/retry.js";
 import { getContentBlacklistHighlights } from "../../utils/command-patterns.js";
 import { getRuleViolationHighlights } from "../../utils/content-patterns.js";
 import { formatProposedEdit, type EditValidationToolInput } from "./edit-validation.js";
-import type { TextEditToolName } from "../../utils/edit-tools.js";
+import { applyTextEditReplacements, type TextEditToolName } from "../../utils/edit-tools.js";
 
 /**
  * Validate CLAUDE.md content against agent-framework rules.
@@ -50,6 +50,7 @@ export async function validateClaudeMd(
   hookName: string
 ): Promise<{ approved: boolean; reason?: string }> {
   const proposedEdit = formatProposedEdit(toolName, toolInput);
+  const resultingContent = applyTextEditReplacements(currentContent, toolName, toolInput) ?? proposedEdit;
 
   // Empty proposed edit - allow
   if (!proposedEdit.trim()) {
@@ -58,12 +59,10 @@ export async function validateClaudeMd(
   }
 
   try {
-    // Check for violations in proposed edit. CLAUDE.md uses inverseCodeBlocks
-    // mode: blacklisted commands inside fenced ```...``` blocks are the
-    // violation (CLAUDE.md should not document them as runnable). Any such
-    // hit is a hard deny — there is no Manual User Verification carve-out
-    // in CLAUDE.md.
-    const codeBlockHits = getContentBlacklistHighlights(proposedEdit, {
+    // Validate the resulting file content, not the raw edit description.
+    // Replacement-style edits include removed text in old_string; counting
+    // that as live CLAUDE.md content self-blocks cleanup edits.
+    const codeBlockHits = getContentBlacklistHighlights(resultingContent, {
       inverseCodeBlocks: true,
     });
     if (codeBlockHits.length > 0) {
@@ -76,9 +75,9 @@ export async function validateClaudeMd(
       };
     }
 
-    const proseBlacklistHits = getContentBlacklistHighlights(proposedEdit);
+    const proseBlacklistHits = getContentBlacklistHighlights(resultingContent);
     const blacklistHighlights = proseBlacklistHits.map((h) => h.rendered);
-    const ruleViolations = getRuleViolationHighlights(proposedEdit);
+    const ruleViolations = getRuleViolationHighlights(resultingContent);
     const allViolations = [...blacklistHighlights, ...ruleViolations];
     const violationSection = allViolations.length > 0
       ? `=== VIOLATIONS DETECTED ===\n${allViolations.join("\n")}\n=== END VIOLATIONS ===\n\n`
@@ -89,7 +88,7 @@ export async function validateClaudeMd(
       { ...CLAUDE_MD_VALIDATE_AGENT, workingDir },
       {
         prompt: "Validate this CLAUDE.md content.",
-        context: `CURRENT FILE:\n${currentContent ?? "(new file)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\n${violationSection}`,
+        context: `CURRENT FILE:\n${currentContent ?? "(new file)"}\n\nPROPOSED ${toolName.toUpperCase()}:\n${proposedEdit}\n\nRESULTING FILE:\n${resultingContent}\n\n${violationSection}`,
       },
       {
         formatValidator: (text) => startsWithAny(text, ["OK", "DRIFT:"]),

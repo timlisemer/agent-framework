@@ -1,11 +1,21 @@
 import { isCancellationError } from "../utils/cancellation.js";
-import type { AiErrorInfo } from "../ai-protocol/index.js";
+import type { AiErrorInfo, AiMetadata } from "../ai-protocol/index.js";
 
-export function toPublicError(error: unknown): AiErrorInfo {
+export function toPublicError(
+  error: unknown,
+  options: { publicMessage?: string; metadata?: AiMetadata } = {}
+): AiErrorInfo {
   if (isCancellationError(error)) {
-    return { code: "cancelled", message: "Operation cancelled", recoverable: true };
+    return withMetadata(
+      { code: "cancelled", message: "Operation cancelled", recoverable: true },
+      options.metadata
+    );
   }
-  return { code: "runtime_error", message: "Runtime operation failed", recoverable: false };
+  return withMetadata({
+    code: "runtime_error",
+    message: options.publicMessage ?? "Runtime operation failed",
+    recoverable: false,
+  }, options.metadata);
 }
 
 export function protocolError(
@@ -13,4 +23,8 @@ export function protocolError(
   message: string
 ): AiErrorInfo {
   return { code, message, recoverable: code !== "conflict" };
+}
+
+function withMetadata(error: AiErrorInfo, metadata: AiMetadata | undefined): AiErrorInfo {
+  return metadata && Object.keys(metadata).length > 0 ? { ...error, metadata } : error;
 }

@@ -18,6 +18,7 @@
  */
 
 import type { TranscriptEntry, ContentBlock } from "../../src/adapter/types.js";
+import { normalizeCodexToolName, parseCodexToolObjectInput } from "./tool-payload.js";
 
 function normalizeContentBlock(block: unknown): ContentBlock | null {
   if (!block || typeof block !== "object") return null;
@@ -44,30 +45,6 @@ function normalizeContentBlock(block: unknown): ContentBlock | null {
   }
 
   return null;
-}
-
-function normalizeToolName(payload: Record<string, unknown>): string {
-  const name = typeof payload.name === "string" ? payload.name : "unknown";
-  const namespace = typeof payload.namespace === "string" ? payload.namespace : "";
-  return `${namespace}${name}`;
-}
-
-function normalizeToolInput(payload: Record<string, unknown>): Record<string, unknown> {
-  const input = payload.input ?? payload.arguments;
-  if (input && typeof input === "object" && !Array.isArray(input)) {
-    return input as Record<string, unknown>;
-  }
-  if (typeof input !== "string" || input.trim().length === 0) {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(input) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
-  }
 }
 
 function assistantMessageContent(payload: Record<string, unknown>): ContentBlock[] {
@@ -189,8 +166,8 @@ export function parseTranscript(rawLines: readonly string[]): readonly (Transcri
           contentBlocks.push({
             type: "tool_use",
             id: typeof nextPayload.call_id === "string" ? nextPayload.call_id : undefined,
-            name: normalizeToolName(nextPayload),
-            input: normalizeToolInput(nextPayload),
+            name: normalizeCodexToolName(nextPayload),
+            input: parseCodexToolObjectInput(nextPayload),
           });
           i++;
         }
@@ -235,8 +212,8 @@ export function parseTranscript(rawLines: readonly string[]): readonly (Transcri
           contentBlocks.push({
             type: "tool_use",
             id: callId,
-            name: normalizeToolName(np),
-            input: normalizeToolInput(np),
+            name: normalizeCodexToolName(np),
+            input: parseCodexToolObjectInput(np),
           });
           i++;
         }
@@ -292,8 +269,8 @@ export function parseTranscript(rawLines: readonly string[]): readonly (Transcri
             {
               type: "tool_use",
               id: callId,
-              name: normalizeToolName(payload),
-              input: normalizeToolInput(payload),
+              name: normalizeCodexToolName(payload),
+              input: parseCodexToolObjectInput(payload),
             },
           ],
         },

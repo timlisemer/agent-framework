@@ -16,21 +16,8 @@ import { sessionToolLogFile, sessionStateFile } from "./paths.js";
 import { appendJsonlEntry, appendJsonlEntrySync, readJsonl } from "./file-io.js";
 import type { ToolPrediction } from "./prediction-types.js";
 import type { PriorErrorContext } from "./prior-error-context.js";
-
-export interface ToolLogEntry {
-  ts: number;
-  tool: string;
-  toolUseId?: string;
-  batchPosition?: number;
-  batchSize?: number;
-  path?: string;
-  paths?: string[];
-  cmd?: string;
-  status: string;
-  gate: string;
-  reason?: string;
-  ms: number;
-}
+import type { ToolLogEntry } from "./tool-log-types.js";
+export type { ToolLogEntry } from "./tool-log-types.js";
 
 /**
  * Per-target state for graduated drift-block repetition detection.

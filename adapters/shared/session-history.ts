@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { AdapterResumeTarget, AdapterSessionHistoryMessage, AdapterSessionHistoryRecord } from "../../src/adapter/types.js";
-import { listJsonlFilesRecursive, readJsonlTail } from "../../src/utils/file-io.js";
+import { listJsonlFilesRecursive, readJsonlTailWithSequenceIds } from "../../src/utils/file-io.js";
 
 export const MANAGED_SESSION_MAX_FILE_BYTES = 256 * 1024;
 
@@ -44,7 +44,7 @@ export function listManagedSessionRecords(input: {
 }
 
 export function readManagedSessionRecord(input: ManagedSessionRecordInput): AdapterSessionHistoryRecord | null {
-  const entries = readJsonlTail<JsonObject>(input.filePath, MANAGED_SESSION_MAX_FILE_BYTES);
+  const entries = readJsonlTailWithSequenceIds<JsonObject>(input.filePath, MANAGED_SESSION_MAX_FILE_BYTES);
   const messages: AdapterSessionHistoryMessage[] = [];
   let workingDir: string | null = null;
   let createdAt: string | undefined;
@@ -52,7 +52,7 @@ export function readManagedSessionRecord(input: ManagedSessionRecordInput): Adap
   let summary = "";
   let sessionId = input.defaultSessionId;
 
-  for (const raw of entries) {
+  for (const { entry: raw, sequenceId } of entries) {
     const cwd = firstStringAt(raw, input.workingDirPaths);
     if (cwd && !workingDir) workingDir = path.resolve(cwd);
     const timestamp = firstStringAt(raw, [["timestamp"], ["created_at"], ["createdAt"]]);
@@ -65,7 +65,7 @@ export function readManagedSessionRecord(input: ManagedSessionRecordInput): Adap
     const role = input.roleFor(raw);
     const text = extractText(raw, input.textPaths, input.contentPaths);
     if (role && text) {
-      messages.push({ role, text, ...(timestamp ? { createdAt: timestamp } : {}) });
+      messages.push({ sequenceId, role, text, ...(timestamp ? { createdAt: timestamp } : {}) });
       if (!summary && role === "user") summary = firstLine(text);
     }
   }

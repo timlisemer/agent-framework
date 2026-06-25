@@ -1108,8 +1108,9 @@ export const CLAUDE_MD_VALIDATE_AGENT: Omit<AgentConfig, 'workingDir'> = {
 You will receive:
 1. CURRENT FILE: Full content of the CLAUDE.md file
 2. PROPOSED EDIT: The change being made (Write: new content, Edit: old→new)
+3. RESULTING FILE: The full file content after applying the proposed edit
 
-VALIDATE THE ENTIRE FILE, not just the proposed edit.
+VALIDATE THE RESULTING FILE, not just the proposed edit.
 
 ## DETECT DRIFT (→ DRIFT)
 

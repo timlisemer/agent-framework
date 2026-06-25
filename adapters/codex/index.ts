@@ -52,6 +52,7 @@ export const codexSpec: AdapterSpec = {
   },
   recognizeMcp: MCP.recognizeMcp,
   mcpWireName:  MCP.mcpWireName,
+  recognizeMcpServerTool: MCP.recognizeMcpServerTool,
   canonicalizeToolCall: TC.canonicalizeToolCall,
   summarizeToolCallForLlm: (input) => {
     if (isPatchEditAlias(input)) {

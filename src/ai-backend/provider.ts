@@ -12,6 +12,7 @@ import {
 } from "../providers/claude-agent-runtime.js";
 import {
   createCodexLiveSession,
+  createCodexToolLogPoller,
   createCodexUiStreamState,
   mapCodexUiStreamEvent,
   normalizeCodexAiUsage,
@@ -195,7 +196,7 @@ class CodexUiProvider implements AiProviderRunner {
         true,
         this.resumeThreadId ?? undefined
       );
-      yield* runCodexUiTurn(this.#liveSession.thread, buildCodexTurnInput(config, prompt), signal);
+      yield* runCodexUiTurn(this.#liveSession.thread, buildCodexTurnInput(config, prompt), signal, config);
       yield { type: "continuation.updated", available: Boolean(this.#liveSession.thread.id) };
       return;
     }
@@ -204,7 +205,7 @@ class CodexUiProvider implements AiProviderRunner {
       this.resolvedProvider,
       { ...config, runtimeExecutionMode: "sdk" },
       "agent-framework-ai-codex-",
-      async (thread) => collectCodexUiTurn(thread, buildCodexTurnInput(config, prompt), signal)
+      async (thread) => collectCodexUiTurn(thread, buildCodexTurnInput(config, prompt), signal, config)
     );
     yield* events;
   }
@@ -218,7 +219,8 @@ class CodexUiProvider implements AiProviderRunner {
 async function* runCodexUiTurn(
   thread: Awaited<ReturnType<typeof createCodexLiveSession>>["thread"],
   prompt: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  config: AiSessionConfig
 ): AsyncIterable<AiRuntimeEvent> {
   if (!thread.runStreamed) {
     const result = await thread.run(prompt, { signal });
@@ -232,20 +234,49 @@ async function* runCodexUiTurn(
     return;
   }
   const state = createCodexUiStreamState();
-  const streamed = await thread.runStreamed(prompt, { signal });
-  for await (const event of streamed.events) {
-    signal.throwIfAborted();
-    for (const mapped of mapCodexUiStreamEvent(event, state)) yield mapped;
+  const toolLogPoller = createCodexToolLogPoller(config.workingDir, state);
+  const queue = new RuntimeEventQueue();
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+  const pollToolLog = (): void => {
+    if (!toolLogPoller) return;
+    for (const event of toolLogPoller.poll()) queue.push(event);
+  };
+
+  if (toolLogPoller) {
+    pollInterval = setInterval(pollToolLog, 100);
+    pollInterval.unref?.();
+  }
+  const producer = (async () => {
+    try {
+      const streamed = await thread.runStreamed!(prompt, { signal });
+      for await (const event of streamed.events) {
+        signal.throwIfAborted();
+        pollToolLog();
+        for (const mapped of mapCodexUiStreamEvent(event, state)) queue.push(mapped);
+      }
+      pollToolLog();
+    } finally {
+      if (pollInterval) clearInterval(pollInterval);
+    }
+  })();
+  producer.then(() => queue.end(), (error) => queue.fail(error));
+  try {
+    yield* queue;
+  } finally {
+    if (pollInterval) clearInterval(pollInterval);
+    await producer.catch(() => undefined);
   }
 }
 
 async function collectCodexUiTurn(
   thread: Awaited<ReturnType<typeof createCodexLiveSession>>["thread"],
   prompt: string,
-  signal: AbortSignal
+  signal: AbortSignal,
+  config: AiSessionConfig
 ): Promise<AiRuntimeEvent[]> {
   const events: AiRuntimeEvent[] = [];
-  for await (const event of runCodexUiTurn(thread, prompt, signal)) events.push(event);
+  for await (const event of runCodexUiTurn(thread, prompt, signal, config)) events.push(event);
   return events;
 }
 

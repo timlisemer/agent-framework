@@ -178,6 +178,15 @@ describe("AI session history service", () => {
           timestamp: "2026-06-20T10:02:00.000Z",
           payload: { type: "agent_message", message: "Status is clean." },
         },
+        {
+          type: "response_item",
+          timestamp: "2026-06-20T10:02:00.000Z",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Status is clean." }],
+          },
+        },
       ]);
 
       const service = new AiSessionHistoryService();
@@ -191,12 +200,84 @@ describe("AI session history service", () => {
         transcriptPath: transcript,
       });
       expect(resolved?.transcript.map((entry) => ({
+        sequenceId: entry.sequenceId,
         role: entry.role,
         text: entry.content[0]?.type === "text" ? entry.content[0].text : "",
       }))).toEqual([
-        { role: "user", text: "Show status" },
-        { role: "assistant", text: "Status is clean." },
+        { sequenceId: 2, role: "user", text: "Show status" },
+        { sequenceId: 4, role: "assistant", text: "Status is clean." },
       ]);
+    } finally {
+      restoreEnv();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("hydrates managed Codex function calls as completed historical tools", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-history-tool-test-"));
+    const restoreEnv = withEnvForTest({ HOME: home });
+    try {
+      const projectDir = path.join(home, "project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      const transcript = path.join(home, ".agent-framework", "astral-ai", "codex", "sessions", "tool-call.jsonl");
+      writeJsonl(transcript, [
+        {
+          type: "session_meta",
+          timestamp: "2026-06-20T10:00:00.000Z",
+          payload: { cwd: projectDir, id: "tool-thread" },
+        },
+        {
+          timestamp: "2026-06-20T10:01:00.000Z",
+          payload: { role: "user", text: "Check status" },
+        },
+        {
+          type: "response_item",
+          timestamp: "2026-06-20T10:02:00.000Z",
+          payload: {
+            type: "function_call",
+            call_id: "call-1",
+            name: "exec_command",
+            arguments: "{\"command\":\"git status --short\"}",
+          },
+        },
+        {
+          type: "response_item",
+          timestamp: "2026-06-20T10:03:00.000Z",
+          payload: {
+            type: "function_call_output",
+            call_id: "call-1",
+            output: " M src/app.ts\n",
+          },
+        },
+      ]);
+
+      const service = new AiSessionHistoryService();
+      const choices = await service.listChoices({ sdkRuntimeHome: "managedAstral", maxResults: 10 });
+      expect(choices.sessions).toHaveLength(1);
+      const resolved = service.resolve(choices.sessions[0].resumeId);
+      if (!resolved) throw new Error("expected resolved Codex session");
+
+      expect(resolved.toolCalls).toHaveLength(1);
+      expect(resolved.toolCalls[0]).toMatchObject({
+        id: "call-1",
+        turnId: "history-turn-1",
+        name: "exec_command",
+        status: "completed",
+        wait: null,
+        output: [{ type: "text", text: " M src/app.ts\n" }],
+        result: {
+          state: "completed",
+          output: [{ type: "text", text: " M src/app.ts\n" }],
+          error: null,
+        },
+        processId: null,
+        progress: null,
+        elapsedMs: null,
+        createdAt: "2026-06-20T10:02:00.000Z",
+        updatedAt: "2026-06-20T10:03:00.000Z",
+        completedAt: "2026-06-20T10:03:00.000Z",
+      });
+      expect(resolved.toolCalls[0].input.fields).toMatchObject({ command: "git status --short" });
     } finally {
       restoreEnv();
       fs.rmSync(home, { recursive: true, force: true });

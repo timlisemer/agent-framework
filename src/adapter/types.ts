@@ -8,6 +8,7 @@
  * @module adapter/types
  */
 
+import type { AiToolCall } from "../ai-protocol/index.js";
 import type { RuntimeHomeProfile, RuntimeToolPolicy } from "../runtime-home/profiles.js";
 
 export type EventName =
@@ -163,6 +164,7 @@ export interface AdapterTranscriptFile {
 }
 
 export type AdapterSessionHistoryMessage = {
+  sequenceId: number;
   role: "user" | "assistant";
   text: string;
   createdAt?: string;
@@ -182,6 +184,7 @@ export type AdapterSessionHistoryRecord = {
   updatedAt?: string;
   resumeTarget: AdapterResumeTarget;
   messages: readonly AdapterSessionHistoryMessage[];
+  toolCalls?: readonly AiToolCall[];
 };
 
 export interface AdapterSessionHistoryProvider {
@@ -234,6 +237,9 @@ export interface AdapterSpec {
 
   /** Render the wire spelling for a canonical MCP capability. */
   mcpWireName(canonical: CanonicalMcp): string;
+
+  /** Recognize split SDK MCP identity fields such as server/tool. */
+  recognizeMcpServerTool(server: string, tool: string): CanonicalMcp | null;
 
   /** Translate a raw wire-shape tool call into canonical form.
    *  Handles MCP recognition, adapter-specific name aliases, and input

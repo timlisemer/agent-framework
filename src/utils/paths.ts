@@ -208,6 +208,31 @@ export function getAgentFrameworkSessionDir(input: AgentFrameworkSessionDirInput
   return sessionDirForTranscript(input.transcriptPath, input.projectDir);
 }
 
+export function findExistingAgentFrameworkSessionDirForTranscript(input: {
+  transcriptPath: string;
+  projectDir?: string;
+}): string | null {
+  const internalSessionDir = existingDirectory(internalSessionDirForTranscript(input.transcriptPath));
+  if (internalSessionDir) return internalSessionDir;
+
+  const testRunDir = existingDirectory(testRunSessionDirForTranscript(input.transcriptPath));
+  if (testRunDir) return testRunDir;
+
+  return resolveProjectSessionDirForTranscript(input.transcriptPath, input.projectDir, {
+    create: false,
+    writeSidecar: false,
+  });
+}
+
+function existingDirectory(dirPath: string | null | undefined): string | null {
+  if (!dirPath) return null;
+  try {
+    return fs.statSync(dirPath).isDirectory() ? dirPath : null;
+  } catch {
+    return null;
+  }
+}
+
 function internalSessionDirForTranscript(transcriptPath: string): string | null {
   const policy = process.env.AGENT_FRAMEWORK_SESSION_POLICY;
   if (policy === "none") {
@@ -233,17 +258,28 @@ function internalSessionDirForTranscript(transcriptPath: string): string | null 
 }
 
 function sessionDirForTranscript(transcriptPath: string, projectDir?: string): string {
+  return resolveProjectSessionDirForTranscript(transcriptPath, projectDir, {
+    create: true,
+    writeSidecar: true,
+  })!;
+}
+
+function resolveProjectSessionDirForTranscript(
+  transcriptPath: string,
+  projectDir: string | undefined,
+  opts: { create: boolean; writeSidecar: boolean }
+): string | null {
   const hash = hashString(transcriptPath);
   const projectKey = encodeAgentFrameworkProjectDir(projectDir);
   const cacheKey = `${projectKey}:${hash}`;
-  const cached = sessionDirCache.get(cacheKey);
+  const cached = existingDirectory(sessionDirCache.get(cacheKey));
   if (cached) {
-    writeSidecarIfNeeded(cached, transcriptPath);
+    if (opts.writeSidecar) writeSidecarIfNeeded(cached, transcriptPath);
     return cached;
   }
 
   const parentDir = path.join(runtimeRoot(), "sessions", projectKey);
-  fs.mkdirSync(parentDir, { recursive: true });
+  if (opts.create) fs.mkdirSync(parentDir, { recursive: true });
 
   const suffix = `_${hash}`;
   let dirPath: string | undefined;
@@ -254,16 +290,17 @@ function sessionDirForTranscript(transcriptPath: string, projectDir?: string): s
       dirPath = path.join(parentDir, existing);
     }
   } catch {
-    // Parent dir just created, no entries yet
+    if (!opts.create) return null;
   }
 
   if (!dirPath) {
+    if (!opts.create) return null;
     dirPath = path.join(parentDir, `${formatTimestamp()}_${hash}`);
     fs.mkdirSync(dirPath, { recursive: true });
   }
 
   sessionDirCache.set(cacheKey, dirPath);
-  writeSidecarIfNeeded(dirPath, transcriptPath);
+  if (opts.writeSidecar) writeSidecarIfNeeded(dirPath, transcriptPath);
   return dirPath;
 }
 
