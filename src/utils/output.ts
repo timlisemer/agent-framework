@@ -29,6 +29,19 @@ export function stringField(value: Record<string, unknown>, key: string): string
   return typeof value[key] === "string" ? value[key] : null;
 }
 
+export function nonEmptyStringField(value: Record<string, unknown>, key: string): string | null {
+  const field = stringField(value, key);
+  return field && field.length > 0 ? field : null;
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function recordFromUnknown(value: unknown): Record<string, unknown> {
+  return isRecord(value) ? value : {};
+}
+
 export function trimmedStringField(value: Record<string, unknown>, key: string): string | null {
   const field = value[key];
   if (typeof field !== "string") return null;

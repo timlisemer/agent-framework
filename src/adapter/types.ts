@@ -8,8 +8,9 @@
  * @module adapter/types
  */
 
-import type { AiToolCall } from "../ai-protocol/index.js";
+import type { AiMetadata, AiProviderMetadataState, TokenUsage } from "../ai-protocol/index.js";
 import type { RuntimeHomeProfile, RuntimeToolPolicy } from "../runtime-home/profiles.js";
+import type { ToolLogEntry } from "../utils/session-store.js";
 
 export type EventName =
   | "PreToolUse"
@@ -163,13 +164,6 @@ export interface AdapterTranscriptFile {
   path: string;
 }
 
-export type AdapterSessionHistoryMessage = {
-  sequenceId: number;
-  role: "user" | "assistant";
-  text: string;
-  createdAt?: string;
-};
-
 export type AdapterResumeTarget = {
   provider: string;
   target: Record<string, string>;
@@ -183,8 +177,8 @@ export type AdapterSessionHistoryRecord = {
   createdAt?: string;
   updatedAt?: string;
   resumeTarget: AdapterResumeTarget;
-  messages: readonly AdapterSessionHistoryMessage[];
-  toolCalls?: readonly AiToolCall[];
+  transcriptPath?: string;
+  nativeSessionId?: string;
 };
 
 export interface AdapterSessionHistoryProvider {
@@ -195,19 +189,45 @@ export interface AdapterSessionHistoryProvider {
 
 // ── Transcript shape (canonical, used by parseTranscript) ───────────────────
 
+export type TranscriptSource = {
+  adapter: string;
+  sourceKey: string;
+  transcriptPath?: string;
+  startLine: number;
+  endLine: number;
+  nativeId?: string;
+  createdAt?: string;
+};
+
+export type TranscriptParseOptions = {
+  startLine?: number;
+  transcriptPath?: string;
+};
+
+export interface ProviderMetadataExtractionInput {
+  rawLines: readonly string[];
+  transcriptPath?: string;
+}
+
 export interface ContentBlock {
   type: string;
   text?: string;
-  content?: string | ContentBlock[];
+  content?: unknown;
   tool_use_id?: string;
   name?: string;
   id?: string;
   input?: Record<string, unknown>;
   is_error?: boolean;
+  source?: TranscriptSource;
+  metadata?: AiMetadata;
 }
 
 export interface TranscriptEntry {
   isMeta?: boolean;
+  source?: TranscriptSource;
+  createdAt?: string;
+  usage?: TokenUsage | null;
+  metadata?: AiMetadata;
   message?: {
     id?: string;
     role: string;
@@ -251,6 +271,13 @@ export interface AdapterSpec {
    *  host-specific aliases without fabricating fields. */
   summarizeToolCallForLlm(input: AdapterToolCallContext): string;
 
+  /** Adapter-specific fallback matching for transcript tool calls and
+   *  agent-framework tool-log entries when native runtime IDs differ. */
+  toolLogEntryMatchesTranscriptTool?(entry: ToolLogEntry, toolName: string, input: unknown): boolean;
+  transcriptToolLogIdentityKey?(toolName: string, input: unknown): string | null;
+  transcriptToolLogMatchIsStable?(toolName: string, input: unknown): boolean;
+  transcriptMessageGroupKey?(entry: TranscriptEntry): string | null;
+
   /** True when a deny reason is impossible for this adapter-specific call
    *  shape and should be treated as hallucinated rule-gate output. */
   isFabricatedDenyReason?(reason: string, input: AdapterToolCallContext): boolean;
@@ -280,7 +307,12 @@ export interface AdapterSpec {
   // ── Transcript parsing (the bug-fix surface) ────────────────────────────
   /** Parse adapter-native JSONL lines into the canonical TranscriptEntry stream.
    *  Codex coalesces multi-line response_items into one entry per logical turn. */
-  parseTranscript(rawLines: readonly string[]): readonly (TranscriptEntry | null)[];
+  parseTranscript(rawLines: readonly string[], options?: TranscriptParseOptions): readonly (TranscriptEntry | null)[];
+
+  /** Extract provider-owned metadata from adapter-native transcript rows. */
+  extractProviderMetadata?(
+    input: ProviderMetadataExtractionInput,
+  ): Partial<AiProviderMetadataState>;
 
   /** True if a content string is an adapter-injected interruption message. */
   isInterruptionMessage(content: string): boolean;

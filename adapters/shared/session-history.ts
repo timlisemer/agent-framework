@@ -1,12 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AdapterResumeTarget, AdapterSessionHistoryMessage, AdapterSessionHistoryRecord } from "../../src/adapter/types.js";
-import { listJsonlFilesRecursive, readJsonlTailWithSequenceIds } from "../../src/utils/file-io.js";
+import type { AdapterResumeTarget, AdapterSessionHistoryRecord } from "../../src/adapter/types.js";
+import { listJsonlFilesRecursive, readJsonlTail } from "../../src/utils/file-io.js";
 
 export const MANAGED_SESSION_MAX_FILE_BYTES = 256 * 1024;
 
 export type JsonObject = Record<string, unknown>;
 export type JsonPath = readonly string[];
+export type ManagedSessionRole = "user" | "assistant";
 
 export type ManagedSessionRecordInput = {
   adapterName: string;
@@ -14,7 +15,7 @@ export type ManagedSessionRecordInput = {
   defaultSessionId: string;
   workingDirPaths: readonly JsonPath[];
   sessionIdPaths: readonly JsonPath[];
-  roleFor: (raw: JsonObject) => AdapterSessionHistoryMessage["role"] | null;
+  roleFor: (raw: JsonObject) => ManagedSessionRole | null;
   sessionIdFor?: (raw: JsonObject) => string | null;
   textPaths: readonly JsonPath[];
   contentPaths: readonly JsonPath[];
@@ -44,15 +45,14 @@ export function listManagedSessionRecords(input: {
 }
 
 export function readManagedSessionRecord(input: ManagedSessionRecordInput): AdapterSessionHistoryRecord | null {
-  const entries = readJsonlTailWithSequenceIds<JsonObject>(input.filePath, MANAGED_SESSION_MAX_FILE_BYTES);
-  const messages: AdapterSessionHistoryMessage[] = [];
+  const entries = readJsonlTail<JsonObject>(input.filePath, MANAGED_SESSION_MAX_FILE_BYTES);
   let workingDir: string | null = null;
   let createdAt: string | undefined;
   let updatedAt: string | undefined;
   let summary = "";
   let sessionId = input.defaultSessionId;
 
-  for (const { entry: raw, sequenceId } of entries) {
+  for (const raw of entries) {
     const cwd = firstStringAt(raw, input.workingDirPaths);
     if (cwd && !workingDir) workingDir = path.resolve(cwd);
     const timestamp = firstStringAt(raw, [["timestamp"], ["created_at"], ["createdAt"]]);
@@ -65,7 +65,6 @@ export function readManagedSessionRecord(input: ManagedSessionRecordInput): Adap
     const role = input.roleFor(raw);
     const text = extractText(raw, input.textPaths, input.contentPaths);
     if (role && text) {
-      messages.push({ sequenceId, role, text, ...(timestamp ? { createdAt: timestamp } : {}) });
       if (!summary && role === "user") summary = firstLine(text);
     }
   }
@@ -84,7 +83,8 @@ export function readManagedSessionRecord(input: ManagedSessionRecordInput): Adap
     ...(createdAt ? { createdAt } : {}),
     ...(updatedAt ? { updatedAt } : {}),
     resumeTarget: input.resumeTargetFor(sessionId, input.filePath),
-    messages,
+    transcriptPath: input.filePath,
+    nativeSessionId: sessionId,
   };
 }
 

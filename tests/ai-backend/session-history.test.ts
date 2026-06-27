@@ -74,8 +74,12 @@ describe("AI session history service", () => {
       const resolved = service.resolve(codex.resumeId);
       expect(resolved?.target).toEqual({
         provider: "codex",
-        threadId: "codex-thread",
+        target: {
+          threadId: "codex-thread",
+          transcriptPath: codexTranscript,
+        },
         transcriptPath: codexTranscript,
+        nativeSessionId: "codex-thread",
       });
       expect(resolved?.transcript.map((entry) => ({
         role: entry.role,
@@ -196,16 +200,76 @@ describe("AI session history service", () => {
 
       expect(resolved?.target).toEqual({
         provider: "codex",
-        threadId: "event-thread",
+        target: {
+          threadId: "event-thread",
+          transcriptPath: transcript,
+        },
         transcriptPath: transcript,
+        nativeSessionId: "event-thread",
       });
       expect(resolved?.transcript.map((entry) => ({
         sequenceId: entry.sequenceId,
         role: entry.role,
         text: entry.content[0]?.type === "text" ? entry.content[0].text : "",
       }))).toEqual([
-        { sequenceId: 2, role: "user", text: "Show status" },
-        { sequenceId: 4, role: "assistant", text: "Status is clean." },
+        { sequenceId: 1, role: "user", text: "Show status" },
+        { sequenceId: 2, role: "assistant", text: "Status is clean." },
+      ]);
+    } finally {
+      restoreEnv();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("collapses same-text Codex assistant paired rows separated by metadata-only entries", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-history-separated-assistant-test-"));
+    const restoreEnv = withEnvForTest({ HOME: home });
+    try {
+      const projectDir = path.join(home, "project");
+      fs.mkdirSync(projectDir, { recursive: true });
+      const transcript = path.join(home, ".agent-framework", "astral-ai", "codex", "sessions", "separated-assistant.jsonl");
+      writeJsonl(transcript, [
+        {
+          type: "session_meta",
+          timestamp: "2026-06-20T10:00:00.000Z",
+          payload: { cwd: projectDir, id: "separated-assistant-thread" },
+        },
+        {
+          timestamp: "2026-06-20T10:01:00.000Z",
+          payload: { role: "user", text: "Show status twice" },
+        },
+        {
+          type: "event_msg",
+          timestamp: "2026-06-20T10:02:00.000Z",
+          payload: { type: "agent_message", message: "Status is clean." },
+        },
+        {
+          type: "event_msg",
+          timestamp: "2026-06-20T10:02:00.000Z",
+          payload: { type: "token_count", total_token_usage: { input_tokens: 1, output_tokens: 1 } },
+        },
+        {
+          type: "response_item",
+          timestamp: "2026-06-20T10:02:00.000Z",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Status is clean." }],
+          },
+        },
+      ]);
+
+      const service = new AiSessionHistoryService();
+      const choices = await service.listChoices({ sdkRuntimeHome: "managedAstral", maxResults: 10 });
+      expect(choices.sessions).toHaveLength(1);
+      const resolved = service.resolve(choices.sessions[0].resumeId);
+
+      expect(resolved?.transcript.map((entry) => ({
+        role: entry.role,
+        text: entry.content[0]?.type === "text" ? entry.content[0].text : "",
+      }))).toEqual([
+        { role: "user", text: "Show status twice" },
+        { role: "assistant", text: "Status is clean." },
       ]);
     } finally {
       restoreEnv();
@@ -260,7 +324,7 @@ describe("AI session history service", () => {
       expect(resolved.toolCalls).toHaveLength(1);
       expect(resolved.toolCalls[0]).toMatchObject({
         id: "call-1",
-        turnId: "history-turn-1",
+        turnId: expect.stringMatching(/^turn-/),
         name: "exec_command",
         status: "completed",
         wait: null,

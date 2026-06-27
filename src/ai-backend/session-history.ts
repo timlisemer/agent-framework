@@ -9,26 +9,30 @@ import type {
 } from "../ai-protocol/index.js";
 import type { AdapterResumeTarget, AdapterSessionHistoryRecord } from "../adapter/types.js";
 import { allAdapterSpecs } from "../adapter/spec.js";
+import { projectTranscriptFile } from "./transcript-runtime.js";
 
 export const DEFAULT_SESSION_HISTORY_LIMIT = 100;
 const MAX_RESUME_CACHE_ENTRIES = DEFAULT_SESSION_HISTORY_LIMIT * 5;
 
-export type ResumeTarget =
-  | { provider: "codex"; threadId: string; transcriptPath: string }
-  | { provider: "claude"; sessionId: string; transcriptPath: string };
+export type ResumeTarget = {
+  provider: string;
+  target: Record<string, string>;
+  transcriptPath: string;
+  nativeSessionId: string | null;
+};
 
 export type ResolvedResumeSession = {
   descriptor: AiSessionDescriptor;
   target: ResumeTarget;
   transcript: AiTranscriptEntry[];
   toolCalls: AiToolCall[];
+  agentFrameworkSessionDir: string | null;
 };
 
 type ResumeEntry = {
   descriptor: AiSessionDescriptor;
   target: ResumeTarget;
-  transcript: AiTranscriptEntry[];
-  toolCalls: AiToolCall[];
+  adapterName: string;
 };
 
 export class AiSessionHistoryService {
@@ -66,14 +70,19 @@ export class AiSessionHistoryService {
 
   resolve(resumeId: string): ResolvedResumeSession | null {
     const entry = this.#resume.get(resumeId);
-    return entry
-      ? {
-          descriptor: structuredClone(entry.descriptor),
-          target: structuredClone(entry.target),
-          transcript: structuredClone(entry.transcript),
-          toolCalls: structuredClone(entry.toolCalls),
-        }
-      : null;
+    if (!entry) return null;
+    const projection = projectTranscriptFile({
+      adapterName: entry.adapterName,
+      transcriptPath: entry.target.transcriptPath,
+      workingDir: entry.descriptor.workingDir,
+    });
+    return {
+      descriptor: structuredClone(entry.descriptor),
+      target: structuredClone(entry.target),
+      transcript: structuredClone(projection.transcript),
+      toolCalls: structuredClone(projection.toolCalls),
+      agentFrameworkSessionDir: projection.agentFrameworkSessionDir,
+    };
   }
 
   private descriptorFor(record: AdapterSessionHistoryRecord): AiSessionDescriptor | null {
@@ -91,8 +100,7 @@ export class AiSessionHistoryService {
     this.#resume.set(resumeId, {
       descriptor,
       target,
-      transcript: hydrateTranscript(record),
-      toolCalls: hydrateToolCalls(record),
+      adapterName: record.adapterName,
     });
     this.pruneResumeCache();
     return descriptor;
@@ -115,15 +123,15 @@ export class AiSessionHistoryService {
 }
 
 function normalizeResumeTarget(target: AdapterResumeTarget): ResumeTarget | null {
-  if (target.provider === "codex") {
-    const { threadId, transcriptPath } = target.target;
-    return threadId && transcriptPath ? { provider: "codex", threadId, transcriptPath } : null;
-  }
-  if (target.provider === "claude") {
-    const { sessionId, transcriptPath } = target.target;
-    return sessionId && transcriptPath ? { provider: "claude", sessionId, transcriptPath } : null;
-  }
-  return null;
+  const transcriptPath = target.target.transcriptPath;
+  if (!transcriptPath) return null;
+  const nativeSessionId = target.target.threadId ?? target.target.sessionId ?? null;
+  return {
+    provider: target.provider,
+    target: { ...target.target },
+    transcriptPath,
+    nativeSessionId,
+  };
 }
 
 export const sessionHistoryService = new AiSessionHistoryService();
@@ -149,28 +157,6 @@ function summarizeWorkingDirectories(records: readonly AdapterSessionHistoryReco
       sessionCount: entry.sessionCount,
       ...(entry.lastUsedAt ? { lastUsedAt: entry.lastUsedAt } : {}),
     }));
-}
-
-function hydrateTranscript(record: AdapterSessionHistoryRecord): AiTranscriptEntry[] {
-  return record.messages.map((message, index) => {
-    const createdAt = message.createdAt ?? record.updatedAt ?? new Date(0).toISOString();
-    return {
-      id: `history-message-${index + 1}`,
-      sequenceId: message.sequenceId,
-      turnId: null,
-      role: message.role,
-      content: message.text ? [{ type: "text" as const, text: message.text }] : [],
-      status: "completed" as const,
-      createdAt,
-      updatedAt: createdAt,
-      completedAt: createdAt,
-      usage: null,
-    };
-  });
-}
-
-function hydrateToolCalls(record: AdapterSessionHistoryRecord): AiToolCall[] {
-  return (record.toolCalls ?? []).map((toolCall) => structuredClone(toolCall));
 }
 
 function compareHistoryRecords(a: AdapterSessionHistoryRecord, b: AdapterSessionHistoryRecord): number {

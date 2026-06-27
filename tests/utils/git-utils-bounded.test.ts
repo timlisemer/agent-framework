@@ -287,6 +287,36 @@ describe("bounded git utilities", () => {
     ]);
   });
 
+  it("does not report unrelated generic barrel filename mentions", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.writeFileSync(path.join(repoDir, "src", "index.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "README.md"), "Create an index.ts barrel when adding a package.\n");
+    git(repoDir, ["add", "src/index.ts", "README.md"]);
+    git(repoDir, ["commit", "-m", "add barrel"]);
+    fs.rmSync(path.join(repoDir, "src", "index.ts"));
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
+
+  it("reports deleted generic barrel files when the old path remains referenced", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.writeFileSync(path.join(repoDir, "src", "index.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "README.md"), "Import from src/index.ts while migrating.\n");
+    git(repoDir, ["add", "src/index.ts", "README.md"]);
+    git(repoDir, ["commit", "-m", "add barrel reference"]);
+    fs.rmSync(path.join(repoDir, "src", "index.ts"));
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].oldPath).toBe("src/index.ts");
+    expect(issues[0].references).toEqual([
+      { path: "README.md", line: 1, text: "Import from src/index.ts while migrating." },
+    ]);
+  });
+
   it("reports stale filename references after a same-basename move", async () => {
     fs.mkdirSync(path.join(repoDir, "src"));
     fs.mkdirSync(path.join(repoDir, "lib"));

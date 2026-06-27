@@ -1,3 +1,11 @@
+import {
+  AI_ERROR_CODES,
+  AI_MESSAGE_ROLES,
+  AI_MESSAGE_STATUSES,
+  AI_TOOL_RESULT_STATES,
+  AI_TOOL_STATUSES,
+} from "./constants.js";
+
 export type SessionId = string;
 export type TurnId = string;
 export type AiMessageId = string;
@@ -5,25 +13,16 @@ export type ToolCallId = string;
 export type AiBackendProcessId = string;
 export type AiRequestId = string;
 export type AiEventSeq = number;
+export type AiTimelineSeq = number;
 export type AiSnapshotRevision = number;
 
 export type AiPlanMode = "disabled" | "planning" | "awaitingApproval" | "approved";
 export type SdkRuntimeEnvironment = "isolated" | "user";
 export type SdkRuntimeHome = "native" | "managedAstral";
-export type AiMessageRole = "user" | "assistant" | "system" | "tool";
-export type AiMessageStatus = "streaming" | "completed" | "failed" | "cancelled";
+export type AiMessageRole = (typeof AI_MESSAGE_ROLES)[number];
+export type AiMessageStatus = (typeof AI_MESSAGE_STATUSES)[number];
 export type AiSessionStatus = "idle" | "running" | "waiting" | "error" | "cancelled";
-export type AiToolStatus =
-  | "created"
-  | "waiting"
-  | "delayed"
-  | "approved"
-  | "denied"
-  | "unsupported"
-  | "running"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export type AiToolStatus = (typeof AI_TOOL_STATUSES)[number];
 export type AiBackendProcessStatus = "created" | "running" | "completed" | "failed" | "cancelled";
 
 export type TokenUsage = {
@@ -46,11 +45,12 @@ export type AiMessage = {
 
 export type AiTranscriptEntry = {
   id: AiMessageId;
-  sequenceId: AiEventSeq | null;
+  sequenceId: AiTimelineSeq;
   turnId: TurnId | null;
   role: AiMessageRole;
   content: AiContentBlock[];
   status: AiMessageStatus;
+  metadata?: AiMetadata;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
@@ -82,20 +82,21 @@ export type AiMetadataValue =
 export type AiMetadata = Record<string, AiMetadataValue>;
 
 export type AiErrorInfo = {
-  code: "cancelled" | "invalid_request" | "not_found" | "conflict" | "runtime_error";
+  code: (typeof AI_ERROR_CODES)[number];
   message: string;
   recoverable: boolean;
   metadata?: AiMetadata;
 };
 
 export type AiToolResult = {
-  state: "completed" | "failed" | "denied" | "cancelled" | "unsupported" | "movedToProcess";
+  state: (typeof AI_TOOL_RESULT_STATES)[number];
   output: AiToolOutputBlock[];
   error: AiErrorInfo | null;
 };
 
 export type AiToolCall = {
   id: ToolCallId;
+  sequenceId: AiTimelineSeq;
   turnId: TurnId;
   name: string;
   input: AiToolInputSummary;
@@ -139,6 +140,36 @@ export type AiPlanState = {
   approved: boolean;
 };
 
+export type AiProviderModelChoice = {
+  tier: string;
+  id: string;
+  displayName: string | null;
+};
+
+export type AiProviderContextState = {
+  usedTokens: number | null;
+  maxTokens: number | null;
+  remainingTokens: number | null;
+};
+
+export type AiProviderCompactionState = {
+  lastCompactedAt: string | null;
+  events: AiMetadata[];
+};
+
+export type AiProviderMetadataState = {
+  provider: string | null;
+  runtime: "claude" | "codex" | null;
+  model: string | null;
+  displayModel: string | null;
+  availableModels: AiProviderModelChoice[];
+  nativeSessionId: string | null;
+  usage: TokenUsage | null;
+  context: AiProviderContextState;
+  compaction: AiProviderCompactionState;
+  errors: AiErrorInfo[];
+};
+
 export type AiSessionConfig = {
   model: string | null;
   workingDir: string | null;
@@ -177,6 +208,7 @@ export type AiSessionSnapshot = {
   transcript: AiTranscriptEntry[];
   toolCalls: AiToolCall[];
   backendProcesses: AiBackendProcess[];
+  provider: AiProviderMetadataState;
   plan: AiPlanState;
   continuation: AiContinuationState;
   errors: AiErrorInfo[];
@@ -218,19 +250,20 @@ type AiEventBase = {
 
 export type AiEvent =
   | (AiEventBase & { type: "sessionUpdated"; snapshot: AiSessionSnapshot })
+  | (AiEventBase & { type: "sessionStatusChanged"; status: AiSessionStatus; error: AiErrorInfo | null })
   | (AiEventBase & { type: "turnStarted"; turnId: TurnId })
   | (AiEventBase & { type: "messageCreated"; turnId: TurnId; message: AiTranscriptEntry })
   | (AiEventBase & { type: "messageDelta"; turnId: TurnId; messageId: AiMessageId; delta: string })
   | (AiEventBase & { type: "messageReasoningDelta"; turnId: TurnId; messageId: AiMessageId; delta: string })
-  | (AiEventBase & { type: "messageCompleted"; turnId: TurnId; message: AiTranscriptEntry; usage: TokenUsage | null })
+  | (AiEventBase & { type: "messageCompleted"; turnId: TurnId; messageId: AiMessageId; message: AiTranscriptEntry; status: AiMessageStatus; completedAt: string; usage: TokenUsage | null; error: AiErrorInfo | null })
   | (AiEventBase & { type: "toolCallCreated"; turnId: TurnId; toolCall: AiToolCall })
-  | (AiEventBase & { type: "toolCallUpdated"; turnId: TurnId; toolCall: AiToolCall })
-  | (AiEventBase & { type: "toolCallProgress"; turnId: TurnId; toolCallId: ToolCallId; progress: string | null; elapsedMs: number | null })
+  | (AiEventBase & { type: "toolCallStatusChanged"; turnId: TurnId; toolCallId: ToolCallId; status: AiToolStatus; wait: AiWaitState; resultState: AiToolResult["state"] | null; error: AiErrorInfo | null; completedAt: string | null; processId: AiBackendProcessId | null; progress: string | null; elapsedMs: number | null })
+  | (AiEventBase & { type: "toolCallMetadataChanged"; turnId: TurnId; toolCallId: ToolCallId; metadata: AiMetadata })
   | (AiEventBase & { type: "toolCallOutput"; turnId: TurnId; toolCallId: ToolCallId; output: AiToolOutputBlock[] })
   | (AiEventBase & { type: "backendProcessCreated"; turnId: TurnId; process: AiBackendProcess })
-  | (AiEventBase & { type: "backendProcessUpdated"; turnId: TurnId; process: AiBackendProcess })
+  | (AiEventBase & { type: "backendProcessStatusChanged"; turnId: TurnId; processId: AiBackendProcessId; status: AiBackendProcessStatus; cancellable: boolean; error: AiErrorInfo | null; completedAt: string | null })
   | (AiEventBase & { type: "backendProcessProgress"; turnId: TurnId; processId: AiBackendProcessId; progress: string | null; elapsedMs: number | null })
-  | (AiEventBase & { type: "toolCallPromotedToBackendProcess"; turnId: TurnId; toolCallId: ToolCallId; processId: AiBackendProcessId })
+  | (AiEventBase & { type: "backendProcessOutput"; turnId: TurnId; processId: AiBackendProcessId; output: AiToolOutputBlock[] })
   | (AiEventBase & { type: "continuationUpdated"; continuation: AiContinuationState })
   | (AiEventBase & { type: "planStateChanged"; state: AiPlanState })
   | (AiEventBase & { type: "turnFinished"; turnId: TurnId; usage: TokenUsage | null })
@@ -238,7 +271,7 @@ export type AiEvent =
 
 export type AiBackendMessage =
   | { type: "response"; response: AiResponse }
-  | { type: "event"; event: AiEvent };
+  | { type: "event"; event: AiEvent; snapshot: AiSessionSnapshot };
 
 export type AiClientMessage =
   | { type: "request"; request: AiRequest }

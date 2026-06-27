@@ -12,6 +12,7 @@ import * as PM  from "./plan-mode.js";
 import * as Paths from "./paths.js";
 import * as History from "./session-history.js";
 import * as RuntimeHome from "./runtime-home.js";
+import * as ProviderMetadata from "./provider-metadata.js";
 import type {
   AdapterSpec,
   AdapterToolCallContext,
@@ -19,6 +20,11 @@ import type {
 import { extractJsonContextMessage } from "../../src/adapter/context-message.js";
 import { summarizeToolInputForLlm } from "../../src/utils/tool-input-summary.js";
 import { extractApplyPatchPaths } from "./apply-patch-parser.js";
+import {
+  codexToolLogEntryMatchesToolCall,
+  codexTranscriptToolLogIdentityKey,
+  codexTranscriptToolLogMatchIsStable,
+} from "./tool-payload.js";
 
 function isPatchEditAlias(input: AdapterToolCallContext): boolean {
   if (input.rawToolName !== "apply_patch") return false;
@@ -62,6 +68,9 @@ export const codexSpec: AdapterSpec = {
     }
     return summarizeToolInputForLlm(input.canonicalToolName, input.canonicalToolInput);
   },
+  toolLogEntryMatchesTranscriptTool: codexToolLogEntryMatchesToolCall,
+  transcriptToolLogIdentityKey: codexTranscriptToolLogIdentityKey,
+  transcriptToolLogMatchIsStable: codexTranscriptToolLogMatchIsStable,
   isFabricatedDenyReason: (reason, input) =>
     isPatchEditAlias(input) &&
     /old_string[^.]*new_string[^.]*(?:non-string|missing|malformed|invalid)/i.test(reason),
@@ -71,6 +80,7 @@ export const codexSpec: AdapterSpec = {
   renderWorkflowInvocation:    WI.renderWorkflowInvocation,
   workflowInstructionText:     WI.workflowInstructionText,
   parseTranscript: PT.parseTranscript,
+  extractProviderMetadata: ProviderMetadata.extractProviderMetadata,
   isInterruptionMessage: IR.isInterruptionMessage,
   extractContextMessage: (_event, stdout) => extractJsonContextMessage(stdout),
   resolveHostContext:     HC.resolveHostContext,

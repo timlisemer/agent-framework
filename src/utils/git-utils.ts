@@ -608,10 +608,13 @@ function parseDeletedOrRenamedChanges(nameStatus: string): NameStatusChange[] {
 async function findReferencesToBasename(
   workingDir: string,
   files: string[],
+  oldPath: string,
   basename: string,
   options: CancellationOptions,
 ): Promise<DeletedOrRenamedFileReference[]> {
   const references: DeletedOrRenamedFileReference[] = [];
+  const genericBarrelName = isGenericBarrelBasename(basename);
+  const oldPathNoExt = stripKnownExtension(oldPath);
   for (const relativePath of files) {
     throwIfAborted(options.signal);
     const absolutePath = path.join(workingDir, relativePath);
@@ -624,7 +627,11 @@ async function findReferencesToBasename(
 
     const lines = content.split("\n");
     for (let i = 0; i < lines.length; i++) {
-      if (!lines[i].includes(basename)) continue;
+      if (genericBarrelName) {
+        if (!lines[i].includes(oldPath) && !lines[i].includes(oldPathNoExt)) continue;
+      } else if (!lines[i].includes(basename)) {
+        continue;
+      }
       references.push({
         path: relativePath,
         line: i + 1,
@@ -633,6 +640,14 @@ async function findReferencesToBasename(
     }
   }
   return references;
+}
+
+function isGenericBarrelBasename(basename: string): boolean {
+  return /^(?:index|mod|lib)\.(?:[cm]?[jt]sx?|rs)$/.test(basename);
+}
+
+function stripKnownExtension(filePath: string): string {
+  return filePath.replace(/\.(?:[cm]?[jt]sx?|rs)$/, "");
 }
 
 function isScenarioFixturePath(relativePath: string): boolean {
@@ -666,6 +681,7 @@ export async function findDeletedOrRenamedFileReferenceIssuesCancellable(
     const references = await findReferencesToBasename(
       workingDir,
       files.filter((relativePath) => relativePath !== change.oldPath && !isScenarioFixturePath(relativePath)),
+      change.oldPath,
       change.oldBasename,
       options,
     );

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { codexToolLogEntryMatchesToolCall, extractCodexToolPaths } from "../../adapters/codex/tool-payload.js";
+import {
+  codexToolLogEntryMatchesToolCall,
+  codexTranscriptToolLogIdentityKey,
+  codexTranscriptToolLogMatchIsStable,
+  extractCodexToolPaths,
+} from "../../adapters/codex/tool-payload.js";
+import type { ToolLogEntry } from "../../src/utils/session-store.js";
 
 describe("Codex tool payload helpers", () => {
   it("canonicalizes path fields with one sorted unique policy", () => {
@@ -10,25 +16,73 @@ describe("Codex tool payload helpers", () => {
     })).toEqual(["src/a.ts", "src/b.ts", "src/notebook.ipynb"]);
   });
 
-  it("matches tool-log paths independent of input ordering", () => {
+  it("matches exec_command transcript tools to Bash logs by command", () => {
+    expect(codexTranscriptToolLogIdentityKey(
+      "exec_command",
+      { command: "sed -n '1,20p' .env" }
+    )).toBe("Bash:cmd:sed -n '1,20p' .env");
+    expect(codexTranscriptToolLogMatchIsStable(
+      "exec_command",
+      { command: "sed -n '1,20p' .env" }
+    )).toBe(true);
     expect(codexToolLogEntryMatchesToolCall(
-      {
-        tool: "apply_patch",
-        paths: ["src/a.ts", "src/b.ts"],
-      },
+      toolLog({ tool: "Bash", cmd: "sed -n '1,20p' .env" }),
+      "exec_command",
+      { command: "sed -n '1,20p' .env" }
+    )).toBe(true);
+    expect(codexToolLogEntryMatchesToolCall(
+      toolLog({ tool: "Bash", cmd: "git status --short" }),
+      "exec_command",
+      { command: "sed -n '1,20p' .env" }
+    )).toBe(false);
+  });
+
+  it("matches file tools by canonical full path list", () => {
+    expect(codexTranscriptToolLogIdentityKey(
+      "apply_patch",
+      { file_paths: ["src/b.ts", "src/a.ts"] }
+    )).toBe("Edit:paths:src/a.ts\0src/b.ts");
+    expect(codexToolLogEntryMatchesToolCall(
+      toolLog({ tool: "Read", path: "src/app.ts" }),
+      "read_file",
+      { file_path: "src/app.ts" }
+    )).toBe(true);
+    expect(codexToolLogEntryMatchesToolCall(
+      toolLog({ tool: "Edit", paths: ["src/a.ts", "src/b.ts"] }),
+      "edit_file",
+      { file_paths: ["src/b.ts", "src/a.ts"] }
+    )).toBe(true);
+    expect(codexToolLogEntryMatchesToolCall(
+      toolLog({ tool: "Edit", paths: ["src/a.ts", "src/b.ts"] }),
       "apply_patch",
       { file_paths: ["src/b.ts", "src/a.ts"] }
     )).toBe(true);
+    expect(codexToolLogEntryMatchesToolCall(
+      toolLog({ tool: "Edit", paths: ["src/a.ts", "src/b.ts"] }),
+      "edit_file",
+      { file_paths: ["src/a.ts"] }
+    )).toBe(false);
   });
 
-  it("does not match multi-file tools that only share one path", () => {
+  it("marks pathless same-tool fallback as unstable", () => {
+    expect(codexTranscriptToolLogMatchIsStable(
+      "mcp__agent_framework__check",
+      { working_dir: "/repo" }
+    )).toBe(false);
     expect(codexToolLogEntryMatchesToolCall(
-      {
-        tool: "apply_patch",
-        paths: ["src/a.ts", "src/b.ts"],
-      },
-      "apply_patch",
-      { file_paths: ["src/a.ts", "src/c.ts"] }
+      toolLog({ tool: "mcp__agent_framework__commit" }),
+      "mcp__agent_framework__check",
+      { working_dir: "/repo" }
     )).toBe(false);
   });
 });
+
+function toolLog(input: Partial<ToolLogEntry> & Pick<ToolLogEntry, "tool">): ToolLogEntry {
+  return {
+    ts: 1,
+    status: "allowed",
+    gate: "test",
+    ms: 1,
+    ...input,
+  };
+}

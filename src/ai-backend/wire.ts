@@ -2,6 +2,7 @@ import { createInterface } from "node:readline";
 import { stdin as processStdin, stdout as processStdout } from "node:process";
 import { z } from "zod";
 import type { AiBackendMessage, AiClientMessage } from "../ai-protocol/index.js";
+import { jsonStringifyWithBigint } from "../utils/json.js";
 
 interface JsonlWritable {
   write(chunk: string): unknown;
@@ -99,11 +100,7 @@ export function parseClientFrame(line: string): AiClientMessage {
 }
 
 export function writeBackendFrame(frame: AiBackendMessage, stdout: JsonlWritable = processStdout): void {
-  stdout.write(`${JSON.stringify(frame, jsonReplacer)}\n`);
-}
-
-function jsonReplacer(_key: string, value: unknown): unknown {
-  return typeof value === "bigint" ? value.toString() : value;
+  stdout.write(`${jsonStringifyWithBigint(frame)}\n`);
 }
 
 export async function readClientFrames(

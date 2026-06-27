@@ -17,6 +17,9 @@
 import * as fs from "fs";
 import * as path from "path";
 
+type JsonReplacer = (this: unknown, key: string, value: unknown) => unknown;
+type JsonWriteOptions = { indent?: number; replacer?: JsonReplacer };
+
 export function readFirstUtf8File(filePaths: readonly string[]): string | null {
   for (const filePath of filePaths) {
     try {
@@ -416,9 +419,30 @@ export function writeJsonl<T>(filePath: string, entries: readonly T[]): void {
  * Creates parent directories if necessary.
  * Defaults to 2-space indentation with a trailing newline (matching project style).
  */
-export function writeJson<T>(filePath: string, value: T, opts?: { indent?: number }): void {
+export function writeJson<T>(filePath: string, value: T, opts?: JsonWriteOptions): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(value, null, opts?.indent ?? 2) + "\n");
+  fs.writeFileSync(filePath, JSON.stringify(value, opts?.replacer, opts?.indent ?? 2) + "\n");
+}
+
+/**
+ * Atomically write a value as formatted JSON via a same-directory temp file.
+ * Creates parent directories if necessary.
+ */
+export function writeJsonAtomic<T>(filePath: string, value: T, opts?: JsonWriteOptions): void {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tempPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  try {
+    fs.writeFileSync(tempPath, JSON.stringify(value, opts?.replacer, opts?.indent ?? 2) + "\n");
+    fs.renameSync(tempPath, filePath);
+  } catch (error) {
+    try {
+      fs.rmSync(tempPath, { force: true });
+    } catch {
+      // Best-effort cleanup only; preserve the original write/rename failure.
+    }
+    throw error;
+  }
 }
 
 /**
@@ -444,6 +468,14 @@ export function fileSizeOrZero(filePath: string): number {
     return fs.statSync(filePath).size;
   } catch {
     return 0;
+  }
+}
+
+export function fileMtimeMs(filePath: string, missingValue = -1): number {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return missingValue;
   }
 }
 

@@ -23,10 +23,16 @@ import { sessionToolLogFile } from "../utils/paths.js";
 import type { ToolLogEntry } from "../utils/session-store.js";
 import { combineInjectionMessages, loadSessionInjectionsBySeq } from "../utils/session-injections.js";
 import { shortContentHash } from "../utils/hash-utils.js";
-import { activeSpec, adapterSpecByName } from "../adapter/spec.js";
+import { activeSpec } from "../adapter/spec.js";
 import type { ContentBlock, TranscriptEntry } from "../adapter/types.js";
 import type { ToolPrediction } from "../utils/prediction-types.js";
 import { readJsonlThroughByteOffset } from "../utils/file-io.js";
+import {
+  parseCanonicalTranscriptLines,
+  rawAnchorStartIndex,
+  sliceCanonicalEntriesForCapture,
+  sliceRawTranscriptForCapture,
+} from "../utils/canonical-transcript.js";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,26 +54,6 @@ function dropTargetPreToolUseLogEntry(
   const last = entries[entries.length - 1];
   if (last.toolUseId !== toolUseId) return entries;
   return entries.slice(0, -1);
-}
-
-function entryContainsToolUseId(entry: TranscriptEntry | null, toolUseId: string): boolean {
-  const content = entry?.message?.content;
-  if (!Array.isArray(content)) return false;
-  return content.some((block) => block.type === "tool_use" && block.id === toolUseId);
-}
-
-function sliceEntriesForCapture(
-  entries: readonly (TranscriptEntry | null)[],
-  event: string,
-  toolUseId: string | undefined,
-): readonly (TranscriptEntry | null)[] {
-  if ((event !== "PreToolUse" && event !== "PostToolUse") || !toolUseId) {
-    return entries;
-  }
-
-  const idx = entries.findIndex((entry) => entryContainsToolUseId(entry, toolUseId));
-  if (idx === -1) return entries;
-  return entries.slice(0, idx + 1);
 }
 
 function scenarioBlocksFromCanonicalContent(content: string | ContentBlock[]): ScenarioBlock[] {
@@ -93,12 +79,19 @@ function scenarioBlocksFromCanonicalContent(content: string | ContentBlock[]): S
       out.push({
         type: "tool_result",
         tool_use_id: block.tool_use_id,
-        content: block.content ?? "",
+        content: scenarioToolResultContent(block.content),
         is_error: block.is_error,
       });
     }
   }
   return out;
+}
+
+function scenarioToolResultContent(content: unknown): string | unknown[] {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return content;
+  if (content === undefined || content === null) return "";
+  return JSON.stringify(content);
 }
 
 function projectCanonicalTranscriptToEntries(
@@ -191,47 +184,6 @@ function inferAdapterNameFromTranscriptPath(transcriptPath: string): string | nu
   return null;
 }
 
-function rawAnchorStartIndex(
-  rawLines: readonly Record<string, unknown>[],
-  anchorUuid: string | null,
-): number {
-  if (!anchorUuid) return 0;
-  const idx = rawLines.findIndex((line) => line.uuid === anchorUuid);
-  return idx === -1 ? 0 : idx;
-}
-
-function timestampMillis(rawLine: Record<string, unknown>): number | null {
-  const timestamp = rawLine.timestamp;
-  if (typeof timestamp !== "string") return null;
-  const millis = Date.parse(timestamp);
-  return Number.isFinite(millis) ? millis : null;
-}
-
-function sliceRawTranscriptForCapture(
-  rawTranscriptLines: string[],
-  rawJsonLines: Record<string, unknown>[],
-  event: string,
-  captureTs: number,
-): { rawTranscriptLines: string[]; rawJsonLines: Record<string, unknown>[] } {
-  if (event !== "Stop") {
-    return { rawTranscriptLines, rawJsonLines };
-  }
-
-  let endIdx = rawJsonLines.length;
-  for (let i = 0; i < rawJsonLines.length; i++) {
-    const millis = timestampMillis(rawJsonLines[i]);
-    if (millis !== null && millis > captureTs) {
-      endIdx = i;
-      break;
-    }
-  }
-
-  return {
-    rawTranscriptLines: rawTranscriptLines.slice(0, endIdx),
-    rawJsonLines: rawJsonLines.slice(0, endIdx),
-  };
-}
-
 function seedCurrentPrediction(
   prediction: ToolPrediction | null,
 ): Scenario["seed_state"]["currentPrediction"] {
@@ -317,7 +269,6 @@ export async function materializeScenario(
   }
 
   const adapterName = inferAdapterNameFromTranscriptPath(transcriptPath) ?? activeSpec().name;
-  const spec = adapterSpecByName(adapterName);
   const rawTranscriptLines = fs.readFileSync(transcriptPath, "utf-8").split("\n").filter((line) => line.trim());
   const rawJsonLines = rawTranscriptLines.map((line) => {
     try {
@@ -326,20 +277,25 @@ export async function materializeScenario(
       return {};
     }
   });
-  const boundedRaw = sliceRawTranscriptForCapture(
+  const boundedRaw = sliceRawTranscriptForCapture({
     rawTranscriptLines,
     rawJsonLines,
-    pointer.event,
-    pointer.ts,
-  );
+    event: pointer.event,
+    captureTs: pointer.ts,
+  });
   const anchorUuid = pointer.transcript_anchor_uuid ?? epoch?.anchor_uuid ?? null;
   const rawStartIdx = rawAnchorStartIndex(boundedRaw.rawJsonLines, anchorUuid);
   const anchoredRawTranscriptLines = boundedRaw.rawTranscriptLines.slice(rawStartIdx);
-  const parsedEntries = sliceEntriesForCapture(
-    spec.parseTranscript(anchoredRawTranscriptLines),
-    pointer.event,
-    pointer.tool_use_id,
-  );
+  const parsedEntries = sliceCanonicalEntriesForCapture({
+    entries: parseCanonicalTranscriptLines({
+      adapterName,
+      rawLines: anchoredRawTranscriptLines,
+      transcriptPath,
+      startLine: rawStartIdx + 1,
+    }),
+    event: pointer.event,
+    toolUseId: pointer.tool_use_id,
+  });
   const entries = projectCanonicalTranscriptToEntries(parsedEntries, null);
   const scenarioEntries = pointer.event === "Stop"
     ? normalizeStopTranscriptEntries(entries)

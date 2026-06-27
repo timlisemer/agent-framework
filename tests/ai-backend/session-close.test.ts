@@ -1,11 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { AiBackendSessionManager } from "../../src/ai-backend/session-manager.js";
-import type { AiBackendMessage } from "../../src/ai-protocol/index.js";
+import { createAiBackendHarness } from "../helpers/ai-backend-harness.js";
 
 describe("AI backend close requests", () => {
   it("reports request-scoped not_found for unknown sessions", async () => {
-    const frames: AiBackendMessage[] = [];
-    const manager = new AiBackendSessionManager((frame) => frames.push(frame));
+    const { frames, manager } = createAiBackendHarness();
 
     await manager.handle({
       type: "request",

@@ -1,4 +1,6 @@
 import * as fs from "fs";
+import type { ContentBlock } from "../adapter/types.js";
+import { parseActiveTranscriptLines } from "./canonical-transcript.js";
 import type { ToolPrediction } from "./prediction-types.js";
 
 /**
@@ -26,24 +28,6 @@ export const PLAN_APPROVAL_MARKER = "User has approved your plan.";
 export interface PlanApprovalEvent {
   toolUseId: string;
   approvalContent: string;
-}
-
-interface ContentBlock {
-  type?: string;
-  text?: string;
-  content?: unknown;
-  tool_use_id?: string;
-  name?: string;
-  id?: string;
-}
-
-interface TranscriptEntry {
-  isMeta?: boolean;
-  message?: {
-    id?: string;
-    role?: string;
-    content?: string | ContentBlock[];
-  };
 }
 
 /**
@@ -91,15 +75,8 @@ export async function findUnprocessedPlanApproval(
     return null;
   }
 
-  const lines = raw.split("\n");
-  const parsed: (TranscriptEntry | null)[] = lines.map((line) => {
-    if (!line) return null;
-    try {
-      return JSON.parse(line) as TranscriptEntry;
-    } catch {
-      return null;
-    }
-  });
+  const lines = raw.split("\n").filter((line) => line.trim().length > 0);
+  const parsed = parseActiveTranscriptLines(lines, transcriptPath);
 
   // First pass forward: build tool_use_id → tool_name map from assistant
   // tool_use blocks.

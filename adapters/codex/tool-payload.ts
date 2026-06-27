@@ -1,13 +1,8 @@
+import { isToolLogFailureStatus } from "../../src/utils/agent-framework-tool-log.js";
 import { trimmedStringField } from "../../src/utils/output.js";
 import { errorMessage, outputBlocks } from "../../src/utils/output.js";
 import type { AiErrorInfo, AiToolOutputBlock } from "../../src/ai-protocol/index.js";
-
-type CodexToolLogIdentityEntry = {
-  tool: string;
-  cmd?: string;
-  path?: string;
-  paths?: readonly string[];
-};
+import type { ToolLogEntry } from "../../src/utils/session-store.js";
 
 const SINGLE_PATH_KEYS = ["file_path", "path", "notebook_path"] as const;
 const ARRAY_PATH_KEYS = ["file_paths", "paths", "files"] as const;
@@ -43,7 +38,7 @@ export function interpretCodexToolOutputPayload(
 ): { output: AiToolOutputBlock[]; error: AiErrorInfo | null } {
   const output = outputBlocks(outputValue);
   const status = trimmedStringField(payload, "status");
-  const failed = isCodexFailureStatus(status) || payload.error !== undefined;
+  const failed = isToolLogFailureStatus(status) || payload.error !== undefined;
   return {
     output,
     error: failed
@@ -86,37 +81,46 @@ export function extractCodexFileChangePaths(item: Record<string, unknown>): stri
   ));
 }
 
-export function codexToolLogCanonicalInput(entry: CodexToolLogIdentityEntry): unknown {
-  if (entry.cmd) return { command: entry.cmd };
-  const paths = codexToolLogPaths(entry);
-  if (paths.length > 0) return { file_path: paths[0], file_paths: paths };
-  return {};
-}
-
 export function codexToolLogEntryMatchesToolCall(
-  entry: CodexToolLogIdentityEntry,
+  entry: ToolLogEntry,
   toolName: string,
   input: unknown
 ): boolean {
-  if (!codexToolNamesMatch(entry.tool, toolName)) return false;
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return !entry.cmd && codexToolLogPaths(entry).length === 0;
+  const rawInput = input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  const hookToolName = codexHookToolName(toolName);
+  if (entry.tool !== hookToolName && entry.tool !== toolName) return false;
+
+  const command = trimmedStringField(rawInput, "command");
+  if (toolName === "exec_command" || entry.tool === "Bash" || entry.cmd) {
+    return Boolean(command && entry.cmd && command === entry.cmd);
   }
 
-  const fields = input as Record<string, unknown>;
-  const command = trimmedStringField(fields, "command");
-  if (entry.cmd || command) return entry.cmd === command;
-
-  const inputPaths = extractCodexToolPaths(fields);
-  const entryPaths = codexToolLogPaths(entry);
-  if (inputPaths.length === 0 || entryPaths.length === 0) {
-    return inputPaths.length === 0 && entryPaths.length === 0;
+  const inputPaths = extractCodexToolPaths(rawInput);
+  const logPaths = canonicalizeCodexPaths([entry.path, ...(entry.paths ?? [])]);
+  if (inputPaths.length > 0 || logPaths.length > 0) {
+    return sameStringList(inputPaths, logPaths);
   }
-  return sameStringArray(inputPaths, entryPaths);
+
+  return true;
 }
 
-function codexToolLogPaths(entry: CodexToolLogIdentityEntry): string[] {
-  return canonicalizeCodexPaths(entry.paths?.length ? entry.paths : entry.path ? [entry.path] : []);
+export function codexTranscriptToolLogMatchIsStable(toolName: string, input: unknown): boolean {
+  return codexTranscriptToolLogIdentityKey(toolName, input) !== null;
+}
+
+export function codexTranscriptToolLogIdentityKey(toolName: string, input: unknown): string | null {
+  const rawInput = input && typeof input === "object" && !Array.isArray(input)
+    ? input as Record<string, unknown>
+    : {};
+  const hookToolName = codexHookToolName(toolName);
+  const command = trimmedStringField(rawInput, "command");
+  if ((toolName === "exec_command" || hookToolName === "Bash") && command) {
+    return `${hookToolName}:cmd:${command}`;
+  }
+  const paths = extractCodexToolPaths(rawInput);
+  return paths.length > 0 ? `${hookToolName}:paths:${paths.join("\0")}` : null;
 }
 
 function canonicalizeCodexPaths(paths: readonly (string | null | undefined)[]): string[] {
@@ -126,18 +130,22 @@ function canonicalizeCodexPaths(paths: readonly (string | null | undefined)[]): 
     .sort();
 }
 
-function codexToolNamesMatch(entryTool: string, toolName: string): boolean {
-  return entryTool === toolName ||
-    (entryTool === "Bash" && toolName === "exec_command") ||
-    (entryTool === "exec_command" && toolName === "Bash") ||
-    (entryTool === "Edit" && toolName === "apply_patch") ||
-    (entryTool === "apply_patch" && toolName === "Edit");
+function codexHookToolName(toolName: string): string {
+  switch (toolName) {
+    case "exec_command":
+      return "Bash";
+    case "read_file":
+      return "Read";
+    case "write_file":
+      return "Write";
+    case "edit_file":
+    case "apply_patch":
+      return "Edit";
+    default:
+      return toolName;
+  }
 }
 
-function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+function sameStringList(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-export function isCodexFailureStatus(status: string | null | undefined): boolean {
-  return status === "failed" || status === "error";
 }

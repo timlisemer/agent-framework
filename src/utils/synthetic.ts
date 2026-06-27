@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import { AGENT_FRAMEWORK_METADATA_KEYS } from "./agent-framework-metadata.js";
 import { appendToolLog } from "./session-store.js";
 import { getAgentFrameworkSessionDir } from "./paths.js";
 
@@ -50,7 +51,13 @@ export function extractAskUserAnswer(toolResponse: unknown): string | null {
 function buildEntry(kind: MessageKind, source: string, content: string): object {
   switch (kind) {
     case "user":
-      return { message: { role: "user", content } };
+      return {
+        metadata: {
+          [AGENT_FRAMEWORK_METADATA_KEYS.messageKind]: "synthetic",
+          [AGENT_FRAMEWORK_METADATA_KEYS.syntheticSource]: source,
+        },
+        message: { role: "user", content },
+      };
     case "ai":
       return { message: { role: "assistant", content: [{ type: "text", text: content }] } };
     case "tool":

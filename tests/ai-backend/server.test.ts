@@ -1,9 +1,29 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AiBackendSessionManager } from "../../src/ai-backend/session-manager.js";
-import type { AiBackendMessage, AiSessionConfig, SessionId } from "../../src/ai-protocol/index.js";
-import type { AiRuntimeEvent, AiRunTurnInput } from "../../src/ai-backend/runtime-events.js";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type {
+  AiBackendMessage,
+  AiSessionConfig,
+  AiToolCall,
+  AiTranscriptEntry,
+  TokenUsage,
+} from "../../src/ai-protocol/index.js";
+import type { AiRunTurnInput } from "../../src/ai-backend/runtime-events.js";
+import { isActiveToolStatus } from "../../src/ai-backend/timeline-status.js";
+import {
+  createAiBackendHarness as createHarness,
+  defaultAiSessionConfig as defaultConfig,
+  getSessionSnapshot,
+  runtimeEvents as events,
+  sendAiBackendInput as sendInput,
+  startAiBackendSession as startSession,
+  type EventFrame,
+  waitForTurnFinished,
+} from "../helpers/ai-backend-harness.js";
+import {
+  toolCallFixture,
+  transcriptEntryFixture,
+} from "../helpers/ai-backend-fixtures.js";
 
 const provider = vi.hoisted(() => ({
   createResolvedProviderRunner: vi.fn(),
@@ -20,43 +40,37 @@ function resolvedProviderFor(config: AiSessionConfig) {
     modelId: "google/gemini-3.5-flash",
     sdkRuntime: "codex",
     costTracking: "none",
+  } as const;
+}
+
+vi.mock("../../src/ai-backend/provider.js", async () => {
+  const { createDefaultProviderMetadata } =
+    await vi.importActual<typeof import("../../src/ai-backend/provider-metadata.js")>(
+      "../../src/ai-backend/provider-metadata.js"
+    );
+  return {
+    createResolvedProviderRunner: provider.createResolvedProviderRunner,
+    createResumeProviderRunner: provider.createResumeProviderRunner,
+    providerMetadataForResolvedProvider: (resolvedProvider: ReturnType<typeof resolvedProviderFor>) =>
+      createDefaultProviderMetadata({
+        provider: resolvedProvider.type,
+        runtime: resolvedProvider.sdkRuntime,
+        model: resolvedProvider.modelId,
+        displayModel: resolvedProvider.modelId,
+        availableModels: [],
+      }),
+    resolveSessionProvider: resolvedProviderFor,
+    ResumeProviderMismatchError: provider.ResumeProviderMismatchError,
   };
-}
+});
 
-vi.mock("../../src/ai-backend/provider.js", () => ({
-  createResolvedProviderRunner: provider.createResolvedProviderRunner,
-  createResumeProviderRunner: provider.createResumeProviderRunner,
-  resolveSessionProvider: resolvedProviderFor,
-  ResumeProviderMismatchError: provider.ResumeProviderMismatchError,
-}));
-
-const defaultConfig: AiSessionConfig = {
-  model: null,
-  workingDir: null,
-  systemPrompt: null,
-  continuable: false,
-  sdkRuntimeEnvironment: "isolated",
+const TOKEN_USAGE: TokenUsage = {
+  promptTokens: 1,
+  cachedTokens: null,
+  completionTokens: 2,
+  reasoningTokens: null,
+  totalTokens: 3,
 };
-
-function createHarness(): { frames: AiBackendMessage[]; manager: AiBackendSessionManager } {
-  const frames: AiBackendMessage[] = [];
-  return { frames, manager: new AiBackendSessionManager((frame) => frames.push(frame)) };
-}
-
-async function startSession(
-  manager: AiBackendSessionManager,
-  sessionId: SessionId,
-  config: AiSessionConfig = defaultConfig
-): Promise<void> {
-  await manager.handle({
-    type: "request",
-    request: { type: "startSession", sessionId, config },
-  });
-}
-
-async function* events(...items: AiRuntimeEvent[]): AsyncIterable<AiRuntimeEvent> {
-  yield* items;
-}
 
 describe("AI backend session manager", () => {
   beforeEach(() => {
@@ -67,46 +81,43 @@ describe("AI backend session manager", () => {
       runTurn: provider.runTurn,
     }));
     provider.runTurn.mockReset();
-    provider.runTurn.mockImplementation(() =>
-      events(
-        { type: "message.created", ref: "assistant", content: "" },
-        { type: "message.completed", ref: "assistant", content: "done", usage: null }
-      )
-    );
+    provider.runTurn.mockImplementation(() => events({ type: "turn.completed", usage: null }));
   });
 
-  it("starts sessions without provider execution or public provider metadata", async () => {
+  it("starts sessions without provider execution and includes snapshot provider metadata", async () => {
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-start");
 
-    const started = frames[0];
-    expect(started.type).toBe("response");
-    if (started.type !== "response" || started.response.type !== "sessionStarted") {
-      throw new Error("expected sessionStarted response");
-    }
-    expect(started.response.snapshot).toMatchObject({
-      sessionId: "session-start",
-      status: "idle",
-      transcript: [],
-      toolCalls: [],
-      backendProcesses: [],
-      continuation: { enabled: false, available: false },
+    expect(frames[0]).toMatchObject({
+      type: "response",
+      response: {
+        type: "sessionStarted",
+        sessionId: "session-start",
+        snapshot: {
+          sessionId: "session-start",
+          status: "idle",
+          transcript: [],
+          toolCalls: [],
+          backendProcesses: [],
+          provider: expect.objectContaining({
+            provider: "openrouter",
+            runtime: "codex",
+            model: "google/gemini-3.5-flash",
+          }),
+          continuation: { enabled: false, available: false },
+        },
+      },
     });
-    expect(JSON.stringify(started)).not.toMatch(
-      new RegExp(`provider|native(Session|Thread)Id|${["pending", "Tools"].join("")}|resume`, "i")
-    );
+    expect(provider.runTurn).not.toHaveBeenCalled();
   });
 
   it("returns protocol errors for invalid internally resolved sessions", async () => {
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-invalid", {
+      ...defaultConfig,
       model: "invalid-model",
-      workingDir: null,
-      systemPrompt: null,
-      continuable: false,
-      sdkRuntimeEnvironment: "isolated",
     });
 
     expect(frames[0]).toMatchObject({
@@ -119,239 +130,299 @@ describe("AI backend session manager", () => {
     });
   });
 
-  it("reduces a streamed assistant timeline into ordered events and snapshots", async () => {
+  it("uses transcript snapshots as the only source for visible timeline rows", async () => {
     provider.runTurn.mockImplementation(() =>
       events(
-        { type: "message.created", ref: "assistant", content: "" },
-        { type: "message.delta", ref: "assistant", delta: "hel" },
         {
-          type: "message.completed",
-          ref: "assistant",
-          content: "hello",
-          usage: {
-            promptTokens: 1,
-            cachedTokens: null,
-            completionTokens: 2,
-            reasoningTokens: null,
-            totalTokens: 3,
-          },
-        }
-      )
-    );
-    const { frames, manager } = createHarness();
-
-    await startSession(manager, "session-turn-success");
-    await manager.handle({
-      type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-turn-success",
-        turnId: "turn-1",
-        input: "hello",
-      },
-    });
-
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
-    const eventsOnly = frames.filter((frame): frame is Extract<AiBackendMessage, { type: "event" }> => frame.type === "event");
-    expect(eventsOnly.map((frame) => frame.event.seq)).toEqual(eventsOnly.map((_, index) => index + 1));
-    expect(eventsOnly.some((frame) => frame.event.type === "messageDelta")).toBe(true);
-
-    const sessionUpdated = [...eventsOnly].reverse().find((frame) => frame.event.type === "sessionUpdated");
-    if (!sessionUpdated || sessionUpdated.event.type !== "sessionUpdated") {
-      throw new Error("expected sessionUpdated event");
-    }
-    expect(sessionUpdated.event.sessionId).toBe("session-turn-success");
-    expect(sessionUpdated.event.snapshot.status).toBe("idle");
-    expect(sessionUpdated.event.snapshot.transcript).toContainEqual(
-      expect.objectContaining({ role: "user", status: "completed" })
-    );
-    expect(sessionUpdated.event.snapshot.transcript).toContainEqual(
-      expect.objectContaining({ role: "assistant", status: "completed", usage: expect.objectContaining({ totalTokens: 3 }) })
-    );
-    expect(JSON.stringify(frames)).not.toMatch(
-      new RegExp(`native(Session|Thread)Id|${["provider", "ToolCallId"].join("")}|${["resume", "MetadataUpdated"].join("")}`)
-    );
-  });
-
-  it("stamps transcript messages with their creation event sequence ids", async () => {
-    const { frames, manager } = createHarness();
-
-    await startSession(manager, "session-message-seq");
-    await manager.handle({
-      type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-message-seq",
-        turnId: "turn-1",
-        input: "hello",
-      },
-    });
-
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
-
-    const messageCreated = frames.flatMap((frame) =>
-      frame.type === "event" && frame.event.type === "messageCreated" ? [frame.event] : []
-    );
-    expect(messageCreated.map((event) => event.message.sequenceId)).toEqual(
-      messageCreated.map((event) => event.seq)
-    );
-
-    const latestUpdate = [...frames].reverse().find((frame): frame is Extract<AiBackendMessage, { type: "event" }> =>
-      frame.type === "event" && frame.event.type === "sessionUpdated"
-    );
-    if (!latestUpdate || latestUpdate.event.type !== "sessionUpdated") {
-      throw new Error("expected sessionUpdated event");
-    }
-    expect(latestUpdate.event.snapshot.transcript.map((entry) => entry.sequenceId)).toEqual(
-      messageCreated.map((event) => event.seq)
-    );
-  });
-
-  it("emits message creation for implicitly materialized assistant messages", async () => {
-    provider.runTurn.mockImplementation(() =>
-      events(
-        { type: "message.delta", ref: "assistant", delta: "hel" },
-        { type: "message.completed", ref: "assistant", content: "hello", usage: null }
-      )
-    );
-    const { frames, manager } = createHarness();
-
-    await startSession(manager, "session-implicit-message");
-    await manager.handle({
-      type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-implicit-message",
-        turnId: "turn-1",
-        input: "hello",
-      },
-    });
-
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
-    const assistantCreated = frames.find((frame) =>
-      frame.type === "event" &&
-      frame.event.type === "messageCreated" &&
-      frame.event.message.role === "assistant"
-    );
-    expect(assistantCreated).toBeDefined();
-  });
-
-  it("does not materialize a duplicate assistant message for terminal turn usage", async () => {
-    provider.runTurn.mockImplementation(() =>
-      events(
-        { type: "message.completed", ref: "msg-1", content: "Running the command now.", usage: null },
-        {
-          type: "tool.created",
-          ref: "tool-1",
-          name: "shell",
-          input: { text: "shell(command=\"true\")" },
+          type: "timeline.snapshot",
+          transcript: [
+            transcriptEntryFixture({
+              id: "user-1",
+              sequenceId: 1,
+              turnId: "turn-1",
+              role: "user",
+              text: "hello",
+              metadata: { agentFrameworkSourceLine: 9 },
+              createdAt: "2026-05-22T00:00:00.000Z",
+              updatedAt: "2026-05-22T00:00:00.000Z",
+              completedAt: "2026-05-22T00:00:00.000Z",
+            }),
+            transcriptEntryFixture({
+              id: "assistant-1",
+              sequenceId: 2,
+              turnId: "turn-1",
+              text: "draft",
+              metadata: { agentFrameworkSourceLine: 10 },
+              createdAt: "2026-05-22T00:00:00.000Z",
+              updatedAt: "2026-05-22T00:00:00.000Z",
+              completedAt: "2026-05-22T00:00:00.000Z",
+            }),
+          ],
+          toolCalls: [],
+          provider: { nativeSessionId: "native-session-1" },
         },
-        { type: "tool.completed", ref: "tool-1", output: [] },
-        { type: "message.completed", ref: "msg-2", content: "I just ran the bash command.", usage: null },
         {
-          type: "turn.completed",
-          usage: {
-            promptTokens: 1,
-            cachedTokens: null,
-            completionTokens: 2,
-            reasoningTokens: null,
-            totalTokens: 3,
+          type: "timeline.snapshot",
+          transcript: [
+            transcriptEntryFixture({
+              id: "user-1",
+              sequenceId: 1,
+              turnId: "turn-1",
+              role: "user",
+              text: "hello",
+              metadata: { agentFrameworkSourceLine: 9 },
+              createdAt: "2026-05-22T00:00:00.000Z",
+              updatedAt: "2026-05-22T00:00:00.000Z",
+              completedAt: "2026-05-22T00:00:00.000Z",
+            }),
+            transcriptEntryFixture({
+              id: "assistant-1",
+              sequenceId: 2,
+              turnId: "turn-1",
+              text: "final",
+              metadata: { agentFrameworkSourceLine: 11, provider: "codex" },
+              createdAt: "2026-05-22T00:00:00.000Z",
+              updatedAt: "2026-05-22T00:00:01.000Z",
+              completedAt: "2026-05-22T00:00:01.000Z",
+            }),
+          ],
+          toolCalls: [
+            toolCallFixture({
+              id: "tool-1",
+              sequenceId: 3,
+              turnId: "turn-1",
+              name: "Read",
+              inputText: "Read(file_path=\"src/example.ts\")",
+              output: [{ type: "text", text: "file contents" }],
+            }),
+          ],
+          provider: {
+            context: { usedTokens: 10, maxTokens: 100, remainingTokens: 90 },
           },
-        }
+        },
+        { type: "turn.completed", usage: TOKEN_USAGE }
       )
     );
     const { frames, manager } = createHarness();
 
-    await startSession(manager, "session-no-terminal-duplicate");
-    await manager.handle({
-      type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-no-terminal-duplicate",
-        turnId: "turn-1",
-        input: "hello",
-      },
-    });
+    await startSession(manager, "session-transcript-source");
+    await sendInput(manager, "session-transcript-source", "turn-1", "hello");
+    await waitForTurnFinished(frames, "turn-1");
 
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
-    const sessionUpdated = [...frames].reverse().find((frame) => frame.type === "event" && frame.event.type === "sessionUpdated");
-    if (!sessionUpdated || sessionUpdated.type !== "event" || sessionUpdated.event.type !== "sessionUpdated") {
-      throw new Error("expected sessionUpdated event");
+    const emitted = eventFrames(frames);
+    expect(emitted.map((frame) => frame.event.seq)).toEqual(emitted.map((_, index) => index + 1));
+    expect(emitted.map((frame) => frame.snapshot.lastEventSeq)).toEqual(emitted.map((frame) => frame.event.seq));
+    for (const frame of emitted) {
+      if (frame.event.type !== "sessionUpdated") continue;
+      expect(frame.event.snapshot.lastEventSeq).toBe(frame.event.seq);
+      expect(frame.event.snapshot.revision).toBe(frame.snapshot.revision);
+      expect(frame.event.snapshot.transcript).toEqual(frame.snapshot.transcript);
+      expect(frame.event.snapshot.toolCalls).toEqual(frame.snapshot.toolCalls);
     }
-    const assistantMessages = sessionUpdated.event.snapshot.transcript.filter((entry) => entry.role === "assistant");
-    expect(assistantMessages.map((entry) => entry.content)).toEqual([
-      [{ type: "text", text: "Running the command now." }],
-      [{ type: "text", text: "I just ran the bash command." }],
+    expect(emitted.map((frame) => frame.event.type)).toEqual([
+      "turnStarted",
+      "sessionStatusChanged",
+      "sessionUpdated",
+      "sessionUpdated",
+      "sessionStatusChanged",
+      "turnFinished",
     ]);
-    const turnFinished = frames.find((frame) => frame.type === "event" && frame.event.type === "turnFinished");
-    expect(turnFinished).toMatchObject({ type: "event", event: { usage: { totalTokens: 3 } } });
+    expect(emitted.some((frame) => [
+      "messageCreated",
+      "messageDelta",
+      "messageCompleted",
+      "toolCallCreated",
+      "toolCallStatusChanged",
+    ].includes(frame.event.type))).toBe(false);
+
+    const snapshot = await getSessionSnapshot(manager, frames, "session-transcript-source");
+    expect(snapshot.status).toBe("idle");
+    expect(snapshot.transcript).toEqual([
+      expect.objectContaining({
+        id: "user-1",
+        sequenceId: 1,
+        content: [{ type: "text", text: "hello" }],
+        metadata: { agentFrameworkSourceLine: 9 },
+      }),
+      expect.objectContaining({
+        id: "assistant-1",
+        sequenceId: 2,
+        content: [{ type: "text", text: "final" }],
+        metadata: { agentFrameworkSourceLine: 11, provider: "codex" },
+      }),
+    ]);
+    expect(snapshot.toolCalls).toEqual([
+      expect.objectContaining({
+        id: "tool-1",
+        sequenceId: 3,
+        status: "completed",
+        output: [{ type: "text", text: "file contents" }],
+      }),
+    ]);
+    expect(snapshot.provider).toMatchObject({
+      nativeSessionId: "native-session-1",
+      usage: TOKEN_USAGE,
+      context: { usedTokens: 10, maxTokens: 100, remainingTokens: 90 },
+    });
   });
 
-  it("persists reasoning blocks and preserves them when final text completes", async () => {
+  it("echoes pending user input until a real transcript user row confirms it", async () => {
     provider.runTurn.mockImplementation(() =>
       events(
-        { type: "message.reasoning_delta", ref: "assistant", delta: "think" },
-        { type: "message.delta", ref: "assistant", delta: "hel" },
-        { type: "message.completed", ref: "assistant", content: "hello", usage: null }
+        {
+          type: "timeline.snapshot",
+          transcript: [
+            transcriptEntryFixture({
+              id: "synthetic-1",
+              sequenceId: 1,
+              turnId: "turn-synthetic",
+              role: "user",
+              text: "# AGENTS.md instructions for /tmp/project",
+              metadata: {
+                agentFrameworkMessageKind: "synthetic",
+                agentFrameworkSyntheticSource: "provider-instructions",
+              },
+            }),
+          ],
+          toolCalls: [],
+        },
+        {
+          type: "timeline.snapshot",
+          transcript: [
+            transcriptEntryFixture({
+              id: "synthetic-1",
+              sequenceId: 1,
+              turnId: "turn-synthetic",
+              role: "user",
+              text: "# AGENTS.md instructions for /tmp/project",
+              metadata: {
+                agentFrameworkMessageKind: "synthetic",
+                agentFrameworkSyntheticSource: "provider-instructions",
+              },
+            }),
+            transcriptEntryFixture({
+              id: "user-1",
+              sequenceId: 2,
+              turnId: "turn-transcript",
+              role: "user",
+              text: "hello",
+            }),
+          ],
+          toolCalls: [],
+        },
+        { type: "turn.completed", usage: null }
       )
     );
     const { frames, manager } = createHarness();
 
-    await startSession(manager, "session-reasoning");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-reasoning", turnId: "turn-1", input: "hello" },
-    });
+    await startSession(manager, "session-pending-user");
+    await sendInput(manager, "session-pending-user", "turn-1", "hello");
+    await waitForTurnFinished(frames, "turn-1");
 
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
+    const emitted = eventFrames(frames);
+    expect(emitted.find((frame) => frame.event.type === "turnStarted")?.snapshot.transcript).toEqual([
+      expect.objectContaining({
+        id: "message-pending-turn-1",
+        role: "user",
+        status: "pending",
+        content: [{ type: "text", text: "hello" }],
+      }),
+    ]);
+    const updates = emitted.filter((frame) => frame.event.type === "sessionUpdated");
+    expect(updates[0]?.snapshot.transcript).toEqual([
+      expect.objectContaining({
+        id: "synthetic-1",
+        status: "completed",
+        metadata: expect.objectContaining({ agentFrameworkMessageKind: "synthetic" }),
+      }),
+      expect.objectContaining({
+        id: "message-pending-turn-1",
+        status: "pending",
+        content: [{ type: "text", text: "hello" }],
+      }),
+    ]);
+    expect(updates[1]?.snapshot.transcript).toEqual([
+      expect.objectContaining({
+        id: "synthetic-1",
+        status: "completed",
+      }),
+      expect.objectContaining({
+        id: "user-1",
+        status: "completed",
+        content: [{ type: "text", text: "hello" }],
+      }),
+    ]);
+    const snapshot = await getSessionSnapshot(manager, frames, "session-pending-user");
+    expect(snapshot.transcript.some((entry) => entry.status === "pending")).toBe(false);
+  });
+
+  it("finalizes pending user input when a successful turn emits no transcript snapshot", async () => {
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-no-transcript-success");
+    await sendInput(manager, "session-no-transcript-success", "turn-1", "hello");
+    await waitForTurnFinished(frames, "turn-1");
+
+    const snapshot = await getSessionSnapshot(manager, frames, "session-no-transcript-success");
+    expect(snapshot.transcript).toEqual([
+      expect.objectContaining({
+        id: "message-pending-turn-1",
+        turnId: "turn-1",
+        role: "user",
+        status: "completed",
+        content: [{ type: "text", text: "hello" }],
+        completedAt: expect.any(String),
+      }),
+    ]);
+    expect(snapshot.transcript.some((entry) => entry.status === "pending")).toBe(false);
+  });
+
+  it("applies provider metadata and continuation control events", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events(
+        {
+          type: "provider.metadata",
+          provider: {
+            nativeSessionId: "native-session-2",
+            availableModels: [{ tier: "pro", id: "model-pro", displayName: "Model Pro" }],
+            compaction: {
+              lastCompactedAt: "2026-05-22T00:00:00.000Z",
+              events: [{ reason: "context_limit" }],
+            },
+          },
+        },
+        { type: "continuation.updated", available: true },
+        { type: "turn.completed", usage: TOKEN_USAGE }
+      )
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-provider-control", { ...defaultConfig, continuable: true });
+    await sendInput(manager, "session-provider-control", "turn-1", "hello");
+    await waitForTurnFinished(frames, "turn-1");
+
     expect(frames).toContainEqual(expect.objectContaining({
       type: "event",
-      event: expect.objectContaining({ type: "messageReasoningDelta", delta: "think" }),
+      event: expect.objectContaining({ type: "sessionUpdated" }),
     }));
-    const sessionUpdated = [...frames].reverse().find((frame) => frame.type === "event" && frame.event.type === "sessionUpdated");
-    if (!sessionUpdated || sessionUpdated.type !== "event" || sessionUpdated.event.type !== "sessionUpdated") {
-      throw new Error("expected sessionUpdated event");
-    }
-    const assistant = sessionUpdated.event.snapshot.transcript.find((entry) => entry.role === "assistant");
-    expect(assistant?.content).toEqual([{ type: "reasoning", text: "think" }, { type: "text", text: "hello" }]);
-  });
-
-  it("removes stale interleaved text blocks when final text completes", async () => {
-    provider.runTurn.mockImplementation(() =>
-      events(
-        { type: "message.delta", ref: "assistant", delta: "draft " },
-        { type: "message.reasoning_delta", ref: "assistant", delta: "think" },
-        { type: "message.delta", ref: "assistant", delta: "tail" },
-        { type: "message.completed", ref: "assistant", content: "final", usage: null }
-      )
-    );
-    const { frames, manager } = createHarness();
-
-    await startSession(manager, "session-interleaved-final");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-interleaved-final", turnId: "turn-1", input: "hello" },
+    expect(frames).toContainEqual(expect.objectContaining({
+      type: "event",
+      event: expect.objectContaining({
+        type: "continuationUpdated",
+        continuation: expect.objectContaining({ available: true }),
+      }),
+    }));
+    const snapshot = await getSessionSnapshot(manager, frames, "session-provider-control");
+    expect(snapshot.provider).toMatchObject({
+      nativeSessionId: "native-session-2",
+      availableModels: [{ tier: "pro", id: "model-pro", displayName: "Model Pro" }],
+      compaction: {
+        lastCompactedAt: "2026-05-22T00:00:00.000Z",
+        events: [{ reason: "context_limit" }],
+      },
+      usage: TOKEN_USAGE,
     });
-
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
-    const sessionUpdated = [...frames].reverse().find((frame) => frame.type === "event" && frame.event.type === "sessionUpdated");
-    if (!sessionUpdated || sessionUpdated.type !== "event" || sessionUpdated.event.type !== "sessionUpdated") {
-      throw new Error("expected sessionUpdated event");
-    }
-    const assistant = sessionUpdated.event.snapshot.transcript.find((entry) => entry.role === "assistant");
-    expect(assistant?.content).toEqual([{ type: "text", text: "final" }, { type: "reasoning", text: "think" }]);
+    expect(snapshot.continuation).toMatchObject({ enabled: true, available: true });
   });
 
   it("applies provider plan updates without downgrading approved plans", async () => {
@@ -361,16 +432,14 @@ describe("AI backend session manager", () => {
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-plan");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-plan", turnId: "turn-1", input: "plan" },
-    });
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
+    await sendInput(manager, "session-plan", "turn-1", "plan");
+    await waitForTurnFinished(frames, "turn-1");
     expect(frames).toContainEqual(expect.objectContaining({
       type: "event",
-      event: expect.objectContaining({ type: "planStateChanged", state: { mode: "planning", planText: "Provider plan", approved: false } }),
+      event: expect.objectContaining({
+        type: "planStateChanged",
+        state: { mode: "planning", planText: "Provider plan", approved: false },
+      }),
     }));
 
     await manager.handle({
@@ -384,43 +453,26 @@ describe("AI backend session manager", () => {
     provider.runTurn.mockImplementation(() =>
       events({ type: "plan.updated", state: { mode: "planning", planText: "Updated provider plan", approved: false } })
     );
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-plan", turnId: "turn-2", input: "plan again" },
-    });
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished" && frame.event.turnId === "turn-2")).toBe(true);
-    });
-    const sessionUpdated = [...frames].reverse().find((frame) => frame.type === "event" && frame.event.type === "sessionUpdated");
-    if (!sessionUpdated || sessionUpdated.type !== "event" || sessionUpdated.event.type !== "sessionUpdated") {
-      throw new Error("expected sessionUpdated event");
-    }
-    expect(sessionUpdated.event.snapshot.plan).toEqual({ mode: "approved", planText: "Updated provider plan", approved: true });
+    await sendInput(manager, "session-plan", "turn-2", "plan again");
+    await waitForTurnFinished(frames, "turn-2");
+
+    const snapshot = await getSessionSnapshot(manager, frames, "session-plan");
+    expect(snapshot.plan).toEqual({ mode: "approved", planText: "Updated provider plan", approved: true });
   });
 
   it("returns reconnect snapshots and events since a cursor", async () => {
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-reconnect");
-    await manager.handle({
-      type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-reconnect",
-        turnId: "turn-1",
-        input: "hello",
-      },
-    });
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
+    await sendInput(manager, "session-reconnect", "turn-1", "hello");
+    await waitForTurnFinished(frames, "turn-1");
     await manager.handle({
       type: "request",
       request: { type: "getSessionSnapshot", sessionId: "session-reconnect" },
     });
     await manager.handle({
       type: "request",
-      request: { type: "eventsSince", sessionId: "session-reconnect", afterSeq: 2 },
+      request: { type: "eventsSince", sessionId: "session-reconnect", afterSeq: 1 },
     });
 
     const response = frames.at(-1);
@@ -435,123 +487,85 @@ describe("AI backend session manager", () => {
     if (response?.type !== "response" || response.response.type !== "sessionEvents") {
       throw new Error("expected sessionEvents response");
     }
-    expect(response.response.events.every((event) => event.seq > 2)).toBe(true);
-    expect(response.response.snapshot.lastEventSeq).toBeGreaterThan(2);
+    expect(response.response.events.every((event) => event.seq > 1)).toBe(true);
+    expect(response.response.snapshot.lastEventSeq).toBeGreaterThan(1);
   });
 
-  it("keeps streamed provider failures in the session snapshot", async () => {
+  it("keeps streamed provider failures in the session snapshot without leaking native details", async () => {
     provider.runTurn.mockImplementation(() =>
-      events(
-        { type: "message.created", ref: "assistant", content: "" },
-        { type: "message.failed", ref: "assistant", error: new Error("native provider detail") }
-      )
+      events({ type: "error", error: new Error("native provider detail") })
     );
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-stream-failure");
-    await manager.handle({
-      type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-stream-failure",
-        turnId: "turn-1",
-        input: "hello",
-      },
-    });
+    await sendInput(manager, "session-stream-failure", "turn-1", "hello");
+    await waitForTurnFinished(frames, "turn-1");
 
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
-    const sessionUpdates = frames.filter((frame): frame is Extract<AiBackendMessage, { type: "event" }> =>
-      frame.type === "event" && frame.event.type === "sessionUpdated"
-    );
-    const lastSessionUpdate = sessionUpdates.at(-1);
-    if (!lastSessionUpdate || lastSessionUpdate.event.type !== "sessionUpdated") {
-      throw new Error("expected sessionUpdated event");
-    }
-    expect(lastSessionUpdate.event.snapshot.status).toBe("error");
-    expect(lastSessionUpdate.event.snapshot.error).toMatchObject({
+    const snapshot = await getSessionSnapshot(manager, frames, "session-stream-failure");
+    expect(snapshot.status).toBe("error");
+    expect(snapshot.error).toMatchObject({
       code: "runtime_error",
       message: "Runtime operation failed",
     });
+    expect(snapshot.provider.errors).toContainEqual(expect.objectContaining({
+      code: "runtime_error",
+      message: "Runtime operation failed",
+    }));
     expect(JSON.stringify(frames)).not.toContain("native provider detail");
   });
 
-  it("terminates active operations when a turn fails after tool activity starts", async () => {
+  it("sanitizes thrown provider failures", async () => {
     provider.runTurn.mockImplementation(async function* () {
-      yield {
-        type: "tool.created",
-        ref: "tool-ref",
-        name: "inspect",
-        input: { text: "inspect(path=\".\")" },
-      };
-      yield { type: "tool.updated", ref: "tool-ref", status: "running" };
-      yield { type: "backend_process.created", ref: "process-ref", title: "background work" };
-      yield { type: "backend_process.updated", ref: "process-ref", status: "running" };
-      throw new Error("native provider detail");
+      throw new Error("native thrown detail");
     });
     const { frames, manager } = createHarness();
 
-    await startSession(manager, "session-runtime-failure-active");
-    await manager.handle({
-      type: "request",
-      request: {
-        type: "sendInput",
-        sessionId: "session-runtime-failure-active",
-        turnId: "turn-1",
-        input: "hello",
-      },
-    });
+    await startSession(manager, "session-thrown-failure");
+    await sendInput(manager, "session-thrown-failure", "turn-1", "hello");
+    await waitForTurnFinished(frames, "turn-1");
 
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
-    const sessionUpdates = frames.filter((frame): frame is Extract<AiBackendMessage, { type: "event" }> =>
-      frame.type === "event" && frame.event.type === "sessionUpdated"
-    );
-    const lastSessionUpdate = sessionUpdates.at(-1);
-    if (!lastSessionUpdate || lastSessionUpdate.event.type !== "sessionUpdated") {
-      throw new Error("expected sessionUpdated event");
-    }
-    expect(lastSessionUpdate.event.snapshot.status).toBe("error");
-    expect(lastSessionUpdate.event.snapshot.toolCalls).toContainEqual(
-      expect.objectContaining({ status: "cancelled" })
-    );
-    expect(lastSessionUpdate.event.snapshot.backendProcesses).toContainEqual(
-      expect.objectContaining({ status: "cancelled" })
-    );
-    expect(JSON.stringify(frames)).not.toContain("native provider detail");
+    const snapshot = await getSessionSnapshot(manager, frames, "session-thrown-failure");
+    expect(snapshot.status).toBe("error");
+    expect(snapshot.error).toMatchObject({ code: "runtime_error", message: "Runtime operation failed" });
+    expect(JSON.stringify(frames)).not.toContain("native thrown detail");
   });
 
   it("reuses one provider runner across turns in a session", async () => {
+    const transcript: AiTranscriptEntry[] = [];
+    provider.runTurn.mockImplementation(async function* (input: AiRunTurnInput) {
+      transcript.push(transcriptEntryFixture({
+        id: `user-${input.turnId}`,
+        sequenceId: transcript.length + 1,
+        turnId: input.turnId,
+        role: "user",
+        text: input.prompt,
+      }));
+      transcript.push(transcriptEntryFixture({
+        id: `assistant-${input.turnId}`,
+        sequenceId: transcript.length + 1,
+        turnId: input.turnId,
+        text: `reply:${input.prompt}`,
+      }));
+      yield { type: "timeline.snapshot", transcript: [...transcript], toolCalls: [] };
+      yield { type: "turn.completed", usage: null };
+    });
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-runner-reuse", { ...defaultConfig, continuable: true });
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-runner-reuse", turnId: "turn-1", input: "first" },
-    });
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished" && frame.event.turnId === "turn-1")).toBe(true);
-    });
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-runner-reuse", turnId: "turn-2", input: "second" },
-    });
+    await sendInput(manager, "session-runner-reuse", "turn-1", "first");
+    await waitForTurnFinished(frames, "turn-1");
+    await sendInput(manager, "session-runner-reuse", "turn-2", "second");
+    await waitForTurnFinished(frames, "turn-2");
 
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished" && frame.event.turnId === "turn-2")).toBe(true);
-    });
     expect(provider.createResolvedProviderRunner).toHaveBeenCalledTimes(1);
     expect(provider.runTurn).toHaveBeenCalledTimes(2);
-    const sessionUpdated = [...frames].reverse().find((frame) => frame.type === "event" && frame.event.type === "sessionUpdated");
-    if (!sessionUpdated || sessionUpdated.type !== "event" || sessionUpdated.event.type !== "sessionUpdated") {
-      throw new Error("expected sessionUpdated event");
-    }
-    const assistantEntries = sessionUpdated.event.snapshot.transcript.filter((entry) => entry.role === "assistant");
-    expect(assistantEntries).toHaveLength(2);
-    expect(assistantEntries.every((entry) => entry.status === "completed")).toBe(true);
-    expect(new Set(assistantEntries.map((entry) => entry.id)).size).toBe(2);
+    const snapshot = await getSessionSnapshot(manager, frames, "session-runner-reuse");
+    expect(snapshot.transcript.map((entry) => entry.content)).toEqual([
+      [{ type: "text", text: "first" }],
+      [{ type: "text", text: "reply:first" }],
+      [{ type: "text", text: "second" }],
+      [{ type: "text", text: "reply:second" }],
+    ]);
   });
 
   it("rejects overlapping turns and session replacement for the same session", async () => {
@@ -561,22 +575,16 @@ describe("AI backend session manager", () => {
     });
     provider.runTurn.mockImplementation(async function* () {
       await pending;
-      yield { type: "message.completed", ref: "assistant", content: "done", usage: null };
+      yield { type: "turn.completed", usage: null };
     });
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-overlap", { ...defaultConfig, continuable: true });
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-overlap", turnId: "turn-1", input: "first" },
-    });
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-overlap", turnId: "turn-2", input: "second" },
-    });
+    await sendInput(manager, "session-overlap", "turn-1", "first");
+    await sendInput(manager, "session-overlap", "turn-2", "second");
     await startSession(manager, "session-overlap", { ...defaultConfig, systemPrompt: "replacement" });
 
-    expect(frames).toContainEqual({
+    expect(frames).toContainEqual(expect.objectContaining({
       type: "event",
       event: expect.objectContaining({
         type: "error",
@@ -584,7 +592,7 @@ describe("AI backend session manager", () => {
         turnId: "turn-2",
         error: expect.objectContaining({ code: "conflict" }),
       }),
-    });
+    }));
     expect(frames).toContainEqual({
       type: "response",
       response: expect.objectContaining({
@@ -595,99 +603,27 @@ describe("AI backend session manager", () => {
     });
 
     release();
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
+    await waitForTurnFinished(frames, "turn-1");
   });
 
   it("does not reject turns for sessions whose ids are prefixes of running sessions", async () => {
     const releases: Array<() => void> = [];
     provider.runTurn.mockImplementation(async function* () {
       await new Promise<void>((resolve) => releases.push(resolve));
-      yield { type: "message.completed", ref: "assistant", content: "done", usage: null };
+      yield { type: "turn.completed", usage: null };
     });
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session");
     await startSession(manager, "session:child");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session:child", turnId: "turn-1", input: "child" },
-    });
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session", turnId: "turn-1", input: "parent" },
-    });
+    await sendInput(manager, "session:child", "turn-1", "child");
+    await sendInput(manager, "session", "turn-1", "parent");
 
     expect(provider.runTurn).toHaveBeenCalledTimes(2);
     for (const release of releases) release();
     await vi.waitFor(() => {
-      expect(frames.filter((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toHaveLength(2);
+      expect(eventFrames(frames).filter((frame) => frame.event.type === "turnFinished")).toHaveLength(2);
     });
-  });
-
-  it("does not clear active runtime state for similarly prefixed sessions when closing", async () => {
-    vi.useFakeTimers();
-    const { frames, manager } = createHarness();
-    provider.runTurn.mockImplementation(async function* (input: AiRunTurnInput) {
-      yield {
-        type: "tool.created",
-        ref: "tool-ref",
-        name: "inspect",
-        input: { text: "inspect(path=\".\")", fields: { path: "." } },
-      };
-      yield { type: "tool.updated", ref: "tool-ref", status: "running" };
-      yield { type: "backend_process.created", ref: "process-ref", title: "background work" };
-      yield { type: "backend_process.updated", ref: "process-ref", status: "running" };
-      await new Promise<void>((resolve) => {
-        if (input.signal.aborted) {
-          resolve();
-          return;
-        }
-        input.signal.addEventListener("abort", () => resolve(), { once: true });
-      });
-    });
-    try {
-      await startSession(manager, "session-1");
-      await startSession(manager, "session-10");
-      await manager.handle({
-        type: "request",
-        request: { type: "sendInput", sessionId: "session-1", turnId: "turn-1", input: "first" },
-      });
-      await manager.handle({
-        type: "request",
-        request: { type: "sendInput", sessionId: "session-10", turnId: "turn-1", input: "second" },
-      });
-      await vi.waitFor(() => {
-        expect(frames).toContainEqual(expect.objectContaining({
-          type: "event",
-          event: expect.objectContaining({ type: "backendProcessUpdated", sessionId: "session-10" }),
-        }));
-      });
-      frames.length = 0;
-
-      await manager.handle({
-        type: "request",
-        request: { type: "closeSession", requestId: "close-prefix", sessionId: "session-1" },
-      });
-      await vi.advanceTimersByTimeAsync(1000);
-
-      expect(frames).toContainEqual(expect.objectContaining({
-        type: "event",
-        event: expect.objectContaining({ type: "toolCallProgress", sessionId: "session-10", elapsedMs: expect.any(Number) }),
-      }));
-      expect(frames).toContainEqual(expect.objectContaining({
-        type: "event",
-        event: expect.objectContaining({ type: "backendProcessProgress", sessionId: "session-10", elapsedMs: expect.any(Number) }),
-      }));
-
-      await manager.handle({
-        type: "request",
-        request: { type: "closeSession", requestId: "close-other", sessionId: "session-10" },
-      });
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("reports close disposal failures and does not leave the session closing", async () => {
@@ -705,10 +641,7 @@ describe("AI backend session manager", () => {
       type: "request",
       request: { type: "closeSession", requestId: "close-failure", sessionId: "session-close-failure" },
     });
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-close-failure", turnId: "turn-after-close", input: "hello" },
-    });
+    await sendInput(manager, "session-close-failure", "turn-after-close", "hello");
 
     expect(frames).toContainEqual({
       type: "response",
@@ -757,14 +690,8 @@ describe("AI backend session manager", () => {
       request: { type: "closeSession", requestId: "close-in-progress", sessionId: "session-closing" },
     });
     await disposeStarted;
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-closing", turnId: "turn-during-close", input: "hello" },
-    });
-    await manager.handle({
-      type: "request",
-      request: { type: "startSession", sessionId: "session-closing", config: defaultConfig },
-    });
+    await sendInput(manager, "session-closing", "turn-during-close", "hello");
+    await startSession(manager, "session-closing");
     await manager.handle({
       type: "request",
       request: {
@@ -781,19 +708,6 @@ describe("AI backend session manager", () => {
       },
     });
 
-    expect(frames).toContainEqual({
-      type: "response",
-      response: {
-        type: "error",
-        sessionId: "session-closing",
-        message: "AI session is closing: session-closing",
-        error: {
-          code: "conflict",
-          message: "AI session is closing: session-closing",
-          recoverable: false,
-        },
-      },
-    });
     expect(frames.filter((frame) =>
       frame.type === "response" &&
       frame.response.type === "error" &&
@@ -821,26 +735,26 @@ describe("AI backend session manager", () => {
   });
 
   it("closes without waiting for a non-cooperative aborted turn", async () => {
-    let turnStarted!: () => void;
-    const turnStartedSignal = new Promise<void>((resolve) => {
-      turnStarted = resolve;
+    let markTurnStarted!: () => void;
+    const turnStarted = new Promise<void>((resolve) => {
+      markTurnStarted = resolve;
     });
     provider.runTurn.mockImplementation(async function* () {
-      yield { type: "message.created", ref: "assistant", content: "" };
-      turnStarted();
+      markTurnStarted();
       await new Promise<never>(() => undefined);
     });
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-non-cooperative-close");
+    await sendInput(manager, "session-non-cooperative-close", "turn-1", "wait");
+    await turnStarted;
     await manager.handle({
       type: "request",
-      request: { type: "sendInput", sessionId: "session-non-cooperative-close", turnId: "turn-1", input: "wait" },
-    });
-    await turnStartedSignal;
-    await manager.handle({
-      type: "request",
-      request: { type: "closeSession", requestId: "close-non-cooperative", sessionId: "session-non-cooperative-close" },
+      request: {
+        type: "closeSession",
+        requestId: "close-non-cooperative",
+        sessionId: "session-non-cooperative-close",
+      },
     });
 
     expect(frames).toContainEqual({
@@ -854,69 +768,113 @@ describe("AI backend session manager", () => {
   });
 
   it("ignores stale turn events after close and same-id restart", async () => {
-    let turnStarted!: () => void;
+    let markOldTurnStarted!: () => void;
     let releaseOldTurn!: () => void;
-    let oldTurnClosed!: () => void;
+    let markOldTurnClosed!: () => void;
     let releaseNewTurn!: () => void;
-    let newTurnStarted!: () => void;
-    const turnStartedSignal = new Promise<void>((resolve) => {
-      turnStarted = resolve;
+    let markNewTurnStarted!: () => void;
+    const oldTurnStarted = new Promise<void>((resolve) => {
+      markOldTurnStarted = resolve;
     });
-    const releaseOldTurnSignal = new Promise<void>((resolve) => {
+    const oldTurnRelease = new Promise<void>((resolve) => {
       releaseOldTurn = resolve;
     });
-    const oldTurnClosedSignal = new Promise<void>((resolve) => {
-      oldTurnClosed = resolve;
+    const oldTurnClosed = new Promise<void>((resolve) => {
+      markOldTurnClosed = resolve;
     });
-    const newTurnStartedSignal = new Promise<void>((resolve) => {
-      newTurnStarted = resolve;
+    const newTurnStarted = new Promise<void>((resolve) => {
+      markNewTurnStarted = resolve;
     });
     provider.runTurn.mockImplementationOnce(async function* () {
       try {
-        yield { type: "message.created", ref: "assistant", content: "old-start" };
-        turnStarted();
-        await releaseOldTurnSignal;
-        yield { type: "message.completed", ref: "assistant", content: "old-finish", usage: null };
+        yield {
+          type: "timeline.snapshot",
+          transcript: [
+            transcriptEntryFixture({
+              id: "old-entry",
+              sequenceId: 1,
+              turnId: "old-turn",
+              role: "assistant",
+              text: "old-start",
+            }),
+          ],
+          toolCalls: [],
+        };
+        markOldTurnStarted();
+        await oldTurnRelease;
+        yield {
+          type: "timeline.snapshot",
+          transcript: [
+            transcriptEntryFixture({
+              id: "old-entry",
+              sequenceId: 1,
+              turnId: "old-turn",
+              role: "assistant",
+              text: "old-finish",
+            }),
+          ],
+          toolCalls: [],
+        };
       } finally {
-        oldTurnClosed();
+        markOldTurnClosed();
       }
     });
     provider.runTurn.mockImplementationOnce(async function* () {
-      newTurnStarted();
+      markNewTurnStarted();
+      yield {
+        type: "timeline.snapshot",
+        transcript: [
+          transcriptEntryFixture({
+            id: "new-entry",
+            sequenceId: 1,
+            turnId: "new-turn",
+            role: "user",
+            text: "new",
+          }),
+        ],
+        toolCalls: [],
+      };
       await new Promise<void>((resolve) => {
         releaseNewTurn = resolve;
       });
-      yield { type: "message.completed", ref: "assistant", content: "new-finish", usage: null };
+      yield {
+        type: "timeline.snapshot",
+        transcript: [
+          transcriptEntryFixture({
+            id: "new-entry",
+            sequenceId: 1,
+            turnId: "new-turn",
+            role: "user",
+            text: "new",
+          }),
+          transcriptEntryFixture({
+            id: "new-finish-entry",
+            sequenceId: 2,
+            turnId: "new-turn",
+            role: "assistant",
+            text: "new-finish",
+          }),
+        ],
+        toolCalls: [],
+      };
     });
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-reused");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-reused", turnId: "old-turn", input: "old" },
-    });
-    await turnStartedSignal;
+    await sendInput(manager, "session-reused", "old-turn", "old");
+    await oldTurnStarted;
     await manager.handle({
       type: "request",
       request: { type: "closeSession", requestId: "close-reused", sessionId: "session-reused" },
     });
     await startSession(manager, "session-reused");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-reused", turnId: "old-turn", input: "new" },
-    });
-    await newTurnStartedSignal;
+    await sendInput(manager, "session-reused", "new-turn", "new");
+    await newTurnStarted;
 
     releaseOldTurn();
-    await oldTurnClosedSignal;
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-reused", turnId: "overlap", input: "overlap" },
-    });
-    await manager.handle({
-      type: "request",
-      request: { type: "getSessionSnapshot", sessionId: "session-reused" },
-    });
+    await oldTurnClosed;
+    await sendInput(manager, "session-reused", "overlap", "overlap");
+    const runningSnapshot = await getSessionSnapshot(manager, frames, "session-reused");
 
     expect(JSON.stringify(frames)).not.toContain("old-finish");
     expect(frames).toContainEqual(expect.objectContaining({
@@ -926,32 +884,16 @@ describe("AI backend session manager", () => {
         sessionId: "session-reused",
         turnId: "overlap",
         message: "AI session already has a running turn: session-reused",
-        error: {
-          code: "conflict",
-          message: "AI session already has a running turn: session-reused",
-          recoverable: false,
-        },
+        error: expect.objectContaining({ code: "conflict" }),
       }),
     }));
-    const snapshot = frames.at(-1);
-    expect(snapshot).toMatchObject({
-      type: "response",
-      response: {
-        type: "sessionSnapshot",
-        sessionId: "session-reused",
-        snapshot: {
-          status: "running",
-          transcript: [
-            expect.objectContaining({ role: "user", content: [{ type: "text", text: "new" }] }),
-          ],
-        },
-      },
-    });
+    expect(runningSnapshot.status).toBe("running");
+    expect(runningSnapshot.transcript).toEqual([
+      expect.objectContaining({ role: "user", content: [{ type: "text", text: "new" }] }),
+    ]);
 
     releaseNewTurn();
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
+    await waitForTurnFinished(frames, "new-turn");
   });
 
   it("reports resume running-turn conflicts as non-recoverable request errors", async () => {
@@ -960,15 +902,12 @@ describe("AI backend session manager", () => {
       await new Promise<void>((resolve) => {
         release = resolve;
       });
-      yield { type: "message.completed", ref: "assistant", content: "done", usage: null };
+      yield { type: "turn.completed", usage: null };
     });
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-resume-conflict");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-resume-conflict", turnId: "turn-1", input: "wait" },
-    });
+    await sendInput(manager, "session-resume-conflict", "turn-1", "wait");
     await manager.handle({
       type: "request",
       request: {
@@ -998,18 +937,13 @@ describe("AI backend session manager", () => {
     });
 
     release();
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
+    await waitForTurnFinished(frames, "turn-1");
   });
 
   it("emits protocol errors for unknown sessions", async () => {
     const { frames, manager } = createHarness();
 
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "missing-session", turnId: "turn-missing", input: "hello" },
-    });
+    await sendInput(manager, "missing-session", "turn-missing", "hello");
     await manager.handle({
       type: "request",
       request: { type: "getSessionSnapshot", sessionId: "missing-session" },
@@ -1021,427 +955,251 @@ describe("AI backend session manager", () => {
     ]);
   });
 
-  it("cancels in-flight turns and active operations through the provider signal", async () => {
+  it("cancels in-flight turns through the provider signal", async () => {
+    let providerSawAbort = false;
+    let markTurnStarted!: () => void;
+    const turnStarted = new Promise<void>((resolve) => {
+      markTurnStarted = resolve;
+    });
     provider.runTurn.mockImplementation(async function* (input: AiRunTurnInput) {
-      input.signal.throwIfAborted();
+      markTurnStarted();
       yield {
-        type: "tool.created",
-        ref: "tool-ref",
-        name: "inspect",
-        input: { text: "inspect(path=\".\")", fields: { path: "." } },
+        type: "timeline.snapshot",
+        transcript: [],
+        toolCalls: [
+          toolCallFixture({
+            id: "mcp-tool-cancel",
+            sequenceId: 2,
+            turnId: input.turnId,
+            name: "mcp__agent_framework__check",
+            inputText: "mcp__agent_framework__check",
+            status: "running",
+            result: null,
+            progress: "Running",
+            completedAt: null,
+          }),
+        ],
       };
-      yield { type: "tool.updated", ref: "tool-ref", status: "running" };
-      yield { type: "tool.progress", ref: "tool-ref", progress: "working" };
-      yield { type: "backend_process.created", ref: "process-ref", title: "background work" };
-      yield { type: "backend_process.updated", ref: "process-ref", status: "running" };
-      yield { type: "backend_process.progress", ref: "process-ref", progress: "working" };
-      input.signal.throwIfAborted();
-      await new Promise((_resolve, reject) => {
-        if (input.signal.aborted) {
-          reject(new Error("aborted"));
-          return;
-        }
-        input.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      await new Promise<void>((resolve) => {
+        input.signal.addEventListener("abort", () => {
+          providerSawAbort = true;
+          resolve();
+        }, { once: true });
       });
+      input.signal.throwIfAborted();
     });
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-cancel");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-cancel", turnId: "turn-cancel", input: "wait" },
-    });
+    await sendInput(manager, "session-cancel", "turn-cancel", "wait");
+    await turnStarted;
+    await waitForToolStatus(frames, "mcp-tool-cancel", "running");
     await manager.handle({ type: "cancel", sessionId: "session-cancel", turnId: "turn-cancel" });
+    await waitForTurnFinished(frames, "turn-cancel");
 
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
-    expect(frames).toContainEqual({
-      type: "event",
-      event: expect.objectContaining({
-        type: "toolCallUpdated",
-        toolCall: expect.objectContaining({
-          status: "cancelled",
-          wait: null,
-          progress: null,
-          elapsedMs: null,
-        }),
+    expect(providerSawAbort).toBe(true);
+    const snapshot = await getSessionSnapshot(manager, frames, "session-cancel");
+    expect(snapshot.status).toBe("cancelled");
+    expect(snapshot.transcript).toEqual([
+      expect.objectContaining({
+        id: "message-pending-turn-cancel",
+        turnId: "turn-cancel",
+        role: "user",
+        status: "cancelled",
+        content: [{ type: "text", text: "wait" }],
+        completedAt: expect.any(String),
       }),
-    });
-    expect(frames).toContainEqual({
-      type: "event",
-      event: expect.objectContaining({
-        type: "backendProcessUpdated",
-        process: expect.objectContaining({
-          status: "cancelled",
-          progress: null,
-          elapsedMs: null,
-        }),
+      expect.objectContaining({
+        id: "message-terminal-turn-cancel-cancelled",
+        turnId: "turn-cancel",
+        role: "assistant",
+        status: "cancelled",
+        content: [{
+          type: "error",
+          message: "cancelled: Operation cancelled (recoverable)",
+        }],
+        completedAt: expect.any(String),
       }),
-    });
-  });
-
-  it("tracks tool and backend process lifecycle events", async () => {
-    provider.runTurn.mockImplementation(() =>
-      events(
-        {
-          type: "tool.created",
-          ref: "tool-ref",
-          name: "inspect",
-          input: { text: "inspect(path=\".\")", fields: { path: "." } },
-        },
-        { type: "tool.updated", ref: "tool-ref", status: "running" },
-        { type: "tool.output", ref: "tool-ref", output: [{ type: "text", text: "started" }] },
-        { type: "tool.promoted_to_backend_process", toolRef: "tool-ref", processRef: "process-ref", title: "background work" },
-        { type: "backend_process.updated", ref: "process-ref", status: "running" },
-        { type: "backend_process.progress", ref: "process-ref", progress: "50%" },
-        { type: "backend_process.completed", ref: "process-ref", output: [{ type: "text", text: "done" }] },
-        { type: "message.completed", ref: "assistant", content: "done", usage: null }
-      )
-    );
-    const { frames, manager } = createHarness();
-
-    await startSession(manager, "session-tools");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-tools", turnId: "turn-tools", input: "run" },
-    });
-
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
-    expect(frames.some((frame) => frame.type === "event" && frame.event.type === "toolCallCreated")).toBe(true);
-    expect(frames.some((frame) => frame.type === "event" && frame.event.type === "toolCallPromotedToBackendProcess")).toBe(true);
-    expect(frames.some((frame) => frame.type === "event" && frame.event.type === "backendProcessProgress")).toBe(true);
-    expect(JSON.stringify(frames)).not.toMatch(
-      new RegExp(`${["provider", "ToolCallId"].join("")}|native(Session|Thread)Id`)
-    );
-  });
-
-  it("stores completed tool results with cumulative output once", async () => {
-    provider.runTurn.mockImplementation(() =>
-      events(
-        {
-          type: "tool.created",
-          ref: "tool-ref",
-          name: "inspect",
-          input: { text: "inspect(path=\".\")" },
-        },
-        { type: "tool.output", ref: "tool-ref", output: [{ type: "text", text: "started" }] },
-        { type: "tool.completed", ref: "tool-ref", output: [{ type: "text", text: "done" }] },
-        { type: "message.completed", ref: "assistant", content: "done", usage: null }
-      )
-    );
-    const { frames, manager } = createHarness();
-
-    await startSession(manager, "session-tool-output");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-tool-output", turnId: "turn-tools", input: "run" },
-    });
-
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "turnFinished")).toBe(true);
-    });
-    const updated = [...frames].reverse().find((frame) =>
-      frame.type === "event" &&
-      frame.event.type === "toolCallUpdated" &&
-      frame.event.toolCall.status === "completed"
-    );
-    if (!updated || updated.type !== "event" || updated.event.type !== "toolCallUpdated") {
-      throw new Error("expected completed tool update");
-    }
-    expect(updated.event.toolCall.output).toEqual([
-      { type: "text", text: "started" },
-      { type: "text", text: "done" },
     ]);
-    expect(updated.event.toolCall.result?.output).toEqual(updated.event.toolCall.output);
+    expect(snapshot.transcript.map((entry) => entry.sequenceId)).toEqual([1, 3]);
+    expect(snapshot.transcript.some((entry) => entry.status === "pending" || entry.status === "streaming")).toBe(false);
+    expect(snapshot.toolCalls).toEqual([
+      expect.objectContaining({
+        id: "mcp-tool-cancel",
+        turnId: "turn-cancel",
+        status: "cancelled",
+        wait: null,
+        progress: null,
+        result: { state: "cancelled", output: [], error: null },
+        completedAt: expect.any(String),
+      }),
+    ]);
+    expect(snapshot.toolCalls.some((tool) => isActiveToolStatus(tool.status))).toBe(false);
   });
 
-  it("stores Codex-style terminal tool output once", async () => {
-    provider.runTurn.mockImplementation(() =>
-      events(
-        {
-          type: "tool.created",
-          ref: "tool-ref",
-          name: "Read",
-          input: { text: "Read(file_path=\"src/example.ts\")" },
-        },
-        { type: "tool.completed", ref: "tool-ref", output: [{ type: "text", text: "file contents" }] }
-      )
-    );
+  it("records a distinct sequenced terminal transcript entry for each interrupted turn", async () => {
+    const startedTurns: string[] = [];
+    provider.runTurn.mockImplementation(async function* (input: AiRunTurnInput) {
+      startedTurns.push(input.turnId);
+      await new Promise<void>((resolve) => {
+        input.signal.addEventListener("abort", () => resolve(), { once: true });
+      });
+      input.signal.throwIfAborted();
+    });
     const { frames, manager } = createHarness();
+    const turnIds = ["turn-cancel-1", "turn-cancel-2", "turn-cancel-3"];
 
-    await startSession(manager, "session-codex-tool-output");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-codex-tool-output", turnId: "turn-tools", input: "read" },
-    });
-
-    await vi.waitFor(() => {
-      expect(frames.some((frame) =>
-        frame.type === "event" &&
-        frame.event.type === "toolCallUpdated" &&
-        frame.event.toolCall.status === "completed"
-      )).toBe(true);
-    });
-    const updated = [...frames].reverse().find((frame) =>
-      frame.type === "event" &&
-      frame.event.type === "toolCallUpdated" &&
-      frame.event.toolCall.status === "completed"
-    );
-    if (!updated || updated.type !== "event" || updated.event.type !== "toolCallUpdated") {
-      throw new Error("expected completed tool update");
+    await startSession(manager, "session-repeat-cancel");
+    for (const turnId of turnIds) {
+      await sendInput(manager, "session-repeat-cancel", turnId, `wait ${turnId}`);
+      await vi.waitFor(() => expect(startedTurns).toContain(turnId));
+      await manager.handle({ type: "cancel", sessionId: "session-repeat-cancel", turnId });
+      await waitForTurnFinished(frames, turnId);
     }
-    expect(updated.event.toolCall.output).toEqual([{ type: "text", text: "file contents" }]);
-    expect(updated.event.toolCall.result?.output).toEqual([{ type: "text", text: "file contents" }]);
+
+    const snapshot = await getSessionSnapshot(manager, frames, "session-repeat-cancel");
+    const terminalEntries = snapshot.transcript.filter((entry) =>
+      entry.id.startsWith("message-terminal-")
+    );
+    expect(terminalEntries).toHaveLength(3);
+    expect(new Set(terminalEntries.map((entry) => entry.id)).size).toBe(3);
+    expect(new Set(terminalEntries.map((entry) => entry.sequenceId)).size).toBe(3);
+    expect(terminalEntries).toEqual(turnIds.map((turnId) =>
+      expect.objectContaining({
+        id: `message-terminal-${turnId}-cancelled`,
+        turnId,
+        status: "cancelled",
+        content: [{
+          type: "error",
+          message: "cancelled: Operation cancelled (recoverable)",
+        }],
+      })
+    ));
+    for (const turnId of turnIds) {
+      expect(snapshot.transcript).toContainEqual(expect.objectContaining({
+        id: `message-pending-${turnId}`,
+        turnId,
+        role: "user",
+        status: "cancelled",
+      }));
+    }
+    expect(snapshot.transcript.some((entry) => entry.status === "pending" || entry.status === "streaming")).toBe(false);
   });
 
-  it("stores failed tool results with cumulative output", async () => {
-    provider.runTurn.mockImplementation(() =>
-      events(
-        {
-          type: "tool.created",
-          ref: "tool-ref",
-          name: "inspect",
-          input: { text: "inspect(path=\".\")" },
-        },
-        { type: "tool.output", ref: "tool-ref", output: [{ type: "text", text: "started" }] },
-        { type: "tool.failed", ref: "tool-ref", error: "exit code 1", publicMessage: "exit code 1" }
-      )
-    );
-    const { frames, manager } = createHarness();
-
-    await startSession(manager, "session-tool-failed-output");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-tool-failed-output", turnId: "turn-tools", input: "run" },
-    });
-
-    await vi.waitFor(() => {
-      expect(frames.some((frame) =>
-        frame.type === "event" &&
-        frame.event.type === "toolCallUpdated" &&
-        frame.event.toolCall.status === "failed"
-      )).toBe(true);
-    });
-    const updated = [...frames].reverse().find((frame) =>
-      frame.type === "event" &&
-      frame.event.type === "toolCallUpdated" &&
-      frame.event.toolCall.status === "failed"
-    );
-    if (!updated || updated.type !== "event" || updated.event.type !== "toolCallUpdated") {
-      throw new Error("expected failed tool update");
-    }
-    expect(updated.event.toolCall.output).toEqual([{ type: "text", text: "started" }]);
-    expect(updated.event.toolCall.result?.output).toEqual(updated.event.toolCall.output);
-  });
-
-  it("surfaces denied tool failures on the tool result with rule metadata", async () => {
-    provider.runTurn.mockImplementation(() =>
-      events(
-        {
-          type: "tool.created",
-          ref: "tool-ref",
-          name: "apply_patch",
-          input: { text: "apply_patch(file=\"src/a.ts\")" },
-          metadata: {
-            provider: "codex",
-            providerItemId: "tool-ref",
-            providerItemType: "function_call",
-          },
-        },
-        {
-          type: "tool.failed",
-          ref: "tool-ref",
-          error: "hook denied",
-          publicMessage: "Plan mode blocks file edits.",
-          metadata: {
-            agentFrameworkHook: "PreToolUse",
-            agentFrameworkRule: "plan-mode-block",
-            agentFrameworkToolStatus: "denied",
-            agentFrameworkExpectedStatus: "deny",
-            agentFrameworkCaptureSeq: 7,
-            agentFrameworkStateSnapshotSeq: 6,
-          },
-        }
-      )
-    );
-    const { frames, manager } = createHarness();
-
-    await startSession(manager, "session-tool-denied");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-tool-denied", turnId: "turn-denied", input: "edit" },
-    });
-
-    await vi.waitFor(() => {
-      expect(frames.some((frame) =>
-        frame.type === "event" &&
-        frame.event.type === "toolCallUpdated" &&
-        frame.event.toolCall.status === "denied"
-      )).toBe(true);
-    });
-    const deniedTool = frames.find((frame) =>
-      frame.type === "event" &&
-      frame.event.type === "toolCallUpdated" &&
-      frame.event.toolCall.status === "denied"
-    );
-    if (!deniedTool || deniedTool.type !== "event" || deniedTool.event.type !== "toolCallUpdated") {
-      throw new Error("expected denied tool update");
-    }
-    expect(deniedTool.event.toolCall.result?.error).toMatchObject({
-      code: "runtime_error",
-      message: "Plan mode blocks file edits.",
-      metadata: {
-        agentFrameworkRule: "plan-mode-block",
-        agentFrameworkExpectedStatus: "deny",
-      },
-    });
-
-    const errorMessage = frames.find((frame) =>
-      frame.type === "event" &&
-      frame.event.type === "messageCreated" &&
-      frame.event.message.role === "tool" &&
-      frame.event.message.content.some((block) => block.type === "error")
-    );
-    expect(errorMessage).toBeUndefined();
-  });
-
-  it("keeps failed hook failures distinct from denied tool failures", async () => {
-    provider.runTurn.mockImplementation(() =>
-      events(
-        {
-          type: "tool.created",
-          ref: "tool-ref",
-          name: "Bash",
-          input: { text: "npm test" },
-        },
-        {
-          type: "tool.failed",
-          ref: "tool-ref",
-          error: "exit code 1",
-          publicMessage: "exit code 1",
-          metadata: {
-            agentFrameworkHook: "PostToolUse",
-            agentFrameworkRule: "check",
-            agentFrameworkToolStatus: "failed",
-          },
-        }
-      )
-    );
-    const { frames, manager } = createHarness();
-
-    await startSession(manager, "session-tool-failed");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-tool-failed", turnId: "turn-failed", input: "test" },
-    });
-
-    await vi.waitFor(() => {
-      expect(frames.some((frame) =>
-        frame.type === "event" &&
-        frame.event.type === "toolCallUpdated" &&
-        frame.event.toolCall.status === "failed"
-      )).toBe(true);
-    });
-    const failedTool = frames.find((frame) =>
-      frame.type === "event" &&
-      frame.event.type === "toolCallUpdated" &&
-      frame.event.toolCall.status === "failed"
-    );
-    if (!failedTool || failedTool.type !== "event" || failedTool.event.type !== "toolCallUpdated") {
-      throw new Error("expected failed tool update");
-    }
-    expect(failedTool.event.toolCall.result?.state).toBe("failed");
-  });
-
-  it("handles generic tool decisions without provider tool ids", async () => {
+  it("submits native transcript tool ids directly to providers", async () => {
     const submitToolDecision = vi.fn();
-    provider.createResolvedProviderRunner.mockImplementation(() => ({
-      resolvedProvider: { type: "openrouter" },
+    provider.createResolvedProviderRunner.mockImplementation((resolvedProvider: ReturnType<typeof resolvedProviderFor>) => ({
+      resolvedProvider,
       runTurn: provider.runTurn,
       submitToolDecision,
     }));
     provider.runTurn.mockImplementation(() =>
-      events(
-        {
-          type: "tool.created",
-          ref: "tool-ref",
-          name: "inspect",
-          input: { text: "inspect(path=\".\")" },
-        },
-        { type: "tool.updated", ref: "tool-ref", status: "waiting", waitReason: "approval" }
-      )
+      events({
+        type: "timeline.snapshot",
+        transcript: [],
+        toolCalls: [waitingTool("native-tool-1")],
+      })
     );
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-decision");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-decision", turnId: "turn-1", input: "run" },
-    });
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "toolCallUpdated")).toBe(true);
-    });
+    await sendInput(manager, "session-decision", "turn-1", "run");
+    await waitForWaitingTool(frames, "native-tool-1");
     await manager.handle({
       type: "request",
       request: {
         type: "submitToolDecision",
         sessionId: "session-decision",
         turnId: "turn-1",
-        decision: { toolCallId: "tool-1", decision: "approve", reason: null },
+        decision: { toolCallId: "native-tool-1", decision: "approve", reason: null },
       },
     });
 
-    expect(submitToolDecision).toHaveBeenCalledWith({ toolCallId: "tool-ref", decision: "approve", reason: null });
-    expect(frames.at(-1)).toEqual({
+    expect(submitToolDecision).toHaveBeenCalledWith({ toolCallId: "native-tool-1", decision: "approve", reason: null });
+    expect(frames).toContainEqual({
       type: "response",
       response: { type: "accepted", sessionId: "session-decision", turnId: "turn-1" },
     });
   });
 
-  it("marks unsupported tool approval without failing the tool", async () => {
+  it("rejects unsupported manual tool approval without mutating the transcript tool", async () => {
     provider.runTurn.mockImplementation(() =>
-      events(
-        {
-          type: "tool.created",
-          ref: "tool-ref",
-          name: "inspect",
-          input: { text: "inspect(path=\".\")" },
-        },
-        { type: "tool.updated", ref: "tool-ref", status: "waiting", waitReason: "approval" }
-      )
+      events({
+        type: "timeline.snapshot",
+        transcript: [],
+        toolCalls: [waitingTool("native-tool-1")],
+      })
     );
     const { frames, manager } = createHarness();
 
     await startSession(manager, "session-unsupported-decision");
-    await manager.handle({
-      type: "request",
-      request: { type: "sendInput", sessionId: "session-unsupported-decision", turnId: "turn-1", input: "run" },
-    });
-    await vi.waitFor(() => {
-      expect(frames.some((frame) => frame.type === "event" && frame.event.type === "toolCallUpdated")).toBe(true);
-    });
+    await sendInput(manager, "session-unsupported-decision", "turn-1", "run");
+    await waitForWaitingTool(frames, "native-tool-1");
     await manager.handle({
       type: "request",
       request: {
         type: "submitToolDecision",
         sessionId: "session-unsupported-decision",
         turnId: "turn-1",
-        decision: { toolCallId: "tool-1", decision: "approve", reason: null },
+        decision: { toolCallId: "native-tool-1", decision: "approve", reason: null },
       },
     });
 
-    expect(frames).toContainEqual({
-      type: "event",
-      event: expect.objectContaining({
-        type: "toolCallUpdated",
-        toolCall: expect.objectContaining({
-          status: "unsupported",
-          result: expect.objectContaining({ state: "unsupported" }),
-        }),
+    expect(frames).toContainEqual(expect.objectContaining({
+      type: "response",
+      response: expect.objectContaining({
+        type: "error",
+        sessionId: "session-unsupported-decision",
+        error: expect.objectContaining({ code: "runtime_error" }),
       }),
+    }));
+    const snapshot = await getSessionSnapshot(manager, frames, "session-unsupported-decision");
+    expect(snapshot.toolCalls).toEqual([
+      expect.objectContaining({
+        id: "native-tool-1",
+        status: "waiting",
+        result: null,
+      }),
+    ]);
+  });
+
+  it("rejects tool decisions for tools that are not waiting", async () => {
+    provider.runTurn.mockImplementation(() =>
+      events({
+        type: "timeline.snapshot",
+        transcript: [],
+        toolCalls: [
+          toolCallFixture({
+            id: "native-tool-1",
+            sequenceId: 1,
+            turnId: "turn-1",
+            status: "completed",
+          }),
+        ],
+      })
+    );
+    const { frames, manager } = createHarness();
+
+    await startSession(manager, "session-nonwaiting-decision");
+    await sendInput(manager, "session-nonwaiting-decision", "turn-1", "run");
+    await waitForTurnFinished(frames, "turn-1");
+    await manager.handle({
+      type: "request",
+      request: {
+        type: "submitToolDecision",
+        sessionId: "session-nonwaiting-decision",
+        turnId: "turn-1",
+        decision: { toolCallId: "native-tool-1", decision: "approve", reason: null },
+      },
+    });
+
+    expect(frames.at(-1)).toMatchObject({
+      type: "response",
+      response: {
+        type: "error",
+        sessionId: "session-nonwaiting-decision",
+        error: { code: "invalid_request" },
+      },
     });
   });
 
@@ -1450,9 +1208,6 @@ describe("AI backend session manager", () => {
       "src/ai-backend/server.ts",
       "src/ai-backend/session-manager.ts",
       "src/ai-backend/provider.ts",
-      "src/ai-backend/providers/index.ts",
-      "src/ai-backend/providers/claude.ts",
-      "src/ai-backend/providers/codex.ts",
     ];
     const combined = files.map((file) => readFileSync(join(process.cwd(), file), "utf8")).join("\n");
 
@@ -1461,3 +1216,37 @@ describe("AI backend session manager", () => {
     expect(combined).not.toContain("runCodexAgent");
   });
 });
+
+async function waitForWaitingTool(frames: AiBackendMessage[], toolCallId: string): Promise<void> {
+  await waitForToolStatus(frames, toolCallId, "waiting");
+}
+
+async function waitForToolStatus(
+  frames: AiBackendMessage[],
+  toolCallId: string,
+  status: AiToolCall["status"]
+): Promise<void> {
+  await vi.waitFor(() => {
+    expect(frames.some((frame) =>
+      frame.type === "event" &&
+      frame.event.type === "sessionUpdated" &&
+      frame.snapshot.toolCalls.some((tool) => tool.id === toolCallId && tool.status === status)
+    )).toBe(true);
+  });
+}
+
+function waitingTool(id: string): AiToolCall {
+  return toolCallFixture({
+    id,
+    sequenceId: 1,
+    turnId: "turn-1",
+    status: "waiting",
+    wait: { reason: "approval", since: "2026-05-22T00:00:00.000Z" },
+    result: null,
+    completedAt: null,
+  });
+}
+
+function eventFrames(frames: AiBackendMessage[]): EventFrame[] {
+  return frames.filter((frame): frame is EventFrame => frame.type === "event");
+}

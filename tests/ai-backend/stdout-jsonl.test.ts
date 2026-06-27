@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { Readable } from "node:stream";
 import { PassThrough } from "node:stream";
 import { parseClientFrame, readClientFrames, writeBackendFrame } from "../../src/ai-backend/wire.js";
-import type { AiBackendMessage } from "../../src/ai-protocol/index.js";
+import { createDefaultProviderMetadata } from "../../src/ai-backend/provider-metadata.js";
+import type { AiBackendMessage, AiSessionSnapshot } from "../../src/ai-protocol/index.js";
 
 describe("AI backend JSONL wire", () => {
   it("parses client request frames", () => {
@@ -207,6 +208,7 @@ describe("AI backend JSONL wire", () => {
           totalTokens: 3,
         },
       },
+      snapshot: snapshotFixture(),
     };
 
     writeBackendFrame(frame, stdout);
@@ -227,14 +229,34 @@ describe("AI backend JSONL wire", () => {
         type: "toolCallOutput",
         sessionId: "session-1",
         turnId: "turn-1",
-        toolCallId: "tool-1",
         seq: 1,
         createdAt: "2026-05-22T00:00:00.000Z",
+        toolCallId: "tool-1",
         output: [{ type: "json", value: { count: BigInt(1) } }],
       },
+      snapshot: snapshotFixture(),
     };
 
     writeBackendFrame(frame, stdout);
     expect(JSON.parse(output).event.output[0].value.count).toBe("1");
   });
 });
+
+function snapshotFixture(): AiSessionSnapshot {
+  return {
+    sessionId: "session-1",
+    workingDir: null,
+    agentFrameworkSessionDir: null,
+    status: "idle",
+    revision: 1,
+    lastEventSeq: 1,
+    transcript: [],
+    toolCalls: [],
+    backendProcesses: [],
+    provider: createDefaultProviderMetadata(),
+    plan: { mode: "disabled", planText: null, approved: false },
+    continuation: { enabled: false, available: false, updatedAt: null },
+    errors: [],
+    error: null,
+  };
+}

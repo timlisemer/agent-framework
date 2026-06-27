@@ -15,14 +15,22 @@ The `ai-backend` package entry runs a provider-neutral JSONL session backend
 for UI clients. Clients send typed `startSession`, `sendInput`,
 `listSessionChoices`, `resumeSession`, `closeSession`, snapshot, event-cursor,
 plan-state, tool-decision, and cancel frames. The backend emits ordered session,
-turn, message, tool, backend-process, continuation, plan-state, and error
-events plus request-correlated `sessionChoices`, `sessionClosed`, and
-`requestError` responses using the local protocol exported from
-`src/ai-protocol`. `sdkRuntimeHome: "managedAstral"` enables managed
-Claude/Codex homes and resumable history discovery for user-runtime sessions.
-Managed Astral homes mirror the bundled adapter dotfolders under
-`adapters/claude/dotclaude` and `adapters/codex/dotcodex` while preserving
-local auth files.
+turn lifecycle, session-update, continuation, plan-state, provider-metadata,
+and error events plus request-correlated `sessionChoices`, `sessionClosed`,
+and `requestError` responses using the local protocol exported from
+`src/ai-protocol`. Visible transcript rows and tool calls are rebuilt from
+provider transcripts through per-event timeline snapshots rather than reduced
+from provider stream items. Snapshots carry transcript-projected messages,
+tool state, provider metadata, usage, context-window details, compaction
+events, and agent-framework session bindings; runtime control events only
+cover continuation, plan state, provider metadata, timeline snapshots, turn
+completion, and errors. Claude manual tool approvals are overlaid onto the
+current transcript snapshot while the SDK is blocked on `canUseTool`, using
+the native tool-use ID for follow-up decisions. `sdkRuntimeHome:
+"managedAstral"` enables managed Claude/Codex homes and resumable history
+discovery for user-runtime sessions. Managed Astral homes mirror the bundled
+adapter dotfolders under `adapters/claude/dotclaude` and
+`adapters/codex/dotcodex` while preserving local auth files.
 The protocol is owned in this repository and uses opaque resume targets instead
 of native runtime IDs. Build before running the backend:
 

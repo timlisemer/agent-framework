@@ -1,5 +1,4 @@
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
@@ -8,6 +7,7 @@ import {
   sessionCurrentPlanFile,
   sessionPlanFile,
   sessionPlanValidationStatusFile,
+  testRunsRoot,
 } from "../../src/utils/paths.js";
 import {
   hashPlanContent,
@@ -163,7 +163,8 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "stop-plan-test-"));
+    fs.mkdirSync(testRunsRoot(), { recursive: true });
+    tempDir = fs.mkdtempSync(path.join(testRunsRoot(), "stop-plan-test-"));
     transcriptPath = path.join(tempDir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
     sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
@@ -192,8 +193,9 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
   });
 
   afterEach(() => {
-    fs.rmSync(sessionDir, { recursive: true, force: true });
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    for (const dirPath of new Set([sessionDir, tempDir])) {
+      fs.rmSync(dirPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 });
+    }
     if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
     else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
   });

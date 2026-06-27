@@ -1,4 +1,5 @@
 import { homedir } from "node:os";
+import path from "node:path";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import {
   abortableDelay,
@@ -6,8 +7,7 @@ import {
   linkAbortSignal,
   throwIfAborted,
 } from "../utils/cancellation.js";
-import { numberOrNull, outputBlocks, stringField, textFromOutput } from "../utils/output.js";
-import { summarizeToolInputForUi } from "../utils/tool-input-summary.js";
+import { numberOrNull, stringField } from "../utils/output.js";
 import { PROVIDER_TYPES } from "./registry.js";
 import type {
   ClaudeProviderContinuationState,
@@ -19,8 +19,10 @@ import type {
 import type { ResolvedProvider } from "./types.js";
 import type { AiRuntimeEvent } from "../ai-backend/runtime-events.js";
 import type { TokenUsage } from "../ai-protocol/index.js";
-import { assertManagedRuntimeHomeConfig, prepareManagedRuntimeHome } from "./managed-runtime-home.js";
+import { assertManagedRuntimeHomeConfig, prepareManagedRuntimeHome, resolveNativeProviderRoot } from "./managed-runtime-home.js";
 import { materializeRuntimeHome, resolveRuntimeHomeProfile, type MaterializedRuntimeHome } from "../runtime-home/runtime-profiles.js";
+import { readJsonlTail } from "../utils/file-io.js";
+import { resolveTranscriptBinding } from "./transcript-binding.js";
 
 type ClaudeQueryOptionsConfig = {
   workingDir?: string | null;
@@ -58,29 +60,19 @@ export type ClaudeRuntimeHomeLease = {
   dispose(): void;
 };
 
-export type ClaudeUiStreamState = {
-  seenMessages: Set<string>;
-  seenTools: Set<string>;
-  seenProcesses: Set<string>;
-  assistantText: string;
-  assistantReasoning: Map<string, string>;
+export type ClaudeControlStreamState = {
   planUpdates: Set<string>;
   sessionRef: string | null;
 };
 
-export function createClaudeUiStreamState(sessionRef: string | null = null): ClaudeUiStreamState {
+export function createClaudeControlStreamState(sessionRef: string | null = null): ClaudeControlStreamState {
   return {
-    seenMessages: new Set(),
-    seenTools: new Set(),
-    seenProcesses: new Set(),
-    assistantText: "",
-    assistantReasoning: new Map(),
     planUpdates: new Set(),
     sessionRef,
   };
 }
 
-export function recordClaudePlanUpdate(state: ClaudeUiStreamState, plan: string): boolean {
+export function recordClaudePlanUpdate(state: Pick<ClaudeControlStreamState, "planUpdates">, plan: string): boolean {
   if (state.planUpdates.has(plan)) return false;
   state.planUpdates.add(plan);
   return true;
@@ -465,7 +457,7 @@ export function collectClaudeMessageResult(
   return { text: current.text, nativeSessionId };
 }
 
-export function mapClaudeUiStreamMessage(message: unknown, state: ClaudeUiStreamState): {
+export function mapClaudeControlStreamMessage(message: unknown, state: ClaudeControlStreamState): {
   events: AiRuntimeEvent[];
   usage: TokenUsage | null;
   sessionRef: string | null;
@@ -480,87 +472,23 @@ export function mapClaudeUiStreamMessage(message: unknown, state: ClaudeUiStream
   let usage: TokenUsage | null = null;
   let terminal = false;
 
-  if (raw.type === "stream_event") {
-    events.push(...mapClaudePartialStreamEvent(raw.event, state));
-  } else if (raw.type === "assistant") {
-    events.push(...mapClaudeAssistantMessage(raw, state));
-  } else if (raw.type === "user") {
-    events.push(...mapClaudeUserMessage(raw));
-  } else if (raw.type === "tool_progress") {
-    const ref = stringField(raw, "tool_use_id");
-    if (ref) {
-      ensureTool(events, state, ref, stringField(raw, "tool_name") ?? "tool", {});
-      const seconds = typeof raw.elapsed_time_seconds === "number" ? `${raw.elapsed_time_seconds}s elapsed` : null;
-      events.push({ type: "tool.progress", ref, progress: seconds });
-    }
-  } else if (raw.type === "system") {
-    events.push(...mapClaudeSystemMessage(raw, state));
+  if (raw.type === "assistant") {
+    events.push(...mapClaudeAssistantControlMessage(raw, state));
   } else if (raw.type === "result") {
     terminal = true;
-    usage = normalizeClaudeUiUsage(raw.usage);
-    const resultText = typeof raw.result === "string" ? raw.result : state.assistantText;
-    if (!state.seenMessages.has("assistant")) {
-      state.seenMessages.add("assistant");
-      events.push({ type: "message.created", ref: "assistant", content: "" });
-    }
-    events.push({ type: "message.completed", ref: "assistant", content: resultText, usage });
+    usage = normalizeClaudeAiUsage(raw.usage);
   }
 
   return { events, usage, sessionRef: state.sessionRef, terminal };
 }
 
-function mapClaudePartialStreamEvent(event: unknown, state: ClaudeUiStreamState): AiRuntimeEvent[] {
-  if (!event || typeof event !== "object") return [];
-  const raw = event as Record<string, unknown>;
+function mapClaudeAssistantControlMessage(raw: Record<string, unknown>, state: ClaudeControlStreamState): AiRuntimeEvent[] {
   const events: AiRuntimeEvent[] = [];
-  if (!state.seenMessages.has("assistant")) {
-    state.seenMessages.add("assistant");
-    events.push({ type: "message.created", ref: "assistant", content: "" });
-  }
-  if (raw.type === "content_block_delta") {
-    const delta = raw.delta;
-    if (delta && typeof delta === "object" && "text" in delta && typeof delta.text === "string") {
-      state.assistantText += delta.text;
-      events.push({ type: "message.delta", ref: "assistant", delta: delta.text });
-    }
-    const thinking = reasoningText(delta);
-    if (thinking) {
-      const key = reasoningKey(raw.index, stringField(delta as Record<string, unknown>, "type"));
-      const previous = state.assistantReasoning.get(key) ?? "";
-      state.assistantReasoning.set(key, previous + thinking);
-      events.push({ type: "message.reasoning_delta", ref: "assistant", delta: thinking });
-    }
-  }
-  return events;
-}
-
-function mapClaudeAssistantMessage(raw: Record<string, unknown>, state: ClaudeUiStreamState): AiRuntimeEvent[] {
-  const events: AiRuntimeEvent[] = [];
-  if (!state.seenMessages.has("assistant")) {
-    state.seenMessages.add("assistant");
-    events.push({ type: "message.created", ref: "assistant", content: "" });
-  }
-  const text = extractClaudeAssistantText(raw);
-  if (text && text !== state.assistantText) {
-    const delta = text.startsWith(state.assistantText) ? text.slice(state.assistantText.length) : text;
-    state.assistantText = text;
-    if (delta) events.push({ type: "message.delta", ref: "assistant", delta });
-  }
-
   const content = messageContent(raw);
-  for (const [index, block] of content.entries()) {
+  for (const block of content) {
     if (!block || typeof block !== "object") continue;
     const item = block as Record<string, unknown>;
-    const thinking = reasoningText(item);
-    if (thinking) {
-      const key = reasoningKey(index, stringField(item, "type"));
-      const previous = state.assistantReasoning.get(key) ?? "";
-      const delta = thinking.startsWith(previous) ? thinking.slice(previous.length) : thinking;
-      state.assistantReasoning.set(key, thinking);
-      if (delta) events.push({ type: "message.reasoning_delta", ref: "assistant", delta });
-    }
     if (item.type !== "tool_use") continue;
-    const ref = stringField(item, "id");
     const name = stringField(item, "name") ?? "tool";
     const input = item.input;
     if (name === "ExitPlanMode" && input && typeof input === "object") {
@@ -569,81 +497,8 @@ function mapClaudeAssistantMessage(raw: Record<string, unknown>, state: ClaudeUi
         events.push({ type: "plan.updated", state: { mode: "awaitingApproval", planText: plan, approved: false } });
       }
     }
-    if (ref) ensureTool(events, state, ref, name, input);
   }
   return events;
-}
-
-function mapClaudeUserMessage(raw: Record<string, unknown>): AiRuntimeEvent[] {
-  const events: AiRuntimeEvent[] = [];
-  for (const block of messageContent(raw)) {
-    if (!block || typeof block !== "object") continue;
-    const item = block as Record<string, unknown>;
-    if (item.type !== "tool_result") continue;
-    const ref = stringField(item, "tool_use_id");
-    if (!ref) continue;
-    const isError = item.is_error === true;
-    const output = outputBlocks(item.content);
-    if (output.length > 0) events.push({ type: "tool.output", ref, output });
-    events.push(isError
-      ? { type: "tool.failed", ref, error: textFromOutput(output) || "Tool failed" }
-      : { type: "tool.completed", ref, output });
-  }
-  return events;
-}
-
-function mapClaudeSystemMessage(raw: Record<string, unknown>, state: ClaudeUiStreamState): AiRuntimeEvent[] {
-  const subtype = stringField(raw, "subtype");
-  const events: AiRuntimeEvent[] = [];
-  if (subtype === "permission_denied") {
-    const ref = stringField(raw, "tool_use_id");
-    const name = stringField(raw, "tool_name") ?? "tool";
-    if (ref) {
-      ensureTool(events, state, ref, name, {});
-      events.push({ type: "tool.updated", ref, status: "denied", waitReason: stringField(raw, "decision_reason") });
-    }
-  } else if (subtype === "task_started") {
-    const ref = stringField(raw, "task_id");
-    if (ref) {
-      const title = stringField(raw, "description") ?? "Background task";
-      ensureProcess(events, state, ref, title);
-      events.push({ type: "backend_process.updated", ref, status: "running" });
-    }
-  } else if (subtype === "task_progress") {
-    const ref = stringField(raw, "task_id");
-    if (ref) {
-      ensureProcess(events, state, ref, stringField(raw, "description") ?? "Background task");
-      events.push({ type: "backend_process.progress", ref, progress: stringField(raw, "summary") ?? stringField(raw, "description") });
-    }
-  } else if (subtype === "task_notification") {
-    const ref = stringField(raw, "task_id");
-    if (ref) {
-      ensureProcess(events, state, ref, stringField(raw, "summary") ?? "Background task");
-      const status = stringField(raw, "status");
-      if (status === "completed") events.push({ type: "backend_process.completed", ref, output: outputBlocks(raw.summary) });
-      if (status === "failed") events.push({ type: "backend_process.failed", ref, error: stringField(raw, "summary") ?? "Background task failed" });
-      if (status === "stopped") events.push({ type: "backend_process.cancelled", ref });
-    }
-  }
-  return events;
-}
-
-function ensureTool(
-  events: AiRuntimeEvent[],
-  state: ClaudeUiStreamState,
-  ref: string,
-  name: string,
-  input: unknown
-): void {
-  if (state.seenTools.has(ref)) return;
-  state.seenTools.add(ref);
-  events.push({ type: "tool.created", ref, name, input: summarizeToolInputForUi(name, input) });
-}
-
-function ensureProcess(events: AiRuntimeEvent[], state: ClaudeUiStreamState, ref: string, title: string): void {
-  if (state.seenProcesses.has(ref)) return;
-  state.seenProcesses.add(ref);
-  events.push({ type: "backend_process.created", ref, title, cancellable: true });
 }
 
 function messageContent(raw: Record<string, unknown>): unknown[] {
@@ -653,22 +508,7 @@ function messageContent(raw: Record<string, unknown>): unknown[] {
   return Array.isArray(content) ? content : [];
 }
 
-function reasoningText(value: unknown): string | null {
-  if (!value || typeof value !== "object") return null;
-  const raw = value as Record<string, unknown>;
-  const type = stringField(raw, "type");
-  if (type !== "thinking" && type !== "reasoning" && type !== "thinking_delta" && type !== "redacted_thinking") {
-    return null;
-  }
-  return stringField(raw, "thinking") ?? stringField(raw, "text") ?? stringField(raw, "summary");
-}
-
-function reasoningKey(index: unknown, type: string | null): string {
-  const normalizedType = type === "thinking_delta" ? "thinking" : (type ?? "thinking");
-  return `reasoning:${String(index ?? "unknown")}:${normalizedType}`;
-}
-
-function normalizeClaudeUiUsage(usage: unknown): TokenUsage | null {
+export function normalizeClaudeAiUsage(usage: unknown): TokenUsage | null {
   if (!usage || typeof usage !== "object") return null;
   const data = usage as Record<string, unknown>;
   const promptTokens = numberOrNull(data.input_tokens);
@@ -683,6 +523,46 @@ function normalizeClaudeUiUsage(usage: unknown): TokenUsage | null {
       ? null
       : (promptTokens ?? 0) + (completionTokens ?? 0),
   };
+}
+
+export function resolveClaudeTranscriptBinding(input: {
+  runtimeHomeRoot?: string | null;
+  sessionId: string | null;
+  workingDir?: string | null;
+  resumeTranscriptPath?: string | null;
+}): string | null {
+  const root = input.runtimeHomeRoot ?? resolveNativeProviderRoot("claude", process.env);
+  const projectsRoot = root ? path.join(root, "projects") : null;
+  return resolveTranscriptBinding({
+    explicitPath: input.resumeTranscriptPath,
+    sessionId: input.sessionId,
+    transcriptsRoot: projectsRoot,
+    workingDir: input.workingDir,
+    missingMtimeMs: 0,
+    matches: (filePath, candidate) =>
+      claudeTranscriptMatches(filePath, candidate.sessionId, candidate.workingDir),
+  });
+}
+
+function claudeTranscriptMatches(filePath: string, sessionId: string, workingDir: string | null | undefined): boolean {
+  const entries = readJsonlTail<Record<string, unknown>>(filePath, 512 * 1024);
+  let sessionMatched = false;
+  let cwdMatched = !workingDir;
+  const expectedCwd = workingDir ? path.resolve(workingDir) : null;
+
+  for (const entry of entries) {
+    const nativeId = stringField(entry, "sessionId") ?? stringField(entry, "session_id");
+    if (nativeId === sessionId) sessionMatched = true;
+    const cwd = stringField(entry, "cwd") ?? stringField(entry, "projectDir");
+    if (expectedCwd && cwd && path.resolve(cwd) === expectedCwd) cwdMatched = true;
+    if (sessionMatched && cwdMatched) return true;
+  }
+
+  if (!sessionMatched) {
+    const basename = path.basename(filePath, ".jsonl");
+    sessionMatched = basename === sessionId || basename.endsWith(sessionId);
+  }
+  return sessionMatched && cwdMatched;
 }
 
 export async function collectClaudeQueryResult(

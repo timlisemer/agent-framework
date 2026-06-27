@@ -76,8 +76,12 @@ src/                                # TypeScript source
 
   ai-backend/                       # Provider-neutral JSONL backend for UI sessions
     server.ts                       # stdin/stdout JSONL frame loop
-    session-manager.ts              # Session lifecycle and generic timeline reducer
+    session-manager.ts              # Session lifecycle and snapshot/event orchestration
     provider.ts                     # Internal SDK runtime runner boundary for UI turns
+    transcript-runtime.ts           # Provider transcript projection into visible messages/tools
+    live-transcript-watcher.ts      # Transcript/tool-log polling for live timeline snapshots
+    timeline-allocator.ts           # Stable sequence hydration for resume/live snapshots
+    transcript-store.ts             # Session snapshot state, pending user echo, timeline replacement
     wire.ts                         # Backend wire parsing and serialization helpers
 
   ai-protocol/                      # Locally owned TypeScript JSONL protocol
@@ -632,6 +636,9 @@ space is rooted under `/tmp/agent-framework`.
 1. **`state.json`** — SessionState (prediction, edit-intent, force-check lockout, frustration streak, window size, tool count).
 2. **`gate-reasoning.json`** — priority-evicted denial memory with NOTE/WARNING/appeal outcomes.
 3. **`tool-log.jsonl`** — append-only audit trail consumed by drift-detect, error-acknowledge, pre-tool-use, gate-reasoning, the test-harness, and AI backend UI/resume metadata hydration.
+
+Legacy `timeline-state.json` files are ignored by active AI backend resume.
+Visible rows are rebuilt from the provider transcript and tool log each time.
 
 Plan-mode and reproducibility sidecars live in the same session directory:
 `plans/<name>.md` stores named session planfiles, `current-plan.json` stores

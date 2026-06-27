@@ -4,8 +4,15 @@ import { activeSpec } from "../adapter/spec.js";
 import {
   SLASH_COMMAND_ALLOWED_TOOLS,
 } from "./slash-commands.js";
-import type { TranscriptEntry, ContentBlock } from "../adapter/types.js";
+import type { ContentBlock } from "../adapter/types.js";
 import type { PriorErrorContext, PriorErrorSource } from "./prior-error-context.js";
+import {
+  buildAssistantGroups,
+  collectAssistantTextCandidates,
+  parseActiveTranscriptLines,
+  userEntryHasHumanText,
+  type AssistantGroup,
+} from "./canonical-transcript.js";
 
 export interface TranscriptMessage {
   role: 'user' | 'assistant' | 'tool';
@@ -137,173 +144,6 @@ export interface TranscriptReadResult {
    * before adjacent assistant entries are grouped for rule context.
    */
   assistantTextCandidates?: string[];
-}
-
-/**
- * One logical assistant turn. Adapter materializers may write one visible
- * turn as multiple adjacent assistant entries, sometimes with different
- * message ids (for example text followed by parallel tool calls). The
- * scanner treats each contiguous assistant run as one group, bounded by a
- * non-meta user entry such as a user prompt or tool_result.
- */
-interface AssistantGroup {
-  msgId: string;
-  indices: number[];
-  lastIndex: number;
-  text: string;
-  hasThinking: boolean;
-  hasToolUse: boolean;
-  toolUseIds: string[];
-  entryCount: number;
-}
-
-type AssistantGroupBoundaryPolicy = "human-user-text" | "user-text-or-tool-result";
-
-function appendAssistantText(group: AssistantGroup, text: string): void {
-  if (!text) return;
-  if (group.text === text) return;
-
-  const existingParts = group.text.split("\n").map((part) => part.trim()).filter(Boolean);
-  if (existingParts.includes(text.trim())) return;
-
-  group.text = group.text ? `${group.text} ${text}` : text;
-}
-
-function addAssistantEntryToGroup(
-  group: AssistantGroup,
-  entry: TranscriptEntry,
-  index: number,
-): void {
-  group.indices.push(index);
-  group.entryCount++;
-  if (index > group.lastIndex) group.lastIndex = index;
-
-  const content = entry.message?.content;
-  if (Array.isArray(content)) {
-    for (const block of content) {
-      if (block.type === "text" && block.text) {
-        appendAssistantText(group, block.text);
-      } else if (block.type === "thinking") {
-        group.hasThinking = true;
-      } else if (block.type === "tool_use") {
-        group.hasToolUse = true;
-        if (block.id) group.toolUseIds.push(block.id);
-      }
-    }
-  } else if (typeof content === "string" && content) {
-    appendAssistantText(group, content);
-  }
-}
-
-function userEntryHasHumanText(entry: TranscriptEntry): boolean {
-  if (entry.message?.role !== "user" || entry.isMeta === true) return false;
-
-  const content = entry.message.content;
-  if (typeof content === "string") {
-    return content.length > 0;
-  }
-  if (!Array.isArray(content)) return false;
-
-  return content.some((block) => block.type === "text" && (block.text ?? "").length > 0);
-}
-
-function userEntryHasToolResult(entry: TranscriptEntry): boolean {
-  if (entry.message?.role !== "user" || entry.isMeta === true) return false;
-
-  const content = entry.message.content;
-  if (!Array.isArray(content)) return false;
-
-  return content.some((block) => block.type === "tool_result");
-}
-
-function userEntryResetsAssistantGroup(
-  entry: TranscriptEntry,
-  policy: AssistantGroupBoundaryPolicy,
-): boolean {
-  if (policy === "human-user-text") {
-    return userEntryHasHumanText(entry);
-  }
-  return userEntryHasHumanText(entry) || userEntryHasToolResult(entry);
-}
-
-/**
- * Build a map from jsonl index -> AssistantGroup. Adjacent assistant entries
- * in the same post-user run collapse into one group, even when adapter
- * materialization assigns distinct message ids. Non-message/null/meta lines do
- * not contribute and do not reset the active run. Callers choose whether
- * user-role tool results reset assistant groups.
- */
-function buildAssistantGroups(
-  parsedEntries: (TranscriptEntry | null)[],
-  boundaryPolicy: AssistantGroupBoundaryPolicy = "human-user-text",
-): Map<number, AssistantGroup> {
-  const byIndex = new Map<number, AssistantGroup>();
-  let activeGroup: AssistantGroup | undefined;
-
-  for (let i = 0; i < parsedEntries.length; i++) {
-    const entry = parsedEntries[i];
-
-    if (!entry || !entry.message) continue;
-
-    if (entry.message.role !== "assistant") {
-      if (userEntryResetsAssistantGroup(entry, boundaryPolicy)) {
-        activeGroup = undefined;
-      }
-      continue;
-    }
-
-    if (entry.isMeta === true) continue;
-
-    if (!activeGroup) {
-      activeGroup = {
-        msgId: entry.message.id ?? `__assistant_run_${i}`,
-        indices: [],
-        lastIndex: i,
-        text: "",
-        hasThinking: false,
-        hasToolUse: false,
-        toolUseIds: [],
-        entryCount: 0,
-      };
-    }
-
-    addAssistantEntryToGroup(activeGroup, entry, i);
-    byIndex.set(i, activeGroup);
-  }
-
-  return byIndex;
-}
-
-function collectAssistantTextCandidates(
-  parsedEntries: (TranscriptEntry | null)[],
-  maxAssistantEntries: number,
-): string[] {
-  const candidates: string[] = [];
-  let assistantEntriesSeen = 0;
-
-  for (let i = parsedEntries.length - 1; i >= 0; i--) {
-    const entry = parsedEntries[i];
-    if (!entry?.message || entry.isMeta === true || entry.message.role !== "assistant") {
-      continue;
-    }
-
-    assistantEntriesSeen++;
-    const content = entry.message.content;
-    if (Array.isArray(content)) {
-      for (let j = content.length - 1; j >= 0; j--) {
-        const block = content[j];
-        if (block.type === "text" && block.text?.trim()) {
-          candidates.push(block.text);
-        }
-      }
-    } else if (typeof content === "string" && content.trim()) {
-      candidates.push(content);
-    }
-
-    if (assistantEntriesSeen >= maxAssistantEntries) break;
-  }
-
-  return candidates;
 }
 
 /**
@@ -622,9 +462,7 @@ export async function readTranscriptExact(
   let slashCommandContext: SlashCommandContext | undefined;
 
   // Parse all lines using the active adapter's parseTranscript
-  const parsedEntries: (TranscriptEntry | null)[] = [
-    ...activeSpec().parseTranscript(allLines),
-  ];
+  const parsedEntries = parseActiveTranscriptLines(allLines, transcriptPath);
 
   const assistantGroupByIndex = buildAssistantGroups(parsedEntries, "user-text-or-tool-result");
   collected.assistantTextCandidates = collectAssistantTextCandidates(
@@ -811,9 +649,7 @@ export async function currentTurnAssistantState(
 ): Promise<CurrentTurnAssistantState> {
   const content = await fs.promises.readFile(transcriptPath, "utf-8");
   const allLines = content.trim().split("\n");
-  const parsedEntries: (TranscriptEntry | null)[] = [
-    ...activeSpec().parseTranscript(allLines),
-  ];
+  const parsedEntries = parseActiveTranscriptLines(allLines, transcriptPath);
 
   let lastUserIndex = -1;
   for (let i = parsedEntries.length - 1; i >= 0; i--) {
@@ -869,9 +705,7 @@ export async function userTurnIsFreshSinceLockout(
 ): Promise<boolean> {
   const content = await fs.promises.readFile(transcriptPath, "utf-8");
   const allLines = content.trim().split("\n");
-  const parsedEntries: (TranscriptEntry | null)[] = [
-    ...activeSpec().parseTranscript(allLines),
-  ];
+  const parsedEntries = parseActiveTranscriptLines(allLines, transcriptPath);
 
   let userIdx = -1;
   for (let i = parsedEntries.length - 1; i >= 0; i--) {
@@ -1048,7 +882,7 @@ export async function readRecentUserMessages(
     return "";
   }
   const lines = raw.trim().split("\n");
-  const parsedEntries = [...activeSpec().parseTranscript(lines)];
+  const parsedEntries = parseActiveTranscriptLines(lines, transcriptPath);
   const collected: string[] = [];
   for (let i = parsedEntries.length - 1; i >= 0 && collected.length < n; i--) {
     const entry = parsedEntries[i];
@@ -1104,7 +938,7 @@ export async function readRecentUserMessagesArray(
     return [];
   }
   const lines = raw.trim().split("\n");
-  const parsedEntries = [...activeSpec().parseTranscript(lines)];
+  const parsedEntries = parseActiveTranscriptLines(lines, transcriptPath);
   const collected: string[] = [];
   for (let i = parsedEntries.length - 1; i >= 0 && collected.length < n; i--) {
     const entry = parsedEntries[i];
@@ -1159,7 +993,7 @@ export async function userTurnFollowedByCompletedToolRoundtrip(
     return false;
   }
   const lines = raw.trim().split("\n");
-  const parsed: (TranscriptEntry | null)[] = [...activeSpec().parseTranscript(lines)];
+  const parsed = parseActiveTranscriptLines(lines, transcriptPath);
 
   let anchorIndex = -1;
   for (let i = parsed.length - 1; i >= 0; i--) {
@@ -1243,7 +1077,7 @@ export async function resolveActiveSlashCommandAllowedTools(
     return undefined;
   }
   const lines = raw.trim().split("\n");
-  const parsed = [...activeSpec().parseTranscript(lines)];
+  const parsed = parseActiveTranscriptLines(lines, transcriptPath);
   for (let i = parsed.length - 1; i >= 0; i--) {
     const entry = parsed[i];
     if (!entry || !entry.message || entry.message.role !== "user") continue;
@@ -1297,7 +1131,7 @@ export async function detectParallelBatch(
   const content = await fs.promises.readFile(transcriptPath, "utf-8");
   const lines = content.trim().split("\n");
 
-  const parsed: (TranscriptEntry | null)[] = [...activeSpec().parseTranscript(lines)];
+  const parsed = parseActiveTranscriptLines(lines, transcriptPath);
 
   interface ToolUseEntry {
     lineIndex: number;
