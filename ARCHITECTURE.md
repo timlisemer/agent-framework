@@ -205,7 +205,7 @@ All agents use the unified `runAgent()` function from `utils/agent-runner.ts`. T
 - Can read additional files to understand context
 - Can search codebase for patterns
 - Confirm, fullconfirm, and implementation validation use read-only tools.
-- The implementation workflow uses an internal write-capable SDK agent with `Read`, read-only `Bash`, file edit tools, and no framework MCP tools.
+- The implementation workflow uses an internal write-capable SDK agent whose fake home keeps the same adapter tool surface as managed Astral, including configured MCP tools, with only the Stop hook removed.
 - Confirm and fullconfirm always run three SDK reviewers in parallel: one general reviewer, one deduplication/generalization specialist, and one code-quality/pattern specialist. A direct aggregator merges their blocking findings and non-blocking warnings into the final verdict.
 - Implement runs one write-capable SDK agent, then parent-owned check, then one read-only SDK validator.
 
@@ -401,8 +401,10 @@ data are still passed in the prompt so review agents do not need write access.
 
 The implementation workflow uses two separate SDK policies:
 
-- **Implementer**: write-capable internal runtime with `Read`, guarded `Bash`,
-  `Write`, `Edit`, `MultiEdit`, `Glob`, `Grep`, `LS`, and `TodoWrite`
+- **Implementer**: write-capable internal runtime that uses the same adapter
+  config surface as managed Astral, including configured MCP tools, plugins,
+  project trust, and file editing tools. The internal write home remains the
+  existing per-run fake home, and only the Stop hook is removed.
 - **Validator**: read-only internal runtime with `Read` and guarded `Bash`
 
 This lets implementation agents modify code while confirm and validation agents

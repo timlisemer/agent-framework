@@ -15,7 +15,12 @@ type QueryGenerator = (stderr: StderrCallback) => AsyncGenerator<unknown, void, 
 
 let queryGenerators: QueryGenerator[] = [];
 let queryCallCount = 0;
-const queryArgs: Array<{ options?: { stderr?: (data: string) => void; abortController?: AbortController; env?: NodeJS.ProcessEnv } }> = [];
+type QueryOptionsCapture = Record<string, unknown> & {
+  stderr?: (data: string) => void;
+  abortController?: AbortController;
+  env?: NodeJS.ProcessEnv;
+};
+const queryArgs: Array<{ options?: QueryOptionsCapture }> = [];
 
 function setQueryGenerators(...gens: QueryGenerator[]): void {
   queryGenerators = gens;
@@ -23,7 +28,7 @@ function setQueryGenerators(...gens: QueryGenerator[]): void {
 }
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
-  query: vi.fn().mockImplementation((args: { options?: { stderr?: (data: string) => void; abortController?: AbortController; env?: NodeJS.ProcessEnv } }) => {
+  query: vi.fn().mockImplementation((args: { options?: QueryOptionsCapture }) => {
     queryArgs.push(args);
     const idx = Math.min(queryCallCount, queryGenerators.length - 1);
     const gen = queryGenerators[idx];
@@ -188,6 +193,56 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
     expect(result.success).toBe(false);
     expect(result.errorCount).toBeGreaterThan(0);
     expect(runAnthropicApiSkinDirectSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps read-only Claude SDK agents allow-listed", async () => {
+    setQueryGenerators(
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      async function* (_stderr) {
+        yield {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "## Verdict\nCONFIRMED: read-only tools constrained",
+        };
+      },
+    );
+
+    await runAgent(makeConfig(), { prompt: "Evaluate:" });
+
+    expect(queryArgs[0].options?.tools).toEqual(["Read", "Bash"]);
+    expect(queryArgs[0].options?.allowedTools).toEqual(["Read", "Bash"]);
+  });
+
+  it("does not send a Claude SDK allow-list for write-policy agents", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-claude-write-tools-"));
+    const restoreHome = withEnvForTest({ HOME: home });
+    setQueryGenerators(
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      async function* (_stderr) {
+        yield {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "## Verdict\nCONFIRMED: write tools unconstrained",
+        };
+      },
+    );
+
+    try {
+      await runAgent(makeConfig({
+        sdkToolPolicy: "write",
+      }), { prompt: "Evaluate:" });
+
+      expect(queryArgs[0].options).not.toHaveProperty("tools");
+      expect(queryArgs[0].options).not.toHaveProperty("allowedTools");
+      expect(queryArgs[0].options?.env?.CLAUDE_CONFIG_DIR).toContain(
+        path.join(home, ".agent-framework", "internal", "write", "claude"),
+      );
+    } finally {
+      restoreHome();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("treats runAgent SDK calls as one-shot even when continuable true is passed", async () => {

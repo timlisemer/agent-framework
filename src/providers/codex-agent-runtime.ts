@@ -11,6 +11,7 @@ import { codexSessionsRoot, codexTranscriptCwd, codexTranscriptSessionId } from 
 import { sandboxModeForToolPolicy } from "../../adapters/codex/runtime-home.js";
 import { mapCodexTokenUsage, normalizeCodexProviderUsage } from "../../adapters/codex/usage.js";
 import { resolveTranscriptBinding } from "./transcript-binding.js";
+import { writePolicyRuntimeAccessSentence } from "./sdk-tool-policy-prompts.js";
 
 export type CodexThreadOptionsConfig = {
   workingDir?: string | null;
@@ -416,7 +417,7 @@ export function buildCodexConfig(
 
 function codexSdkPolicyPrompt(policy: CodexThreadOptionsConfig["sdkToolPolicy"]): string {
   if (policy === "write") {
-    return "You are running as a write-capable implementation agent for agent-framework. You may edit files only as required by the provided plan. MCP tools are unavailable; parent-owned workflow code runs check and validation.";
+    return `You are running as a write-capable implementation agent for agent-framework. You may edit files only as required by the provided plan. ${writePolicyRuntimeAccessSentence()}`;
   }
   return "You are running as a read-only validation agent for agent-framework. Do not edit files. Use only read-only inspection. MCP tools are unavailable in this runtime.";
 }

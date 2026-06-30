@@ -7,7 +7,6 @@ import {
   sdkToolsForPolicy,
 } from "../../src/runtime-home/runtime-profiles.js";
 import { buildHookTrustBlock } from "../../adapters/codex/runtime-home.js";
-import { activeSpec } from "../../src/adapter/spec.js";
 import { TEXT_EDIT_TOOL_NAMES } from "../../src/utils/edit-tools.js";
 import { resolveAgentFrameworkRootFromModulePath } from "../../src/utils/paths.js";
 import { withEnvForTest } from "../helpers/provider-env.js";
@@ -64,7 +63,7 @@ describe("runtime profiles", () => {
     }
   });
 
-  it("materializes internal read-only and write homes without MCP servers plus stop pass-through env", () => {
+  it("materializes internal read-only homes restricted and write homes with Astral config minus Stop", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-runtime-policy-"));
     const restore = withEnvForTest({ HOME: home, AGENT_FRAMEWORK_DISABLE_STOP_BLOCK: "1" });
     try {
@@ -85,10 +84,15 @@ describe("runtime profiles", () => {
       expect(write.env.AGENT_FRAMEWORK_DISABLE_STOP_BLOCK).toBe("1");
       const writeConfig = fs.readFileSync(path.join(write.root!, "config.toml"), "utf-8");
       expect(writeConfig).toContain("sandbox_mode = \"workspace-write\"");
-      expect(writeConfig).not.toContain("[mcp_servers.agent-framework]");
-      expect(writeConfig).not.toContain("[plugins.");
-      expect(writeConfig).not.toContain("[projects.");
+      expect(writeConfig).toContain("[mcp_servers.agent-framework]");
+      expect(writeConfig).toContain("[plugins.");
+      expect(writeConfig).toContain("[projects.");
+      expect(writeConfig).not.toContain(":stop:0:0");
       expect(fs.existsSync(path.join(write.root!, "hooks.json"))).toBe(true);
+      const writeHooks = JSON.parse(fs.readFileSync(path.join(write.root!, "hooks.json"), "utf-8")) as {
+        hooks?: Record<string, unknown>;
+      };
+      expect(writeHooks.hooks?.Stop).toBeUndefined();
     } finally {
       restore();
       fs.rmSync(home, { recursive: true, force: true });
@@ -120,6 +124,41 @@ describe("runtime profiles", () => {
       expect(localSettings.hooks).toBeUndefined();
       expect(localSettings.statusLine).toBeUndefined();
       expect(settings.hooks).toBeDefined();
+    } finally {
+      restore();
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps Claude write homes like Astral while removing only Stop hooks", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-runtime-claude-write-local-"));
+    const nativeClaude = path.join(home, "native-claude");
+    fs.mkdirSync(nativeClaude, { recursive: true });
+    fs.writeFileSync(path.join(nativeClaude, "settings.local.json"), JSON.stringify({
+      mcpServers: { local: {} },
+      hooks: { Stop: [{ matcher: "" }], PreToolUse: [{ matcher: ".*" }] },
+      statusLine: { command: "echo hi" },
+      keep: true,
+    }));
+    const restore = withEnvForTest({ HOME: home, CLAUDE_CONFIG_DIR: nativeClaude });
+    try {
+      const write = materializeRuntimeHome({ provider: "claude", profile: "internalWrite", runId: "claude-write" });
+      const localSettings = JSON.parse(
+        fs.readFileSync(path.join(write.root!, "settings.local.json"), "utf-8"),
+      ) as Record<string, unknown>;
+      const settings = JSON.parse(
+        fs.readFileSync(path.join(write.root!, "settings.json"), "utf-8"),
+      ) as Record<string, unknown>;
+      const localHooks = localSettings.hooks as Record<string, unknown>;
+      const bundledHooks = settings.hooks as Record<string, unknown>;
+
+      expect(localSettings.keep).toBe(true);
+      expect(localSettings.mcpServers).toEqual({ local: {} });
+      expect(localSettings.statusLine).toEqual({ command: "echo hi" });
+      expect(localHooks.Stop).toBeUndefined();
+      expect(localHooks.PreToolUse).toEqual([{ matcher: ".*" }]);
+      expect(bundledHooks.Stop).toBeUndefined();
+      expect(bundledHooks.PreToolUse).toBeDefined();
     } finally {
       restore();
       fs.rmSync(home, { recursive: true, force: true });
@@ -172,7 +211,6 @@ describe("runtime profiles", () => {
     expect(sdkToolsForPolicy("none")).toEqual([]);
     expect(sdkToolsForPolicy("read-only")).toEqual(["Read", "Bash"]);
     expect(sdkToolsForPolicy("write")).toEqual(["Read", "Bash", ...TEXT_EDIT_TOOL_NAMES, "Glob", "Grep", "LS", "TodoWrite"]);
-    expect(sdkToolsForPolicy("write")).not.toContain(activeSpec().mcpWireName("check"));
   });
 
   it("builds Codex hook trust keys for the materialized hooks path", () => {

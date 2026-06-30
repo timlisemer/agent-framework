@@ -90,8 +90,10 @@ export function materializeRuntimeHome(input: {
         removeHooksConfig(input.provider, root);
       } else {
         syncAdapterHome(input.provider, root, env, input.profile);
-        removeMcpServerConfig(input.provider, root);
-        sanitizeLocalSettings(input.provider, root);
+        if (sessionPolicyForProfile(input.profile) !== "write") {
+          removeMcpServerConfig(input.provider, root);
+          sanitizeLocalSettings(input.provider, root);
+        }
       }
     }
 
@@ -209,8 +211,8 @@ function syncAdapterHome(
   copyDirectory(sourceRoot, destinationRoot);
   restorePreserved(destinationRoot, preserved);
   copyProviderAuthToHome(provider, destinationRoot, env);
-  adapter.rewriteConfig?.(destinationRoot, profile);
   if (sessionPolicyForProfile(profile) === "write") adapter.removeStopHookFromSettings?.(destinationRoot);
+  adapter.rewriteConfig?.(destinationRoot, profile);
   ensurePrivateDirectory(destinationRoot);
 }
 

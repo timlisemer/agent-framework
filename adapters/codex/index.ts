@@ -54,6 +54,7 @@ export const codexSpec: AdapterSpec = {
     sandboxModeForToolPolicy: RuntimeHome.sandboxModeForToolPolicy,
     removeMcpServerConfig: RuntimeHome.removeMcpServerConfig,
     removeHooksConfig: RuntimeHome.removeHooksConfig,
+    removeStopHookFromSettings: RuntimeHome.removeStopHookFromSettings,
     buildHookTrustBlock: RuntimeHome.buildHookTrustBlock,
   },
   recognizeMcp: MCP.recognizeMcp,

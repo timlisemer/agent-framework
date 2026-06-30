@@ -21,6 +21,7 @@ import type { AiRuntimeEvent } from "../ai-backend/runtime-events.js";
 import type { TokenUsage } from "../ai-protocol/index.js";
 import { assertManagedRuntimeHomeConfig, prepareManagedRuntimeHome, resolveNativeProviderRoot } from "./managed-runtime-home.js";
 import { materializeRuntimeHome, resolveRuntimeHomeProfile, type MaterializedRuntimeHome } from "../runtime-home/runtime-profiles.js";
+import { writePolicyRuntimeAccessSentence } from "./sdk-tool-policy-prompts.js";
 import { readJsonlTail } from "../utils/file-io.js";
 import { resolveTranscriptBinding } from "./transcript-binding.js";
 
@@ -87,6 +88,7 @@ export async function runClaudeAgent(
 
   const workingDir = config.workingDir ?? process.cwd();
   const isSubscription = resolvedProvider.type === PROVIDER_TYPES.CLAUDE_SUBSCRIPTION;
+  const sdkToolPolicy = config.sdkToolPolicy ?? "read-only";
   const tools = mode === "direct" ? [] : [...(input.tools ?? [])];
   const systemPrompt = mode === "direct"
     ? config.systemPrompt
@@ -94,7 +96,7 @@ export async function runClaudeAgent(
 
 ## TOOLS AVAILABLE
 
-${claudeSdkToolDescription(config.sdkToolPolicy ?? "read-only")}
+${claudeSdkToolDescription(sdkToolPolicy)}
 
 Use these tools when you need to:
 - Understand context around changed code
@@ -151,8 +153,7 @@ Your final response should be your complete analysis in the required format.`;
               abortController,
               subprocessEnv,
               {
-                tools,
-                allowedTools: tools,
+                ...claudeToolSelectionOptions(mode, sdkToolPolicy, tools),
                 permissionMode: "bypassPermissions",
                 allowDangerouslySkipPermissions: true,
                 maxTurns: mode === "direct" ? 1 : (config.maxTurns ?? 10),
@@ -577,6 +578,15 @@ export async function collectClaudeQueryResult(
   return collected;
 }
 
+function claudeToolSelectionOptions(
+  mode: "direct" | "sdk",
+  policy: ClaudeQueryOptionsConfig["sdkToolPolicy"],
+  tools: readonly string[],
+): Pick<ClaudeQueryOptionOverrides, "tools" | "allowedTools"> {
+  if (mode === "sdk" && policy === "write") return {};
+  return { tools, allowedTools: tools };
+}
+
 function toResult(outcome: SdkAttemptOutcome, resolvedProvider: ProviderRunInput["resolvedProvider"]): ProviderExecutionResult {
   return {
     text: outcome.text,
@@ -590,10 +600,7 @@ function toResult(outcome: SdkAttemptOutcome, resolvedProvider: ProviderRunInput
 
 function claudeSdkToolDescription(policy: ClaudeQueryOptionsConfig["sdkToolPolicy"]): string {
   if (policy === "write") {
-    return `You have access to implementation tools:
-- **Read/Bash/Glob/Grep/LS**: inspect code. Bash still flows through agent-framework guardrails.
-- **Write/Edit/MultiEdit/TodoWrite**: modify files only as required by the provided plan.
-Parent-owned workflow steps such as check are run outside this SDK agent.`;
+    return writePolicyRuntimeAccessSentence();
   }
   return `You have access to read-only tools for investigating code:
 - **Read**: View file contents.

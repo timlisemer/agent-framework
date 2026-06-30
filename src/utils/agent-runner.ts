@@ -44,11 +44,13 @@
  * ## SECURITY CONSIDERATIONS
  *
  * SDK mode defaults to Read + classified read-only Bash. Write-capable
- * implementation agents must opt into sdkToolPolicy: "write". SDK tool calls
- * flow through the normal hook and rule pipeline:
+ * implementation agents must opt into sdkToolPolicy: "write". Write-policy
+ * agents use the internal write runtime home's configured adapter tool
+ * surface, including MCP tools, while SDK tool calls flow through the normal
+ * hook and rule pipeline:
  * - Bash is allowed only for read-only search/navigation and safe read-only pipelines
  * - Execution and network commands are denied deterministically
- * - Write/Edit/MultiEdit access is available only for explicit write-policy agents
+ * - File edit tools are available only for explicit write-policy agents
  * - Git data is passed via prompt rather than gathered via git commands
  *
  * This lets reviewer SDK agents investigate without edits while allowing the
@@ -95,7 +97,7 @@ import { runProviderDirect, runProviderSdk } from "../providers/index.js";
 import type { ProviderContinuationState, ProviderExecutionResult } from "../providers/execution-types.js";
 import type { RuntimeHomeProfile, SdkToolPolicy } from "../providers/execution-types.js";
 import type { SdkRuntimeEnvironment } from "../ai-protocol/index.js";
-import { makeRuntimeRunId, sdkToolsForPolicy } from "../runtime-home/runtime-profiles.js";
+import { makeRuntimeRunId, resolveRuntimeHomeProfile, sdkToolsForPolicy } from "../runtime-home/runtime-profiles.js";
 
 /**
  * Default tools available to read-only SDK mode agents.
@@ -113,8 +115,8 @@ import { makeRuntimeRunId, sdkToolsForPolicy } from "../runtime-home/runtime-pro
  * Bash via bundled ugrep/bfs). Git data should be passed via the prompt
  * context rather than gathered via git commands.
  *
- * Explicit write-policy agents receive the policy-selected edit tools from
- * sdkToolsForPolicy; ordinary reviewer/validator agents stay read-only.
+ * Explicit write-policy agents use the configured internal write runtime-home
+ * surface; ordinary reviewer/validator agents stay read-only.
  */
 /**
  * Internal result from agent execution functions.
@@ -622,8 +624,9 @@ async function applyFormatValidation(
  *   read-only-heavy evaluation such as nix-eval-jobs, and safe read-only
  *   pipelines). Gated by the pre-tool-use hook via the normal Bash policy.
  *
- * Implementation agents must opt into sdkToolPolicy: "write" to receive
- * text edit tools for the provided plan.
+ * Implementation agents must opt into sdkToolPolicy: "write" to use the
+ * internal write runtime home's configured adapter tool surface, including
+ * MCP and file edit tools for the provided plan.
  *
  * Git data (status/diff/log/show) must be passed via the prompt context
  * rather than gathered via bash git commands -- those are denied by the hook.
@@ -652,11 +655,16 @@ async function runSdkAgent(
   const resolvedProvider = resolveProvider(config.tier, "sdk");
   const sdkToolPolicy = config.sdkToolPolicy ?? "read-only";
   const tools = [...sdkToolsForPolicy(sdkToolPolicy), ...(config.extraTools ?? [])];
+  const runtimeHomeProfile = config.runtimeHomeProfile ?? resolveRuntimeHomeProfile({
+    sdkRuntimeEnvironment: config.sdkRuntimeEnvironment ?? "isolated",
+    sdkToolPolicy,
+    runtimeExecutionMode: "sdk",
+  });
   return runProviderSdk({
     config: {
       ...config,
       sdkRuntimeEnvironment: config.sdkRuntimeEnvironment ?? "isolated",
-      runtimeHomeProfile: config.runtimeHomeProfile ?? "internalReadOnly",
+      runtimeHomeProfile,
       sdkToolPolicy,
       runtimeRunId: config.runtimeRunId ?? makeRuntimeRunId(config.name),
     },

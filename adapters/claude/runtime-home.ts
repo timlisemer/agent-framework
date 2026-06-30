@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import { removeHookByName } from "../shared/runtime-home-settings.js";
+import { readJson, writeJson } from "../../src/utils/file-io.js";
 import { isPathAtOrInside } from "../../src/utils/path-containment.js";
 
 export const CLAUDE_AUTH_FILES = [
@@ -59,8 +61,7 @@ export function sanitizeLocalSettings(root: string): void {
 
 export function removeStopHookFromSettings(root: string): void {
   mutateSettingsFiles(root, ["settings.json", "settings.local.json"], (settings) => {
-    const hooks = settings.hooks as Record<string, unknown> | undefined;
-    if (hooks) delete hooks.Stop;
+    removeHookByName(settings, "Stop");
   });
 }
 
@@ -72,8 +73,8 @@ function mutateSettingsFiles(
   for (const name of names) {
     const settingsPath = path.join(root, name);
     if (!fs.existsSync(settingsPath)) continue;
-    const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8")) as Record<string, unknown>;
+    const settings = readJson<Record<string, unknown>>(settingsPath);
     mutator(settings);
-    fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+    writeJson(settingsPath, settings);
   }
 }

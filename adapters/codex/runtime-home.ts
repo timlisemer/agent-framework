@@ -5,6 +5,8 @@ import {
   CODEX_HOOK_TRUST_END,
   buildCodexHookTrustBlock,
 } from "./hook-trust-state.js";
+import { removeHookByName } from "../shared/runtime-home-settings.js";
+import { readJson, writeJson } from "../../src/utils/file-io.js";
 import { isPathAtOrInside } from "../../src/utils/path-containment.js";
 import {
   codexSandboxModeForRuntimeProfile,
@@ -45,7 +47,7 @@ export function rewriteConfig(root: string, profile: RuntimeHomeProfile): void {
   let config = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf-8") : "";
   config = rewriteCodexHookTrustConfig({
     config,
-    hooksConfig: JSON.parse(fs.readFileSync(path.join(root, "hooks.json"), "utf8")),
+    hooksConfig: readJson<unknown>(path.join(root, "hooks.json")),
     codexHooksSourcePath: path.join(root, "hooks.json"),
   });
   const sandboxMode = codexSandboxModeForRuntimeProfile(profile);
@@ -64,9 +66,17 @@ export function removeHooksConfig(root: string): void {
   fs.rmSync(path.join(root, "hooks.json"), { force: true });
 }
 
+export function removeStopHookFromSettings(root: string): void {
+  const hooksPath = path.join(root, "hooks.json");
+  if (!fs.existsSync(hooksPath)) return;
+  const config = readJson<Record<string, unknown>>(hooksPath);
+  removeHookByName(config, "Stop");
+  writeJson(hooksPath, config);
+}
+
 export function buildHookTrustBlock(hooksConfigPath: string, codexHooksSourcePath: string): string {
   return buildCodexHookTrustBlock({
-    hooksConfig: JSON.parse(fs.readFileSync(hooksConfigPath, "utf8")),
+    hooksConfig: readJson<unknown>(hooksConfigPath),
     codexHooksSourcePath,
   });
 }

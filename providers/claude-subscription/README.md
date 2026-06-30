@@ -6,7 +6,7 @@ This provider uses the Claude Agent SDK / Claude Code runtime instead of Anthrop
 
 - `direct`: one Claude SDK turn, no tools.
 - `sdk`: Claude SDK with the framework's default read-only `Read` and `Bash` tool policy for reviewer-style agents.
-- Internal implementation workflows can opt into a disposable write-capable SDK profile with `Write`, `Edit`, `MultiEdit`, and search tools. Those runs use per-run framework-owned homes and leave check/validation to the parent workflow.
+- Internal implementation workflows can opt into a disposable write-capable SDK profile that keeps the same configured adapter tool surface as managed Astral, including MCP tools and file editing tools, while removing only the Stop hook. Those runs still use per-run framework-owned fake homes and leave parent-owned check/validation available to the workflow.
 
 Recommended config:
 
