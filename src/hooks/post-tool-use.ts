@@ -27,12 +27,13 @@ export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, enco
     sessionDir,
   });
   const canonical = spec.canonicalizeToolCall(input.tool_name, input.tool_input);
+  const canonicalPathOrCmd = extractPathOrCmd(canonical.toolInput);
   await appendToolLog(sessionDir, {
     ts: Date.now(),
-    tool: input.tool_name,
-    path: extractPathOrCmd(input.tool_input).path,
+    tool: canonical.toolName,
+    path: canonicalPathOrCmd.path,
     paths: extractFilePaths(canonical.toolName, canonical.toolInput),
-    cmd: extractPathOrCmd(input.tool_input).cmd,
+    cmd: canonicalPathOrCmd.cmd,
     status: "allowed",
     gate: "post-tool-use",
     ms: 0,

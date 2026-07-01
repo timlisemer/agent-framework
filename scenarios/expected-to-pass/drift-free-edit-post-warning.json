@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "name": "drift-free-edit-post-warning",
-  "description": "Promoted to expected-to-pass on 2026-05-19 after three scenario_tester sweeps consistently allowed this case. Post-Warning free-edit path: target is at level=1 with allowedSinceLevelChange=0 (Warning was issued once, no bypass edits yet). The next edit flows through without a drift-block denial; no other rule should fire.",
+  "description": "Promoted to expected-to-pass on 2026-05-19 after three scenario_tester sweeps consistently allowed this case. Post-Warning path: target is at level=1, and the current turn remains below the final-warning threshold. The next edit flows through without a drift-block denial; no other rule should fire.",
   "transcript": [
     {
       "role": "user",
@@ -53,13 +53,12 @@
     "currentWindowSize": 2,
     "driftState": {
       "/home/tim/.claude/plans/drift-scenario-test.md": {
-        "level": 1,
-        "allowedSinceLevelChange": 0
+        "level": 1
       }
     }
   },
   "expect": {
     "expected": "allow",
-    "notes": "Level 1 with 0 free edits used -> drift-block returns null. The rule advances state to {level:1, allowedSinceLevelChange:1} on the allow path so the post-Warning bypass window counts down toward the Final Warning trigger."
+    "notes": "Level 1 below 10 effective same-target edits returns null. The rule does not mutate drift state on the allow path."
   }
 }

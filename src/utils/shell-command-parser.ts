@@ -266,24 +266,32 @@ export function tokenizeShellSegment(segment: string): string[] {
 
 export function splitShellSegments(command: string): {
   segments: string[];
+  operators: Array<string | null>;
   hasComplexOperator: boolean;
   backgrounded: boolean;
 } {
   const basis = stripQuotedRegions(command);
   const splitRegex = /\s*(?:\|\||&&|[;|\n\r]|(?<![<>])&)\s*/g;
   const segments: string[] = [];
+  const operators: Array<string | null> = [];
   let last = 0;
   let hasComplexOperator = false;
   let backgrounded = false;
   for (const m of basis.matchAll(splitRegex)) {
     const operatorText = m[0];
+    const operatorMatch = operatorText.match(/\|\||&&|[;|\n\r]|(?<![<>])&/);
+    if (!operatorMatch || operatorMatch.index === undefined) continue;
+    const operatorStart = (m.index ?? 0) + operatorMatch.index;
+    const operatorEnd = operatorStart + operatorMatch[0].length;
     hasComplexOperator = true;
-    if (operatorText.includes("&") && !operatorText.includes("&&")) {
+    if (operatorMatch[0].includes("&") && operatorMatch[0] !== "&&") {
       backgrounded = true;
     }
-    segments.push(command.slice(last, m.index));
-    last = (m.index ?? 0) + operatorText.length;
+    segments.push(command.slice(last, operatorStart));
+    operators.push(operatorMatch[0]);
+    last = operatorEnd;
   }
   segments.push(command.slice(last));
-  return { segments, hasComplexOperator, backgrounded };
+  operators.push(null);
+  return { segments, operators, hasComplexOperator, backgrounded };
 }

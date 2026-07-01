@@ -735,6 +735,7 @@ async function main() {
       frustrationStreak: scenario.seed_state.frustrationStreak,
       currentWindowSize: scenario.seed_state.currentWindowSize,
       driftState: scenario.seed_state.driftState ?? {},
+      driftReductionCredits: {},
     };
     fs.writeFileSync(
       path.join(cacheDir, "state.json"),

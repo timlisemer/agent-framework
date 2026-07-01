@@ -5,7 +5,7 @@ import {
   extractDriftTargets,
 } from "../utils/drift-detector.js";
 import { isEditToolName } from "../utils/edit-tools.js";
-import { readToolLogEntries } from "../utils/session-store.js";
+import { readToolLogEntries, type DriftTargetState } from "../utils/session-store.js";
 
 export const driftDetectRule: PreToolRule = {
   name: "drift-block",
@@ -29,38 +29,11 @@ export const driftDetectRule: PreToolRule = {
       ctx.state.driftState,
       {
         allowMultiRegionEditRepetition: isExplicitMultiRegionEdit(ctx),
+        driftReductionCredits: ctx.state.driftReductionCredits ?? {},
       },
     );
     if (drift.detected) {
       return { fastDeny: drift.reason };
-    }
-
-    // Allow-path: advance allowedSinceLevelChange for warned/final-warned
-    // targets so the "3 free" / "1 free" bypass windows count down.
-    const targets = extractDriftTargets(ctx.toolInput);
-    if (targets.length > 0 && isEditToolName(ctx.toolName)) {
-      const updates = Object.fromEntries(targets.flatMap((target) => {
-        const state = ctx.state.driftState?.[target];
-        if (state && state.level > 0 && state.level < 3) {
-          return [[
-            target,
-            {
-              level: state.level,
-              allowedSinceLevelChange: state.allowedSinceLevelChange + 1,
-            },
-          ]];
-        }
-        return [];
-      }));
-      if (Object.keys(updates).length > 0) {
-        await ctx.stateManager.update((s) => ({
-          ...s,
-          driftState: {
-            ...(s.driftState ?? {}),
-            ...updates,
-          },
-        }));
-      }
     }
 
     return null;
@@ -70,16 +43,16 @@ export const driftDetectRule: PreToolRule = {
     const targets = extractDriftTargets(ctx.toolInput);
     if (targets.length === 0 || !isEditToolName(ctx.toolName)) return;
 
-    // Only graduate the loop/thrashing branch. All three drift messages share
-    // the substring `edits to "` (level 0/1/2/3 emissions in drift-detector.ts).
+    // Only graduate the loop branch. Drift messages share
+    // the substring `edits to "` (emissions in drift-detector.ts).
     // Workaround-escalation denials use a different shape and are excluded.
     if (!/edits to "/.test(reason)) return;
 
     await ctx.stateManager.update((s) => {
-      const nextEntries = Object.fromEntries(targets.map((target) => {
-        const prior = s.driftState?.[target] ?? { level: 0 as const, allowedSinceLevelChange: 0 };
-        const nextLevel = Math.min(prior.level + 1, 3) as 0 | 1 | 2 | 3;
-        return [target, { level: nextLevel, allowedSinceLevelChange: 0 }];
+      const nextEntries: Record<string, DriftTargetState> = Object.fromEntries(targets.map((target) => {
+        const prior = s.driftState?.[target] ?? { level: 0 as const };
+        const nextLevel: DriftTargetState["level"] = prior.level === 0 ? 1 : 2;
+        return [target, { level: nextLevel }];
       }));
       return {
         ...s,

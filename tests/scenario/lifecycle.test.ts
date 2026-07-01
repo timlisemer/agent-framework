@@ -4,12 +4,14 @@ import * as os from "os";
 import * as path from "path";
 import {
   onUserPromptTurn,
+  reduceDriftDetectionWindow,
   resetDriftDetectionWindow,
 } from "../../src/scenario/lifecycle.js";
 import {
   getSessionState,
   sessionStateDefaults,
   appendToolLog,
+  readToolLogEntries,
 } from "../../src/utils/session-store.js";
 
 describe("onUserPromptTurn", () => {
@@ -43,8 +45,9 @@ describe("onUserPromptTurn", () => {
       editIntentOverturnCount: 2,
       respondFirstChecked: true,
       driftState: {
-        "/tmp/file.ts": { level: 2, allowedSinceLevelChange: 1 },
+        "/tmp/file.ts": { level: 2 },
       },
+      driftReductionCredits: { "/tmp/file.ts": 3 },
       lastProcessedPlanApprovalToolUseId: "toolu_plan",
     });
 
@@ -61,6 +64,7 @@ describe("onUserPromptTurn", () => {
     expect(state.editIntentOverturnCount).toBe(0);
     expect(state.respondFirstChecked).toBe(false);
     expect(state.driftState).toEqual({});
+    expect(state.driftReductionCredits).toEqual({});
     expect(state.lastProcessedPlanApprovalToolUseId).toBeNull();
     expect(state.lastUserMessageTimestamp).toBeGreaterThan(0);
   });
@@ -83,8 +87,9 @@ describe("onUserPromptTurn", () => {
       editIntentOverturnCount: 2,
       respondFirstChecked: true,
       driftState: {
-        "/tmp/file.ts": { level: 2, allowedSinceLevelChange: 1 },
+        "/tmp/file.ts": { level: 2 },
       },
+      driftReductionCredits: { "/tmp/file.ts": 3 },
       lastProcessedPlanApprovalToolUseId: "toolu_plan",
       lastUserMessageTimestamp: 123,
     });
@@ -100,6 +105,36 @@ describe("onUserPromptTurn", () => {
     expect(state.respondFirstChecked).toBe(true);
     expect(state.lastProcessedPlanApprovalToolUseId).toBe("toolu_plan");
     expect(state.driftState).toEqual({});
+    expect(state.driftReductionCredits).toEqual({});
     expect(state.lastUserMessageTimestamp).toBeGreaterThan(123);
+  });
+
+  it("reduces the drift window by per-target credits without deleting tool-log entries", async () => {
+    const target = "/tmp/file.ts";
+    const other = "/tmp/other.ts";
+    for (let i = 0; i < 55; i++) {
+      await appendToolLog(tempDir, {
+        ts: i,
+        tool: "Edit",
+        path: i < 52 ? target : other,
+        status: "allowed",
+        gate: "all-rules",
+        ms: 1,
+      });
+    }
+
+    const stateManager = getSessionState(tempDir);
+    await stateManager.save({
+      ...sessionStateDefaults(),
+      lastUserMessageTimestamp: 10,
+      driftReductionCredits: { [target]: 1 },
+    });
+
+    await reduceDriftDetectionWindow(tempDir, 3);
+
+    const state = await stateManager.load();
+    expect(state.driftReductionCredits[target]).toBe(4);
+    expect(state.driftReductionCredits[other]).toBe(3);
+    expect(readToolLogEntries(tempDir, 100)).toHaveLength(55);
   });
 });

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getSingleRepoGitContextWithSiblingOverviewCancellable: vi.fn(),
   getRepoFullScopeContextsCancellable: vi.fn(),
   formatGitContextForRepos: vi.fn(),
+  resetDriftDetectionWindow: vi.fn(),
 }));
 
 vi.mock("../../../src/agents/mcp/check.js", () => ({
@@ -27,6 +28,10 @@ vi.mock("../../../src/utils/git-utils.js", () => ({
   getSingleRepoGitContextWithSiblingOverviewCancellable: mocks.getSingleRepoGitContextWithSiblingOverviewCancellable,
   getRepoFullScopeContextsCancellable: mocks.getRepoFullScopeContextsCancellable,
   formatGitContextForRepos: mocks.formatGitContextForRepos,
+}));
+
+vi.mock("../../../src/scenario/lifecycle.js", () => ({
+  resetDriftDetectionWindow: mocks.resetDriftDetectionWindow,
 }));
 
 import { formatCheckFailure, runConfirmAgent, runFullConfirmAgent } from "../../../src/agents/mcp/confirm.js";
@@ -71,10 +76,14 @@ src/bar.ts:8: 'unusedValue' is declared but its value is never read.
 
 describe("runConfirmAgent planfile context", () => {
   let tempDir: string;
+  let sessionDir: string;
 
   beforeEach(() => {
     vi.clearAllMocks();
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "confirm-agent-"));
+    const transcriptPath = path.join(tempDir, "transcript.jsonl");
+    fs.writeFileSync(transcriptPath, "");
+    sessionDir = getAgentFrameworkSessionDir({ projectDir: tempDir, transcriptPath });
     mocks.runCheckAgent.mockResolvedValue(`## Results
 - Errors: 0
 - Warnings: 0
@@ -141,10 +150,12 @@ describe("runConfirmAgent planfile context", () => {
     mocks.runAgent.mockResolvedValue({
       output: "## Verdict\nCONFIRMED: ok",
     });
+    mocks.resetDriftDetectionWindow.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
+    fs.rmSync(sessionDir, { recursive: true, force: true });
   });
 
   it("injects explicit optional_planfile content into confirm context", async () => {
@@ -160,6 +171,39 @@ describe("runConfirmAgent planfile context", () => {
     expect(context).toContain(planPath);
     expect(context).toContain("PLANFILE CONTENT:");
     expect(context).toContain("Implement x.");
+    expect(mocks.resetDriftDetectionWindow).toHaveBeenCalledWith(getAgentFrameworkSessionDir({ projectDir: tempDir }));
+  });
+
+  it("resets drift detection after check-failure returns", async () => {
+    mocks.runCheckAgent.mockResolvedValue(`## Results
+- Errors: 1
+- Warnings: 0
+- Status: FAIL
+
+## Errors
+type error
+`);
+
+    await runConfirmAgent(tempDir, "haiku");
+
+    expect(mocks.runAgent).not.toHaveBeenCalled();
+    expect(mocks.resetDriftDetectionWindow).toHaveBeenCalledWith(getAgentFrameworkSessionDir({ projectDir: tempDir }));
+  });
+
+  it("resets drift detection after deterministic planfile-error returns", async () => {
+    const missingPath = path.join(tempDir, "missing.md");
+
+    await runConfirmAgent(tempDir, "haiku", undefined, missingPath);
+
+    expect(mocks.runAgent).not.toHaveBeenCalled();
+    expect(mocks.resetDriftDetectionWindow).toHaveBeenCalledWith(getAgentFrameworkSessionDir({ projectDir: tempDir }));
+  });
+
+  it("resets drift detection after fullconfirm completion", async () => {
+    await runFullConfirmAgent(tempDir, "haiku");
+
+    expect(mocks.getRepoFullScopeContextsCancellable).toHaveBeenCalled();
+    expect(mocks.resetDriftDetectionWindow).toHaveBeenCalledWith(getAgentFrameworkSessionDir({ projectDir: tempDir }));
   });
 
   it("adds the Deduplication category to the confirm agent prompt and fallback output", async () => {

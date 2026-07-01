@@ -64,7 +64,7 @@ import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
-import { resetDriftDetectionWindow } from "../../scenario/lifecycle.js";
+import { reduceDriftDetectionWindow } from "../../scenario/lifecycle.js";
 import { runSupplementalDiagnosticProviders } from "../../utils/supplemental-diagnostics.js";
 import { parseCheckAgentResult } from "../../utils/check-result.js";
 
@@ -449,7 +449,7 @@ export async function runCheckAgent(
     const sessionDir = transcriptPath
       ? getAgentFrameworkSessionDir({ transcriptPath })
       : getAgentFrameworkSessionDir({ projectDir: workingDir });
-    await resetDriftDetectionWindow(sessionDir);
+    await reduceDriftDetectionWindow(sessionDir, 3);
   } catch {
     // Best-effort: check output must remain the authoritative result.
   }

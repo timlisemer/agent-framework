@@ -18,15 +18,15 @@ trusted_hash = "sha256:62a39c4172a840abe3edcc4afe039e01834e40008358318af94aef886
 
 [hooks.state."/home/tim/.codex/hooks.json:pre_tool_use:0:0"]
 enabled = true
-trusted_hash = "sha256:42e50415f0515d8082d3201b07beaf6b9460b38b47d49030b3e2dad4f2370feb"
+trusted_hash = "sha256:869d43e7cfdc29302f3a1dc531a2f01d2f9380080182e81609215a7fe70e239d"
 
 [hooks.state."/home/tim/.codex/hooks.json:permission_request:0:0"]
 enabled = true
-trusted_hash = "sha256:e8960ad5c6884a0c241f612c359c310964ffac40b7426402dc4d061cc68abb48"
+trusted_hash = "sha256:57a32aa0a9bd9297e1866b5697e05ce3cdf269592769a160a9dc161139a1cb73"
 
 [hooks.state."/home/tim/.codex/hooks.json:post_tool_use:0:0"]
 enabled = true
-trusted_hash = "sha256:862e2b786956a016193995419fcb793d2bf1f5738ceebdb094b3e03d6c53c588"
+trusted_hash = "sha256:fbf1de77f14967576812174e6f867f94f52d17855acd908ee299b11360ce9269"
 
 [hooks.state."/home/tim/.codex/hooks.json:stop:0:0"]
 enabled = true

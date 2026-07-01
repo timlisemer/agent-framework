@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   logAgentResult: vi.fn(),
   setTranscriptPath: vi.fn(),
   getAgentFrameworkSessionDir: vi.fn(),
-  resetDriftDetectionWindow: vi.fn(),
+  reduceDriftDetectionWindow: vi.fn(),
   runSupplementalDiagnosticProviders: vi.fn(),
 }));
 
@@ -51,7 +51,7 @@ vi.mock("../../../src/utils/paths.js", () => ({
 }));
 
 vi.mock("../../../src/scenario/lifecycle.js", () => ({
-  resetDriftDetectionWindow: mocks.resetDriftDetectionWindow,
+  reduceDriftDetectionWindow: mocks.reduceDriftDetectionWindow,
 }));
 
 vi.mock("../../../src/utils/supplemental-diagnostics.js", () => ({
@@ -285,7 +285,7 @@ describe("runCheckAgent supplemental diagnostics context", () => {
     mocks.getGitStatusCancellable.mockResolvedValue(" M src/example.ts");
     mocks.findDeletedOrRenamedFileReferenceIssuesCancellable.mockResolvedValue([]);
     mocks.getAgentFrameworkSessionDir.mockReturnValue(path.join(tempDir, ".agent-framework-session"));
-    mocks.resetDriftDetectionWindow.mockResolvedValue(undefined);
+    mocks.reduceDriftDetectionWindow.mockResolvedValue(undefined);
     mocks.runSupplementalDiagnosticProviders.mockResolvedValue(
       "TYPESCRIPT LANGUAGE SERVICE DIAGNOSTICS:\nsrc/example.ts:1:1 warning TS6385: deprecated",
     );
@@ -310,6 +310,7 @@ src/example.ts:1:1 warning TS6385: deprecated
   it("appends supplemental diagnostics before CHECK_AGENT summarization", async () => {
     await runCheckAgent(tempDir);
 
+    expect(mocks.reduceDriftDetectionWindow).toHaveBeenCalledWith(path.join(tempDir, ".agent-framework-session"), 3);
     expect(mocks.runSupplementalDiagnosticProviders).toHaveBeenCalledWith(tempDir, expect.any(Object));
     expect(mocks.runAgent).toHaveBeenCalled();
     const context = mocks.runAgent.mock.calls[0][1].context as string;

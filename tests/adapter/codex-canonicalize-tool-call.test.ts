@@ -13,4 +13,15 @@ describe("Codex canonicalizeToolCall", () => {
       },
     });
   });
+
+  it("canonicalizes raw edit_file and write_file aliases", () => {
+    expect(canonicalizeToolCall("edit_file", { file_path: "/repo/src/a.ts" })).toEqual({
+      toolName: "Edit",
+      toolInput: { file_path: "/repo/src/a.ts" },
+    });
+    expect(canonicalizeToolCall("write_file", { file_path: "/repo/src/b.ts" })).toEqual({
+      toolName: "Write",
+      toolInput: { file_path: "/repo/src/b.ts" },
+    });
+  });
 });

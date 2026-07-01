@@ -67,7 +67,48 @@ describe("classifyBashCommand", () => {
       const result = classifyBashCommand(command);
       expect(result.riskClass, command).toBe("blocked");
       expect(result.reason, command).toBe("shell redirect to file");
+      expect(result.workaroundCategory, command).toBe("file-write");
     }
+  });
+
+  it("blocks deterministic file-write commands with file-write workaround metadata", () => {
+    for (const command of [
+      "dd if=/tmp/in of=/tmp/out",
+      "install /tmp/source /tmp/target",
+      "install -d /tmp/outdir",
+      "install -t /tmp/outdir /tmp/source",
+      "install --target-directory=/tmp/outdir /tmp/source",
+      "cp /tmp/source /tmp/target",
+      "cp -t /tmp/outdir /tmp/source",
+      "cp --target-directory=/tmp/outdir /tmp/source",
+      "mv /tmp/source /tmp/target",
+      "mv -t /tmp/outdir /tmp/source",
+      "mv --target-directory=/tmp/outdir /tmp/source",
+    ]) {
+      const result = classifyBashCommand(command);
+      expect(result.riskClass, command).toBe("blocked");
+      expect(result.reason, command).toContain("file write");
+      expect(result.workaroundCategory, command).toBe("file-write");
+    }
+  });
+
+  it("classifies background shell file writes before generic file-write findings", () => {
+    for (const command of [
+      "printf x > /tmp/out &",
+      "bash -lc 'printf x > /tmp/out' &",
+    ]) {
+      const result = classifyBashCommand(command);
+      expect(result.riskClass, command).toBe("blocked");
+      expect(result.reason, command).toBe("background shell file write");
+      expect(result.workaroundCategory, command).toBe("background-file-write");
+    }
+  });
+
+  it("keeps foreground writes after unrelated background segments as file writes", () => {
+    const result = classifyBashCommand("sleep 1 & printf x > /tmp/out");
+    expect(result.riskClass).toBe("blocked");
+    expect(result.reason).toBe("shell redirect to file");
+    expect(result.workaroundCategory).toBe("file-write");
   });
 
   it("blocks destructive read-only command flags even when quoted", () => {

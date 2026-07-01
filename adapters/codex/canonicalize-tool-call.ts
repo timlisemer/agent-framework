@@ -5,6 +5,7 @@ import { extractApplyPatchPaths } from "./apply-patch-parser.js";
 const ALIAS: Readonly<Record<string, string>> = {
   apply_patch: "Edit",
   close_agent: "CloseAgent",
+  edit_file: "Edit",
   exec_command: "Bash",
   list_mcp_resources: "ListMcpResources",
   read_mcp_resource: "ReadMcpResource",
@@ -13,6 +14,7 @@ const ALIAS: Readonly<Record<string, string>> = {
   spawn_agent: "Agent",
   tool_search: "ToolSearch",
   wait_agent: "TaskOutput",
+  write_file: "Write",
 };
 
 function normalizeExecCommandInput(rawInput: unknown): unknown {

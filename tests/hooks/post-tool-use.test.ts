@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
 import { mainPostToolUse } from "../../src/hooks/post-tool-use.js";
 import { getAgentFrameworkSessionDir, sessionCurrentPlanFile, sessionPlanFile } from "../../src/utils/paths.js";
+import { readToolLogEntries } from "../../src/utils/session-store.js";
 
 vi.mock("../../src/utils/hook-bootstrap.js", async () => {
   const actual = await vi.importActual<typeof import("../../src/utils/hook-bootstrap.js")>(
@@ -147,5 +148,45 @@ describe("mainPostToolUse planfile sidecar", () => {
       path: planPath,
       planName: "multi-edit-plan",
     });
+  });
+
+  it("logs raw Codex edit_file successes as canonical Edit entries", async () => {
+    const filePath = path.join(tempDir, "src", "main.ts");
+
+    await mainPostToolUse(
+      {
+        session_id: "session-post",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "edit_file",
+        tool_input: { file_path: filePath },
+      },
+      codexEncoder,
+    );
+
+    const [entry] = readToolLogEntries(sessionDir, 1);
+    expect(entry.tool).toBe("Edit");
+    expect(entry.path).toBe(filePath);
+    expect(entry.paths).toEqual([filePath]);
+  });
+
+  it("logs raw Codex write_file successes as canonical Write entries", async () => {
+    const filePath = path.join(tempDir, "src", "main.ts");
+
+    await mainPostToolUse(
+      {
+        session_id: "session-post",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "write_file",
+        tool_input: { file_path: filePath },
+      },
+      codexEncoder,
+    );
+
+    const [entry] = readToolLogEntries(sessionDir, 1);
+    expect(entry.tool).toBe("Write");
+    expect(entry.path).toBe(filePath);
+    expect(entry.paths).toEqual([filePath]);
   });
 });

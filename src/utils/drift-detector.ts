@@ -10,6 +10,7 @@
 import type { DriftTargetState, ToolLogEntry } from "./session-store.js";
 import { findDestructiveFlagsFromCommand } from "./find-command-policy.js";
 import { isEditToolName, TEXT_EDIT_TOOL_NAMES_DISPLAY } from "./edit-tools.js";
+import { fileWritePolicyFingerprintCategories } from "./bash-policy/registry.js";
 
 export interface DriftSignal {
   detected: boolean;
@@ -23,6 +24,7 @@ const MULTI_REGION_EDIT_INTENT_RE =
 
 export interface DriftDetectionOptions {
   allowMultiRegionEditRepetition?: boolean;
+  driftReductionCredits?: Record<string, number>;
 }
 
 /**
@@ -49,8 +51,8 @@ export function extractDriftTarget(toolInput: unknown): string {
  * Detect drift between the current tool call and recent tool history.
  * Uses pure string/regex operations for speed.
  *
- * `driftState` holds the per-target escalation level (Warning → Final Warning
- * → Error) maintained by the drift-detect rule; when omitted, all targets are
+ * `driftState` holds the per-target escalation level (Warning → Final Warning)
+ * maintained by the drift-detect rule; when omitted, all targets are
  * treated as level 0.
  */
 export function detectDrift(
@@ -62,13 +64,14 @@ export function detectDrift(
 ): DriftSignal {
   const targets = extractDriftTargets(toolInput);
   for (const target of targets) {
-    const state = driftState?.[target] ?? { level: 0, allowedSinceLevelChange: 0 };
+    const state = driftState?.[target] ?? { level: 0 as const };
     const repetitionSignal = checkRepetition(
       toolName,
       target,
       recentToolLog,
       state,
       options.allowMultiRegionEditRepetition ?? false,
+      options.driftReductionCredits?.[target] ?? 0,
     );
     if (repetitionSignal.detected) return repetitionSignal;
   }
@@ -83,14 +86,12 @@ export function detectDrift(
 }
 
 /**
- * Graduated loop/thrashing detection.
+ * Graduated loop detection.
  *
- * Level 0 (normal): 4+ allowed edits to the same file → consolidation nudge.
- * Level 1 (post-nudge): 3 free edits, then a stronger consolidation nudge.
- * Level 2 (post-second-nudge): 1 free edit, then "thrashing" message.
- * Level 3 (clamped): every subsequent edit gets the "thrashing" message.
+ * Level 0 (normal): 5+ effective allowed edits to the same file → consolidation nudge.
+ * Level 1/2 (post-nudge): 10+ effective allowed edits → final warning.
  *
- * All three messages tell the AI to KEEP editing the file but consolidate the
+ * Both messages tell the AI to KEEP editing the file but consolidate the
  * remaining changes into one text edit call. They share the substring
  * `edits to "` so the drift-detect rule can recognize its own emissions in
  * onDenialConfirmed without relying on a Warning/Error prefix that the AI
@@ -105,42 +106,25 @@ function checkRepetition(
   recentToolLog: ToolLogEntry[],
   state: DriftTargetState,
   allowMultiRegionEditRepetition: boolean,
+  reductionCredit: number,
 ): DriftSignal {
   if (!target || !isEditToolName(toolName)) return NO_DRIFT;
   if (allowMultiRegionEditRepetition) return NO_DRIFT;
 
-  const sameTargetAllowedEdits = recentToolLog.filter(
-    (e) =>
-      toolLogEntryTargets(e).includes(target) &&
-      isEditToolName(e.tool) &&
-      e.status === "allowed",
-  );
-  const count = sameTargetAllowedEdits.length;
+  const rawCount = allowedEditCountForTarget(recentToolLog, target);
+  const count = Math.max(0, rawCount - reductionCredit);
 
-  const thrashingMessage = `${count} edits to "${target}" — you are thrashing. The fix is not to stop editing; it is to consolidate. Read the full current file, plan every remaining change, then apply them in ONE ${TEXT_EDIT_TOOL_NAMES_DISPLAY} call.`;
-
-  if (state.level === 3) {
-    return { detected: true, reason: thrashingMessage };
-  }
-
-  if (state.level === 2) {
-    if (state.allowedSinceLevelChange >= 1) {
-      return { detected: true, reason: thrashingMessage };
-    }
-    return NO_DRIFT;
-  }
-
-  if (state.level === 1) {
-    if (state.allowedSinceLevelChange >= 3) {
+  if (state.level > 0) {
+    if (count >= 10) {
       return {
         detected: true,
-        reason: `${count} edits to "${target}" — last nudge. Do NOT make another partial edit. Read the file, list every remaining change, then apply them all in a single ${TEXT_EDIT_TOOL_NAMES_DISPLAY} call.`,
+        reason: `${count} edits to "${target}" — final warning. Do NOT make another partial edit. Read the file, list every remaining change, then apply them all in a single ${TEXT_EDIT_TOOL_NAMES_DISPLAY} call.`,
       };
     }
     return NO_DRIFT;
   }
 
-  if (count >= 4) {
+  if (count >= 5) {
     return {
       detected: true,
       reason: `${count} edits to "${target}" — stop making many small edits. Read the full file, plan all remaining changes, and apply them in ONE ${TEXT_EDIT_TOOL_NAMES_DISPLAY} call. You may continue editing this file; just consolidate.`,
@@ -154,9 +138,24 @@ export function describesMultiRegionEditIntent(text: string): boolean {
   return MULTI_REGION_EDIT_INTENT_RE.test(text);
 }
 
-function toolLogEntryTargets(entry: ToolLogEntry): string[] {
+export function toolLogEntryTargets(entry: ToolLogEntry): string[] {
   if (entry.paths?.length) return entry.paths;
   return entry.path ? [entry.path] : [];
+}
+
+export function allowedEditTargetCounts(recentToolLog: ToolLogEntry[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const entry of recentToolLog) {
+    if (entry.status !== "allowed" || !isEditToolName(entry.tool)) continue;
+    for (const target of toolLogEntryTargets(entry)) {
+      counts[target] = (counts[target] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
+export function allowedEditCountForTarget(recentToolLog: ToolLogEntry[], target: string): number {
+  return allowedEditTargetCounts(recentToolLog)[target] ?? 0;
 }
 
 /**
@@ -204,6 +203,10 @@ function collectBashDenialFingerprints(command: string, reason: string): Set<str
 
   if (isFilteredCheckCommand(command) || /filter restricting check output/i.test(reason)) {
     fingerprints.add("check-output-filter");
+  }
+
+  for (const fingerprint of fileWritePolicyFingerprintCategories(command, reason)) {
+    fingerprints.add(fingerprint);
   }
 
   return fingerprints;

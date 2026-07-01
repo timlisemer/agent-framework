@@ -21,14 +21,10 @@ export type { ToolLogEntry } from "./tool-log-types.js";
 
 /**
  * Per-target state for graduated drift-block repetition detection.
- * level 0 = normal, 1 = post-Warning, 2 = post-Final-Warning, 3 = hard-errored.
- * allowedSinceLevelChange counts allowed edits since the last level-up; the
- * drift-detect rule uses it to enforce the "3 free then Final Warning" and
- * "1 free then Error" bypass windows.
+ * level 0 = normal, 1 = post-Warning, 2 = post-Final-Warning.
  */
 export interface DriftTargetState {
-  level: 0 | 1 | 2 | 3;
-  allowedSinceLevelChange: number;
+  level: 0 | 1 | 2;
 }
 
 export interface SessionState {
@@ -63,9 +59,14 @@ export interface SessionState {
   currentWindowSize: number;
   /**
    * Per-target drift-block escalation state, keyed by absolute file path.
-   * Written by drift-detect rule on allow-path increments and level-ups.
+   * Written by drift-detect rule on level-ups.
    */
   driftState: Record<string, DriftTargetState>;
+  /**
+   * Per-target same-turn drift count credits granted by check MCP runs.
+   * Credits reduce effective edit counts without truncating forensic logs.
+   */
+  driftReductionCredits: Record<string, number>;
   /**
    * tool_use_id of the most recently processed plan-approval tool_result.
    * Set when the PreToolUse plan-approval detector synthesizes a fresh
@@ -101,6 +102,7 @@ export function sessionStateDefaults(): SessionState {
     frustrationStreak: 0,
     currentWindowSize: 2,
     driftState: {},
+    driftReductionCredits: {},
     lastProcessedPlanApprovalToolUseId: null,
     lastUserMessageTimestamp: 0,
   };

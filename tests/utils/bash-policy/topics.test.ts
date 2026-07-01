@@ -42,6 +42,84 @@ describe("bash policy topics", () => {
     ]);
   });
 
+  it("emits deterministic file-write findings for command write forms", () => {
+    expect(fileWritePolicyFindings("dd if=/tmp/in of=/tmp/out")[0]).toMatchObject({
+      topic: "file-write",
+      name: "dd file write",
+      category: "file-write",
+    });
+    expect(fileWritePolicyFindings("install /tmp/source /tmp/target")[0]).toMatchObject({
+      topic: "file-write",
+      name: "install file write",
+      category: "file-write",
+    });
+    expect(fileWritePolicyFindings("install -d /tmp/outdir")[0]).toMatchObject({
+      topic: "file-write",
+      name: "install file write",
+      category: "file-write",
+    });
+    expect(fileWritePolicyFindings("install -t /tmp/outdir /tmp/source")[0]).toMatchObject({
+      topic: "file-write",
+      name: "install file write",
+      category: "file-write",
+    });
+    expect(fileWritePolicyFindings("install --target-directory=/tmp/outdir /tmp/source")[0]).toMatchObject({
+      topic: "file-write",
+      name: "install file write",
+      category: "file-write",
+    });
+    expect(fileWritePolicyFindings("cp /tmp/source /tmp/target")[0]).toMatchObject({
+      topic: "file-write",
+      name: "cp file write",
+      category: "file-write",
+    });
+    expect(fileWritePolicyFindings("cp -t /tmp/outdir /tmp/source")[0]).toMatchObject({
+      topic: "file-write",
+      name: "cp file write",
+      category: "file-write",
+    });
+    expect(fileWritePolicyFindings("cp --target-directory=/tmp/outdir /tmp/source")[0]).toMatchObject({
+      topic: "file-write",
+      name: "cp file write",
+      category: "file-write",
+    });
+    expect(fileWritePolicyFindings("mv /tmp/source /tmp/target")[0]).toMatchObject({
+      topic: "file-write",
+      name: "mv file write",
+      category: "file-write",
+    });
+    expect(fileWritePolicyFindings("mv -t /tmp/outdir /tmp/source")[0]).toMatchObject({
+      topic: "file-write",
+      name: "mv file write",
+      category: "file-write",
+    });
+    expect(fileWritePolicyFindings("mv --target-directory=/tmp/outdir /tmp/source")[0]).toMatchObject({
+      topic: "file-write",
+      name: "mv file write",
+      category: "file-write",
+    });
+  });
+
+  it("emits background file-write before generic nested shell redirect findings", () => {
+    expect(fileWritePolicyFindings("printf x > /tmp/out &").map((finding) => finding.name)).toEqual([
+      "background shell file write",
+      "shell redirect",
+      "echo redirect",
+    ]);
+    expect(fileWritePolicyFindings("bash -lc 'printf x > /tmp/out' &").map((finding) => finding.name)).toEqual([
+      "background shell file write",
+      "shell redirect",
+      "echo redirect",
+    ]);
+  });
+
+  it("does not promote foreground writes after unrelated background segments", () => {
+    expect(fileWritePolicyFindings("sleep 1 & printf x > /tmp/out").map((finding) => finding.name)).toEqual([
+      "shell redirect",
+      "echo redirect",
+    ]);
+  });
+
   it("preserves registry precedence with one terminal owner", () => {
     const result = evaluateBashPolicy("cd repo && npx tsc --noEmit");
 

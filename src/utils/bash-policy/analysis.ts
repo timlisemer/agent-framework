@@ -201,11 +201,14 @@ function collectInvocations(command: string, source: BashInvocationSource, seen:
 export function analyzeBashCommand(command: string): BashAnalysis {
   const trimmed = command.trim();
   const split = splitShellSegments(trimmed);
-  const segments = split.segments.map((segment) => {
+  const segments = split.segments.map((segment, index) => {
     const tokens = tokenizeShellSegment(segment.trim());
+    const operator = split.operators[index] ?? null;
     return {
       segment,
       tokens,
+      operator,
+      backgrounded: operator === "&",
       invocation: wrappedExecutableInvocation(tokens, segment.trim(), "direct"),
     };
   });

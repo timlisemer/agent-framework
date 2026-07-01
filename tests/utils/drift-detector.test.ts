@@ -14,74 +14,78 @@ function deniedBash(command: string, reason: string): ToolLogEntry {
 }
 
 describe("detectDrift - graduated repetition block", () => {
-  it("allows at level 0 when fewer than 4 allowed edits exist", () => {
-    const log: ToolLogEntry[] = [allowedEdit(), allowedEdit(), allowedEdit()];
-    const signal = detectDrift("Edit", { file_path: TARGET }, log, {});
-    expect(signal.detected).toBe(false);
-  });
-
-  it("denies with level-0 consolidation nudge once 4 allowed edits exist", () => {
+  it("allows at level 0 when only 4 allowed edits exist", () => {
     const log: ToolLogEntry[] = [allowedEdit(), allowedEdit(), allowedEdit(), allowedEdit()];
     const signal = detectDrift("Edit", { file_path: TARGET }, log, {});
+    expect(signal.detected).toBe(false);
+  });
+
+  it("denies with level-0 consolidation nudge once 5 allowed edits exist", () => {
+    const log: ToolLogEntry[] = Array.from({ length: 5 }, () => allowedEdit());
+    const signal = detectDrift("Edit", { file_path: TARGET }, log, {});
     expect(signal.detected).toBe(true);
-    expect(signal.reason.startsWith(`4 edits to "${TARGET}"`)).toBe(true);
+    expect(signal.reason.startsWith(`5 edits to "${TARGET}"`)).toBe(true);
     expect(signal.reason).toContain("stop making many small edits");
     expect(signal.reason).toContain("ONE Edit, MultiEdit, or Write call");
+    expect(signal.reason).not.toContain("you are thrashing");
   });
 
-  it("allows at level 1 until 3 free edits are consumed", () => {
+  it("allows at level 1 below 10 effective edits", () => {
     const drift: Record<string, DriftTargetState> = {
-      [TARGET]: { level: 1, allowedSinceLevelChange: 2 },
-    };
-    const log: ToolLogEntry[] = Array.from({ length: 10 }, () => allowedEdit());
-    const signal = detectDrift("Edit", { file_path: TARGET }, log, drift);
-    expect(signal.detected).toBe(false);
-  });
-
-  it("denies with last-nudge message when level 1 bypass window expires", () => {
-    const drift: Record<string, DriftTargetState> = {
-      [TARGET]: { level: 1, allowedSinceLevelChange: 3 },
-    };
-    const log: ToolLogEntry[] = Array.from({ length: 7 }, () => allowedEdit());
-    const signal = detectDrift("Edit", { file_path: TARGET }, log, drift);
-    expect(signal.detected).toBe(true);
-    expect(signal.reason.startsWith(`7 edits to "${TARGET}"`)).toBe(true);
-    expect(signal.reason).toContain("last nudge");
-  });
-
-  it("allows at level 2 for the single free edit", () => {
-    const drift: Record<string, DriftTargetState> = {
-      [TARGET]: { level: 2, allowedSinceLevelChange: 0 },
-    };
-    const log: ToolLogEntry[] = Array.from({ length: 8 }, () => allowedEdit());
-    const signal = detectDrift("Edit", { file_path: TARGET }, log, drift);
-    expect(signal.detected).toBe(false);
-  });
-
-  it("denies with thrashing message when level 2 bypass window expires", () => {
-    const drift: Record<string, DriftTargetState> = {
-      [TARGET]: { level: 2, allowedSinceLevelChange: 1 },
+      [TARGET]: { level: 1 },
     };
     const log: ToolLogEntry[] = Array.from({ length: 9 }, () => allowedEdit());
     const signal = detectDrift("Edit", { file_path: TARGET }, log, drift);
-    expect(signal.detected).toBe(true);
-    expect(signal.reason.startsWith(`9 edits to "${TARGET}"`)).toBe(true);
-    expect(signal.reason).toContain("you are thrashing");
+    expect(signal.detected).toBe(false);
   });
 
-  it("denies with thrashing message on every attempt at level 3", () => {
+  it("denies with final warning at level 1 once 10 effective edits exist", () => {
     const drift: Record<string, DriftTargetState> = {
-      [TARGET]: { level: 3, allowedSinceLevelChange: 0 },
+      [TARGET]: { level: 1 },
     };
-    const log: ToolLogEntry[] = Array.from({ length: 12 }, () => allowedEdit());
+    const log: ToolLogEntry[] = Array.from({ length: 10 }, () => allowedEdit());
     const signal = detectDrift("Edit", { file_path: TARGET }, log, drift);
     expect(signal.detected).toBe(true);
-    expect(signal.reason.startsWith(`12 edits to "${TARGET}"`)).toBe(true);
-    expect(signal.reason).toContain("you are thrashing");
+    expect(signal.reason.startsWith(`10 edits to "${TARGET}"`)).toBe(true);
+    expect(signal.reason).toContain("final warning");
+    expect(signal.reason).not.toContain("you are thrashing");
+  });
+
+  it("allows at level 2 below 10 effective edits", () => {
+    const drift: Record<string, DriftTargetState> = {
+      [TARGET]: { level: 2 },
+    };
+    const log: ToolLogEntry[] = Array.from({ length: 9 }, () => allowedEdit());
+    const signal = detectDrift("Edit", { file_path: TARGET }, log, drift);
+    expect(signal.detected).toBe(false);
+  });
+
+  it("denies with final warning at level 2 once 10 effective edits exist", () => {
+    const drift: Record<string, DriftTargetState> = {
+      [TARGET]: { level: 2 },
+    };
+    const log: ToolLogEntry[] = Array.from({ length: 10 }, () => allowedEdit());
+    const signal = detectDrift("Edit", { file_path: TARGET }, log, drift);
+    expect(signal.detected).toBe(true);
+    expect(signal.reason.startsWith(`10 edits to "${TARGET}"`)).toBe(true);
+    expect(signal.reason).toContain("final warning");
+    expect(signal.reason).not.toContain("you are thrashing");
+  });
+
+  it("applies reduction credits to the effective count", () => {
+    const drift: Record<string, DriftTargetState> = {
+      [TARGET]: { level: 1 },
+    };
+    const log: ToolLogEntry[] = Array.from({ length: 12 }, () => allowedEdit());
+    const signal = detectDrift("Edit", { file_path: TARGET }, log, drift, {
+      driftReductionCredits: { [TARGET]: 3 },
+    });
+    expect(signal.detected).toBe(false);
   });
 
   it("ignores denied edits when counting allowed edits at level 0", () => {
     const log: ToolLogEntry[] = [
+      allowedEdit(),
       allowedEdit(),
       allowedEdit(),
       allowedEdit(),
@@ -98,10 +102,10 @@ describe("detectDrift - graduated repetition block", () => {
   });
 
   it("works without a driftState argument (backward compatible)", () => {
-    const log: ToolLogEntry[] = [allowedEdit(), allowedEdit(), allowedEdit(), allowedEdit()];
+    const log: ToolLogEntry[] = Array.from({ length: 5 }, () => allowedEdit());
     const signal = detectDrift("Edit", { file_path: TARGET }, log);
     expect(signal.detected).toBe(true);
-    expect(signal.reason).toContain(`4 edits to "${TARGET}"`);
+    expect(signal.reason).toContain(`5 edits to "${TARGET}"`);
     expect(signal.reason).toContain("stop making many small edits");
   });
 });
@@ -262,5 +266,39 @@ describe("detectDrift - workaround escalation fingerprints", () => {
 
     expect(signal.detected).toBe(true);
     expect(signal.reason).toContain("check-output-filter");
+  });
+
+  it("denies repeated denied file-write workarounds", () => {
+    const log: ToolLogEntry[] = [
+      deniedBash("printf x > /tmp/out.txt", "shell redirect to file"),
+      deniedBash("dd if=/tmp/in of=/tmp/out.txt", "dd file write"),
+    ];
+
+    const signal = detectDrift(
+      "Bash",
+      { command: "cp /tmp/in /tmp/out.txt" },
+      log,
+      {},
+    );
+
+    expect(signal.detected).toBe(true);
+    expect(signal.reason).toContain("bash:file-write");
+  });
+
+  it("denies repeated denied background file-write workarounds from the current command", () => {
+    const log: ToolLogEntry[] = [
+      deniedBash("bash -lc 'printf x > /tmp/out.txt' &", "background shell file write"),
+      deniedBash("bash -lc 'dd if=/tmp/in of=/tmp/out.txt' &", "background shell file write"),
+    ];
+
+    const signal = detectDrift(
+      "Bash",
+      { command: "bash -lc 'cp /tmp/in /tmp/out.txt' &" },
+      log,
+      {},
+    );
+
+    expect(signal.detected).toBe(true);
+    expect(signal.reason).toContain("bash:background-file-write");
   });
 });

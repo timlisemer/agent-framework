@@ -18,6 +18,7 @@ import {
   FILE_WRITE_PATTERNS,
   SHELL_REDIRECT_DENY_REASON,
   fileWritePolicyFindings,
+  fileWritePolicyFingerprintCategories,
 } from "./topics/file-write.js";
 import {
   READ_ONLY_BASH_COMMANDS,
@@ -71,6 +72,8 @@ export {
   WORKAROUND_PATTERNS,
   checkReadOnlyBashAllowlist,
   detectWorkaroundCommand,
+  fileWritePolicyFindings,
+  fileWritePolicyFingerprintCategories,
   FIND_DESTRUCTIVE_DENY_REASON,
   FIND_DESTRUCTIVE_FLAG_NAMES,
   FIND_DESTRUCTIVE_FLAG_TOKEN_PATTERN,
@@ -229,6 +232,9 @@ function terminalResultForDenyFinding(
   };
   if (chosen.category === "install" || chosen.topic !== "read-only" && hasInstallWorkaround) {
     extra.workaroundCategory = "install";
+  }
+  if (chosen.topic === "file-write" && extra.workaroundCategory === undefined) {
+    extra.workaroundCategory = chosen.category ?? "file-write";
   }
   return ensureSingleTerminal({
     terminal: terminalFromFinding(chosen, riskClass, commandHead, extra),

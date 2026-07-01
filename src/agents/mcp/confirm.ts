@@ -49,6 +49,7 @@ import { readRecentUserMessagesArray } from "../../utils/transcript.js";
 import { runCheckAgent } from "./check.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 import { parseCheckAgentResult } from "../../utils/check-result.js";
+import { resetDriftDetectionWindow } from "../../scenario/lifecycle.js";
 
 import { activeSpec } from "../../adapter/spec.js";
 function getHookName(scopeKind: ConfirmReviewScopeKind = "uncommitted"): string {
@@ -463,62 +464,68 @@ async function runSharedConfirmAgent(
   const agentName = scopeKind === "full" ? "fullconfirm" : "confirm";
   logAgentStarted(agentName, getHookName(scopeKind));
 
-  const tier = parseTierName(tierName);
+  try {
+    const tier = parseTierName(tierName);
 
-  // Step 1: Run check agent first
-  const allRepoInfo = options.repoScope?.mode === "all" ? options.repoScope.repoInfo : undefined;
-  const checkResult = allRepoInfo
-    ? await runCheckAgent(allRepoInfo.mainRepo, undefined, {
-        ...options,
-        repoScope: { mode: "all", repoInfo: allRepoInfo },
-      })
-    : await runCheckAgent(workingDir, undefined, options);
+    // Step 1: Run check agent first
+    const allRepoInfo = options.repoScope?.mode === "all" ? options.repoScope.repoInfo : undefined;
+    const checkResult = allRepoInfo
+      ? await runCheckAgent(allRepoInfo.mainRepo, undefined, {
+          ...options,
+          repoScope: { mode: "all", repoInfo: allRepoInfo },
+        })
+      : await runCheckAgent(workingDir, undefined, options);
 
-  const parsedCheck = parseCheckAgentResult(checkResult);
+    const parsedCheck = parseCheckAgentResult(checkResult);
 
-  // Step 2: If check failed, decline immediately
-  if (parsedCheck.failed) {
-    // No confirm output or LLM call here: check output is the authoritative failure.
-    return formatCheckFailure(checkResult, parsedCheck.errorCount);
-  }
+    // Step 2: If check failed, decline immediately
+    if (parsedCheck.failed) {
+      // No confirm output or LLM call here: check output is the authoritative failure.
+      return formatCheckFailure(checkResult, parsedCheck.errorCount);
+    }
 
-  const planfile = await resolveConfirmPlanfile(workingDir, sessionContext.sessionDir, optionalPlanfile);
-  const deterministicErrors: string[] = [];
-  if (planfile.kind === "error") deterministicErrors.push(planfile.message);
-  if (deterministicErrors.length > 0) return deterministicErrors.join("\n");
+    const planfile = await resolveConfirmPlanfile(workingDir, sessionContext.sessionDir, optionalPlanfile);
+    const deterministicErrors: string[] = [];
+    if (planfile.kind === "error") deterministicErrors.push(planfile.message);
+    if (deterministicErrors.length > 0) return deterministicErrors.join("\n");
 
-  // Step 3: Get review scope data
-  throwIfAborted(options.signal);
-  const reviewContext = scopeKind === "full"
-    ? await buildFullReviewContext(workingDir, allRepoInfo, options)
-    : await buildUncommittedReviewContext(workingDir, allRepoInfo, options);
+    // Step 3: Get review scope data
+    throwIfAborted(options.signal);
+    const reviewContext = scopeKind === "full"
+      ? await buildFullReviewContext(workingDir, allRepoInfo, options)
+      : await buildUncommittedReviewContext(workingDir, allRepoInfo, options);
 
-  // Step 3.5: Pre-filter deterministic violations (file/extension-aware)
-  const prefilterSection = formatConfirmPrefilter(runConfirmPrefilter(reviewContext.status, reviewContext.diff));
-  const recentUserContext = await readRecentUserContextForConfirm(sessionContext.sessionDir);
-  const deduplicationRequirement = findDeduplicationUserRequirement([
-    filterGeneratedConfirmGuidance(extraContext),
-    recentUserContext,
-  ].join("\n"));
-  const deduplicationRequirementSection = formatDeduplicationRequirementContext(deduplicationRequirement);
+    // Step 3.5: Pre-filter deterministic violations (file/extension-aware)
+    const prefilterSection = formatConfirmPrefilter(runConfirmPrefilter(reviewContext.status, reviewContext.diff));
+    const recentUserContext = await readRecentUserContextForConfirm(sessionContext.sessionDir);
+    const deduplicationRequirement = findDeduplicationUserRequirement([
+      filterGeneratedConfirmGuidance(extraContext),
+      recentUserContext,
+    ].join("\n"));
+    const deduplicationRequirementSection = formatDeduplicationRequirementContext(deduplicationRequirement);
 
-  const baseContext = `${prefilterSection}${deduplicationRequirementSection}${formatPlanfileContext(planfile)}
+    const baseContext = `${prefilterSection}${deduplicationRequirementSection}${formatPlanfileContext(planfile)}
 
 REVIEW SCOPE: ${scopeKind === "full" ? "full git-visible code" : "uncommitted code changes"}
 REVIEW LINE COUNT: ${reviewContext.lineCount}
 
 ${reviewContext.context}${extraContext ? `\n\nUSER INSTRUCTIONS:\n${extraContext}` : ""}`;
-  const context = appendNormalizedMovesContext(baseContext, reviewContext.normalizedMoves);
-  const result = await runConfirmReviewAgents(workingDir, tier, reviewContext, context, options);
+    const context = appendNormalizedMovesContext(baseContext, reviewContext.normalizedMoves);
+    const result = await runConfirmReviewAgents(workingDir, tier, reviewContext, context, options);
 
-  logAgentResult(result, {
-    agent: agentName,
-    hookName: getHookName(scopeKind),
-    toolName: getHookName(scopeKind),
-    workingDir,
-    executionType: EXECUTION_TYPES.LLM,
-    decisionOverride: "CONFIRM",
-  });
+    logAgentResult(result, {
+      agent: agentName,
+      hookName: getHookName(scopeKind),
+      toolName: getHookName(scopeKind),
+      workingDir,
+      executionType: EXECUTION_TYPES.LLM,
+      decisionOverride: "CONFIRM",
+    });
 
-  return result.output;
+    return result.output;
+  } finally {
+    if (sessionContext.sessionDir) {
+      await resetDriftDetectionWindow(sessionContext.sessionDir).catch(() => undefined);
+    }
+  }
 }

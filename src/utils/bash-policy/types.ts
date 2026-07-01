@@ -27,6 +27,8 @@ export interface BashSegmentAnalysis {
   segment: string;
   tokens: string[];
   invocation: BashInvocation | null;
+  operator: string | null;
+  backgrounded: boolean;
 }
 
 export interface BashAnalysis {
@@ -43,7 +45,7 @@ export interface BashPolicyFinding {
   role: BashPolicyFindingRole;
   kind: BashPolicyFindingKind;
   name: string;
-  category?: CheckRoutedCategory | "install" | "run" | "git-write";
+  category?: CheckRoutedCategory | "install" | "run" | "git-write" | "file-write" | "background-file-write";
   reason: string;
   alternative?: string;
   equivalents?: string[];

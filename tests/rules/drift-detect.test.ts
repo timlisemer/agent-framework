@@ -67,19 +67,20 @@ describe("driftDetectRule.check — end-to-end level behavior", () => {
     fs.rmSync(sessionDir, { recursive: true, force: true });
   });
 
-  it("fastDenies level-0 nudge once 4 allowed edits exist", async () => {
-    writeToolLog(sessionDir, [allowedEdit(), allowedEdit(), allowedEdit(), allowedEdit()]);
+  it("fastDenies level-0 nudge once 5 allowed edits exist", async () => {
+    writeToolLog(sessionDir, Array.from({ length: 5 }, () => allowedEdit()));
     const ctx = await buildCtx(sessionDir, { driftState: {} });
     const result = await driftDetectRule.check(ctx);
     expect(result).not.toBeNull();
     expect(result).toHaveProperty("fastDeny");
     const { fastDeny } = result as { fastDeny: string };
-    expect(fastDeny.startsWith(`4 edits to "${TARGET}"`)).toBe(true);
+    expect(fastDeny.startsWith(`5 edits to "${TARGET}"`)).toBe(true);
     expect(fastDeny).toContain("stop making many small edits");
+    expect(fastDeny).not.toContain("you are thrashing");
   });
 
   it("allows repeated same-file edits when prediction explicitly describes multi-region work", async () => {
-    writeToolLog(sessionDir, [allowedEdit(), allowedEdit(), allowedEdit(), allowedEdit()]);
+    writeToolLog(sessionDir, Array.from({ length: 5 }, () => allowedEdit()));
     const ctx = await buildCtx(sessionDir, {
       driftState: {},
       currentPrediction: {
@@ -105,6 +106,7 @@ describe("driftDetectRule.check — end-to-end level behavior", () => {
       allowedMultiEdit([`${first}.2`, TARGET]),
       allowedMultiEdit([`${first}.3`, TARGET]),
       allowedMultiEdit([`${first}.4`, TARGET]),
+      allowedMultiEdit([`${first}.5`, TARGET]),
     ]);
     const ctx = await buildCtx(sessionDir, { driftState: {} }, {
       file_path: first,
@@ -115,50 +117,50 @@ describe("driftDetectRule.check — end-to-end level behavior", () => {
     const result = await driftDetectRule.check(ctx);
     expect(result).not.toBeNull();
     const { fastDeny } = result as { fastDeny: string };
-    expect(fastDeny.startsWith(`4 edits to "${TARGET}"`)).toBe(true);
+    expect(fastDeny.startsWith(`5 edits to "${TARGET}"`)).toBe(true);
   });
 
-  it("allows at level 0 with only 3 allowed edits", async () => {
-    writeToolLog(sessionDir, [allowedEdit(), allowedEdit(), allowedEdit()]);
+  it("allows at level 0 with only 4 allowed edits", async () => {
+    writeToolLog(sessionDir, [allowedEdit(), allowedEdit(), allowedEdit(), allowedEdit()]);
     const ctx = await buildCtx(sessionDir, { driftState: {} });
     const result = await driftDetectRule.check(ctx);
     expect(result).toBeNull();
   });
 
-  it("fastDenies last-nudge message at level 1 once bypass window (3) expires", async () => {
-    writeToolLog(sessionDir, Array.from({ length: 7 }, () => allowedEdit()));
+  it("fastDenies final warning at level 1 once 10 effective edits exist", async () => {
+    writeToolLog(sessionDir, Array.from({ length: 10 }, () => allowedEdit()));
     const ctx = await buildCtx(sessionDir, {
-      driftState: { [TARGET]: { level: 1, allowedSinceLevelChange: 3 } },
+      driftState: { [TARGET]: { level: 1 } },
     });
     const result = await driftDetectRule.check(ctx);
     expect(result).not.toBeNull();
     const { fastDeny } = result as { fastDeny: string };
-    expect(fastDeny.startsWith(`7 edits to "${TARGET}"`)).toBe(true);
-    expect(fastDeny).toContain("last nudge");
+    expect(fastDeny.startsWith(`10 edits to "${TARGET}"`)).toBe(true);
+    expect(fastDeny).toContain("final warning");
+    expect(fastDeny).not.toContain("you are thrashing");
   });
 
-  it("fastDenies thrashing message at level 2 once bypass window (1) expires", async () => {
-    writeToolLog(sessionDir, Array.from({ length: 9 }, () => allowedEdit()));
+  it("fastDenies final warning at level 2 once 10 effective edits exist", async () => {
+    writeToolLog(sessionDir, Array.from({ length: 10 }, () => allowedEdit()));
     const ctx = await buildCtx(sessionDir, {
-      driftState: { [TARGET]: { level: 2, allowedSinceLevelChange: 1 } },
+      driftState: { [TARGET]: { level: 2 } },
     });
     const result = await driftDetectRule.check(ctx);
     expect(result).not.toBeNull();
     const { fastDeny } = result as { fastDeny: string };
-    expect(fastDeny.startsWith(`9 edits to "${TARGET}"`)).toBe(true);
-    expect(fastDeny).toContain("you are thrashing");
+    expect(fastDeny.startsWith(`10 edits to "${TARGET}"`)).toBe(true);
+    expect(fastDeny).toContain("final warning");
+    expect(fastDeny).not.toContain("you are thrashing");
   });
 
-  it("fastDenies thrashing message on every attempt at level 3", async () => {
+  it("applies reduction credits when checking repeated edit counts", async () => {
     writeToolLog(sessionDir, Array.from({ length: 12 }, () => allowedEdit()));
     const ctx = await buildCtx(sessionDir, {
-      driftState: { [TARGET]: { level: 3, allowedSinceLevelChange: 0 } },
+      driftState: { [TARGET]: { level: 1 } },
+      driftReductionCredits: { [TARGET]: 3 },
     });
     const result = await driftDetectRule.check(ctx);
-    expect(result).not.toBeNull();
-    const { fastDeny } = result as { fastDeny: string };
-    expect(fastDeny.startsWith(`12 edits to "${TARGET}"`)).toBe(true);
-    expect(fastDeny).toContain("you are thrashing");
+    expect(result).toBeNull();
   });
 
   it("ignores log entries older than lastUserMessageTimestamp (per-turn reset)", async () => {
@@ -167,9 +169,10 @@ describe("driftDetectRule.check — end-to-end level behavior", () => {
       { ts: 200, tool: "Edit", path: TARGET, status: "allowed", gate: "edit-intent", ms: 0 },
       { ts: 300, tool: "Edit", path: TARGET, status: "allowed", gate: "edit-intent", ms: 0 },
       { ts: 400, tool: "Edit", path: TARGET, status: "allowed", gate: "edit-intent", ms: 0 },
+      { ts: 450, tool: "Edit", path: TARGET, status: "allowed", gate: "edit-intent", ms: 0 },
     ]);
-    // lastUserMessageTimestamp=500 → all four prior edits are filtered out, so
-    // the count drops from 4 to 0 and drift no longer fires.
+    // lastUserMessageTimestamp=500 filters all five prior edits, so the count
+    // drops from 5 to 0 and drift no longer fires.
     const ctx = await buildCtx(sessionDir, {
       driftState: {},
       lastUserMessageTimestamp: 500,
@@ -179,7 +182,7 @@ describe("driftDetectRule.check — end-to-end level behavior", () => {
   });
 });
 
-describe("driftDetectRule.check — allow-path state increments", () => {
+describe("driftDetectRule.check — allow-path state preservation", () => {
   let sessionDir: string;
 
   beforeEach(() => {
@@ -190,26 +193,26 @@ describe("driftDetectRule.check — allow-path state increments", () => {
     fs.rmSync(sessionDir, { recursive: true, force: true });
   });
 
-  it("increments allowedSinceLevelChange at level 1 when within bypass window", async () => {
+  it("does not mutate level 1 state on allowed edits below the final-warning threshold", async () => {
     writeToolLog(sessionDir, [allowedEdit(), allowedEdit()]);
     const ctx = await buildCtx(sessionDir, {
-      driftState: { [TARGET]: { level: 1, allowedSinceLevelChange: 1 } },
+      driftState: { [TARGET]: { level: 1 } },
     });
     const result = await driftDetectRule.check(ctx);
     expect(result).toBeNull();
     const after = await loadDriftState(sessionDir);
-    expect(after[TARGET]).toEqual({ level: 1, allowedSinceLevelChange: 2 });
+    expect(after[TARGET]).toEqual({ level: 1 });
   });
 
-  it("increments allowedSinceLevelChange at level 2 when within bypass window", async () => {
+  it("does not mutate level 2 state on allowed edits below the final-warning threshold", async () => {
     writeToolLog(sessionDir, [allowedEdit()]);
     const ctx = await buildCtx(sessionDir, {
-      driftState: { [TARGET]: { level: 2, allowedSinceLevelChange: 0 } },
+      driftState: { [TARGET]: { level: 2 } },
     });
     const result = await driftDetectRule.check(ctx);
     expect(result).toBeNull();
     const after = await loadDriftState(sessionDir);
-    expect(after[TARGET]).toEqual({ level: 2, allowedSinceLevelChange: 1 });
+    expect(after[TARGET]).toEqual({ level: 2 });
   });
 
   it("does NOT increment at level 0 (no level change yet)", async () => {
@@ -221,38 +224,18 @@ describe("driftDetectRule.check — allow-path state increments", () => {
     expect(after[TARGET]).toBeUndefined();
   });
 
-  it("does NOT increment at level 3 (terminal error state)", async () => {
-    writeToolLog(sessionDir, []);
-    const ctx = await buildCtx(sessionDir, {
-      driftState: { [TARGET]: { level: 3, allowedSinceLevelChange: 0 } },
-    });
-    // At level 3 the rule fastDenies, so we bypass the fastDeny path by using a
-    // non-edit tool to exercise the allow-path branch without triggering drift.
-    const readCtx = await buildCtx(
-      sessionDir,
-      { driftState: { [TARGET]: { level: 3, allowedSinceLevelChange: 0 } } },
-      { file_path: TARGET },
-      "Read",
-    );
-    const result = await driftDetectRule.check(readCtx);
-    expect(result).toBeNull();
-    const after = await loadDriftState(sessionDir);
-    expect(after[TARGET]).toEqual({ level: 3, allowedSinceLevelChange: 0 });
-    void ctx;
-  });
-
   it("does not touch driftState for non-edit tools", async () => {
     writeToolLog(sessionDir, []);
     const ctx = await buildCtx(
       sessionDir,
-      { driftState: { [TARGET]: { level: 1, allowedSinceLevelChange: 1 } } },
+      { driftState: { [TARGET]: { level: 1 } } },
       { file_path: TARGET },
       "Read",
     );
     const result = await driftDetectRule.check(ctx);
     expect(result).toBeNull();
     const after = await loadDriftState(sessionDir);
-    expect(after[TARGET]).toEqual({ level: 1, allowedSinceLevelChange: 1 });
+    expect(after[TARGET]).toEqual({ level: 1 });
   });
 });
 
@@ -267,69 +250,57 @@ describe("driftDetectRule.onDenialConfirmed — level transitions", () => {
     fs.rmSync(sessionDir, { recursive: true, force: true });
   });
 
-  it("advances level 0 → 1 on a level-0 drift reason, resetting allowedSinceLevelChange", async () => {
+  it("advances level 0 to 1 on a level-0 drift reason", async () => {
     const ctx = await buildCtx(sessionDir, { driftState: {} });
     await driftDetectRule.onDenialConfirmed!(
       ctx,
-      `4 edits to "${TARGET}" — stop making many small edits.`,
+      `5 edits to "${TARGET}" — stop making many small edits.`,
     );
     const after = await loadDriftState(sessionDir);
-    expect(after[TARGET]).toEqual({ level: 1, allowedSinceLevelChange: 0 });
+    expect(after[TARGET]).toEqual({ level: 1 });
   });
 
-  it("advances level 1 → 2 on a level-1 drift reason", async () => {
+  it("advances level 1 to 2 on a level-1 drift reason", async () => {
     const ctx = await buildCtx(sessionDir, {
-      driftState: { [TARGET]: { level: 1, allowedSinceLevelChange: 3 } },
+      driftState: { [TARGET]: { level: 1 } },
     });
     await driftDetectRule.onDenialConfirmed!(
       ctx,
-      `7 edits to "${TARGET}" — last nudge.`,
+      `10 edits to "${TARGET}" — final warning.`,
     );
     const after = await loadDriftState(sessionDir);
-    expect(after[TARGET]).toEqual({ level: 2, allowedSinceLevelChange: 0 });
+    expect(after[TARGET]).toEqual({ level: 2 });
   });
 
-  it("advances level 2 → 3 on a level-2 drift reason", async () => {
+  it("clamps at level 2 on subsequent drift denials", async () => {
     const ctx = await buildCtx(sessionDir, {
-      driftState: { [TARGET]: { level: 2, allowedSinceLevelChange: 1 } },
+      driftState: { [TARGET]: { level: 2 } },
     });
     await driftDetectRule.onDenialConfirmed!(
       ctx,
-      `9 edits to "${TARGET}" — you are thrashing.`,
+      `10 edits to "${TARGET}" — final warning.`,
     );
     const after = await loadDriftState(sessionDir);
-    expect(after[TARGET]).toEqual({ level: 3, allowedSinceLevelChange: 0 });
-  });
-
-  it("clamps at level 3 on subsequent thrashing denials", async () => {
-    const ctx = await buildCtx(sessionDir, {
-      driftState: { [TARGET]: { level: 3, allowedSinceLevelChange: 0 } },
-    });
-    await driftDetectRule.onDenialConfirmed!(
-      ctx,
-      `12 edits to "${TARGET}" — you are thrashing.`,
-    );
-    const after = await loadDriftState(sessionDir);
-    expect(after[TARGET]).toEqual({ level: 3, allowedSinceLevelChange: 0 });
+    expect(after[TARGET]).toEqual({ level: 2 });
   });
 
   it("ignores non-drift denial reasons (e.g. workaround escalation)", async () => {
     const ctx = await buildCtx(sessionDir, {
-      driftState: { [TARGET]: { level: 1, allowedSinceLevelChange: 2 } },
+      driftState: { [TARGET]: { level: 1 } },
     });
     await driftDetectRule.onDenialConfirmed!(
       ctx,
       "2 recent denials targeting \"foo\" - possible workaround escalation",
     );
     const after = await loadDriftState(sessionDir);
-    expect(after[TARGET]).toEqual({ level: 1, allowedSinceLevelChange: 2 });
+    expect(after[TARGET]).toEqual({ level: 1 });
   });
 
   it("does nothing when tool input has no target", async () => {
     const ctx = await buildCtx(sessionDir, { driftState: {} }, {});
     await driftDetectRule.onDenialConfirmed!(
       ctx,
-      `4 edits to "${TARGET}" — stop making many small edits.`,
+      `5 edits to "${TARGET}" — stop making many small edits.`,
     );
     const after = await loadDriftState(sessionDir);
     expect(after).toEqual({});
@@ -339,7 +310,7 @@ describe("driftDetectRule.onDenialConfirmed — level transitions", () => {
     const ctx = await buildCtx(sessionDir, { driftState: {} }, { file_path: TARGET }, "Read");
     await driftDetectRule.onDenialConfirmed!(
       ctx,
-      `4 edits to "${TARGET}" — stop making many small edits.`,
+      `5 edits to "${TARGET}" — stop making many small edits.`,
     );
     const after = await loadDriftState(sessionDir);
     expect(after).toEqual({});

@@ -17,7 +17,8 @@ import {
   sessionPlanModeStateFile,
   sessionStatuslineFile,
 } from "../utils/paths.js";
-import { getSessionState, sessionStateDefaults } from "../utils/session-store.js";
+import { allowedEditTargetCounts } from "../utils/drift-detector.js";
+import { getSessionState, readToolLogEntries, sessionStateDefaults } from "../utils/session-store.js";
 import { detectEpochChange, rotateEpoch, type Epoch } from "./epoch.js";
 
 /**
@@ -101,6 +102,7 @@ export async function onUserPromptTurn(sessionDir: string): Promise<void> {
       editIntentOverturnCount: 0,
       respondFirstChecked: false,
       driftState: {},
+      driftReductionCredits: {},
       lastProcessedPlanApprovalToolUseId: null,
       lastUserMessageTimestamp: Date.now(),
     }));
@@ -121,6 +123,34 @@ export async function resetDriftDetectionWindow(sessionDir: string): Promise<voi
   await stateManager.update((s) => ({
     ...s,
     driftState: {},
+    driftReductionCredits: {},
     lastUserMessageTimestamp: Date.now(),
   }));
+}
+
+/**
+ * Reduce the effective edit-drift repetition window without deleting logs.
+ *
+ * The reduction is stored as per-target credits and capped at the current raw
+ * count in the same recent window used by drift-detect.
+ */
+export async function reduceDriftDetectionWindow(sessionDir: string, reduction: number): Promise<void> {
+  const stateManager = getSessionState(sessionDir);
+  await stateManager.update((s) => {
+    const sinceTs = s.lastUserMessageTimestamp ?? 0;
+    const counts = allowedEditTargetCounts(
+      readToolLogEntries(sessionDir, 50).filter((entry) => entry.ts >= sinceTs),
+    );
+
+    const nextCredits = { ...(s.driftReductionCredits ?? {}) };
+    for (const [target, rawCountForTarget] of Object.entries(counts)) {
+      const currentCredit = s.driftReductionCredits?.[target] ?? 0;
+      nextCredits[target] = Math.min(rawCountForTarget, currentCredit + reduction);
+    }
+
+    return {
+      ...s,
+      driftReductionCredits: nextCredits,
+    };
+  });
 }
