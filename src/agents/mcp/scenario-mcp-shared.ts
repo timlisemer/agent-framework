@@ -809,6 +809,58 @@ export function formatStatusFooter(state: WorkflowState): string {
   return lines.join("\n");
 }
 
+interface TranscriptReplayWithFooterOptions {
+  prefer: "project" | "run";
+  rootOverride?: string;
+  transcriptPathOverride?: string;
+  postprocess?: (output: string) => string;
+}
+
+function runTranscriptReplayWithFooter(
+  transcriptName: string,
+  argsForTranscriptPath: (transcriptPath: string) => string[],
+  options: TranscriptReplayWithFooterOptions,
+): string {
+  const transcriptPath = resolveScenarioTranscriptPath(
+    transcriptName,
+    options.transcriptPathOverride,
+    { prefer: options.prefer },
+  );
+  const output = runReplayCommand(argsForTranscriptPath(transcriptPath), 600000, options.rootOverride);
+  const state = detectWorkflowState(transcriptName);
+  return output + (options.postprocess?.(output) ?? "") + formatStatusFooter(state);
+}
+
+export function runTranscriptListWithFooter(
+  transcriptName: string,
+  options: TranscriptReplayWithFooterOptions,
+): string {
+  return runTranscriptReplayWithFooter(
+    transcriptName,
+    (transcriptPath) => ["--list", "--transcript", transcriptPath],
+    options,
+  );
+}
+
+export function runTranscriptExpandWithFooter(
+  transcriptName: string,
+  target: string,
+  depth: number,
+  options: TranscriptReplayWithFooterOptions,
+): string {
+  return runTranscriptReplayWithFooter(
+    transcriptName,
+    (transcriptPath) => {
+      const args = ["--list", "--transcript", transcriptPath, "--expand", target];
+      if (depth > 1) {
+        args.push("--depth", String(depth));
+      }
+      return args;
+    },
+    options,
+  );
+}
+
 // ─── Transcript Discovery ──────────────────────────────────────────────────
 
 interface TranscriptInfo {
@@ -949,24 +1001,14 @@ export function readScenarioFile(name: string, filename: string): string {
 }
 
 /**
- * Describes one discoverable scenario across the four sources: home
- * (~/.agent-framework/test-runs/scenarios/<name>/scenario.json) and the
- * three repo-tracked fixture subfolders (expected-to-pass/, non-deterministic/,
- * expected-to-fail/ under <root>/scenarios/). `inputPath`
- * is what the scenario runner reads; `outputDir` is where cache/ and
- * report-scenario.json land — always under
- * ~/.agent-framework/test-runs/scenarios/<name>/ so the repo-tracked
- * fixture files never get polluted by per-run artifacts. `error` is set
- * when the fixture is malformed (filename stem does not match
- * scenario.name, or validateScenario rejects the JSON); such entries
- * must not be executed but are surfaced to the caller so the user sees
- * the broken fixture.
- */
-/**
  * Enumerate every scenario discoverable across four sources: home
  * (~/.agent-framework/test-runs/scenarios/) and the three repo-tracked
  * fixture subfolders (<root>/scenarios/expected-to-pass/,
  * non-deterministic/, expected-to-fail/). Entries are sorted alphabetically by name.
+ *
+ * `inputPath` is what the scenario runner reads; `outputDir` is where
+ * cache/ and report-scenario.json land, always under the home tree so
+ * repo-tracked fixtures are not polluted by per-run artifacts.
  *
  * Per-fixture validation errors (filename stem != scenario.name, or
  * validateScenario rejection) are attached to the entry as `error`

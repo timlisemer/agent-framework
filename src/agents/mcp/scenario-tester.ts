@@ -29,6 +29,8 @@ import {
   transcriptRunDir,
   readAllowedTestRunFile,
   runReplayCommand,
+  runTranscriptListWithFooter,
+  runTranscriptExpandWithFooter,
   runScenarioCommand,
   runScenarioCommandAsync,
   runJustBuild,
@@ -52,6 +54,13 @@ import { materializeScenario } from "../../scenario/materialize.js";
 const SINGLE_SCENARIO_TIMEOUT_MS = 300_000;
 const ALL_SCENARIOS_TIMEOUT_MS = 3_600_000;
 const ALL_SCENARIOS_CONCURRENCY = 8;
+const TESTER_ALLOWED_READ_FILES = [
+  "report.json",
+  "report-single.json",
+  "labels.json",
+  "labels.draft.json",
+  "notes_and_questions.md",
+] as const;
 
 // ─── Action Handlers ───────────────────────────────────────────────────────
 
@@ -131,43 +140,6 @@ function handleRunSingleHook(
   }
   const state = detectWorkflowState(transcriptName);
   return output + formatStatusFooter(state) + "\n\nWORKFLOW: You must call run_single_hook (free, unlimited) before your next run_test.";
-}
-
-function handleList(
-  transcriptName: string,
-  rootOverride?: string,
-  transcriptPathOverride?: string,
-): string {
-  const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
-  const output = runReplayCommand(["--list", "--transcript", transcriptPath], 600000, rootOverride);
-  const state = detectWorkflowState(transcriptName);
-  return output + formatStatusFooter(state);
-}
-
-function handleExpand(
-  transcriptName: string,
-  target: string,
-  depth: number,
-  rootOverride?: string,
-  transcriptPathOverride?: string,
-): string {
-  const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
-  const args = ["--list", "--transcript", transcriptPath, "--expand", target];
-  if (depth > 1) {
-    args.push("--depth", String(depth));
-  }
-  const output = runReplayCommand(args, 600000, rootOverride);
-  const state = detectWorkflowState(transcriptName);
-  return output + formatStatusFooter(state);
-}
-
-function handleReadFile(transcriptName: string, filename: string): string {
-  const allowedFiles = ["report.json", "report-single.json", "labels.json", "labels.draft.json", "notes_and_questions.md"];
-  return readAllowedTestRunFile(transcriptName, filename, allowedFiles);
-}
-
-function handleAppendNotes(transcriptName: string, content: string): string {
-  return appendTestRunNotes(transcriptName, content);
 }
 
 function handleRunScenario(
@@ -470,14 +442,6 @@ function handleReadScenario(scenarioName: string, filename: string): string {
   return readScenarioFile(scenarioName, filename);
 }
 
-function handleGitHash(): string {
-  return getVersion();
-}
-
-function handleHelp(): string {
-  return TESTER_HELP;
-}
-
 // ─── Transcript Path Resolution ────────────────────────────────────────────
 
 function resolveTranscriptPath(transcriptName: string, override?: string): string {
@@ -580,22 +544,30 @@ export async function handleScenarioTester(input: TesterInput): Promise<string> 
 
       case "list":
         if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleList(input.transcript_name, input.working_dir, input.transcript_path);
+        return runTranscriptListWithFooter(input.transcript_name, {
+          prefer: "run",
+          rootOverride: input.working_dir,
+          transcriptPathOverride: input.transcript_path,
+        });
 
       case "expand":
         if (!input.transcript_name) throw new Error("transcript_name is required");
         if (!input.target) throw new Error("target is required (tool_use_id or stop:N)");
-        return handleExpand(input.transcript_name, input.target, input.depth ?? 1, input.working_dir, input.transcript_path);
+        return runTranscriptExpandWithFooter(input.transcript_name, input.target, input.depth ?? 1, {
+          prefer: "run",
+          rootOverride: input.working_dir,
+          transcriptPathOverride: input.transcript_path,
+        });
 
       case "read_file":
         if (!input.transcript_name) throw new Error("transcript_name is required");
         if (!input.filename) throw new Error("filename is required");
-        return handleReadFile(input.transcript_name, input.filename);
+        return readAllowedTestRunFile(input.transcript_name, input.filename, TESTER_ALLOWED_READ_FILES);
 
       case "append_notes":
         if (!input.transcript_name) throw new Error("transcript_name is required");
         if (!input.content) throw new Error("content is required");
-        return handleAppendNotes(input.transcript_name, input.content);
+        return appendTestRunNotes(input.transcript_name, input.content);
 
       case "materialize_scenario":
         return await handleMaterializeScenario(
@@ -621,10 +593,10 @@ export async function handleScenarioTester(input: TesterInput): Promise<string> 
         return handleReadScenario(input.scenario_name, input.filename);
 
       case "git_hash":
-        return handleGitHash();
+        return getVersion();
 
       case "help":
-        return handleHelp();
+        return TESTER_HELP;
 
       default:
         throw new Error(

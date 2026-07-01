@@ -40,6 +40,8 @@ import {
   type PredictionAnnotation,
   type RichExpectation,
   runReplayCommand,
+  runTranscriptListWithFooter,
+  runTranscriptExpandWithFooter,
   getVersion,
   checkAndIncrementRunLimit,
   rollbackRunLimit,
@@ -48,6 +50,12 @@ import {
   appendTestRunNotes,
   resolveScenarioTranscriptPath,
 } from "./scenario-mcp-shared.js";
+
+const LABELER_ALLOWED_READ_FILES = [
+  "labels.draft.json",
+  "labels.json",
+  "notes_and_questions.md",
+] as const;
 
 /**
  * Return the canonical `expected` string for any LabelValue form. Used to
@@ -258,43 +266,6 @@ function handleAutoLabel(
   ].join("\n");
 }
 
-function handleList(
-  transcriptName: string,
-  transcriptPathOverride?: string,
-  rootOverride?: string,
-): string {
-  const transcriptPath = resolveTranscriptForList(transcriptName, transcriptPathOverride);
-  const output = runReplayCommand(
-    ["--list", "--transcript", transcriptPath],
-    600000,
-    rootOverride,
-  );
-  const state = detectWorkflowState(transcriptName);
-  return output + formatStatusFooter(state);
-}
-
-function handleExpand(
-  transcriptName: string,
-  target: string,
-  depth: number,
-  transcriptPathOverride?: string,
-  rootOverride?: string,
-): string {
-  const transcriptPath = resolveTranscriptForList(transcriptName, transcriptPathOverride);
-  const args = ["--list", "--transcript", transcriptPath, "--expand", target];
-  if (depth > 1) {
-    args.push("--depth", String(depth));
-  }
-  const output = runReplayCommand(args, 600000, rootOverride);
-  const state = detectWorkflowState(transcriptName);
-
-  // Augment with prediction context when the target's label carries a
-  // prediction annotation (or its tool-log entry's gate is prediction-block
-  // / batch-sibling). Best-effort: if files don't exist, just skip.
-  const predictionContext = collectPredictionContext(transcriptName, target);
-  return output + (predictionContext ? "\n\n" + predictionContext : "") + formatStatusFooter(state);
-}
-
 /**
  * For the labeler's expand action: inspect labels.draft.json (or labels.json
  * if the draft is gone) and the cache's tool-log.jsonl + state.json's
@@ -438,7 +409,7 @@ function handleValidate(
   transcriptPathOverride?: string,
   rootOverride?: string,
 ): string {
-  const transcriptPath = resolveTranscriptForList(transcriptName, transcriptPathOverride);
+  const transcriptPath = resolveRunTranscriptPath(transcriptName, transcriptPathOverride);
   const draftPath = path.join(transcriptRunDir(transcriptName), "labels.draft.json");
   if (!fs.existsSync(draftPath)) {
     throw new Error("labels.draft.json not found. Generate labels first.");
@@ -607,7 +578,7 @@ function handleFinalize(
   }
 
   // Step 4: Run validate via replay.ts
-  const transcriptPath = resolveTranscriptForList(transcriptName, transcriptPathOverride);
+  const transcriptPath = resolveRunTranscriptPath(transcriptName, transcriptPathOverride);
   const draftPath = path.join(transcriptRunDir(transcriptName), "labels.draft.json");
   try {
     runReplayCommand(
@@ -628,30 +599,13 @@ function handleFinalize(
   return `Finalized: labels.draft.json renamed to labels.json\nTotal labels: ${labelKeys.length}` + formatStatusFooter(state);
 }
 
-function handleReadFile(transcriptName: string, filename: string): string {
-  const allowedFiles = ["labels.draft.json", "labels.json", "notes_and_questions.md"];
-  return readAllowedTestRunFile(transcriptName, filename, allowedFiles);
-}
-
-function handleAppendNotes(transcriptName: string, content: string): string {
-  return appendTestRunNotes(transcriptName, content);
-}
-
-function handleGitHash(): string {
-  return getVersion();
-}
-
-function handleHelp(): string {
-  return LABELER_HELP;
-}
-
 // ─── Transcript Path Resolution ────────────────────────────────────────────
 
 function resolveTranscriptPath(transcriptName: string, override?: string): string {
   return resolveScenarioTranscriptPath(transcriptName, override, { prefer: "project" });
 }
 
-function resolveTranscriptForList(transcriptName: string, override?: string): string {
+function resolveRunTranscriptPath(transcriptName: string, override?: string): string {
   return resolveScenarioTranscriptPath(transcriptName, override, { prefer: "run" });
 }
 
@@ -745,12 +699,27 @@ export async function handleScenarioLabeler(input: LabelerInput): Promise<string
 
       case "list":
         if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleList(input.transcript_name, input.transcript_path, input.working_dir);
+        return runTranscriptListWithFooter(input.transcript_name, {
+          prefer: "run",
+          rootOverride: input.working_dir,
+          transcriptPathOverride: input.transcript_path,
+        });
 
-      case "expand":
+      case "expand": {
         if (!input.transcript_name) throw new Error("transcript_name is required");
         if (!input.target) throw new Error("target is required (tool_use_id or stop:N)");
-        return handleExpand(input.transcript_name, input.target, input.depth ?? 1, input.transcript_path, input.working_dir);
+        const transcriptName = input.transcript_name;
+        const target = input.target;
+        return runTranscriptExpandWithFooter(transcriptName, target, input.depth ?? 1, {
+          prefer: "run",
+          rootOverride: input.working_dir,
+          transcriptPathOverride: input.transcript_path,
+          postprocess: () => {
+            const predictionContext = collectPredictionContext(transcriptName, target);
+            return predictionContext ? "\n\n" + predictionContext : "";
+          },
+        });
+      }
 
       case "validate":
         if (!input.transcript_name) throw new Error("transcript_name is required");
@@ -810,18 +779,18 @@ export async function handleScenarioLabeler(input: LabelerInput): Promise<string
       case "read_file":
         if (!input.transcript_name) throw new Error("transcript_name is required");
         if (!input.filename) throw new Error("filename is required");
-        return handleReadFile(input.transcript_name, input.filename);
+        return readAllowedTestRunFile(input.transcript_name, input.filename, LABELER_ALLOWED_READ_FILES);
 
       case "append_notes":
         if (!input.transcript_name) throw new Error("transcript_name is required");
         if (!input.content) throw new Error("content is required");
-        return handleAppendNotes(input.transcript_name, input.content);
+        return appendTestRunNotes(input.transcript_name, input.content);
 
       case "git_hash":
-        return handleGitHash();
+        return getVersion();
 
       case "help":
-        return handleHelp();
+        return LABELER_HELP;
 
       default:
         throw new Error(
