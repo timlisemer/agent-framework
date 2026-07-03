@@ -62,11 +62,12 @@ import {
 } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
-import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
+import { isCancellationError, type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
 import { reduceDriftDetectionWindow } from "../../scenario/lifecycle.js";
 import { runSupplementalDiagnosticProviders } from "../../utils/supplemental-diagnostics.js";
 import { parseCheckAgentResult } from "../../utils/check-result.js";
+import { setMcpTimeoutPhase } from "../../mcp/timeout.js";
 
 import { activeSpec, registeredAdapterNames } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("check"); }
@@ -88,6 +89,48 @@ type CheckOptions = CancellationOptions & { repoScope?: CheckScope };
  * output samples).
  */
 const UNUSED_CODE_RE = /\b(unused|never read|declared but|not used|dead code)\b/i;
+const CHECK_CONTEXT_SECTION_MAX_BYTES = 256 * 1024;
+const CHECK_CONTEXT_TOTAL_MAX_BYTES = 768 * 1024;
+
+async function runCheckPhase<T>(phase: string, fn: () => Promise<T>): Promise<T> {
+  setMcpTimeoutPhase(phase);
+  try {
+    return await fn();
+  } finally {
+    setMcpTimeoutPhase(undefined);
+  }
+}
+
+function clipMiddleUtf8(text: string, maxBytes: number): string {
+  const byteLength = Buffer.byteLength(text, "utf-8");
+  if (byteLength <= maxBytes) return text;
+
+  const marker = `\n[agent-framework: check context truncated from ${byteLength} to ${maxBytes} bytes]\n`;
+  const markerBytes = Buffer.byteLength(marker, "utf-8");
+  const keepBytes = Math.max(0, maxBytes - markerBytes);
+  const headBytes = Math.floor(keepBytes * 0.65);
+  const tailBytes = keepBytes - headBytes;
+  const buffer = Buffer.from(text, "utf-8");
+  return buffer.subarray(0, headBytes).toString("utf-8") +
+    marker +
+    buffer.subarray(Math.max(headBytes, buffer.length - tailBytes)).toString("utf-8");
+}
+
+function clipCheckContextSection(section: string): string {
+  return clipMiddleUtf8(section, CHECK_CONTEXT_SECTION_MAX_BYTES);
+}
+
+function buildCheckAgentContext(input: {
+  status: string;
+  lintOutput: string;
+  checkOutput: string;
+  supplementalContext: string;
+}): string {
+  return clipMiddleUtf8(
+    `UNCOMMITTED FILES:\n${input.status || "(none)"}\n\n${input.lintOutput}${input.checkOutput}${input.supplementalContext}`,
+    CHECK_CONTEXT_TOTAL_MAX_BYTES,
+  );
+}
 
 /**
  * Move any `## Warnings` section lines that match the unused-code regex into
@@ -313,29 +356,44 @@ function isCommandAvailable(cmd: string): boolean {
   }
 }
 
-/**
- * Detect which linter is configured for the project.
- * Checks the target directory first, then falls back to the main repo.
- *
- * @returns Object with cmd and the directory to run it in, or null if no linter found
- */
-function detectLinter(
-  workingDir: string,
-  mainRepo: string
-): { cmd: string; dir: string } | null {
+function lintScriptCommand(dir: string): string | null {
+  const packageJsonPath = path.join(dir, "package.json");
+  if (!fs.existsSync(packageJsonPath)) return null;
+
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf-8")) as {
+      scripts?: Record<string, unknown>;
+    };
+    const lintScript = packageJson.scripts?.lint;
+    if (
+      typeof lintScript === "string" &&
+      /\beslint\b/.test(lintScript) &&
+      !/\b--fix\b/.test(lintScript)
+    ) {
+      return "npm run lint 2>&1";
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function detectLinterInDir(dir: string): { cmd: string; dir: string } | null {
+  const eslintFiles = [
+    "eslint.config.js",
+    "eslint.config.mjs",
+    "eslint.config.cjs",
+    ".eslintrc.js",
+    ".eslintrc.json",
+    ".eslintrc.yml",
+    ".eslintrc",
+  ];
+  if (eslintFiles.some((file) => fs.existsSync(path.join(dir, file)))) {
+    return { cmd: lintScriptCommand(dir) ?? "npx eslint . 2>&1", dir };
+  }
+
   const checks = [
-    {
-      files: [
-        "eslint.config.js",
-        "eslint.config.mjs",
-        "eslint.config.cjs",
-        ".eslintrc.js",
-        ".eslintrc.json",
-        ".eslintrc.yml",
-        ".eslintrc",
-      ],
-      cmd: "npx eslint . 2>&1",
-    },
     { files: ["Cargo.toml"], cmd: "cargo clippy 2>&1 || cargo check 2>&1" },
     {
       files: ["pyproject.toml", "setup.py"],
@@ -347,24 +405,33 @@ function detectLinter(
     },
   ];
 
-  // Check target directory first
   for (const { files, cmd } of checks) {
     for (const file of files) {
-      if (fs.existsSync(path.join(workingDir, file))) {
-        return { cmd, dir: workingDir };
+      if (fs.existsSync(path.join(dir, file))) {
+        return { cmd, dir };
       }
     }
   }
 
+  return null;
+}
+
+/**
+ * Detect which linter is configured for the project.
+ * Checks the target directory first, then falls back to the main repo.
+ *
+ * @returns Object with cmd and the directory to run it in, or null if no linter found
+ */
+function detectLinter(
+  workingDir: string,
+  mainRepo: string
+): { cmd: string; dir: string } | null {
+  const workingDirLinter = detectLinterInDir(workingDir);
+  if (workingDirLinter) return workingDirLinter;
+
   // Fall back to main repo if different
   if (mainRepo !== workingDir) {
-    for (const { files, cmd } of checks) {
-      for (const file of files) {
-        if (fs.existsSync(path.join(mainRepo, file))) {
-          return { cmd, dir: mainRepo };
-        }
-      }
-    }
+    return detectLinterInDir(mainRepo);
   }
 
   return null;
@@ -446,18 +513,23 @@ export async function runCheckAgent(
   logAgentStarted("check", getHookName());
 
   try {
-    const sessionDir = transcriptPath
-      ? getAgentFrameworkSessionDir({ transcriptPath })
-      : getAgentFrameworkSessionDir({ projectDir: workingDir });
-    await reduceDriftDetectionWindow(sessionDir, 3);
-  } catch {
+    await runCheckPhase("check drift-window setup", async () => {
+      const sessionDir = transcriptPath
+        ? getAgentFrameworkSessionDir({ transcriptPath })
+        : getAgentFrameworkSessionDir({ projectDir: workingDir });
+      await reduceDriftDetectionWindow(sessionDir, 3);
+    });
+  } catch (error) {
+    if (options.signal?.aborted || isCancellationError(error)) throw error;
     // Best-effort: check output must remain the authoritative result.
   }
 
   // Get main repo path for fallback
-  const repoInfo = options.repoScope?.mode === "all"
-    ? options.repoScope.repoInfo
-    : await getRepoInfoCancellable(workingDir, options);
+  const repoInfo = await runCheckPhase("check git repository scope", async () =>
+    options.repoScope?.mode === "all"
+      ? options.repoScope.repoInfo
+      : await getRepoInfoCancellable(workingDir, options)
+  );
   const mainRepo = repoInfo.mainRepo;
   const scopedRepos = options.repoScope?.mode === "all"
     ? sortReposWithChangesSubmodulesFirst(repoInfo)
@@ -469,12 +541,16 @@ export async function runCheckAgent(
     const statusSections: string[] = [];
     for (const repo of scopedRepos) {
       throwIfAborted(options.signal);
-      const repoStatus = await getGitStatusCancellable(repo.path, options);
+      const repoStatus = await runCheckPhase(`check git status for ${repo.name}`, () =>
+        getGitStatusCancellable(repo.path, options)
+      );
       statusSections.push(`=== ${repo.name} (${repo.path}) ===\n${repoStatus || "(none)"}`);
     }
     status = statusSections.join("\n\n");
   } else {
-    status = await getGitStatusCancellable(workingDir, options);
+    status = await runCheckPhase("check git status", () =>
+      getGitStatusCancellable(workingDir, options)
+    );
   }
 
   // Step 2: Run linter if configured (check workingDir first, then main repo)
@@ -491,10 +567,12 @@ export async function runCheckAgent(
       }
       seenLintInvocations.add(lintKey);
       throwIfAborted(options.signal);
-      const lint = await runProcessCancellable({ shell: true, command: linter.cmd }, linter.dir, options);
+      const lint = await runCheckPhase(`run linter: ${linter.cmd}`, () =>
+        runProcessCancellable({ shell: true, command: linter.cmd }, linter.dir, options)
+      );
       const lintLocation = linter.dir === repo.path ? "" : ` (from ${path.basename(linter.dir)})`;
       const repoLabel = options.repoScope?.mode === "all" ? ` for ${repo.name}` : "";
-      const section = `LINTER OUTPUT${repoLabel}${lintLocation} (exit code ${lint.exitCode}):\n${lint.output}`;
+      const section = clipCheckContextSection(`LINTER OUTPUT${repoLabel}${lintLocation} (exit code ${lint.exitCode}):\n${lint.output}`);
       lintSections.push(section);
       if (lint.exitCode !== 0) {
         commandErrors.push(section);
@@ -522,16 +600,19 @@ export async function runCheckAgent(
         }
         seenCheckInvocations.add(checkKey);
         throwIfAborted(options.signal);
-        const check = await runProcessCancellable(
-          { shell: true, command: invocation.cmd },
-          invocation.dir,
-          { ...options, env: invocation.env },
+        const check = await runCheckPhase(
+          `run ${invocation.type} check${invocation.adapter ? ` for ${invocation.adapter}` : ""}`,
+          () => runProcessCancellable(
+            { shell: true, command: invocation.cmd },
+            invocation.dir,
+            { ...options, env: invocation.env },
+          ),
         );
         const label = invocation.type === "just" ? "JUST CHECK" : "MAKE CHECK";
         const checkLocation = invocation.dir === repo.path ? "" : ` (from ${path.basename(invocation.dir)})`;
         const adapterLabel = invocation.adapter ? ` [adapter=${invocation.adapter}]` : "";
         const repoLabel = options.repoScope?.mode === "all" ? ` for ${repo.name}` : "";
-        const section = `${label} OUTPUT${adapterLabel}${repoLabel}${checkLocation} (exit code ${check.exitCode}):\n${check.output}`;
+        const section = clipCheckContextSection(`${label} OUTPUT${adapterLabel}${repoLabel}${checkLocation} (exit code ${check.exitCode}):\n${check.output}`);
         checkSections.push(section);
         if (check.exitCode !== 0) {
           commandErrors.push(section);
@@ -552,11 +633,14 @@ export async function runCheckAgent(
   const supplementalSections: string[] = [];
   for (const repo of scopedRepos) {
     throwIfAborted(options.signal);
-    const supplementalOutput = await runSupplementalDiagnosticProviders(repo.path, options);
+    const supplementalOutput = await runCheckPhase(`run supplemental diagnostics for ${repo.name}`, () =>
+      runSupplementalDiagnosticProviders(repo.path, options)
+    );
     if (supplementalOutput) {
-      supplementalSections.push(options.repoScope?.mode === "all"
+      const section = options.repoScope?.mode === "all"
         ? `SUPPLEMENTAL DIAGNOSTICS for ${repo.name} (${repo.path}):\n${supplementalOutput}`
-        : supplementalOutput);
+        : supplementalOutput;
+      supplementalSections.push(clipCheckContextSection(section));
     }
   }
   const supplementalOutput = supplementalSections.join("\n\n");
@@ -567,7 +651,9 @@ export async function runCheckAgent(
   const deterministicErrors: string[] = [];
   for (const repo of scopedRepos) {
     throwIfAborted(options.signal);
-    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repo.path, options);
+    const issues = await runCheckPhase(`run deterministic filename-reference diagnostics for ${repo.name}`, () =>
+      findDeletedOrRenamedFileReferenceIssuesCancellable(repo.path, options)
+    );
     deterministicErrors.push(
       ...issues.map((issue) =>
         formatDeletedOrRenamedReferenceError(repo, issue, options.repoScope?.mode === "all")
@@ -576,13 +662,21 @@ export async function runCheckAgent(
   }
 
   // Step 5: Use unified runner for analysis
-  const result = await runAgent(
-    { ...CHECK_AGENT, workingDir },
-    {
-      prompt: "Summarize the following check results:",
-      context: `UNCOMMITTED FILES:\n${status || "(none)"}\n\n${lintOutput}${checkOutput}${supplementalContext}`,
-    },
-    options
+  const result = await runCheckPhase(
+    "summarize check output",
+    () => runAgent(
+      { ...CHECK_AGENT, workingDir },
+      {
+        prompt: "Summarize the following check results:",
+        context: buildCheckAgentContext({
+          status,
+          lintOutput,
+          checkOutput,
+          supplementalContext,
+        }),
+      },
+      options,
+    ),
   );
 
   const summarizerFailed =

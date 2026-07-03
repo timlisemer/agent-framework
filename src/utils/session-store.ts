@@ -8,12 +8,13 @@
  * @module session-store
  */
 
+import * as fs from "fs";
 import * as path from "path";
 import {
   CacheManager,
 } from "./cache-manager.js";
 import { sessionToolLogFile, sessionStateFile } from "./paths.js";
-import { appendJsonlEntry, appendJsonlEntrySync, readJsonl } from "./file-io.js";
+import { appendJsonlEntry, appendJsonlEntrySync, readJsonlTail } from "./file-io.js";
 import type { ToolPrediction } from "./prediction-types.js";
 import type { PriorErrorContext } from "./prior-error-context.js";
 import type { ToolLogEntry } from "./tool-log-types.js";
@@ -109,6 +110,7 @@ export function sessionStateDefaults(): SessionState {
 }
 
 type SessionStateManager = CacheManager<SessionState>;
+const TOOL_LOG_TAIL_MAX_BYTES = 1024 * 1024;
 
 /**
  * Append a tool log entry to the session's JSONL tool log.
@@ -121,7 +123,23 @@ export async function appendToolLog(sessionDir: string, entry: ToolLogEntry): Pr
  * Read the last N entries from the tool log as parsed ToolLogEntry objects.
  */
 export function readToolLogEntries(sessionDir: string, count: number): ToolLogEntry[] {
-  return readJsonl<ToolLogEntry>(sessionToolLogFile(sessionDir), { tail: count });
+  if (count <= 0) return [];
+
+  const toolLogPath = sessionToolLogFile(sessionDir);
+  let fileSize: number;
+  try {
+    fileSize = fs.statSync(toolLogPath).size;
+  } catch {
+    return [];
+  }
+  if (fileSize === 0) return [];
+
+  let maxBytes = Math.min(TOOL_LOG_TAIL_MAX_BYTES, fileSize);
+  while (true) {
+    const entries = readJsonlTail<ToolLogEntry>(toolLogPath, maxBytes, count);
+    if (entries.length >= count || maxBytes >= fileSize) return entries;
+    maxBytes = Math.min(maxBytes * 2, fileSize);
+  }
 }
 
 interface PriorErrorReadOptions {

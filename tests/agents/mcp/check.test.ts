@@ -320,6 +320,41 @@ src/example.ts:1:1 warning TS6385: deprecated
     expect(context).toContain("src/example.ts:1:1 warning TS6385: deprecated");
   });
 
+  it("prefers a safe package lint script over raw eslint dot", async () => {
+    fs.writeFileSync(path.join(tempDir, "eslint.config.js"), "export default [];\n");
+    fs.writeFileSync(
+      path.join(tempDir, "package.json"),
+      JSON.stringify({ scripts: { lint: "eslint src" } }),
+    );
+    mocks.runProcessCancellable.mockResolvedValue({
+      output: "lint passed",
+      exitCode: 0,
+    });
+
+    await runCheckAgent(tempDir);
+
+    expect(mocks.runProcessCancellable).toHaveBeenCalledWith(
+      { shell: true, command: "npm run lint 2>&1" },
+      tempDir,
+      expect.any(Object),
+    );
+  });
+
+  it("clips large command output before CHECK_AGENT summarization", async () => {
+    fs.writeFileSync(path.join(tempDir, "Makefile"), "check:\n\ttrue\n");
+    mocks.runProcessCancellable.mockResolvedValue({
+      output: `${"a".repeat(400_000)}tail-marker`,
+      exitCode: 0,
+    });
+
+    await runCheckAgent(tempDir);
+
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("[agent-framework: check context truncated");
+    expect(context).toContain("tail-marker");
+    expect(Buffer.byteLength(context, "utf-8")).toBeLessThan(800_000);
+  });
+
   it("appends deleted filename references as deterministic check errors", async () => {
     mocks.findDeletedOrRenamedFileReferenceIssuesCancellable.mockResolvedValue([
       {

@@ -36,6 +36,14 @@ describe("supplementalDiagnosticProviders", () => {
 
     expect(supplementalDiagnosticProviders[0].detect(dir)).toBe(true);
   });
+
+  it("does not detect TypeScript projects only from skipped generated directories", () => {
+    const dir = makeFixture("supplemental-skipped-");
+    fs.mkdirSync(path.join(dir, "target"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "target", "generated.ts"), "const value = 1;\n");
+
+    expect(supplementalDiagnosticProviders[0].detect(dir)).toBe(false);
+  });
 });
 
 describe("runSupplementalDiagnosticProviders", () => {
@@ -111,6 +119,50 @@ value;
     const output = await runSupplementalDiagnosticProviders(dir);
 
     expect(output).toContain("TYPESCRIPT LANGUAGE SERVICE DIAGNOSTICS:");
-    expect(output).toContain("info: typescript-language-service-suggestions could not run:");
+    expect(output).toContain("info: could not read tsconfig.json:");
+  });
+
+  it("uses nested tsconfig projects instead of a synthetic root project", async () => {
+    const dir = makeFixture("supplemental-nested-tsconfig-");
+    const appDir = path.join(dir, "app");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          target: "ES2022",
+          module: "NodeNext",
+          moduleResolution: "NodeNext",
+        },
+        files: ["index.ts"],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(appDir, "index.ts"),
+      `interface Legacy {
+  /** @deprecated use next */
+  old: string;
+}
+
+const value: Legacy = { old: "x" };
+value.old;
+`,
+    );
+    fs.writeFileSync(
+      path.join(dir, "ignored.ts"),
+      `interface RootLegacy {
+  /** @deprecated ignored */
+  old: string;
+}
+
+const ignored: RootLegacy = { old: "x" };
+ignored.old;
+`,
+    );
+
+    const output = await runSupplementalDiagnosticProviders(dir);
+
+    expect(output).toContain("app/index.ts");
+    expect(output).not.toContain("ignored.ts");
   });
 });

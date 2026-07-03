@@ -137,4 +137,34 @@ describe("onUserPromptTurn", () => {
     expect(state.driftReductionCredits[other]).toBe(3);
     expect(readToolLogEntries(tempDir, 100)).toHaveLength(55);
   });
+
+  it("reads recent tool-log entries from a large log tail", () => {
+    const oldEntries = Array.from({ length: 200 }, (_, i) =>
+      JSON.stringify({
+        ts: i,
+        tool: "Edit",
+        path: `/tmp/old-${i}.ts`,
+        status: "allowed",
+        gate: "all-rules",
+        reason: "x".repeat(8192),
+        ms: 1,
+      })
+    );
+    const largeReason = "x".repeat(400 * 1024);
+    const recentEntries = [
+      { ts: 201, tool: "Edit", path: "/tmp/recent-1.ts", status: "allowed", gate: "all-rules", reason: largeReason, ms: 1 },
+      { ts: 202, tool: "Edit", path: "/tmp/recent-2.ts", status: "allowed", gate: "all-rules", reason: largeReason, ms: 1 },
+      { ts: 203, tool: "Edit", path: "/tmp/recent-3.ts", status: "allowed", gate: "all-rules", reason: largeReason, ms: 1 },
+    ];
+    fs.writeFileSync(
+      path.join(tempDir, "tool-log.jsonl"),
+      `${oldEntries.join("\n")}\n${recentEntries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+    );
+
+    expect(readToolLogEntries(tempDir, 3).map((entry) => entry.path)).toEqual([
+      "/tmp/recent-1.ts",
+      "/tmp/recent-2.ts",
+      "/tmp/recent-3.ts",
+    ]);
+  });
 });

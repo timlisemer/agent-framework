@@ -1,9 +1,28 @@
 import * as fs from "fs";
 import * as path from "path";
 import { createRequire } from "module";
+import { runProcessCancellable } from "./command.js";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
 
 type TypeScript = typeof import("typescript");
+
+type TypeScriptProject = {
+  rootDir: string;
+  label: string;
+  rootFileNames: string[];
+  options: import("typescript").CompilerOptions;
+};
+
+type TypeScriptProjectReadResult = {
+  projects: TypeScriptProject[];
+  notes: string[];
+};
+
+type RecursiveFileDiscoveryOptions = {
+  limit: number;
+  includeFile: (fileName: string, fullPath: string) => boolean;
+  skipDirectory?: (dirName: string) => boolean;
+};
 
 export type SupplementalDiagnosticProvider = {
   name: string;
@@ -12,14 +31,26 @@ export type SupplementalDiagnosticProvider = {
 };
 
 const SKIPPED_DIRS = new Set([
+  ".cache",
   ".git",
+  ".next",
+  ".nuxt",
+  ".svelte-kit",
+  "build",
   "coverage",
   "dist",
   "generated",
   "node_modules",
   "out",
+  "public",
+  "target",
   "vendor",
 ]);
+
+const MAX_TYPESCRIPT_PROJECTS = 20;
+const MAX_TYPESCRIPT_ROOT_FILES = 1_000;
+const GIT_FILE_LIST_MAX_BYTES = 4 * 1024 * 1024;
+const SUPPLEMENTAL_PROVIDER_MAX_MS = 30_000;
 
 function hasTypeScriptDependency(workingDir: string): boolean {
   const packageJsonPath = path.join(workingDir, "package.json");
@@ -39,10 +70,29 @@ function hasTypeScriptDependency(workingDir: string): boolean {
   }
 }
 
-function discoverTypeScriptFiles(workingDir: string): string[] {
+function shouldSkipDirectory(name: string): boolean {
+  return SKIPPED_DIRS.has(name);
+}
+
+function isTypeScriptSourceFile(fileName: string): boolean {
+  return (
+    (fileName.endsWith(".ts") || fileName.endsWith(".tsx")) &&
+    !fileName.endsWith(".d.ts")
+  );
+}
+
+function discoverFilesRecursive(
+  workingDir: string,
+  {
+    limit,
+    includeFile,
+    skipDirectory = shouldSkipDirectory,
+  }: RecursiveFileDiscoveryOptions,
+): string[] {
   const files: string[] = [];
 
   function visit(dir: string): void {
+    if (files.length >= limit) return;
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -53,18 +103,14 @@ function discoverTypeScriptFiles(workingDir: string): string[] {
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (!SKIPPED_DIRS.has(entry.name)) {
-          visit(fullPath);
-        }
+        if (!skipDirectory(entry.name)) visit(fullPath);
+        if (files.length >= limit) return;
         continue;
       }
 
-      if (
-        entry.isFile() &&
-        (entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")) &&
-        !entry.name.endsWith(".d.ts")
-      ) {
+      if (entry.isFile() && includeFile(entry.name, fullPath)) {
         files.push(fullPath);
+        if (files.length >= limit) return;
       }
     }
   }
@@ -74,17 +120,37 @@ function discoverTypeScriptFiles(workingDir: string): string[] {
   return files;
 }
 
+function discoverTypeScriptConfigPaths(workingDir: string): string[] {
+  const rootTsconfig = path.join(workingDir, "tsconfig.json");
+  if (fs.existsSync(rootTsconfig)) return [rootTsconfig];
+
+  return discoverFilesRecursive(workingDir, {
+    limit: MAX_TYPESCRIPT_PROJECTS,
+    includeFile: (fileName) => fileName === "tsconfig.json",
+  });
+}
+
+function discoverTypeScriptFiles(
+  workingDir: string,
+  limit = MAX_TYPESCRIPT_ROOT_FILES + 1,
+): string[] {
+  return discoverFilesRecursive(workingDir, {
+    limit,
+    includeFile: isTypeScriptSourceFile,
+  });
+}
+
 function detectTypeScriptProject(workingDir: string): boolean {
   return (
-    fs.existsSync(path.join(workingDir, "tsconfig.json")) ||
+    discoverTypeScriptConfigPaths(workingDir).length > 0 ||
     hasTypeScriptDependency(workingDir) ||
-    discoverTypeScriptFiles(workingDir).length > 0
+    discoverTypeScriptFiles(workingDir, 1).length > 0
   );
 }
 
-function resolveTypeScript(workingDir: string): TypeScript {
+function resolveTypeScript(projectDir: string): TypeScript {
   try {
-    const projectRequire = createRequire(path.join(workingDir, "package.json"));
+    const projectRequire = createRequire(path.join(projectDir, "package.json"));
     return projectRequire("typescript") as TypeScript;
   } catch {
     const frameworkRequire = createRequire(import.meta.url);
@@ -105,47 +171,152 @@ function formatTypeScriptDiagnostic(
   return `${relativePath}:${position.line + 1}:${position.character + 1} warning TS${diagnostic.code}: ${message}`;
 }
 
-function readTypeScriptProject(
+function readTypeScriptConfigProject(
   ts: TypeScript,
   workingDir: string,
-): {
-  rootFileNames: string[];
-  options: import("typescript").CompilerOptions;
-} {
-  const tsconfigPath = path.join(workingDir, "tsconfig.json");
-  if (fs.existsSync(tsconfigPath)) {
-    const readResult = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
-    if (readResult.error) {
-      throw new Error(ts.flattenDiagnosticMessageText(readResult.error.messageText, " "));
+  tsconfigPath: string,
+): TypeScriptProject {
+  const rootDir = path.dirname(tsconfigPath);
+  const readResult = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+  if (readResult.error) {
+    throw new Error(ts.flattenDiagnosticMessageText(readResult.error.messageText, " "));
+  }
+
+  const parsed = ts.parseJsonConfigFileContent(
+    readResult.config,
+    ts.sys,
+    rootDir,
+  );
+  if (parsed.errors.length > 0) {
+    const message = parsed.errors
+      .map((error) => ts.flattenDiagnosticMessageText(error.messageText, " "))
+      .join("; ");
+    throw new Error(message);
+  }
+
+  return {
+    rootDir,
+    label: path.relative(workingDir, tsconfigPath) || "tsconfig.json",
+    rootFileNames: parsed.fileNames.filter(isTypeScriptSourceFile),
+    options: parsed.options,
+  };
+}
+
+function defaultCompilerOptions(ts: TypeScript): import("typescript").CompilerOptions {
+  return {
+    jsx: ts.JsxEmit.ReactJSX,
+    module: ts.ModuleKind.NodeNext,
+    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    skipLibCheck: true,
+    target: ts.ScriptTarget.ES2022,
+  };
+}
+
+async function discoverGitVisibleTypeScriptFiles(
+  workingDir: string,
+  options: CancellationOptions,
+): Promise<string[] | null> {
+  const result = await runProcessCancellable(
+    {
+      shell: false,
+      file: "git",
+      args: ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+    },
+    workingDir,
+    {
+      ...options,
+      maxStdoutBytes: GIT_FILE_LIST_MAX_BYTES,
+      maxStderrBytes: 64 * 1024,
+    },
+  );
+  if (result.exitCode !== 0) return null;
+  if ((result.output || "").includes("[agent-framework: stdout truncated after")) return null;
+
+  return (result.output || "")
+    .split("\0")
+    .filter(isTypeScriptSourceFile)
+    .map((fileName) => path.join(workingDir, fileName))
+    .sort();
+}
+
+async function readTypeScriptProjects(
+  ts: TypeScript,
+  workingDir: string,
+  options: CancellationOptions,
+): Promise<TypeScriptProjectReadResult> {
+  const notes: string[] = [];
+  const tsconfigPaths = discoverTypeScriptConfigPaths(workingDir);
+  if (tsconfigPaths.length > 0) {
+    if (tsconfigPaths.length >= MAX_TYPESCRIPT_PROJECTS) {
+      notes.push(`info: typescript-language-service-suggestions limited tsconfig discovery to ${MAX_TYPESCRIPT_PROJECTS} projects.`);
     }
 
-    const parsed = ts.parseJsonConfigFileContent(
-      readResult.config,
-      ts.sys,
-      workingDir,
-    );
-    if (parsed.errors.length > 0) {
-      const message = parsed.errors
-        .map((error) => ts.flattenDiagnosticMessageText(error.messageText, " "))
-        .join("; ");
-      throw new Error(message);
+    const projects: TypeScriptProject[] = [];
+    for (const tsconfigPath of tsconfigPaths.slice(0, MAX_TYPESCRIPT_PROJECTS)) {
+      throwIfAborted(options.signal);
+      try {
+        const project = readTypeScriptConfigProject(ts, workingDir, tsconfigPath);
+        if (project.rootFileNames.length > MAX_TYPESCRIPT_ROOT_FILES) {
+          notes.push(
+            `info: skipped ${project.label}: ${project.rootFileNames.length} TypeScript root files exceeds supplemental limit ${MAX_TYPESCRIPT_ROOT_FILES}.`,
+          );
+          continue;
+        }
+        if (project.rootFileNames.length > 0) projects.push(project);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        notes.push(`info: could not read ${path.relative(workingDir, tsconfigPath)}: ${message}`);
+      }
     }
+    return { projects, notes };
+  }
 
+  const gitVisibleFiles = await discoverGitVisibleTypeScriptFiles(workingDir, options);
+  const rootFileNames = gitVisibleFiles ?? discoverTypeScriptFiles(workingDir);
+  if (rootFileNames.length > MAX_TYPESCRIPT_ROOT_FILES) {
     return {
-      rootFileNames: parsed.fileNames,
-      options: parsed.options,
+      projects: [],
+      notes: [
+        `info: skipped fallback TypeScript diagnostics: ${rootFileNames.length} TypeScript files without a tsconfig exceeds supplemental limit ${MAX_TYPESCRIPT_ROOT_FILES}.`,
+      ],
     };
   }
 
   return {
-    rootFileNames: discoverTypeScriptFiles(workingDir),
-    options: {
-      jsx: ts.JsxEmit.ReactJSX,
-      module: ts.ModuleKind.NodeNext,
-      moduleResolution: ts.ModuleResolutionKind.NodeNext,
-      skipLibCheck: true,
-      target: ts.ScriptTarget.ES2022,
+    projects: rootFileNames.length > 0
+      ? [{
+          rootDir: workingDir,
+          label: gitVisibleFiles ? "git-visible TypeScript files" : "discovered TypeScript files",
+          rootFileNames,
+          options: defaultCompilerOptions(ts),
+        }]
+      : [],
+    notes,
+  };
+}
+
+function createLanguageServiceHost(
+  ts: TypeScript,
+  project: TypeScriptProject,
+): import("typescript").LanguageServiceHost {
+  return {
+    getCompilationSettings: () => project.options,
+    getCurrentDirectory: () => project.rootDir,
+    getDefaultLibFileName: (compilerOptions) => ts.getDefaultLibFilePath(compilerOptions),
+    getScriptFileNames: () => project.rootFileNames,
+    getScriptSnapshot: (fileName) => {
+      if (!ts.sys.fileExists(fileName)) return undefined;
+      const content = ts.sys.readFile(fileName);
+      return content === undefined ? undefined : ts.ScriptSnapshot.fromString(content);
     },
+    getScriptVersion: () => "0",
+    readFile: ts.sys.readFile,
+    fileExists: ts.sys.fileExists,
+    directoryExists: ts.sys.directoryExists,
+    getDirectories: ts.sys.getDirectories,
+    readDirectory: ts.sys.readDirectory,
+    realpath: ts.sys.realpath,
+    useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
   };
 }
 
@@ -158,44 +329,51 @@ async function runTypeScriptLanguageServiceSuggestions(
   try {
     throwIfAborted(options.signal);
     const ts = resolveTypeScript(workingDir);
-    const project = readTypeScriptProject(ts, workingDir);
-    if (project.rootFileNames.length === 0) return "";
+    const { projects, notes } = await readTypeScriptProjects(ts, workingDir, options);
+    if (projects.length === 0 && notes.length === 0) return "";
 
-    const host: import("typescript").LanguageServiceHost = {
-      getCompilationSettings: () => project.options,
-      getCurrentDirectory: () => workingDir,
-      getDefaultLibFileName: (compilerOptions) => ts.getDefaultLibFilePath(compilerOptions),
-      getScriptFileNames: () => project.rootFileNames,
-      getScriptSnapshot: (fileName) => {
-        if (!ts.sys.fileExists(fileName)) return undefined;
-        const content = ts.sys.readFile(fileName);
-        return content === undefined ? undefined : ts.ScriptSnapshot.fromString(content);
-      },
-      getScriptVersion: () => "0",
-      readFile: ts.sys.readFile,
-      fileExists: ts.sys.fileExists,
-      directoryExists: ts.sys.directoryExists,
-      getDirectories: ts.sys.getDirectories,
-      readDirectory: ts.sys.readDirectory,
-      realpath: ts.sys.realpath,
-      useCaseSensitiveFileNames: () => ts.sys.useCaseSensitiveFileNames,
-    };
-
-    const service = ts.createLanguageService(host, ts.createDocumentRegistry());
+    const deadline = Date.now() + SUPPLEMENTAL_PROVIDER_MAX_MS;
     const lines: string[] = [];
-    for (const fileName of project.rootFileNames) {
+    let stoppedForBudget = false;
+    for (const project of projects) {
       throwIfAborted(options.signal);
-      const diagnostics = service
-        .getSuggestionDiagnostics(fileName)
-        .filter((diagnostic) => diagnostic.reportsDeprecated);
-      for (const diagnostic of diagnostics) {
-        const formatted = formatTypeScriptDiagnostic(ts, workingDir, diagnostic);
-        if (formatted) lines.push(formatted);
+      if (Date.now() > deadline) {
+        stoppedForBudget = true;
+        break;
       }
+
+      const service = ts.createLanguageService(
+        createLanguageServiceHost(ts, project),
+        ts.createDocumentRegistry(),
+      );
+      try {
+        for (const fileName of project.rootFileNames) {
+          throwIfAborted(options.signal);
+          if (Date.now() > deadline) {
+            stoppedForBudget = true;
+            break;
+          }
+          const diagnostics = service
+            .getSuggestionDiagnostics(fileName)
+            .filter((diagnostic) => diagnostic.reportsDeprecated);
+          for (const diagnostic of diagnostics) {
+            const formatted = formatTypeScriptDiagnostic(ts, workingDir, diagnostic);
+            if (formatted) lines.push(formatted);
+          }
+        }
+      } finally {
+        service.dispose();
+      }
+      if (stoppedForBudget) break;
     }
 
-    if (lines.length === 0) return "";
-    return `TYPESCRIPT LANGUAGE SERVICE DIAGNOSTICS:\n${lines.join("\n")}`;
+    if (stoppedForBudget) {
+      notes.push(`info: stopped TypeScript supplemental diagnostics after ${SUPPLEMENTAL_PROVIDER_MAX_MS}ms internal budget.`);
+    }
+
+    const outputLines = [...notes, ...lines];
+    if (outputLines.length === 0) return "";
+    return `TYPESCRIPT LANGUAGE SERVICE DIAGNOSTICS:\n${outputLines.join("\n")}`;
   } catch (error) {
     if (options.signal?.aborted) throw error;
     const message = error instanceof Error ? error.message : String(error);

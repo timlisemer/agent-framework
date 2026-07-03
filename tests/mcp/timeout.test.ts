@@ -8,6 +8,7 @@ import {
   pauseMcpTimeout,
   resumeMcpTimeout,
   runMcpToolWithTimeout,
+  setMcpTimeoutPhase,
 } from "../../src/mcp/timeout.js";
 
 describe("mcp timeout policy", () => {
@@ -37,6 +38,24 @@ describe("runMcpToolWithTimeout", () => {
       name: "McpToolTimeoutError",
       toolName: "check",
       timeoutMs: DEFAULT_MCP_TIMEOUT_MS,
+    });
+    await vi.advanceTimersByTimeAsync(DEFAULT_MCP_TIMEOUT_MS);
+
+    await assertion;
+  });
+
+  it("includes the active phase in timeout errors", async () => {
+    vi.useFakeTimers();
+
+    const result = runMcpToolWithTimeout("check", undefined, () => {
+      setMcpTimeoutPhase("run just check");
+      return new Promise(() => undefined);
+    });
+    const assertion = expect(result).rejects.toMatchObject({
+      name: "McpToolTimeoutError",
+      toolName: "check",
+      timeoutMs: DEFAULT_MCP_TIMEOUT_MS,
+      phase: "run just check",
     });
     await vi.advanceTimersByTimeAsync(DEFAULT_MCP_TIMEOUT_MS);
 
@@ -109,6 +128,12 @@ describe("formatMcpTimeoutError", () => {
   it("formats a clear timeout message", () => {
     expect(formatMcpTimeoutError(new McpToolTimeoutError("confirm", 1_500_000))).toBe(
       'ERROR: MCP tool "confirm" timed out after 1500 seconds of active work. The operation was cancelled.',
+    );
+  });
+
+  it("formats timeout phase details when present", () => {
+    expect(formatMcpTimeoutError(new McpToolTimeoutError("check", DEFAULT_MCP_TIMEOUT_MS, "run just check"))).toBe(
+      'ERROR: MCP tool "check" timed out after 300 seconds of active work during run just check. The operation was cancelled.',
     );
   });
 });

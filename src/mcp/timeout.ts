@@ -8,6 +8,7 @@ const EXTENDED_MCP_TIMEOUT_MS = 1_500_000;
 type TimeoutContext = {
   toolName: string;
   timeoutMs: number;
+  phase: string | undefined;
   controller: AbortController;
   externalSignal: AbortSignal | undefined;
   activeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -24,12 +25,15 @@ const timeoutStorage = new AsyncLocalStorage<TimeoutContext>();
 export class McpToolTimeoutError extends Error {
   readonly toolName: string;
   readonly timeoutMs: number;
+  readonly phase: string | undefined;
 
-  constructor(toolName: string, timeoutMs: number) {
-    super(`MCP tool "${toolName}" timed out after ${Math.round(timeoutMs / 1000)} seconds of active work.`);
+  constructor(toolName: string, timeoutMs: number, phase?: string) {
+    const phaseText = phase ? ` during ${phase}` : "";
+    super(`MCP tool "${toolName}" timed out after ${Math.round(timeoutMs / 1000)} seconds of active work${phaseText}.`);
     this.name = "McpToolTimeoutError";
     this.toolName = toolName;
     this.timeoutMs = timeoutMs;
+    this.phase = phase;
   }
 }
 
@@ -41,6 +45,15 @@ export function mcpTimeoutForTool(toolName: string): number {
 
 export function currentMcpSignal(): AbortSignal | undefined {
   return timeoutStorage.getStore()?.controller.signal;
+}
+
+export function setMcpTimeoutPhase(phase: string | undefined): void {
+  const context = timeoutStorage.getStore();
+  if (!context) {
+    return;
+  }
+
+  context.phase = phase;
 }
 
 export function pauseMcpTimeout(): void {
@@ -84,6 +97,7 @@ export async function runMcpToolWithTimeout<T>(
   const context: TimeoutContext = {
     toolName,
     timeoutMs: mcpTimeoutForTool(toolName),
+    phase: undefined,
     controller: new AbortController(),
     externalSignal,
     activeTimer: undefined,
@@ -138,7 +152,8 @@ export async function runMcpToolWithTimeout<T>(
 }
 
 export function formatMcpTimeoutError(error: McpToolTimeoutError): string {
-  return `ERROR: MCP tool "${error.toolName}" timed out after ${Math.round(error.timeoutMs / 1000)} seconds of active work. The operation was cancelled.`;
+  const phaseText = error.phase ? ` during ${error.phase}` : "";
+  return `ERROR: MCP tool "${error.toolName}" timed out after ${Math.round(error.timeoutMs / 1000)} seconds of active work${phaseText}. The operation was cancelled.`;
 }
 
 function startActiveTimer(context: TimeoutContext): void {
@@ -178,7 +193,7 @@ function timeoutContext(context: TimeoutContext): void {
   stopActiveTimer(context);
   context.remainingMs = 0;
   context.timedOut = true;
-  context.timeoutError = new McpToolTimeoutError(context.toolName, context.timeoutMs);
+  context.timeoutError = new McpToolTimeoutError(context.toolName, context.timeoutMs, context.phase);
   context.controller.abort(context.timeoutError);
   context.rejectAbort(context.timeoutError);
 }
