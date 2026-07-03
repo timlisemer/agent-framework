@@ -274,9 +274,12 @@ For manual MCP config (alternative to `claude mcp add`):
 When the host supports per-server tool timeout configuration, set the
 agent-framework MCP host timeout to an effectively disabled value
 (`2147483647`). Agent-framework enforces its own adapter-independent active-work
-timeouts: tools default to 300 seconds, `commit`, `confirm`, `fullconfirm`, `implement`, and `validate_implementation` use 1500 seconds,
-and time spent waiting for MCP elicitation forms does not count against the
-active-work budget.
+timeouts: tools default to 300 seconds. Direct `check` calls use a 300-second
+command timeout plus a 30-second summary grace window, and check subprocess
+runtime is governed by the command timeout instead of consuming the MCP
+active-work budget. `commit`, `confirm`, `fullconfirm`, `implement`, and
+`validate_implementation` use 1500 seconds, and time spent waiting for MCP
+elicitation forms does not count against the active-work budget.
 
 Codex has a repository-managed MCP server entry in
 `adapters/codex/dotcodex/config.toml`, so that host timeout is checked in

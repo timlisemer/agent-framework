@@ -17,7 +17,7 @@ import type {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { RepoInfo } from "./git-utils.js";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
-import { MCP_NO_TIMEOUT_MS, pauseMcpTimeout, resumeMcpTimeout } from "../mcp/timeout.js";
+import { MCP_NO_TIMEOUT_MS, runWithPausedMcpTimeout } from "../mcp/timeout.js";
 
 // MCP SDK always calls setTimeout internally with no way to disable it.
 // Max 32-bit signed int is the largest value setTimeout accepts.
@@ -39,12 +39,9 @@ async function elicitInputNoTimeout<T>(
   request: ElicitRequestFormParams | ElicitRequestURLParams,
   options: CancellationOptions = {},
 ): Promise<T> {
-  pauseMcpTimeout();
-  try {
-    return await mcpServer.elicitInput(request, noTimeoutWithCancellation(options)) as T;
-  } finally {
-    resumeMcpTimeout();
-  }
+  return runWithPausedMcpTimeout(() =>
+    mcpServer.elicitInput(request, noTimeoutWithCancellation(options)) as Promise<T>
+  );
 }
 
 export interface RepoSelection {

@@ -26,6 +26,23 @@ describe("runProcessCancellable", () => {
     expect(result.output.length).toBeLessThan(140);
   });
 
+  it("preserves head and tail output when requested", async () => {
+    const result = await runProcessCancellable(
+      {
+        shell: false,
+        file: process.execPath,
+        args: ["-e", "process.stdout.write('HEAD-' + 'x'.repeat(1000) + '-TAIL')"],
+      },
+      process.cwd(),
+      { maxStdoutBytes: 20, preserveTailOnTruncate: true },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("HEAD-");
+    expect(result.output).toContain("-TAIL");
+    expect(result.output).toContain("[agent-framework: stdout truncated after 20 bytes]");
+  });
+
   it("passes env overrides to child processes", async () => {
     const result = await runProcessCancellable(
       { shell: true, command: "node -e \"process.stdout.write(process.env.AGENT_FRAMEWORK_ADAPTER || '')\"" },
@@ -48,5 +65,23 @@ describe("runProcessCancellable", () => {
     controller.abort();
 
     await expect(running).rejects.toMatchObject({ name: "OperationCancelledError" });
+  });
+
+  it("resolves with captured output when command timeout elapses", async () => {
+    const result = await runProcessCancellable(
+      {
+        shell: false,
+        file: process.execPath,
+        args: ["-e", "process.stdout.write('before-timeout'); setTimeout(() => {}, 10000);"],
+      },
+      process.cwd(),
+      { commandTimeoutMs: 1_000 },
+    );
+
+    expect(result.exitCode).toBe(124);
+    expect(result.timedOut).toBe(true);
+    expect(result.timeoutMs).toBe(1_000);
+    expect(result.output).toContain("before-timeout");
+    expect(result.output).toContain("[agent-framework: command timed out after 1 second; process terminated]");
   });
 });

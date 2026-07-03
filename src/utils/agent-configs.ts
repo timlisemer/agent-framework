@@ -76,8 +76,9 @@ import { EDIT_TOOL_NAMES_DISPLAY, TEXT_EDIT_TOOL_NAMES_DISPLAY } from "./edit-to
  * **Tier: sonnet** - Needs to parse complex error output accurately
  * **Mode: direct** - All context (linter output) provided upfront
  *
- * The agent receives pre-gathered linter/make/just-check output and classifies
- * each issue as error, warning, or info. Unused code is classified as ERROR.
+ * The agent receives pre-gathered linter, TypeScript diagnostic, make, and
+ * just-check output and classifies each issue as error, warning, or info.
+ * Unused code is classified as ERROR.
  * Info captures important output like benchmark results and performance metrics.
  */
 export const CHECK_AGENT: Omit<AgentConfig, 'workingDir'> = {
@@ -111,10 +112,18 @@ CLASSIFICATION RULES:
    - Examples: "CYCLES: 4590, Speedup: 32.2x", "Tests: 42 passed, 0 failed", "Build time: 2.3s"
 4. Quote style: project uses double quotes ("") for all strings and imports
 
+INPUT SECTIONS:
+- UNCOMMITTED FILES: git status context.
+- LINTER OUTPUT: TypeScript/linter output such as ESLint or package lint scripts.
+- SUPPLEMENTAL DIAGNOSTICS: TypeScript language service/editor-style diagnostics.
+- JUST CHECK OUTPUT and MAKE CHECK OUTPUT: project check target output.
+- Any section header that says "timed out after N seconds" is a failed check command. Summarize and quote the errors printed before the timeout and quote the timeout marker itself when present.
+
 CONTEXT PRESERVATION RULES (CRITICAL):
-- Include the COMMAND or STEP that produced each error (e.g., "docker buildx build", "tsc", "eslint")
+- Include the COMMAND or STEP that produced each error (e.g., "LINTER OUTPUT", "JUST CHECK OUTPUT", "MAKE CHECK OUTPUT", "tsc", "eslint")
 - For Docker errors: Quote the full failing instruction (ADD, RUN, COPY, etc.)
 - For TypeScript/linter errors: Include "file:line" format (e.g., "src/foo.ts:42")
+- For timed-out direct commands: Include the timeout section header and quote the last relevant captured lines before the timeout marker. Do not infer a root cause for the timeout.
 - For Dockerfile warnings: Always prefix with "Dockerfile:" (e.g., "Dockerfile:62")
 - Quote enough surrounding context to make errors ACTIONABLE, not just the error message
 - Example BAD: "ERROR: invalid response status 404"
@@ -125,6 +134,7 @@ REPORTING RULES:
 - Do NOT analyze what the errors mean
 - Do NOT suggest fixes or recommendations
 - Do NOT provide policy guidance
+- Do NOT ignore LINTER OUTPUT, TypeScript diagnostics, or timeout output when make/just output is also present
 - Just report what the tools said with enough context to act on it
 - Unused code (unused variables, functions, imports, dead code) MUST be deleted, not suppressed with underscores, comments, or annotations. TS post-parse promotes any unused-code lines from Warnings to Errors automatically — you do NOT need to classify them yourself, just report the linter output verbatim.
 - TS post-parse adds the Status: PASS|FAIL line based on the final error count. You do NOT need to emit it.

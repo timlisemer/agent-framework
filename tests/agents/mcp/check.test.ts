@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { OperationCancelledError } from "../../../src/utils/cancellation.js";
 
 const mocks = vi.hoisted(() => ({
   runAgent: vi.fn(),
@@ -65,6 +66,11 @@ import {
   promoteUnusedCodeToErrors,
   runCheckAgent,
 } from "../../../src/agents/mcp/check.js";
+import {
+  CHECK_COMMAND_TIMEOUT_MS,
+  CHECK_SUMMARY_GRACE_MS,
+  runMcpToolWithTimeout,
+} from "../../../src/mcp/timeout.js";
 
 describe("applyStatusOverride", () => {
   it("forces FAIL when Errors > 0 even if existing Status says PASS", () => {
@@ -304,6 +310,7 @@ src/example.ts:1:1 warning TS6385: deprecated
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -336,8 +343,53 @@ src/example.ts:1:1 warning TS6385: deprecated
     expect(mocks.runProcessCancellable).toHaveBeenCalledWith(
       { shell: true, command: "npm run lint 2>&1" },
       tempDir,
-      expect.any(Object),
+      expect.objectContaining({
+        commandTimeoutMs: CHECK_COMMAND_TIMEOUT_MS,
+        preserveTailOnTruncate: true,
+      }),
     );
+  });
+
+  it("preserves failing TypeScript linter output in the final check result", async () => {
+    fs.writeFileSync(path.join(tempDir, "eslint.config.js"), "export default [];\n");
+    fs.writeFileSync(
+      path.join(tempDir, "package.json"),
+      JSON.stringify({ scripts: { lint: "eslint src" } }),
+    );
+    fs.writeFileSync(path.join(tempDir, "Makefile"), "check:\n\ttrue\n");
+    mocks.runProcessCancellable.mockImplementation(async (command: { command?: string }) =>
+      command.command === "npm run lint 2>&1"
+        ? {
+            output: "src/example.ts:4:7 error TS2322: Type 'string' is not assignable to type 'number'.",
+            exitCode: 1,
+          }
+        : {
+            output: "check passed",
+            exitCode: 0,
+          }
+    );
+    mocks.runAgent.mockResolvedValue({
+      output: `## Results
+- Errors: 0
+- Warnings: 0
+- Status: PASS
+
+## Errors
+(none)
+
+## Warnings
+(none)
+`,
+    });
+
+    const result = await runCheckAgent(tempDir);
+
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("LINTER OUTPUT (exit code 1):");
+    expect(context).toContain("src/example.ts:4:7 error TS2322");
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("LINTER OUTPUT (exit code 1):");
+    expect(result).toContain("Type 'string' is not assignable to type 'number'");
   });
 
   it("clips large command output before CHECK_AGENT summarization", async () => {
@@ -353,6 +405,170 @@ src/example.ts:1:1 warning TS6385: deprecated
     expect(context).toContain("[agent-framework: check context truncated");
     expect(context).toContain("tail-marker");
     expect(Buffer.byteLength(context, "utf-8")).toBeLessThan(800_000);
+  });
+
+  it("preserves timed-out check output for summarization and deterministic failure", async () => {
+    fs.writeFileSync(path.join(tempDir, "Makefile"), "check:\n\tfalse\n");
+    mocks.runProcessCancellable.mockResolvedValue({
+      output: "last useful line before timeout\n[agent-framework: command timed out after 300 seconds; process terminated]",
+      exitCode: 124,
+      timedOut: true,
+      timeoutMs: CHECK_COMMAND_TIMEOUT_MS,
+    });
+    mocks.runAgent.mockResolvedValue({
+      output: `## Results
+- Errors: 0
+- Warnings: 0
+- Status: PASS
+
+## Errors
+(none)
+
+## Warnings
+(none)
+`,
+    });
+
+    const result = await runCheckAgent(tempDir);
+
+    expect(mocks.runProcessCancellable).toHaveBeenCalledWith(
+      { shell: true, command: "make check 2>&1" },
+      tempDir,
+      expect.objectContaining({
+        commandTimeoutMs: CHECK_COMMAND_TIMEOUT_MS,
+        preserveTailOnTruncate: true,
+      }),
+    );
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("MAKE CHECK OUTPUT (exit code 124, timed out after 300 seconds):");
+    expect(context).toContain("last useful line before timeout");
+    expect(context).toContain("[agent-framework: command timed out after 300 seconds; process terminated]");
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("MAKE CHECK OUTPUT (exit code 124, timed out after 300 seconds):");
+    expect(result).toContain("last useful line before timeout");
+  });
+
+  it.each(["check", "confirm"] as const)(
+    "returns deterministic check failure when %s-invoked summary exceeds post-timeout grace",
+    async (toolName) => {
+      vi.useFakeTimers();
+      fs.writeFileSync(path.join(tempDir, "Makefile"), "check:\n\tfalse\n");
+      mocks.runProcessCancellable.mockResolvedValue({
+        output: "last useful line before timeout\n[agent-framework: command timed out after 300 seconds; process terminated]",
+        exitCode: 124,
+        timedOut: true,
+        timeoutMs: CHECK_COMMAND_TIMEOUT_MS,
+      });
+      let resolveAgentStarted!: () => void;
+      const agentStarted = new Promise<void>((resolve) => {
+        resolveAgentStarted = resolve;
+      });
+      mocks.runAgent.mockImplementation(async (_config, _input, options) => {
+        resolveAgentStarted();
+        return new Promise((_, reject) => {
+          options.signal?.addEventListener(
+            "abort",
+            () => reject(new OperationCancelledError()),
+            { once: true },
+          );
+        });
+      });
+
+      const running = runMcpToolWithTimeout(toolName, undefined, (signal) =>
+        runCheckAgent(tempDir, undefined, { signal })
+      );
+      await agentStarted;
+      await vi.advanceTimersByTimeAsync(CHECK_SUMMARY_GRACE_MS);
+
+      const result = await running;
+
+      expect(result).toContain("- Status: FAIL");
+      expect(result).toContain("MAKE CHECK OUTPUT (exit code 124, timed out after 300 seconds):");
+      expect(result).toContain("last useful line before timeout");
+      expect(result).toContain("Check summarizer timed out after 30 seconds summary grace");
+    },
+  );
+
+  it("returns deterministic check failure when confirm-invoked summarizer ignores abort", async () => {
+    vi.useFakeTimers();
+    fs.writeFileSync(path.join(tempDir, "Makefile"), "check:\n\tfalse\n");
+    mocks.runProcessCancellable.mockResolvedValue({
+      output: "last useful line before timeout\n[agent-framework: command timed out after 300 seconds; process terminated]",
+      exitCode: 124,
+      timedOut: true,
+      timeoutMs: CHECK_COMMAND_TIMEOUT_MS,
+    });
+    let resolveAgentStarted!: () => void;
+    const agentStarted = new Promise<void>((resolve) => {
+      resolveAgentStarted = resolve;
+    });
+    mocks.runAgent.mockImplementation(async () => {
+      resolveAgentStarted();
+      return new Promise(() => undefined);
+    });
+
+    const running = runMcpToolWithTimeout("confirm", undefined, (signal) =>
+      runCheckAgent(tempDir, undefined, { signal })
+    );
+    await agentStarted;
+    await vi.advanceTimersByTimeAsync(CHECK_SUMMARY_GRACE_MS);
+
+    const result = await running;
+
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("MAKE CHECK OUTPUT (exit code 124, timed out after 300 seconds):");
+    expect(result).toContain("last useful line before timeout");
+    expect(result).toContain("Check summarizer timed out after 30 seconds summary grace");
+  });
+
+  it("forces FAIL when a failed command section is clipped out of summarizer context", async () => {
+    const repos = ["repo-a", "repo-b", "repo-c", "repo-d", "repo-e"].map((name) => {
+      const repoPath = path.join(tempDir, name);
+      fs.mkdirSync(repoPath);
+      fs.writeFileSync(path.join(repoPath, "Makefile"), "check:\n\tfalse\n");
+      return { path: repoPath, name };
+    });
+    const repoInfo = {
+      mainRepo: tempDir,
+      mainRepoName: "main",
+      mainRepoHasChanges: false,
+      submodules: [],
+      reposWithChanges: repos,
+    };
+    mocks.sortReposWithChangesSubmodulesFirst.mockReturnValue(repoInfo.reposWithChanges);
+    mocks.getGitStatusCancellable.mockResolvedValue(" M src/example.ts");
+    mocks.runSupplementalDiagnosticProviders.mockResolvedValue("");
+    mocks.runProcessCancellable.mockImplementation(async (_command, cwd: string) => {
+      const repoName = path.basename(cwd);
+      const failed = repoName === "repo-c";
+      return {
+        output: `${repoName}\n${"x".repeat(300_000)}${failed ? "critical failure marker" : "ok"}`,
+        exitCode: failed ? 1 : 0,
+      };
+    });
+    mocks.runAgent.mockResolvedValue({
+      output: `## Results
+- Errors: 0
+- Warnings: 0
+- Status: PASS
+
+## Errors
+(none)
+
+## Warnings
+(none)
+`,
+    });
+
+    const result = await runCheckAgent(tempDir, undefined, {
+      repoScope: { mode: "all", repoInfo },
+    });
+
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(Buffer.byteLength(context, "utf-8")).toBeLessThan(800_000);
+    expect(result).toContain("- Status: FAIL");
+    expect(result).toContain("MAKE CHECK OUTPUT for repo-c (exit code 1):");
+    expect(result).toContain("critical failure marker");
   });
 
   it("appends deleted filename references as deterministic check errors", async () => {

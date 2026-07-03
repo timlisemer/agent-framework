@@ -63,52 +63,154 @@ export type ProcessMode =
 export interface ProcessOutputLimits extends CancellationOptions {
   maxStdoutBytes?: number;
   maxStderrBytes?: number;
+  commandTimeoutMs?: number;
   env?: NodeJS.ProcessEnv;
+  preserveTailOnTruncate?: boolean;
+}
+
+export interface ProcessResult {
+  output: string;
+  exitCode: number;
+  timedOut?: boolean;
+  timeoutMs?: number;
 }
 
 const DEFAULT_PROCESS_STREAM_LIMIT_BYTES = 2 * 1024 * 1024;
+const TIMED_OUT_EXIT_CODE = 124;
+
+type BoundedOutputCapture = {
+  value: string;
+  totalBytes: number;
+  head: Buffer;
+  tail: Buffer;
+  truncated: boolean;
+};
+
+function createBoundedOutputCapture(): BoundedOutputCapture {
+  return {
+    value: "",
+    totalBytes: 0,
+    head: Buffer.alloc(0),
+    tail: Buffer.alloc(0),
+    truncated: false,
+  };
+}
+
+function formatStreamTruncationMarker(
+  streamName: "stdout" | "stderr",
+  limit: number,
+): string {
+  return `\n[agent-framework: ${streamName} truncated after ${limit} bytes]\n`;
+}
+
+export function formatCommandTimeoutDuration(timeoutMs: number): string {
+  const seconds = Math.max(1, Math.ceil(timeoutMs / 1000));
+  const unit = seconds === 1 ? "second" : "seconds";
+  return `${seconds} ${unit}`;
+}
+
+function appendTailPreservingOutput(
+  capture: BoundedOutputCapture,
+  chunk: Buffer,
+  limit: number,
+): void {
+  if (limit <= 0) {
+    capture.totalBytes += chunk.length;
+    capture.truncated ||= chunk.length > 0;
+    return;
+  }
+
+  const headLimit = Math.floor(limit / 2);
+  const tailLimit = limit - headLimit;
+  const previousTotal = capture.totalBytes;
+  capture.totalBytes += chunk.length;
+
+  if (previousTotal < headLimit) {
+    const headRemaining = headLimit - previousTotal;
+    capture.head = Buffer.concat([
+      capture.head,
+      chunk.subarray(0, headRemaining),
+    ]);
+  }
+
+  if (tailLimit > 0) {
+    const nextTail = Buffer.concat([capture.tail, chunk]);
+    capture.tail = nextTail.subarray(Math.max(0, nextTail.length - tailLimit));
+  }
+
+  if (capture.totalBytes <= limit) {
+    capture.value += chunk.toString("utf-8");
+  } else {
+    capture.truncated = true;
+  }
+}
 
 function appendBoundedOutput(
-  current: string,
+  capture: BoundedOutputCapture,
   data: Buffer | string,
   limit: number,
   streamName: "stdout" | "stderr",
-): { value: string; truncated: boolean } {
+  preserveTailOnTruncate: boolean,
+): void {
   const chunk = Buffer.isBuffer(data) ? data : Buffer.from(data);
-  const used = Buffer.byteLength(current, "utf-8");
+  if (preserveTailOnTruncate) {
+    appendTailPreservingOutput(capture, chunk, limit);
+    return;
+  }
+
+  const used = Buffer.byteLength(capture.value, "utf-8");
   const remaining = Math.max(0, limit - used);
 
   if (remaining <= 0) {
-    return { value: current, truncated: chunk.length > 0 };
+    capture.truncated ||= chunk.length > 0;
+    return;
   }
 
   if (chunk.length <= remaining) {
-    return { value: current + chunk.toString("utf-8"), truncated: false };
+    capture.value += chunk.toString("utf-8");
+    return;
   }
 
-  const marker = `\n[agent-framework: ${streamName} truncated after ${limit} bytes]\n`;
-  return {
-    value: current + chunk.subarray(0, remaining).toString("utf-8") + marker,
-    truncated: true,
-  };
+  const marker = formatStreamTruncationMarker(streamName, limit);
+  capture.value += chunk.subarray(0, remaining).toString("utf-8") + marker;
+  capture.truncated = true;
+}
+
+function formatBoundedOutput(
+  capture: BoundedOutputCapture,
+  limit: number,
+  streamName: "stdout" | "stderr",
+  preserveTailOnTruncate: boolean,
+): string {
+  if (!preserveTailOnTruncate || !capture.truncated) {
+    return capture.value;
+  }
+
+  const marker = formatStreamTruncationMarker(streamName, limit);
+  return capture.head.toString("utf-8") + marker + capture.tail.toString("utf-8");
+}
+
+function formatCommandTimeoutMarker(timeoutMs: number): string {
+  return `\n[agent-framework: command timed out after ${formatCommandTimeoutDuration(timeoutMs)}; process terminated]\n`;
 }
 
 export async function runProcessCancellable(
   mode: ProcessMode,
   cwd: string,
   options: ProcessOutputLimits = {}
-): Promise<{ output: string; exitCode: number }> {
+): Promise<ProcessResult> {
   throwIfAborted(options.signal);
 
   return new Promise((resolve, reject) => {
     let settled = false;
     let closed = false;
-    let stdout = "";
-    let stderr = "";
-    let stdoutTruncated = false;
-    let stderrTruncated = false;
+    let timedOut = false;
+    const stdout = createBoundedOutputCapture();
+    const stderr = createBoundedOutputCapture();
     const maxStdoutBytes = options.maxStdoutBytes ?? DEFAULT_PROCESS_STREAM_LIMIT_BYTES;
     const maxStderrBytes = options.maxStderrBytes ?? DEFAULT_PROCESS_STREAM_LIMIT_BYTES;
+    const preserveTailOnTruncate = options.preserveTailOnTruncate ?? false;
+    let commandTimeout: ReturnType<typeof setTimeout> | undefined;
 
     const child = mode.shell
       ? spawn(mode.command, {
@@ -128,6 +230,10 @@ export async function runProcessCancellable(
 
     const cleanup = () => {
       options.signal?.removeEventListener("abort", onAbort);
+      if (commandTimeout) {
+        clearTimeout(commandTimeout);
+        commandTimeout = undefined;
+      }
     };
 
     const terminate = () => {
@@ -169,18 +275,24 @@ export async function runProcessCancellable(
     };
 
     options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.commandTimeoutMs !== undefined) {
+      commandTimeout = setTimeout(() => {
+        if (settled || closed) {
+          return;
+        }
+        timedOut = true;
+        terminate();
+      }, options.commandTimeoutMs);
+      commandTimeout.unref?.();
+    }
 
     child.stdout?.on("data", (data: Buffer | string) => {
-      if (stdoutTruncated) return;
-      const next = appendBoundedOutput(stdout, data, maxStdoutBytes, "stdout");
-      stdout = next.value;
-      stdoutTruncated = next.truncated;
+      if (stdout.truncated && !preserveTailOnTruncate) return;
+      appendBoundedOutput(stdout, data, maxStdoutBytes, "stdout", preserveTailOnTruncate);
     });
     child.stderr?.on("data", (data: Buffer | string) => {
-      if (stderrTruncated) return;
-      const next = appendBoundedOutput(stderr, data, maxStderrBytes, "stderr");
-      stderr = next.value;
-      stderrTruncated = next.truncated;
+      if (stderr.truncated && !preserveTailOnTruncate) return;
+      appendBoundedOutput(stderr, data, maxStderrBytes, "stderr", preserveTailOnTruncate);
     });
 
     child.on("error", (error) => {
@@ -199,7 +311,17 @@ export async function runProcessCancellable(
       }
       settled = true;
       cleanup();
-      resolve({ output: stdout + stderr, exitCode: code ?? 1 });
+      const output =
+        formatBoundedOutput(stdout, maxStdoutBytes, "stdout", preserveTailOnTruncate) +
+        formatBoundedOutput(stderr, maxStderrBytes, "stderr", preserveTailOnTruncate) +
+        (timedOut && options.commandTimeoutMs !== undefined
+          ? formatCommandTimeoutMarker(options.commandTimeoutMs)
+          : "");
+      resolve({
+        output,
+        exitCode: timedOut ? TIMED_OUT_EXIT_CODE : code ?? 1,
+        ...(timedOut ? { timedOut: true, timeoutMs: options.commandTimeoutMs } : {}),
+      });
     });
   });
 }

@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
+  CHECK_COMMAND_TIMEOUT_MS,
+  CHECK_MCP_TIMEOUT_MS,
+  CHECK_SUMMARY_GRACE_MS,
   DEFAULT_MCP_TIMEOUT_MS,
   McpToolTimeoutError,
   currentMcpSignal,
@@ -7,13 +10,20 @@ import {
   mcpTimeoutForTool,
   pauseMcpTimeout,
   resumeMcpTimeout,
+  runWithMcpChildTimeout,
   runMcpToolWithTimeout,
   setMcpTimeoutPhase,
 } from "../../src/mcp/timeout.js";
 
 describe("mcp timeout policy", () => {
   it("uses the default timeout for ordinary tools", () => {
-    expect(mcpTimeoutForTool("check")).toBe(DEFAULT_MCP_TIMEOUT_MS);
+    expect(mcpTimeoutForTool("push")).toBe(DEFAULT_MCP_TIMEOUT_MS);
+  });
+
+  it("uses the check command timeout plus summary grace for check", () => {
+    expect(CHECK_COMMAND_TIMEOUT_MS).toBe(DEFAULT_MCP_TIMEOUT_MS);
+    expect(CHECK_MCP_TIMEOUT_MS).toBe(330_000);
+    expect(mcpTimeoutForTool("check")).toBe(CHECK_MCP_TIMEOUT_MS);
   });
 
   it("uses 1500 seconds for confirm, fullconfirm, commit, implement, and implementation validation", () => {
@@ -30,16 +40,16 @@ describe("runMcpToolWithTimeout", () => {
     vi.useRealTimers();
   });
 
-  it("times out after the default active-work timeout", async () => {
+  it("times out after the check active-work timeout", async () => {
     vi.useFakeTimers();
 
     const result = runMcpToolWithTimeout("check", undefined, () => new Promise(() => undefined));
     const assertion = expect(result).rejects.toMatchObject({
       name: "McpToolTimeoutError",
       toolName: "check",
-      timeoutMs: DEFAULT_MCP_TIMEOUT_MS,
+      timeoutMs: CHECK_MCP_TIMEOUT_MS,
     });
-    await vi.advanceTimersByTimeAsync(DEFAULT_MCP_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(CHECK_MCP_TIMEOUT_MS);
 
     await assertion;
   });
@@ -54,10 +64,10 @@ describe("runMcpToolWithTimeout", () => {
     const assertion = expect(result).rejects.toMatchObject({
       name: "McpToolTimeoutError",
       toolName: "check",
-      timeoutMs: DEFAULT_MCP_TIMEOUT_MS,
+      timeoutMs: CHECK_MCP_TIMEOUT_MS,
       phase: "run just check",
     });
-    await vi.advanceTimersByTimeAsync(DEFAULT_MCP_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(CHECK_MCP_TIMEOUT_MS);
 
     await assertion;
   });
@@ -68,9 +78,9 @@ describe("runMcpToolWithTimeout", () => {
 
     const result = runMcpToolWithTimeout("check", undefined, async () => {
       pauseMcpTimeout();
-      await vi.advanceTimersByTimeAsync(DEFAULT_MCP_TIMEOUT_MS * 2);
+      await vi.advanceTimersByTimeAsync(CHECK_MCP_TIMEOUT_MS * 2);
       resumeMcpTimeout();
-      await vi.advanceTimersByTimeAsync(DEFAULT_MCP_TIMEOUT_MS - 1);
+      await vi.advanceTimersByTimeAsync(CHECK_MCP_TIMEOUT_MS - 1);
       await Promise.resolve();
       resolveHandler();
       return "done";
@@ -82,6 +92,28 @@ describe("runMcpToolWithTimeout", () => {
     await handlerGate;
 
     await expect(result).resolves.toBe("done");
+  });
+
+  it("lets a later check subprocess timeout after prior check work consumed summary grace", async () => {
+    vi.useFakeTimers();
+    let resolveHandler!: () => void;
+
+    const result = runMcpToolWithTimeout("check", undefined, async () => {
+      await vi.advanceTimersByTimeAsync(CHECK_SUMMARY_GRACE_MS + 1_000);
+      pauseMcpTimeout();
+      await vi.advanceTimersByTimeAsync(CHECK_COMMAND_TIMEOUT_MS);
+      resumeMcpTimeout();
+      await Promise.resolve();
+      resolveHandler();
+      return "summary after command timeout";
+    });
+    const handlerGate = new Promise<void>((resolve) => {
+      resolveHandler = resolve;
+    });
+
+    await handlerGate;
+
+    await expect(result).resolves.toBe("summary after command timeout");
   });
 
   it("uses the outer signal and ignores the nested tool timeout", async () => {
@@ -132,8 +164,8 @@ describe("formatMcpTimeoutError", () => {
   });
 
   it("formats timeout phase details when present", () => {
-    expect(formatMcpTimeoutError(new McpToolTimeoutError("check", DEFAULT_MCP_TIMEOUT_MS, "run just check"))).toBe(
-      'ERROR: MCP tool "check" timed out after 300 seconds of active work during run just check. The operation was cancelled.',
+    expect(formatMcpTimeoutError(new McpToolTimeoutError("check", CHECK_MCP_TIMEOUT_MS, "run just check"))).toBe(
+      'ERROR: MCP tool "check" timed out after 330 seconds of active work during run just check. The operation was cancelled.',
     );
   });
 });
@@ -148,5 +180,33 @@ describe("currentMcpSignal", () => {
     });
 
     expect(signal).toBeInstanceOf(AbortSignal);
+  });
+});
+
+describe("runWithMcpChildTimeout", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("cleans up timeout state when handler throws synchronously", async () => {
+    vi.useFakeTimers();
+    let timeoutErrorCreated = 0;
+
+    await expect(
+      runWithMcpChildTimeout(
+        undefined,
+        100,
+        () => {
+          timeoutErrorCreated++;
+          return new Error("child timeout");
+        },
+        () => {
+          throw new Error("boom");
+        },
+      ),
+    ).rejects.toThrow("boom");
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(timeoutErrorCreated).toBe(0);
   });
 });

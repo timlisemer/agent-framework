@@ -8,13 +8,12 @@
  * @module session-store
  */
 
-import * as fs from "fs";
 import * as path from "path";
 import {
   CacheManager,
 } from "./cache-manager.js";
 import { sessionToolLogFile, sessionStateFile } from "./paths.js";
-import { appendJsonlEntry, appendJsonlEntrySync, readJsonlTail } from "./file-io.js";
+import { appendJsonlEntry, appendJsonlEntrySync, fileSizeOrZero, readJsonlTail } from "./file-io.js";
 import type { ToolPrediction } from "./prediction-types.js";
 import type { PriorErrorContext } from "./prior-error-context.js";
 import type { ToolLogEntry } from "./tool-log-types.js";
@@ -126,12 +125,7 @@ export function readToolLogEntries(sessionDir: string, count: number): ToolLogEn
   if (count <= 0) return [];
 
   const toolLogPath = sessionToolLogFile(sessionDir);
-  let fileSize: number;
-  try {
-    fileSize = fs.statSync(toolLogPath).size;
-  } catch {
-    return [];
-  }
+  const fileSize = fileSizeOrZero(toolLogPath);
   if (fileSize === 0) return [];
 
   let maxBytes = Math.min(TOOL_LOG_TAIL_MAX_BYTES, fileSize);

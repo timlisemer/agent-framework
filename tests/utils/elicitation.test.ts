@@ -8,6 +8,7 @@ import {
 } from "../../src/utils/elicitation.js";
 import type { RepoInfo } from "../../src/utils/git-utils.js";
 import {
+  CHECK_MCP_TIMEOUT_MS,
   DEFAULT_MCP_TIMEOUT_MS,
   MCP_NO_TIMEOUT_MS,
   runMcpToolWithTimeout,
@@ -284,7 +285,7 @@ describe("elicitation cancellation", () => {
       content: { "/repo/a": true, "/repo/b": false },
     });
     await Promise.resolve();
-    await vi.advanceTimersByTimeAsync(DEFAULT_MCP_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(CHECK_MCP_TIMEOUT_MS);
 
     await assertion;
   });

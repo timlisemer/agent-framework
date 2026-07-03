@@ -2,6 +2,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 export const MCP_NO_TIMEOUT_MS = 2147483647;
 export const DEFAULT_MCP_TIMEOUT_MS = 300_000;
+export const CHECK_COMMAND_TIMEOUT_MS = DEFAULT_MCP_TIMEOUT_MS;
+export const CHECK_SUMMARY_GRACE_MS = 30_000;
+export const CHECK_MCP_TIMEOUT_MS = CHECK_COMMAND_TIMEOUT_MS + CHECK_SUMMARY_GRACE_MS;
 
 const EXTENDED_MCP_TIMEOUT_MS = 1_500_000;
 
@@ -17,7 +20,17 @@ type TimeoutContext = {
   pauseDepth: number;
   timedOut: boolean;
   timeoutError: McpToolTimeoutError | undefined;
-  rejectAbort: (error: Error) => void;
+};
+
+type AbortableRaceTimeout = {
+  timeoutMs: number;
+  createError: () => Error;
+};
+
+type AbortableRaceOptions = {
+  controller: AbortController;
+  externalSignal?: AbortSignal;
+  timeout?: AbortableRaceTimeout;
 };
 
 const timeoutStorage = new AsyncLocalStorage<TimeoutContext>();
@@ -28,8 +41,7 @@ export class McpToolTimeoutError extends Error {
   readonly phase: string | undefined;
 
   constructor(toolName: string, timeoutMs: number, phase?: string) {
-    const phaseText = phase ? ` during ${phase}` : "";
-    super(`MCP tool "${toolName}" timed out after ${Math.round(timeoutMs / 1000)} seconds of active work${phaseText}.`);
+    super(formatMcpTimeoutCore(toolName, timeoutMs, phase));
     this.name = "McpToolTimeoutError";
     this.toolName = toolName;
     this.timeoutMs = timeoutMs;
@@ -38,6 +50,7 @@ export class McpToolTimeoutError extends Error {
 }
 
 export function mcpTimeoutForTool(toolName: string): number {
+  if (toolName === "check") return CHECK_MCP_TIMEOUT_MS;
   return toolName === "confirm" || toolName === "fullconfirm" || toolName === "commit" || toolName === "implement" || toolName === "validate_implementation"
     ? EXTENDED_MCP_TIMEOUT_MS
     : DEFAULT_MCP_TIMEOUT_MS;
@@ -80,6 +93,81 @@ export function resumeMcpTimeout(): void {
   }
 }
 
+export async function runWithPausedMcpTimeout<T>(fn: () => Promise<T>): Promise<T> {
+  pauseMcpTimeout();
+  try {
+    return await fn();
+  } finally {
+    resumeMcpTimeout();
+  }
+}
+
+export async function runWithMcpChildTimeout<T>(
+  externalSignal: AbortSignal | undefined,
+  timeoutMs: number,
+  createTimeoutError: () => Error,
+  handler: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  return runAbortableRace(
+    {
+      controller: new AbortController(),
+      externalSignal,
+      timeout: { timeoutMs, createError: createTimeoutError },
+    },
+    handler,
+  );
+}
+
+async function runAbortableRace<T>(
+  options: AbortableRaceOptions,
+  handler: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  let rejectAbort!: (error: Error) => void;
+  const abortPromise = new Promise<never>((_, reject) => {
+    rejectAbort = reject;
+  });
+
+  const abortFromSignal = () => {
+    const reason = options.externalSignal?.reason instanceof Error
+      ? options.externalSignal.reason
+      : new Error("MCP tool call cancelled.");
+    options.controller.abort(reason);
+    rejectAbort(reason);
+  };
+  const abortFromController = () => {
+    const reason = options.controller.signal.reason instanceof Error
+      ? options.controller.signal.reason
+      : new Error("MCP tool call cancelled.");
+    rejectAbort(reason);
+  };
+
+  if (options.externalSignal?.aborted) {
+    abortFromSignal();
+  } else {
+    options.externalSignal?.addEventListener("abort", abortFromSignal, { once: true });
+  }
+  options.controller.signal.addEventListener("abort", abortFromController, { once: true });
+
+  const timeout = options.timeout
+    ? setTimeout(() => {
+        const error = options.timeout!.createError();
+        options.controller.abort(error);
+        rejectAbort(error);
+      }, options.timeout.timeoutMs)
+    : undefined;
+  timeout?.unref?.();
+
+  try {
+    const handlerPromise = handler(options.controller.signal);
+    handlerPromise.catch(() => undefined);
+    return await Promise.race([handlerPromise, abortPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    options.externalSignal?.removeEventListener("abort", abortFromSignal);
+    options.controller.signal.removeEventListener("abort", abortFromController);
+  }
+}
+
 export async function runMcpToolWithTimeout<T>(
   toolName: string,
   externalSignal: AbortSignal | undefined,
@@ -90,10 +178,6 @@ export async function runMcpToolWithTimeout<T>(
     return handler(parentContext.controller.signal);
   }
 
-  let rejectAbort!: (error: Error) => void;
-  const abortPromise = new Promise<never>((_, reject) => {
-    rejectAbort = reject;
-  });
   const context: TimeoutContext = {
     toolName,
     timeoutMs: mcpTimeoutForTool(toolName),
@@ -106,37 +190,16 @@ export async function runMcpToolWithTimeout<T>(
     pauseDepth: 0,
     timedOut: false,
     timeoutError: undefined,
-    rejectAbort,
   };
-
-  const abortFromSignal = () => {
-    const reason = externalSignal?.reason instanceof Error
-      ? externalSignal.reason
-      : new Error("MCP tool call cancelled.");
-    context.controller.abort(reason);
-    rejectAbort(reason);
-  };
-  const abortFromContext = () => {
-    const reason = context.controller.signal.reason instanceof Error
-      ? context.controller.signal.reason
-      : new Error("MCP tool call cancelled.");
-    rejectAbort(reason);
-  };
-
-  if (externalSignal?.aborted) {
-    abortFromSignal();
-  } else {
-    externalSignal?.addEventListener("abort", abortFromSignal, { once: true });
-  }
-  context.controller.signal.addEventListener("abort", abortFromContext, { once: true });
 
   try {
     return await timeoutStorage.run(context, async () => {
       startActiveTimer(context);
-      const handlerPromise = handler(context.controller.signal);
-      handlerPromise.catch(() => undefined);
       try {
-        return await Promise.race([handlerPromise, abortPromise]);
+        return await runAbortableRace(
+          { controller: context.controller, externalSignal },
+          handler,
+        );
       } catch (error) {
         if (context.timedOut && context.timeoutError) {
           throw context.timeoutError;
@@ -146,14 +209,20 @@ export async function runMcpToolWithTimeout<T>(
     });
   } finally {
     stopActiveTimer(context);
-    externalSignal?.removeEventListener("abort", abortFromSignal);
-    context.controller.signal.removeEventListener("abort", abortFromContext);
   }
 }
 
 export function formatMcpTimeoutError(error: McpToolTimeoutError): string {
-  const phaseText = error.phase ? ` during ${error.phase}` : "";
-  return `ERROR: MCP tool "${error.toolName}" timed out after ${Math.round(error.timeoutMs / 1000)} seconds of active work${phaseText}. The operation was cancelled.`;
+  return `ERROR: ${formatMcpTimeoutCore(error.toolName, error.timeoutMs, error.phase)} The operation was cancelled.`;
+}
+
+function formatMcpTimeoutCore(
+  toolName: string,
+  timeoutMs: number,
+  phase?: string,
+): string {
+  const phaseText = phase ? ` during ${phase}` : "";
+  return `MCP tool "${toolName}" timed out after ${Math.round(timeoutMs / 1000)} seconds of active work${phaseText}.`;
 }
 
 function startActiveTimer(context: TimeoutContext): void {
@@ -195,5 +264,4 @@ function timeoutContext(context: TimeoutContext): void {
   context.timedOut = true;
   context.timeoutError = new McpToolTimeoutError(context.toolName, context.timeoutMs, context.phase);
   context.controller.abort(context.timeoutError);
-  context.rejectAbort(context.timeoutError);
 }

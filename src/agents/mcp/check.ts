@@ -49,9 +49,14 @@ import * as fs from "fs";
 import * as path from "path";
 import { execSync } from "child_process";
 import { EXECUTION_TYPES } from "../../types.js";
-import { runAgent } from "../../utils/agent-runner.js";
+import { runAgent, type AgentExecutionResult } from "../../utils/agent-runner.js";
 import { CHECK_AGENT } from "../../utils/agent-configs.js";
-import { runProcessCancellable } from "../../utils/command.js";
+import {
+  formatCommandTimeoutDuration,
+  runProcessCancellable,
+  type ProcessOutputLimits,
+  type ProcessResult,
+} from "../../utils/command.js";
 import {
   findDeletedOrRenamedFileReferenceIssuesCancellable,
   getGitStatusCancellable,
@@ -62,12 +67,22 @@ import {
 } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
-import { isCancellationError, type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
+import {
+  isCancellationError,
+  type CancellationOptions,
+  throwIfAborted,
+} from "../../utils/cancellation.js";
 import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
 import { reduceDriftDetectionWindow } from "../../scenario/lifecycle.js";
 import { runSupplementalDiagnosticProviders } from "../../utils/supplemental-diagnostics.js";
 import { parseCheckAgentResult } from "../../utils/check-result.js";
-import { setMcpTimeoutPhase } from "../../mcp/timeout.js";
+import {
+  CHECK_COMMAND_TIMEOUT_MS,
+  CHECK_SUMMARY_GRACE_MS,
+  runWithMcpChildTimeout,
+  runWithPausedMcpTimeout,
+  setMcpTimeoutPhase,
+} from "../../mcp/timeout.js";
 
 import { activeSpec, registeredAdapterNames } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("check"); }
@@ -101,6 +116,10 @@ async function runCheckPhase<T>(phase: string, fn: () => Promise<T>): Promise<T>
   }
 }
 
+async function runCheckCommandPhase<T>(phase: string, fn: () => Promise<T>): Promise<T> {
+  return runCheckPhase(phase, () => runWithPausedMcpTimeout(fn));
+}
+
 function clipMiddleUtf8(text: string, maxBytes: number): string {
   const byteLength = Buffer.byteLength(text, "utf-8");
   if (byteLength <= maxBytes) return text;
@@ -130,6 +149,72 @@ function buildCheckAgentContext(input: {
     `UNCOMMITTED FILES:\n${input.status || "(none)"}\n\n${input.lintOutput}${input.checkOutput}${input.supplementalContext}`,
     CHECK_CONTEXT_TOTAL_MAX_BYTES,
   );
+}
+
+function checkCommandOptions(
+  options: CancellationOptions,
+  env?: NodeJS.ProcessEnv,
+): ProcessOutputLimits {
+  return {
+    ...options,
+    ...(env ? { env } : {}),
+    commandTimeoutMs: CHECK_COMMAND_TIMEOUT_MS,
+    preserveTailOnTruncate: true,
+  };
+}
+
+function processResultDetails(result: ProcessResult): string {
+  const timeoutText = result.timedOut
+    ? `, timed out after ${formatCommandTimeoutDuration(result.timeoutMs ?? CHECK_COMMAND_TIMEOUT_MS)}`
+    : "";
+  return `exit code ${result.exitCode}${timeoutText}`;
+}
+
+function recordCheckCommandSection(input: {
+  sections: string[];
+  commandErrors: string[];
+  header: string;
+  result: ProcessResult;
+}): boolean {
+  const section = clipCheckContextSection(
+    `${input.header} (${processResultDetails(input.result)}):\n${input.result.output}`,
+  );
+  input.sections.push(section);
+  if (input.result.exitCode !== 0) {
+    input.commandErrors.push(section);
+  }
+  return input.result.timedOut === true;
+}
+
+class CheckSummaryGraceTimeoutError extends Error {
+  constructor() {
+    super(`Check summarizer timed out after ${formatCommandTimeoutDuration(CHECK_SUMMARY_GRACE_MS)} summary grace following a command timeout.`);
+    this.name = "CheckSummaryGraceTimeoutError";
+  }
+}
+
+async function runWithCheckSummaryGrace<T>(
+  options: CheckOptions,
+  fn: (options: CheckOptions) => Promise<T>,
+): Promise<T> {
+  throwIfAborted(options.signal);
+  return runWithMcpChildTimeout(
+    options.signal,
+    CHECK_SUMMARY_GRACE_MS,
+    () => new CheckSummaryGraceTimeoutError(),
+    (signal) => fn({ ...options, signal }),
+  );
+}
+
+function checkSummaryGraceTimeoutResult(error: CheckSummaryGraceTimeoutError): AgentExecutionResult {
+  return {
+    output: `[DIRECT ERROR] ${error.message}`,
+    latencyMs: CHECK_SUMMARY_GRACE_MS,
+    modelTier: CHECK_AGENT.tier,
+    modelName: "check-summary-grace-timeout",
+    success: false,
+    errorCount: 1,
+  };
 }
 
 /**
@@ -557,6 +642,7 @@ export async function runCheckAgent(
   let lintOutput = "";
   const lintSections: string[] = [];
   const commandErrors: string[] = [];
+  let commandTimedOut = false;
   const seenLintInvocations = new Set<string>();
   for (const repo of scopedRepos) {
     const linter = detectLinter(repo.path, mainRepo);
@@ -567,15 +653,23 @@ export async function runCheckAgent(
       }
       seenLintInvocations.add(lintKey);
       throwIfAborted(options.signal);
-      const lint = await runCheckPhase(`run linter: ${linter.cmd}`, () =>
-        runProcessCancellable({ shell: true, command: linter.cmd }, linter.dir, options)
+      const lint = await runCheckCommandPhase(`run linter: ${linter.cmd}`, () =>
+        runProcessCancellable(
+          { shell: true, command: linter.cmd },
+          linter.dir,
+          checkCommandOptions(options),
+        )
       );
       const lintLocation = linter.dir === repo.path ? "" : ` (from ${path.basename(linter.dir)})`;
       const repoLabel = options.repoScope?.mode === "all" ? ` for ${repo.name}` : "";
-      const section = clipCheckContextSection(`LINTER OUTPUT${repoLabel}${lintLocation} (exit code ${lint.exitCode}):\n${lint.output}`);
-      lintSections.push(section);
-      if (lint.exitCode !== 0) {
-        commandErrors.push(section);
+      if (recordCheckCommandSection({
+        sections: lintSections,
+        commandErrors,
+        header: `LINTER OUTPUT${repoLabel}${lintLocation}`,
+        result: lint,
+      })) {
+        commandTimedOut = true;
+        break;
       }
     }
   }
@@ -585,7 +679,7 @@ export async function runCheckAgent(
   let checkOutput = "";
   const checkSections: string[] = [];
   const seenCheckInvocations = new Set<string>();
-  for (const repo of scopedRepos) {
+  for (const repo of commandTimedOut ? [] : scopedRepos) {
     const checkRunner = findCheckRunner(repo.path, mainRepo);
     if (checkRunner && "error" in checkRunner) {
       const section = `CHECK OUTPUT${options.repoScope?.mode === "all" ? ` for ${repo.name}` : ""}: ${checkRunner.error}`;
@@ -600,22 +694,26 @@ export async function runCheckAgent(
         }
         seenCheckInvocations.add(checkKey);
         throwIfAborted(options.signal);
-        const check = await runCheckPhase(
+        const check = await runCheckCommandPhase(
           `run ${invocation.type} check${invocation.adapter ? ` for ${invocation.adapter}` : ""}`,
           () => runProcessCancellable(
             { shell: true, command: invocation.cmd },
             invocation.dir,
-            { ...options, env: invocation.env },
+            checkCommandOptions(options, invocation.env),
           ),
         );
         const label = invocation.type === "just" ? "JUST CHECK" : "MAKE CHECK";
         const checkLocation = invocation.dir === repo.path ? "" : ` (from ${path.basename(invocation.dir)})`;
         const adapterLabel = invocation.adapter ? ` [adapter=${invocation.adapter}]` : "";
         const repoLabel = options.repoScope?.mode === "all" ? ` for ${repo.name}` : "";
-        const section = clipCheckContextSection(`${label} OUTPUT${adapterLabel}${repoLabel}${checkLocation} (exit code ${check.exitCode}):\n${check.output}`);
-        checkSections.push(section);
-        if (check.exitCode !== 0) {
-          commandErrors.push(section);
+        if (recordCheckCommandSection({
+          sections: checkSections,
+          commandErrors,
+          header: `${label} OUTPUT${adapterLabel}${repoLabel}${checkLocation}`,
+          result: check,
+        })) {
+          commandTimedOut = true;
+          break;
         }
       }
     } else {
@@ -625,13 +723,14 @@ export async function runCheckAgent(
       checkSections.push(section);
       commandErrors.push(section);
     }
+    if (commandTimedOut) break;
   }
   checkOutput = checkSections.join("\n\n");
 
   // Step 4: Run supplemental editor diagnostics for known command-tool gaps
   throwIfAborted(options.signal);
   const supplementalSections: string[] = [];
-  for (const repo of scopedRepos) {
+  for (const repo of commandTimedOut ? [] : scopedRepos) {
     throwIfAborted(options.signal);
     const supplementalOutput = await runCheckPhase(`run supplemental diagnostics for ${repo.name}`, () =>
       runSupplementalDiagnosticProviders(repo.path, options)
@@ -649,7 +748,7 @@ export async function runCheckAgent(
   // Deterministic deleted/renamed filename reference check. This runs outside
   // CHECK_AGENT so stale references cannot be downgraded or missed by the LLM.
   const deterministicErrors: string[] = [];
-  for (const repo of scopedRepos) {
+  for (const repo of commandTimedOut ? [] : scopedRepos) {
     throwIfAborted(options.signal);
     const issues = await runCheckPhase(`run deterministic filename-reference diagnostics for ${repo.name}`, () =>
       findDeletedOrRenamedFileReferenceIssuesCancellable(repo.path, options)
@@ -662,7 +761,7 @@ export async function runCheckAgent(
   }
 
   // Step 5: Use unified runner for analysis
-  const result = await runCheckPhase(
+  const summarizeCheckOutput = (summaryOptions: CheckOptions) => runCheckPhase(
     "summarize check output",
     () => runAgent(
       { ...CHECK_AGENT, workingDir },
@@ -675,9 +774,22 @@ export async function runCheckAgent(
           supplementalContext,
         }),
       },
-      options,
+      summaryOptions,
     ),
   );
+
+  let result: AgentExecutionResult;
+  try {
+    result = commandTimedOut
+      ? await runWithCheckSummaryGrace(options, summarizeCheckOutput)
+      : await summarizeCheckOutput(options);
+  } catch (error) {
+    if (error instanceof CheckSummaryGraceTimeoutError) {
+      result = checkSummaryGraceTimeoutResult(error);
+    } else {
+      throw error;
+    }
+  }
 
   const summarizerFailed =
     result.success === false ||
@@ -706,11 +818,15 @@ export async function runCheckAgent(
 
   // TS post-parse normalization:
   //   1. Move unused-code lines from ## Warnings into ## Errors (recompute counts).
-  //   2. Append deterministic TS-side errors that the LLM cannot downgrade.
+  //   2. Append command failures and deterministic TS-side errors that the LLM
+  //      cannot downgrade or miss after context clipping.
   //   3. Recompute Status from the final Errors count.
   // The LLM still classifies most lines correctly; this just corrects drift.
   const promoted = promoteUnusedCodeToErrors(result.output);
-  const withDeterministicErrors = appendDeterministicCheckErrors(promoted, deterministicErrors);
+  const withDeterministicErrors = appendDeterministicCheckErrors(promoted, [
+    ...commandErrors,
+    ...deterministicErrors,
+  ]);
   const normalized = applyStatusOverride(withDeterministicErrors);
 
   // Determine pass/fail status from the TS-authoritative output
