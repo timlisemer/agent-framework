@@ -289,6 +289,75 @@ describe("bounded git utilities", () => {
     ]);
   });
 
+  it("does not report references to existing different paths with similar basenames", async () => {
+    fs.mkdirSync(path.join(repoDir, "src-tauri", "icons"), { recursive: true });
+    fs.mkdirSync(path.join(repoDir, "libs", "iocto-website-backend-lib"), { recursive: true });
+    fs.mkdirSync(path.join(repoDir, "iocto-website", "src"), { recursive: true });
+    fs.mkdirSync(path.join(repoDir, "iocto-website", "static"), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, "Cargo.toml"), "[workspace]\n");
+    fs.writeFileSync(path.join(repoDir, "src-tauri", "Cargo.toml"), "[package]\nname = \"old-tauri\"\n");
+    fs.writeFileSync(
+      path.join(repoDir, "libs", "iocto-website-backend-lib", "Cargo.toml"),
+      "[package]\nname = \"iocto-backend\"\n",
+    );
+    fs.writeFileSync(path.join(repoDir, "src-tauri", "icons", "icon.ico"), "old icon\n");
+    fs.writeFileSync(path.join(repoDir, "iocto-website", "static", "favicon.ico"), "website icon\n");
+    fs.writeFileSync(
+      path.join(repoDir, "justfile"),
+      "update:\n  cargo update --manifest-path libs/iocto-website-backend-lib/Cargo.toml\n",
+    );
+    fs.writeFileSync(
+      path.join(repoDir, "Dockerfile"),
+      "FROM rust:latest\nRUN cargo build --manifest-path Cargo.toml -p iocto-backend --release\n",
+    );
+    fs.writeFileSync(
+      path.join(repoDir, "iocto-website", "src", "app.html"),
+      "<link rel=\"icon\" href=\"%sveltekit.assets%/favicon.ico\" />\n",
+    );
+    git(repoDir, ["add", "."]);
+    git(repoDir, ["commit", "-m", "add tauri and website files"]);
+    fs.rmSync(path.join(repoDir, "src-tauri", "Cargo.toml"));
+    fs.rmSync(path.join(repoDir, "src-tauri", "icons", "icon.ico"));
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
+
+  it("reports root-anchored references to deleted paths", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.writeFileSync(path.join(repoDir, "src", "deleted.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "index.html"), "<script src=\"/src/deleted.ts\"></script>\n");
+    git(repoDir, ["add", "src/deleted.ts", "index.html"]);
+    git(repoDir, ["commit", "-m", "add root-anchored reference"]);
+    fs.rmSync(path.join(repoDir, "src", "deleted.ts"));
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].oldPath).toBe("src/deleted.ts");
+    expect(issues[0].references).toEqual([
+      { path: "index.html", line: 1, text: "<script src=\"/src/deleted.ts\"></script>" },
+    ]);
+  });
+
+  it("reports bare same-directory references to deleted paths", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.writeFileSync(path.join(repoDir, "src", "deleted.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "src", "index.html"), "<script src=\"deleted.ts\"></script>\n");
+    git(repoDir, ["add", "src/deleted.ts", "src/index.html"]);
+    git(repoDir, ["commit", "-m", "add bare same-directory reference"]);
+    fs.rmSync(path.join(repoDir, "src", "deleted.ts"));
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].oldPath).toBe("src/deleted.ts");
+    expect(issues[0].references).toEqual([
+      { path: "src/index.html", line: 1, text: "<script src=\"deleted.ts\"></script>" },
+    ]);
+  });
+
   it("does not report references from deleted files", async () => {
     fs.mkdirSync(path.join(repoDir, ".github", "workflows"), { recursive: true });
     fs.writeFileSync(
@@ -391,6 +460,16 @@ describe("bounded git utilities", () => {
         ],
       },
     ]);
+  });
+
+  it("does not warn for external protocol URLs with path-like suffixes", async () => {
+    fs.writeFileSync(path.join(repoDir, "README.md"), "See https://example.com/docs/missing.md.\n");
+    git(repoDir, ["add", "README.md"]);
+    git(repoDir, ["commit", "-m", "add external url reference"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
   });
 
   it("warns for missing markdown link targets relative to the source file", async () => {

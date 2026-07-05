@@ -621,7 +621,64 @@ function parseDeletedOrRenamedChanges(nameStatus: string): NameStatusChange[] {
   return changes;
 }
 
-async function findReferencesToBasename(
+function normalizeGitRelativePath(relativePath: string): string {
+  return path.posix.normalize(relativePath.replace(/\\/g, "/")).replace(/^\.\//, "");
+}
+
+const REFERENCE_LEFT_BOUNDARY_PATTERN = "(^|[\\s\"'`([{<:=,])";
+const REFERENCE_RIGHT_BOUNDARY_PATTERN = "(?=$|[\\s\"'`)\\]}>:;,.])";
+
+function buildReferenceBoundaryRegExp(innerPattern: string, flags = ""): RegExp {
+  return new RegExp(`${REFERENCE_LEFT_BOUNDARY_PATTERN}${innerPattern}${REFERENCE_RIGHT_BOUNDARY_PATTERN}`, flags);
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+}
+
+function lineContainsRepoPathLiteral(line: string, relativePath: string): boolean {
+  return buildReferenceBoundaryRegExp(escapeRegExp(relativePath)).test(line);
+}
+
+function lineReferencesDeletedOrRenamedPath(
+  sourcePath: string,
+  line: string,
+  oldPath: string,
+  basename: string,
+): boolean {
+  const normalizedOldPath = normalizeGitRelativePath(oldPath);
+  const genericBarrelName = isGenericBarrelBasename(basename);
+  const oldPathNoExt = stripKnownExtension(normalizedOldPath);
+
+  if (lineContainsRepoPathLiteral(line, normalizedOldPath)) return true;
+  if (genericBarrelName && lineContainsRepoPathLiteral(line, oldPathNoExt)) return true;
+  if (lineContainsRepoPathLiteral(line, basename)) {
+    const referencedPath = resolveReferencedPath(sourcePath, basename);
+    if (referencedPath && normalizeGitRelativePath(referencedPath) === normalizedOldPath) return true;
+  }
+  if (genericBarrelName) {
+    const basenameNoExt = stripKnownExtension(basename);
+    if (lineContainsRepoPathLiteral(line, basenameNoExt)) {
+      const referencedPathNoExt = normalizeGitRelativePath(path.posix.join(
+        path.posix.dirname(sourcePath),
+        basenameNoExt,
+      ));
+      if (referencedPathNoExt === oldPathNoExt) return true;
+    }
+  }
+
+  for (const rawPath of findPathReferenceCandidates(line)) {
+    const referencedPath = resolveReferencedPath(sourcePath, rawPath);
+    if (!referencedPath) continue;
+    const normalizedReferencedPath = normalizeGitRelativePath(referencedPath);
+    if (normalizedReferencedPath === normalizedOldPath) return true;
+    if (genericBarrelName && stripKnownExtension(normalizedReferencedPath) === oldPathNoExt) return true;
+  }
+
+  return false;
+}
+
+async function findReferencesToDeletedOrRenamedPath(
   workingDir: string,
   files: string[],
   oldPath: string,
@@ -630,7 +687,7 @@ async function findReferencesToBasename(
 ): Promise<DeletedOrRenamedFileReference[]> {
   const references: DeletedOrRenamedFileReference[] = [];
   const genericBarrelName = isGenericBarrelBasename(basename);
-  const oldPathNoExt = stripKnownExtension(oldPath);
+  const oldPathNoExt = stripKnownExtension(normalizeGitRelativePath(oldPath));
   for (const relativePath of files) {
     throwIfAborted(options.signal);
     const absolutePath = path.join(workingDir, relativePath);
@@ -643,11 +700,14 @@ async function findReferencesToBasename(
 
     const lines = content.split("\n");
     for (let i = 0; i < lines.length; i++) {
-      if (genericBarrelName) {
-        if (!lines[i].includes(oldPath) && !lines[i].includes(oldPathNoExt)) continue;
-      } else if (!lines[i].includes(basename)) {
+      if (
+        !lines[i].includes(basename) &&
+        !lines[i].includes(oldPath) &&
+        !(genericBarrelName && lines[i].includes(oldPathNoExt))
+      ) {
         continue;
       }
+      if (!lineReferencesDeletedOrRenamedPath(relativePath, lines[i], oldPath, basename)) continue;
       references.push({
         path: relativePath,
         line: i + 1,
@@ -670,8 +730,14 @@ function isScenarioFixturePath(relativePath: string): boolean {
   return relativePath.startsWith("scenarios/") && relativePath.endsWith(".json");
 }
 
-const FILE_REFERENCE_RE = /(^|[\s"'`([{<:=,])((?:\.{1,2}\/|[A-Za-z0-9_.-]+\/)[A-Za-z0-9_./@%+~=-]*\.[A-Za-z0-9][A-Za-z0-9+-]{0,11})(?=$|[\s"'`)\]}>:;,.])/g;
-const EXTENSIONLESS_CONFIG_REFERENCE_RE = /(^|[\s"'`([{<:=,])((?:\.{1,2}\/|(?:[A-Za-z0-9_.-]+\/)+)?(?:\.env(?:\.[A-Za-z0-9_.-]+)?|Dockerfile(?:\.[A-Za-z0-9_.-]+)?|Containerfile(?:\.[A-Za-z0-9_.-]+)?|Makefile(?:\.[A-Za-z0-9_.-]+)?|makefile(?:\.[A-Za-z0-9_.-]+)?|GNUmakefile|Justfile|justfile))(?=$|[\s"'`)\]}>:;,.])/g;
+const FILE_REFERENCE_RE = buildReferenceBoundaryRegExp(
+  "((?:/+|\\.{1,2}/|[A-Za-z0-9_.-]+/)[A-Za-z0-9_./@%+~=-]*\\.[A-Za-z0-9][A-Za-z0-9+-]{0,11})",
+  "g",
+);
+const EXTENSIONLESS_CONFIG_REFERENCE_RE = buildReferenceBoundaryRegExp(
+  "((?:/+|\\.{1,2}/|(?:[A-Za-z0-9_.-]+/)+)?(?:\\.env(?:\\.[A-Za-z0-9_.-]+)?|Dockerfile(?:\\.[A-Za-z0-9_.-]+)?|Containerfile(?:\\.[A-Za-z0-9_.-]+)?|Makefile(?:\\.[A-Za-z0-9_.-]+)?|makefile(?:\\.[A-Za-z0-9_.-]+)?|GNUmakefile|Justfile|justfile))",
+  "g",
+);
 const MARKDOWN_LINK_TARGET_RE = /!?\[[^\]]*]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g;
 
 const CHECKED_REFERENCE_EXTENSIONS = new Set([
@@ -803,10 +869,19 @@ function stripReferenceDecoration(rawPath: string): string {
   return rawPath.replace(/[?#].*$/, "");
 }
 
+function isProtocolReferenceCandidate(
+  line: string,
+  matchIndex: number,
+  leftBoundary: string,
+  rawPath: string,
+): boolean {
+  return rawPath.startsWith("//") || line.slice(0, matchIndex + leftBoundary.length).endsWith("://");
+}
+
 function resolveReferencedPath(sourcePath: string, rawPath: string): string | null {
   const clean = stripReferenceDecoration(rawPath);
   if (!clean || clean.startsWith("@") || clean.includes("*")) return null;
-  if (clean.includes("://") || /^[A-Za-z]:/.test(clean)) return null;
+  if (clean.includes("://") || clean.startsWith("//") || /^[A-Za-z]:/.test(clean)) return null;
 
   const extension = path.posix.extname(clean).toLowerCase();
   const basename = path.posix.basename(clean);
@@ -873,8 +948,7 @@ function findPathReferenceCandidates(line: string): string[] {
   FILE_REFERENCE_RE.lastIndex = 0;
   for (let match = FILE_REFERENCE_RE.exec(line); match; match = FILE_REFERENCE_RE.exec(line)) {
     const rawPath = match[2];
-    const startsAfterProtocol = line.slice(0, match.index + match[1].length).endsWith("://");
-    if (!rawPath || startsAfterProtocol) continue;
+    if (!rawPath || isProtocolReferenceCandidate(line, match.index, match[1], rawPath)) continue;
     candidates.add(rawPath);
   }
 
@@ -885,8 +959,7 @@ function findPathReferenceCandidates(line: string): string[] {
     match = EXTENSIONLESS_CONFIG_REFERENCE_RE.exec(line)
   ) {
     const rawPath = match[2];
-    const startsAfterProtocol = line.slice(0, match.index + match[1].length).endsWith("://");
-    if (!rawPath || startsAfterProtocol) continue;
+    if (!rawPath || isProtocolReferenceCandidate(line, match.index, match[1], rawPath)) continue;
     candidates.add(rawPath);
   }
   return [...candidates];
@@ -935,7 +1008,7 @@ async function findDeletedOrRenamedFileReferenceIssuesFromContext(
 
   for (const change of changes) {
     throwIfAborted(options.signal);
-    const references = await findReferencesToBasename(
+    const references = await findReferencesToDeletedOrRenamedPath(
       workingDir,
       files.filter((relativePath) =>
         !deletedReferenceSourcePaths.has(relativePath) && !isScenarioFixturePath(relativePath)
