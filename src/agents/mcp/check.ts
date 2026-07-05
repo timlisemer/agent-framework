@@ -393,15 +393,13 @@ function formatDeletedOrRenamedReferenceError(
   issue: DeletedOrRenamedFileReferenceIssue,
   includeRepoLabel: boolean,
 ): string {
-  const action = issue.changeType === "deleted" ? "Deleted" : "Renamed";
+  const target = issue.changeType === "deleted" ? "deleted file" : "old path of renamed file";
   const repoLabel = includeRepoLabel ? ` in ${repo.name} (${repo.path})` : "";
-  const references = issue.references
-    .map((ref) => `  - ${ref.path}:${ref.line}: ${ref.text}`)
+  return issue.references
+    .map((ref) =>
+      `\`${ref.path}\`${repoLabel}:${ref.line} still references ${target} \`${issue.oldPath}\` (old filename \`${issue.oldBasename}\`): ${ref.text}`
+    )
     .join("\n");
-  return [
-    `${action} file${repoLabel} \`${issue.oldPath}\` still has references to old filename \`${issue.oldBasename}\`:`,
-    references,
-  ].join("\n");
 }
 
 export function appendDeterministicCheckErrors(

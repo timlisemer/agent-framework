@@ -287,6 +287,25 @@ describe("bounded git utilities", () => {
     ]);
   });
 
+  it("does not report references from deleted files", async () => {
+    fs.mkdirSync(path.join(repoDir, ".github", "workflows"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repoDir, ".github", "workflows", "manual-build.yml"),
+      "name: manual-build\n",
+    );
+    fs.writeFileSync(
+      path.join(repoDir, ".github", "workflows", "cleanup.yml"),
+      "uses: ./.github/workflows/manual-build.yml\n",
+    );
+    git(repoDir, ["add", ".github/workflows/manual-build.yml", ".github/workflows/cleanup.yml"]);
+    git(repoDir, ["commit", "-m", "add workflows"]);
+    git(repoDir, ["rm", "--cached", ".github/workflows/manual-build.yml", ".github/workflows/cleanup.yml"]);
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
+
   it("does not report unrelated generic barrel filename mentions", async () => {
     fs.mkdirSync(path.join(repoDir, "src"));
     fs.writeFileSync(path.join(repoDir, "src", "index.ts"), "export const value = 1;\n");
@@ -333,6 +352,25 @@ describe("bounded git utilities", () => {
     expect(issues[0].oldPath).toBe("src/same-name.ts");
     expect(issues[0].changeType).toBe("renamed");
     expect(issues[0].references.map((ref) => ref.path)).toEqual(["src/index.ts"]);
+  });
+
+  it("reports old-path references after git mv", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "lib"));
+    fs.writeFileSync(path.join(repoDir, "src", "git-moved.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "README.md"), "Import from src/git-moved.ts after move.\n");
+    git(repoDir, ["add", "src/git-moved.ts", "README.md"]);
+    git(repoDir, ["commit", "-m", "add git moved file"]);
+    git(repoDir, ["mv", "src/git-moved.ts", "lib/git-moved.ts"]);
+
+    const issues = await findDeletedOrRenamedFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0].oldPath).toBe("src/git-moved.ts");
+    expect(issues[0].changeType).toBe("renamed");
+    expect(issues[0].references).toEqual([
+      { path: "README.md", line: 1, text: "Import from src/git-moved.ts after move." },
+    ]);
   });
 
   it("does not treat an unrelated existing same-basename file as a move", async () => {

@@ -674,13 +674,16 @@ export async function findDeletedOrRenamedFileReferenceIssuesCancellable(
 
   const inventory = await getGitVisibleFileInventoryCancellable(workingDir, options);
   const files = inventory.files.map((file) => file.path);
+  const deletedReferenceSourcePaths = new Set(changes.map((change) => change.oldPath));
   const issues: DeletedOrRenamedFileReferenceIssue[] = [];
 
   for (const change of changes) {
     throwIfAborted(options.signal);
     const references = await findReferencesToBasename(
       workingDir,
-      files.filter((relativePath) => relativePath !== change.oldPath && !isScenarioFixturePath(relativePath)),
+      files.filter((relativePath) =>
+        !deletedReferenceSourcePaths.has(relativePath) && !isScenarioFixturePath(relativePath)
+      ),
       change.oldPath,
       change.oldBasename,
       options,

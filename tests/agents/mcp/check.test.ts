@@ -143,13 +143,13 @@ describe("appendDeterministicCheckErrors", () => {
 `;
 
     const result = appendDeterministicCheckErrors(input, [
-      "Deleted file `src/old.ts` still has references to old filename `old.ts`:\n  - src/index.ts:1: import './old.ts';",
+      "`src/index.ts`:1 still references deleted file `src/old.ts` (old filename `old.ts`): import './old.ts';",
     ]);
 
     expect(result).toContain("- Errors: 1");
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain("DETERMINISTIC CHECK ERRORS:");
-    expect(result).toContain("Deleted file `src/old.ts`");
+    expect(result).toContain("`src/index.ts`:1 still references deleted file `src/old.ts`");
     expect(result).not.toMatch(/## Errors\s*\n\(none\)/);
   });
 });
@@ -601,8 +601,8 @@ src/example.ts:1:1 warning TS6385: deprecated
     expect(mocks.findDeletedOrRenamedFileReferenceIssuesCancellable).toHaveBeenCalledWith(tempDir, expect.any(Object));
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain("DETERMINISTIC CHECK ERRORS:");
-    expect(result).toContain("Deleted file `src/old-helper.ts` still has references");
-    expect(result).toContain("src/index.ts:3: import './old-helper.ts';");
+    expect(result).toContain("`src/index.ts`:3 still references deleted file `src/old-helper.ts`");
+    expect(result).toContain("import './old-helper.ts';");
   });
 
   it("includes failing command output when the check summarizer returns a sentinel", async () => {
