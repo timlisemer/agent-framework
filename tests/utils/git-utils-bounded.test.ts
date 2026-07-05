@@ -472,11 +472,156 @@ describe("bounded git utilities", () => {
     expect(issues).toHaveLength(0);
   });
 
+  it("does not warn when prose and config literals resolve from the repo root", async () => {
+    fs.mkdirSync(path.join(repoDir, ".github", "actions", "setup"), { recursive: true });
+    fs.mkdirSync(path.join(repoDir, "docs", "nested"), { recursive: true });
+    fs.mkdirSync(path.join(repoDir, "libs", "foo"), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, "libs", "foo", "package.json"), "{}\n");
+    fs.writeFileSync(path.join(repoDir, "justfile"), "check:\n  true\n");
+    fs.writeFileSync(
+      path.join(repoDir, ".github", "actions", "setup", "action.yml"),
+      "runs:\n  steps:\n    - run: cat libs/foo/package.json\n",
+    );
+    fs.writeFileSync(
+      path.join(repoDir, "docs", "nested", "README.md"),
+      "Use the justfile from the project root.\n",
+    );
+    fs.writeFileSync(path.join(repoDir, "README.md"), "Run the Justfile command.\n");
+    git(repoDir, ["add", "."]);
+    git(repoDir, ["commit", "-m", "add repo-root reference examples"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
+
+  it("does not warn for intentional local env file references", async () => {
+    fs.writeFileSync(path.join(repoDir, ".gitignore"), ".env\n.env.local\n");
+    fs.writeFileSync(path.join(repoDir, ".env.example"), "EXAMPLE=true\n");
+    fs.writeFileSync(path.join(repoDir, "Cargo.toml"), "env_file = \".env\"\n");
+    fs.writeFileSync(
+      path.join(repoDir, "README.md"),
+      ["Copy .env.example to .env.", "Use .env.local for local overrides.", ""].join("\n"),
+    );
+    fs.writeFileSync(path.join(repoDir, "docker-compose.yml"), "services:\n  app:\n    env_file: .env\n");
+    git(repoDir, ["add", "."]);
+    git(repoDir, ["commit", "-m", "add env reference examples"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
+
+  it("warns for unignored env typos even when a generic env template exists", async () => {
+    fs.writeFileSync(path.join(repoDir, ".env.example"), "EXAMPLE=true\n");
+    fs.writeFileSync(path.join(repoDir, "README.md"), "Use .env.prodution for production settings.\n");
+    git(repoDir, ["add", ".env.example", "README.md"]);
+    git(repoDir, ["commit", "-m", "add env typo reference"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toEqual([
+      {
+        referencedPath: ".env.prodution",
+        references: [
+          { path: "README.md", line: 1, text: "Use .env.prodution for production settings." },
+        ],
+      },
+    ]);
+  });
+
+  it("does not warn for non-env copy instruction targets when the source exists", async () => {
+    fs.mkdirSync(path.join(repoDir, "templates"), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, "templates", "config.json"), "{}\n");
+    fs.writeFileSync(path.join(repoDir, "README.md"), "Copy templates/config.json to config/local.json.\n");
+    git(repoDir, ["add", "templates/config.json", "README.md"]);
+    git(repoDir, ["commit", "-m", "add copy target instruction"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
+
+  it("still warns for unrelated missing references after copy instruction targets", async () => {
+    fs.mkdirSync(path.join(repoDir, "templates"), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, "templates", "config.json"), "{}\n");
+    fs.writeFileSync(
+      path.join(repoDir, "README.md"),
+      "Copy templates/config.json to config/local.json and see docs/missing.md.\n",
+    );
+    git(repoDir, ["add", "templates/config.json", "README.md"]);
+    git(repoDir, ["commit", "-m", "add copy target with later missing reference"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toEqual([
+      {
+        referencedPath: "docs/missing.md",
+        references: [
+          {
+            path: "README.md",
+            line: 1,
+            text: "Copy templates/config.json to config/local.json and see docs/missing.md.",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("does not warn for creation instructions and placeholder target paths", async () => {
+    fs.writeFileSync(
+      path.join(repoDir, "README.md"),
+      "Create src/api/YourModelService.ts and src/stores/yourModelHelper.ts for your model.\n",
+    );
+    git(repoDir, ["add", "README.md"]);
+    git(repoDir, ["commit", "-m", "add placeholder creation instructions"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
+
+  it("warns for markdown links with create in the link text", async () => {
+    fs.writeFileSync(path.join(repoDir, "README.md"), "See [create docs](docs/missing.md).\n");
+    git(repoDir, ["add", "README.md"]);
+    git(repoDir, ["commit", "-m", "add create link text"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toEqual([
+      {
+        referencedPath: "docs/missing.md",
+        references: [
+          { path: "README.md", line: 1, text: "See [create docs](docs/missing.md)." },
+        ],
+      },
+    ]);
+  });
+
+  it("warns for negated create prose", async () => {
+    fs.writeFileSync(path.join(repoDir, "README.md"), "Do not create docs/missing.md.\n");
+    git(repoDir, ["add", "README.md"]);
+    git(repoDir, ["commit", "-m", "add negated create reference"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toEqual([
+      {
+        referencedPath: "docs/missing.md",
+        references: [
+          { path: "README.md", line: 1, text: "Do not create docs/missing.md." },
+        ],
+      },
+    ]);
+  });
+
   it("warns for missing markdown link targets relative to the source file", async () => {
     fs.mkdirSync(path.join(repoDir, "docs"), { recursive: true });
+    fs.mkdirSync(path.join(repoDir, "guide"), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, "guide", "api.md"), "Root guide exists.\n");
     fs.writeFileSync(path.join(repoDir, "README.md"), "See [architecture](MISSING.md).\n");
     fs.writeFileSync(path.join(repoDir, "docs", "README.md"), "See [API](guide/api.md).\n");
-    git(repoDir, ["add", "README.md", "docs/README.md"]);
+    git(repoDir, ["add", "README.md", "docs/README.md", "guide/api.md"]);
     git(repoDir, ["commit", "-m", "add missing markdown links"]);
 
     const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
@@ -492,6 +637,25 @@ describe("bounded git utilities", () => {
         referencedPath: "MISSING.md",
         references: [
           { path: "README.md", line: 1, text: "See [architecture](MISSING.md)." },
+        ],
+      },
+    ]);
+  });
+
+  it("still warns when nested prose references the wrong repo-root path", async () => {
+    fs.mkdirSync(path.join(repoDir, "iocto-backend", "src", "web"), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, "iocto-backend", "src", "web", "models.rs"), "pub struct Model;\n");
+    fs.writeFileSync(path.join(repoDir, "iocto-backend", "README.md"), "See web/models.rs.\n");
+    git(repoDir, ["add", "iocto-backend/src/web/models.rs", "iocto-backend/README.md"]);
+    git(repoDir, ["commit", "-m", "add nested wrong-path reference"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toEqual([
+      {
+        referencedPath: "iocto-backend/web/models.rs",
+        references: [
+          { path: "iocto-backend/README.md", line: 1, text: "See web/models.rs." },
         ],
       },
     ]);

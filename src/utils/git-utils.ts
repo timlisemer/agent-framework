@@ -667,8 +667,8 @@ function lineReferencesDeletedOrRenamedPath(
     }
   }
 
-  for (const rawPath of findPathReferenceCandidates(line)) {
-    const referencedPath = resolveReferencedPath(sourcePath, rawPath);
+  for (const candidate of findPathReferenceCandidates(line)) {
+    const referencedPath = resolveReferencedPath(sourcePath, candidate.rawPath);
     if (!referencedPath) continue;
     const normalizedReferencedPath = normalizeGitRelativePath(referencedPath);
     if (normalizedReferencedPath === normalizedOldPath) return true;
@@ -829,6 +829,16 @@ const JS_RUNTIME_EXTENSION_ALTERNATES: Record<string, string[]> = {
   ".mjs": [".mts", ".ts"],
 };
 
+const CONFIG_REFERENCE_ALIASES: Record<string, string[]> = {
+  "Justfile": ["justfile"],
+  "justfile": ["Justfile"],
+  "Makefile": ["makefile", "GNUmakefile"],
+  "makefile": ["Makefile", "GNUmakefile"],
+};
+
+const ENV_TEMPLATE_SUFFIXES = [".example", ".sample", ".template"];
+const ENV_TEMPLATE_BASENAMES = ENV_TEMPLATE_SUFFIXES.map((suffix) => `.env${suffix}`);
+
 const GENERATED_REFERENCE_PATH_PREFIXES = [
   "build/",
   "coverage/",
@@ -879,6 +889,14 @@ function isProtocolReferenceCandidate(
 }
 
 function resolveReferencedPath(sourcePath: string, rawPath: string): string | null {
+  return resolveReferencedPathFromBase(path.posix.dirname(sourcePath), rawPath);
+}
+
+function resolveRepoRootReferencedPath(rawPath: string): string | null {
+  return resolveReferencedPathFromBase("", rawPath);
+}
+
+function resolveReferencedPathFromBase(base: string, rawPath: string): string | null {
   const clean = stripReferenceDecoration(rawPath);
   if (!clean || clean.startsWith("@") || clean.includes("*")) return null;
   if (clean.includes("://") || clean.startsWith("//") || /^[A-Za-z]:/.test(clean)) return null;
@@ -891,8 +909,7 @@ function resolveReferencedPath(sourcePath: string, rawPath: string): string | nu
   ) return null;
 
   const rootAnchoredPath = clean.startsWith("/") ? clean.replace(/^\/+/, "") : null;
-  const base = rootAnchoredPath === null ? path.posix.dirname(sourcePath) : "";
-  const resolved = path.posix.normalize(path.posix.join(base, rootAnchoredPath ?? clean));
+  const resolved = path.posix.normalize(path.posix.join(rootAnchoredPath === null ? base : "", rootAnchoredPath ?? clean));
   if (!resolved || resolved === "." || resolved === ".." || resolved.startsWith("../")) return null;
   return resolved;
 }
@@ -934,22 +951,58 @@ async function referencedPathExists(
     if (await repoRelativeFileExists(workingDir, alternatePath)) return true;
   }
 
+  const basename = path.posix.basename(relativePath);
+  const aliases = CONFIG_REFERENCE_ALIASES[basename] ?? [];
+  for (const alias of aliases) {
+    const aliasPath = path.posix.join(path.posix.dirname(relativePath), alias);
+    if (await repoRelativeFileExists(workingDir, aliasPath)) return true;
+  }
+
   return false;
 }
 
-function findPathReferenceCandidates(line: string): string[] {
-  const candidates = new Set<string>();
+type PathReferenceCandidateKind = "markdown-link" | "path-literal" | "extensionless-config-literal";
+
+type PathReferenceCandidate = {
+  rawPath: string;
+  kind: PathReferenceCandidateKind;
+  index: number;
+};
+
+function addPathReferenceCandidate(
+  candidates: Map<string, PathReferenceCandidate>,
+  candidate: PathReferenceCandidate,
+): void {
+  const key = `${candidate.index}\0${candidate.rawPath}`;
+  const existing = candidates.get(key);
+  if (!existing || candidate.kind === "markdown-link") {
+    candidates.set(key, candidate);
+  }
+}
+
+function findPathReferenceCandidates(line: string): PathReferenceCandidate[] {
+  const candidates = new Map<string, PathReferenceCandidate>();
   MARKDOWN_LINK_TARGET_RE.lastIndex = 0;
   for (let match = MARKDOWN_LINK_TARGET_RE.exec(line); match; match = MARKDOWN_LINK_TARGET_RE.exec(line)) {
     const rawPath = match[1];
-    if (rawPath) candidates.add(rawPath);
+    if (rawPath) {
+      addPathReferenceCandidate(candidates, {
+        rawPath,
+        kind: "markdown-link",
+        index: match.index + match[0].indexOf(rawPath),
+      });
+    }
   }
 
   FILE_REFERENCE_RE.lastIndex = 0;
   for (let match = FILE_REFERENCE_RE.exec(line); match; match = FILE_REFERENCE_RE.exec(line)) {
     const rawPath = match[2];
     if (!rawPath || isProtocolReferenceCandidate(line, match.index, match[1], rawPath)) continue;
-    candidates.add(rawPath);
+    addPathReferenceCandidate(candidates, {
+      rawPath,
+      kind: "path-literal",
+      index: match.index + match[1].length,
+    });
   }
 
   EXTENSIONLESS_CONFIG_REFERENCE_RE.lastIndex = 0;
@@ -960,9 +1013,165 @@ function findPathReferenceCandidates(line: string): string[] {
   ) {
     const rawPath = match[2];
     if (!rawPath || isProtocolReferenceCandidate(line, match.index, match[1], rawPath)) continue;
-    candidates.add(rawPath);
+    addPathReferenceCandidate(candidates, {
+      rawPath,
+      kind: "extensionless-config-literal",
+      index: match.index + match[1].length,
+    });
   }
-  return [...candidates];
+  return [...candidates.values()].sort((a, b) => a.index - b.index || a.rawPath.localeCompare(b.rawPath));
+}
+
+function isRepoRootFallbackEligible(candidate: PathReferenceCandidate): boolean {
+  const clean = stripReferenceDecoration(candidate.rawPath);
+  return (
+    candidate.kind !== "markdown-link" &&
+    !clean.startsWith("./") &&
+    !clean.startsWith("../") &&
+    !clean.startsWith("/")
+  );
+}
+
+async function referenceCandidateExists(
+  workingDir: string,
+  referencedPath: string,
+  candidate: PathReferenceCandidate,
+): Promise<boolean> {
+  if (await referencedPathExists(workingDir, referencedPath)) return true;
+  if (!isRepoRootFallbackEligible(candidate)) return false;
+
+  const rootReferencedPath = resolveRepoRootReferencedPath(candidate.rawPath);
+  return Boolean(rootReferencedPath && await referencedPathExists(workingDir, rootReferencedPath));
+}
+
+function isPlaceholderReferencePath(relativePath: string): boolean {
+  return /(?:^|[^A-Za-z0-9])(?:Your[A-Z][A-Za-z0-9]*|your[A-Z][A-Za-z0-9]*)/.test(path.posix.basename(relativePath));
+}
+
+function isCreateInstructionForCandidate(line: string, candidate: PathReferenceCandidate): boolean {
+  if (candidate.kind === "markdown-link") return false;
+  const beforeCandidate = line.slice(0, candidate.index);
+  if (/\b(?:do\s+not|don't|never)\s+create\s+$/i.test(beforeCandidate)) return false;
+  return /\bcreate\s+$/i.test(beforeCandidate);
+}
+
+async function isGitIgnoredPath(
+  workingDir: string,
+  relativePath: string,
+  options: CancellationOptions,
+): Promise<boolean> {
+  const result = await runGit(["check-ignore", "--quiet", "--", relativePath], workingDir, {
+    ...options,
+    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  return result.exitCode === 0;
+}
+
+async function hasEnvTemplateForPath(
+  workingDir: string,
+  relativePath: string,
+  allowGenericTemplates: boolean,
+): Promise<boolean> {
+  const dirname = path.posix.dirname(relativePath);
+  const candidateDirs = new Set(["", dirname === "." ? "" : dirname]);
+  const basename = path.posix.basename(relativePath);
+  const templateBasenames = [
+    ...ENV_TEMPLATE_SUFFIXES.map((suffix) => `${basename}${suffix}`),
+    ...(allowGenericTemplates ? ENV_TEMPLATE_BASENAMES : []),
+  ];
+
+  for (const dir of candidateDirs) {
+    for (const templateBasename of templateBasenames) {
+      const templatePath = dir ? path.posix.join(dir, templateBasename) : templateBasename;
+      if (await repoRelativeFileExists(workingDir, templatePath)) return true;
+    }
+  }
+
+  return false;
+}
+
+async function isIntentionalEnvReference(
+  workingDir: string,
+  referencedPath: string,
+  options: CancellationOptions,
+): Promise<boolean> {
+  const basename = path.posix.basename(referencedPath);
+  const isBareEnv = basename === ".env";
+  if (
+    !isBareEnv &&
+    (
+      !basename.startsWith(".env.") ||
+      ENV_TEMPLATE_BASENAMES.includes(basename)
+    )
+  ) return false;
+  if (
+    await isGitIgnoredPath(workingDir, referencedPath, options) ||
+    await isGitIgnoredPath(workingDir, basename, options)
+  ) return true;
+  return (
+    await hasEnvTemplateForPath(workingDir, referencedPath, isBareEnv)
+  );
+}
+
+function lastWordIndexBefore(line: string, word: string, endIndex: number): number {
+  const wordRe = new RegExp(`\\b${word}\\b`, "gi");
+  let lastIndex = -1;
+  for (let match = wordRe.exec(line); match && match.index < endIndex; match = wordRe.exec(line)) {
+    lastIndex = match.index;
+  }
+  return lastIndex;
+}
+
+async function isCopyInstructionToCandidate(
+  workingDir: string,
+  sourcePath: string,
+  line: string,
+  candidate: PathReferenceCandidate,
+  candidates: readonly PathReferenceCandidate[],
+): Promise<boolean> {
+  const toIndex = lastWordIndexBefore(line, "to", candidate.index);
+  if (toIndex < 0) return false;
+  const copyIndex = lastWordIndexBefore(line, "copy", toIndex);
+  if (copyIndex < 0) return false;
+  const destinationCandidate = candidates.find((possibleDestination) => possibleDestination.index > toIndex);
+  if (destinationCandidate !== candidate) return false;
+
+  const sourceCandidates = candidates.filter((sourceCandidate) =>
+    sourceCandidate.index > copyIndex &&
+    sourceCandidate.index < toIndex
+  );
+  for (const sourceCandidate of sourceCandidates) {
+    const sourceReferencedPath = resolveReferencedPath(sourcePath, sourceCandidate.rawPath);
+    if (sourceReferencedPath && await referenceCandidateExists(workingDir, sourceReferencedPath, sourceCandidate)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function shouldSuppressNonexistentReference(input: {
+  workingDir: string;
+  sourcePath: string;
+  line: string;
+  referencedPath: string;
+  candidate: PathReferenceCandidate;
+  candidates: readonly PathReferenceCandidate[];
+  options: CancellationOptions;
+}): Promise<boolean> {
+  return (
+    isPlaceholderReferencePath(input.referencedPath) ||
+    isCreateInstructionForCandidate(input.line, input.candidate) ||
+    await isIntentionalEnvReference(input.workingDir, input.referencedPath, input.options) ||
+    await isCopyInstructionToCandidate(
+      input.workingDir,
+      input.sourcePath,
+      input.line,
+      input.candidate,
+      input.candidates,
+    )
+  );
 }
 
 /**
@@ -1059,14 +1268,24 @@ async function findNonexistentFileReferenceIssuesFromContext(
       }
       if (inMarkdownFence) continue;
 
-      for (const rawPath of findPathReferenceCandidates(lines[i])) {
-        const referencedPath = resolveReferencedPath(file.path, rawPath);
+      const candidates = findPathReferenceCandidates(lines[i]);
+      for (const candidate of candidates) {
+        const referencedPath = resolveReferencedPath(file.path, candidate.rawPath);
         if (
           !referencedPath ||
           deletedOrRenamedOldPaths.has(referencedPath) ||
           isGeneratedReferencePath(referencedPath)
         ) continue;
-        if (await referencedPathExists(workingDir, referencedPath)) continue;
+        if (await referenceCandidateExists(workingDir, referencedPath, candidate)) continue;
+        if (await shouldSuppressNonexistentReference({
+          workingDir,
+          sourcePath: file.path,
+          line: lines[i],
+          referencedPath,
+          candidate,
+          candidates,
+          options,
+        })) continue;
 
         const reference = {
           path: file.path,
