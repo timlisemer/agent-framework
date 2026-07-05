@@ -3,6 +3,7 @@ import fs from "fs";
 import os from "os";
 import { runCommand, runProcessCancellable, type ProcessOutputLimits } from "./command.js";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
+import { isPathAtOrInside } from "./path-containment.js";
 
 const isWindows = process.platform === "win32";
 const NULL_DEVICE = isWindows ? "NUL" : "/dev/null";
@@ -218,6 +219,16 @@ export interface DeletedOrRenamedFileReferenceIssue {
   oldBasename: string;
   changeType: "deleted" | "renamed";
   references: DeletedOrRenamedFileReference[];
+}
+
+export interface NonexistentFileReferenceIssue {
+  referencedPath: string;
+  references: DeletedOrRenamedFileReference[];
+}
+
+export interface FilenameReferenceDiagnostics {
+  deletedOrRenamedIssues: DeletedOrRenamedFileReferenceIssue[];
+  nonexistentIssues: NonexistentFileReferenceIssue[];
 }
 
 function sortRepoSelectionsSubmodulesFirst<T extends { path: string }>(
@@ -569,6 +580,11 @@ type NameStatusChange = DeletedOrRenamedChange & {
   newPath?: string;
 };
 
+type FilenameReferenceScanContext = {
+  changes: NameStatusChange[];
+  inventory: GitVisibleFileInventory;
+};
+
 function parseDeletedOrRenamedChanges(nameStatus: string): NameStatusChange[] {
   const changes: NameStatusChange[] = [];
   const seen = new Set<string>();
@@ -654,6 +670,228 @@ function isScenarioFixturePath(relativePath: string): boolean {
   return relativePath.startsWith("scenarios/") && relativePath.endsWith(".json");
 }
 
+const FILE_REFERENCE_RE = /(^|[\s"'`([{<:=,])((?:\.{1,2}\/|[A-Za-z0-9_.-]+\/)[A-Za-z0-9_./@%+~=-]*\.[A-Za-z0-9][A-Za-z0-9+-]{0,11})(?=$|[\s"'`)\]}>:;,.])/g;
+const EXTENSIONLESS_CONFIG_REFERENCE_RE = /(^|[\s"'`([{<:=,])((?:\.{1,2}\/|(?:[A-Za-z0-9_.-]+\/)+)?(?:\.env(?:\.[A-Za-z0-9_.-]+)?|Dockerfile(?:\.[A-Za-z0-9_.-]+)?|Containerfile(?:\.[A-Za-z0-9_.-]+)?|Makefile(?:\.[A-Za-z0-9_.-]+)?|makefile(?:\.[A-Za-z0-9_.-]+)?|GNUmakefile|Justfile|justfile))(?=$|[\s"'`)\]}>:;,.])/g;
+const MARKDOWN_LINK_TARGET_RE = /!?\[[^\]]*]\(([^)\s]+)(?:\s+["'][^)]*["'])?\)/g;
+
+const CHECKED_REFERENCE_EXTENSIONS = new Set([
+  ".bash",
+  ".c",
+  ".cc",
+  ".cjs",
+  ".cpp",
+  ".cs",
+  ".css",
+  ".cts",
+  ".env",
+  ".fish",
+  ".gif",
+  ".go",
+  ".graphql",
+  ".h",
+  ".hpp",
+  ".html",
+  ".ico",
+  ".java",
+  ".jpeg",
+  ".jpg",
+  ".js",
+  ".json",
+  ".jsonc",
+  ".jsx",
+  ".kt",
+  ".kts",
+  ".less",
+  ".md",
+  ".mdx",
+  ".mjs",
+  ".mts",
+  ".nix",
+  ".php",
+  ".png",
+  ".proto",
+  ".py",
+  ".rb",
+  ".rs",
+  ".sass",
+  ".scss",
+  ".sh",
+  ".sql",
+  ".svg",
+  ".swift",
+  ".toml",
+  ".ts",
+  ".tsx",
+  ".txt",
+  ".webp",
+  ".xml",
+  ".yaml",
+  ".yml",
+  ".zsh",
+]);
+
+const FILENAME_REFERENCE_WARNING_SOURCE_EXTENSIONS = new Set([
+  ".adoc",
+  ".html",
+  ".json",
+  ".jsonc",
+  ".md",
+  ".mdx",
+  ".rst",
+  ".toml",
+  ".txt",
+  ".xml",
+  ".yaml",
+  ".yml",
+]);
+
+const EXTENSIONLESS_CONFIG_REFERENCE_BASENAMES = new Set([
+  ".env",
+  "Containerfile",
+  "Dockerfile",
+  "GNUmakefile",
+  "Justfile",
+  "Makefile",
+  "justfile",
+  "makefile",
+]);
+
+const JS_RUNTIME_EXTENSION_ALTERNATES: Record<string, string[]> = {
+  ".cjs": [".cts", ".ts"],
+  ".js": [".ts", ".tsx", ".mts", ".cts"],
+  ".jsx": [".tsx", ".ts"],
+  ".mjs": [".mts", ".ts"],
+};
+
+const GENERATED_REFERENCE_PATH_PREFIXES = [
+  "build/",
+  "coverage/",
+  "dist/",
+  "out/",
+  "target/",
+];
+
+function shouldIgnoreFilenameReferenceScanPath(relativePath: string): boolean {
+  const extension = path.posix.extname(relativePath).toLowerCase();
+  const basename = path.posix.basename(relativePath);
+  const isScannableSource =
+    FILENAME_REFERENCE_WARNING_SOURCE_EXTENSIONS.has(extension) ||
+    isExtensionlessConfigReferenceBasename(basename);
+  return (
+    !isScannableSource ||
+    isScenarioFixturePath(relativePath) ||
+    /(?:^|\/)(?:package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/.test(relativePath)
+  );
+}
+
+function isGeneratedReferencePath(relativePath: string): boolean {
+  return GENERATED_REFERENCE_PATH_PREFIXES.some((prefix) =>
+    relativePath.startsWith(prefix) || relativePath.includes(`/${prefix}`)
+  );
+}
+
+function scansMarkdownFences(relativePath: string): boolean {
+  const extension = path.posix.extname(relativePath).toLowerCase();
+  return extension === ".md" || extension === ".mdx";
+}
+
+function isMarkdownFenceLine(line: string): boolean {
+  return /^\s*(?:`{3,}|~{3,})/.test(line);
+}
+
+function stripReferenceDecoration(rawPath: string): string {
+  return rawPath.replace(/[?#].*$/, "");
+}
+
+function resolveReferencedPath(sourcePath: string, rawPath: string): string | null {
+  const clean = stripReferenceDecoration(rawPath);
+  if (!clean || clean.startsWith("@") || clean.includes("*")) return null;
+  if (clean.includes("://") || /^[A-Za-z]:/.test(clean)) return null;
+
+  const extension = path.posix.extname(clean).toLowerCase();
+  const basename = path.posix.basename(clean);
+  if (
+    !CHECKED_REFERENCE_EXTENSIONS.has(extension) &&
+    !isExtensionlessConfigReferenceBasename(basename)
+  ) return null;
+
+  const rootAnchoredPath = clean.startsWith("/") ? clean.replace(/^\/+/, "") : null;
+  const base = rootAnchoredPath === null ? path.posix.dirname(sourcePath) : "";
+  const resolved = path.posix.normalize(path.posix.join(base, rootAnchoredPath ?? clean));
+  if (!resolved || resolved === "." || resolved === ".." || resolved.startsWith("../")) return null;
+  return resolved;
+}
+
+function isExtensionlessConfigReferenceBasename(basename: string): boolean {
+  return (
+    EXTENSIONLESS_CONFIG_REFERENCE_BASENAMES.has(basename) ||
+    basename.startsWith(".env.") ||
+    basename.startsWith("Containerfile.") ||
+    basename.startsWith("Dockerfile.") ||
+    basename.startsWith("Makefile.") ||
+    basename.startsWith("makefile.")
+  );
+}
+
+async function repoRelativeFileExists(
+  workingDir: string,
+  relativePath: string,
+): Promise<boolean> {
+  try {
+    const absolutePath = path.resolve(workingDir, relativePath);
+    if (!isPathAtOrInside(absolutePath, workingDir)) return false;
+    return (await fs.promises.stat(absolutePath)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function referencedPathExists(
+  workingDir: string,
+  relativePath: string,
+): Promise<boolean> {
+  if (await repoRelativeFileExists(workingDir, relativePath)) return true;
+
+  const extension = path.posix.extname(relativePath).toLowerCase();
+  const alternates = JS_RUNTIME_EXTENSION_ALTERNATES[extension] ?? [];
+  for (const alternateExtension of alternates) {
+    const alternatePath = relativePath.slice(0, -extension.length) + alternateExtension;
+    if (await repoRelativeFileExists(workingDir, alternatePath)) return true;
+  }
+
+  return false;
+}
+
+function findPathReferenceCandidates(line: string): string[] {
+  const candidates = new Set<string>();
+  MARKDOWN_LINK_TARGET_RE.lastIndex = 0;
+  for (let match = MARKDOWN_LINK_TARGET_RE.exec(line); match; match = MARKDOWN_LINK_TARGET_RE.exec(line)) {
+    const rawPath = match[1];
+    if (rawPath) candidates.add(rawPath);
+  }
+
+  FILE_REFERENCE_RE.lastIndex = 0;
+  for (let match = FILE_REFERENCE_RE.exec(line); match; match = FILE_REFERENCE_RE.exec(line)) {
+    const rawPath = match[2];
+    const startsAfterProtocol = line.slice(0, match.index + match[1].length).endsWith("://");
+    if (!rawPath || startsAfterProtocol) continue;
+    candidates.add(rawPath);
+  }
+
+  EXTENSIONLESS_CONFIG_REFERENCE_RE.lastIndex = 0;
+  for (
+    let match = EXTENSIONLESS_CONFIG_REFERENCE_RE.exec(line);
+    match;
+    match = EXTENSIONLESS_CONFIG_REFERENCE_RE.exec(line)
+  ) {
+    const rawPath = match[2];
+    const startsAfterProtocol = line.slice(0, match.index + match[1].length).endsWith("://");
+    if (!rawPath || startsAfterProtocol) continue;
+    candidates.add(rawPath);
+  }
+  return [...candidates];
+}
+
 /**
  * Deterministically find references to file names that were truly deleted or
  * renamed in the uncommitted diff. A same-basename path elsewhere in the repo
@@ -664,15 +902,33 @@ export async function findDeletedOrRenamedFileReferenceIssuesCancellable(
   workingDir: string,
   options: CancellationOptions = {},
 ): Promise<DeletedOrRenamedFileReferenceIssue[]> {
+  const context = await getFilenameReferenceScanContext(workingDir, options);
+  return findDeletedOrRenamedFileReferenceIssuesFromContext(workingDir, context, options);
+}
+
+async function getFilenameReferenceScanContext(
+  workingDir: string,
+  options: CancellationOptions,
+): Promise<FilenameReferenceScanContext> {
   const nameStatus = await runGit(["diff", "--name-status", "--find-renames", "HEAD"], workingDir, {
     ...options,
     maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
     maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
   });
-  const changes = parseDeletedOrRenamedChanges(nameStatus.output || "");
+  return {
+    changes: parseDeletedOrRenamedChanges(nameStatus.output || ""),
+    inventory: await getGitVisibleFileInventoryCancellable(workingDir, options),
+  };
+}
+
+async function findDeletedOrRenamedFileReferenceIssuesFromContext(
+  workingDir: string,
+  context: FilenameReferenceScanContext,
+  options: CancellationOptions,
+): Promise<DeletedOrRenamedFileReferenceIssue[]> {
+  const { changes, inventory } = context;
   if (changes.length === 0) return [];
 
-  const inventory = await getGitVisibleFileInventoryCancellable(workingDir, options);
   const files = inventory.files.map((file) => file.path);
   const deletedReferenceSourcePaths = new Set(changes.map((change) => change.oldPath));
   const issues: DeletedOrRenamedFileReferenceIssue[] = [];
@@ -694,6 +950,91 @@ export async function findDeletedOrRenamedFileReferenceIssuesCancellable(
   }
 
   return issues;
+}
+
+export async function findNonexistentFileReferenceIssuesCancellable(
+  workingDir: string,
+  options: CancellationOptions = {},
+): Promise<NonexistentFileReferenceIssue[]> {
+  const context = await getFilenameReferenceScanContext(workingDir, options);
+  return findNonexistentFileReferenceIssuesFromContext(workingDir, context, options);
+}
+
+async function findNonexistentFileReferenceIssuesFromContext(
+  workingDir: string,
+  context: FilenameReferenceScanContext,
+  options: CancellationOptions,
+): Promise<NonexistentFileReferenceIssue[]> {
+  const deletedOrRenamedOldPaths = new Set(context.changes.map((change) => change.oldPath));
+  const issuesByReferencedPath = new Map<string, NonexistentFileReferenceIssue>();
+  const seenReferences = new Set<string>();
+
+  for (const file of context.inventory.files) {
+    throwIfAborted(options.signal);
+    if (shouldIgnoreFilenameReferenceScanPath(file.path) || deletedOrRenamedOldPaths.has(file.path)) continue;
+
+    const content = await readWorkingTreeText(workingDir, file.path);
+    if (content === undefined) continue;
+
+    const lines = content.split("\n");
+    let inMarkdownFence = false;
+    for (let i = 0; i < lines.length; i++) {
+      throwIfAborted(options.signal);
+      if (scansMarkdownFences(file.path) && isMarkdownFenceLine(lines[i])) {
+        inMarkdownFence = !inMarkdownFence;
+        continue;
+      }
+      if (inMarkdownFence) continue;
+
+      for (const rawPath of findPathReferenceCandidates(lines[i])) {
+        const referencedPath = resolveReferencedPath(file.path, rawPath);
+        if (
+          !referencedPath ||
+          deletedOrRenamedOldPaths.has(referencedPath) ||
+          isGeneratedReferencePath(referencedPath)
+        ) continue;
+        if (await referencedPathExists(workingDir, referencedPath)) continue;
+
+        const reference = {
+          path: file.path,
+          line: i + 1,
+          text: lines[i].trim(),
+        };
+        const referenceKey = `${referencedPath}\0${reference.path}\0${reference.line}\0${reference.text}`;
+        if (seenReferences.has(referenceKey)) continue;
+        seenReferences.add(referenceKey);
+
+        const issue = issuesByReferencedPath.get(referencedPath) ?? {
+          referencedPath,
+          references: [],
+        };
+        issue.references.push(reference);
+        issuesByReferencedPath.set(referencedPath, issue);
+      }
+    }
+  }
+
+  return [...issuesByReferencedPath.values()].sort((a, b) =>
+    a.referencedPath.localeCompare(b.referencedPath)
+  );
+}
+
+export async function findFilenameReferenceDiagnosticsCancellable(
+  workingDir: string,
+  options: CancellationOptions = {},
+): Promise<FilenameReferenceDiagnostics> {
+  const context = await getFilenameReferenceScanContext(workingDir, options);
+  const deletedOrRenamedIssues = await findDeletedOrRenamedFileReferenceIssuesFromContext(
+    workingDir,
+    context,
+    options,
+  );
+  const nonexistentIssues = await findNonexistentFileReferenceIssuesFromContext(
+    workingDir,
+    context,
+    options,
+  );
+  return { deletedOrRenamedIssues, nonexistentIssues };
 }
 
 function appendWithinLimit(

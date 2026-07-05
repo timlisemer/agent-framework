@@ -7,7 +7,7 @@ import { OperationCancelledError } from "../../../src/utils/cancellation.js";
 const mocks = vi.hoisted(() => ({
   runAgent: vi.fn(),
   runProcessCancellable: vi.fn(),
-  findDeletedOrRenamedFileReferenceIssuesCancellable: vi.fn(),
+  findFilenameReferenceDiagnosticsCancellable: vi.fn(),
   getGitStatusCancellable: vi.fn(),
   getRepoInfoCancellable: vi.fn(),
   sortReposWithChangesSubmodulesFirst: vi.fn(),
@@ -32,7 +32,7 @@ vi.mock("../../../src/utils/command.js", async (importOriginal) => {
 });
 
 vi.mock("../../../src/utils/git-utils.js", () => ({
-  findDeletedOrRenamedFileReferenceIssuesCancellable: mocks.findDeletedOrRenamedFileReferenceIssuesCancellable,
+  findFilenameReferenceDiagnosticsCancellable: mocks.findFilenameReferenceDiagnosticsCancellable,
   getGitStatusCancellable: mocks.getGitStatusCancellable,
   getRepoInfoCancellable: mocks.getRepoInfoCancellable,
   sortReposWithChangesSubmodulesFirst: mocks.sortReposWithChangesSubmodulesFirst,
@@ -61,6 +61,7 @@ vi.mock("../../../src/utils/supplemental-diagnostics.js", () => ({
 
 import {
   appendDeterministicCheckErrors,
+  appendDeterministicCheckWarnings,
   applyStatusOverride,
   checkInvocationsForRunner,
   promoteUnusedCodeToErrors,
@@ -151,6 +152,33 @@ describe("appendDeterministicCheckErrors", () => {
     expect(result).toContain("DETERMINISTIC CHECK ERRORS:");
     expect(result).toContain("`src/index.ts`:1 still references deleted file `src/old.ts`");
     expect(result).not.toMatch(/## Errors\s*\n\(none\)/);
+  });
+});
+
+describe("appendDeterministicCheckWarnings", () => {
+  it("adds deterministic warnings without forcing FAIL", () => {
+    const input = `## Results
+- Errors: 0
+- Warnings: 0
+- Status: PASS
+
+## Errors
+(none)
+
+## Warnings
+(none)
+`;
+
+    const result = appendDeterministicCheckWarnings(input, [
+      "`README.md`:1 references missing file `docs/missing.md`: See docs/missing.md",
+    ]);
+
+    expect(result).toContain("- Errors: 0");
+    expect(result).toContain("- Warnings: 1");
+    expect(result).toContain("- Status: PASS");
+    expect(result).toContain("DETERMINISTIC CHECK WARNINGS:");
+    expect(result).toContain("`README.md`:1 references missing file `docs/missing.md`");
+    expect(result).not.toMatch(/## Warnings\s*\n\(none\)/);
   });
 });
 
@@ -289,7 +317,10 @@ describe("runCheckAgent supplemental diagnostics context", () => {
     mocks.getRepoInfoCancellable.mockResolvedValue({ mainRepo: tempDir });
     mocks.sortReposWithChangesSubmodulesFirst.mockImplementation((repoInfo) => repoInfo.reposWithChanges);
     mocks.getGitStatusCancellable.mockResolvedValue(" M src/example.ts");
-    mocks.findDeletedOrRenamedFileReferenceIssuesCancellable.mockResolvedValue([]);
+    mocks.findFilenameReferenceDiagnosticsCancellable.mockResolvedValue({
+      deletedOrRenamedIssues: [],
+      nonexistentIssues: [],
+    });
     mocks.getAgentFrameworkSessionDir.mockReturnValue(path.join(tempDir, ".agent-framework-session"));
     mocks.reduceDriftDetectionWindow.mockResolvedValue(undefined);
     mocks.runSupplementalDiagnosticProviders.mockResolvedValue(
@@ -572,16 +603,19 @@ src/example.ts:1:1 warning TS6385: deprecated
   });
 
   it("appends deleted filename references as deterministic check errors", async () => {
-    mocks.findDeletedOrRenamedFileReferenceIssuesCancellable.mockResolvedValue([
-      {
-        oldPath: "src/old-helper.ts",
-        oldBasename: "old-helper.ts",
-        changeType: "deleted",
-        references: [
-          { path: "src/index.ts", line: 3, text: "import './old-helper.ts';" },
-        ],
-      },
-    ]);
+    mocks.findFilenameReferenceDiagnosticsCancellable.mockResolvedValue({
+      deletedOrRenamedIssues: [
+        {
+          oldPath: "src/old-helper.ts",
+          oldBasename: "old-helper.ts",
+          changeType: "deleted",
+          references: [
+            { path: "src/index.ts", line: 3, text: "import './old-helper.ts';" },
+          ],
+        },
+      ],
+      nonexistentIssues: [],
+    });
     mocks.runAgent.mockResolvedValue({
       output: `## Results
 - Errors: 0
@@ -598,11 +632,53 @@ src/example.ts:1:1 warning TS6385: deprecated
 
     const result = await runCheckAgent(tempDir);
 
-    expect(mocks.findDeletedOrRenamedFileReferenceIssuesCancellable).toHaveBeenCalledWith(tempDir, expect.any(Object));
+    expect(mocks.findFilenameReferenceDiagnosticsCancellable).toHaveBeenCalledWith(tempDir, expect.any(Object));
     expect(result).toContain("- Status: FAIL");
     expect(result).toContain("DETERMINISTIC CHECK ERRORS:");
     expect(result).toContain("`src/index.ts`:3 still references deleted file `src/old-helper.ts`");
     expect(result).toContain("import './old-helper.ts';");
+  });
+
+  it("appends nonexistent filename references as deterministic check warnings", async () => {
+    fs.writeFileSync(path.join(tempDir, "Makefile"), "check:\n\ttrue\n");
+    mocks.runProcessCancellable.mockResolvedValue({
+      output: "check passed",
+      exitCode: 0,
+    });
+    mocks.findFilenameReferenceDiagnosticsCancellable.mockResolvedValue({
+      deletedOrRenamedIssues: [],
+      nonexistentIssues: [
+        {
+          referencedPath: "docs/missing.md",
+          references: [
+            { path: "README.md", line: 7, text: "See docs/missing.md for details." },
+          ],
+        },
+      ],
+    });
+    mocks.runAgent.mockResolvedValue({
+      output: `## Results
+- Errors: 0
+- Warnings: 0
+- Status: PASS
+
+## Errors
+(none)
+
+## Warnings
+(none)
+`,
+    });
+
+    const result = await runCheckAgent(tempDir);
+
+    expect(mocks.findFilenameReferenceDiagnosticsCancellable).toHaveBeenCalledWith(tempDir, expect.any(Object));
+    expect(result).toContain("- Errors: 0");
+    expect(result).toContain("- Warnings: 1");
+    expect(result).toContain("- Status: PASS");
+    expect(result).toContain("DETERMINISTIC CHECK WARNINGS:");
+    expect(result).toContain("`README.md`:7 references missing file `docs/missing.md`");
+    expect(result).toContain("See docs/missing.md for details.");
   });
 
   it("includes failing command output when the check summarizer returns a sentinel", async () => {

@@ -313,7 +313,7 @@ registerTimedTool(
   "check",
   {
     title: "Check",
-    description: "Run linter, make/just check, deterministic deleted/renamed filename-reference diagnostics, and supplemental editor diagnostics; return summarized results with warning recommendations.",
+    description: "Run linter, make/just check, deterministic filename-reference diagnostics (deleted/renamed errors plus docs/config missing-file warnings), and supplemental editor diagnostics; return summarized results with warning recommendations.",
     inputSchema: {
       working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
       transcript_path: z.string().optional().describe("Session transcript path for statusLine")

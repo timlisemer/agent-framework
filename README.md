@@ -47,7 +47,7 @@ The framework implements specialized agents and MCP tools organized into three c
 
 | Agent           | Model  | Purpose                                                      |
 | --------------- | ------ | ------------------------------------------------------------ |
-| check           | sonnet | Run linter + make/just check plus deterministic deleted/renamed filename-reference and supplemental editor diagnostics, return summary with recommendations |
+| check           | sonnet | Run linter + make/just check plus deterministic filename-reference diagnostics (deleted/renamed errors and docs/config missing-file warnings) and supplemental editor diagnostics, return summary with recommendations |
 | confirm         | opus   | Binary quality gate using three SDK reviewers plus aggregator |
 | fullconfirm     | opus   | Full tracked-repository quality gate using three SDK reviewers plus aggregator |
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
@@ -439,7 +439,7 @@ Once configured, the agent can:
 
 ```
 > Use the check tool to verify code quality
-[Runs linter + make/just check plus deterministic deleted/renamed filename-reference and supplemental editor diagnostics, returns summary]
+[Runs linter + make/just check plus deterministic filename-reference diagnostics (deleted/renamed errors and docs/config missing-file warnings) and supplemental editor diagnostics, returns summary]
 
 > Run confirm to check my changes
 CONFIRMED

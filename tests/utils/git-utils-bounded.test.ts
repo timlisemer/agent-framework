@@ -7,6 +7,8 @@ import {
   formatGitContextForRepos,
   formatSiblingRepoOverview,
   findDeletedOrRenamedFileReferenceIssuesCancellable,
+  findFilenameReferenceDiagnosticsCancellable,
+  findNonexistentFileReferenceIssuesCancellable,
   detectMovedRecreatedFilesCancellable,
   getSingleRepoGitContextWithSiblingOverviewCancellable,
   getRepoGitContextsCancellable,
@@ -371,6 +373,163 @@ describe("bounded git utilities", () => {
     expect(issues[0].references).toEqual([
       { path: "README.md", line: 1, text: "Import from src/git-moved.ts after move." },
     ]);
+  });
+
+  it("warns when a file mentions a path-like file that does not exist", async () => {
+    fs.mkdirSync(path.join(repoDir, "docs"));
+    fs.writeFileSync(path.join(repoDir, "README.md"), "See docs/missing.md.\n");
+    git(repoDir, ["add", "README.md"]);
+    git(repoDir, ["commit", "-m", "add missing docs reference"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toEqual([
+      {
+        referencedPath: "docs/missing.md",
+        references: [
+          { path: "README.md", line: 1, text: "See docs/missing.md." },
+        ],
+      },
+    ]);
+  });
+
+  it("warns for missing markdown link targets relative to the source file", async () => {
+    fs.mkdirSync(path.join(repoDir, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(repoDir, "README.md"), "See [architecture](MISSING.md).\n");
+    fs.writeFileSync(path.join(repoDir, "docs", "README.md"), "See [API](guide/api.md).\n");
+    git(repoDir, ["add", "README.md", "docs/README.md"]);
+    git(repoDir, ["commit", "-m", "add missing markdown links"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toEqual([
+      {
+        referencedPath: "docs/guide/api.md",
+        references: [
+          { path: "docs/README.md", line: 1, text: "See [API](guide/api.md)." },
+        ],
+      },
+      {
+        referencedPath: "MISSING.md",
+        references: [
+          { path: "README.md", line: 1, text: "See [architecture](MISSING.md)." },
+        ],
+      },
+    ]);
+  });
+
+  it("warns from extensionless config files and for extensionless config targets", async () => {
+    fs.writeFileSync(path.join(repoDir, "Makefile"), ["check:", "\tcat docs/missing.md", ""].join("\n"));
+    fs.writeFileSync(path.join(repoDir, "README.md"), "See [container](Dockerfile).\n");
+    git(repoDir, ["add", "Makefile", "README.md"]);
+    git(repoDir, ["commit", "-m", "add extensionless reference examples"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    const referencesByPath = new Map(issues.map((issue) => [issue.referencedPath, issue.references]));
+    expect([...referencesByPath.keys()].sort()).toEqual(["Dockerfile", "docs/missing.md"]);
+    expect(referencesByPath.get("docs/missing.md")).toEqual([
+      { path: "Makefile", line: 2, text: "cat docs/missing.md" },
+    ]);
+    expect(referencesByPath.get("Dockerfile")).toEqual([
+      { path: "README.md", line: 1, text: "See [container](Dockerfile)." },
+    ]);
+  });
+
+  it("does not warn for path-like imports inside markdown fenced code blocks", async () => {
+    fs.writeFileSync(
+      path.join(repoDir, "README.md"),
+      [
+        "```typescript",
+        "import { runCheckAgent } from './agents/mcp/check.js';",
+        "```",
+        "See docs/missing.md.",
+        "",
+      ].join("\n"),
+    );
+    git(repoDir, ["add", "README.md"]);
+    git(repoDir, ["commit", "-m", "add markdown code sample"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toEqual([
+      {
+        referencedPath: "docs/missing.md",
+        references: [
+          { path: "README.md", line: 4, text: "See docs/missing.md." },
+        ],
+      },
+    ]);
+  });
+
+  it("does not warn for extensionless imports or TypeScript-backed JavaScript runtime imports", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.writeFileSync(path.join(repoDir, "src", "existing.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "README.md"), "Runtime docs mention src/existing.js.\n");
+    fs.writeFileSync(
+      path.join(repoDir, "src", "index.ts"),
+      [
+        "import { value } from './existing.js';",
+        "import './extensionless';",
+        "import scoped from '@scope/pkg/file.js';",
+        "void value;",
+        "void scoped;",
+      ].join("\n"),
+    );
+    git(repoDir, ["add", "README.md", "src/existing.ts", "src/index.ts"]);
+    git(repoDir, ["commit", "-m", "add import carve-out examples"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
+
+  it("does not warn for deleted paths handled by the git-status error rule", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.writeFileSync(path.join(repoDir, "src", "deleted.ts"), "export const value = 1;\n");
+    fs.writeFileSync(path.join(repoDir, "README.md"), "See src/deleted.ts while migrating.\n");
+    git(repoDir, ["add", "src/deleted.ts", "README.md"]);
+    git(repoDir, ["commit", "-m", "add deleted path reference"]);
+    fs.rmSync(path.join(repoDir, "src", "deleted.ts"));
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
+
+  it("does not warn for generated build output targets in package scripts", async () => {
+    fs.writeFileSync(
+      path.join(repoDir, "package.json"),
+      JSON.stringify({
+        scripts: {
+          server: "node dist/src/ai-backend/server.js",
+          mcp: "node dist/mcp/server.js",
+        },
+      }),
+    );
+    git(repoDir, ["add", "package.json"]);
+    git(repoDir, ["commit", "-m", "add package scripts"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
+
+  it("collects deleted-path errors and missing-file warnings with one diagnostics helper", async () => {
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.writeFileSync(path.join(repoDir, "src", "deleted.ts"), "export const value = 1;\n");
+    fs.writeFileSync(
+      path.join(repoDir, "README.md"),
+      "See src/deleted.ts and docs/missing.md while migrating.\n",
+    );
+    git(repoDir, ["add", "src/deleted.ts", "README.md"]);
+    git(repoDir, ["commit", "-m", "add combined reference examples"]);
+    fs.rmSync(path.join(repoDir, "src", "deleted.ts"));
+
+    const diagnostics = await findFilenameReferenceDiagnosticsCancellable(repoDir);
+
+    expect(diagnostics.deletedOrRenamedIssues.map((issue) => issue.oldPath)).toEqual(["src/deleted.ts"]);
+    expect(diagnostics.nonexistentIssues.map((issue) => issue.referencedPath)).toEqual(["docs/missing.md"]);
   });
 
   it("does not treat an unrelated existing same-basename file as a move", async () => {

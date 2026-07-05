@@ -1,23 +1,25 @@
 /**
  * Check Agent - Linter, Type-Check, and Supplemental Diagnostics Summarizer
  *
- * This agent runs project linters, make/just check, and narrow supplemental
- * editor diagnostics for known command-tool gaps, then summarizes the results
- * without analysis or suggestions. It classifies issues as errors, warnings,
- * or info.
+ * This agent runs project linters, make/just check, deterministic
+ * filename-reference diagnostics, and narrow supplemental editor diagnostics
+ * for known command-tool gaps, then summarizes the results without analysis or
+ * suggestions. It classifies issues as errors, warnings, or info.
  *
  * ## FLOW
  *
  * 1. Get uncommitted files info
  * 2. Detect and run project linter (ESLint, Cargo, Ruff, etc.)
  * 3. Run check target (Justfile preferred, Makefile fallback)
- * 4. Run supplemental editor diagnostics for known gaps
+ * 4. Run supplemental editor diagnostics and deterministic filename-reference
+ *    diagnostics for known gaps
  * 5. Summarize results via unified runner
  *
  * ## CLASSIFICATION
  *
  * - ERRORS: Compilation failures, type errors, syntax errors, UNUSED CODE
- * - WARNINGS: Style suggestions, lints, refactoring hints
+ * - WARNINGS: Style suggestions, lints, refactoring hints, docs/config
+ *   references to missing files
  * - INFO: Benchmark results, performance metrics, test summaries (max 5 lines)
  *
  * Unused code is classified as ERROR because it must be deleted, not suppressed.
@@ -58,11 +60,12 @@ import {
   type ProcessResult,
 } from "../../utils/command.js";
 import {
-  findDeletedOrRenamedFileReferenceIssuesCancellable,
+  findFilenameReferenceDiagnosticsCancellable,
   getGitStatusCancellable,
   getRepoInfoCancellable,
   sortReposWithChangesSubmodulesFirst,
   type DeletedOrRenamedFileReferenceIssue,
+  type NonexistentFileReferenceIssue,
   type RepoInfo,
 } from "../../utils/git-utils.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
@@ -394,35 +397,78 @@ function formatDeletedOrRenamedReferenceError(
   includeRepoLabel: boolean,
 ): string {
   const target = issue.changeType === "deleted" ? "deleted file" : "old path of renamed file";
+  return formatReferenceDiagnostics(repo, issue.references, includeRepoLabel, (ref, repoLabel) =>
+    `\`${ref.path}\`${repoLabel}:${ref.line} still references ${target} \`${issue.oldPath}\` (old filename \`${issue.oldBasename}\`): ${ref.text}`
+  );
+}
+
+function formatNonexistentFileReferenceWarning(
+  repo: { path: string; name: string },
+  issue: NonexistentFileReferenceIssue,
+  includeRepoLabel: boolean,
+): string {
+  return formatReferenceDiagnostics(repo, issue.references, includeRepoLabel, (ref, repoLabel) =>
+    `\`${ref.path}\`${repoLabel}:${ref.line} references missing file \`${issue.referencedPath}\`: ${ref.text}`
+  );
+}
+
+function formatReferenceDiagnostics(
+  repo: { path: string; name: string },
+  references: readonly { path: string; line: number; text: string }[],
+  includeRepoLabel: boolean,
+  formatReference: (ref: { path: string; line: number; text: string }, repoLabel: string) => string,
+): string {
   const repoLabel = includeRepoLabel ? ` in ${repo.name} (${repo.path})` : "";
-  return issue.references
-    .map((ref) =>
-      `\`${ref.path}\`${repoLabel}:${ref.line} still references ${target} \`${issue.oldPath}\` (old filename \`${issue.oldBasename}\`): ${ref.text}`
-    )
-    .join("\n");
+  return references.map((ref) => formatReference(ref, repoLabel)).join("\n");
+}
+
+function appendDeterministicCheckSection(
+  output: string,
+  heading: "Errors" | "Warnings",
+  sectionHeader: string,
+  items: string[],
+): string {
+  if (items.length === 0) return output;
+
+  const sectionMatch = output.match(new RegExp(`## ${heading}\\s*\\n([\\s\\S]*?)(?:\\n## |$)`));
+  const existingBody = sectionMatch?.[1].trim();
+  const existingItems = existingBody && existingBody !== "(none)" ? existingBody : "";
+  const deterministicBody = [
+    existingItems,
+    sectionHeader,
+    ...items,
+  ].filter(Boolean).join("\n");
+
+  let next = replaceSectionBody(output, heading, deterministicBody);
+  const errorCount = resultCount(output, "Errors") + (heading === "Errors" ? items.length : 0);
+  const warningCount = resultCount(output, "Warnings") + (heading === "Warnings" ? items.length : 0);
+  next = setResultCount(next, "Errors", errorCount);
+  next = setResultCount(next, "Warnings", warningCount);
+  return applyStatusOverride(next);
 }
 
 export function appendDeterministicCheckErrors(
   output: string,
   errors: string[],
 ): string {
-  if (errors.length === 0) return output;
-
-  const errMatch = output.match(/## Errors\s*\n([\s\S]*?)(?:\n## |$)/);
-  const existingBody = errMatch?.[1].trim();
-  const existingErrors = existingBody && existingBody !== "(none)" ? existingBody : "";
-  const deterministicBody = [
-    existingErrors,
+  return appendDeterministicCheckSection(
+    output,
+    "Errors",
     "DETERMINISTIC CHECK ERRORS:",
-    ...errors,
-  ].filter(Boolean).join("\n");
+    errors,
+  );
+}
 
-  let next = replaceSectionBody(output, "Errors", deterministicBody);
-  const errorCount = resultCount(output, "Errors") + errors.length;
-  const warningCount = resultCount(output, "Warnings");
-  next = setResultCount(next, "Errors", errorCount);
-  next = setResultCount(next, "Warnings", warningCount);
-  return applyStatusOverride(next);
+export function appendDeterministicCheckWarnings(
+  output: string,
+  warnings: string[],
+): string {
+  return appendDeterministicCheckSection(
+    output,
+    "Warnings",
+    "DETERMINISTIC CHECK WARNINGS:",
+    warnings,
+  );
 }
 
 /**
@@ -743,17 +789,24 @@ export async function runCheckAgent(
   const supplementalOutput = supplementalSections.join("\n\n");
   const supplementalContext = supplementalOutput ? `\n\n${supplementalOutput}` : "";
 
-  // Deterministic deleted/renamed filename reference check. This runs outside
-  // CHECK_AGENT so stale references cannot be downgraded or missed by the LLM.
+  // Deterministic filename-reference checks run outside CHECK_AGENT so stale
+  // git-deleted/renamed references cannot be downgraded or missed by the LLM,
+  // and broader docs/config missing-file references remain TS-owned warnings.
   const deterministicErrors: string[] = [];
+  const deterministicWarnings: string[] = [];
   for (const repo of commandTimedOut ? [] : scopedRepos) {
     throwIfAborted(options.signal);
-    const issues = await runCheckPhase(`run deterministic filename-reference diagnostics for ${repo.name}`, () =>
-      findDeletedOrRenamedFileReferenceIssuesCancellable(repo.path, options)
+    const diagnostics = await runCheckPhase(`run deterministic filename-reference diagnostics for ${repo.name}`, () =>
+      findFilenameReferenceDiagnosticsCancellable(repo.path, options)
     );
     deterministicErrors.push(
-      ...issues.map((issue) =>
+      ...diagnostics.deletedOrRenamedIssues.map((issue) =>
         formatDeletedOrRenamedReferenceError(repo, issue, options.repoScope?.mode === "all")
+      ),
+    );
+    deterministicWarnings.push(
+      ...diagnostics.nonexistentIssues.map((issue) =>
+        formatNonexistentFileReferenceWarning(repo, issue, options.repoScope?.mode === "all")
       ),
     );
   }
@@ -798,6 +851,7 @@ export async function runCheckAgent(
     const fallback = deterministicCheckFallback({
       commandErrors,
       deterministicErrors,
+      deterministicWarnings,
       supplementalOutput,
       rawError: result.output,
     });
@@ -825,7 +879,11 @@ export async function runCheckAgent(
     ...commandErrors,
     ...deterministicErrors,
   ]);
-  const normalized = applyStatusOverride(withDeterministicErrors);
+  const withDeterministicWarnings = appendDeterministicCheckWarnings(
+    withDeterministicErrors,
+    deterministicWarnings,
+  );
+  const normalized = applyStatusOverride(withDeterministicWarnings);
 
   // Determine pass/fail status from the TS-authoritative output
   const isPassing = parseCheckAgentResult(normalized).status === "PASS";
@@ -856,11 +914,15 @@ If you introduced this unused code, investigate why it happened and delete it. W
 function deterministicCheckFallback(input: {
   commandErrors: readonly string[];
   deterministicErrors: readonly string[];
+  deterministicWarnings: readonly string[];
   supplementalOutput: string;
   rawError: string;
 }): string {
   const errors = [...input.commandErrors, ...input.deterministicErrors];
-  const warnings = input.supplementalOutput ? [input.supplementalOutput] : [];
+  const warnings = [
+    ...input.deterministicWarnings,
+    ...(input.supplementalOutput ? [input.supplementalOutput] : []),
+  ];
   const info = [
     "Check summarizer failed or returned malformed output; using deterministic command exit-code fallback.",
     input.rawError,

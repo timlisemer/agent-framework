@@ -1,12 +1,13 @@
 ---
 disable-model-invocation: true
-description: Run linter, type checks, deterministic deleted/renamed filename-reference diagnostics, and supplemental editor diagnostics; return summarized results (user)
+description: Run linter, type checks, deterministic filename-reference diagnostics, and supplemental editor diagnostics; return summarized results (user)
 allowed-tools: mcp__agent-framework__check
 ---
 
 1. IMMEDIATELY call mcp__agent-framework__check.
 
    - Pass `working_dir` with the current repository working directory.
+   - The check includes deterministic deleted/renamed filename-reference errors and docs/config missing-file reference warnings.
 
    - Do NOT run any Bash commands (make check, just check, npm run build, cargo check, tsc, etc.)
    - Do NOT read files or gather context first
