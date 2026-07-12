@@ -204,18 +204,28 @@ describe("detectParallelBatch", () => {
   // the trailing run of consecutive assistant tool_use lines as an
   // in-flight batch and treat the firing call as its next sibling.
   it("treats the firing tool_use_id as a sibling when its line is not yet flushed (live race)", async () => {
-    const filePath = writeTranscript([
-      userText("run three plans"),
-      assistantToolUse("toolu_p1"),
-      assistantToolUse("toolu_p2"),
-      // toolu_p3 line not yet flushed when hook fires for it
-    ]);
-    const result = await detectParallelBatch(filePath, "toolu_p3");
-    expect(result).not.toBeNull();
-    expect(result?.batchSize).toBe(3);
-    expect(result?.leaderId).toBe("toolu_p1");
-    expect(result?.allIds).toContain("toolu_p3");
-    expect(result?.allIds[0]).toBe("toolu_p1");
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "claude";
+    try {
+      const filePath = writeTranscript([
+        userText("run three plans"),
+        assistantToolUse("toolu_p1"),
+        assistantToolUse("toolu_p2"),
+        // toolu_p3 line not yet flushed when hook fires for it
+      ]);
+      const result = await detectParallelBatch(filePath, "toolu_p3");
+      expect(result).not.toBeNull();
+      expect(result?.batchSize).toBe(3);
+      expect(result?.leaderId).toBe("toolu_p1");
+      expect(result?.allIds).toContain("toolu_p3");
+      expect(result?.allIds[0]).toBe("toolu_p1");
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
   });
 
   it("returns null in the race fallback when the trailing entry is a user message (no in-flight batch)", async () => {
