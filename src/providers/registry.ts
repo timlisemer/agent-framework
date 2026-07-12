@@ -41,9 +41,9 @@ export const PROVIDERS = {
     costTracking: "none",
     defaultSdkRuntime: "codex",
     models: {
-      haiku: { id: "gpt-5.4-mini" },
-      sonnet: { id: "gpt-5.5" },
-      opus: { id: "gpt-5.5", reasoningEffort: "xhigh" },
+      haiku: { id: "gpt-5.6-luna", reasoningEffort: "low" },
+      sonnet: { id: "gpt-5.6-sol", reasoningEffort: "medium" },
+      opus: { id: "gpt-5.6-sol", reasoningEffort: "max" },
     },
   },
 } as const satisfies Record<ProviderTypeValue, ProviderDefinition>;

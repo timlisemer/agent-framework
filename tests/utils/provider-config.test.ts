@@ -74,10 +74,12 @@ describe("resolveProvider", () => {
     const sonnet = resolveProvider(MODEL_TIERS.SONNET, "direct");
     const opus = resolveProvider(MODEL_TIERS.OPUS, "direct");
     expect(haiku.type).toBe(PROVIDER_TYPES.OPENAI_SUBSCRIPTION);
-    expect(haiku.modelId).toBe("gpt-5.4-mini");
-    expect(sonnet.modelId).toBe("gpt-5.5");
-    expect(opus.modelId).toBe("gpt-5.5");
-    expect(opus.reasoningEffort).toBe("xhigh");
+    expect(haiku.modelId).toBe("gpt-5.6-luna");
+    expect(haiku.reasoningEffort).toBe("low");
+    expect(sonnet.modelId).toBe("gpt-5.6-sol");
+    expect(sonnet.reasoningEffort).toBe("medium");
+    expect(opus.modelId).toBe("gpt-5.6-sol");
+    expect(opus.reasoningEffort).toBe("max");
   });
 
   it("respects AGENT_FRAMEWORK_DIRECT_PROVIDER for direct mode", () => {

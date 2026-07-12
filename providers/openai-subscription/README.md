@@ -8,9 +8,9 @@ Model mapping:
 
 | Tier | Model |
 | --- | --- |
-| `haiku` | `gpt-5.4-mini` |
-| `sonnet` | `gpt-5.5` |
-| `opus` | `gpt-5.5` with `xhigh` reasoning |
+| `haiku` | `gpt-5.6-luna` with `low` reasoning |
+| `sonnet` | `gpt-5.6-sol` with `medium` reasoning |
+| `opus` | `gpt-5.6-sol` with `max` reasoning |
 
 Recommended config:
 

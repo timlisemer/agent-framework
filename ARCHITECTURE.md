@@ -301,9 +301,9 @@ Each provider uses different model identifiers:
 
 | Tier | OpenRouter ID | Claude subscription ID | OpenAI subscription ID |
 |------|---------------|------------------------|------------------------|
-| haiku | `deepseek/deepseek-v4-flash` | `claude-haiku-4-5` | `gpt-5.4-mini` |
-| sonnet | `deepseek/deepseek-v4-pro` | `claude-sonnet-4-5` | `gpt-5.5` |
-| opus | `google/gemini-3.5-flash` | `claude-opus-4-5` | `gpt-5.5` + `xhigh` reasoning |
+| haiku | `deepseek/deepseek-v4-flash` | `claude-haiku-4-5` | `gpt-5.6-luna` + `low` reasoning |
+| sonnet | `deepseek/deepseek-v4-pro` | `claude-sonnet-4-5` | `gpt-5.6-sol` + `medium` reasoning |
+| opus | `google/gemini-3.5-flash` | `claude-opus-4-5` | `gpt-5.6-sol` + `max` reasoning |
 
 ### Telemetry Behavior
 

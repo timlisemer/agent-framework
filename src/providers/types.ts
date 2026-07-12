@@ -11,7 +11,7 @@ export type ProviderType = ProviderTypeValue & ProviderTypeBranded;
 export type ProviderMode = "direct" | "sdk";
 export type ModelTierKey = "haiku" | "sonnet" | "opus";
 export type SdkRuntime = "claude" | "codex";
-export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 export type CostTrackingMode = "openrouter-generation" | "none";
 
 export interface ProviderModelSpec {
@@ -35,4 +35,3 @@ export interface ResolvedProvider {
   sdkRuntime?: SdkRuntime;
   costTracking: CostTrackingMode;
 }
-
