@@ -43,6 +43,7 @@ export const claudeSpec: AdapterSpec = {
   renderWorkflowInvocation:    WI.renderWorkflowInvocation,
   workflowInstructionText:     WI.workflowInstructionText,
   parseTranscript: PT.parseTranscript,
+  canInferUnflushedParallelToolUse: PT.canInferUnflushedParallelToolUse,
   transcriptMessageGroupKey: PT.transcriptMessageGroupKey,
   isInterruptionMessage: IR.isInterruptionMessage,
   extractContextMessage: (_event, stdout) => extractJsonContextMessage(stdout),

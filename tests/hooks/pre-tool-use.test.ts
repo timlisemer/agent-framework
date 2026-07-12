@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   exitAfterFlush: vi.fn().mockResolvedValue(undefined),
   validateClaudeMd: vi.fn(),
   appealHelper: vi.fn().mockResolvedValue({ overturned: false }),
+  evaluateRules: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("../../src/utils/hook-bootstrap.js", async () => {
@@ -43,7 +44,7 @@ vi.mock("../../src/rules/index.js", async () => {
   );
   return {
     ...actual,
-    evaluateRules: vi.fn().mockResolvedValue(null),
+    evaluateRules: mocks.evaluateRules,
   };
 });
 
@@ -67,6 +68,8 @@ describe("pre-tool-use planfile writes", () => {
     mocks.validateClaudeMd.mockReset();
     mocks.appealHelper.mockClear();
     mocks.appealHelper.mockResolvedValue({ overturned: false });
+    mocks.evaluateRules.mockReset();
+    mocks.evaluateRules.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -208,6 +211,51 @@ describe("pre-tool-use planfile writes", () => {
 
     expect(mocks.validateClaudeMd).not.toHaveBeenCalled();
     expect(mocks.exitAfterFlush).toHaveBeenCalledWith(0, "");
+  });
+
+  it("returns a nested Codex tool denial instead of waiting for an outer transcript call", async () => {
+    fs.writeFileSync(
+      transcriptPath,
+      JSON.stringify({
+        message: {
+          role: "assistant",
+          content: [{
+            type: "tool_use",
+            id: "call_outer_exec",
+            name: "exec",
+            input: {},
+          }],
+        },
+      }) + "\n",
+    );
+    mocks.evaluateRules.mockResolvedValueOnce({
+      decision: "deny",
+      agent: "prediction-block",
+      reason: "Workflow requires mcp__agent_framework__check before Bash.",
+    });
+
+    await mainPreToolUse(
+      {
+        session_id: "session-pre",
+        tool_use_id: "exec-7007897d-f958-4670-b5fb-5d436f12dc78",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "Bash",
+        tool_input: { command: "sed -n '1,240p' SKILL.md" },
+      },
+      codexEncoder,
+    );
+
+    expect(mocks.exitAfterFlush).toHaveBeenCalledTimes(1);
+    const [exitCode, stdout] = mocks.exitAfterFlush.mock.calls[0];
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout)).toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "Workflow requires mcp__agent_framework__check before Bash.",
+      },
+    });
   });
 
   it("denies a strict workflow parallel batch when a sibling has the wrong agent type", async () => {

@@ -43,6 +43,16 @@ interface RawEntry {
   message?: unknown;
 }
 
+/**
+ * Codex transcript-level tool calls use provider call IDs. Nested tools run
+ * inside a custom `exec` call have host-generated IDs such as `exec-...` and
+ * never receive their own rollout row, so they cannot be inferred as an
+ * unflushed sibling of the transcript's outer call.
+ */
+export function canInferUnflushedParallelToolUse(toolUseId: string): boolean {
+  return toolUseId.startsWith("call_");
+}
+
 type ParsedLine = {
   raw: RawEntry | null;
   line: string;

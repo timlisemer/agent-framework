@@ -81,6 +81,7 @@ export const codexSpec: AdapterSpec = {
   renderWorkflowInvocation:    WI.renderWorkflowInvocation,
   workflowInstructionText:     WI.workflowInstructionText,
   parseTranscript: PT.parseTranscript,
+  canInferUnflushedParallelToolUse: PT.canInferUnflushedParallelToolUse,
   extractProviderMetadata: ProviderMetadata.extractProviderMetadata,
   isInterruptionMessage: IR.isInterruptionMessage,
   extractContextMessage: (_event, stdout) => extractJsonContextMessage(stdout),

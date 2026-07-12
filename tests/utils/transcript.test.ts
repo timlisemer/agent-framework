@@ -308,6 +308,28 @@ describe("detectParallelBatch", () => {
       }
     }
   });
+
+  it("does not treat a nested Codex exec tool as an unflushed transcript sibling", async () => {
+    const prev = process.env.AGENT_FRAMEWORK_ADAPTER;
+    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    try {
+      const filePath = writeTranscript([
+        userText("read the skill"),
+        codexFunctionCall("call_outer_exec", "exec"),
+      ]);
+      const result = await detectParallelBatch(
+        filePath,
+        "exec-7007897d-f958-4670-b5fb-5d436f12dc78",
+      );
+      expect(result).toBeNull();
+    } finally {
+      if (prev === undefined) {
+        delete process.env.AGENT_FRAMEWORK_ADAPTER;
+      } else {
+        process.env.AGENT_FRAMEWORK_ADAPTER = prev;
+      }
+    }
+  });
 });
 
 describe("currentTurnAssistantState", () => {

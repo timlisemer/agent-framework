@@ -309,6 +309,10 @@ export interface AdapterSpec {
    *  Codex coalesces multi-line response_items into one entry per logical turn. */
   parseTranscript(rawLines: readonly string[], options?: TranscriptParseOptions): readonly (TranscriptEntry | null)[];
 
+  /** True when a hook tool-use ID can legitimately be inferred as the next
+   *  transcript call before its adapter-native JSONL row has been flushed. */
+  canInferUnflushedParallelToolUse(toolUseId: string): boolean;
+
   /** Extract provider-owned metadata from adapter-native transcript rows. */
   extractProviderMetadata?(
     input: ProviderMetadataExtractionInput,

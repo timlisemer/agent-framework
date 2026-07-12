@@ -17,6 +17,11 @@ import type {
 import { nonEmptyStringField, recordFromUnknown } from "../../src/utils/output.js";
 import { buildLineTranscriptSource, withTranscriptSource } from "../shared/transcript-source.js";
 
+/** Claude hook tool-use IDs and transcript tool-use IDs share this prefix. */
+export function canInferUnflushedParallelToolUse(toolUseId: string): boolean {
+  return toolUseId.startsWith("toolu_");
+}
+
 function normalizeEntry(raw: unknown, source: TranscriptSource): TranscriptEntry | null {
   if (!raw || typeof raw !== "object") return null;
   const entry = raw as TranscriptEntry & { payload?: unknown };

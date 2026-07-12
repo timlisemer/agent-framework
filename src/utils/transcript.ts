@@ -1209,6 +1209,7 @@ export async function detectParallelBatch(
       break;
     }
   } else {
+    if (!activeSpec().canInferUnflushedParallelToolUse(toolUseId)) return null;
     for (let i = parsed.length - 1; i >= 0; i--) {
       if (isNonMessageLine(i) || isThinkingOnlyLine(i)) continue;
       if (isAssistantToolUseLine(i)) {
