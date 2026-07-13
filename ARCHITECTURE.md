@@ -18,7 +18,7 @@ src/                                # TypeScript source
 
   agents/
     mcp/                            # MCP-exposed agents
-      check.ts                      # Runs linter + make/just check + deterministic filename-reference diagnostics and supplemental editor diagnostics
+      check.ts                      # Runs linter + make/just check + deterministic filename-reference diagnostics, repository-wide style-drift warnings, and supplemental editor diagnostics
       create-planfile.ts            # Writes named planfiles and runs validation
       confirm.ts                    # Code quality gate (SDK mode)
       commit.ts                     # Generates commit message + commits
@@ -49,7 +49,6 @@ src/                                # TypeScript source
     error-acknowledge.ts            # Priority 50:  Require error acknowledgment
     trusted-path.ts                 # Priority 58:  Deny sensitive-path access
     edit-intent.ts                  # Priority 60:  Block edits without intent
-    style-drift.ts                  # Priority 65:  Detect style changes
     prediction-context.ts           # Priority 68:  Prediction context for rule-gate LLM
     recent-messages.ts              # Priority 70:  Recent user messages context
     reasoning-history.ts            # Priority 72:  Gate reasoning history context
@@ -328,7 +327,7 @@ Models are centrally configured in `src/types.ts`:
 
 | Tier   | Mode   | Agents                                                                       |
 |--------|--------|------------------------------------------------------------------------------|
-| haiku  | direct | rule-gate, tool-appeal, commit, style-drift, question-validate, sentiment, validate-intent, response-align-stop |
+| haiku  | direct | rule-gate, tool-appeal, commit, question-validate, sentiment, validate-intent, response-align-stop |
 | sonnet | direct | check, plan-validate, claude-md-validate |
 | sonnet | sdk    | implement and implement-validator agents used by MCP-owned implementation workflows |
 | opus   | sdk    | confirm and fullconfirm reviewers (general, deduplication, and code-quality/pattern investigation) |
@@ -340,14 +339,14 @@ MCP agents chain together for verification:
 ```
 commit → normalize moved files → confirm → check
   │              │               │         │
-  │              │               │         └─ Runs linter + make/just check + deterministic filename-reference diagnostics + supplemental editor diagnostics (sonnet, direct)
+  │              │               │         └─ Runs linter + make/just check + deterministic filename-reference diagnostics + repository-wide style-drift warnings + supplemental editor diagnostics (sonnet, direct)
   │              │               └─ Analyzes git diff with three SDK reviewers + direct aggregator
   │              └─ Stages detected moved+recreated path pairs before confirm so Git reports renames
   └─ Generates commit message + executes commit (haiku, direct)
 
 fullconfirm → check
   │           │
-  │           └─ Runs linter + make/just check + deterministic filename-reference diagnostics + supplemental editor diagnostics (sonnet, direct)
+  │           └─ Runs linter + make/just check + deterministic filename-reference diagnostics + repository-wide style-drift warnings + supplemental editor diagnostics (sonnet, direct)
   └─ Reviews git-visible repository scope with three SDK reviewers + direct aggregator
 
 implement → internal write implementer → check → implementation validator
@@ -434,7 +433,6 @@ Tool call received
 │   ├─> error-acknowledge (50) Require error acknowledgment (appealable, LLM)
 │   ├─> trusted-path (58)      Fast deny sensitive paths
 │   ├─> edit-intent (60)       Block edits without intent (appealable)
-│   ├─> style-drift (65)       Detect style changes (appealable, LLM)
 │   ├─> prediction-context (68) Prediction context for rule-gate LLM
 │   ├─> recent-messages (70)   Recent user messages context
 │   ├─> reasoning-history (72) Gate reasoning history context
@@ -509,6 +507,14 @@ When the underlying call returns an `[SDK ERROR]` / `[DIRECT ERROR]` sentinel, t
 
 Validation rules are defined alongside system prompts in `agent-configs.ts`.
 
+Repository-wide style drift is checked deterministically by the check MCP, not
+the PreToolUse rule pipeline. Git-visible text files are scanned through the
+bounded no-follow inventory reader; findings and any unreadable, non-regular,
+or safety-limit omissions are appended as warnings.
+Intentional fixtures may use the comment markers
+`agent-framework-style-drift-ignore-next-line` or
+`agent-framework-style-drift-ignore-file`.
+
 ### `agent-configs.ts`
 Centralized agent configurations with documentation:
 - `CHECK_AGENT` - sonnet, direct
@@ -516,7 +522,6 @@ Centralized agent configurations with documentation:
 - `COMMIT_AGENT` - haiku, direct
 - `VALIDATE_INTENT_AGENT` - haiku, direct (inlined into validateIntentRule side-effect pattern)
 - `TOOL_APPROVE_PROMPT_SECTION` - prompt body for tool-approve rule
-- `STYLE_DRIFT_PROMPT_SECTION` - prompt body for style-drift aggregator rule
 - `RULE_GATE_AGENT` - haiku, direct (aggregated rule evaluation)
 - `TOOL_APPEAL_AGENT` - haiku, direct
 - `PLAN_VALIDATE_AGENT` - sonnet, direct
@@ -619,7 +624,6 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 | `src/rules/response-align-stop.ts` | 2 | via `runAgent` in rule check | `direct` |
 | `plan-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
 | `claude-md-validate.ts` | 1 | `APPROVE`, `DENY` | `direct` |
-| `src/rules/style-drift.ts` | 0 (aggregator, no own call) | - | - |
 | `src/rules/question-validate.ts` | 1 | via `runAgent` in rule check | `direct` |
 | `push.ts` | 0 | - | - |
 

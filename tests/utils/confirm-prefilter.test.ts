@@ -199,14 +199,6 @@ describe("runConfirmPrefilter — unusedCodeWorkarounds", () => {
     expect(r.unusedCodeWorkarounds).toEqual([]);
   });
 
-  it("flags #[allow(dead_code)] in Rust", () => {
-    const diff = "+++ b/src/lib.rs\n+#[allow(dead_code)]\n";
-    const r = runConfirmPrefilter("", diff);
-    expect(
-      r.unusedCodeWorkarounds.some((e) => e.label === "#[allow(dead_code)]"),
-    ).toBe(true);
-  });
-
   it("does not flag workaround patterns inside quoted metadata", () => {
     const tsIgnoreMarker = ["@ts", "ignore"].join("-");
     const diff = `+++ b/src/patterns.ts\n+const candidate = "${tsIgnoreMarker}";\n`;

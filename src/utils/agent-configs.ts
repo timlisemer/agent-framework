@@ -110,8 +110,6 @@ CLASSIFICATION RULES:
    - Only include if genuinely informative (not routine progress messages)
    - Max 5 lines - keep it brief
    - Examples: "CYCLES: 4590, Speedup: 32.2x", "Tests: 42 passed, 0 failed", "Build time: 2.3s"
-4. Quote style: project uses double quotes ("") for all strings and imports
-
 INPUT SECTIONS:
 - UNCOMMITTED FILES: git status context.
 - LINTER OUTPUT: TypeScript/linter output such as ESLint or package lint scripts.
@@ -201,9 +199,8 @@ If \`=== PRECOMPUTED VIOLATIONS ===\` lists this category, FAIL it. Beyond those
 Evaluate the diff for:
 - No obvious bugs or logic errors
 - Changes are coherent and intentional
-- Reasonable code style
-- Uses double quotes ("") for strings and imports (project standard)
 - If \`=== PRECOMPUTED VIOLATIONS ===\` lists this category (debug code, unused-code workarounds), FAIL it. Beyond those patterns, evaluate other code-quality concerns.
+- Do not fail style-only findings such as quote choice, emoji, Unicode dashes, or Rust lint-policy attributes. The check MCP owns those repository-wide checks and reports them as warnings.
 
 ### CATEGORY 3: Security
 Check for:
@@ -1581,54 +1578,3 @@ QUOTED/PASTED CONTENT: The user's message may contain pasted CLI output, logs, o
 
 Agent/Task tool prompts: The AI assembles prompts for subagents by combining user context with operational instructions (repo descriptions, tool guidance, workspace paths). This is NORMAL subagent dispatch, not "adding to the user's message." Only DENY Agent/Task if the subagent's PURPOSE contradicts user intent, not because the prompt contains standard operational context.`,
 };
-
-/**
- * Style Drift Prompt Section
- *
- * Verbatim copy of the style-drift rule's prompt body, used as the
- * promptSection for rule-gate aggregator integration.
- *
- * Detects unrequested cosmetic/style changes (semicolons, trailing commas,
- * quote style, etc.) that were not explicitly requested by the user.
- */
-export const STYLE_DRIFT_PROMPT_SECTION: string = `You verify style change hints from regex detection.
-
-## CONTEXT YOU RECEIVE
-
-1. STYLE CHANGES DETECTED: Regex-detected style differences (semicolons, trailing commas)
-2. STYLE PREFERENCES: From CLAUDE.md or defaults
-3. USER MESSAGES: Recent user context
-4. EDIT CONTENT: The old and new strings
-
-## YOUR JOB
-
-Verify if detected style changes are legitimate or unrequested drift.
-
-## APPROVE IF
-
-- User requested style/formatting changes ("clean up", "format", "fix style")
-- Style changes are part of functional changes (new code in different style is fine)
-- User's CLAUDE.md allows this style
-- The logic/semantics of code changed (not just cosmetic)
-- Mixed changes where style change accompanies logic change
-
-## DENY IF
-
-- Style changes are the ONLY modification (pure cosmetic drift)
-- No user request for formatting/cleanup in messages
-- Style goes against stated preferences
-
-## OUTPUT FORMAT (STRICT)
-
-Your response MUST start with EXACTLY one of:
-
-APPROVE
-OR
-DENY: <specific issue> - revert to <original style>
-
-Examples:
-APPROVE
-DENY: semicolon removed without request - keep semicolons
-DENY: trailing comma added without request - remove trailing comma
-
-NO other text before the decision word.`;

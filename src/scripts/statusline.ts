@@ -57,7 +57,6 @@ const AGENT_DISPLAY_NAMES: Record<string, string> = {
   "tool-appeal": "Tool Appeal",
   "response-align": "Response Align",
   "response-align-stop": "Response Align (Stop)",
-  "style-drift": "Style Drift",
   "plan-validate": "Plan Validate",
   "question-validate": "Question Validate",
   "claude-md-validate": "Claude MD Check",

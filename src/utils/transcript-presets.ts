@@ -45,16 +45,6 @@ export const PLAN_VALIDATE_COUNTS: TranscriptReadOptions = {
 };
 
 /**
- * For style drift checks.
- *
- * Only user messages - checking if user requested style changes.
- * Fewer messages since style requests are usually recent.
- */
-export const STYLE_DRIFT_COUNTS: TranscriptReadOptions = {
-  counts: { user: 5 },
-};
-
-/**
  * For validate-intent checks.
  *
  * Comprehensive user+assistant context without tool results.

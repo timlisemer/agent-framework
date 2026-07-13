@@ -16,6 +16,110 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
+
+export type ValidatedFileScanResult =
+  | { kind: "text"; bytes: number; scannedBytes: number }
+  | { kind: "binary"; bytes: number; scannedBytes: number }
+  | { kind: "scan-limited"; bytes: number; scannedBytes: number }
+  | { kind: "non-file"; fileType: "symbolic link" | "directory" | "special file"; scannedBytes: number }
+  | { kind: "unreadable"; regularFile?: boolean; bytes?: number; scannedBytes: number };
+
+/**
+ * Validate and stream a regular file without following symlinks. This is the
+ * single safety-sensitive read primitive for bounded repository file scans.
+ */
+export async function scanValidatedFileCancellable(
+  filePath: string,
+  options: CancellationOptions & {
+    maxBytes: number;
+    visitChunk?: (chunk: Buffer) => void;
+  },
+): Promise<ValidatedFileScanResult> {
+  throwIfAborted(options.signal);
+  let before: fs.Stats;
+  try {
+    before = await fs.promises.lstat(filePath);
+  } catch {
+    throwIfAborted(options.signal);
+    return { kind: "unreadable", scannedBytes: 0 };
+  }
+  throwIfAborted(options.signal);
+  if (!before.isFile()) {
+    return {
+      kind: "non-file",
+      fileType: before.isSymbolicLink()
+        ? "symbolic link"
+        : before.isDirectory() ? "directory" : "special file",
+      scannedBytes: 0,
+    };
+  }
+  if (before.size > options.maxBytes) return { kind: "scan-limited", bytes: before.size, scannedBytes: 0 };
+
+  let handle: fs.promises.FileHandle;
+  try {
+    handle = await fs.promises.open(
+      filePath,
+      fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0),
+    );
+  } catch {
+    throwIfAborted(options.signal);
+    return { kind: "unreadable", regularFile: true, bytes: before.size, scannedBytes: 0 };
+  }
+  let total = 0;
+  let visitorFailed = false;
+  let visitorError: unknown;
+  try {
+    throwIfAborted(options.signal);
+    const opened = await handle.stat();
+    throwIfAborted(options.signal);
+    const after = await fs.promises.lstat(filePath);
+    throwIfAborted(options.signal);
+    if (after.isSymbolicLink()) return { kind: "non-file", fileType: "symbolic link", scannedBytes: total };
+    if (opened.dev !== after.dev || opened.ino !== after.ino) {
+      return { kind: "unreadable", regularFile: true, bytes: opened.size, scannedBytes: total };
+    }
+    if (!opened.isFile()) {
+      return { kind: "non-file", fileType: opened.isDirectory() ? "directory" : "special file", scannedBytes: total };
+    }
+    if (opened.size > options.maxBytes) return { kind: "scan-limited", bytes: opened.size, scannedBytes: 0 };
+
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    while (true) {
+      throwIfAborted(options.signal);
+      let read: Awaited<ReturnType<typeof handle.read>>;
+      try {
+        read = await handle.read(buffer, 0, buffer.length, null);
+      } catch {
+        throwIfAborted(options.signal);
+        return { kind: "unreadable", regularFile: true, bytes: opened.size, scannedBytes: total };
+      }
+      if (read.bytesRead === 0) break;
+      total += read.bytesRead;
+      throwIfAborted(options.signal);
+      if (total > options.maxBytes) {
+        return { kind: "scan-limited", bytes: Math.max(opened.size, total), scannedBytes: total };
+      }
+      const chunk = buffer.subarray(0, read.bytesRead);
+      if (chunk.includes(0)) return { kind: "binary", bytes: opened.size, scannedBytes: total };
+      try {
+        options.visitChunk?.(chunk);
+      } catch (error) {
+        visitorFailed = true;
+        visitorError = error;
+        throw error;
+      }
+    }
+    return { kind: "text", bytes: total, scannedBytes: total };
+  } catch {
+    if (visitorFailed) throw visitorError;
+    throwIfAborted(options.signal);
+    return { kind: "unreadable", regularFile: true, bytes: before.size, scannedBytes: total };
+  } finally {
+    await handle.close().catch(() => undefined);
+    throwIfAborted(options.signal);
+  }
+}
 
 type JsonReplacer = (this: unknown, key: string, value: unknown) => unknown;
 type JsonWriteOptions = { indent?: number; replacer?: JsonReplacer };
@@ -29,6 +133,21 @@ export function readFirstUtf8File(filePaths: readonly string[]): string | null {
     }
   }
   return null;
+}
+
+/** Bounded no-follow UTF-8 read for instruction and configuration files. */
+export async function readValidatedTextFileCancellable(
+  filePath: string,
+  options: CancellationOptions & { maxBytes?: number } = {},
+): Promise<string | null> {
+  const maxBytes = options.maxBytes ?? 64 * 1024 * 1024;
+  const chunks: Buffer[] = [];
+  const result = await scanValidatedFileCancellable(filePath, {
+    ...options,
+    maxBytes,
+    visitChunk: (chunk) => chunks.push(Buffer.from(chunk)),
+  });
+  return result.kind === "text" ? Buffer.concat(chunks).toString("utf-8") : null;
 }
 
 export function listJsonlFilesRecursive(root: string): string[] {

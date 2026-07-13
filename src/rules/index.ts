@@ -12,7 +12,6 @@ import { driftDetectRule } from "./drift-detect.js";
 import { errorAcknowledgeRule } from "./error-acknowledge.js";
 import { trustedPathRule } from "./trusted-path.js";
 import { editIntentRule } from "./edit-intent.js";
-import { styleDriftRule } from "./style-drift.js";
 import { predictionContextRule } from "./prediction-context.js";
 import { recentMessagesRule } from "./recent-messages.js";
 import { reasoningHistoryRule } from "./reasoning-history.js";
@@ -42,7 +41,6 @@ export const ALL_RULES: PreToolRule[] = [
   errorAcknowledgeRule,
   trustedPathRule,
   editIntentRule,
-  styleDriftRule,
   predictionContextRule,
   recentMessagesRule,
   reasoningHistoryRule,

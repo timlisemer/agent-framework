@@ -3,7 +3,7 @@
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
 1. **MCP Server** - For `check`, `confirm`, `fullconfirm`, `commit`, `push`, `implement`, `validate_implementation`, `validate_intent`, `create_planfile`, `validate_plan`, `scenario_labeler`, `scenario_tester`, `locate_scenario` tools (portable, works with any MCP client)
-2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `style-drift`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
+2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
 3. **Stop Hook** - For `response-align-stop` and Codex `<proposed_plan>` acceptance validation
 4. **UserPromptSubmit Hook** - For `sentiment` rule and slash/skill workflow prediction seeding before each tool call sequence
 
@@ -47,7 +47,7 @@ The framework implements specialized agents and MCP tools organized into three c
 
 | Agent           | Model  | Purpose                                                      |
 | --------------- | ------ | ------------------------------------------------------------ |
-| check           | sonnet | Run linter + make/just check plus deterministic filename-reference diagnostics (deleted/renamed errors and docs/config missing-file warnings) and supplemental editor diagnostics, return summary with recommendations |
+| check           | sonnet | Run linter + make/just check plus deterministic filename-reference diagnostics, repository-wide style-drift warnings, and supplemental editor diagnostics, return summary with recommendations |
 | confirm         | opus   | Binary quality gate using three SDK reviewers plus aggregator |
 | fullconfirm     | opus   | Full tracked-repository quality gate using three SDK reviewers plus aggregator |
 | commit          | haiku  | Generate minimal commit message + execute git commit         |
@@ -67,6 +67,10 @@ The framework implements specialized agents and MCP tools organized into three c
 
 **Note on locate_scenario**: This tool replaces the manual `scenarios/LOCATE-SCENARIO.md` recipe. It accepts one or more quote substrings, runs predefined literal searches over raw Claude/Codex transcripts and agent-framework session logs, resolves candidate session directories/capture sequences where possible, and uses a haiku-level LLM only to summarize successful findings. If no predefined search matches, it returns a failure notice plus manual fallback guidance.
 
+**Style-drift warnings:** `check` performs a bounded scan of tracked and non-ignored untracked text files and reports unreadable, non-regular, or safety-limit omissions in its warning output. Intentional fixtures can place `agent-framework-style-drift-ignore-next-line` in a comment immediately above one exempt line, or `agent-framework-style-drift-ignore-file` in a comment to exempt a fixture file. These markers affect only deterministic style warnings.
+
+Rust policy warnings include Clippy `allow`/`expect` excuses, dead or unused-code suppressions, and the explicitly prohibited crate attribute `#![warn(clippy::disallowed_types)]`.
+
 ### Validation Agents (Hook-Triggered)
 
 | Agent            | Model  | Hook        | Purpose                                        |
@@ -74,7 +78,6 @@ The framework implements specialized agents and MCP tools organized into three c
 | rule-gate           | haiku  | PreToolUse        | Combined evaluator for triggered rule contexts |
 | error-acknowledge   | haiku  | PreToolUse        | Require error acknowledgment before proceeding |
 | plan-validate       | sonnet | Stop / MCP helper | Validate plan contract and user-intent fit     |
-| style-drift         | haiku  | PreToolUse        | Detect unrequested cosmetic/style changes (aggregator) |
 | claude-md-validate  | sonnet | PreToolUse        | Validate CLAUDE.md edits against conventions   |
 | question-validate   | haiku  | PreToolUse        | Validate AskUserQuestion before showing to user (side-effect) |
 | validate-intent     | haiku  | PreToolUse        | Check if AI followed user intentions (side-effect) |
@@ -129,7 +132,6 @@ and validator half for already-applied changes.
 │  ├─ error-acknowledge (50): Require error acknowledgment (appealable, LLM)
 │  ├─ trusted-path (58): Deny sensitive-path access
 │  ├─ edit-intent (60): Block edits without intent (appealable)
-│  ├─ style-drift (65): Detect style changes (appealable, LLM)
 │  ├─ gate (70): Gate agent contribution to rule-gate LLM
 │  └─ tool-approve (100): Final tool approval (appealable, LLM)
 │     └─ fastDeny with appealable → tool-appeal with transcript
@@ -439,7 +441,7 @@ Once configured, the agent can:
 
 ```
 > Use the check tool to verify code quality
-[Runs linter + make/just check plus deterministic filename-reference diagnostics (deleted/renamed errors and docs/config missing-file warnings) and supplemental editor diagnostics, returns summary]
+[Runs linter + make/just check plus deterministic filename-reference diagnostics (deleted/renamed errors and docs/config missing-file warnings), repository-wide style-drift warnings, and supplemental editor diagnostics, returns summary]
 
 > Run confirm to check my changes
 CONFIRMED

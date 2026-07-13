@@ -25,10 +25,14 @@ import {
   sortReposWithChangesSubmodulesFirst,
 } from "../../src/utils/git-utils.js";
 import { selectConfirmPrefilterCandidateLines } from "../../src/utils/confirm-prefilter.js";
+import { failFileHandleReadAfter } from "../helpers/file-read-failure.js";
 
 type InventoryOpenHooks = {
   beforeOpen?: (absolutePath: string) => void | Promise<void>;
-  afterOpen?: (absolutePath: string) => void | Promise<void>;
+  afterOpen?: (
+    absolutePath: string,
+    handle: Awaited<ReturnType<typeof fs.promises.open>>,
+  ) => void | Promise<void>;
   afterFirstStat?: (absolutePath: string) => void | Promise<void>;
   afterLstat?: (absolutePath: string, pathCall: number) => void | Promise<void>;
 };
@@ -59,7 +63,7 @@ async function withInventoryOpenHooks<T>(
     const absolutePath = String(file);
     await hooks.beforeOpen?.(absolutePath);
     const handle = await originalOpen(file, flags, mode);
-    await hooks.afterOpen?.(absolutePath);
+    await hooks.afterOpen?.(absolutePath, handle);
     if (hooks.afterFirstStat) {
       const originalStat = handle.stat.bind(handle);
       let intercepted = false;
@@ -308,6 +312,24 @@ describe("bounded git utilities", () => {
       reason: "metadata scan skipped: per-file safety limit",
     }));
     expect(inventory.scannedBytes).toBeGreaterThan(64 * 1024 * 1024);
+  });
+
+  it("accounts for bytes consumed before an inventory read failure", async () => {
+    const partialPath = path.join(repoDir, "partial-untracked.txt");
+    fs.writeFileSync(partialPath, Buffer.alloc(80 * 1024, 120));
+
+    const inventory = await withInventoryOpenHooks({
+      afterOpen: (absolutePath, handle) => {
+        if (absolutePath !== partialPath) return;
+        failFileHandleReadAfter(handle, 1);
+      },
+    }, () => getGitVisibleFileInventoryCancellable(repoDir));
+
+    expect(inventory.skippedFiles).toContainEqual(expect.objectContaining({
+      path: "partial-untracked.txt",
+      reason: "unreadable",
+    }));
+    expect(inventory.scannedBytes).toBeGreaterThanOrEqual(64 * 1024);
   });
 
   it("uses one unchanged context line around tracked diff hunks", async () => {

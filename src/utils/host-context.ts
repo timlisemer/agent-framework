@@ -8,8 +8,9 @@
  */
 
 import { activeSpec } from "../adapter/spec.js";
-export type { HostContext } from "../adapter/types.js";
+import type { HostContextInput } from "../adapter/types.js";
+export type { HostContext, HostContextInput } from "../adapter/types.js";
 
-export function resolveHostContext(input?: { cwd?: string }): import("../adapter/types.js").HostContext {
+export function resolveHostContext(input?: HostContextInput): import("../adapter/types.js").HostContext {
   return activeSpec().resolveHostContext(input ?? {});
 }

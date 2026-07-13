@@ -7,6 +7,7 @@ import { runGitCancellable as runGit } from "./git-process.js";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
 import { isPathAtOrInside } from "./path-containment.js";
 import { clipUtf8Bytes } from "./text-bounds.js";
+import { scanValidatedFileCancellable } from "./file-io.js";
 import {
   assertCompleteGitOutput,
   formatUnifiedDiffPath,
@@ -1471,6 +1472,7 @@ type FileInspection =
       matchedLines: string[];
       omittedMatchedLines: number;
       contentLines: string[];
+      content?: string;
       oversizedLinesSkipped: number;
     }
   | { kind: "binary"; bytes: number }
@@ -1485,81 +1487,18 @@ async function inspectInventoryPath(
   budget: FileInspectionBudget,
   options: CancellationOptions & {
     untrackedLineMatcher?: (path: string, line: string) => string[];
+    captureContent?: boolean;
+    maxFileBytes?: number;
   },
   prefilterPath?: string,
 ): Promise<FileInspection> {
   throwIfAborted(options.signal);
-  let stat: fs.Stats;
-  try {
-    stat = await fs.promises.lstat(absolutePath);
-  } catch {
-    throwIfAborted(options.signal);
-    return { kind: "unreadable" };
-  }
-  throwIfAborted(options.signal);
-  if (!stat.isFile()) {
-    const fileType = stat.isSymbolicLink()
-      ? "symbolic link"
-      : stat.isDirectory() ? "directory" : "special file";
-    return { kind: "non-file", fileType };
-  }
-  let handle: fs.promises.FileHandle;
-  try {
-    const flags = fs.constants.O_RDONLY
-      | (fs.constants.O_NOFOLLOW ?? 0)
-      | (fs.constants.O_NONBLOCK ?? 0);
-    handle = await fs.promises.open(absolutePath, flags);
-  } catch {
-    throwIfAborted(options.signal);
-    return { kind: "unreadable", regularFile: true, bytes: stat.size };
-  }
-
-  let actualBytesRead = 0;
-  try {
-    throwIfAborted(options.signal);
-    let openedStat: fs.Stats;
-    try {
-      openedStat = await handle.stat();
-    } catch {
-      throwIfAborted(options.signal);
-      return { kind: "unreadable", regularFile: true, bytes: stat.size };
-    }
-    throwIfAborted(options.signal);
-    try {
-      const pathStatAfterOpen = await fs.promises.lstat(absolutePath);
-      throwIfAborted(options.signal);
-      if (
-        pathStatAfterOpen.isSymbolicLink()
-        || pathStatAfterOpen.dev !== openedStat.dev
-        || pathStatAfterOpen.ino !== openedStat.ino
-      ) {
-        return pathStatAfterOpen.isSymbolicLink()
-          ? { kind: "non-file", fileType: "symbolic link" }
-          : { kind: "unreadable", regularFile: true, bytes: openedStat.size };
-      }
-    } catch {
-      throwIfAborted(options.signal);
-      return { kind: "unreadable", regularFile: true, bytes: openedStat.size };
-    }
-    if (!openedStat.isFile()) {
-      throwIfAborted(options.signal);
-      const fileType = openedStat.isDirectory() ? "directory" : "special file";
-      return { kind: "non-file", fileType };
-    }
-    if (openedStat.size > REVIEW_CONTEXT_REDUCTION_LIMITS.inventoryScanMaxFileBytes) {
-      return { kind: "scan-limited", bytes: openedStat.size, reason: "per-file safety limit" };
-    }
-    const aggregateRemaining = REVIEW_CONTEXT_REDUCTION_LIMITS.inventoryScanMaxTotalBytes
-      - budget.scannedBytes;
-    if (openedStat.size > aggregateRemaining) {
-      return { kind: "scan-limited", bytes: openedStat.size, reason: "aggregate safety limit" };
-    }
-
+  const aggregateRemaining = REVIEW_CONTEXT_REDUCTION_LIMITS.inventoryScanMaxTotalBytes
+    - budget.scannedBytes;
   const liveReadLimit = Math.min(
-    REVIEW_CONTEXT_REDUCTION_LIMITS.inventoryScanMaxFileBytes,
+    options.maxFileBytes ?? REVIEW_CONTEXT_REDUCTION_LIMITS.inventoryScanMaxFileBytes,
     aggregateRemaining,
   );
-  let bytesRead = 0;
   let newlineCount = 0;
   let lastByte = -1;
   const decoder = new StringDecoder("utf8");
@@ -1569,6 +1508,7 @@ async function inspectInventoryPath(
   const matchedLines: string[] = [];
   let omittedMatchedLines = 0;
   const contentLines: string[] = [];
+  const decodedChunks: string[] = [];
   const initialContentBytesRemaining = budget.contentBytesRemaining;
   let contentBytesUsed = 0;
   const captureContentLine = (line: string) => {
@@ -1595,6 +1535,7 @@ async function inspectInventoryPath(
     captureContentLine(line);
   };
   const processDecodedText = (decoded: string) => {
+    if (options.captureContent && decoded) decodedChunks.push(decoded);
     let cursor = 0;
     while (cursor < decoded.length) {
       const newline = decoded.indexOf("\n", cursor);
@@ -1625,57 +1566,158 @@ async function inspectInventoryPath(
       cursor = newline + 1;
     }
   };
-    const buffer = Buffer.allocUnsafe(64 * 1024);
-    while (true) {
-      throwIfAborted(options.signal);
-      let read: Awaited<ReturnType<typeof handle.read>>;
-      try {
-        read = await handle.read(buffer, 0, buffer.byteLength, null);
-      } catch {
-        throwIfAborted(options.signal);
-        return { kind: "unreadable", regularFile: true, bytes: openedStat.size };
-      }
-      if (read.bytesRead === 0) break;
-      actualBytesRead += read.bytesRead;
-      throwIfAborted(options.signal);
-      const chunk = buffer.subarray(0, read.bytesRead);
-      if (bytesRead + read.bytesRead > liveReadLimit) {
-        return {
-          kind: "scan-limited",
-          bytes: Math.max(openedStat.size, bytesRead + read.bytesRead),
-          reason: liveReadLimit === aggregateRemaining
-            ? "aggregate safety limit"
-            : "per-file safety limit",
-        };
-      }
-      bytesRead += read.bytesRead;
-      if (chunk.includes(0)) {
-        return { kind: "binary", bytes: openedStat.size };
-      }
+  const safeResult = await scanValidatedFileCancellable(absolutePath, {
+    signal: options.signal,
+    maxBytes: liveReadLimit,
+    visitChunk: (chunk) => {
       for (const byte of chunk) {
         if (byte === 10) newlineCount += 1;
       }
       processDecodedText(decoder.write(chunk));
       if (chunk.byteLength > 0) lastByte = chunk[chunk.byteLength - 1];
-    }
-    processDecodedText(decoder.end());
-    if (oversizedLine) oversizedLinesSkipped += 1;
-    else if (pendingLine) scanCompleteLine(pendingLine);
-    budget.contentBytesRemaining -= contentBytesUsed;
+    },
+  });
+  budget.scannedBytes += safeResult.scannedBytes;
+  if (safeResult.kind === "scan-limited") {
     return {
-      kind: "text",
-      bytes: openedStat.size,
-      lines: bytesRead === 0 ? 0 : newlineCount + (lastByte === 10 ? 0 : 1),
-      matchedLines,
-      omittedMatchedLines,
-      contentLines,
-      oversizedLinesSkipped,
+      ...safeResult,
+      reason: liveReadLimit === aggregateRemaining
+        ? "aggregate safety limit"
+        : "per-file safety limit",
     };
-  } finally {
-    budget.scannedBytes += actualBytesRead;
-    await handle.close().catch(() => undefined);
+  }
+  if (safeResult.kind !== "text") return safeResult;
+
+  processDecodedText(decoder.end());
+  if (oversizedLine) oversizedLinesSkipped += 1;
+  else if (pendingLine) scanCompleteLine(pendingLine);
+  budget.contentBytesRemaining -= contentBytesUsed;
+  return {
+    kind: "text",
+    bytes: safeResult.bytes,
+    lines: safeResult.bytes === 0 ? 0 : newlineCount + (lastByte === 10 ? 0 : 1),
+    matchedLines,
+    omittedMatchedLines,
+    contentLines,
+    ...(options.captureContent ? { content: decodedChunks.join("") } : {}),
+    oversizedLinesSkipped,
+  };
+}
+
+export async function listGitVisiblePathsCancellable(
+  workingDir: string,
+  options: CancellationOptions & {
+    includeUntracked?: boolean;
+    maxStdoutBytes?: number;
+    maxStderrBytes?: number;
+  } = {},
+): Promise<string[]> {
+  const lsArgs = options.includeUntracked === false
+    ? ["ls-files", "--cached", "-z"]
+    : ["ls-files", "--cached", "--others", "--exclude-standard", "-z"];
+  const lsFiles = await runGit(lsArgs, workingDir, {
+    ...options,
+    maxStdoutBytes: options.maxStdoutBytes ?? DEFAULT_GIT_FILE_LIST_MAX_BYTES,
+    maxStderrBytes: options.maxStderrBytes ?? DEFAULT_GIT_STATUS_MAX_BYTES,
+  });
+  return parseCompleteGitNulRecords(lsFiles, "git-visible file inventory").sort();
+}
+
+export interface GitVisibleTextScanSummary {
+  textFiles: number;
+  skippedBinary: number;
+  skippedUnreadable: number;
+  skippedScanLimited: number;
+  skippedNonRegular: number;
+  scannedBytes: number;
+  skippedFiles: GitVisibleScanSkippedFile[];
+}
+
+export type GitVisibleScanSkipReason =
+  | "binary"
+  | "unreadable"
+  | "per-file safety limit"
+  | "aggregate safety limit"
+  | "symbolic link"
+  | "directory"
+  | "special file";
+
+export interface GitVisibleScanSkippedFile {
+  path: string;
+  reason: GitVisibleScanSkipReason;
+  bytes?: number;
+}
+
+async function walkGitVisibleFilesCancellable(
+  workingDir: string,
+  options: CancellationOptions & {
+    includeUntracked?: boolean;
+    captureContent?: boolean;
+    maxFileBytes?: number;
+  },
+  visit: (relativePath: string, inspection: FileInspection) => void | Promise<void>,
+): Promise<GitVisibleTextScanSummary> {
+  const paths = await listGitVisiblePathsCancellable(workingDir, options);
+  const budget: FileInspectionBudget = { scannedBytes: 0, contentBytesRemaining: 0 };
+  const summary: GitVisibleTextScanSummary = {
+    textFiles: 0,
+    skippedBinary: 0,
+    skippedUnreadable: 0,
+    skippedScanLimited: 0,
+    skippedNonRegular: 0,
+    scannedBytes: 0,
+    skippedFiles: [],
+  };
+  for (const relativePath of paths) {
+    throwIfAborted(options.signal);
+    const inspection = await inspectInventoryPath(path.join(workingDir, relativePath), budget, options);
+    switch (inspection.kind) {
+      case "text": summary.textFiles += 1; break;
+      case "binary":
+        summary.skippedBinary += 1;
+        summary.skippedFiles.push({ path: relativePath, reason: "binary", bytes: inspection.bytes });
+        break;
+      case "unreadable":
+        summary.skippedUnreadable += 1;
+        summary.skippedFiles.push({ path: relativePath, reason: "unreadable", bytes: inspection.bytes });
+        break;
+      case "scan-limited":
+        summary.skippedScanLimited += 1;
+        summary.skippedFiles.push({ path: relativePath, reason: inspection.reason, bytes: inspection.bytes });
+        break;
+      case "non-file":
+        summary.skippedNonRegular += 1;
+        summary.skippedFiles.push({ path: relativePath, reason: inspection.fileType });
+        break;
+    }
+    await visit(relativePath, inspection);
     throwIfAborted(options.signal);
   }
+  summary.scannedBytes = budget.scannedBytes;
+  return summary;
+}
+
+/**
+ * Visit git-visible text files through the inventory scanner's validated open
+ * handle. This preserves no-follow, inode, regular-file, cancellation, and byte
+ * budget guarantees and never reopens a path after validation.
+ */
+export async function scanGitVisibleTextFilesCancellable(
+  workingDir: string,
+  visit: (relativePath: string, content: string) => void | Promise<void>,
+  options: CancellationOptions & { includeUntracked?: boolean; maxFileBytes?: number } = {},
+): Promise<GitVisibleTextScanSummary> {
+  return walkGitVisibleFilesCancellable(
+    workingDir,
+    { ...options, captureContent: true },
+    async (relativePath, inspection) => {
+      if (inspection.kind !== "text") return;
+      if (inspection.content === undefined) {
+        throw new Error("Git-visible text scan invariant failed: captured content is missing");
+      }
+      await visit(relativePath, inspection.content);
+    },
+  );
 }
 
 async function getVirtualNormalizedTrackedDiff(
@@ -1887,63 +1929,29 @@ export async function getGitVisibleFileInventoryCancellable(
   workingDir: string,
   options: CancellationOptions & { includeUntracked?: boolean } = {},
 ): Promise<GitVisibleFileInventory> {
-  const lsArgs = options.includeUntracked === false
-    ? ["ls-files", "--cached", "-z"]
-    : ["ls-files", "--cached", "--others", "--exclude-standard", "-z"];
-  const lsFiles = await runGit(lsArgs, workingDir, {
-    ...options,
-    maxStdoutBytes: DEFAULT_GIT_FILE_LIST_MAX_BYTES,
-    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
-  });
-  const paths = parseCompleteGitNulRecords(lsFiles, "git-visible file inventory").sort();
   const files: GitVisibleFileEntry[] = [];
-  const skippedFiles: NonNullable<GitVisibleFileInventory["skippedFiles"]> = [];
-  let skippedBinary = 0;
-  let skippedUnreadable = 0;
-  let skippedScanLimited = 0;
-  let skippedNonRegular = 0;
-  const budget: FileInspectionBudget = { scannedBytes: 0, contentBytesRemaining: 0 };
-
-  for (const relativePath of paths) {
-    throwIfAborted(options.signal);
-    const inspection = await inspectInventoryPath(path.join(workingDir, relativePath), budget, options);
-    switch (inspection.kind) {
-      case "text":
-        files.push({ path: relativePath, lines: inspection.lines });
-        break;
-      case "binary":
-        skippedBinary += 1;
-        skippedFiles.push({ path: relativePath, reason: "binary", bytes: inspection.bytes });
-        break;
-      case "unreadable":
-        skippedFiles.push({ path: relativePath, reason: "unreadable" });
-        skippedUnreadable += 1;
-        break;
-      case "scan-limited":
-        skippedFiles.push({
-          path: relativePath,
-          reason: `metadata scan skipped: ${inspection.reason}`,
-          bytes: inspection.bytes,
-        });
-        skippedScanLimited += 1;
-        break;
-      case "non-file":
-        skippedFiles.push({ path: relativePath, reason: `${inspection.fileType}; not followed or read` });
-        skippedNonRegular += 1;
-        break;
-    }
-  }
+  const summary = await walkGitVisibleFilesCancellable(workingDir, options, (relativePath, inspection) => {
+    if (inspection.kind === "text") files.push({ path: relativePath, lines: inspection.lines });
+  });
+  const skippedFiles = summary.skippedFiles.map((file) => ({
+    ...file,
+    reason: file.reason === "per-file safety limit" || file.reason === "aggregate safety limit"
+      ? `metadata scan skipped: ${file.reason}`
+      : file.reason === "symbolic link" || file.reason === "directory" || file.reason === "special file"
+        ? `${file.reason}; not followed or read`
+        : file.reason,
+  }));
 
   return {
     files,
     skippedFiles,
     totalFiles: files.length + skippedFiles.length,
     totalLines: files.reduce((sum, file) => sum + file.lines, 0),
-    skippedBinary,
-    skippedUnreadable,
-    skippedScanLimited,
-    skippedNonRegular,
-    scannedBytes: budget.scannedBytes,
+    skippedBinary: summary.skippedBinary,
+    skippedUnreadable: summary.skippedUnreadable,
+    skippedScanLimited: summary.skippedScanLimited,
+    skippedNonRegular: summary.skippedNonRegular,
+    scannedBytes: summary.scannedBytes,
   };
 }
 

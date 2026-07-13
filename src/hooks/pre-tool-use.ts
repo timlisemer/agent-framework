@@ -483,7 +483,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
 
   // Run all rules (respond-first, low-risk, plan-mode-block,
   // question-validate, prediction-block, drift-detect,
-  // error-acknowledge, sensitive-path-block, edit-intent, style-drift, gate, tool-approve)
+  // error-acknowledge, sensitive-path-block, edit-intent, gate, tool-approve)
   const ruleResult = await evaluateRules(ALL_RULES, ctx, "PreToolUse");
 
   if (ruleResult) {

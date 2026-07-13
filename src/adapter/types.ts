@@ -159,6 +159,12 @@ export interface HostContext {
   instructionLabel: string;
 }
 
+export interface HostContextInput {
+  cwd?: string;
+  /** Explicit repository scope; takes precedence over host environment variables. */
+  projectDir?: string;
+}
+
 export interface AdapterTranscriptFile {
   name: string;
   path: string;
@@ -327,7 +333,7 @@ export interface AdapterSpec {
   // ── Path / config conventions ───────────────────────────────────────────
   /** Resolve host context (config root, plans root, instruction files).
    *  Generic code never sees ".claude", ".codex", "CLAUDE.md", "AGENTS.md". */
-  resolveHostContext(input: { cwd?: string }): HostContext;
+  resolveHostContext(input: HostContextInput): HostContext;
 
   /** True if a file path is exempt from edit-intent gating
    *  (plan files, memory files, instruction files for this adapter). */

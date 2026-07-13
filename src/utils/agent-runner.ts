@@ -994,7 +994,7 @@ export async function runAgentWithRetryAndTelemetry(
   // a key matching telemetry.agent, synthesize an AgentExecutionResult from
   // the mapped string and skip runAgentWithRetry entirely. This is the
   // LLM-transport boundary — stubbing here covers tool-appeal, rule-gate,
-  // style-drift, question-validate, edit-intent, plan-validate, and every
+  // question-validate, edit-intent, plan-validate, and every
   // other LLM verdict path with a single mechanism. The anti-bypass banner
   // in src/agents/hooks/tool-appeal.ts:1-34 is preserved because tool-appeal
   // itself is untouched.

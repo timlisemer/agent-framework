@@ -11,8 +11,10 @@ export const CHECK_HELP = `# check -- Linter + Type-Check Summarizer
 
 Runs the project's configured linter and check target (Justfile or Makefile),
 runs deterministic filename-reference diagnostics (deleted/renamed references
-as errors, docs/config missing-file references as warnings), classifies the
-output into errors/warnings/info, and returns a structured summary.
+as errors, docs/config missing-file references as warnings), scans every
+git-visible text file for deterministic style drift within bounded safety
+limits, reports omitted paths, classifies the output into errors/warnings/info,
+and returns a structured summary.
 
 ## Inputs
 
@@ -24,7 +26,7 @@ output into errors/warnings/info, and returns a structured summary.
 - ERRORS: compile failures, type errors, syntax errors, UNUSED code
   (unused code is an error because it must be deleted, not suppressed)
 - WARNINGS: style hints, lints, refactoring suggestions, docs/config
-  references to missing files
+  references to missing files, repository-wide style-drift findings
 - INFO: benchmark results, performance metrics, test summaries (max 5 lines)
 
 ## Output shape

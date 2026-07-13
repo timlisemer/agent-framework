@@ -10,6 +10,7 @@ import * as os from "os";
 import * as fs from "fs";
 import * as path from "path";
 import type { AdapterTranscriptFile } from "../../src/adapter/types.js";
+import { resolveProjectDirectory } from "../shared/host-context.js";
 
 /**
  * ~/.claude directory.
@@ -33,7 +34,7 @@ export function claudeProjectsRoot(): string {
  * Example: /home/user/my_project -> -home-user-my-project
  */
 export function encodeClaudeProjectDir(absPath?: string): string {
-  const projectDir = absPath ?? (process.env.CLAUDE_PROJECT_DIR ?? process.cwd());
+  const projectDir = resolveProjectDirectory({ projectDir: absPath });
   return projectDir.replace(/[/_]/g, "-");
 }
 

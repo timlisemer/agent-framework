@@ -7,19 +7,12 @@
  * @module adapters/codex/host-context
  */
 
-import * as os from "os";
 import * as path from "path";
-import type { HostContext } from "../../src/adapter/types.js";
+import type { HostContext, HostContextInput } from "../../src/adapter/types.js";
+import { resolveBaseHostContext } from "../shared/host-context.js";
 
-export function resolveHostContext(input: { cwd?: string }): HostContext {
-  const projectDir =
-    process.env.AGENT_FRAMEWORK_PROJECT_DIR ||
-    process.env.CLAUDE_PROJECT_DIR ||
-    input.cwd ||
-    process.cwd();
-
-  const configRoot = path.join(os.homedir(), ".codex");
-  const plansRoot = process.env.AGENT_FRAMEWORK_PLAN_DIR ?? path.join(configRoot, "plans");
+export function resolveHostContext(input: HostContextInput): HostContext {
+  const { projectDir, configRoot, plansRoot } = resolveBaseHostContext(input, ".codex");
 
   return {
     adapter: "codex",

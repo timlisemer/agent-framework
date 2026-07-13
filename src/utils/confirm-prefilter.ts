@@ -65,12 +65,10 @@ const DEBUG_CODE_PATTERNS: Array<{
 
 const tsIgnoreLabel = ["@ts", "ignore"].join("-");
 const tsExpectErrorLabel = ["@ts", "expect", "error"].join("-");
-const deadCodeAllowanceLabel = ["#[allow(", "dead_code", ")]"].join("");
 const UNUSED_CODE_WORKAROUNDS: DeterministicPattern[] = [
   { re: new RegExp(`${tsIgnoreLabel}\\b`), label: tsIgnoreLabel, candidate: `// ${tsIgnoreLabel}` },
   { re: new RegExp(`${tsExpectErrorLabel}\\b`), label: tsExpectErrorLabel, candidate: `// ${tsExpectErrorLabel}` },
   { re: /^\s*(let|const|var|fn)\s+_\w+\s*=/, label: "_-prefixed unused var", candidate: "let _unused = value;" },
-  { re: new RegExp("#\\[allow\\(dead_code\\)\\]"), label: deadCodeAllowanceLabel, candidate: deadCodeAllowanceLabel },
 ];
 
 const DEDUPLICATION_USER_REQUEST_PATTERNS: RegExp[] = [

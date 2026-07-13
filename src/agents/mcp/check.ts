@@ -2,17 +2,17 @@
  * Check Agent - Linter, Type-Check, and Supplemental Diagnostics Summarizer
  *
  * This agent runs project linters, make/just check, deterministic
- * filename-reference diagnostics, and narrow supplemental editor diagnostics
- * for known command-tool gaps, then summarizes the results without analysis or
- * suggestions. It classifies issues as errors, warnings, or info.
+ * filename-reference diagnostics, repository-wide style checks, and narrow
+ * supplemental editor diagnostics for known command-tool gaps, then summarizes
+ * the results without analysis or suggestions.
  *
  * ## FLOW
  *
  * 1. Get uncommitted files info
  * 2. Detect and run project linter (ESLint, Cargo, Ruff, etc.)
  * 3. Run check target (Justfile preferred, Makefile fallback)
- * 4. Run supplemental editor diagnostics and deterministic filename-reference
- *    diagnostics for known gaps
+ * 4. Run supplemental diagnostics, filename-reference diagnostics, and
+ *    repository-wide deterministic style checks
  * 5. Summarize results via unified runner
  *
  * ## CLASSIFICATION
@@ -89,6 +89,10 @@ import {
 
 import { activeSpec, registeredAdapterNames } from "../../adapter/spec.js";
 import { clipUtf8Bytes } from "../../utils/text-bounds.js";
+import {
+  findRepositoryStyleDrift,
+  formatRepositoryStyleDriftWarning,
+} from "../../utils/style-drift-check.js";
 function getHookName(): string { return activeSpec().mcpWireName("check"); }
 
 type CheckRunner = { cmd: string; dir: string; type: string };
@@ -803,6 +807,19 @@ export async function runCheckAgent(
         formatNonexistentFileReferenceWarning(repo, issue, options.repoScope?.mode === "all")
       ),
     );
+  }
+  // Style drift is repository state, not command output. Scan it even when a
+  // linter/check command timed out so the deterministic warning is not lost.
+  for (const repo of scopedRepos) {
+    throwIfAborted(options.signal);
+    const styleFindings = await runCheckPhase(`run deterministic style checks for ${repo.name}`, () =>
+      findRepositoryStyleDrift(repo.path, options)
+    );
+    const styleWarning = formatRepositoryStyleDriftWarning(
+      styleFindings,
+      options.repoScope?.mode === "all" ? ` in ${repo.name} (${repo.path})` : "",
+    );
+    if (styleWarning) deterministicWarnings.push(styleWarning);
   }
 
   // Step 5: Use unified runner for analysis

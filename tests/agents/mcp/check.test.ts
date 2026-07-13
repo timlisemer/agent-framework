@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   getAgentFrameworkSessionDir: vi.fn(),
   reduceDriftDetectionWindow: vi.fn(),
   runSupplementalDiagnosticProviders: vi.fn(),
+  findRepositoryStyleDrift: vi.fn(),
 }));
 
 vi.mock("../../../src/utils/agent-runner.js", () => ({
@@ -58,6 +59,14 @@ vi.mock("../../../src/scenario/lifecycle.js", () => ({
 vi.mock("../../../src/utils/supplemental-diagnostics.js", () => ({
   runSupplementalDiagnosticProviders: mocks.runSupplementalDiagnosticProviders,
 }));
+
+vi.mock("../../../src/utils/style-drift-check.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/utils/style-drift-check.js")>();
+  return {
+    ...actual,
+    findRepositoryStyleDrift: mocks.findRepositoryStyleDrift,
+  };
+});
 
 import {
   appendDeterministicCheckErrors,
@@ -326,6 +335,7 @@ describe("runCheckAgent supplemental diagnostics context", () => {
     mocks.runSupplementalDiagnosticProviders.mockResolvedValue(
       "TYPESCRIPT LANGUAGE SERVICE DIAGNOSTICS:\nsrc/example.ts:1:1 warning TS6385: deprecated",
     );
+    mocks.findRepositoryStyleDrift.mockResolvedValue({ findings: [], totalFindings: 0, skippedFiles: [], policyWarnings: [] });
     mocks.runAgent.mockResolvedValue({
       output: `## Results
 - Errors: 0
@@ -679,6 +689,44 @@ src/example.ts:1:1 warning TS6385: deprecated
     expect(result).toContain("DETERMINISTIC CHECK WARNINGS:");
     expect(result).toContain("`README.md`:7 references missing file `docs/missing.md`");
     expect(result).toContain("See docs/missing.md for details.");
+  });
+
+  it("appends repository style drift as a warning without failing check", async () => {
+    fs.writeFileSync(path.join(tempDir, "Makefile"), "check:\n\ttrue\n");
+    mocks.runProcessCancellable.mockResolvedValue({ output: "check passed", exitCode: 0 });
+    mocks.findRepositoryStyleDrift.mockResolvedValue({
+      findings: [{
+        path: "src/lib.rs",
+        line: 4,
+        column: 1,
+        kind: "rust-lint-suppression",
+        message: "Rust lint suppression is forbidden",
+      }],
+      totalFindings: 1,
+      skippedFiles: [],
+      policyWarnings: [],
+    });
+    mocks.runAgent.mockResolvedValue({
+      output: `## Results
+- Errors: 0
+- Warnings: 0
+- Status: PASS
+
+## Errors
+(none)
+
+## Warnings
+(none)
+`,
+    });
+
+    const result = await runCheckAgent(tempDir);
+
+    expect(result).toContain("- Errors: 0");
+    expect(result).toContain("- Warnings: 1");
+    expect(result).toContain("- Status: PASS");
+    expect(result).toContain("Repository-wide style drift detected");
+    expect(result).toContain("src/lib.rs:4:1 [rust-lint-suppression]");
   });
 
   it("includes failing command output when the check summarizer returns a sentinel", async () => {

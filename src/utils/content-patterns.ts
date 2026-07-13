@@ -3,7 +3,7 @@
  *
  * Categories:
  * - Rule violations: Time estimates, unrequested parameters
- * - Style violations: Emoji additions, quote changes
+ * - Shared deterministic style-policy primitives
  */
 
 export interface ContentPattern {
@@ -34,7 +34,7 @@ export const RULE_VIOLATION_PATTERNS: ContentPattern[] = [
 ];
 
 /**
- * Style violation patterns for style-drift agent.
+ * Shared style-violation patterns.
  * Detect unrequested cosmetic changes.
  *
  * Common emoji ranges covering most used emojis in code/docs context.
@@ -190,27 +190,6 @@ export function getRuleViolationHighlights(content: string): string[] {
 }
 
 /**
- * Detect emoji additions between old and new content.
- */
-export function detectEmojiAddition(oldStr: string, newStr: string): string[] {
-  const oldCounts = new Map<string, number>();
-  for (const emoji of oldStr.match(EMOJI_REGEX) || []) {
-    oldCounts.set(emoji, (oldCounts.get(emoji) || 0) + 1);
-  }
-
-  const newEmojis = newStr.match(EMOJI_REGEX) || [];
-  const addedEmojis = newEmojis.filter((emoji) => {
-    const remaining = oldCounts.get(emoji) || 0;
-    if (remaining > 0) {
-      oldCounts.set(emoji, remaining - 1);
-      return false;
-    }
-    return true;
-  });
-  return [...new Set(addedEmojis)];
-}
-
-/**
  * Question patterns for detecting AI questions directed at user.
  * These should use AskUserQuestion tool instead of plain text.
  *
@@ -293,176 +272,30 @@ export function detectUserDirectedQuestions(text: string): string[] {
 // STYLE PREFERENCES
 // ============================================================================
 
-/**
- * Extract style-related preferences from CLAUDE.md content.
- *
- * Looks for sections containing keywords like "quote", "style", "format".
- */
-export function extractStylePreferences(claudeMdContent: string): string {
-  const lines = claudeMdContent.split("\n");
-  const relevantLines: string[] = [];
-  const keywords = [
-    "quote",
-    "style",
-    "format",
-    "semicolon",
-    "trailing",
-    "comma",
-    "indent",
-    "backtick",
-    "emdash",
-    "dash",
-  ];
+export type QuotePreference = "double" | "single" | null;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].toLowerCase();
-    if (keywords.some((kw) => line.includes(kw))) {
-      const start = Math.max(0, i - 1);
-      const end = Math.min(lines.length, i + 3);
-      for (let j = start; j < end; j++) {
-        if (!relevantLines.includes(lines[j])) {
-          relevantLines.push(lines[j]);
-        }
-      }
-    }
-  }
-
-  return relevantLines.join("\n");
+export interface QuotePreferenceAnalysis {
+  preference: QuotePreference;
+  conflict: boolean;
 }
 
-// ============================================================================
-// STYLE DRIFT DETECTION
-// ============================================================================
-
-/**
- * Style change detection result.
- * Follows existing pattern: returns specific findings, not boolean.
- */
-export interface StyleChange {
-  type: "quote" | "semicolon" | "trailing_comma" | "backtick" | "emdash";
-  direction: string; // e.g., "' → \"" or "added" or "removed"
-  sample: string; // snippet of affected code
-  violatesPreference?: boolean; // true if changing AWAY from preference
-  matchesPreference?: boolean; // true if changing TOWARD preference
-}
-
-/**
- * Detect style changes between old and new content.
- * Returns list of changes with preference flags for fast-path decisions.
- *
- * @param oldStr - Original content
- * @param newStr - New content
- * @param quotePreference - "double" | "single" | null for quote preference
- */
-export function detectStyleChanges(
-  oldStr: string,
-  newStr: string,
-  quotePreference: "double" | "single" | null = "double"
-): StyleChange[] {
-  const changes: StyleChange[] = [];
-
-  // Quote changes - compare counts
-  const oldSingle = (oldStr.match(/'/g) || []).length;
-  const newSingle = (newStr.match(/'/g) || []).length;
-  const oldDouble = (oldStr.match(/"/g) || []).length;
-  const newDouble = (newStr.match(/"/g) || []).length;
-
-  if (oldSingle !== newSingle || oldDouble !== newDouble) {
-    const goingToSingle = newSingle > oldSingle && newDouble <= oldDouble;
-    const goingToDouble = newDouble > oldDouble && newSingle <= oldSingle;
-    const direction = goingToDouble ? "' → \"" : goingToSingle ? "\" → '" : "mixed";
-
-    changes.push({
-      type: "quote",
-      direction,
-      sample: newStr.slice(0, 50),
-      // Violation: going AWAY from preference
-      violatesPreference:
-        (quotePreference === "double" && goingToSingle) ||
-        (quotePreference === "single" && goingToDouble),
-      // Match: going TOWARD preference (cleanup)
-      matchesPreference:
-        (quotePreference === "double" && goingToDouble) ||
-        (quotePreference === "single" && goingToSingle),
-    });
+/** Analyze explicit, non-negated quote requirements in instruction text. */
+export function analyzeQuotePreferences(content: string): QuotePreferenceAnalysis {
+  const preferences = new Set<Exclude<QuotePreference, null>>();
+  const policyVerb = "(?:use|uses|using|prefer|prefers|preferring|require|requires|requiring)";
+  for (const clause of content.split(/[;\n]/)) {
+    const normalized = clause.toLowerCase();
+    const negates = (quote: "double" | "single") =>
+      new RegExp(
+        `\\b(?:(?:do not|don't|never)\\s+${policyVerb}|avoid(?:\\s+${policyVerb})?)\\s+(?:only\\s+)?${quote} quotes?\\b`,
+      ).test(normalized);
+    const affirms = (quote: "double" | "single") =>
+      new RegExp(`\\b(?:${policyVerb}|standard(?: is|:)?)(?:\\s+only)?\\s+${quote} quotes?\\b`).test(normalized);
+    if (affirms("double") && !negates("double")) preferences.add("double");
+    if (affirms("single") && !negates("single")) preferences.add("single");
   }
-
-  // Semicolon changes - no preference, always needs LLM
-  const oldSemis = (oldStr.match(/;/g) || []).length;
-  const newSemis = (newStr.match(/;/g) || []).length;
-  if (oldSemis !== newSemis) {
-    changes.push({
-      type: "semicolon",
-      direction: newSemis > oldSemis ? "added" : "removed",
-      sample: newStr.slice(0, 50),
-    });
-  }
-
-  // Trailing comma changes - no preference, always needs LLM
-  const oldTrailing = (oldStr.match(/,\s*[\n})\]]/g) || []).length;
-  const newTrailing = (newStr.match(/,\s*[\n})\]]/g) || []).length;
-  if (oldTrailing !== newTrailing) {
-    changes.push({
-      type: "trailing_comma",
-      direction: newTrailing > oldTrailing ? "added" : "removed",
-      sample: newStr.slice(0, 50),
-    });
-  }
-
-  // Backtick changes - no preference, additions fast-denied in caller
-  const oldBackticks = (oldStr.match(/`/g) || []).length;
-  const newBackticks = (newStr.match(/`/g) || []).length;
-  if (oldBackticks !== newBackticks) {
-    changes.push({
-      type: "backtick",
-      direction: newBackticks > oldBackticks ? "added" : "removed",
-      sample: newStr.slice(0, 50),
-    });
-  }
-
-  // Emdash detection - emdashes in new content are always flagged
-  // Covers em dash (U+2014), en dash (U+2013), and horizontal bar (U+2015)
-  const emdashRegex = /[\u2013\u2014\u2015]/g;
-  const newEmdashes = (newStr.match(emdashRegex) || []).length;
-  if (newEmdashes > 0) {
-    changes.push({
-      type: "emdash",
-      direction: "present",
-      sample: newStr.slice(0, 50),
-    });
-  }
-
-  return changes;
-}
-
-/**
- * Format style changes as hints for LLM prompt injection.
- * Follows [TYPE: name] message format from other agents.
- */
-export function formatStyleHints(changes: StyleChange[]): string {
-  if (changes.length === 0) return "";
-
-  const hints = changes.map((c) => {
-    const message =
-      c.type === "semicolon"
-        ? c.direction === "added"
-          ? "semicolons were added"
-          : "semicolons were removed"
-        : c.type === "trailing_comma"
-          ? c.direction === "added"
-            ? "trailing commas were added"
-            : "trailing commas were removed"
-          : c.type === "backtick"
-            ? c.direction === "added"
-              ? "backticks were added"
-              : "backticks were removed"
-            : c.type === "emdash"
-              ? "emdash present - replace with normal dash"
-              : `quote style changed: ${c.direction}`;
-    return `[STYLE: ${c.type}] ${message}`;
-  });
-
-  return `=== STYLE CHANGES DETECTED ===
-${hints.join("\n")}
-=== END STYLE HINTS ===\n`;
+  return {
+    preference: preferences.size === 1 ? preferences.values().next().value ?? null : null,
+    conflict: preferences.size > 1,
+  };
 }

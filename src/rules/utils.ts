@@ -9,14 +9,14 @@ export { isSensitivePath } from "../utils/sensitive-paths.js";
 
 // File tools that go through path-based risk classification (trusted/sensitive)
 // and write-specific gates (edit-intent, CLAUDE.md validation, plan-file validation,
-// style-drift). Read is NOT here -- it's read-only with no side effects, so it
+// edit-intent). Read is NOT here -- it's read-only with no side effects, so it
 // belongs in LOW_RISK_TOOLS for prediction/default non-blocking classification.
 // apply_patch is excluded: Codex canonicalizes it to Edit before rules run.
 export const FILE_TOOLS = EDIT_TOOL_NAMES;
 
 // Low-risk tools are read-only or side-effect-free for prediction policy and
 // default workflow non-blocking support. Contrast with FILE_TOOLS above, which
-// go through write-specific gates (edit-intent, style-drift, etc.).
+// go through write-specific gates (edit-intent, etc.).
 export const LOW_RISK_TOOLS = [
   // Read-only file/search/navigation
   "Read",

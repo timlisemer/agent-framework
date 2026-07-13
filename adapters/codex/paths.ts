@@ -10,6 +10,7 @@ import * as os from "os";
 import * as path from "path";
 import type { AdapterTranscriptFile } from "../../src/adapter/types.js";
 import { listJsonlFilesRecursive, readFileHeadBuffer } from "../../src/utils/file-io.js";
+import { resolveProjectDirectory } from "../shared/host-context.js";
 import { codexEventCwd, codexEventSessionId } from "./transcript-metadata.js";
 
 export function codexSessionsRoot(): string {
@@ -31,12 +32,7 @@ export function projectTranscriptFile(name: string, absPath?: string): string {
 
 export function listProjectTranscripts(absPath?: string): AdapterTranscriptFile[] {
   const root = codexSessionsRoot();
-  const projectDir = path.resolve(
-    absPath ??
-    process.env.AGENT_FRAMEWORK_PROJECT_DIR ??
-    process.env.CLAUDE_PROJECT_DIR ??
-    process.cwd(),
-  );
+  const projectDir = resolveProjectDirectory({ projectDir: absPath });
   const results: AdapterTranscriptFile[] = [];
   for (const filePath of listJsonlFilesRecursive(root)) {
     const cwd = codexTranscriptCwd(filePath);

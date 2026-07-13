@@ -3,7 +3,7 @@ import * as path from "path";
 import { createRequire } from "module";
 import { type ProcessResult } from "./command.js";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
-import { runGitCancellable } from "./git-process.js";
+import { listGitVisiblePathsCancellable } from "./git-utils.js";
 import { parseCompleteGitNulRecords } from "./git-status.js";
 
 type TypeScript = typeof import("typescript");
@@ -225,6 +225,10 @@ export function parseGitVisibleTypeScriptFiles(
     return null;
   }
 
+  return typeScriptPathsFromRecords(records, workingDir);
+}
+
+function typeScriptPathsFromRecords(records: string[], workingDir: string): string[] {
   return records
     .filter(isTypeScriptSourceFile)
     .map((fileName) => path.join(workingDir, fileName))
@@ -235,16 +239,17 @@ async function discoverGitVisibleTypeScriptFiles(
   workingDir: string,
   options: CancellationOptions,
 ): Promise<string[] | null> {
-  const result = await runGitCancellable(
-    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-    workingDir,
-    {
+  try {
+    const paths = await listGitVisiblePathsCancellable(workingDir, {
       ...options,
       maxStdoutBytes: GIT_FILE_LIST_MAX_BYTES,
       maxStderrBytes: 64 * 1024,
-    },
-  );
-  return parseGitVisibleTypeScriptFiles(result, workingDir);
+    });
+    return typeScriptPathsFromRecords(paths, workingDir);
+  } catch {
+    throwIfAborted(options.signal);
+    return null;
+  }
 }
 
 async function readTypeScriptProjects(
