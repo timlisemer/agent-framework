@@ -30,7 +30,8 @@ import * as os from "os";
 import * as path from "path";
 import { runAgent } from "../../utils/agent-runner.js";
 import { COMMIT_AGENT } from "../../utils/agent-configs.js";
-import { runProcessCancellable } from "../../utils/command.js";
+import { parseCompleteGitNulRecords } from "../../utils/git-status.js";
+import { runGitCancellable as runGit } from "../../utils/git-process.js";
 import {
   getUncommittedChangesCancellable,
   classifyCommitSize,
@@ -42,17 +43,10 @@ import {
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import { confirmResultFailed, runConfirmAgent } from "./confirm.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
+import { clipUtf8Bytes } from "../../utils/text-bounds.js";
 
 import { activeSpec } from "../../adapter/spec.js";
 function getHookName(): string { return activeSpec().mcpWireName("commit"); }
-
-function runGit(
-  args: string[],
-  cwd: string,
-  options: CancellationOptions = {}
-): Promise<{ output: string; exitCode: number }> {
-  return runProcessCancellable({ shell: false, file: "git", args }, cwd, options);
-}
 
 type CommitOptions = CancellationOptions & {
   repoScope?: { mode: "single"; repoInfo?: RepoInfo };
@@ -139,12 +133,13 @@ async function getIndexedPaths(
   options: CancellationOptions,
 ): Promise<{ paths: Set<string>; error?: string }> {
   const result = await runGit(["ls-files", "--cached", "-z", "--", ...paths], workingDir, options);
-  if (result.exitCode !== 0) {
-    return { paths: new Set(), error: result.output || "git ls-files failed" };
+  try {
+    return {
+      paths: new Set(parseCompleteGitNulRecords(result, "indexed-path inventory")),
+    };
+  } catch (error) {
+    return { paths: new Set(), error: error instanceof Error ? error.message : String(error) };
   }
-  return {
-    paths: new Set(result.output.split("\0").filter(Boolean)),
-  };
 }
 
 type PreparedMoveIndexSnapshot = {
@@ -215,7 +210,18 @@ async function commitWithConfirmResult(
   sharedCommitContext: string | undefined,
   options: CancellationOptions = {},
 ): Promise<string> {
-  const { status, diff, diffStat, untrackedDiff } = await getUncommittedChangesCancellable(workingDir, options);
+  const {
+    status,
+    diff,
+    diffStat,
+    untrackedDiff,
+    untrackedInventory,
+    untrackedLinesChanged,
+    untrackedContentDiff,
+  } = await getUncommittedChangesCancellable(workingDir, {
+    ...options,
+    untrackedContentSourceMaxBytes: 8000,
+  });
 
   if (!status.trim()) {
     return "SKIPPED: nothing to commit";
@@ -228,7 +234,25 @@ async function commitWithConfirmResult(
   // TS-side size classification (folds in untracked-file accounting). The LLM
   // still emits a SIZE: line per its prompt format; we override the parsed
   // value with the TS-authoritative classification before returning.
-  const tsSize = classifyCommitSize(diffStat, untrackedDiff, status);
+  const tsSize = classifyCommitSize(diffStat, untrackedDiff, status, untrackedLinesChanged);
+  const boundSection = (value: string, maxBytes: number): string => clipUtf8Bytes(
+    value,
+    maxBytes,
+    "\n... (truncated)",
+    1,
+  );
+  const trackedDiff = untrackedInventory && diff.endsWith(`\n${untrackedInventory}`)
+    ? diff.slice(0, -(untrackedInventory.length + 1))
+    : diff;
+  const commitDiffContext = [
+    `TRACKED CHANGES:\n${boundSection(trackedDiff, 2400)}`,
+    untrackedInventory
+      ? `UNTRACKED FILE INVENTORY:\n${boundSection(untrackedInventory, 1600)}`
+      : "",
+    untrackedContentDiff
+      ? `UNTRACKED SOURCE EXCERPT:\n${boundSection(untrackedContentDiff, 3600)}`
+      : "",
+  ].filter(Boolean).join("\n\n");
 
   // Generate commit message
   const result = await runAgent(
@@ -246,7 +270,7 @@ DIFF STATS:
 ${diffStat}
 
 DIFF (for context):
-${diff.slice(0, 8000)}${diff.length > 8000 ? "\n... (truncated)" : ""}`,
+${commitDiffContext}`,
     },
     options
   );

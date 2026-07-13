@@ -10,8 +10,8 @@
  * @module push
  */
 
-import { runProcessCancellable } from "../../utils/command.js";
 import { isCancellationError, type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
+import { runGitCancellable } from "../../utils/git-process.js";
 
 /**
  * Push committed changes to the remote repository.
@@ -25,11 +25,7 @@ export async function runPushAgent(
 ): Promise<string> {
   try {
     throwIfAborted(options.signal);
-    const result = await runProcessCancellable(
-      { shell: false, file: "git", args: ["push"] },
-      workingDir,
-      options
-    );
+    const result = await runGitCancellable(["push"], workingDir, options);
     if (result.exitCode !== 0) {
       return `ERROR: ${result.output}`;
     }

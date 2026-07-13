@@ -1,8 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import { createRequire } from "module";
-import { runProcessCancellable } from "./command.js";
+import { type ProcessResult } from "./command.js";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
+import { runGitCancellable } from "./git-process.js";
+import { parseCompleteGitNulRecords } from "./git-status.js";
 
 type TypeScript = typeof import("typescript");
 
@@ -212,16 +214,29 @@ function defaultCompilerOptions(ts: TypeScript): import("typescript").CompilerOp
   };
 }
 
+export function parseGitVisibleTypeScriptFiles(
+  result: ProcessResult,
+  workingDir: string,
+): string[] | null {
+  let records: string[];
+  try {
+    records = parseCompleteGitNulRecords(result, "supplemental TypeScript file inventory");
+  } catch {
+    return null;
+  }
+
+  return records
+    .filter(isTypeScriptSourceFile)
+    .map((fileName) => path.join(workingDir, fileName))
+    .sort();
+}
+
 async function discoverGitVisibleTypeScriptFiles(
   workingDir: string,
   options: CancellationOptions,
 ): Promise<string[] | null> {
-  const result = await runProcessCancellable(
-    {
-      shell: false,
-      file: "git",
-      args: ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-    },
+  const result = await runGitCancellable(
+    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
     workingDir,
     {
       ...options,
@@ -229,14 +244,7 @@ async function discoverGitVisibleTypeScriptFiles(
       maxStderrBytes: 64 * 1024,
     },
   );
-  if (result.exitCode !== 0) return null;
-  if ((result.output || "").includes("[agent-framework: stdout truncated after")) return null;
-
-  return (result.output || "")
-    .split("\0")
-    .filter(isTypeScriptSourceFile)
-    .map((fileName) => path.join(workingDir, fileName))
-    .sort();
+  return parseGitVisibleTypeScriptFiles(result, workingDir);
 }
 
 async function readTypeScriptProjects(

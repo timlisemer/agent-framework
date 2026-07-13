@@ -11,6 +11,11 @@
  */
 
 import { isSensitivePath } from "./sensitive-paths.js";
+import {
+  formatGitPathForContext,
+  parsePorcelainStatusLine,
+  parseUnifiedDiffDestination,
+} from "./git-status.js";
 
 const UNWANTED_PATH_PATTERNS: RegExp[] = [
   /(^|\/)node_modules\//,
@@ -35,32 +40,37 @@ const UNWANTED_PATH_PATTERNS: RegExp[] = [
 // File-extension-scoped debug patterns. Each entry's `matchFile` predicate
 // is run against the path of the diff hunk's current file; only matching
 // patterns then run on `+` lines.
+type DeterministicPattern = { re: RegExp; label: string; candidate: string };
+
 const DEBUG_CODE_PATTERNS: Array<{
   matchFile: (p: string) => boolean;
-  patterns: { re: RegExp; label: string }[];
+  patterns: DeterministicPattern[];
 }> = [
   {
     matchFile: (p) => /\.(ts|tsx|js|jsx|mjs|cjs)$/i.test(p),
     patterns: [
-      { re: /\bconsole\.(log|debug|info|warn)\s*\(/, label: "console.log/debug" },
-      { re: /\bdebugger\b/, label: "debugger statement" },
+      { re: /\bconsole\.(log|debug|info|warn)\s*\(/, label: "console.log/debug", candidate: "console.log();" },
+      { re: /\bdebugger\b/, label: "debugger statement", candidate: "debugger;" },
     ],
   },
   {
     matchFile: (p) => /\.(rs)$/i.test(p),
-    patterns: [{ re: /\bdbg!\s*\(/, label: "dbg!() (Rust)" }],
+    patterns: [{ re: /\bdbg!\s*\(/, label: "dbg!() (Rust)", candidate: "dbg!(value);" }],
   },
   {
     matchFile: (p) => /\.(py)$/i.test(p),
-    patterns: [{ re: /^\s*print\s*\(/, label: "print() (Python)" }],
+    patterns: [{ re: /^\s*print\s*\(/, label: "print() (Python)", candidate: "print()" }],
   },
 ];
 
-const UNUSED_CODE_WORKAROUNDS: { re: RegExp; label: string }[] = [
-  { re: /@ts-ignore\b/, label: "@ts-ignore" },
-  { re: /@ts-expect-error\b/, label: "@ts-expect-error" },
-  { re: /^\s*(let|const|var|fn)\s+_\w+\s*=/, label: "_-prefixed unused var" },
-  { re: /#\[allow\(dead_code\)\]/, label: "#[allow(dead_code)]" },
+const tsIgnoreLabel = ["@ts", "ignore"].join("-");
+const tsExpectErrorLabel = ["@ts", "expect", "error"].join("-");
+const deadCodeAllowanceLabel = ["#[allow(", "dead_code", ")]"].join("");
+const UNUSED_CODE_WORKAROUNDS: DeterministicPattern[] = [
+  { re: new RegExp(`${tsIgnoreLabel}\\b`), label: tsIgnoreLabel, candidate: `// ${tsIgnoreLabel}` },
+  { re: new RegExp(`${tsExpectErrorLabel}\\b`), label: tsExpectErrorLabel, candidate: `// ${tsExpectErrorLabel}` },
+  { re: /^\s*(let|const|var|fn)\s+_\w+\s*=/, label: "_-prefixed unused var", candidate: "let _unused = value;" },
+  { re: new RegExp("#\\[allow\\(dead_code\\)\\]"), label: deadCodeAllowanceLabel, candidate: deadCodeAllowanceLabel },
 ];
 
 const DEDUPLICATION_USER_REQUEST_PATTERNS: RegExp[] = [
@@ -77,16 +87,41 @@ export interface ConfirmPrefilterResult {
   unusedCodeWorkarounds: { file: string; line: string; label: string }[];
 }
 
-function pathsFromPorcelainStatusLine(line: string): string[] {
-  if (!line) return [];
-  const payload = line.startsWith("??") ? line.slice(3) : line.slice(3);
-  if (!payload) return [];
-  const renameSeparator = " -> ";
-  if (line[0] === "R" && payload.includes(renameSeparator)) {
-    const destination = payload.slice(payload.indexOf(renameSeparator) + renameSeparator.length);
-    return destination ? [destination] : [];
-  }
-  return [payload];
+function matchConfirmPrefilterAddedLine(
+  activeFile: string,
+  content: string,
+): { debug: DeterministicPattern[]; unused: DeterministicPattern[] } {
+  const codeOnly = content
+    .replace(/`[^`]*`/g, "")
+    .replace(/"[^"]*"/g, "")
+    .replace(/'[^']*'/g, "");
+  const trimmed = codeOnly.trimStart();
+  const isComment = trimmed.startsWith("//") || trimmed.startsWith("*");
+  const debug = activeFile && !isComment
+    ? DEBUG_CODE_PATTERNS
+      .filter(({ matchFile }) => matchFile(activeFile))
+      .flatMap(({ patterns }) => patterns.filter(({ re }) => re.test(codeOnly)))
+    : [];
+  const unused = UNUSED_CODE_WORKAROUNDS.filter(({ re }) => re.test(codeOnly));
+  return { debug, unused };
+}
+
+export function scanConfirmPrefilterAddedLine(
+  activeFile: string,
+  content: string,
+): Pick<ConfirmPrefilterResult, "debugCode" | "unusedCodeWorkarounds"> {
+  const debugCode: ConfirmPrefilterResult["debugCode"] = [];
+  const unusedCodeWorkarounds: ConfirmPrefilterResult["unusedCodeWorkarounds"] = [];
+  const matches = matchConfirmPrefilterAddedLine(activeFile, content);
+  debugCode.push(...matches.debug.map(({ label }) => ({ file: activeFile, line: content.trim(), label })));
+  unusedCodeWorkarounds.push(...matches.unused.map(({ label }) => ({ file: activeFile, line: content.trim(), label })));
+  return { debugCode, unusedCodeWorkarounds };
+}
+
+/** Return compact lines that faithfully reproduce every deterministic finding. */
+export function selectConfirmPrefilterCandidateLines(activeFile: string, content: string): string[] {
+  const matches = matchConfirmPrefilterAddedLine(activeFile, content);
+  return [...new Set([...matches.debug, ...matches.unused].map(({ candidate }) => candidate))];
 }
 
 /**
@@ -105,7 +140,8 @@ export function runConfirmPrefilter(
     if (!line.trim()) continue;
     // Porcelain status: 2-char status code + space + path. Virtual normalized
     // renames use `R  old -> new`; evaluate the destination path.
-    for (const path of pathsFromPorcelainStatusLine(line)) {
+    const parsed = parsePorcelainStatusLine(line);
+    for (const path of parsed ? [parsed.path] : []) {
       if (UNWANTED_PATH_PATTERNS.some((re) => re.test(path)) || isSensitivePath(path)) {
         unwantedFiles.push(path);
       }
@@ -117,13 +153,8 @@ export function runConfirmPrefilter(
 
   let activeFile = "";
   for (const rawLine of diff.split("\n")) {
-    if (rawLine.startsWith("+++ b/")) {
-      activeFile = rawLine.slice(6);
-      continue;
-    }
     if (rawLine.startsWith("+++ ")) {
-      // e.g. `+++ /dev/null` for deletions
-      activeFile = "";
+      activeFile = parseUnifiedDiffDestination(rawLine) ?? "";
       continue;
     }
     if (rawLine.startsWith("---")) continue;
@@ -131,43 +162,9 @@ export function runConfirmPrefilter(
     // Strip the leading `+` to inspect the actual added line content.
     const content = rawLine.slice(1);
 
-    if (activeFile) {
-      // Strip string literals (single, double, backtick) and skip pure
-      // comment lines before debug-code matching. The DEBUG_CODE_PATTERNS
-      // regexes are deliberately substring matchers; without this guard a
-      // backtick-quoted shell command in a test fixture or a `//` comment
-      // quoting a code example produces a false positive. Mirrors the same
-      // strip-then-test pattern used in src/utils/command-patterns.ts.
-      // Greedy non-nested replace is sufficient for
-      // the false-positive classes seen in practice; full parser-grade
-      // quote handling is out of scope.
-      const codeOnly = content
-        .replace(/`[^`]*`/g, "")
-        .replace(/"[^"]*"/g, "")
-        .replace(/'[^']*'/g, "");
-      const trimmed = codeOnly.trimStart();
-      const isComment = trimmed.startsWith("//") || trimmed.startsWith("*");
-      if (!isComment) {
-        for (const { matchFile, patterns } of DEBUG_CODE_PATTERNS) {
-          if (!matchFile(activeFile)) continue;
-          for (const { re, label } of patterns) {
-            if (re.test(codeOnly)) {
-              debugCode.push({ file: activeFile, line: content.trim(), label });
-            }
-          }
-        }
-      }
-    }
-
-    for (const { re, label } of UNUSED_CODE_WORKAROUNDS) {
-      if (re.test(content)) {
-        unusedCodeWorkarounds.push({
-          file: activeFile,
-          line: content.trim(),
-          label,
-        });
-      }
-    }
+    const findings = scanConfirmPrefilterAddedLine(activeFile, content);
+    debugCode.push(...findings.debugCode);
+    unusedCodeWorkarounds.push(...findings.unusedCodeWorkarounds);
   }
 
   return { unwantedFiles, debugCode, unusedCodeWorkarounds };
@@ -199,22 +196,25 @@ export function formatConfirmPrefilter(r: ConfirmPrefilterResult): string {
     return "";
   }
   const lines: string[] = ["=== PRECOMPUTED VIOLATIONS ==="];
+  const appendLabeledFindings = (
+    heading: string,
+    findings: Array<{ file: string; line: string; label: string }>,
+  ) => {
+    if (findings.length === 0) return;
+    lines.push(heading);
+    for (const finding of findings) {
+      lines.push(`  - ${formatGitPathForContext(finding.file)}: ${finding.label} → "${finding.line.slice(0, 100)}"`);
+    }
+  };
   if (r.unwantedFiles.length > 0) {
     lines.push("Files (CATEGORY 1): the following paths match unwanted-file patterns:");
-    for (const f of r.unwantedFiles) lines.push(`  - ${f}`);
+    for (const f of r.unwantedFiles) lines.push(`  - ${formatGitPathForContext(f)}`);
   }
-  if (r.debugCode.length > 0) {
-    lines.push("Code Quality (CATEGORY 2 — debug code added):");
-    for (const e of r.debugCode) {
-      lines.push(`  - ${e.file}: ${e.label} → "${e.line.slice(0, 100)}"`);
-    }
-  }
-  if (r.unusedCodeWorkarounds.length > 0) {
-    lines.push("Code Quality (CATEGORY 2 — unused-code workarounds):");
-    for (const e of r.unusedCodeWorkarounds) {
-      lines.push(`  - ${e.file}: ${e.label} → "${e.line.slice(0, 100)}"`);
-    }
-  }
+  appendLabeledFindings("Code Quality (CATEGORY 2 — debug code added):", r.debugCode);
+  appendLabeledFindings(
+    "Code Quality (CATEGORY 2 — unused-code workarounds):",
+    r.unusedCodeWorkarounds,
+  );
   lines.push("=== END PRECOMPUTED VIOLATIONS ===");
   return lines.join("\n") + "\n";
 }

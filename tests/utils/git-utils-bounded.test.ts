@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -8,6 +8,7 @@ import {
 } from "../helpers/git-fixtures.js";
 import {
   formatGitContextForRepos,
+  formatGitPathForContext,
   formatSiblingRepoOverview,
   findDeletedOrRenamedFileReferenceIssuesCancellable,
   findFilenameReferenceDiagnosticsCancellable,
@@ -19,8 +20,67 @@ import {
   getGitStatusCancellable,
   getGitVisibleFileInventoryCancellable,
   getUncommittedChangesCancellable,
+  getUncommittedChanges,
+  parsePorcelainStatusLine,
   sortReposWithChangesSubmodulesFirst,
 } from "../../src/utils/git-utils.js";
+import { selectConfirmPrefilterCandidateLines } from "../../src/utils/confirm-prefilter.js";
+
+type InventoryOpenHooks = {
+  beforeOpen?: (absolutePath: string) => void | Promise<void>;
+  afterOpen?: (absolutePath: string) => void | Promise<void>;
+  afterFirstStat?: (absolutePath: string) => void | Promise<void>;
+  afterLstat?: (absolutePath: string, pathCall: number) => void | Promise<void>;
+};
+
+async function withInventoryOpenHooks<T>(
+  hooks: InventoryOpenHooks,
+  action: () => Promise<T>,
+): Promise<T> {
+  const originalLstat = fs.promises.lstat.bind(fs.promises);
+  const lstatCalls = new Map<string, number>();
+  const lstatSpy = vi.spyOn(fs.promises, "lstat").mockImplementation((async (
+    file: fs.PathLike,
+    options?: Parameters<typeof fs.promises.lstat>[1],
+  ) => {
+    const result = await originalLstat(file, options as never);
+    const absolutePath = String(file);
+    const pathCall = (lstatCalls.get(absolutePath) ?? 0) + 1;
+    lstatCalls.set(absolutePath, pathCall);
+    await hooks.afterLstat?.(absolutePath, pathCall);
+    return result;
+  }) as typeof fs.promises.lstat);
+  const originalOpen = fs.promises.open.bind(fs.promises);
+  const openSpy = vi.spyOn(fs.promises, "open").mockImplementation((async (
+    file: fs.PathLike,
+    flags: string | number,
+    mode?: fs.Mode,
+  ) => {
+    const absolutePath = String(file);
+    await hooks.beforeOpen?.(absolutePath);
+    const handle = await originalOpen(file, flags, mode);
+    await hooks.afterOpen?.(absolutePath);
+    if (hooks.afterFirstStat) {
+      const originalStat = handle.stat.bind(handle);
+      let intercepted = false;
+      handle.stat = (async (...args: Parameters<typeof handle.stat>) => {
+        const result = await originalStat(...args);
+        if (!intercepted) {
+          intercepted = true;
+          await hooks.afterFirstStat?.(absolutePath);
+        }
+        return result;
+      }) as typeof handle.stat;
+    }
+    return handle;
+  }) as typeof fs.promises.open);
+  try {
+    return await action();
+  } finally {
+    openSpy.mockRestore();
+    lstatSpy.mockRestore();
+  }
+}
 
 describe("bounded git utilities", () => {
   let repoDir: string;
@@ -39,6 +99,13 @@ describe("bounded git utilities", () => {
     fs.rmSync(repoDir, { recursive: true, force: true });
   });
 
+  function populateStatusBeyondBound(): void {
+    for (let index = 0; index < 2300; index += 1) {
+      const filename = `${index}-${"x".repeat(225)}.ts`;
+      fs.writeFileSync(path.join(repoDir, filename), "x\n");
+    }
+  }
+
   it("reads status without requiring full diff collection", async () => {
     fs.writeFileSync(path.join(repoDir, "large-untracked.txt"), "x".repeat(256 * 1024));
 
@@ -48,13 +115,347 @@ describe("bounded git utilities", () => {
     expect(status).not.toContain("x".repeat(1000));
   });
 
-  it("bounds untracked file diff content", async () => {
+  it("rejects truncated status in the status-only collector", async () => {
+    populateStatusBeyondBound();
+
+    await expect(getGitStatusCancellable(repoDir)).rejects.toThrow(
+      "git status output was truncated",
+    );
+  });
+
+  it("rejects truncated status in uncommitted-change collection", async () => {
+    populateStatusBeyondBound();
+
+    await expect(getUncommittedChangesCancellable(repoDir)).rejects.toThrow(
+      "git status output was truncated",
+    );
+  });
+
+  it("summarizes large untracked files without embedding raw contents", async () => {
     fs.writeFileSync(path.join(repoDir, "large-untracked.txt"), "x".repeat(8 * 1024 * 1024));
 
     const changes = await getUncommittedChangesCancellable(repoDir);
 
     expect(changes.status).toContain("?? large-untracked.txt");
-    expect(Buffer.byteLength(changes.untrackedDiff, "utf-8")).toBeLessThan(3 * 1024 * 1024);
+    expect(changes.untrackedInventory).toContain("UNTRACKED FILE INVENTORY");
+    expect(changes.untrackedInventory).toContain("large-untracked.txt (text, 1 lines, 8388608 bytes");
+    expect(changes.untrackedInventory).not.toContain("x".repeat(1000));
+  });
+
+  it("does not let a late binary marker consume another file's excerpt budget", async () => {
+    fs.writeFileSync(
+      path.join(repoDir, "a-binary.dat"),
+      Buffer.concat([Buffer.from("text prefix\n"), Buffer.from([0]), Buffer.from("binary tail")]),
+    );
+    fs.writeFileSync(path.join(repoDir, "b-source.ts"), "export const retained = true;\n");
+
+    const changes = await getUncommittedChangesCancellable(repoDir, {
+      untrackedContentSourceMaxBytes: 64,
+    });
+
+    expect(changes.untrackedContentDiff).toContain("+++ b/b-source.ts");
+    expect(changes.untrackedContentDiff).toContain("+export const retained = true;");
+    expect(changes.untrackedContentDiff).not.toContain("text prefix");
+  });
+
+  it("clips untracked excerpts without corrupting multibyte characters", async () => {
+    fs.writeFileSync(path.join(repoDir, "multibyte.ts"), "😀😀😀\n");
+
+    const changes = await getUncommittedChangesCancellable(repoDir, {
+      untrackedContentSourceMaxBytes: 6,
+    });
+
+    expect(changes.untrackedContentDiff).not.toContain("�");
+    const addedContent = changes.untrackedContentDiff?.split("\n")
+      .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+      .map((line) => line.slice(1))
+      .join("\n") ?? "";
+    expect(Buffer.byteLength(addedContent, "utf8")).toBeLessThanOrEqual(6);
+  });
+
+  it("labels oversized sparse files without buffering or embedding them", async () => {
+    const sparsePath = path.join(repoDir, "oversized-untracked.txt");
+    fs.writeFileSync(sparsePath, "start\n");
+    fs.truncateSync(sparsePath, 65 * 1024 * 1024);
+
+    const changes = await getUncommittedChangesCancellable(repoDir);
+
+    expect(changes.untrackedInventory).toContain("oversized-untracked.txt (regular file, 68157440 bytes; metadata scan skipped: per-file safety limit)");
+    expect(changes.untrackedInventory).not.toContain("start");
+  });
+
+  it("does not follow untracked symlinks while building inventory", async () => {
+    const outsidePath = path.join(repoDir, "outside.txt");
+    fs.writeFileSync(outsidePath, "sensitive target contents\n");
+    fs.symlinkSync(outsidePath, path.join(repoDir, "untracked-link"));
+
+    const changes = await getUncommittedChangesCancellable(repoDir);
+    const inventory = await getGitVisibleFileInventoryCancellable(repoDir);
+
+    expect(changes.untrackedInventory).toContain("untracked-link (symbolic link; not followed or read)");
+    expect(changes.untrackedInventory).not.toContain("sensitive target contents");
+    expect(inventory.skippedNonRegular).toBe(1);
+    expect(inventory.skippedUnreadable).toBe(0);
+  });
+
+  it("cancels an active streamed inventory scan", async () => {
+    fs.writeFileSync(path.join(repoDir, "streamed-untracked.txt"), Buffer.alloc(32 * 1024 * 1024, 120));
+    const controller = new AbortController();
+    const pending = withInventoryOpenHooks({
+      afterOpen: (absolutePath) => {
+        if (absolutePath.endsWith("streamed-untracked.txt")) controller.abort();
+      },
+    }, () => getUncommittedChangesCancellable(repoDir, { signal: controller.signal }));
+
+    await expect(pending).rejects.toThrow();
+  });
+
+  it("honors cancellation after every awaited inventory metadata stage", async () => {
+    const targetPath = path.join(repoDir, "metadata-cancel.txt");
+    fs.writeFileSync(targetPath, "metadata\n");
+    const collectors: Array<(signal: AbortSignal) => Promise<unknown>> = [
+      (signal: AbortSignal) => getUncommittedChangesCancellable(repoDir, { signal }),
+      (signal: AbortSignal) => getGitVisibleFileInventoryCancellable(repoDir, { signal }),
+    ];
+    const stages: Array<(controller: AbortController) => InventoryOpenHooks> = [
+      (controller) => ({
+        afterLstat: (absolutePath, pathCall) => {
+          if (absolutePath === targetPath && pathCall === 1) controller.abort();
+        },
+      }),
+      (controller) => ({
+        afterOpen: (absolutePath) => {
+          if (absolutePath === targetPath) controller.abort();
+        },
+      }),
+      (controller) => ({
+        afterFirstStat: (absolutePath) => {
+          if (absolutePath === targetPath) controller.abort();
+        },
+      }),
+      (controller) => ({
+        afterLstat: (absolutePath, pathCall) => {
+          if (absolutePath === targetPath && pathCall === 2) controller.abort();
+        },
+      }),
+    ];
+
+    for (const collect of collectors) {
+      for (const stage of stages) {
+        const controller = new AbortController();
+        const pending = withInventoryOpenHooks(
+          stage(controller),
+          () => collect(controller.signal),
+        );
+        await expect(pending).rejects.toMatchObject({ name: "OperationCancelledError" });
+      }
+    }
+  });
+
+  it("honors cancellation before classifying the final symlink inventory path", async () => {
+    const targetPath = path.join(repoDir, "zz-final-link");
+    fs.symlinkSync("tracked.txt", targetPath);
+    const collectors: Array<(signal: AbortSignal) => Promise<unknown>> = [
+      (signal: AbortSignal) => getUncommittedChangesCancellable(repoDir, { signal }),
+      (signal: AbortSignal) => getGitVisibleFileInventoryCancellable(repoDir, { signal }),
+    ];
+
+    for (const collect of collectors) {
+      const controller = new AbortController();
+      const pending = withInventoryOpenHooks({
+        afterLstat: (absolutePath) => {
+          if (absolutePath === targetPath) controller.abort();
+        },
+      }, () => collect(controller.signal));
+      await expect(pending).rejects.toMatchObject({ name: "OperationCancelledError" });
+    }
+  });
+
+  it("does not follow a symlink replacement between metadata inspection and open", async () => {
+    const victimPath = path.join(repoDir, "replacement-victim.txt");
+    const targetPath = `${repoDir}-replacement-target.txt`;
+    fs.writeFileSync(victimPath, "original\n");
+    fs.writeFileSync(targetPath, "outside\ntarget\ncontents\n");
+    try {
+      const changes = await withInventoryOpenHooks({
+        beforeOpen: (absolutePath) => {
+          if (absolutePath !== victimPath) return;
+          fs.rmSync(victimPath);
+          fs.symlinkSync(targetPath, victimPath);
+        },
+      }, () => getUncommittedChangesCancellable(repoDir));
+
+      expect(changes.untrackedInventory).toContain("replacement-victim.txt (unreadable");
+    } finally {
+      fs.rmSync(targetPath, { force: true });
+    }
+  });
+
+  it("enforces the live byte limit when an opened file grows", async () => {
+    const growingPath = path.join(repoDir, "growing-untracked.txt");
+    fs.writeFileSync(growingPath, "initial\n");
+
+    const inventory = await withInventoryOpenHooks({
+      afterFirstStat: (absolutePath) => {
+        if (absolutePath === growingPath) {
+          fs.appendFileSync(growingPath, Buffer.alloc(65 * 1024 * 1024, 120));
+        }
+      },
+    }, () => getGitVisibleFileInventoryCancellable(repoDir));
+
+    expect(inventory.skippedFiles).toContainEqual(expect.objectContaining({
+      path: "growing-untracked.txt",
+      reason: "metadata scan skipped: per-file safety limit",
+    }));
+    expect(inventory.scannedBytes).toBeGreaterThan(64 * 1024 * 1024);
+  });
+
+  it("uses one unchanged context line around tracked diff hunks", async () => {
+    fs.writeFileSync(
+      path.join(repoDir, "tracked.txt"),
+      ["one", "two", "three", "four", "five", "six", "seven", ""].join("\n"),
+    );
+    git(repoDir, ["add", "tracked.txt"]);
+    git(repoDir, ["commit", "-m", "expand tracked fixture"]);
+    fs.writeFileSync(
+      path.join(repoDir, "tracked.txt"),
+      ["one", "two", "three", "changed", "five", "six", "seven", ""].join("\n"),
+    );
+
+    const changes = await getUncommittedChangesCancellable(repoDir);
+
+    expect(changes.diff).toContain("@@ -3,3 +3,3 @@ two");
+    expect(changes.diff).toContain(" three\n-four\n+changed\n five");
+    expect(changes.diff).not.toContain("\n two\n");
+    expect(changes.diff).not.toContain("\n six\n");
+  });
+
+  it("rejects a truncated tracked diff instead of presenting it as complete", async () => {
+    fs.writeFileSync(path.join(repoDir, "large-tracked.txt"), "a\n");
+    git(repoDir, ["add", "large-tracked.txt"]);
+    git(repoDir, ["commit", "-m", "add large tracked fixture"]);
+    fs.writeFileSync(path.join(repoDir, "large-tracked.txt"), "b".repeat(5 * 1024 * 1024));
+
+    await expect(getUncommittedChangesCancellable(repoDir)).rejects.toThrow(
+      "tracked diff output was truncated",
+    );
+  });
+
+  it("lists every non-ignored untracked path without a file-count cutoff", async () => {
+    for (let i = 0; i < 51; i++) {
+      fs.writeFileSync(path.join(repoDir, `untracked-${String(i).padStart(2, "0")}.txt`), `${i}\n`);
+    }
+
+    const changes = await getUncommittedChangesCancellable(repoDir);
+
+    expect(changes.untrackedInventory).toContain("untracked-00.txt");
+    expect(changes.untrackedInventory).toContain("untracked-50.txt");
+    expect(changes.untrackedInventory).not.toContain("skipped");
+  });
+
+  it("preserves exact untracked paths that Git would otherwise quote", async () => {
+    const paths = [
+      "unicode-ä.txt",
+      "tab\tname.txt",
+      "line\nbreak.txt",
+      "back\\slash.txt",
+    ];
+    for (const relativePath of paths) {
+      fs.writeFileSync(path.join(repoDir, relativePath), "one\ntwo\n");
+    }
+
+    const changes = await getUncommittedChangesCancellable(repoDir);
+
+    for (const relativePath of paths) {
+      expect(changes.untrackedInventory).toContain(
+        `${formatGitPathForContext(relativePath)} (text, 2 lines`,
+      );
+    }
+    expect(changes.untrackedLinesChanged).toBe(8);
+  });
+
+  it("preserves unusual untracked paths in the synchronous collector", () => {
+    const relativePath = "sync-line\nbreak.ts";
+    fs.writeFileSync(path.join(repoDir, relativePath), "export const syncValue = 1;\n");
+
+    const changes = getUncommittedChanges(repoDir);
+
+    expect(changes.status).toContain(`?? ${JSON.stringify(relativePath)}`);
+    expect(changes.diff).toContain("+export const syncValue = 1;");
+  });
+
+  it("retains compact deterministic prefilter candidates from untracked text", async () => {
+    const tsIgnoreMarker = ["@ts", "ignore"].join("-");
+    fs.writeFileSync(
+      path.join(repoDir, "untracked-debug.ts"),
+      `console.log("debug");\n// ${tsIgnoreMarker}\nexport const value = 1;\n`,
+    );
+
+    const changes = await getUncommittedChangesCancellable(repoDir, {
+      untrackedLineMatcher: selectConfirmPrefilterCandidateLines,
+    });
+
+    expect(changes.untrackedMatchedLineDiff).toContain("+++ b/untracked-debug.ts");
+    expect(changes.untrackedMatchedLineDiff).toContain("+console.log();");
+    expect(changes.untrackedMatchedLineDiff).toContain(`+// ${tsIgnoreMarker}`);
+    expect(changes.diff).not.toContain("console.log(\"debug\");");
+  });
+
+  it("propagates deterministic matcher failures", async () => {
+    fs.writeFileSync(path.join(repoDir, "matcher-error.ts"), "export const value = true;\n");
+    const matcherError = new Error("matcher failed");
+
+    await expect(getUncommittedChangesCancellable(repoDir, {
+      untrackedLineMatcher: () => {
+        throw matcherError;
+      },
+    })).rejects.toBe(matcherError);
+  });
+
+  it("never matches incomplete fragments of an oversized logical line", async () => {
+    const quotedDebugText = `const fixture = "${"x".repeat(140 * 1024)}console.log('fixture')";`;
+    fs.writeFileSync(
+      path.join(repoDir, "oversized-line.ts"),
+      `${quotedDebugText}\nconsole.log("real");\n`,
+    );
+
+    const changes = await getUncommittedChangesCancellable(repoDir, {
+      untrackedLineMatcher: selectConfirmPrefilterCandidateLines,
+    });
+
+    expect(changes.untrackedInventory).toContain("1 oversized logical line(s) skipped");
+    expect(changes.untrackedMatchedLineDiff?.match(/console\.log/g)).toHaveLength(1);
+    expect(changes.untrackedMatchedLineDiff).toContain("+console.log();");
+    expect(changes.untrackedMatchedLineDiff).not.toContain("fixture");
+  });
+
+  it("retains a deterministic violation after character 2000", async () => {
+    fs.writeFileSync(
+      path.join(repoDir, "late-debug.ts"),
+      `${"const value = 1; ".repeat(160)}console.log("late");\n`,
+    );
+
+    const changes = await getUncommittedChangesCancellable(repoDir, {
+      untrackedLineMatcher: selectConfirmPrefilterCandidateLines,
+    });
+
+    expect(changes.untrackedMatchedLineDiff).toContain("+console.log();");
+  });
+
+  it("caps deterministic evidence and preserves the exact omitted-finding count", async () => {
+    fs.writeFileSync(
+      path.join(repoDir, "many-debug-lines.ts"),
+      Array.from({ length: 25 }, (_, index) => `console.log(${index});`).join("\n") + "\n",
+    );
+
+    const changes = await getUncommittedChangesCancellable(repoDir, {
+      untrackedLineMatcher: selectConfirmPrefilterCandidateLines,
+    });
+
+    expect(changes.untrackedMatchedLineDiff?.match(/^\+console\.log\(\);$/gm)).toHaveLength(20);
+    expect(changes.untrackedOmittedMatchedLines).toEqual([
+      { path: "many-debug-lines.ts", count: 5 },
+    ]);
   });
 
   it("detects an exact moved+recreated file as a move", async () => {
@@ -95,6 +496,30 @@ describe("bounded git utilities", () => {
     expect(changes.diff).toContain("+  return 2;");
     expect(changes.diff).not.toContain("new file mode");
     expect(git(repoDir, ["diff", "--cached", "--name-only"]).trim()).toBe("");
+  });
+
+  it("round-trips unusual normalized-move paths through one status record", async () => {
+    const basename = "before -> after\n\"quoted\"\\name.ts";
+    const oldPath = `src/${basename}`;
+    const newPath = `lib/${basename}`;
+    fs.mkdirSync(path.join(repoDir, "src"));
+    fs.mkdirSync(path.join(repoDir, "lib"));
+    fs.writeFileSync(path.join(repoDir, oldPath), "export const value = 1;\n");
+    git(repoDir, ["add", oldPath]);
+    git(repoDir, ["commit", "-m", "add unusual move fixture"]);
+    fs.rmSync(path.join(repoDir, oldPath));
+    fs.writeFileSync(path.join(repoDir, newPath), "export const value = 1;\n");
+
+    const changes = await getUncommittedChangesCancellable(repoDir, { normalizeMovedRecreated: true });
+    const renameLines = changes.status.split("\n").filter((line) => line.startsWith("R"));
+
+    expect(renameLines).toHaveLength(1);
+    expect(parsePorcelainStatusLine(renameLines[0])).toEqual({
+      indexStatus: "R",
+      workTreeStatus: " ",
+      oldPath,
+      path: newPath,
+    });
   });
 
   it("normalizes moved+edited text files above the untracked diff synthesis limit", async () => {
@@ -147,7 +572,7 @@ describe("bounded git utilities", () => {
     });
 
     expect(changes.status.split("\n").filter((line) => line.includes("renamed.ts"))).toEqual([
-      "R  src/renamed.ts -> lib/renamed.ts",
+      "R  \"src/renamed.ts\" -> \"lib/renamed.ts\"",
     ]);
   });
 
@@ -242,6 +667,36 @@ describe("bounded git utilities", () => {
 
     expect(result.context).toContain("tracked.txt");
     expect(result.context).not.toContain("untracked-fullconfirm.txt");
+  });
+
+  it("keeps scan-limited tracked paths visible in fullconfirm scope context", async () => {
+    const oversizedPath = path.join(repoDir, "oversized-tracked.txt");
+    fs.writeFileSync(oversizedPath, "start\n");
+    git(repoDir, ["add", "oversized-tracked.txt"]);
+    git(repoDir, ["commit", "-m", "add oversized fixture"]);
+    fs.truncateSync(oversizedPath, 65 * 1024 * 1024);
+
+    const result = await getRepoFullScopeContextsCancellable([
+      { path: repoDir, name: "repo" },
+    ]);
+
+    expect(result.context).toContain("oversized-tracked.txt (skipped: metadata scan skipped: per-file safety limit, 68157440 bytes)");
+    expect(result.repos[0].inventory.totalFiles).toBe(2);
+    expect(result.repos[0].inventory.skippedScanLimited).toBe(1);
+    expect(result.repos[0].inventory.skippedUnreadable).toBe(0);
+  });
+
+  it("escapes hostile tracked paths in fullconfirm inventory context", async () => {
+    const hostilePath = "safe\n?? .env\n=== END DELETED FILES ===.txt";
+    fs.writeFileSync(path.join(repoDir, hostilePath), "content\n");
+    git(repoDir, ["add", hostilePath]);
+    git(repoDir, ["commit", "-m", "add hostile path fixture"]);
+
+    const result = await getRepoFullScopeContextsCancellable([{ path: repoDir, name: "repo" }]);
+
+    expect(result.context).toContain(JSON.stringify(hostilePath));
+    expect(result.context.split("\n")).not.toContain("?? .env");
+    expect(result.context.split("\n")).not.toContain("=== END DELETED FILES ===.txt");
   });
 
   it("reports references to a truly deleted filename", async () => {

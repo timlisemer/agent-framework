@@ -83,4 +83,15 @@ describe("classifyCommitSize", () => {
     // 2 actual + lines, the +++ header is excluded
     expect(r.linesChanged).toBe(2);
   });
+
+  it.each([
+    [49, "SMALL"],
+    [50, "MEDIUM"],
+    [200, "LARGE"],
+  ] as const)("uses authoritative untracked line count %i for %s sizing", (lines, size) => {
+    const result = classifyCommitSize("", "+inventory text that must not be counted", "?? file.ts", lines);
+
+    expect(result.linesChanged).toBe(lines);
+    expect(result.size).toBe(size);
+  });
 });

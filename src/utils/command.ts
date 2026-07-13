@@ -1,5 +1,6 @@
 import { execSync, spawn } from "child_process";
 import { OperationCancelledError, type CancellationOptions, throwIfAborted } from "./cancellation.js";
+import { utf8BufferHead, utf8BufferTail } from "./text-bounds.js";
 
 /**
  * Run a shell command and capture output.
@@ -71,6 +72,10 @@ export interface ProcessOutputLimits extends CancellationOptions {
 export interface ProcessResult {
   output: string;
   exitCode: number;
+  stdoutTruncated: boolean;
+  stderrTruncated: boolean;
+  stdoutInvalidUtf8: boolean;
+  stderrInvalidUtf8: boolean;
   timedOut?: boolean;
   timeoutMs?: number;
 }
@@ -79,7 +84,7 @@ const DEFAULT_PROCESS_STREAM_LIMIT_BYTES = 2 * 1024 * 1024;
 const TIMED_OUT_EXIT_CODE = 124;
 
 type BoundedOutputCapture = {
-  value: string;
+  value: Buffer;
   totalBytes: number;
   head: Buffer;
   tail: Buffer;
@@ -88,7 +93,7 @@ type BoundedOutputCapture = {
 
 function createBoundedOutputCapture(): BoundedOutputCapture {
   return {
-    value: "",
+    value: Buffer.alloc(0),
     totalBytes: 0,
     head: Buffer.alloc(0),
     tail: Buffer.alloc(0),
@@ -139,7 +144,7 @@ function appendTailPreservingOutput(
   }
 
   if (capture.totalBytes <= limit) {
-    capture.value += chunk.toString("utf-8");
+    capture.value = Buffer.concat([capture.value, chunk]);
   } else {
     capture.truncated = true;
   }
@@ -158,7 +163,7 @@ function appendBoundedOutput(
     return;
   }
 
-  const used = Buffer.byteLength(capture.value, "utf-8");
+  const used = capture.value.length;
   const remaining = Math.max(0, limit - used);
 
   if (remaining <= 0) {
@@ -167,12 +172,19 @@ function appendBoundedOutput(
   }
 
   if (chunk.length <= remaining) {
-    capture.value += chunk.toString("utf-8");
+    capture.value = Buffer.concat([capture.value, chunk]);
     return;
   }
 
   const marker = formatStreamTruncationMarker(streamName, limit);
-  capture.value += chunk.subarray(0, remaining).toString("utf-8") + marker;
+  const completePrefix = Buffer.concat([
+    capture.value,
+    chunk.subarray(0, remaining),
+  ]);
+  capture.value = Buffer.concat([
+    utf8BufferHead(completePrefix, limit),
+    Buffer.from(marker, "utf8"),
+  ]);
   capture.truncated = true;
 }
 
@@ -182,12 +194,36 @@ function formatBoundedOutput(
   streamName: "stdout" | "stderr",
   preserveTailOnTruncate: boolean,
 ): string {
-  if (!preserveTailOnTruncate || !capture.truncated) {
-    return capture.value;
+  if (!capture.truncated) {
+    return capture.value.toString("utf-8");
+  }
+  if (!preserveTailOnTruncate) {
+    return utf8BufferHead(capture.value, capture.value.length).toString("utf-8");
   }
 
   const marker = formatStreamTruncationMarker(streamName, limit);
-  return capture.head.toString("utf-8") + marker + capture.tail.toString("utf-8");
+  return utf8BufferHead(capture.head, capture.head.length).toString("utf-8") +
+    marker +
+    utf8BufferTail(capture.tail, capture.tail.length).toString("utf-8");
+}
+
+function captureHasInvalidUtf8(
+  capture: BoundedOutputCapture,
+  preserveTailOnTruncate: boolean,
+): boolean {
+  const buffers = !capture.truncated
+    ? [capture.value]
+    : preserveTailOnTruncate
+    ? [utf8BufferHead(capture.head, capture.head.length), utf8BufferTail(capture.tail, capture.tail.length)]
+    : [utf8BufferHead(capture.value, capture.value.length)];
+  return buffers.some((buffer) => {
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+      return false;
+    } catch {
+      return true;
+    }
+  });
 }
 
 function formatCommandTimeoutMarker(timeoutMs: number): string {
@@ -320,6 +356,10 @@ export async function runProcessCancellable(
       resolve({
         output,
         exitCode: timedOut ? TIMED_OUT_EXIT_CODE : code ?? 1,
+        stdoutTruncated: stdout.truncated,
+        stderrTruncated: stderr.truncated,
+        stdoutInvalidUtf8: captureHasInvalidUtf8(stdout, preserveTailOnTruncate),
+        stderrInvalidUtf8: captureHasInvalidUtf8(stderr, preserveTailOnTruncate),
         ...(timedOut ? { timedOut: true, timeoutMs: options.commandTimeoutMs } : {}),
       });
     });

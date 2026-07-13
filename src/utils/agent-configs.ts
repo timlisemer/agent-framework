@@ -168,6 +168,16 @@ $RAW`,
  * - Verify patterns are followed consistently
  * - Check if documentation matches implementation
  */
+const CONFIRM_REDUCED_CONTEXT_SYSTEM_GUIDANCE = `## REDUCED REVIEW CONTEXT CONTRACT
+
+The supplied review context intentionally reduces mechanically redundant or tool-accessible data. Its REVIEW CONTEXT REDUCTIONS section is authoritative about what was reduced and why. In particular, unchanged diff-hunk surroundings, unchanged bodies of detected moves, ignored files, raw binary bytes, or full repository contents may not be embedded. Uncommitted confirm lists every non-ignored untracked path with metadata. Fullconfirm excludes untracked paths from its automatic inventory.
+
+Reduction is not evidence that omitted code is irrelevant or already correct. Preserve every supplied changed line and file mapping in your reasoning. When the context names a file without embedding all of its content, contains a truncation/skipped-path marker, or leaves too little surrounding context to decide, use read/search tools to inspect the relevant working-tree files before returning a verdict. Do not fail merely because context was reduced; investigate enough to support a concrete finding.`;
+
+const CONFIRM_DELETION_SYSTEM_GUIDANCE = `## DELETIONS
+
+Deleted files and deleted content must be respected unless it is 100% obvious that a deletion was made by accident.`;
+
 export const CONFIRM_AGENT: Omit<AgentConfig, 'workingDir'> = {
   name: 'confirm',
   tier: MODEL_TIERS.OPUS,
@@ -177,6 +187,10 @@ export const CONFIRM_AGENT: Omit<AgentConfig, 'workingDir'> = {
   systemPrompt: `You are a strict code quality gate. You have ONE job: evaluate changes and return a verdict.
 
 The code has already passed linting and type checks. Now evaluate the changes.
+
+${CONFIRM_REDUCED_CONTEXT_SYSTEM_GUIDANCE}
+
+${CONFIRM_DELETION_SYSTEM_GUIDANCE}
 
 ## EVALUATION CATEGORIES
 
@@ -387,6 +401,10 @@ export const CONFIRM_SPECIALIST_AGENT: Omit<AgentConfig, 'workingDir'> = {
 
 The code has already passed linting and type checks. Use read/search tools to investigate the review scope. Do not ask questions.
 
+${CONFIRM_REDUCED_CONTEXT_SYSTEM_GUIDANCE}
+
+${CONFIRM_DELETION_SYSTEM_GUIDANCE}
+
 ## OUTPUT FORMAT
 Your response must follow this exact structure:
 
@@ -457,6 +475,10 @@ export const CONFIRM_PATTERN_AGENT: Omit<AgentConfig, 'workingDir'> = {
 - Deliberate pattern changes that are not applied consistently or not justified by the changed scope
 
 The code has already passed linting and type checks. Use read/search tools to investigate the review scope. First identify the changed code from the provided git context, then search for similar existing implementations and compare the local patterns. Do not ask questions.
+
+${CONFIRM_REDUCED_CONTEXT_SYSTEM_GUIDANCE}
+
+${CONFIRM_DELETION_SYSTEM_GUIDANCE}
 
 ## OUTPUT FORMAT
 Your response must follow this exact structure:

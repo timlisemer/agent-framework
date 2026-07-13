@@ -88,6 +88,7 @@ import {
 } from "../../mcp/timeout.js";
 
 import { activeSpec, registeredAdapterNames } from "../../adapter/spec.js";
+import { clipUtf8Bytes } from "../../utils/text-bounds.js";
 function getHookName(): string { return activeSpec().mcpWireName("check"); }
 
 type CheckRunner = { cmd: string; dir: string; type: string };
@@ -128,14 +129,7 @@ function clipMiddleUtf8(text: string, maxBytes: number): string {
   if (byteLength <= maxBytes) return text;
 
   const marker = `\n[agent-framework: check context truncated from ${byteLength} to ${maxBytes} bytes]\n`;
-  const markerBytes = Buffer.byteLength(marker, "utf-8");
-  const keepBytes = Math.max(0, maxBytes - markerBytes);
-  const headBytes = Math.floor(keepBytes * 0.65);
-  const tailBytes = keepBytes - headBytes;
-  const buffer = Buffer.from(text, "utf-8");
-  return buffer.subarray(0, headBytes).toString("utf-8") +
-    marker +
-    buffer.subarray(Math.max(headBytes, buffer.length - tailBytes)).toString("utf-8");
+  return clipUtf8Bytes(text, maxBytes, marker);
 }
 
 function clipCheckContextSection(section: string): string {

@@ -61,8 +61,30 @@ describe("runCommitAgent", () => {
     const result = await runCommitAgent(repo, "haiku");
 
     expect(result).toContain("HASH:");
+    expect(mocks.runAgent.mock.calls[0][1].context).toContain("+content");
     const message = git(repo, ["log", "-1", "--pretty=%B"]);
     expect(message).toContain("`<proposed_plan>`");
+  });
+
+  it("keeps tracked and large-untracked evidence in commit-message context", async () => {
+    fs.writeFileSync(path.join(repo, "base.txt"), "base\ntracked marker\n");
+    fs.writeFileSync(
+      path.join(repo, "large-new.txt"),
+      `untracked marker\n${"x".repeat(10_000)}\n`,
+    );
+    mocks.runAgent.mockResolvedValue({
+      output: "SIZE: LARGE\nMESSAGE:\ncommit: preserve mixed context",
+    });
+
+    await runCommitAgent(repo, "haiku");
+
+    const context = mocks.runAgent.mock.calls[0][1].context as string;
+    expect(context).toContain("TRACKED CHANGES:");
+    expect(context).toContain("tracked marker");
+    expect(context).toContain("UNTRACKED FILE INVENTORY:");
+    expect(context).toContain("large-new.txt");
+    expect(context).toContain("UNTRACKED SOURCE EXCERPT:");
+    expect(context).toContain("untracked marker");
   });
 
   it("commits multiline shell-active text literally", async () => {

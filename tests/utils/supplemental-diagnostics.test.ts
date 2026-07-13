@@ -4,6 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import {
   runSupplementalDiagnosticProviders,
+  parseGitVisibleTypeScriptFiles,
   supplementalDiagnosticProviders,
 } from "../../src/utils/supplemental-diagnostics.js";
 
@@ -12,6 +13,19 @@ function makeFixture(name: string): string {
 }
 
 describe("supplementalDiagnosticProviders", () => {
+  it("rejects a marker-free truncated Git file inventory", () => {
+    const dir = makeFixture("supplemental-truncated-");
+
+    expect(parseGitVisibleTypeScriptFiles({
+      output: "src/first.ts\0",
+      exitCode: 0,
+      stdoutTruncated: true,
+      stderrTruncated: false,
+      stdoutInvalidUtf8: false,
+      stderrInvalidUtf8: false,
+    }, dir)).toBeNull();
+  });
+
   it("detects TypeScript projects from tsconfig.json", () => {
     const dir = makeFixture("supplemental-tsconfig-");
     fs.writeFileSync(path.join(dir, "tsconfig.json"), JSON.stringify({ files: [] }));

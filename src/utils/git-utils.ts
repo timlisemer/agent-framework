@@ -1,9 +1,27 @@
 import path from "path";
 import fs from "fs";
 import os from "os";
-import { runCommand, runProcessCancellable, type ProcessOutputLimits } from "./command.js";
+import { StringDecoder } from "string_decoder";
+import { runCommand } from "./command.js";
+import { runGitCancellable as runGit } from "./git-process.js";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
 import { isPathAtOrInside } from "./path-containment.js";
+import { clipUtf8Bytes } from "./text-bounds.js";
+import {
+  assertCompleteGitOutput,
+  formatUnifiedDiffPath,
+  formatGitPathForContext,
+  formatPorcelainStatusZ,
+  formatRenameStatus,
+  parseCompleteGitNulRecords,
+  parsePorcelainStatusLine,
+  splitGitNulRecords,
+} from "./git-status.js";
+export {
+  formatGitPathForContext,
+  parsePorcelainStatusLine,
+  type ParsedPorcelainStatusLine,
+} from "./git-status.js";
 
 const isWindows = process.platform === "win32";
 const NULL_DEVICE = isWindows ? "NUL" : "/dev/null";
@@ -11,8 +29,13 @@ const SUPPRESS_STDERR = isWindows ? "2>NUL" : "2>/dev/null";
 const DEFAULT_GIT_STATUS_MAX_BYTES = 512 * 1024;
 const DEFAULT_GIT_DIFF_MAX_BYTES = 4 * 1024 * 1024;
 const DEFAULT_GIT_FILE_LIST_MAX_BYTES = 64 * 1024 * 1024;
-const DEFAULT_UNTRACKED_DIFF_MAX_BYTES = 2 * 1024 * 1024;
-const DEFAULT_UNTRACKED_FILE_LIMIT = 50;
+export const REVIEW_CONTEXT_REDUCTION_LIMITS = {
+  trackedDiffContextLines: 1,
+  inventoryScanMaxFileBytes: 64 * 1024 * 1024,
+  inventoryScanMaxTotalBytes: 512 * 1024 * 1024,
+  untrackedPrefilterCandidateLinesPerFile: 20,
+} as const;
+const REVIEW_DIFF_CONTEXT_LINES = REVIEW_CONTEXT_REDUCTION_LIMITS.trackedDiffContextLines;
 
 /**
  * Escape a file path for use in shell commands.
@@ -62,18 +85,36 @@ export interface GitChanges {
   /** List of changed files in short format (e.g., "M  file.ts", "?? new.ts") */
   status: string;
 
-  /** Full unified diff of ALL uncommitted changes (tracked + untracked files) */
+  /**
+   * Tracked unified diff plus untracked review context. The synchronous collector
+   * appends synthesized untracked diffs; the cancellable MCP collector appends a
+   * complete path inventory without duplicating untracked file contents.
+   */
   diff: string;
 
   /** Summary statistics: files changed, insertions, deletions */
   diffStat: string;
 
   /**
-   * Synthesized unified diff for untracked files only. This is the same content
-   * appended to `diff` for tracked changes; exposed separately so size
-   * classification can count untracked-only commits accurately.
+   * Synthesized untracked unified diff in the legacy synchronous collector;
+   * empty for the cancellable collector, which uses `untrackedInventory`.
    */
   untrackedDiff: string;
+
+  /** Complete nonignored untracked-path metadata from the cancellable collector. */
+  untrackedInventory?: string;
+
+  /** Compact untracked lines selected by an optional caller-supplied matcher. */
+  untrackedMatchedLineDiff?: string;
+
+  /** Deterministic findings omitted after the per-file evidence cap. */
+  untrackedOmittedMatchedLines?: Array<{ path: string; count: number }>;
+
+  /** Bounded untracked source excerpt requested by consumers that lack file tools. */
+  untrackedContentDiff?: string;
+
+  /** Authoritative untracked line count used by the cancellable collector. */
+  untrackedLinesChanged?: number;
 
   /** Move pairs normalized while constructing the diff, if any. */
   normalizedMoves?: NormalizedMoveSummary[];
@@ -93,6 +134,7 @@ export interface RepoNormalizedMoveSummary {
   moves: NormalizedMoveSummary[];
 }
 
+
 export interface SkippedMoveCandidate {
   oldPath: string;
   newPaths: string[];
@@ -108,15 +150,18 @@ type GitChangeCollectionOptions = CancellationOptions & {
   normalizeMovedRecreated?: boolean;
   preparedNormalizedMoves?: NormalizedMoveSummary[];
   preparedNormalizedMovesByRepo?: RepoNormalizedMoveSummary[];
+  untrackedLineMatcher?: (path: string, line: string) => string[];
+  untrackedContentSourceMaxBytes?: number;
 };
 
 /**
  * Classify commit size from git diff stats and untracked-file accounting.
  *
  * `diffStat` (output of `git diff --stat HEAD`) only covers tracked changes.
- * Untracked files appear as `??` lines in porcelain status; their content
- * comes from `untrackedDiff` (synthesized in `getUncommittedChanges`). Both
- * sources are folded into the file/line totals before bucketing.
+ * Untracked files appear as `??` lines in porcelain status. The cancellable
+ * collector supplies their authoritative line count through
+ * `untrackedLinesChanged`; callers of the legacy synchronous collector fall
+ * back to counting additions in its synthesized untracked diff.
  *
  * Buckets:
  * - LARGE:  >= 10 files OR >= 200 lines changed
@@ -127,6 +172,7 @@ export function classifyCommitSize(
   diffStat: string,
   untrackedDiff: string,
   status: string,
+  untrackedLinesChanged?: number,
 ): { size: CommitSize; filesChanged: number; linesChanged: number } {
   const last = diffStat.trim().split("\n").pop() ?? "";
   const filesM = last.match(/(\d+)\s+files?\s+changed/);
@@ -136,23 +182,39 @@ export function classifyCommitSize(
   let linesChanged =
     (insM ? parseInt(insM[1], 10) : 0) + (delM ? parseInt(delM[1], 10) : 0);
 
-  // Add untracked files: count `??` lines in porcelain status, count their
-  // added lines from the synthesized untracked diff.
+  // Add untracked files and use the authoritative inventory count when present.
   const untrackedPaths = status
     .split("\n")
-    .filter((l) => l.startsWith("??"))
-    .map((l) => l.slice(3).trim())
-    .filter(Boolean);
+    .map(parsePorcelainStatusLine)
+    .filter((entry) => entry?.indexStatus === "?" && entry.workTreeStatus === "?");
   filesChanged += untrackedPaths.length;
-  linesChanged += untrackedDiff
-    .split("\n")
-    .filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
+  linesChanged += untrackedLinesChanged ?? countUnifiedDiffAddedLines(untrackedDiff);
 
   let size: CommitSize;
   if (filesChanged >= 10 || linesChanged >= 200) size = "LARGE";
   else if (filesChanged >= 4 || linesChanged >= 50) size = "MEDIUM";
   else size = "SMALL";
   return { size, filesChanged, linesChanged };
+}
+
+/** Count content additions in unified diff text, excluding file headers. */
+export function countUnifiedDiffAddedLines(diff: string): number {
+  return diff.split("\n").filter(isUnifiedDiffAddedLine).length;
+}
+
+function isUnifiedDiffAddedLine(line: string): boolean {
+  return line.startsWith("+") && !line.startsWith("+++");
+}
+
+function isUnifiedDiffDeletedLine(line: string): boolean {
+  return line.startsWith("-") && !line.startsWith("---");
+}
+
+/** Count content additions and deletions in unified diff text. */
+export function countUnifiedDiffChangedLines(diff: string): number {
+  return diff
+    .split("\n")
+    .filter((line) => isUnifiedDiffAddedLine(line) || isUnifiedDiffDeletedLine(line)).length;
 }
 
 export interface SubmoduleInfo {
@@ -196,10 +258,16 @@ export interface GitVisibleFileEntry {
 
 export interface GitVisibleFileInventory {
   files: GitVisibleFileEntry[];
+  /** Git-visible paths not line-scanned, retained with the reason they were skipped. */
+  skippedFiles?: Array<{ path: string; reason: string; bytes?: number }>;
   totalFiles: number;
   totalLines: number;
   skippedBinary: number;
   skippedUnreadable: number;
+  skippedScanLimited?: number;
+  skippedNonRegular?: number;
+  /** Actual bytes returned by inventory file reads, including limit-crossing reads. */
+  scannedBytes?: number;
 }
 
 export interface RepoFullScopeContext {
@@ -264,7 +332,7 @@ export function allReposInScope(repoInfo: RepoInfo): Array<{ path: string; name:
  */
 export function getUncommittedChanges(workingDir: string): GitChanges {
   /**
-   * COMMAND: git status --porcelain
+   * COMMAND: git status --porcelain -z
    *
    * WHY: The --porcelain flag outputs a stable, machine-parseable format that
    * won't change between git versions. Without it, git status outputs human-friendly
@@ -278,7 +346,7 @@ export function getUncommittedChanges(workingDir: string): GitChanges {
    *   "?? file.ts"  = untracked (new file, never added to git)
    *   "D  file.ts"  = deleted and staged
    */
-  const status = runCommand("git status --porcelain", workingDir);
+  const status = runCommand("git status --porcelain -z", workingDir);
 
   /**
    * COMMAND: git diff --stat HEAD
@@ -306,7 +374,7 @@ export function getUncommittedChanges(workingDir: string): GitChanges {
   const trackedDiff = runCommand("git diff HEAD", workingDir);
 
   /**
-   * COMMAND: git ls-files --others --exclude-standard
+   * COMMAND: git ls-files --others --exclude-standard -z
    *
    * WHY: Lists all UNTRACKED files (files that exist but were never git added).
    *   --others        = show untracked files
@@ -315,7 +383,7 @@ export function getUncommittedChanges(workingDir: string): GitChanges {
    * We need this because `git diff HEAD` only shows changes to tracked files.
    * New files that were never added to git won't appear in that diff.
    */
-  const untrackedFiles = runCommand("git ls-files --others --exclude-standard", workingDir);
+  const untrackedFiles = runCommand("git ls-files --others --exclude-standard -z", workingDir);
 
   /**
    * COMMAND: git diff --no-index <null-device> "<file>"
@@ -333,34 +401,18 @@ export function getUncommittedChanges(workingDir: string): GitChanges {
    * even if the file can't be read.
    */
   let untrackedDiff = "";
-  for (const file of (untrackedFiles.output || "").split("\n").filter(Boolean)) {
+  for (const file of splitGitNulRecords(untrackedFiles.output || "")) {
     const escapedFile = shellEscape(file);
     const fileDiff = runCommand(`git diff --no-index ${NULL_DEVICE} ${escapedFile} ${SUPPRESS_STDERR} || ${isWindows ? "ver >NUL" : "true"}`, workingDir);
     untrackedDiff += fileDiff.output || "";
   }
 
   return {
-    status: status.output || "",
+    status: formatPorcelainStatusZ(status.output || ""),
     diff: (trackedDiff.output || "") + untrackedDiff,
     diffStat: diffStat.output || "",
     untrackedDiff,
   };
-}
-
-async function runGit(
-  args: string[],
-  cwd: string,
-  options: ProcessOutputLimits = {}
-): Promise<{ output: string; exitCode: number }> {
-  throwIfAborted(options.signal);
-  return runProcessCancellable({ shell: false, file: "git", args }, cwd, options);
-}
-
-function splitGitLines(output: string): string[] {
-  return output
-    .split("\n")
-    .map((line) => line.endsWith("\r") ? line.slice(0, -1) : line)
-    .filter((line) => line.length > 0);
 }
 
 async function readGitBlobText(
@@ -374,8 +426,12 @@ async function readGitBlobText(
     maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
   });
   if (result.exitCode !== 0) return undefined;
+  try {
+    assertCompleteGitOutput(result, "Git blob", false);
+  } catch {
+    return undefined;
+  }
   if ((result.output || "").includes("\0")) return undefined;
-  if ((result.output || "").includes("[agent-framework: stdout truncated after")) return undefined;
   return result.output || "";
 }
 
@@ -462,20 +518,20 @@ export async function detectMovedRecreatedFilesCancellable(
   options: CancellationOptions = {},
 ): Promise<MoveDetectionResult> {
   const [deletedResult, untrackedResult] = await Promise.all([
-    runGit(["diff", "--name-only", "--diff-filter=D", "HEAD"], workingDir, {
+    runGit(["diff", "--name-only", "--diff-filter=D", "-z", "HEAD"], workingDir, {
       ...options,
       maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
       maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
     }),
-    runGit(["ls-files", "--others", "--exclude-standard"], workingDir, {
+    runGit(["ls-files", "--others", "--exclude-standard", "-z"], workingDir, {
       ...options,
       maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
       maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
     }),
   ]);
 
-  const deletedPaths = splitGitLines(deletedResult.output || "");
-  const untrackedPaths = splitGitLines(untrackedResult.output || "");
+  const deletedPaths = parseCompleteGitNulRecords(deletedResult, "deleted-path inventory");
+  const untrackedPaths = parseCompleteGitNulRecords(untrackedResult, "move-candidate inventory");
   return detectMovedRecreatedFilesFromPathsCancellable(workingDir, deletedPaths, untrackedPaths, options);
 }
 
@@ -560,14 +616,17 @@ async function detectMovedRecreatedFilesFromPathsCancellable(
 
 export async function getGitStatusCancellable(
   workingDir: string,
-  options: CancellationOptions = {}
+  options: CancellationOptions = {},
+  description = "git status",
+  additionalArgs: string[] = [],
 ): Promise<string> {
-  const status = await runGit(["status", "--porcelain"], workingDir, {
+  const status = await runGit(["status", "--porcelain", "-z", ...additionalArgs], workingDir, {
     ...options,
     maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
     maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
   });
-  return status.output || "";
+  assertCompleteGitOutput(status, description, true);
+  return formatPorcelainStatusZ(status.output || "");
 }
 
 type DeletedOrRenamedChange = {
@@ -1329,64 +1388,294 @@ export async function findFilenameReferenceDiagnosticsCancellable(
   return { deletedOrRenamedIssues, nonexistentIssues };
 }
 
-function appendWithinLimit(
-  current: string,
-  addition: string,
-  limit: number,
-  marker: string,
-): { value: string; full: boolean } {
-  const used = Buffer.byteLength(current, "utf-8");
-  const remaining = Math.max(0, limit - used);
-  if (remaining <= 0) {
-    return { value: current + marker, full: true };
+async function buildUntrackedReviewInventory(
+  workingDir: string,
+  files: string[],
+  options: GitChangeCollectionOptions,
+): Promise<{
+  context: string;
+  matchedLineDiff: string;
+  contentDiff: string;
+  textLines: number;
+  incompleteLineCount: boolean;
+  omittedMatchedLines: Array<{ path: string; count: number }>;
+}> {
+  const entries: string[] = [];
+  const prefilterCandidates: string[] = [];
+  const contentDiffs: string[] = [];
+  let textLines = 0;
+  let incompleteLineCount = false;
+  const omittedMatchedLines: Array<{ path: string; count: number }> = [];
+  const budget: FileInspectionBudget = {
+    scannedBytes: 0,
+    contentBytesRemaining: options.untrackedContentSourceMaxBytes ?? 0,
+  };
+  for (const file of files) {
+    throwIfAborted(options.signal);
+    const displayPath = formatGitPathForContext(file);
+    const inspection = await inspectInventoryPath(path.join(workingDir, file), budget, options, file);
+    switch (inspection.kind) {
+      case "text":
+        textLines += inspection.lines;
+        entries.push(`- ${displayPath} (text, ${inspection.lines} lines, ${inspection.bytes} bytes${inspection.oversizedLinesSkipped > 0 ? `; ${inspection.oversizedLinesSkipped} oversized logical line(s) skipped by deterministic matching` : ""})`);
+        if (inspection.matchedLines.length > 0) {
+          prefilterCandidates.push(
+            `+++ ${formatUnifiedDiffPath(file, "b")}`,
+            ...inspection.matchedLines.map((line) => `+${line}`),
+          );
+          if (inspection.omittedMatchedLines > 0) {
+            omittedMatchedLines.push({ path: file, count: inspection.omittedMatchedLines });
+          }
+        }
+        if (inspection.contentLines.length > 0) {
+          contentDiffs.push(
+            `--- /dev/null\n+++ ${formatUnifiedDiffPath(file, "b")}`,
+            ...inspection.contentLines.map((line) => `+${line}`),
+          );
+        }
+        break;
+      case "binary":
+        entries.push(`- ${displayPath} (binary, ${inspection.bytes} bytes)`);
+        break;
+      case "scan-limited":
+        incompleteLineCount = true;
+        entries.push(`- ${displayPath} (regular file, ${inspection.bytes} bytes; metadata scan skipped: ${inspection.reason})`);
+        break;
+      case "non-file":
+        entries.push(`- ${displayPath} (${inspection.fileType}; not followed or read)`);
+        break;
+      case "unreadable":
+        if (inspection.regularFile) incompleteLineCount = true;
+        entries.push(`- ${displayPath} (unreadable${inspection.bytes === undefined ? "" : `, ${inspection.bytes} bytes`})`);
+        break;
+    }
   }
-
-  const additionBytes = Buffer.byteLength(addition, "utf-8");
-  if (additionBytes <= remaining) {
-    return { value: current + addition, full: false };
-  }
-
   return {
-    value: current + Buffer.from(addition).subarray(0, remaining).toString("utf-8") + marker,
-    full: true,
+    context: `UNTRACKED FILE INVENTORY (all non-ignored untracked paths):
+Raw contents are intentionally not duplicated here because each complete current file is available through read/search tools. Inspect every file relevant to your review; do not treat inventory-only files as reviewed.
+${entries.join("\n") || "(none)"}
+`,
+    matchedLineDiff: prefilterCandidates.join("\n"),
+    contentDiff: contentDiffs.join("\n"),
+    textLines,
+    incompleteLineCount,
+    omittedMatchedLines,
   };
 }
 
-async function buildUntrackedDiffForFiles(
-  workingDir: string,
-  files: string[],
-  options: CancellationOptions,
-): Promise<string> {
-  let untrackedDiff = "";
-  for (const file of files.slice(0, DEFAULT_UNTRACKED_FILE_LIMIT)) {
+type FileInspection =
+  | {
+      kind: "text";
+      bytes: number;
+      lines: number;
+      matchedLines: string[];
+      omittedMatchedLines: number;
+      contentLines: string[];
+      oversizedLinesSkipped: number;
+    }
+  | { kind: "binary"; bytes: number }
+  | { kind: "scan-limited"; bytes: number; reason: "per-file safety limit" | "aggregate safety limit" }
+  | { kind: "non-file"; fileType: "symbolic link" | "directory" | "special file" }
+  | { kind: "unreadable"; regularFile?: boolean; bytes?: number };
+
+type FileInspectionBudget = { scannedBytes: number; contentBytesRemaining: number };
+
+async function inspectInventoryPath(
+  absolutePath: string,
+  budget: FileInspectionBudget,
+  options: CancellationOptions & {
+    untrackedLineMatcher?: (path: string, line: string) => string[];
+  },
+  prefilterPath?: string,
+): Promise<FileInspection> {
+  throwIfAborted(options.signal);
+  let stat: fs.Stats;
+  try {
+    stat = await fs.promises.lstat(absolutePath);
+  } catch {
     throwIfAborted(options.signal);
-    const remaining = Math.max(
-      0,
-      DEFAULT_UNTRACKED_DIFF_MAX_BYTES - Buffer.byteLength(untrackedDiff, "utf-8"),
-    );
-    if (remaining <= 0) {
-      untrackedDiff += `\n[agent-framework: untracked diff truncated after ${DEFAULT_UNTRACKED_DIFF_MAX_BYTES} bytes]\n`;
-      break;
+    return { kind: "unreadable" };
+  }
+  throwIfAborted(options.signal);
+  if (!stat.isFile()) {
+    const fileType = stat.isSymbolicLink()
+      ? "symbolic link"
+      : stat.isDirectory() ? "directory" : "special file";
+    return { kind: "non-file", fileType };
+  }
+  let handle: fs.promises.FileHandle;
+  try {
+    const flags = fs.constants.O_RDONLY
+      | (fs.constants.O_NOFOLLOW ?? 0)
+      | (fs.constants.O_NONBLOCK ?? 0);
+    handle = await fs.promises.open(absolutePath, flags);
+  } catch {
+    throwIfAborted(options.signal);
+    return { kind: "unreadable", regularFile: true, bytes: stat.size };
+  }
+
+  let actualBytesRead = 0;
+  try {
+    throwIfAborted(options.signal);
+    let openedStat: fs.Stats;
+    try {
+      openedStat = await handle.stat();
+    } catch {
+      throwIfAborted(options.signal);
+      return { kind: "unreadable", regularFile: true, bytes: stat.size };
+    }
+    throwIfAborted(options.signal);
+    try {
+      const pathStatAfterOpen = await fs.promises.lstat(absolutePath);
+      throwIfAborted(options.signal);
+      if (
+        pathStatAfterOpen.isSymbolicLink()
+        || pathStatAfterOpen.dev !== openedStat.dev
+        || pathStatAfterOpen.ino !== openedStat.ino
+      ) {
+        return pathStatAfterOpen.isSymbolicLink()
+          ? { kind: "non-file", fileType: "symbolic link" }
+          : { kind: "unreadable", regularFile: true, bytes: openedStat.size };
+      }
+    } catch {
+      throwIfAborted(options.signal);
+      return { kind: "unreadable", regularFile: true, bytes: openedStat.size };
+    }
+    if (!openedStat.isFile()) {
+      throwIfAborted(options.signal);
+      const fileType = openedStat.isDirectory() ? "directory" : "special file";
+      return { kind: "non-file", fileType };
+    }
+    if (openedStat.size > REVIEW_CONTEXT_REDUCTION_LIMITS.inventoryScanMaxFileBytes) {
+      return { kind: "scan-limited", bytes: openedStat.size, reason: "per-file safety limit" };
+    }
+    const aggregateRemaining = REVIEW_CONTEXT_REDUCTION_LIMITS.inventoryScanMaxTotalBytes
+      - budget.scannedBytes;
+    if (openedStat.size > aggregateRemaining) {
+      return { kind: "scan-limited", bytes: openedStat.size, reason: "aggregate safety limit" };
     }
 
-    const fileDiff = await runGit(["diff", "--no-index", NULL_DEVICE, file], workingDir, {
-      ...options,
-      maxStdoutBytes: remaining,
-      maxStderrBytes: 0,
-    });
-    const appended = appendWithinLimit(
-      untrackedDiff,
-      fileDiff.output || "",
-      DEFAULT_UNTRACKED_DIFF_MAX_BYTES,
-      `\n[agent-framework: untracked diff truncated after ${DEFAULT_UNTRACKED_DIFF_MAX_BYTES} bytes]\n`,
-    );
-    untrackedDiff = appended.value;
-    if (appended.full) break;
+  const liveReadLimit = Math.min(
+    REVIEW_CONTEXT_REDUCTION_LIMITS.inventoryScanMaxFileBytes,
+    aggregateRemaining,
+  );
+  let bytesRead = 0;
+  let newlineCount = 0;
+  let lastByte = -1;
+  const decoder = new StringDecoder("utf8");
+  let pendingLine = "";
+  let oversizedLine = false;
+  let oversizedLinesSkipped = 0;
+  const matchedLines: string[] = [];
+  let omittedMatchedLines = 0;
+  const contentLines: string[] = [];
+  const initialContentBytesRemaining = budget.contentBytesRemaining;
+  let contentBytesUsed = 0;
+  const captureContentLine = (line: string) => {
+    const contentBytesRemaining = initialContentBytesRemaining - contentBytesUsed;
+    if (contentBytesRemaining > 0) {
+      const lineBytes = Buffer.byteLength(line, "utf8") + 1;
+      const selected = lineBytes <= contentBytesRemaining
+        ? line
+        : clipUtf8Bytes(line, contentBytesRemaining, "", 1);
+      if (selected) contentLines.push(selected);
+      contentBytesUsed += Math.min(lineBytes, contentBytesRemaining);
+    }
+  };
+  const scanCompleteLine = (line: string) => {
+    if (prefilterPath && options.untrackedLineMatcher) {
+      for (const candidate of options.untrackedLineMatcher(prefilterPath, line)) {
+        if (matchedLines.length < REVIEW_CONTEXT_REDUCTION_LIMITS.untrackedPrefilterCandidateLinesPerFile) {
+          matchedLines.push(candidate.slice(0, 2000));
+        } else {
+          omittedMatchedLines += 1;
+        }
+      }
+    }
+    captureContentLine(line);
+  };
+  const processDecodedText = (decoded: string) => {
+    let cursor = 0;
+    while (cursor < decoded.length) {
+      const newline = decoded.indexOf("\n", cursor);
+      if (newline < 0) {
+        if (!oversizedLine) {
+          pendingLine += decoded.slice(cursor);
+          if (pendingLine.length > 128 * 1024) {
+            captureContentLine(pendingLine);
+            pendingLine = "";
+            oversizedLine = true;
+          }
+        }
+        return;
+      }
+      if (oversizedLine) {
+        oversizedLine = false;
+        oversizedLinesSkipped += 1;
+      } else {
+        pendingLine += decoded.slice(cursor, newline);
+        if (pendingLine.length > 128 * 1024) {
+          captureContentLine(pendingLine);
+          oversizedLinesSkipped += 1;
+        } else {
+          scanCompleteLine(pendingLine);
+        }
+      }
+      pendingLine = "";
+      cursor = newline + 1;
+    }
+  };
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    while (true) {
+      throwIfAborted(options.signal);
+      let read: Awaited<ReturnType<typeof handle.read>>;
+      try {
+        read = await handle.read(buffer, 0, buffer.byteLength, null);
+      } catch {
+        throwIfAborted(options.signal);
+        return { kind: "unreadable", regularFile: true, bytes: openedStat.size };
+      }
+      if (read.bytesRead === 0) break;
+      actualBytesRead += read.bytesRead;
+      throwIfAborted(options.signal);
+      const chunk = buffer.subarray(0, read.bytesRead);
+      if (bytesRead + read.bytesRead > liveReadLimit) {
+        return {
+          kind: "scan-limited",
+          bytes: Math.max(openedStat.size, bytesRead + read.bytesRead),
+          reason: liveReadLimit === aggregateRemaining
+            ? "aggregate safety limit"
+            : "per-file safety limit",
+        };
+      }
+      bytesRead += read.bytesRead;
+      if (chunk.includes(0)) {
+        return { kind: "binary", bytes: openedStat.size };
+      }
+      for (const byte of chunk) {
+        if (byte === 10) newlineCount += 1;
+      }
+      processDecodedText(decoder.write(chunk));
+      if (chunk.byteLength > 0) lastByte = chunk[chunk.byteLength - 1];
+    }
+    processDecodedText(decoder.end());
+    if (oversizedLine) oversizedLinesSkipped += 1;
+    else if (pendingLine) scanCompleteLine(pendingLine);
+    budget.contentBytesRemaining -= contentBytesUsed;
+    return {
+      kind: "text",
+      bytes: openedStat.size,
+      lines: bytesRead === 0 ? 0 : newlineCount + (lastByte === 10 ? 0 : 1),
+      matchedLines,
+      omittedMatchedLines,
+      contentLines,
+      oversizedLinesSkipped,
+    };
+  } finally {
+    budget.scannedBytes += actualBytesRead;
+    await handle.close().catch(() => undefined);
+    throwIfAborted(options.signal);
   }
-  if (files.length > DEFAULT_UNTRACKED_FILE_LIMIT) {
-    untrackedDiff += `\n[agent-framework: skipped ${files.length - DEFAULT_UNTRACKED_FILE_LIMIT} untracked files after limit ${DEFAULT_UNTRACKED_FILE_LIMIT}]\n`;
-  }
-  return untrackedDiff;
 }
 
 async function getVirtualNormalizedTrackedDiff(
@@ -1432,12 +1721,19 @@ async function getVirtualNormalizedTrackedDiff(
     });
     if (addMoved.exitCode !== 0) return undefined;
 
-    const diff = await runGit(["diff", "--cached", "--find-renames", "HEAD"], workingDir, {
+    const diff = await runGit([
+      "diff",
+      "--cached",
+      "--find-renames",
+      `--unified=${REVIEW_DIFF_CONTEXT_LINES}`,
+      "HEAD",
+    ], workingDir, {
       ...options,
       env,
       maxStdoutBytes: DEFAULT_GIT_DIFF_MAX_BYTES,
       maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
     });
+    assertCompleteGitOutput(diff, "normalized tracked diff", false);
     return diff.output || "";
   } finally {
     await fs.promises.rm(tempDir, { recursive: true, force: true });
@@ -1455,33 +1751,28 @@ function normalizeStatusForVirtualMoves(
     .split("\n")
     .filter((line) => {
       if (!line) return false;
-      const porcelainPath = line.slice(3);
-      const renameDestination = porcelainPath.includes(" -> ")
-        ? porcelainPath.slice(porcelainPath.indexOf(" -> ") + " -> ".length)
-        : "";
-      const renameSource = porcelainPath.includes(" -> ")
-        ? porcelainPath.slice(0, porcelainPath.indexOf(" -> "))
-        : "";
-      if (renameSource && deletedPaths.has(renameSource)) {
+      const parsed = parsePorcelainStatusLine(line);
+      if (!parsed) return true;
+      if (parsed.oldPath && deletedPaths.has(parsed.oldPath)) {
         return false;
       }
-      if (renameDestination && newPaths.has(renameDestination)) {
+      if (parsed.oldPath && newPaths.has(parsed.path)) {
         return false;
       }
-      if ((line.startsWith(" D ") || line.startsWith("D  ")) && deletedPaths.has(porcelainPath)) {
+      if ((parsed.indexStatus === "D" || parsed.workTreeStatus === "D") && deletedPaths.has(parsed.path)) {
         return false;
       }
-      if ((line.startsWith(" A ") || line.startsWith("A  ")) && newPaths.has(porcelainPath)) {
+      if ((parsed.indexStatus === "A" || parsed.workTreeStatus === "A") && newPaths.has(parsed.path)) {
         return false;
       }
-      if (line.startsWith("?? ") && newPaths.has(porcelainPath)) {
+      if (parsed.indexStatus === "?" && parsed.workTreeStatus === "?" && newPaths.has(parsed.path)) {
         return false;
       }
       return true;
     });
   return [
     ...remaining,
-    ...moves.map((move) => `R  ${move.oldPath} -> ${move.newPath}`),
+    ...moves.map((move) => formatRenameStatus("R ", move.oldPath, move.newPath)),
   ].join("\n");
 }
 
@@ -1502,23 +1793,19 @@ export async function getUncommittedChangesCancellable(
   workingDir: string,
   options: GitChangeCollectionOptions = {}
 ): Promise<GitChanges> {
-  const status = await runGit(["status", "--porcelain"], workingDir, {
-    ...options,
-    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
-    maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
-  });
+  const status = await getGitStatusCancellable(workingDir, options);
   const diffStat = await runGit(["diff", "--stat", "HEAD"], workingDir, {
     ...options,
     maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
     maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
   });
-  const untrackedFiles = await runGit(["ls-files", "--others", "--exclude-standard"], workingDir, {
+  assertCompleteGitOutput(diffStat, "tracked diff statistics", false);
+  const untrackedFiles = await runGit(["ls-files", "--others", "--exclude-standard", "-z"], workingDir, {
     ...options,
-    maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
+    maxStdoutBytes: DEFAULT_GIT_FILE_LIST_MAX_BYTES,
     maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
   });
-
-  const files = splitGitLines(untrackedFiles.output || "");
+  const files = parseCompleteGitNulRecords(untrackedFiles, "untracked file inventory");
   let normalizedMoves: NormalizedMoveSummary[] = [];
   let normalizedTrackedDiff: string | undefined;
   let untrackedFilesForDiff = files;
@@ -1527,14 +1814,14 @@ export async function getUncommittedChangesCancellable(
     if (options.preparedNormalizedMoves) {
       normalizedMoves = options.preparedNormalizedMoves;
     } else {
-      const deletedResult = await runGit(["diff", "--name-only", "--diff-filter=D", "HEAD"], workingDir, {
+      const deletedResult = await runGit(["diff", "--name-only", "--diff-filter=D", "-z", "HEAD"], workingDir, {
         ...options,
         maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
         maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
       });
       const moveDetection = await detectMovedRecreatedFilesFromPathsCancellable(
         workingDir,
-        splitGitLines(deletedResult.output || ""),
+        parseCompleteGitNulRecords(deletedResult, "deleted-path inventory"),
         files,
         options,
       );
@@ -1550,40 +1837,50 @@ export async function getUncommittedChangesCancellable(
   }
   let trackedDiff = "";
   if (normalizedTrackedDiff === undefined) {
-    const result = await runGit(["diff", "HEAD"], workingDir, {
+    const result = await runGit(["diff", `--unified=${REVIEW_DIFF_CONTEXT_LINES}`, "HEAD"], workingDir, {
       ...options,
       maxStdoutBytes: DEFAULT_GIT_DIFF_MAX_BYTES,
       maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
     });
+    assertCompleteGitOutput(result, "tracked diff", false);
     trackedDiff = result.output || "";
   }
-  const untrackedDiff = await buildUntrackedDiffForFiles(workingDir, untrackedFilesForDiff, options);
+  const untrackedInventory = await buildUntrackedReviewInventory(workingDir, untrackedFilesForDiff, options);
 
   return {
-    status: normalizeStatusForVirtualMoves(status.output || "", normalizedMoves),
-    diff: (normalizedTrackedDiff ?? trackedDiff) + untrackedDiff,
+    status: normalizeStatusForVirtualMoves(status, normalizedMoves),
+    diff: `${normalizedTrackedDiff ?? trackedDiff}\n${untrackedInventory.context}`,
     diffStat: diffStat.output || "",
-    untrackedDiff,
+    untrackedDiff: "",
+    untrackedInventory: untrackedInventory.context,
+    untrackedMatchedLineDiff: untrackedInventory.matchedLineDiff,
+    untrackedOmittedMatchedLines: untrackedInventory.omittedMatchedLines,
+    untrackedContentDiff: untrackedInventory.contentDiff,
+    // An unscanned regular file is necessarily large enough for LARGE sizing;
+    // keep classification conservative without pretending its exact line count is known.
+    untrackedLinesChanged: untrackedInventory.incompleteLineCount
+      ? Math.max(untrackedInventory.textLines, 200)
+      : untrackedInventory.textLines,
     normalizedMoves,
   };
 }
 
-function countTextLines(content: string): number {
-  if (!content) return 0;
-  return content.endsWith("\n") ? content.split("\n").length - 1 : content.split("\n").length;
-}
-
 function formatGitVisibleInventory(inventory: GitVisibleFileInventory): string {
   const fileLines = inventory.files
-    .map((file) => `${file.path} (${file.lines} lines)`)
+    .map((file) => `${formatGitPathForContext(file.path)} (${file.lines} lines)`)
+    .join("\n");
+  const skippedLines = (inventory.skippedFiles ?? [])
+    .map((file) => `${formatGitPathForContext(file.path)} (skipped: ${file.reason}${file.bytes === undefined ? "" : `, ${file.bytes} bytes`})`)
     .join("\n");
   return `Files: ${inventory.totalFiles}
 Text lines: ${inventory.totalLines}
 Skipped binary files: ${inventory.skippedBinary}
 Skipped unreadable files: ${inventory.skippedUnreadable}
+Skipped scan-limited files: ${inventory.skippedScanLimited ?? 0}
+Skipped non-regular paths: ${inventory.skippedNonRegular ?? 0}
 
 GIT-VISIBLE FILE INVENTORY:
-${fileLines || "(none)"}`;
+${[fileLines, skippedLines].filter(Boolean).join("\n") || "(none)"}`;
 }
 
 export async function getGitVisibleFileInventoryCancellable(
@@ -1598,39 +1895,55 @@ export async function getGitVisibleFileInventoryCancellable(
     maxStdoutBytes: DEFAULT_GIT_FILE_LIST_MAX_BYTES,
     maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
   });
-  if ((lsFiles.output || "").includes("[agent-framework: stdout truncated after")) {
-    throw new Error(
-      `git-visible file inventory exceeded ${DEFAULT_GIT_FILE_LIST_MAX_BYTES} bytes; cannot compute reliable fullconfirm line count.`,
-    );
-  }
-  const paths = (lsFiles.output || "").split("\0").filter(Boolean).sort();
+  const paths = parseCompleteGitNulRecords(lsFiles, "git-visible file inventory").sort();
   const files: GitVisibleFileEntry[] = [];
+  const skippedFiles: NonNullable<GitVisibleFileInventory["skippedFiles"]> = [];
   let skippedBinary = 0;
   let skippedUnreadable = 0;
+  let skippedScanLimited = 0;
+  let skippedNonRegular = 0;
+  const budget: FileInspectionBudget = { scannedBytes: 0, contentBytesRemaining: 0 };
 
   for (const relativePath of paths) {
     throwIfAborted(options.signal);
-    try {
-      const absolutePath = path.join(workingDir, relativePath);
-      const stat = await fs.promises.stat(absolutePath);
-      if (!stat.isFile()) continue;
-      const buffer = await fs.promises.readFile(absolutePath);
-      if (buffer.includes(0)) {
+    const inspection = await inspectInventoryPath(path.join(workingDir, relativePath), budget, options);
+    switch (inspection.kind) {
+      case "text":
+        files.push({ path: relativePath, lines: inspection.lines });
+        break;
+      case "binary":
         skippedBinary += 1;
-        continue;
-      }
-      files.push({ path: relativePath, lines: countTextLines(buffer.toString("utf-8")) });
-    } catch {
-      skippedUnreadable += 1;
+        skippedFiles.push({ path: relativePath, reason: "binary", bytes: inspection.bytes });
+        break;
+      case "unreadable":
+        skippedFiles.push({ path: relativePath, reason: "unreadable" });
+        skippedUnreadable += 1;
+        break;
+      case "scan-limited":
+        skippedFiles.push({
+          path: relativePath,
+          reason: `metadata scan skipped: ${inspection.reason}`,
+          bytes: inspection.bytes,
+        });
+        skippedScanLimited += 1;
+        break;
+      case "non-file":
+        skippedFiles.push({ path: relativePath, reason: `${inspection.fileType}; not followed or read` });
+        skippedNonRegular += 1;
+        break;
     }
   }
 
   return {
     files,
-    totalFiles: files.length,
+    skippedFiles,
+    totalFiles: files.length + skippedFiles.length,
     totalLines: files.reduce((sum, file) => sum + file.lines, 0),
     skippedBinary,
     skippedUnreadable,
+    skippedScanLimited,
+    skippedNonRegular,
+    scannedBytes: budget.scannedBytes,
   };
 }
 
@@ -1732,11 +2045,11 @@ async function getRepoGitOverviewContextsCancellable(
   const contexts: RepoGitContext[] = [];
   for (const repo of repos) {
     throwIfAborted(options.signal);
-    const status = await runGit(["status", "--porcelain"], repo.path, {
-      ...options,
-      maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
-      maxStderrBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
-    });
+    const status = await getGitStatusCancellable(
+      repo.path,
+      options,
+      `git status for ${repo.path}`,
+    );
     const diffStat = await runGit(["diff", "--stat", "HEAD"], repo.path, {
       ...options,
       maxStdoutBytes: DEFAULT_GIT_STATUS_MAX_BYTES,
@@ -1745,7 +2058,7 @@ async function getRepoGitOverviewContextsCancellable(
     contexts.push({
       ...repo,
       changes: {
-        status: status.output || "",
+        status,
         diff: "",
         diffStat: diffStat.output || "",
         untrackedDiff: "",
@@ -1943,16 +2256,21 @@ export async function getRepoInfoCancellable(
   for (const subPath of submodulePaths) {
     throwIfAborted(options.signal);
     const absolutePath = path.join(mainRepo, subPath);
-    const statusResult = await runGit(["status", "--porcelain"], absolutePath, options);
+    const status = await getGitStatusCancellable(absolutePath, options);
     submodules.push({
       path: subPath,
       absolutePath,
-      hasChanges: Boolean((statusResult.output || "").trim()),
+      hasChanges: Boolean(status.trim()),
     });
   }
 
-  const mainStatusResult = await runGit(["status", "--porcelain", "--ignore-submodules=all"], mainRepo, options);
-  const mainRepoHasChanges = Boolean((mainStatusResult.output || "").trim());
+  const mainStatus = await getGitStatusCancellable(
+    mainRepo,
+    options,
+    "main repository git status",
+    ["--ignore-submodules=all"],
+  );
+  const mainRepoHasChanges = Boolean(mainStatus.trim());
 
   const reposWithChanges: Array<{ path: string; name: string }> = [];
   if (mainRepoHasChanges) {

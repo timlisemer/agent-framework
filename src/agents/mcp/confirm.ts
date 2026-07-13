@@ -33,15 +33,22 @@ import {
   getAllReposGitContextCancellable,
   getSingleRepoGitContextWithSiblingOverviewCancellable,
   getUncommittedChangesCancellable,
+  countUnifiedDiffAddedLines,
+  countUnifiedDiffChangedLines,
+  REVIEW_CONTEXT_REDUCTION_LIMITS,
   type NormalizedMoveSummary,
   type RepoNormalizedMoveSummary,
   type RepoInfo,
+  type GitChanges,
+  type RepoGitContext,
 } from "../../utils/git-utils.js";
+import { formatGitPathForContext, parsePorcelainStatusLine } from "../../utils/git-status.js";
 import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
 import {
   findDeduplicationUserRequirement,
   runConfirmPrefilter,
   formatConfirmPrefilter,
+  selectConfirmPrefilterCandidateLines,
 } from "../../utils/confirm-prefilter.js";
 import { getAgentFrameworkSessionDir, readSessionTranscriptPath } from "../../utils/paths.js";
 import { readStoredCurrentPlan } from "../../utils/plan-source.js";
@@ -142,6 +149,13 @@ type ConfirmReviewContext = {
   diff: string;
   lineCount: number;
   normalizedMoves: NormalizedMoveSummary[];
+  deletionContexts: Array<{
+    repoPath: string;
+    status: string;
+    normalizedMoves: NormalizedMoveSummary[];
+  }>;
+  untrackedMatchedLineDiff: string;
+  untrackedOmittedMatchedLines: Array<{ repoPath: string; path: string; count: number }>;
 };
 
 async function readPlanfileForConfirm(planPath: string): Promise<ConfirmPlanfileResolution> {
@@ -244,7 +258,7 @@ function formatNormalizedMovesContext(moves: NormalizedMoveSummary[]): string {
   return `NORMALIZED MOVES:
 ${moves.map((move) => {
   const label = move.mode === "moved-with-edits" ? "moved with edits" : "moved";
-  return `${move.oldPath} -> ${move.newPath} (${label}, similarity ${move.similarity}%)`;
+  return `${formatGitPathForContext(move.oldPath)} -> ${formatGitPathForContext(move.newPath)} (${label}, similarity ${move.similarity}%)`;
 }).join("\n")}`;
 }
 
@@ -254,13 +268,113 @@ function appendNormalizedMovesContext(context: string, moves: NormalizedMoveSumm
   return `${context}\n\n${moveContext}`;
 }
 
+function formatDeletedFilesContext(contexts: ConfirmReviewContext["deletionContexts"]): string {
+  const qualifyRepo = contexts.length > 1;
+  const deletedPaths = contexts.flatMap((context) => {
+    const normalizedOldPaths = new Set(context.normalizedMoves.map((move) => move.oldPath));
+    return context.status.split("\n").flatMap((line) => {
+      const parsed = parsePorcelainStatusLine(line);
+      if (
+        !parsed
+        || parsed.oldPath
+        || (parsed.indexStatus !== "D" && parsed.workTreeStatus !== "D")
+        || normalizedOldPaths.has(parsed.path)
+      ) return [];
+      const displayPath = formatGitPathForContext(parsed.path);
+      return [qualifyRepo
+        ? `${displayPath} (repository: ${formatGitPathForContext(context.repoPath)})`
+        : displayPath];
+    });
+  });
+  return `=== DELETED FILES ===
+${deletedPaths.length > 0 ? deletedPaths.map((filePath) => `- ${filePath}`).join("\n") : "(none)"}
+=== END DELETED FILES ===
+`;
+}
+
+function formatReviewContextReductions(
+  scopeKind: ConfirmReviewScopeKind,
+  normalizedMoves: NormalizedMoveSummary[],
+): string {
+  if (scopeKind === "full") {
+    return `=== REVIEW CONTEXT REDUCTIONS ===
+- Fullconfirm embeds the tracked, git-visible text-file inventory and line counts, not repository file contents. This keeps the initial request bounded while read/search tools remain available for inspecting relevant files.
+- Untracked and gitignored files are not part of the automatic fullconfirm inventory. Gitignored files may still be inspected with tools when the visible code makes them relevant.
+- Binary and unreadable files are counted as skipped inventory entries rather than embedded as raw content.
+- Missing inline content does NOT mean a file was reviewed or is irrelevant. Inspect the files needed to support every verdict.
+=== END REVIEW CONTEXT REDUCTIONS ===
+`;
+  }
+
+  const moveReduction = normalizedMoves.length > 0
+    ? `${normalizedMoves.length} detected delete/recreate move pair(s) were rendered as Git renames. Unchanged moved bodies are intentionally collapsed; changed lines and a NORMALIZED MOVES mapping remain.`
+    : "No delete/recreate move pair was normalized in this review context.";
+  return `=== REVIEW CONTEXT REDUCTIONS ===
+- Tracked unified-diff hunks include ${REVIEW_CONTEXT_REDUCTION_LIMITS.trackedDiffContextLines} unchanged context line on each side instead of Git's default three. Every added/deleted line is retained unless an explicit truncation marker says otherwise; use read/search tools for wider surrounding context.
+- Every nonignored untracked path is represented either in the untracked-file inventory or, for a normalized move destination, in the NORMALIZED MOVES mapping. Raw untracked contents are not duplicated because each complete current file is directly available through read/search tools. Inventory-only does not mean reviewed: inspect every untracked file relevant to your verdict.
+- Untracked text is still scanned for deterministic debug and unused-workaround patterns. Up to ${REVIEW_CONTEXT_REDUCTION_LIMITS.untrackedPrefilterCandidateLinesPerFile} compact evidence lines per file feed the prefilter; additional matches are counted rather than duplicated.
+- Oversized individual logical lines are listed but skipped by deterministic matching rather than split into misleading fragments.
+- Inventory metadata is streamed with bounded memory. Symlinks and special files are not followed, and regular-file scans over ${REVIEW_CONTEXT_REDUCTION_LIMITS.inventoryScanMaxFileBytes} bytes per file or ${REVIEW_CONTEXT_REDUCTION_LIMITS.inventoryScanMaxTotalBytes} bytes in total are labeled as skipped while their paths and sizes remain visible. This prevents blocking and resource exhaustion; inspect a labeled path directly when relevant.
+- Raw binary contents are not embedded by Git; only compact binary-diff metadata is present.
+- ${moveReduction}
+- Tracked diff and status collection also have explicit safety caps. Treat every agent-framework truncation or skipped-path marker as an instruction to inspect the named files before deciding.
+=== END REVIEW CONTEXT REDUCTIONS ===
+`;
+}
+
+function formatOmittedPrefilterFindings(
+  entries: ConfirmReviewContext["untrackedOmittedMatchedLines"],
+): string {
+  if (entries.length === 0) return "";
+  return `=== OMITTED DETERMINISTIC FINDINGS ===
+${entries.map((entry) =>
+    `- ${entry.count} additional finding(s) in ${formatGitPathForContext(entry.path)} (repository: ${formatGitPathForContext(entry.repoPath)})`
+  ).join("\n")}
+=== END OMITTED DETERMINISTIC FINDINGS ===
+`;
+}
+
 function countDiffReviewLines(diff: string): number {
-  return diff
-    .split("\n")
-    .filter((line) =>
-      (line.startsWith("+") && !line.startsWith("+++"))
-      || (line.startsWith("-") && !line.startsWith("---"))
-    ).length;
+  return countUnifiedDiffChangedLines(diff);
+}
+
+function countGitChangesReviewLines(changes: GitChanges): number {
+  const untrackedArtifact = changes.untrackedInventory ?? changes.untrackedDiff;
+  const embeddedUntrackedArtifactLines = countDiffReviewLines(untrackedArtifact);
+  const trackedLines = Math.max(0, countDiffReviewLines(changes.diff) - embeddedUntrackedArtifactLines);
+  const untrackedLines = changes.untrackedLinesChanged ?? countUnifiedDiffAddedLines(changes.untrackedDiff);
+  return trackedLines + untrackedLines;
+}
+
+function summarizeRepoChanges(repos: RepoGitContext[]): Pick<
+  ConfirmReviewContext,
+  "status" | "diff" | "normalizedMoves" | "lineCount" | "deletionContexts" | "untrackedMatchedLineDiff"
+  | "untrackedOmittedMatchedLines"
+> {
+  return {
+    status: repos.map((repo) => repo.changes.status).join("\n"),
+    diff: repos.map((repo) => repo.changes.diff).join("\n"),
+    normalizedMoves: repos.flatMap((repo) => repo.changes.normalizedMoves ?? []),
+    lineCount: repos.reduce(
+      (total, repo) => total + countGitChangesReviewLines(repo.changes),
+      0,
+    ),
+    deletionContexts: repos.map((repo) => ({
+      repoPath: repo.path,
+      status: repo.changes.status,
+      normalizedMoves: repo.changes.normalizedMoves ?? [],
+    })),
+    untrackedMatchedLineDiff: repos
+      .map((repo) => repo.changes.untrackedMatchedLineDiff ?? "")
+      .filter(Boolean)
+      .join("\n"),
+    untrackedOmittedMatchedLines: repos.flatMap((repo) =>
+      (repo.changes.untrackedOmittedMatchedLines ?? []).map((entry) => ({
+        repoPath: repo.path,
+        ...entry,
+      }))
+    ),
+  };
 }
 
 async function buildUncommittedReviewContext(
@@ -268,17 +382,17 @@ async function buildUncommittedReviewContext(
   allRepoInfo: RepoInfo | undefined,
   options: ConfirmOptions,
 ): Promise<ConfirmReviewContext> {
-  let status = "";
-  let diff = "";
+  let repos: RepoGitContext[];
   let gitContext = "";
-  let normalizedMoves: NormalizedMoveSummary[] = [];
-  const gitOptions = { ...options, normalizeMovedRecreated: true };
+  const gitOptions = {
+    ...options,
+    normalizeMovedRecreated: true,
+    untrackedLineMatcher: selectConfirmPrefilterCandidateLines,
+  };
   if (allRepoInfo) {
     const allContext = await getAllReposGitContextCancellable(allRepoInfo, gitOptions);
-    status = allContext.repos.map((repo) => repo.changes.status).join("\n");
-    diff = allContext.repos.map((repo) => repo.changes.diff).join("\n");
+    repos = allContext.repos;
     gitContext = allContext.context;
-    normalizedMoves = allContext.repos.flatMap((repo) => repo.changes.normalizedMoves ?? []);
   } else if (
     options.repoScope?.mode === "single"
     && options.repoScope.repoInfo
@@ -290,29 +404,24 @@ async function buildUncommittedReviewContext(
       singleRepoInfo,
       gitOptions,
     );
-    status = singleContext.current.changes.status;
-    diff = singleContext.current.changes.diff;
+    repos = [singleContext.current];
     gitContext = `${formatGitContextForRepos([singleContext.current])}${singleContext.siblingOverview ? `\n\n${singleContext.siblingOverview}` : ""}`;
-    normalizedMoves = singleContext.current.changes.normalizedMoves ?? [];
   } else {
     const changes = await getUncommittedChangesCancellable(workingDir, gitOptions);
-    status = changes.status;
-    diff = changes.diff;
-    normalizedMoves = changes.normalizedMoves ?? [];
+    repos = [{ path: workingDir, name: path.basename(workingDir), changes }];
     gitContext = `GIT STATUS (files changed):
-${status || "(no changes)"}
+${changes.status || "(no changes)"}
 
 GIT DIFF (all uncommitted changes):
-${diff || "(no diff)"}`;
+${changes.diff || "(no diff)"}`;
   }
+
+  const summary = summarizeRepoChanges(repos);
 
   return {
     prompt: "Evaluate these code changes:",
     context: gitContext,
-    status,
-    diff,
-    lineCount: countDiffReviewLines(diff),
-    normalizedMoves,
+    ...summary,
   };
 }
 
@@ -329,11 +438,17 @@ async function buildFullReviewContext(
     prompt: "Evaluate this full git-visible code scope:",
     context: fullContext.context,
     status: fullContext.repos
-      .flatMap((repo) => repo.inventory.files.map((file) => `?? ${file.path}`))
+      .flatMap((repo) => [
+        ...repo.inventory.files.map((file) => `?? ${formatGitPathForContext(file.path)}`),
+        ...(repo.inventory.skippedFiles ?? []).map((file) => `?? ${formatGitPathForContext(file.path)}`),
+      ])
       .join("\n"),
     diff: "",
     lineCount: fullContext.totalLines,
     normalizedMoves: [],
+    deletionContexts: [],
+    untrackedMatchedLineDiff: "",
+    untrackedOmittedMatchedLines: [],
   };
 }
 
@@ -496,7 +611,10 @@ async function runSharedConfirmAgent(
       : await buildUncommittedReviewContext(workingDir, allRepoInfo, options);
 
     // Step 3.5: Pre-filter deterministic violations (file/extension-aware)
-    const prefilterSection = formatConfirmPrefilter(runConfirmPrefilter(reviewContext.status, reviewContext.diff));
+    const prefilterSection = formatConfirmPrefilter(runConfirmPrefilter(
+      reviewContext.status,
+      `${reviewContext.diff}\n${reviewContext.untrackedMatchedLineDiff}`,
+    ));
     const recentUserContext = await readRecentUserContextForConfirm(sessionContext.sessionDir);
     const deduplicationRequirement = findDeduplicationUserRequirement([
       filterGeneratedConfirmGuidance(extraContext),
@@ -504,7 +622,12 @@ async function runSharedConfirmAgent(
     ].join("\n"));
     const deduplicationRequirementSection = formatDeduplicationRequirementContext(deduplicationRequirement);
 
-    const baseContext = `${prefilterSection}${deduplicationRequirementSection}${formatPlanfileContext(planfile)}
+    const reductionSection = formatReviewContextReductions(scopeKind, reviewContext.normalizedMoves);
+    const deletedFilesSection = formatDeletedFilesContext(reviewContext.deletionContexts);
+    const omittedPrefilterSection = formatOmittedPrefilterFindings(
+      reviewContext.untrackedOmittedMatchedLines,
+    );
+    const baseContext = `${reductionSection}${deletedFilesSection}${prefilterSection}${omittedPrefilterSection}${deduplicationRequirementSection}${formatPlanfileContext(planfile)}
 
 REVIEW SCOPE: ${scopeKind === "full" ? "full git-visible code" : "uncommitted code changes"}
 REVIEW LINE COUNT: ${reviewContext.lineCount}
