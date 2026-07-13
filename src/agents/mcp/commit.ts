@@ -103,7 +103,24 @@ async function normalizeMovedRecreatedFilesForCommit(
   throwIfAborted(options.signal);
   const paths = result.moves.flatMap((move) => [move.oldPath, move.newPath]);
   const indexSnapshot = await snapshotPreparedMoveIndex(workingDir, paths, options);
-  const add = await runGit(["add", "-A", "--", ...paths], workingDir, options);
+  const oldPaths = result.moves.map((move) => move.oldPath);
+  const indexedOldPaths = await getIndexedPaths(workingDir, oldPaths, options);
+  if (indexedOldPaths.error) {
+    return {
+      moves: result.moves,
+      stagedPaths: [],
+      indexSnapshot,
+      error: `ERROR: Failed to inspect moved files before confirm: ${indexedOldPaths.error}`,
+    };
+  }
+  // An already-staged deletion is absent from the index and no longer matches
+  // an exact `git add` pathspec. Its deletion is already prepared, so only add
+  // old paths that remain in the index plus every untracked destination.
+  const stagedPaths = [
+    ...oldPaths.filter((oldPath) => indexedOldPaths.paths.has(oldPath)),
+    ...result.moves.map((move) => move.newPath),
+  ];
+  const add = await runGit(["add", "-A", "--", ...stagedPaths], workingDir, options);
   if (add.exitCode !== 0) {
     await rollbackPreparedMoveStaging([indexSnapshot], options);
     return {
@@ -113,7 +130,21 @@ async function normalizeMovedRecreatedFilesForCommit(
       error: `ERROR: Failed to normalize moved files before confirm: ${add.output}`,
     };
   }
-  return { moves: result.moves, stagedPaths: paths, indexSnapshot };
+  return { moves: result.moves, stagedPaths, indexSnapshot };
+}
+
+async function getIndexedPaths(
+  workingDir: string,
+  paths: string[],
+  options: CancellationOptions,
+): Promise<{ paths: Set<string>; error?: string }> {
+  const result = await runGit(["ls-files", "--cached", "-z", "--", ...paths], workingDir, options);
+  if (result.exitCode !== 0) {
+    return { paths: new Set(), error: result.output || "git ls-files failed" };
+  }
+  return {
+    paths: new Set(result.output.split("\0").filter(Boolean)),
+  };
 }
 
 type PreparedMoveIndexSnapshot = {

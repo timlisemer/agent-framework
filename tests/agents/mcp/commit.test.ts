@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { execFileSync } from "child_process";
+import {
+  prepareMovedRecreatedFile,
+  runGitFixture as git,
+} from "../../helpers/git-fixtures.js";
 
 const mocks = vi.hoisted(() => ({
   runConfirmAgent: vi.fn(),
@@ -22,14 +25,6 @@ vi.mock("../../../src/utils/agent-runner.js", () => ({
 }));
 
 import { runCommitAgent, runCommitAgentWithSharedConfirm } from "../../../src/agents/mcp/commit.js";
-
-function git(repo: string, args: string[]): string {
-  return execFileSync("git", args, {
-    cwd: repo,
-    encoding: "utf-8",
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-}
 
 function makeRepo(): string {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "commit-agent-"));
@@ -149,13 +144,7 @@ src/bar.ts:8: 'unusedValue' is declared but its value is never read.
   });
 
   it("real-normalizes moved+recreated files before confirm without duplicating move context", async () => {
-    fs.mkdirSync(path.join(repo, "src"));
-    fs.mkdirSync(path.join(repo, "lib"));
-    fs.writeFileSync(path.join(repo, "src", "helper.ts"), "export const value = 1;\n");
-    git(repo, ["add", "src/helper.ts"]);
-    git(repo, ["commit", "-m", "add helper"]);
-    fs.rmSync(path.join(repo, "src", "helper.ts"));
-    fs.writeFileSync(path.join(repo, "lib", "helper.ts"), "export const value = 1;\n");
+    prepareMovedRecreatedFile(repo);
     mocks.runAgent.mockResolvedValue({
       output: "SIZE: SMALL\nMESSAGE:\ncommit: move helper",
     });
@@ -170,6 +159,21 @@ src/bar.ts:8: 'unusedValue' is declared but its value is never read.
       "plan.md",
       expect.any(Object),
     );
+    expect(git(repo, ["show", "--name-status", "--find-renames", "--pretty=", "HEAD"])).toContain(
+      "R100\tsrc/helper.ts\tlib/helper.ts",
+    );
+  });
+
+  it("normalizes a move when the source deletion is already staged", async () => {
+    prepareMovedRecreatedFile(repo, { staging: "source-deletion" });
+    mocks.runAgent.mockResolvedValue({
+      output: "SIZE: SMALL\nMESSAGE:\ncommit: move staged helper",
+    });
+
+    const result = await runCommitAgent(repo, "haiku");
+
+    expect(result).toContain("HASH:");
+    expect(mocks.runConfirmAgent).toHaveBeenCalledOnce();
     expect(git(repo, ["show", "--name-status", "--find-renames", "--pretty=", "HEAD"])).toContain(
       "R100\tsrc/helper.ts\tlib/helper.ts",
     );

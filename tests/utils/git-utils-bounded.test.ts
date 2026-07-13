@@ -1,8 +1,11 @@
-import { execFileSync } from "child_process";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import {
+  prepareMovedRecreatedFile,
+  runGitFixture as git,
+} from "../helpers/git-fixtures.js";
 import {
   formatGitContextForRepos,
   formatSiblingRepoOverview,
@@ -18,14 +21,6 @@ import {
   getUncommittedChangesCancellable,
   sortReposWithChangesSubmodulesFirst,
 } from "../../src/utils/git-utils.js";
-
-function git(cwd: string, args: string[]): string {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-}
 
 describe("bounded git utilities", () => {
   let repoDir: string;
@@ -63,13 +58,7 @@ describe("bounded git utilities", () => {
   });
 
   it("detects an exact moved+recreated file as a move", async () => {
-    fs.mkdirSync(path.join(repoDir, "src"));
-    fs.mkdirSync(path.join(repoDir, "lib"));
-    fs.writeFileSync(path.join(repoDir, "src", "helper.ts"), "export const value = 1;\n");
-    git(repoDir, ["add", "src/helper.ts"]);
-    git(repoDir, ["commit", "-m", "add helper"]);
-    fs.rmSync(path.join(repoDir, "src", "helper.ts"));
-    fs.writeFileSync(path.join(repoDir, "lib", "helper.ts"), "export const value = 1;\n");
+    prepareMovedRecreatedFile(repoDir);
 
     const result = await detectMovedRecreatedFilesCancellable(repoDir);
 
@@ -85,19 +74,11 @@ describe("bounded git utilities", () => {
   });
 
   it("normalizes moved+edited files virtually without mutating the real index", async () => {
-    fs.mkdirSync(path.join(repoDir, "src"));
-    fs.mkdirSync(path.join(repoDir, "lib"));
-    fs.writeFileSync(
-      path.join(repoDir, "src", "helper.ts"),
-      ["export function value() {", "  return 1;", "}", ""].join("\n"),
-    );
-    git(repoDir, ["add", "src/helper.ts"]);
-    git(repoDir, ["commit", "-m", "add editable helper"]);
-    fs.rmSync(path.join(repoDir, "src", "helper.ts"));
-    fs.writeFileSync(
-      path.join(repoDir, "lib", "helper.ts"),
-      ["export function value() {", "  return 2;", "}", ""].join("\n"),
-    );
+    prepareMovedRecreatedFile(repoDir, {
+      oldContent: ["export function value() {", "  return 1;", "}", ""].join("\n"),
+      newContent: ["export function value() {", "  return 2;", "}", ""].join("\n"),
+      commitMessage: "add editable helper",
+    });
 
     const changes = await getUncommittedChangesCancellable(repoDir, { normalizeMovedRecreated: true });
 
@@ -117,14 +98,14 @@ describe("bounded git utilities", () => {
   });
 
   it("normalizes moved+edited text files above the untracked diff synthesis limit", async () => {
-    fs.mkdirSync(path.join(repoDir, "src"));
-    fs.mkdirSync(path.join(repoDir, "lib"));
     const largeLine = "x".repeat(3 * 1024 * 1024);
-    fs.writeFileSync(path.join(repoDir, "src", "large.ts"), `${largeLine}\nexport const value = 1;\n`);
-    git(repoDir, ["add", "src/large.ts"]);
-    git(repoDir, ["commit", "-m", "add large"]);
-    fs.rmSync(path.join(repoDir, "src", "large.ts"));
-    fs.writeFileSync(path.join(repoDir, "lib", "large.ts"), `${largeLine}\nexport const value = 2;\n`);
+    prepareMovedRecreatedFile(repoDir, {
+      oldPath: "src/large.ts",
+      newPath: "lib/large.ts",
+      oldContent: `${largeLine}\nexport const value = 1;\n`,
+      newContent: `${largeLine}\nexport const value = 2;\n`,
+      commitMessage: "add large",
+    });
 
     const result = await detectMovedRecreatedFilesCancellable(repoDir);
 
@@ -138,15 +119,9 @@ describe("bounded git utilities", () => {
   });
 
   it("preserves already-staged changes while building virtual normalized diffs", async () => {
-    fs.mkdirSync(path.join(repoDir, "src"));
-    fs.mkdirSync(path.join(repoDir, "lib"));
+    prepareMovedRecreatedFile(repoDir);
     fs.writeFileSync(path.join(repoDir, "tracked.txt"), "base\nstaged later\n");
-    fs.writeFileSync(path.join(repoDir, "src", "helper.ts"), "export const value = 1;\n");
-    git(repoDir, ["add", "src/helper.ts"]);
-    git(repoDir, ["commit", "-m", "add helper"]);
     git(repoDir, ["add", "tracked.txt"]);
-    fs.rmSync(path.join(repoDir, "src", "helper.ts"));
-    fs.writeFileSync(path.join(repoDir, "lib", "helper.ts"), "export const value = 1;\n");
 
     const changes = await getUncommittedChangesCancellable(repoDir, { normalizeMovedRecreated: true });
 
@@ -157,14 +132,12 @@ describe("bounded git utilities", () => {
   });
 
   it("emits one normalized rename status for already-staged move pairs", async () => {
-    fs.mkdirSync(path.join(repoDir, "src"));
-    fs.mkdirSync(path.join(repoDir, "lib"));
-    fs.writeFileSync(path.join(repoDir, "src", "renamed.ts"), "export const value = 1;\n");
-    git(repoDir, ["add", "src/renamed.ts"]);
-    git(repoDir, ["commit", "-m", "add renamed"]);
-    fs.rmSync(path.join(repoDir, "src", "renamed.ts"));
-    fs.writeFileSync(path.join(repoDir, "lib", "renamed.ts"), "export const value = 1;\n");
-    git(repoDir, ["add", "-A", "--", "src/renamed.ts", "lib/renamed.ts"]);
+    prepareMovedRecreatedFile(repoDir, {
+      oldPath: "src/renamed.ts",
+      newPath: "lib/renamed.ts",
+      commitMessage: "add renamed",
+      staging: "move",
+    });
 
     const changes = await getUncommittedChangesCancellable(repoDir, {
       normalizeMovedRecreated: true,
