@@ -10,6 +10,7 @@ import {
 } from "./content-patterns.js";
 import {
   type GitVisibleScanSkippedFile,
+  isScenarioFixturePath,
   scanGitVisibleTextFilesCancellable,
 } from "./git-utils.js";
 import { formatGitPathForContext } from "./git-status.js";
@@ -369,6 +370,7 @@ export async function findRepositoryStyleDrift(
     policyWarnings: quotePolicy.warning ? [quotePolicy.warning] : [],
   };
   const summary = await scanGitVisibleTextFilesCancellable(workingDir, (relativePath, content) => {
+    if (isScenarioFixturePath(relativePath)) return;
     const fileResult = scanStyleDriftContent(relativePath, content, {
       ...options,
       quotePreference: quotePolicy.preference,

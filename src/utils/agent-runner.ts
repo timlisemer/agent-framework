@@ -566,7 +566,7 @@ async function applyFormatValidation(
       return { result, success, errorCount };
     }
 
-    // Skip the retry-tier loop when the input is already a sentinel —
+    // Skip the retry-tier loop when the input is already a sentinel -
     // a cheaper model cannot reformat "no output received" into a verdict.
     const isSentinelError =
       result.text.startsWith("[DIRECT ERROR]") ||
@@ -993,7 +993,7 @@ export async function runAgentWithRetryAndTelemetry(
   // Test-harness LLM stub: when AGENT_FRAMEWORK_LLM_STUBS is set and contains
   // a key matching telemetry.agent, synthesize an AgentExecutionResult from
   // the mapped string and skip runAgentWithRetry entirely. This is the
-  // LLM-transport boundary — stubbing here covers tool-appeal, rule-gate,
+  // LLM-transport boundary - stubbing here covers tool-appeal, rule-gate,
   // question-validate, edit-intent, plan-validate, and every
   // other LLM verdict path with a single mechanism. The anti-bypass banner
   // in src/agents/hooks/tool-appeal.ts:1-34 is preserved because tool-appeal

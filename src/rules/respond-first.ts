@@ -51,7 +51,7 @@ export const respondFirstRule: PreToolRule = {
 
     // Inaction-complaint short-circuit: when the user's last message
     // demanded the AI quit stalling and proceed (per the prediction's
-    // intent morphology — see prediction-types INACTION_COMPLAINT_RE),
+    // intent morphology - see prediction-types INACTION_COMPLAINT_RE),
     // forcing a text reply BEFORE the tool call is exactly the deflection
     // the user was complaining about. Skip the respond-first check.
     //

@@ -73,7 +73,7 @@ export function materializeScenarioEntry(
     msg_id?: string;
   };
 
-  // Per-call counter — not shared across calls. The runner is responsible for
+  // Per-call counter - not shared across calls. The runner is responsible for
   // threading a shared counter if needed across entries. For Claude's wire
   // format, unique IDs per-call are sufficient because tool_use_ref resolution
   // uses the returned toolUseIds map.

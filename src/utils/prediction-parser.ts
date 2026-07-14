@@ -114,7 +114,7 @@ export function parseSentimentOutput(raw: string): ParsedPrediction | null {
   const nonBlockingTools = parseToolRequirements(nonBlockingRaw);
   const explicitlyBlockedSubstrings = parseBlockedEntries(blockedRaw);
 
-  // The trailing sections parse leniently — defaults on missing/malformed.
+  // The trailing sections parse leniently - defaults on missing/malformed.
   // The strict 6-section null-fail check above preserves the original fail-safe;
   // these trailing sections do NOT fail the parse if absent.
   const switchRaw = extractSection(raw, "---CONTEXT-SWITCH---", "---QUESTION-IS-STALLING---");

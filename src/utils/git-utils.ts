@@ -786,7 +786,7 @@ function stripKnownExtension(filePath: string): string {
   return filePath.replace(/\.(?:[cm]?[jt]sx?|rs)$/, "");
 }
 
-function isScenarioFixturePath(relativePath: string): boolean {
+export function isScenarioFixturePath(relativePath: string): boolean {
   return relativePath.startsWith("scenarios/") && relativePath.endsWith(".json");
 }
 
@@ -1112,7 +1112,7 @@ function isCreateInstructionForCandidate(line: string, candidate: PathReferenceC
   if (candidate.kind === "markdown-link") return false;
   const beforeCandidate = line.slice(0, candidate.index);
   if (/\b(?:do\s+not|don't|never)\s+create\s+$/i.test(beforeCandidate)) return false;
-  return /\bcreate\s+$/i.test(beforeCandidate);
+  return /\bcreate\s+[`'"([{<]*$/i.test(beforeCandidate);
 }
 
 async function isGitIgnoredPath(
@@ -1220,7 +1220,15 @@ async function shouldSuppressNonexistentReference(input: {
   candidates: readonly PathReferenceCandidate[];
   options: CancellationOptions;
 }): Promise<boolean> {
+  const cleanCandidate = stripReferenceDecoration(input.candidate.rawPath);
+  const isAbsoluteRuntimePath = input.candidate.kind !== "markdown-link" && cleanCandidate.startsWith("/");
+  const isBracketedConfigSelector =
+    input.candidate.kind === "extensionless-config-literal" &&
+    input.line[input.candidate.index - 1] === "[" &&
+    input.line[input.candidate.index + input.candidate.rawPath.length] === "]";
   return (
+    isAbsoluteRuntimePath ||
+    isBracketedConfigSelector ||
     isPlaceholderReferencePath(input.referencedPath) ||
     isCreateInstructionForCandidate(input.line, input.candidate) ||
     await isIntentionalEnvReference(input.workingDir, input.referencedPath, input.options) ||
@@ -1482,6 +1490,38 @@ type FileInspection =
 
 type FileInspectionBudget = { scannedBytes: number; contentBytesRemaining: number };
 
+const OVERSIZED_BINARY_PROBE_EXTENSIONS = new Set([
+  ".7z",
+  ".a",
+  ".avi",
+  ".bin",
+  ".bz2",
+  ".class",
+  ".dll",
+  ".dylib",
+  ".exe",
+  ".gif",
+  ".gz",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".mkv",
+  ".mov",
+  ".mp3",
+  ".mp4",
+  ".o",
+  ".pdf",
+  ".png",
+  ".so",
+  ".tar",
+  ".wasm",
+  ".webp",
+  ".woff",
+  ".woff2",
+  ".xz",
+  ".zip",
+]);
+
 async function inspectInventoryPath(
   absolutePath: string,
   budget: FileInspectionBudget,
@@ -1569,6 +1609,9 @@ async function inspectInventoryPath(
   const safeResult = await scanValidatedFileCancellable(absolutePath, {
     signal: options.signal,
     maxBytes: liveReadLimit,
+    binaryProbeBytes: OVERSIZED_BINARY_PROBE_EXTENSIONS.has(path.extname(absolutePath).toLowerCase())
+      ? Math.min(64 * 1024, Math.max(0, aggregateRemaining))
+      : 0,
     visitChunk: (chunk) => {
       for (const byte of chunk) {
         if (byte === 10) newlineCount += 1;
@@ -1615,12 +1658,19 @@ export async function listGitVisiblePathsCancellable(
   const lsArgs = options.includeUntracked === false
     ? ["ls-files", "--cached", "-z"]
     : ["ls-files", "--cached", "--others", "--exclude-standard", "-z"];
-  const lsFiles = await runGit(lsArgs, workingDir, {
+  const commandOptions = {
     ...options,
     maxStdoutBytes: options.maxStdoutBytes ?? DEFAULT_GIT_FILE_LIST_MAX_BYTES,
     maxStderrBytes: options.maxStderrBytes ?? DEFAULT_GIT_STATUS_MAX_BYTES,
-  });
-  return parseCompleteGitNulRecords(lsFiles, "git-visible file inventory").sort();
+  };
+  const [lsFiles, deletedFiles] = await Promise.all([
+    runGit(lsArgs, workingDir, commandOptions),
+    runGit(["ls-files", "--deleted", "-z"], workingDir, commandOptions),
+  ]);
+  const deletedPaths = new Set(parseCompleteGitNulRecords(deletedFiles, "deleted git-visible path inventory"));
+  return parseCompleteGitNulRecords(lsFiles, "git-visible file inventory")
+    .filter((relativePath) => !deletedPaths.has(relativePath))
+    .sort();
 }
 
 export interface GitVisibleTextScanSummary {

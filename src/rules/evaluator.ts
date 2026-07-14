@@ -136,7 +136,7 @@ export async function evaluateRules(
         // RuleCheckResult. DO NOT gate appeal behind mood / trust / frustrationStreak.
         // Appeal is the user's override path and removing it is hostile per the user's
         // explicit directive. If a mood-driven fastDeny is being wrongly overturned,
-        // fix the agent's prompt and inputs — see the banner atop
+        // fix the agent's prompt and inputs - see the banner atop
         // src/agents/hooks/tool-appeal.ts.
         // ============================================================================
         const appeal = await appealHelper(
@@ -271,7 +271,7 @@ export async function evaluateRules(
     // RuleCheckResult. DO NOT gate appeal behind mood / trust / frustrationStreak.
     // Appeal is the user's override path and removing it is hostile per the user's
     // explicit directive. If a mood-driven LLM deny is being wrongly overturned,
-    // fix the agent's prompt and inputs — see the banner atop
+    // fix the agent's prompt and inputs - see the banner atop
     // src/agents/hooks/tool-appeal.ts.
     // ============================================================================
     const appeal = await appealHelper(

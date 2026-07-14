@@ -326,7 +326,7 @@ prediction-block or prose-oriented regex matching.
 **Path-based classification**: File tools are auto-approved when:
 - File path is inside the project directory (`AGENT_FRAMEWORK_PROJECT_DIR`, `CLAUDE_PROJECT_DIR`, or cwd), OR
 - File path is inside the active adapter's host config root (`~/.claude/` for Claude, `~/.codex/` for Codex)
-- AND the path doesn't match sensitive patterns. Real environment files (`.env`, `.env.local`, etc.), credential/secret/password names, `.ssh`, `.aws`, `.gnupg`, `.kube`, SOPS files, age keys, private-key names, and key-store material are blocked. See [provider-configuration.md](docs/provider-configuration.md) for a copyable provider configuration template.
+- AND the path doesn't match sensitive patterns. Real environment files and local variants, credential/secret/password names, `.ssh`, `.aws`, `.gnupg`, `.kube`, SOPS files, age keys, private-key names, and key-store material are blocked. See [provider-configuration.md](docs/provider-configuration.md) for a copyable provider configuration template.
 
 ### Hook Matcher Configuration
 

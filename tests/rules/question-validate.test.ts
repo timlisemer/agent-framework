@@ -52,7 +52,7 @@ function makeCtx(overrides: Parameters<typeof makeRuleContext>[0] = {}) {
   });
 }
 
-describe("questionValidateRule — deterministic null paths", () => {
+describe("questionValidateRule - deterministic null paths", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -91,7 +91,7 @@ describe("questionValidateRule — deterministic null paths", () => {
   });
 });
 
-describe("questionValidateRule — LLM-call paths", () => {
+describe("questionValidateRule - LLM-call paths", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Provide non-empty transcript so LLM is called

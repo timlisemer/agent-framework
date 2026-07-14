@@ -1,5 +1,5 @@
 /**
- * Test Harness Tester — MCP tool handler for the tester agent role.
+ * Test Harness Tester - MCP tool handler for the tester agent role.
  *
  * Pure TypeScript + execFileSync. NO LLM calls. NO runAgent. NO Anthropic API.
  *

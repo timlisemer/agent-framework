@@ -6,7 +6,7 @@ export const editIntentContextRule: PreToolRule = {
   priority: 74,
   appealable: false,
   usesLlm: true,
-  promptSection: `If edit intent is false and an edit tool arrives, it was already blocked by TypeScript. The current tool is therefore NOT an edit tool — but the user's exploration/read-only intent still informs whether tangential write-ish operations (Bash with side effects, Agent dispatch) are warranted.`,
+  promptSection: `If edit intent is false and an edit tool arrives, it was already blocked by TypeScript. The current tool is therefore NOT an edit tool - but the user's exploration/read-only intent still informs whether tangential write-ish operations (Bash with side effects, Agent dispatch) are warranted.`,
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     const editIntent = ctx.state.currentEditIntent ?? null;

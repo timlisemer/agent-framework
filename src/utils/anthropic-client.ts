@@ -45,7 +45,7 @@ export function buildAnthropicClientOptions(): ConstructorParameters<typeof Anth
     apiKey: process.env.ANTHROPIC_API_KEY || null,
     authToken: process.env.ANTHROPIC_AUTH_TOKEN || undefined,
     baseURL: process.env.ANTHROPIC_BASE_URL || undefined,
-    // Reduce from default 2 — framework's own retry loops (rule-gate,
+    // Reduce from default 2 - framework's own retry loops (rule-gate,
     // tool-appeal) already handle retries with exponential backoff.
     // SDK retrying on the same broken connection compounds hangs.
     maxRetries: 1,

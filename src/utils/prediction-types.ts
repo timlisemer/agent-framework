@@ -1,7 +1,7 @@
 /**
  * Prediction Types - Sentiment-aware prediction shape and pure decision logic.
  *
- * Pure functions only — no I/O, no LLM calls, no caches. The LLM
+ * Pure functions only - no I/O, no LLM calls, no caches. The LLM
  * (SENTIMENT_AGENT) produces a `ToolPrediction` which is stored on
  * `SessionState.currentPrediction`; callers use `decidePrediction` to enforce
  * a small hardcoded mood × tool-class policy with explicit allow/block lists.
@@ -57,7 +57,7 @@ export interface ToolPrediction {
   /** 1-2 sentences: what the user explicitly does NOT want, or "". */
   blockedIntent: string;
 
-  /** LITERAL tool names — exact match, no regex. */
+  /** LITERAL tool names - exact match, no regex. */
   explicitlyAllowedTools: string[];
 
   /**
@@ -73,7 +73,7 @@ export interface ToolPrediction {
    */
   nonBlockingTools?: ToolRequirement[];
 
-  /** LITERAL substring filters — no regex. */
+  /** LITERAL substring filters - no regex. */
   explicitlyBlockedSubstrings: Array<{
     /** Exact tool name like "Bash" or "Edit". */
     tool: string;
@@ -87,7 +87,7 @@ export interface ToolPrediction {
    * Set by SENTIMENT_AGENT when the user explicitly asked the AI to stop
    * doing things entirely ("stop", "don't do anything", "halt everything",
    * "STOP. WTF ARE YOU DOING."). When true, decidePrediction denies EVERY
-   * tool not in explicitlyAllowedTools — overrides the low-risk allowance.
+   * tool not in explicitlyAllowedTools - overrides the low-risk allowance.
    */
   blockAllTools?: boolean;
 
@@ -154,11 +154,11 @@ export function predictionUserMessageForLogic(prediction: ToolPrediction): strin
 }
 
 /**
- * Verbs that — applied to file changes the AI made — require text edit tools to obey.
+ * Verbs that - applied to file changes the AI made - require text edit tools to obey.
  * Mirrors the SENTIMENT_AGENT prompt's undo verb-mapping in
  * src/utils/agent-configs.ts:1444-1445 (commit 2e27eae) and the morphology
  * style of deriveEditIntentFromPrediction (src/utils/edit-intent.ts:83).
- * Keep this list in sync with the prompt — if the prompt grows a verb, this
+ * Keep this list in sync with the prompt - if the prompt grows a verb, this
  * regex must too.
  *
  * Reconciles the case where prose `intent` and structured
@@ -188,7 +188,7 @@ export const INACTION_COMPLAINT_RE =
 /**
  * Categorical tool-prohibition shapes drawn directly from SENTIMENT_AGENT's
  * category-A markers. When any of these are in the userMessageSnippet, the
- * user IS explicitly forbidding tool use — even if the same prediction's
+ * user IS explicitly forbidding tool use - even if the same prediction's
  * intent ALSO mentions inaction. In that case, honor the prohibition (don't
  * short-circuit to allow on the basis of intent morphology alone).
  */
@@ -223,12 +223,12 @@ export const RE_AUTHORIZATION_INTENT_RE =
  * as having been BLOCKED / PREVENTED / REFUSED / DENIED from carrying out
  * the user's stated wish. When this pattern appears in `prediction.intent`,
  * the cached intent IS describing the very bug class prediction-block
- * exhibits — re-denying compounds the meta-complaint instead of resolving it.
+ * exhibits - re-denying compounds the meta-complaint instead of resolving it.
  *
  * Mirrors INACTION_COMPLAINT_RE / UNDO_INTENT_RE / RE_AUTHORIZATION_INTENT_RE:
  * verb-rooted, narrow on purpose. Requires THREE simultaneous anchors:
  *   1. AI-self-reference noun ("the ai", "ai's", "the assistant",
- *      "assistant's", "the hook", "hook's") — pins the actor to the AI,
+ *      "assistant's", "the hook", "hook's") - pins the actor to the AI,
  *      not the user. Without this, "user blocked the push" would match.
  *   2. Within 80 NON-SENTENCE-BOUNDARY chars, a block-verb morpheme
  *      (block\w*, prevent\w*, refus\w*, deni\w*, denied, contradict\w*).
@@ -236,7 +236,7 @@ export const RE_AUTHORIZATION_INTENT_RE =
  *      user-directive-fulfillment phrase: "enforcing/enforcement",
  *      "carry/carrying out", or "(act/acting on) the user('s) intent/
  *      instruction/request/wish/directive". The "act on" form is REQUIRED
- *      to be followed by the user-directive noun phrase — bare "acted on
+ *      to be followed by the user-directive noun phrase - bare "acted on
  *      impulse" or "act on later" do NOT match.
  *
  * Window choice: 80 (vs INACTION_COMPLAINT_RE's 40). The broken-scenario
@@ -278,13 +278,13 @@ export const ACTION_DEMAND_INTENT_RE =
  * "stale-mood ignores fresh re-authorization" failure mode get an entry.
  *
  * IMPORTANT: do NOT add aliases for short canonical tool names like Bash,
- * Edit, Write, Read, Grep — those collide with common English words and
+ * Edit, Write, Read, Grep - those collide with common English words and
  * would over-fire `userMessageNamesTool`. Users typically name those by
  * their PascalCase canonical name when re-authorizing them; the
  * canonical-name branch (case-sensitive, word-boundary-anchored) handles
  * those without aliases.
  *
- * The Agent entry is for Claude Code's subagent-spawn tool — users say
+ * The Agent entry is for Claude Code's subagent-spawn tool - users say
  * "another validator agent", "spawn an agent" etc. when re-authorizing.
  * Aliases require a verb particle or a noun anchor ("validator agent" not
  * bare "agent"; "spawn an agent" not bare "an agent") so a stray "an
@@ -320,7 +320,7 @@ function isPredictionEditTool(toolName: string): boolean {
  * Per-tool extractor: pulls distinctive target identifiers out of toolInput
  * for matching against `prediction.intent` prose in decidePrediction step 3.8.
  *
- * Returned strings are LITERAL — no regex. Step 3.8 matches each token
+ * Returned strings are LITERAL - no regex. Step 3.8 matches each token
  * against intent with word-boundary anchoring and an optional leading
  * "/" so slash-command phrasing ("/plan3") and bare phrasing ("plan3")
  * both match a single returned token.
@@ -329,7 +329,7 @@ function isPredictionEditTool(toolName: string): boolean {
  * user-recognizable identifier the SENTIMENT_AGENT would surface in
  * intent prose verbatim get an entry. Tools whose inputs are arbitrary
  * code/strings/paths (Bash, Edit, Write) cannot be matched generically
- * against prose intent without false positives — those tools route
+ * against prose intent without false positives - those tools route
  * through step 3.7 / step 4 unchanged. New tools are added here as the
  * failure mode reproduces for them.
  */
@@ -391,7 +391,7 @@ export function userMessageNamesTool(
 /**
  * Per-tool revocation morphology. The user can revoke a previously-
  * authorized tool with phrasing that EXPLICIT_PROHIBITION_RE does NOT
- * catch — e.g. "stop running the tester", "don't use the tester",
+ * catch - e.g. "stop running the tester", "don't use the tester",
  * "no more tester", "kill the tester". When a stop/don't/no-more/cease
  * verb appears within 40 NON-SENTENCE-BOUNDARY chars BEFORE a tool
  * reference, treat as revocation. Mirrors INACTION_COMPLAINT_RE's
@@ -481,7 +481,7 @@ export function intentRevokesTarget(intent: string, target: string): boolean {
 }
 
 /**
- * Plain-English imperative morphology — verb forms that command the AI to
+ * Plain-English imperative morphology - verb forms that command the AI to
  * START or RESUME doing something. Mirrors UNDO_INTENT_RE / INACTION_COMPLAINT_RE
  * style (verb-rooted, narrow on purpose).
  *
@@ -492,7 +492,7 @@ export function intentRevokesTarget(intent: string, target: string): boolean {
  * tester", "go ahead and use the tester mcp".
  *
  * Narrow on purpose: requires an action verb. A bare "do it", "go ahead",
- * "yes" does NOT match — those remain at the appeal LLM.
+ * "yes" does NOT match - those remain at the appeal LLM.
  */
 export const POSITIVE_IMPERATIVE_RE =
   /\b(please\s+)?(start|starting|run|running|call|calling|launch|launching|invoke|invoking|use|using|execute|executing|spawn|spawning|kick\s+off|fire\s+off|now\s+run|go\s+(run|call|launch|use|ahead)|proceed\s+with|continue\s+with|retry|re-?try|try\s+again)\b/i;
@@ -560,7 +560,7 @@ export function latestUserMessageAuthorizesBashCommand(
  * Map `toolName` to the verb-class regexes whose match would have produced
  * `toolName` via `deriveAllowedToolsFromIntent`. Used by
  * `latestUserMessageReauthorizesClass` to scope the verb-class revocation
- * guard to ONLY the regex(es) that actually imply the firing tool —
+ * guard to ONLY the regex(es) that actually imply the firing tool -
  * preventing cross-class false-denies (e.g., "now run the tests, don't
  * refactor" wrongly denying Bash because the unrelated `EDIT_VERB_RE`
  * match for "refactor" had "don't" in its preceding window).
@@ -612,7 +612,7 @@ function userMessageRevokesToolClass(
  * user-prompt-submit unions into `explicitlyAllowedTools` in live mode)
  * instead of literal-tool-name matching. Catches "now implement" / "fix it"
  * / "refactor that" / "patch the file" / "make the change" / "make it so"
- * — any class-level imperative the user can type without naming the
+ * - any class-level imperative the user can type without naming the
  * canonical tool.
  *
  * Guards (in order):
@@ -646,10 +646,10 @@ export function latestUserMessageReauthorizesClass(
 }
 
 /**
- * Explicit override phrases — the literal strings the TOOL_APPEAL_AGENT
+ * Explicit override phrases - the literal strings the TOOL_APPEAL_AGENT
  * prompt previously enumerated. Computed once on `ToolPrediction`
- * (`hasExplicitOverride`) against the FULL user prompt — not the 200-char
- * snippet — so late-appearing phrases in long prompts are still caught.
+ * (`hasExplicitOverride`) against the FULL user prompt - not the 200-char
+ * snippet - so late-appearing phrases in long prompts are still caught.
  *
  * Mirrors the prompt's "(b) An explicit override phrase targeting the
  * current block" list and rule 4(a) check-redirect override list.
@@ -1124,7 +1124,7 @@ export function decideNextWindowSize(args: {
   if (newStreak > oldStreak) {
     next = Math.max(next, Math.min(15, oldWindow + 2));
   }
-  // Mood SHIFT — prompt says max(CURRENT+2, 6).
+  // Mood SHIFT - prompt says max(CURRENT+2, 6).
   const hostile = (m?: Mood) => m === "angry" || m === "frustrated";
   if (
     prevMood &&
@@ -1317,7 +1317,7 @@ export function decidePrediction(
     // forbade tool use entirely". When the prediction's own intent describes
     // the user complaining about INACTION (stalling, dithering, dragging
     // your feet), AND the userMessageSnippet does NOT independently contain
-    // a categorical tool-prohibition, the flag contradicts its own prose —
+    // a categorical tool-prohibition, the flag contradicts its own prose -
     // the user demanded MORE action, not less. Allow.
     //
     // The userMessageSnippet guard prevents over-firing: a user who says
@@ -1347,7 +1347,7 @@ export function decidePrediction(
 
   // 3.5. Undo-intent fallback. The LLM-derived intent already encodes whether
   // the user wants the AI to revert file changes it made. If that signal is
-  // present and the requested tool is an edit tool, allow — even when
+  // present and the requested tool is an edit tool, allow - even when
   // explicitlyAllowedTools is empty (covers cases where SENTIMENT_AGENT
   // captured the verb in intent text but missed the structured authorization).
   // Step 2 (explicit blocks) and step 3 (blockAllTools) still win above.
@@ -1363,7 +1363,7 @@ export function decidePrediction(
 
   // 3.6. Re-authorization prose fallback. When the LLM-derived intent
   // explicitly classifies the user as having authorized the AI to proceed
-  // (e.g., "User has explicitly re-authorized..."), allow — even when
+  // (e.g., "User has explicitly re-authorized..."), allow - even when
   // explicitlyAllowedTools is empty (covers cases where SENTIMENT_AGENT
   // captured the authorization in intent text but missed the structured
   // field). Step 2 (explicit blocks) and step 3 (blockAllTools) still win
@@ -1390,17 +1390,17 @@ export function decidePrediction(
   // SENTIMENT_AGENT at one earlier UserPromptSubmit and may no longer
   // reflect the user's current intent.
   //
-  //   PATH (b) — REDIRECT against the cached snippet:
+  //   PATH (b) - REDIRECT against the cached snippet:
   //     The user's last logged message names THIS tool favorably and
   //     contains no prohibition or per-tool revocation. The gripe targets
   //     a DIFFERENT tool the AI used wrongly. Catches the broken fixture's
   //     "via the tester" redirect shape.
   //
-  //   PATH (a) — FRESH IMPERATIVE on the live transcript:
+  //   PATH (a) - FRESH IMPERATIVE on the live transcript:
   //     latestUserMessage (read from disk at PreToolUse entry, NOT from
   //     the cache) is a positive imperative naming THIS tool. Catches
   //     "please start another validator agent" repeated after one stale
-  //     angry turn — the live failure mode where the cache kept blocking
+  //     angry turn - the live failure mode where the cache kept blocking
   //     despite repeated fresh authorization.
   //
   // Both paths share strict prohibition/revocation/per-target-block guards:
@@ -1446,7 +1446,7 @@ export function decidePrediction(
         };
       }
     }
-    // Path (a') — CLASS-LEVEL fresh imperative on the live transcript.
+    // Path (a') - CLASS-LEVEL fresh imperative on the live transcript.
     if (latestUserMessage && latestUserMessageReauthorizesClass(latestUserMessage, toolName)) {
       if (toolName === "Bash") {
         if (!bashClassification) {
@@ -1476,20 +1476,20 @@ export function decidePrediction(
   // SENTIMENT_AGENT's prose summary of what the user wants. When that
   // paraphrase explicitly names the same target the firing call
   // carries (e.g. intent says "to read /plan3" and toolInput carries
-  // skill="plan3"), a deny here is the hook contradicting itself —
+  // skill="plan3"), a deny here is the hook contradicting itself -
   // it correctly understood the user wants X, then would block X.
   //
   // Generic via TOOL_TARGET_EXTRACTORS: tools without an extractor
-  // return [] and this step is inert. Initial coverage is Skill —
+  // return [] and this step is inert. Initial coverage is Skill -
   // the bug under repair. The map is the extension point when future
   // fixtures surface analogous shapes for other tools.
   //
   // Strict guards mirror 3.7:
   //   - blockedForThisToolByName already computed above (line 516)
   //   - EXPLICIT_PROHIBITION_RE on userMessageSnippet (parallel to
-  //     step 3.6's userSaidProhibition guard at line 480) — a
+  //     step 3.6's userSaidProhibition guard at line 480) - a
   //     categorical "freeze. no tools." in the snippet still denies.
-  //   - intentRevokesTarget against the intent — a paraphrase like
+  //   - intentRevokesTarget against the intent - a paraphrase like
   //     "user wants AI to STOP reading /plan3" still denies via
   //     step 4.
   if (!blockedForThisToolByName && !userSaidProhibition) {
@@ -1522,7 +1522,7 @@ export function decidePrediction(
   //     keeps the path family consistent).
   //
   // The match is on `intent` ALONE (not snippet) because the snippet captures
-  // the user's WORDS, while intent is the hook's PARAPHRASE — the
+  // the user's WORDS, while intent is the hook's PARAPHRASE - the
   // contradiction lives in the paraphrase + deny pairing.
   if (
     !userSaidProhibition &&
@@ -1544,7 +1544,7 @@ export function decidePrediction(
   // on a side topic does NOT retract their earlier request (mirrors
   // TOOL_APPEAL_AGENT rule 1's "nested clarification on a side topic"
   // carve-out brought into the deterministic policy because prediction-
-  // block is appealable: false — no LLM appeal can rescue this).
+  // block is appealable: false - no LLM appeal can rescue this).
   //
   // Strict guards mirror 3.6-3.9:
   //   - userSaidProhibition: "freeze. no tools." in the snippet still wins.
@@ -1552,7 +1552,7 @@ export function decidePrediction(
   //     still wins.
   //   - cachedSnippetSideTaskDischarged: pre-tool-use observed a completed
   //     non-error tool round-trip after the snippet's anchor turn. Without
-  //     it the cached prediction is the freshest open imperative — fall
+  //     it the cached prediction is the freshest open imperative - fall
   //     through to normal mood policy.
   //   - recentUserMessages.length >= 2: at least one OLDER user-text turn
   //     exists (the freshest IS the discharged side-clarification anchor).
@@ -1671,14 +1671,14 @@ export function decidePrediction(
   // 4. Mood-driven default policy. Allow set mirrors the shared low-risk
   // tool classifier (single source of truth via isLowRiskTool) so the
   // prediction system doesn't artificially block tools the framework treats
-  // as side-effect-free — UNLESS the user is in SUSTAINED FRUSTRATION
+  // as side-effect-free - UNLESS the user is in SUSTAINED FRUSTRATION
   // (mood angry/frustrated
   // AND trust=low OR frustrationStreak >= 2). Mirrors the TOOL_APPEAL_AGENT
   // prompt's "MOOD-DRIVEN DENIALS GENERALIZE UNDER SUSTAINED FRUSTRATION"
   // rule (src/utils/agent-configs.ts:643-646) so the deterministic policy
   // and the LLM appeal judge agree on the same threshold. Under sustained
   // frustration, low-risk tool calls without explicit authorization are
-  // tangential inspection / deflection, not benign discovery — fall
+  // tangential inspection / deflection, not benign discovery - fall
   // through to the mood-deny path.
   const restrictive =
     prediction.mood === "angry" ||
@@ -1745,7 +1745,7 @@ export function stringifyToolInput(toolInput: unknown): string {
 }
 
 /**
- * Format a prediction as readable context. Single source of truth — used by
+ * Format a prediction as readable context. Single source of truth - used by
  * both the gate-LLM context builder and the SENTIMENT_AGENT's "previous
  * prediction" input field.
  */
@@ -1770,7 +1770,7 @@ export function formatPredictionContext(p: ToolPrediction): string {
     const blocks = p.explicitlyBlockedSubstrings
       .map(
         (b) =>
-          `${b.tool}${b.targetSubstring ? ` (substring: ${b.targetSubstring})` : ""} — ${b.reason}`,
+          `${b.tool}${b.targetSubstring ? ` (substring: ${b.targetSubstring})` : ""} - ${b.reason}`,
       )
       .join("; ");
     lines.push(`Explicitly blocked: ${blocks}`);

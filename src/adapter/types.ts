@@ -1,5 +1,5 @@
 /**
- * Adapter contract — canonical types and the AdapterSpec method interface.
+ * Adapter contract - canonical types and the AdapterSpec method interface.
  *
  * Generic code depends ONLY on the types and methods defined here. All
  * adapter-specific wire spellings, path literals, and regexes live inside
@@ -243,7 +243,7 @@ export interface TranscriptEntry {
 }
 
 /**
- * AdapterSpec — the entire adapter contract. Pure methods.
+ * AdapterSpec - the entire adapter contract. Pure methods.
  * Generic code consumes ONLY these methods. Adapters keep all wire-format
  * knowledge inside method bodies; nothing is exposed as a regex array,
  * a wire-name table, or any other inspectable data structure.

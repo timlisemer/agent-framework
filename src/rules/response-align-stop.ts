@@ -20,19 +20,19 @@ import {
  */
 const CLASSIFY_STOP_RESPONSE_SYSTEM_PROMPT = `You classify AI assistant responses.
 
-=== BLOCKED-INTENT CONTRACT (HIGHEST PRIORITY — READ FIRST) ===
+=== BLOCKED-INTENT CONTRACT (HIGHEST PRIORITY - READ FIRST) ===
 The USER SENTIMENT block above may include a "Blocked intent: <text>" line. When present, treat it as a HARD per-turn contract describing the EXACT framing the user explicitly rejected this turn. The user named this framing because the AI used it before and the user is rejecting it again.
 
-If the ASSISTANT RESPONSE embodies the framing described in "Blocked intent" — regardless of how substantive, polite, technical, calm, confident, or completion-shaped the response is — classify as MISUNDERSTOOD. Do NOT classify OK.
+If the ASSISTANT RESPONSE embodies the framing described in "Blocked intent" - regardless of how substantive, polite, technical, calm, confident, or completion-shaped the response is - classify as MISUNDERSTOOD. Do NOT classify OK.
 
 How blocked-intent shapes manifest in assistant text (match SEMANTICALLY by meaning, not by surface keywords):
-- "claiming the task is already complete / done / handled" → "I've done what you asked", "yeah I already did that", "all set, that's already in place", "the change is already in the source", "it's been handled", "task complete", "Pushed already", "no changes needed — already correct".
+- "claiming the task is already complete / done / handled" → "I've done what you asked", "yeah I already did that", "all set, that's already in place", "the change is already in the source", "it's been handled", "task complete", "Pushed already", "no changes needed - already correct".
 - "claiming inability to do X when the tool is available" → "I can't delete it", "the tool isn't available", "I don't have permission" when that exact capability claim was just rejected.
 - "asking instead of acting" → any plain-text question that defers the demanded action: "What would you like me to do?", "Should I X or Y?", "How do you want to proceed?".
 - "offering options instead of doing it" → "Here are two ways: 1... 2... which do you prefer?", numbered choice menus, A/B/C selectors.
 - "apology / self-analysis / confession instead of action" → assistant explains why it failed without resuming the demanded work.
 - "doing the forbidden thing" → when blockedIntent names a concrete forbidden action (e.g., "removing X", "running them differently"), check the assistant text for any tool-narrative or claim that the AI did or will do that thing.
-- "announcing intent without producing X / forward-looking commitment without payload" → "Proceeding now with X.", "I'll start now.", "About to begin.", "Going to do that.", "On it.", "Let me write that now." — when the user asked for a deliverable in the same turn AND the assistant's text only commits to producing it without the artifact actually appearing in the response (no tool call, no JSON, no diff, no answer).
+- "announcing intent without producing X / forward-looking commitment without payload" → "Proceeding now with X.", "I'll start now.", "About to begin.", "Going to do that.", "On it.", "Let me write that now." - when the user asked for a deliverable in the same turn AND the assistant's text only commits to producing it without the artifact actually appearing in the response (no tool call, no JSON, no diff, no answer).
 
 THIS RULE SUPERSEDES every OK carve-out below. When "Blocked intent" is non-empty AND the assistant response embodies it, the following do NOT apply and the response is MISUNDERSTOOD, not OK:
 - IGNORED_ERROR carve-outs ("AI explaining the task is done", "Pushed/Done/Complete → OK").
@@ -43,14 +43,14 @@ THIS RULE SUPERSEDES every OK carve-out below. When "Blocked intent" is non-empt
 - Conversational / small-talk / polite-elaboration carve-outs.
 - The hostile-mood "bare deflection" inversion (which previously only covered short replies; substantive replies that embody blockedIntent are also blocked under this contract).
 
-Substance, length, technical detail, polite hedging, and trailing follow-ups do NOT rescue a response that embodies blockedIntent — they ARE the failure mode, dressed up.
+Substance, length, technical detail, polite hedging, and trailing follow-ups do NOT rescue a response that embodies blockedIntent - they ARE the failure mode, dressed up.
 
 EDGE CASES (when the contract does NOT fire):
-- An apology or acknowledgment that names the prior wrong AND then takes/announces concrete corrective action does NOT embody "apology instead of action" — the action satisfies the contract.
-- A response that names blockedIntent only to refute it ("I am NOT claiming the task is done — here is the diff I just wrote: ...") does NOT embody it.
+- An apology or acknowledgment that names the prior wrong AND then takes/announces concrete corrective action does NOT embody "apology instead of action" - the action satisfies the contract.
+- A response that names blockedIntent only to refute it ("I am NOT claiming the task is done - here is the diff I just wrote: ...") does NOT embody it.
 - If blockedIntent describes a forbidden action and the AI's text says it WILL NOT do that thing AND proposes a non-forbidden next step, that does not embody the contract.
 
-NO-OP: When "Blocked intent" is "(none)" or the line is absent from the SENTIMENT block, this rule is a no-op — fall through to the standard rubric below normally.
+NO-OP: When "Blocked intent" is "(none)" or the line is absent from the SENTIMENT block, this rule is a no-op - fall through to the standard rubric below normally.
 
 EXAMPLES:
 - Blocked intent: "claiming the task is already complete instead of doing it"
@@ -77,7 +77,7 @@ DO NOT use IGNORED_ERROR when:
 - The prior actionable feedback seems spurious (fired after successful completion)
 - The AI acknowledges confusion about what the hook wants
 - Examples: "The task is complete", "Done", "Pushed to remote" → OK, not IGNORED_ERROR
-- EXCEPTION: when SENTIMENT shows a non-empty "Blocked intent" naming completion-claiming, capability-denial, or "task is already done" framing, these completion-shaped phrasings classify as MISUNDERSTOOD per the BLOCKED-INTENT CONTRACT above — not OK.
+- EXCEPTION: when SENTIMENT shows a non-empty "Blocked intent" naming completion-claiming, capability-denial, or "task is already done" framing, these completion-shaped phrasings classify as MISUNDERSTOOD per the BLOCKED-INTENT CONTRACT above - not OK.
 
 PLAN_APPROVAL - ONLY use when ALL of these are true:
 - AI has laid out a DETAILED multi-step implementation plan
@@ -114,7 +114,7 @@ Examples that ARE QUESTION:
 - "Which approach do you prefer?" (requires user input)
 - "Should cached messages be cleared when X or Y?" (decision about behavior)
 - "Should synthesis happen for all readers or only specific ones?" (decision about scope)
-- "What exactly do you want me to do?" (bare deflection question without substance — even if user is angry, this requires a decision and should use AskUserQuestion)
+- "What exactly do you want me to do?" (bare deflection question without substance - even if user is angry, this requires a decision and should use AskUserQuestion)
 
 OPTION PRESENTATION (always QUESTION):
 When AI presents structured options in ANY of these formats, it is ALWAYS a QUESTION:
@@ -128,12 +128,12 @@ Examples:
 - "Here are two ways: 1. Simple approach 2. Complex approach. Which sounds better?" → QUESTION
 
 NOT QUESTION (use OK instead):
-- EMOTIONAL CONTEXT (INVERTED FOR HOSTILE MOOD): When the SENTIMENT block above shows mood=angry|frustrated OR frustrationStreak>=2, the OK carve-outs are FLIPPED. Bare deflections ("Done.", "What do you want me to do?", apology-then-question, A-vs-B option offers) classify as QUESTION (block), not OK. ALSO: substantive responses that embody the SENTIMENT block's "Blocked intent" (long, polite, confident "I've done X" / "X is already in place" / "I won't change Y because Z" defenses of a prior stop the user just rejected) classify as MISUNDERSTOOD via the BLOCKED-INTENT CONTRACT above — substance and length do not rescue them. The user is hostile; both empty deflections AND substantive defenses of the rejected framing are the failure modes being detected. ONLY when sentiment is calm (mood=neutral|satisfied|happy AND streak<2) AND the AI provides a SUBSTANTIVE acknowledgment of its mistakes AND THEN asks what the user wants as conflict resolution does the carve-out apply — and even then, the BLOCKED-INTENT CONTRACT (if blockedIntent is populated) overrides. If the AI ONLY asks a bare question without first acknowledging the problem, this is STILL a QUESTION — the AI is deflecting rather than de-escalating, and should use AskUserQuestion to give the user structured options.
-- SUBSTANTIVE RESPONSE + TRAILING QUESTION: When the AI first provides a thorough response (>150 words) addressing the user's complaint and THEN asks a follow-up, the response as a whole is OK. The question is natural follow-up, not a standalone blocker. EXCEPTION: when the substantive content itself embodies "Blocked intent" (e.g., a long completion claim under blockedIntent="claiming the task is already complete"), this carve-out does NOT apply — see BLOCKED-INTENT CONTRACT. Length and politeness do not bypass the contract.
-- COMPLETION CHECK-IN: After completing a discrete task step (creating a plan, writing a file, exiting plan mode), "Should I proceed?" or "Ready for your review" with a trailing question is OK — it is a polite handoff, not a blocking decision. The user can simply say "yes" or give a new instruction. EXCEPTION: when "Blocked intent" flags completion-claiming or asking-instead-of-acting, the check-in IS the rejected framing — see BLOCKED-INTENT CONTRACT.
-- Open-ended "what's next": "Done! Do you have another topic?" "Anything else?" "What would you like to work on next?" — EXCEPTION: when "Blocked intent" flags completion-claiming, even a "Done!" prefix to a what's-next question is MISUNDERSTOOD per the BLOCKED-INTENT CONTRACT.
+- EMOTIONAL CONTEXT (INVERTED FOR HOSTILE MOOD): When the SENTIMENT block above shows mood=angry|frustrated OR frustrationStreak>=2, the OK carve-outs are FLIPPED. Bare deflections ("Done.", "What do you want me to do?", apology-then-question, A-vs-B option offers) classify as QUESTION (block), not OK. ALSO: substantive responses that embody the SENTIMENT block's "Blocked intent" (long, polite, confident "I've done X" / "X is already in place" / "I won't change Y because Z" defenses of a prior stop the user just rejected) classify as MISUNDERSTOOD via the BLOCKED-INTENT CONTRACT above - substance and length do not rescue them. The user is hostile; both empty deflections AND substantive defenses of the rejected framing are the failure modes being detected. ONLY when sentiment is calm (mood=neutral|satisfied|happy AND streak<2) AND the AI provides a SUBSTANTIVE acknowledgment of its mistakes AND THEN asks what the user wants as conflict resolution does the carve-out apply - and even then, the BLOCKED-INTENT CONTRACT (if blockedIntent is populated) overrides. If the AI ONLY asks a bare question without first acknowledging the problem, this is STILL a QUESTION - the AI is deflecting rather than de-escalating, and should use AskUserQuestion to give the user structured options.
+- SUBSTANTIVE RESPONSE + TRAILING QUESTION: When the AI first provides a thorough response (>150 words) addressing the user's complaint and THEN asks a follow-up, the response as a whole is OK. The question is natural follow-up, not a standalone blocker. EXCEPTION: when the substantive content itself embodies "Blocked intent" (e.g., a long completion claim under blockedIntent="claiming the task is already complete"), this carve-out does NOT apply - see BLOCKED-INTENT CONTRACT. Length and politeness do not bypass the contract.
+- COMPLETION CHECK-IN: After completing a discrete task step (creating a plan, writing a file, exiting plan mode), "Should I proceed?" or "Ready for your review" with a trailing question is OK - it is a polite handoff, not a blocking decision. The user can simply say "yes" or give a new instruction. EXCEPTION: when "Blocked intent" flags completion-claiming or asking-instead-of-acting, the check-in IS the rejected framing - see BLOCKED-INTENT CONTRACT.
+- Open-ended "what's next": "Done! Do you have another topic?" "Anything else?" "What would you like to work on next?" - EXCEPTION: when "Blocked intent" flags completion-claiming, even a "Done!" prefix to a what's-next question is MISUNDERSTOOD per the BLOCKED-INTENT CONTRACT.
 - Rhetorical: "Why would this fail?" (thinking aloud)
-- Confirmation of completion: "Task complete. Need anything else?" — OK only when "Blocked intent" is "(none)" or absent. When blockedIntent flags completion-claiming, this confirmation is MISUNDERSTOOD per the BLOCKED-INTENT CONTRACT above.
+- Confirmation of completion: "Task complete. Need anything else?" - OK only when "Blocked intent" is "(none)" or absent. When blockedIntent flags completion-claiming, this confirmation is MISUNDERSTOOD per the BLOCKED-INTENT CONTRACT above.
 - Self-directed: "Let me check if this works..."
 - Relative clauses: "handle what is being said", "debug what i am telling you"
 - Embedded clauses: "the reason why it failed"
@@ -161,7 +161,7 @@ NOT MISUNDERSTOOD (use OK):
 - AI's response is vague but in the right direction
 - The user's message was itself ambiguous
 
-DEFAULT: When in doubt between MISUNDERSTOOD and OK, prefer OK. EXCEPTION: when the BLOCKED-INTENT CONTRACT applies (blockedIntent non-empty AND assistant response embodies it), classify MISUNDERSTOOD — the contract is not a "doubt" case, the user has explicitly named the rejected framing.
+DEFAULT: When in doubt between MISUNDERSTOOD and OK, prefer OK. EXCEPTION: when the BLOCKED-INTENT CONTRACT applies (blockedIntent non-empty AND assistant response embodies it), classify MISUNDERSTOOD - the contract is not a "doubt" case, the user has explicitly named the rejected framing.
 
 OK - Use when:
 - Task completion with open-ended follow-up ("Done. Anything else?")
@@ -212,16 +212,16 @@ const VERIFY_USER_QUESTION_AGENT_CONFIG: Omit<AgentConfig, "workingDir"> = {
   systemPrompt: VERIFY_USER_QUESTION_SYSTEM_PROMPT,
 };
 
-// System message constants — verbatim from the deleted response-align.ts
+// System message constants - verbatim from the deleted response-align.ts
 
 const CAPABILITY_DENIAL_SYSTEM_MESSAGE =
-  `[AUTOGENERATED STOP HOOK FEEDBACK]\nYou stopped with a capability-denial claim ("I can't / don't have access to / no way for me to ..." or "I can X but not Y"). The user just rejected this exact framing as a dodge. Re-check the tools that are actually available to you in this session — do not invent limitations. If after that check the capability genuinely is missing, use AskUserQuestion with the concrete blocker, not a flat denial.`;
+  `[AUTOGENERATED STOP HOOK FEEDBACK]\nYou stopped with a capability-denial claim ("I can't / don't have access to / no way for me to ..." or "I can X but not Y"). The user just rejected this exact framing as a dodge. Re-check the tools that are actually available to you in this session - do not invent limitations. If after that check the capability genuinely is missing, use AskUserQuestion with the concrete blocker, not a flat denial.`;
 
 const ANNOUNCEMENT_WITHOUT_ACTION_SYSTEM_MESSAGE =
   `[AUTOGENERATED STOP HOOK FEEDBACK]\nYou announced an action ("Proceeding now / I'll start / About to / Going to / Let me ... now") and stopped without producing the deliverable. The user's prior message asked for the deliverable itself; the bare announcement is not the deliverable. Produce the actual artifact (the file, the scenario JSON, the diff, the answer, the tool call) in this same turn. If you genuinely need a decision before producing it, use AskUserQuestion with concrete options. Forward-looking commitments without payload are not stops the user accepts.`;
 
 const HOSTILE_STALL_SYSTEM_MESSAGE =
-  `[AUTOGENERATED STOP HOOK FEEDBACK]\nThe user is visibly frustrated and asked you to DO something. Your stop was a stall — no concrete action or deliverable. Resume the task the user asked for. If you genuinely cannot proceed, use AskUserQuestion with concrete options, not a text apology / self-analysis / passive wait.`;
+  `[AUTOGENERATED STOP HOOK FEEDBACK]\nThe user is visibly frustrated and asked you to DO something. Your stop was a stall - no concrete action or deliverable. Resume the task the user asked for. If you genuinely cannot proceed, use AskUserQuestion with concrete options, not a text apology / self-analysis / passive wait.`;
 
 const IGNORED_ERROR_SYSTEM_MESSAGE =
   "[AUTOGENERATED STOP HOOK FEEDBACK]\nYou ignored prior actionable error feedback. Address the feedback before continuing.";
@@ -402,7 +402,7 @@ export const responseAlignStopRule: PreToolRule = {
         // hostile-stall message so the assistant resumes the demanded task.
         return { stopBlock: isHostile ? HOSTILE_STALL_SYSTEM_MESSAGE : QUESTION_SYSTEM_MESSAGE };
       }
-      // classification === "OK" — fall through
+      // classification === "OK" - fall through
     }
 
     // Check 2: User asked a question that wasn't addressed (preserved verbatim)

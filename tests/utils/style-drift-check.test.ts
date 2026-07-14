@@ -363,6 +363,37 @@ describe("findRepositoryStyleDrift", () => {
     expect(warning).toContain("oversized.txt was not scanned");
   });
 
+  it("classifies an oversized binary without reporting an incomplete style scan", async () => {
+    fs.writeFileSync(path.join(repoDir, "oversized-plugin.so"), Buffer.alloc(3 * 1024 * 1024, 0));
+
+    const result = await findRepositoryStyleDrift(repoDir);
+
+    expect(result.skippedFiles).toEqual([]);
+    expect(formatRepositoryStyleDriftWarning(result)).toBeNull();
+  });
+
+  it("does not style-check captured scenario fixture content", async () => {
+    const scenarioDir = path.join(repoDir, "scenarios", "expected-to-pass");
+    fs.mkdirSync(scenarioDir, { recursive: true });
+    fs.writeFileSync(path.join(scenarioDir, "captured.json"), "{\"transcript\":\"\ud83d\ude80 \u2014\"}\n");
+
+    const result = await findRepositoryStyleDrift(repoDir);
+
+    expect(result.totalFindings).toBe(0);
+  });
+
+  it("does not report tracked files deleted from the working tree as unreadable", async () => {
+    const deletedPath = path.join(repoDir, "obsolete.txt");
+    fs.writeFileSync(deletedPath, "obsolete\n");
+    git(repoDir, ["add", "obsolete.txt"]);
+    git(repoDir, ["commit", "-m", "add obsolete fixture"]);
+    fs.rmSync(deletedPath);
+
+    const result = await findRepositoryStyleDrift(repoDir);
+
+    expect(result.skippedFiles).toEqual([]);
+  });
+
   it("omits within-inventory-limit high-line-count files before full-content parsing", async () => {
     const highLineCount = path.join(repoDir, "many-lines.txt");
     fs.writeFileSync(highLineCount, Buffer.alloc(3 * 1024 * 1024, 10));

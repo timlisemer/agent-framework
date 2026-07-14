@@ -1,10 +1,10 @@
 /**
- * Lifecycle — epoch-rotation side-effects.
+ * Lifecycle - epoch-rotation side-effects.
  *
  * When a new epoch starts (rewind or compact), the derived caches that
  * accumulated state across the old epoch must be reset so the new epoch
  * begins from defaults. The forensic JSONL logs (captures, state-snapshots,
- * epochs, tool-log) are intentionally NOT touched — they are immutable audit
+ * epochs, tool-log) are intentionally NOT touched - they are immutable audit
  * trails.
  *
  * @module scenario/lifecycle

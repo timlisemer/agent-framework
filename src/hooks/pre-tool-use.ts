@@ -163,12 +163,12 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
     await clearGateReasoning(sessionDir);
   }
 
-  // Fail open on any detection error — falls through to normal single-tool pipeline
+  // Fail open on any detection error - falls through to normal single-tool pipeline
   let batchInfo: ParallelBatchInfo | null = null;
   try {
     batchInfo = await detectParallelBatch(input.transcript_path, input.tool_use_id);
   } catch {
-    // Detection failed — treat as solo tool (safe fallback)
+    // Detection failed - treat as solo tool (safe fallback)
   }
   let workflowBatchAdvanceCalls: PredictionToolCall[] | null = null;
 
@@ -258,7 +258,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
     }
 
     // forceCheckPending clear: keyed on THIS hook's toolName, not the leader's.
-    // Applies to both leader and mirrored siblings — if THIS hook is an MCP
+    // Applies to both leader and mirrored siblings - if THIS hook is an MCP
     // commit/confirm/check/validate_implementation that was allowed (directly or mirrored), it
     // satisfies the force-check lockout. Keeping this outside the
     // `!mirroredFromLeader` guard preserves today's semantics where every
@@ -376,7 +376,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
         await new Promise((r) => setTimeout(r, 100));
       }
       // Leader crashed / never wrote. Fall through and run the pipeline
-      // ourselves — bounded graceful degradation, not deadlock. This
+      // ourselves - bounded graceful degradation, not deadlock. This
       // matches the pre-commit behavior of waitForBatchLeader's
       // fail-open-on-timeout branch.
     }
@@ -389,7 +389,7 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   // - In-project files: normal flow.
   // - Otherwise (true outside-project, e.g. /etc/hosts): flag the context so
   //   downstream LLM gates inject a harsh "be extra conservative" warning.
-  //   NEVER a hard block — the task explicitly requires soft LLM review.
+  //   NEVER a hard block - the task explicitly requires soft LLM review.
   let outsideRootPath: string | undefined;
   if (FILE_TOOLS.includes(toolName)) {
     for (const raw of extractFilePaths(toolName, toolInput)) {

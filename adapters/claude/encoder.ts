@@ -1,5 +1,5 @@
 /**
- * Claude adapter encoder — translates framework decisions into Claude's
+ * Claude adapter encoder - translates framework decisions into Claude's
  * expected stdout JSON shapes.
  *
  * This is the ONLY Claude-specific stdout code in the framework.

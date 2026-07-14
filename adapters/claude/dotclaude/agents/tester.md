@@ -42,7 +42,6 @@ Then find work:
 - `src/hooks/stop-response-check.ts` -- stop hook
 - `src/agents/hooks/tool-approve.ts` -- tool approval agent
 - `src/agents/hooks/tool-appeal.ts` -- appeal agent
-- `src/agents/hooks/gate.ts` -- gate agent
 - `src/utils/agent-configs.ts` -- agent system prompts (includes SENTIMENT_AGENT)
 - `src/utils/prediction-types.ts` -- sentiment prediction shape + decidePrediction
 - `src/rules/force-check-required.ts` -- lockout rule reading state.forceCheckPending

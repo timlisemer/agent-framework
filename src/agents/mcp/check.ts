@@ -107,7 +107,7 @@ type CheckOptions = CancellationOptions & { repoScope?: CheckScope };
  * Strict superset of the original /unused|never read|declared but|not used/i
  * at the legacy "Action Required" footer (the same regex without word
  * boundaries). Adds `dead code` so Cargo/Rust dead-code lints are also
- * promoted. Word boundaries are intentional — substring matches like
+ * promoted. Word boundaries are intentional - substring matches like
  * `Reused` should NOT trigger promotion (verified harmless against linter
  * output samples).
  */

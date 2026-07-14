@@ -55,7 +55,7 @@ const baseTelemetry = {
   executionType: EXECUTION_TYPES.LLM,
 };
 
-describe("runAgentWithRetryAndTelemetry — env-keyed LLM stub", () => {
+describe("runAgentWithRetryAndTelemetry - env-keyed LLM stub", () => {
   let restoreProviderEnv: (() => void) | undefined;
 
   beforeEach(() => {

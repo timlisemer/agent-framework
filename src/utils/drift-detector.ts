@@ -118,7 +118,7 @@ function checkRepetition(
     if (count >= 10) {
       return {
         detected: true,
-        reason: `${count} edits to "${target}" — final warning. Do NOT make another partial edit. Read the file, list every remaining change, then apply them all in a single ${TEXT_EDIT_TOOL_NAMES_DISPLAY} call.`,
+        reason: `${count} edits to "${target}" - final warning. Do NOT make another partial edit. Read the file, list every remaining change, then apply them all in a single ${TEXT_EDIT_TOOL_NAMES_DISPLAY} call.`,
       };
     }
     return NO_DRIFT;
@@ -127,7 +127,7 @@ function checkRepetition(
   if (count >= 5) {
     return {
       detected: true,
-      reason: `${count} edits to "${target}" — stop making many small edits. Read the full file, plan all remaining changes, and apply them in ONE ${TEXT_EDIT_TOOL_NAMES_DISPLAY} call. You may continue editing this file; just consolidate.`,
+      reason: `${count} edits to "${target}" - stop making many small edits. Read the full file, plan all remaining changes, and apply them in ONE ${TEXT_EDIT_TOOL_NAMES_DISPLAY} call. You may continue editing this file; just consolidate.`,
     };
   }
 

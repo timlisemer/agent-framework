@@ -99,7 +99,7 @@ export async function mainSessionStart(input: SessionStartHookInput, encoder: Ad
   }
 
   if (source === "clear") {
-    // Delete session dir entirely — no epoch rotation (dir is being deleted).
+    // Delete session dir entirely - no epoch rotation (dir is being deleted).
     await fs.promises.rm(sessionDir, { recursive: true, force: true });
     const out = encoder.encodeOk("SessionStart");
     await exitAfterFlush(out.exitCode, out.stdout);

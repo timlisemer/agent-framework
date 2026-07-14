@@ -1,7 +1,7 @@
 /**
  * Claude transcript parser.
  *
- * Claude Code already emits the canonical shape on each JSONL line —
+ * Claude Code already emits the canonical shape on each JSONL line -
  * each line is either a canonical message entry or a meta entry.
  * This parser is essentially identity: parse JSON, return as-is.
  *
@@ -29,7 +29,7 @@ function normalizeEntry(raw: unknown, source: TranscriptSource): TranscriptEntry
   // Claude Code already uses the canonical shape.
   if (entry.message) return withTranscriptSource(entry as TranscriptEntry, source);
 
-  // Meta entries (no message field) — preserve isMeta flag.
+  // Meta entries (no message field) - preserve isMeta flag.
   return { isMeta: entry.isMeta ?? true, source, createdAt: source.createdAt };
 }
 

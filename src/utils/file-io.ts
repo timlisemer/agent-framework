@@ -1,5 +1,5 @@
 /**
- * File I/O — unified read/write helpers for all non-CacheManager file I/O.
+ * File I/O - unified read/write helpers for all non-CacheManager file I/O.
  *
  * Provides:
  * - JSONL append (async + sync)
@@ -33,6 +33,7 @@ export async function scanValidatedFileCancellable(
   filePath: string,
   options: CancellationOptions & {
     maxBytes: number;
+    binaryProbeBytes?: number;
     visitChunk?: (chunk: Buffer) => void;
   },
 ): Promise<ValidatedFileScanResult> {
@@ -54,7 +55,10 @@ export async function scanValidatedFileCancellable(
       scannedBytes: 0,
     };
   }
-  if (before.size > options.maxBytes) return { kind: "scan-limited", bytes: before.size, scannedBytes: 0 };
+  const binaryProbeBytes = Math.max(0, Math.floor(options.binaryProbeBytes ?? 0));
+  if (before.size > options.maxBytes && binaryProbeBytes === 0) {
+    return { kind: "scan-limited", bytes: before.size, scannedBytes: 0 };
+  }
 
   let handle: fs.promises.FileHandle;
   try {
@@ -82,7 +86,33 @@ export async function scanValidatedFileCancellable(
     if (!opened.isFile()) {
       return { kind: "non-file", fileType: opened.isDirectory() ? "directory" : "special file", scannedBytes: total };
     }
-    if (opened.size > options.maxBytes) return { kind: "scan-limited", bytes: opened.size, scannedBytes: 0 };
+    if (opened.size > options.maxBytes) {
+      if (binaryProbeBytes === 0) {
+        return { kind: "scan-limited", bytes: opened.size, scannedBytes: 0 };
+      }
+      const probeBuffer = Buffer.allocUnsafe(Math.min(binaryProbeBytes, opened.size));
+      let probeBytes = 0;
+      while (probeBytes < probeBuffer.length) {
+        throwIfAborted(options.signal);
+        let read: Awaited<ReturnType<typeof handle.read>>;
+        try {
+          read = await handle.read(
+            probeBuffer,
+            probeBytes,
+            probeBuffer.length - probeBytes,
+            probeBytes,
+          );
+        } catch {
+          throwIfAborted(options.signal);
+          return { kind: "unreadable", regularFile: true, bytes: opened.size, scannedBytes: probeBytes };
+        }
+        if (read.bytesRead === 0) break;
+        probeBytes += read.bytesRead;
+      }
+      const probe = probeBuffer.subarray(0, probeBytes);
+      if (probe.includes(0)) return { kind: "binary", bytes: opened.size, scannedBytes: probeBytes };
+      return { kind: "scan-limited", bytes: opened.size, scannedBytes: probeBytes };
+    }
 
     const buffer = Buffer.allocUnsafe(64 * 1024);
     while (true) {
@@ -631,7 +661,7 @@ export function updateJsonFile<T>(
       acquired = true;
       break;
     } catch {
-      // Lock held — busy wait
+      // Lock held - busy wait
       const deadline = Date.now() + LOCK_RETRY_DELAY_MS;
       while (Date.now() < deadline) { /* spin */ }
     }

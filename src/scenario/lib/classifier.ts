@@ -107,7 +107,7 @@ export function classifyLine(
     const content = message?.content;
     const stopReason = message?.stop_reason ?? parsed.stop_reason;
 
-    // Priority 5: tool_use blocks — check FIRST regardless of stop_reason
+    // Priority 5: tool_use blocks - check FIRST regardless of stop_reason
     if (Array.isArray(content)) {
       const toolUseBlocks = content.filter(
         (block: Record<string, unknown>) => block.type === "tool_use"
@@ -131,7 +131,7 @@ export function classifyLine(
       }
     }
 
-    // Priority 7 & 8: streaming chunk, thinking-only — skip
+    // Priority 7 & 8: streaming chunk, thinking-only - skip
     return { kind: "skip" };
   }
 

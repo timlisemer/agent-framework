@@ -38,7 +38,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", () => ({
 }));
 
 // Spy-able mock for the direct provider boundary. It MUST NOT be called when
-// input is a sentinel — that's the contract of the format-validation
+// input is a sentinel - that's the contract of the format-validation
 // skip-on-sentinel branch.
 const runAnthropicApiSkinDirectSpy = vi.fn();
 
@@ -81,7 +81,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   };
 }
 
-describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry", () => {
+describe("runAgent - SDK-error sentinel triggers fallbackOutput without retry", () => {
   let restoreProviderEnv: (() => void) | undefined;
 
   beforeEach(() => {
@@ -101,7 +101,7 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
 
   it("substitutes fallbackOutput for [SDK ERROR] sentinel and skips the retry tier", async () => {
     // Both attempts yield zero messages so the in-process retry runs once and
-    // also returns the enriched sentinel — proving the fallback template is
+    // also returns the enriched sentinel - proving the fallback template is
     // applied to the second-attempt sentinel (not the first).
     setQueryGenerators(
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -119,7 +119,7 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
     // proving the fallback was applied (not that the raw sentinel leaked verbatim).
     expect(result.output).toContain("## Raw Output");
     expect(result.output).toContain("[SDK ERROR] No output received");
-    // The output must NOT be exactly the raw sentinel — the fallback wraps it.
+    // The output must NOT be exactly the raw sentinel - the fallback wraps it.
     expect(result.output).not.toBe("[SDK ERROR] No output received");
 
     // Enriched sentinel must include zero-message diagnostics.
@@ -380,7 +380,7 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
 
   it("treats success+is_error=true as failure and ignores its result text", async () => {
     // success+is_error is also retry-eligible. Both attempts return the same
-    // poisoned success — the result text must NEVER appear in the output.
+    // poisoned success - the result text must NEVER appear in the output.
     const poisonedSuccess = {
       type: "result",
       subtype: "success",
@@ -573,7 +573,7 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
           errors: ["max turns exhausted"],
         };
       },
-      // Second generator should never be consumed — added only to make a
+      // Second generator should never be consumed - added only to make a
       // spurious second call observable if the retry guard regresses.
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       async function* (_stderr) {
@@ -644,11 +644,11 @@ describe("runAgent — SDK-error sentinel triggers fallbackOutput without retry"
 
   it("extractDecision classification of the wrapped fallback envelope is unchanged by sentinel enrichment", async () => {
     // Use the real extractDecision implementation. extractDecision looks at
-    // the first whitespace-delimited token of the trimmed output — the
+    // the first whitespace-delimited token of the trimmed output - the
     // fallback envelope starts with "## Verdict" so the first token is "##",
     // which is not in the recognized decision patterns. The point of this
     // regression test is to confirm that the enriched parenthetical embedded
-    // inside the `## Raw Output` block does NOT shift this classification —
+    // inside the `## Raw Output` block does NOT shift this classification -
     // the value must be the same as what the bare-template envelope produces.
     setQueryGenerators(
       // eslint-disable-next-line @typescript-eslint/no-unused-vars

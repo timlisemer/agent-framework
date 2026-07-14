@@ -3,7 +3,7 @@
  *
  * Walks test-harness/fixtures/scenarios/**\/*.json and asserts that no fixture
  * contains runtime-only fields or LLM bypass hooks.
- * Those fields belong in the runtime sidecar (last-run.json) — not in the
+ * Those fields belong in the runtime sidecar (last-run.json) - not in the
  * committed fixture files.
  *
  * Exits 1 with the offending file path on any violation.

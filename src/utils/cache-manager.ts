@@ -186,7 +186,7 @@ export class CacheManager<T> {
     try {
       fs.unlinkSync(this.config.filePath + ".tmp");
     } catch {
-      // No stale .tmp — nothing to clean
+      // No stale .tmp - nothing to clean
     }
     try {
       const raw = await fs.promises.readFile(this.config.filePath, "utf-8");
@@ -208,7 +208,7 @@ export class CacheManager<T> {
 
       let data = state.data;
 
-      // Optional validate callback — on null, reset to defaults and persist
+      // Optional validate callback - on null, reset to defaults and persist
       if (this.config.validate) {
         const validated = this.config.validate(data);
         if (validated === null) {

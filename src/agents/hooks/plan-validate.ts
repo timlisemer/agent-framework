@@ -170,7 +170,7 @@ export async function checkPlanIntent(
     );
 
     // Hard-deny for schedule-bucket and solution-branching categories from
-    // RULE_VIOLATION_PATTERNS — these are fully captured by regex and need
+    // RULE_VIOLATION_PATTERNS - these are fully captured by regex and need
     // no LLM nuance.
     if (hardRuleViolations.length > 0) {
       const feedback = hardRuleViolations

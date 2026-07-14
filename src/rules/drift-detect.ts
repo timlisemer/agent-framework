@@ -18,7 +18,7 @@ export const driftDetectRule: PreToolRule = {
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     // Scope drift counting to the current user turn. Every UserPromptSubmit
     // bumps lastUserMessageTimestamp, so prior-turn allowed edits no longer
-    // count toward the warning threshold — drift counters reset per turn.
+    // count toward the warning threshold - drift counters reset per turn.
     const sinceTs = ctx.state.lastUserMessageTimestamp ?? 0;
     const recentLog = readToolLogEntries(ctx.sessionDir, 50)
       .filter((e) => e.ts >= sinceTs);

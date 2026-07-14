@@ -87,7 +87,7 @@ function renderUserStateSection(userState: AppealUserState): string {
       ? userState.explicitlyAllowedTools.join(", ")
       : "(none)";
   return `
-=== USER STATE (authoritative — deterministic sentiment analysis, not derived from transcript) ===
+=== USER STATE (authoritative - deterministic sentiment analysis, not derived from transcript) ===
 Mood: ${userState.mood ?? "unknown"}
 Trust: ${userState.trust ?? "unknown"}
 Frustration streak (consecutive negative-mood turns): ${userState.frustrationStreak}
@@ -106,7 +106,7 @@ ${explicitlyBlockedStr === "(none)" ? "(none)" : explicitlyBlockedStr}
 function renderLastUserMessageSection(snippet: string): string {
   if (!snippet) return "";
   return `
-=== LAST USER MESSAGE (authoritative — the user's REAL last words) ===
+=== LAST USER MESSAGE (authoritative - the user's REAL last words) ===
 "${snippet}"
 === END LAST USER MESSAGE ===
 `;
@@ -224,12 +224,12 @@ Allowed tools: ${allowedToolsStr}
     const tokenMatch = originalReason.match(/^(.+?)\s+(?:not\s+)?covered\s+by\s+(?:just|make)\s+check\b/);
     const deniedToken = tokenMatch ? tokenMatch[1] : null;
     const tokenLine = deniedToken
-      ? `Denied-command token: ${deniedToken}\nIMPORTANT: the tool call now under appeal IS the denied command — not an alternative TO it. Rule 3's "Used node/python/other language instead of the denied command" does NOT apply here. Rule 2's "Inline string testing" and "Command output capture" carve-outs do NOT apply here.\n`
+      ? `Denied-command token: ${deniedToken}\nIMPORTANT: the tool call now under appeal IS the denied command - not an alternative TO it. Rule 3's "Used node/python/other language instead of the denied command" does NOT apply here. Rule 2's "Inline string testing" and "Command output capture" carve-outs do NOT apply here.\n`
       : "";
     {
       const spec = (await import("../../adapter/spec.js")).activeSpec();
       const checkHint = spec.renderCheckMcpHint();
-      denialClassSection = `\n=== DENIAL CLASS ===\ncheck-redirect: this denial steers from a raw build/test/typecheck/lint/runtime command toward the sanctioned ${checkHint}. The user's underlying intent is fulfilled by the alternative tool — not by the raw command.\n${tokenLine}=== END DENIAL CLASS ===\n`;
+      denialClassSection = `\n=== DENIAL CLASS ===\ncheck-redirect: this denial steers from a raw build/test/typecheck/lint/runtime command toward the sanctioned ${checkHint}. The user's underlying intent is fulfilled by the alternative tool - not by the raw command.\n${tokenLine}=== END DENIAL CLASS ===\n`;
     }
   }
 

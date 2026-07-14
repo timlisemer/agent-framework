@@ -85,7 +85,7 @@ export interface RuleContext {
    *
    * Read by decidePrediction step 3.10. Default false / undefined means
    * "the cached prediction's source turn is still the freshest open
-   * imperative — apply normal mood policy".
+   * imperative - apply normal mood policy".
    */
   cachedSnippetSideTaskDischarged?: boolean;
   /**

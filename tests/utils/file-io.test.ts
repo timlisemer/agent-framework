@@ -109,4 +109,18 @@ describe("readValidatedTextFileCancellable", () => {
       openSpy.mockRestore();
     }
   });
+
+  it("classifies an oversized binary from a bounded prefix probe", async () => {
+    const target = path.join(tmpDir, "oversized-binary.so");
+    fs.writeFileSync(target, Buffer.alloc(256 * 1024, 0));
+
+    await expect(scanValidatedFileCancellable(target, {
+      maxBytes: 64 * 1024,
+      binaryProbeBytes: 64 * 1024,
+    })).resolves.toEqual({
+      kind: "binary",
+      bytes: 256 * 1024,
+      scannedBytes: 64 * 1024,
+    });
+  });
 });

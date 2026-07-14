@@ -22,7 +22,7 @@ export const toolApproveRule: PreToolRule = {
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     // Plan files are handled by the dedicated plan-validate block in
-    // pre-tool-use.ts. Never let the tool-approve LLM speak for them —
+    // pre-tool-use.ts. Never let the tool-approve LLM speak for them -
     // it has no concept of the plans-dir exception and would sample
     // "DENY outside project" nondeterministically.
     if (FILE_TOOLS.includes(ctx.toolName)) {
@@ -83,7 +83,7 @@ export const toolApproveRule: PreToolRule = {
       }
     }
 
-    // Contribute aggregator context — host instruction files + tool target.
+    // Contribute aggregator context - host instruction files + tool target.
     const host = ctx.host;
     const instructionFiles = host?.instructionFiles ?? [path.join(ctx.projectDir, "CLAUDE.md")];
     const chunks = await Promise.all(

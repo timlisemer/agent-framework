@@ -290,7 +290,7 @@ ${commitDiffContext}`,
     return `ERROR: Failed to parse commit message from LLM response: ${result.output}`;
   }
 
-  // TS authoritative on size — override whatever the LLM emitted.
+  // TS authoritative on size - override whatever the LLM emitted.
   parsed.size = tsSize.size;
 
   // Execute the commit. Use argv-based git calls so shell-active commit

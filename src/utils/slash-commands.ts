@@ -1,9 +1,9 @@
 /**
- * Slash commands that GATE specific MCP tools — those tools cannot run
+ * Slash commands that GATE specific MCP tools - those tools cannot run
  * without an explicit slash-command invocation. Single source of truth
  * for RESTRICTED_MCPS. Consumed (transitively) by:
- *  - isLowRiskTool (src/rules/utils.ts) — excludes from low-risk prediction treatment
- *  - tool-approve  (src/rules/tool-approve.ts) — hard-deny without auth
+ *  - isLowRiskTool (src/rules/utils.ts) - excludes from low-risk prediction treatment
+ *  - tool-approve  (src/rules/tool-approve.ts) - hard-deny without auth
  *
  * All keys and values are CANONICAL names. Adapter wire spellings live
  * only inside adapters/. Generic code never sees wire names.

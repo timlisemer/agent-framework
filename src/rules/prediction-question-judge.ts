@@ -16,7 +16,7 @@ import { formatAskUserQuestionsForStallingJudge, normalizeAskUserQuestions } fro
  * ("what do you want me to do?") are denied.
  *
  * Runs BEFORE question-validate (priority 30) because question-validate
- * returns fastAllow which terminates the pipeline — anything at priority > 30
+ * returns fastAllow which terminates the pipeline - anything at priority > 30
  * would never run for AskUserQuestion.
  */
 export const predictionQuestionJudgeRule: PreToolRule = {
@@ -67,7 +67,7 @@ export const predictionQuestionJudgeRule: PreToolRule = {
     if (parsed.questionIsStalling === "yes") {
       return {
         fastDeny:
-          `User is ${prediction.mood} (trust ${prediction.trust}). The question being asked is stalling — answer the user's existing request instead. User said: "${prediction.userMessageSnippet}".`,
+          `User is ${prediction.mood} (trust ${prediction.trust}). The question being asked is stalling - answer the user's existing request instead. User said: "${prediction.userMessageSnippet}".`,
       };
     }
     return null;

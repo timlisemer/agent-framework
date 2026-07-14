@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Scenario runner — fire a single hook against a hand-authored synthetic
+ * Scenario runner - fire a single hook against a hand-authored synthetic
  * transcript state. Unlike replay.ts which walks a real session JSONL,
  * scenario.ts materializes a tiny on-disk transcript from a Scenario blob,
  * fires exactly one hook through the same runHook path, and scores the
@@ -121,7 +121,7 @@ interface BuildResult {
 }
 
 /**
- * Build every jsonl line for the scenario (in-memory only — does NOT
+ * Build every jsonl line for the scenario (in-memory only - does NOT
  * write to disk). Used by both single-hook and fan-out paths so that
  * tool_use id synthesis is stable across the two modes.
  *
@@ -132,7 +132,7 @@ interface BuildResult {
  * `writeTranscriptSlice`.
  *
  * Delegates wire-format emission to `activeSpec().materializeScenarioEntry()`.
- * The active spec is determined by `scenario.env?.adapter` — caller must set
+ * The active spec is determined by `scenario.env?.adapter` - caller must set
  * `process.env.AGENT_FRAMEWORK_ADAPTER` before calling this function.
  */
 function buildAllTranscriptLines(
@@ -286,7 +286,7 @@ function buildAllTranscriptLines(
   // When seed_state.planFile is set, stamp `slug` onto the first synthesized
   // JSONL line so extractSlugFromSession (src/utils/session-utils.ts:30) finds
   // it. The function reads `entry.slug` from any line, returning the first
-  // hit — picking the first line keeps the placement uniform regardless of
+  // hit - picking the first line keeps the placement uniform regardless of
   // which role it carries.
   if (scenario.seed_state?.planFile && allLines.length > 0) {
     const first = JSON.parse(allLines[0]) as Record<string, unknown>;
@@ -441,7 +441,7 @@ function buildHookInput(scenario: Scenario, ctx: BuildInputCtx): Record<string, 
     case "PostToolUse": {
       const block = resolveToolUseBlock(scenario, ctx.finalToolUses);
       // Synthesize a minimal tool_response. For scoring purposes the
-      // content doesn't matter — rules that care should express it via
+      // content doesn't matter - rules that care should express it via
       // scenario transcript tool_result blocks and a later assertion.
       return {
         ...base,
@@ -630,7 +630,7 @@ async function evaluateScenarioPredictions(
 /**
  * Write per-run reality to a last-run.json sidecar under the scenario's
  * home-tree run dir. This keeps the committed fixture file immutable.
- * Best-effort: transient failures must NOT fail the run — log a warning
+ * Best-effort: transient failures must NOT fail the run - log a warning
  * to stderr and continue.
  */
 function writeLastRun(
@@ -963,7 +963,7 @@ async function main() {
       // Fire one PreToolUse hook per tool_use sub-line in the final
       // assistant_split, in order. Shared state (tool-log.jsonl, state.json,
       // gate reasoning) accumulates across fires in one
-      // cacheDir — cache/ is NOT wiped between fires (the rmSync at the
+      // cacheDir - cache/ is NOT wiped between fires (the rmSync at the
       // start of main() runs once per scenario run, preserving the clean
       // slate invariant per run). Siblings inherit the leader's decision
       // via findBatchDecision reading the leader's on-disk tool-log
@@ -1156,7 +1156,7 @@ async function main() {
       try {
         fs.unlinkSync(planFileCleanupPath);
       } catch {
-        // Ignore cleanup errors — best-effort. The seed_state guard refuses
+        // Ignore cleanup errors - best-effort. The seed_state guard refuses
         // to clobber an existing file at the same path on the next run.
       }
     }

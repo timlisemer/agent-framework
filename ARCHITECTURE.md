@@ -165,7 +165,7 @@ false-denial/appeal-alias checks.
 
 Today the Claude Code (`adapters/claude/`) and Codex CLI
 (`adapters/codex/`) adapters exist. Adding support for another tool requires
-only a new adapter directory — the rule logic in `src/hooks/` is unchanged.
+only a new adapter directory - the rule logic in `src/hooks/` is unchanged.
 
 See [`adapters/README.md`](adapters/README.md) for the adapter contract and
 how to add a new adapter.
@@ -186,7 +186,7 @@ as mcp-toolbox only need to run the normal build command.
 
 ## Unified Agent Execution
 
-All agents use the unified `runAgent()` function from `utils/agent-runner.ts`. This provides a single interface regardless of whether the agent uses direct API calls or the host agent's SDK.
+All agents use the unified `runAgent()` function from `src/utils/agent-runner.ts`. This provides a single interface regardless of whether the agent uses direct API calls or the host agent's SDK.
 
 ### Execution Modes
 
@@ -232,7 +232,7 @@ const result = await runAgent(
 
 ### Agent Configuration
 
-All agent configs are defined in `utils/agent-configs.ts`:
+All agent configs are defined in `src/utils/agent-configs.ts`:
 
 ```typescript
 interface AgentConfig {
@@ -486,7 +486,7 @@ add to `ALL_RULES` in `src/rules/index.ts`, add display name to statusline.
 
 ### Pipeline: one evaluator, one LLM call
 
-Every tool call runs every rule in `src/rules/index.ts`'s `ALL_RULES`. Rules either short-circuit with `fastAllow`/`fastDeny` (pure TypeScript, <10ms) or return `llmContext`. The evaluator aggregates every triggered rule's `llmContext` into a SINGLE rule-gate haiku call (`rules/evaluator.ts:99–135`). There is no sync-vs-lazy bifurcation: every rule participates on every call.
+Every tool call runs every rule in `src/rules/index.ts`'s `ALL_RULES`. Rules either short-circuit with `fastAllow`/`fastDeny` (pure TypeScript, <10ms) or return `llmContext`. The evaluator aggregates every triggered rule's `llmContext` into a SINGLE rule-gate haiku call (`src/rules/evaluator.ts:99-135`). There is no sync-vs-lazy bifurcation: every rule participates on every call.
 
 ## Shared Utilities
 
@@ -642,9 +642,9 @@ Write-capable internal implementation runs persist under
 `~/.agent-framework/internal/sessions/write/<run-id>`. Unavoidable scratch
 space is rooted under `/tmp/agent-framework`.
 
-1. **`state.json`** — SessionState (prediction, edit-intent, force-check lockout, frustration streak, window size, tool count).
-2. **`gate-reasoning.json`** — priority-evicted denial memory with NOTE/WARNING/appeal outcomes.
-3. **`tool-log.jsonl`** — append-only audit trail consumed by drift-detect, error-acknowledge, pre-tool-use, gate-reasoning, the test-harness, and AI backend UI/resume metadata hydration.
+1. **`state.json`** - SessionState (prediction, edit-intent, force-check lockout, frustration streak, window size, tool count).
+2. **`gate-reasoning.json`** - priority-evicted denial memory with NOTE/WARNING/appeal outcomes.
+3. **`tool-log.jsonl`** - append-only audit trail consumed by drift-detect, error-acknowledge, pre-tool-use, gate-reasoning, the test-harness, and AI backend UI/resume metadata hydration.
 
 Legacy `timeline-state.json` files are ignored by active AI backend resume.
 Visible rows are rebuilt from the provider transcript and tool log each time.
@@ -677,7 +677,7 @@ PASS/FAIL result. Scenario and replay transcripts under
 `~/.agent-framework/test-runs/` use their containing cache directory as the
 session directory so test artifacts stay isolated.
 
-Compaction recovery relies on the host agent's native transcript compaction — no app-layer summary re-inject.
+Compaction recovery relies on the host agent's native transcript compaction - no app-layer summary re-inject.
 
 ### Hook Lifecycle
 
@@ -699,16 +699,16 @@ Hooks execute in this order during a session:
 ### Removed Components
 
 The following components were removed:
-- `async-validator.ts` — never existed as a source file; the concept was replaced by prediction-driven synchronous rules.
-- `async-gate-validator.ts` — Replaced by the single rule-gate aggregator LLM call.
-- `pending-validation-cache.ts` — Replaced by synchronous rule pipeline.
-- `intent-validate.ts` — Dead code, removed (gate agent covers per-tool intent validation).
-- `ack-cache.ts` — Replaced by `gate-reasoning.json` priority-evicted denial memory.
-- `strict-mode-tracker.ts` — Replaced by `tool-log.jsonl` and SessionState.
-- `summary-updater.ts` / `summary-cache.ts` summary document surface — Replaced by prediction-driven checks and `gate-reasoning.json`.
-- `spawn-background.ts` — No background forks remain; SENTIMENT_AGENT runs synchronously with a hard timeout.
-- `pre-compact.ts` — No app-layer compaction recovery; the host agent's native compaction handles it.
-- `correction-cache.ts` — Dead after summary-updater removal.
-- `checkGate` dead export from `src/agents/hooks/gate.ts` — evaluator's rule-gate path replaces it.
-- `useSyncPipeline` / `coldStart` fields — sync/lazy pipeline bifurcation deleted; every rule runs on every call.
-- `trusted-path` rule — trimmed to `sensitive-path-block` fastDeny only.
+- `async-validator.ts` - never existed as a source file; the concept was replaced by prediction-driven synchronous rules.
+- `async-gate-validator.ts` - Replaced by the single rule-gate aggregator LLM call.
+- `pending-validation-cache.ts` - Replaced by synchronous rule pipeline.
+- `intent-validate.ts` - Dead code, removed (gate agent covers per-tool intent validation).
+- `ack-cache.ts` - Replaced by `gate-reasoning.json` priority-evicted denial memory.
+- `strict-mode-tracker.ts` - Replaced by `tool-log.jsonl` and SessionState.
+- `summary-updater.ts` / `summary-cache.ts` summary document surface - Replaced by prediction-driven checks and `gate-reasoning.json`.
+- `spawn-background.ts` - No background forks remain; SENTIMENT_AGENT runs synchronously with a hard timeout.
+- `pre-compact.ts` - No app-layer compaction recovery; the host agent's native compaction handles it.
+- `correction-cache.ts` - Dead after summary-updater removal.
+- `checkGate` dead export from the former gate hook module - evaluator's rule-gate path replaces it.
+- `useSyncPipeline` / `coldStart` fields - sync/lazy pipeline bifurcation deleted; every rule runs on every call.
+- `trusted-path` rule - trimmed to `sensitive-path-block` fastDeny only.

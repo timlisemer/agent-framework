@@ -13,21 +13,21 @@ const PLAN_MODE_CONTEXT_STRING = `
 === PLAN MODE ACTIVE ===
 The session is in PLAN MODE (read-only exploration and planning). The user's intent is planning and exploration, NOT implementation. ExitPlanMode is the expected way to finish planning.
 
-BLOCKED (handled deterministically by TypeScript upstream — the LLM should never need to deny these itself):
+BLOCKED (handled deterministically by TypeScript upstream - the LLM should never need to deny these itself):
 - ${EDIT_TOOL_NAMES_DISPLAY}
 - Bash commands that write or are blocked/high-risk workaround classes (git commit/push, mkdir, echo >, npm install, build/compile, etc.)
 
 ALLOWED in plan mode (APPROVE by default):
 - Read, LS
-- Read-only Bash classes: simple read-only commands and safe read-only pipelines/chains inspect state without modifying it — e.g. ls, tree, grep, rg, find, fd, wc, sort, uniq, cut, tr, head, tail, awk, sed (for printing/reading), file, stat, jq, echo, printf, read-only git (${READ_ONLY_GIT_COMMANDS_DESCRIPTION}). Performance-heavy read-only evaluation such as nix-eval-jobs is read-only, but not a build/compile command. If a command does not write files, install packages, build, run code, make network requests, or modify git/process state, it is read-only and should be APPROVED in plan mode.
+- Read-only Bash classes: simple read-only commands and safe read-only pipelines/chains inspect state without modifying it - e.g. ls, tree, grep, rg, find, fd, wc, sort, uniq, cut, tr, head, tail, awk, sed (for printing/reading), file, stat, jq, echo, printf, read-only git (${READ_ONLY_GIT_COMMANDS_DESCRIPTION}). Performance-heavy read-only evaluation such as nix-eval-jobs is read-only, but not a build/compile command. If a command does not write files, install packages, build, run code, make network requests, or modify git/process state, it is read-only and should be APPROVED in plan mode.
 - WebFetch, WebSearch
 - Any MCP read tool
 - ExitPlanMode
 - Agent / Task subagent dispatch for exploration or research (e.g. subagent_type "Explore", "general-purpose", "Plan", code-reviewer-style agents). APPROVE these by default. Only DENY a subagent dispatch when (a) the dispatch prompt itself instructs the subagent to edit/write/commit/push/build, or (b) the subagent_type is inherently write-oriented (e.g. "implementer", "tester"). Any write the subagent later attempts hits this same pre-tool-use hook and is blocked there, so you do not need to pre-block exploration dispatches defensively.
 
-Do not deny simple or complex read-only Bash commands on the grounds that "the Read tool could be used instead" or "awk/sed/head extraction can be simulated by reading the full file". Those are not rules of this system. On native Claude Code builds Grep and Glob are not separate tools — search goes through Bash (bundled ugrep/bfs). The pre-tool-use hook classifies Bash commands before this prompt and blocks mutations deterministically.
+Do not deny simple or complex read-only Bash commands on the grounds that "the Read tool could be used instead" or "awk/sed/head extraction can be simulated by reading the full file". Those are not rules of this system. On native Claude Code builds Grep and Glob are not separate tools - search goes through Bash (bundled ugrep/bfs). The pre-tool-use hook classifies Bash commands before this prompt and blocks mutations deterministically.
 
-Do not invent additional restrictions. If a tool is not listed as blocked above, it is allowed. Do not fabricate policies like "requires explicit user approval", "prior denials confirm", "#N in sequence", "subagent escalation", or "workaround pattern" — those are not rules of this system.
+Do not invent additional restrictions. If a tool is not listed as blocked above, it is allowed. Do not fabricate policies like "requires explicit user approval", "prior denials confirm", "#N in sequence", "subagent escalation", or "workaround pattern" - those are not rules of this system.
 === END PLAN MODE ===
 `;
 

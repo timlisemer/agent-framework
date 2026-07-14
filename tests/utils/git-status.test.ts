@@ -1,3 +1,4 @@
+// agent-framework-style-drift-ignore-file
 import { describe, expect, it } from "vitest";
 import {
   assertCompleteGitOutput,

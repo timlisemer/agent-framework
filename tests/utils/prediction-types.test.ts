@@ -384,7 +384,7 @@ describe("decidePrediction", () => {
     expect(result.decision).toBe("allow");
   });
 
-  it("sustained frustration (angry+low-trust+streak=5) revokes low-risk Read bypass — denies as deflection", () => {
+  it("sustained frustration (angry+low-trust+streak=5) revokes low-risk Read bypass - denies as deflection", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -723,7 +723,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
   const FIXTURE_SNIPPET =
     "\"which doesn't map slash-command target plan3 → canonical Skill\" why is that relevant? Isnt the only thing that is relevant the fact that it correctly repeated the user intent, but then blocked the ai";
 
-  it("case 1: verbatim repro from fixture — mood=angry, trust=low, streak=2, intent/snippet verbatim, tool=Read -> allow", () => {
+  it("case 1: verbatim repro from fixture - mood=angry, trust=low, streak=2, intent/snippet verbatim, tool=Read -> allow", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -792,7 +792,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
     expect(result.decision).toBe("allow");
   });
 
-  it("case 6: negative — no AI self-ref: 'user blocked the push attempt' -> deny", () => {
+  it("case 6: negative - no AI self-ref: 'user blocked the push attempt' -> deny", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -826,7 +826,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
     expect(result.decision).toBe("allow");
   });
 
-  it("case 9: negative — no block-verb: 'user wants the AI to stop' -> deny", () => {
+  it("case 9: negative - no block-verb: 'user wants the AI to stop' -> deny", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -837,7 +837,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
     expect(result.decision).toBe("deny");
   });
 
-  it("case 10: negative — undo verb without block-verb: 'the user wants the AI to immediately undo the changes' + streak=2 -> deny (regex requires block-verb)", () => {
+  it("case 10: negative - undo verb without block-verb: 'the user wants the AI to immediately undo the changes' + streak=2 -> deny (regex requires block-verb)", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -845,13 +845,13 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
       userMessageSnippet: "undo it",
     });
     // Read is low-risk; but sustained frustration (angry+low+streak=2) fires
-    // mood-deny at step 4 UNLESS step 3.9 matches first — which it does NOT
+    // mood-deny at step 4 UNLESS step 3.9 matches first - which it does NOT
     // here because there is no block-verb.
     const result = decidePrediction(pred, "Read", { file_path: "src/foo.ts" }, 2);
     expect(result.decision).toBe("deny");
   });
 
-  it("case 10b: negative — AI blocked non-user-object: 'the AI prevented chaos and acted on impulse' -> deny (anchor-3 requires user-directive after act on)", () => {
+  it("case 10b: negative - AI blocked non-user-object: 'the AI prevented chaos and acted on impulse' -> deny (anchor-3 requires user-directive after act on)", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -862,7 +862,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
     expect(result.decision).toBe("deny");
   });
 
-  it("case 11: ordering — snippet prohibition wins: matching intent + snippet 'freeze. no tools.' -> deny", () => {
+  it("case 11: ordering - snippet prohibition wins: matching intent + snippet 'freeze. no tools.' -> deny", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -873,7 +873,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
     expect(result.decision).toBe("deny");
   });
 
-  it("case 12: ordering — per-target block wins: matching intent + explicitlyBlockedSubstrings=[{tool:'Read'}] -> deny", () => {
+  it("case 12: ordering - per-target block wins: matching intent + explicitlyBlockedSubstrings=[{tool:'Read'}] -> deny", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -886,7 +886,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
     expect(result.matchedExplicit?.tool).toBe("Read");
   });
 
-  it("case 13: ordering — blockAllTools=true wins (with neutral snippet, no INACTION) -> deny", () => {
+  it("case 13: ordering - blockAllTools=true wins (with neutral snippet, no INACTION) -> deny", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -898,7 +898,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
     expect(result.decision).toBe("deny");
   });
 
-  it("case 14: ordering — step 3.5 undo wins for edit tool when intent has both undo + self-contradicting -> allow, reason mentions undo/revert", () => {
+  it("case 14: ordering - step 3.5 undo wins for edit tool when intent has both undo + self-contradicting -> allow, reason mentions undo/revert", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -911,7 +911,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
     expect(result.reason).toContain("undo/revert");
   });
 
-  it("case 15: ordering — step 3.6 re-auth wins when intent has re-authorization + self-contradicting -> allow, reason mentions re-authorization", () => {
+  it("case 15: ordering - step 3.6 re-auth wins when intent has re-authorization + self-contradicting -> allow, reason mentions re-authorization", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",
@@ -929,7 +929,7 @@ describe("step 3.9: self-contradicting-block prose-intent fallback", () => {
     expect(result.reason ?? "").toMatch(/re-authorization/);
   });
 
-  it("case 16: bare-verb negative — 'the AI was blocked.' (no patient phrase within 80 chars) -> deny", () => {
+  it("case 16: bare-verb negative - 'the AI was blocked.' (no patient phrase within 80 chars) -> deny", () => {
     const pred = makePrediction({
       mood: "angry",
       trust: "low",

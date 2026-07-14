@@ -123,13 +123,13 @@ function makeCtx(overrides: Partial<RuleContext> = {}): RuleContext {
   });
 }
 
-describe("sentimentRule — metadata", () => {
+describe("sentimentRule - metadata", () => {
   it("exposes events: ['UserPromptSubmit']", () => {
     expect(sentimentRule.events).toEqual(["UserPromptSubmit"]);
   });
 });
 
-describe("sentimentRule — deterministic null paths", () => {
+describe("sentimentRule - deterministic null paths", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -149,7 +149,7 @@ describe("sentimentRule — deterministic null paths", () => {
   });
 });
 
-describe("sentimentRule — LLM-call path", () => {
+describe("sentimentRule - LLM-call path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });

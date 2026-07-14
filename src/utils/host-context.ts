@@ -1,5 +1,5 @@
 /**
- * Host context — pure delegate to the active adapter spec.
+ * Host context - pure delegate to the active adapter spec.
  *
  * All path/config knowledge lives in adapters/<name>/host-context.ts.
  * This module is a thin pass-through that generic code imports.

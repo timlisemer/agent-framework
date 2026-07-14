@@ -1,3 +1,4 @@
+// agent-framework-style-drift-ignore-file
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
@@ -922,6 +923,32 @@ describe("bounded git utilities", () => {
     expect(issues).toHaveLength(0);
   });
 
+  it("does not warn for absolute runtime filesystem paths", async () => {
+    fs.writeFileSync(
+      path.join(repoDir, "runtime.yml"),
+      "storage: /var/lib/service/state.json\nscript: /tmp/service/check.sh\n",
+    );
+    git(repoDir, ["add", "runtime.yml"]);
+    git(repoDir, ["commit", "-m", "add runtime path examples"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
+
+  it("does not treat a bracketed editor language selector as a filename", async () => {
+    fs.writeFileSync(
+      path.join(repoDir, "settings.json"),
+      "{\n  \"[makefile]\": { \"editor.defaultFormatter\": \"example.formatter\" }\n}\n",
+    );
+    git(repoDir, ["add", "settings.json"]);
+    git(repoDir, ["commit", "-m", "add editor language selector"]);
+
+    const issues = await findNonexistentFileReferenceIssuesCancellable(repoDir);
+
+    expect(issues).toHaveLength(0);
+  });
+
   it("does not warn when prose and config literals resolve from the repo root", async () => {
     fs.mkdirSync(path.join(repoDir, ".github", "actions", "setup"), { recursive: true });
     fs.mkdirSync(path.join(repoDir, "docs", "nested"), { recursive: true });
@@ -1021,7 +1048,7 @@ describe("bounded git utilities", () => {
   it("does not warn for creation instructions and placeholder target paths", async () => {
     fs.writeFileSync(
       path.join(repoDir, "README.md"),
-      "Create src/api/YourModelService.ts and src/stores/yourModelHelper.ts for your model.\n",
+      "Create src/api/YourModelService.ts, src/stores/yourModelHelper.ts, and create `src/rules/my-rule.ts`.\n",
     );
     git(repoDir, ["add", "README.md"]);
     git(repoDir, ["commit", "-m", "add placeholder creation instructions"]);

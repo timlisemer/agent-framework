@@ -82,6 +82,6 @@ different transcript UUIDs than the original session.
 ## Fixtures
 
 Fixtures live under `scenarios/` at the repo root, organized into:
-- `expected-to-pass/` — must pass on every CI run
-- `non-deterministic/` — known flaky scenarios that need repeated-run evidence
-- `expected-to-fail/` — intentionally failing (documenting known gaps)
+- `expected-to-pass/` - must pass on every CI run
+- `non-deterministic/` - known flaky scenarios that need repeated-run evidence
+- `expected-to-fail/` - intentionally failing (documenting known gaps)

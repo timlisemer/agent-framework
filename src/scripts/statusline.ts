@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// agent-framework-style-drift-ignore-file
 /**
  * StatusLine Script for the host agent
  *

@@ -67,14 +67,14 @@ export const sentimentRule: PreToolRule = {
     const moodPrefilter = preClassifyMood(strippedForPrefilter);
     const moodHintSection =
       moodPrefilter.hint || moodPrefilter.interruptCount > 0
-        ? `MOOD HINT (regex pre-classifier — judge LATEST yourself; honor only when its first-person hostility is directed at you):\n` +
+        ? `MOOD HINT (regex pre-classifier - judge LATEST yourself; honor only when its first-person hostility is directed at you):\n` +
           `  hint: ${moodPrefilter.hint ?? "none"}\n` +
           `  interruptCount: ${moodPrefilter.interruptCount}\n\n`
         : "";
 
     const directiveHint = extractDirectiveHint(strippedForPrefilter);
     const directiveHintSection = directiveHint
-      ? `DIRECTIVE HINT (regex pre-extractor — last imperative sentence in full LATEST; the user's directive should be reflected in INTENT):\n  ${JSON.stringify(directiveHint)}\n\n`
+      ? `DIRECTIVE HINT (regex pre-extractor - last imperative sentence in full LATEST; the user's directive should be reflected in INTENT):\n  ${JSON.stringify(directiveHint)}\n\n`
       : "";
 
     const strippedHelperSection = strippedForPrefilter !== userPrompt

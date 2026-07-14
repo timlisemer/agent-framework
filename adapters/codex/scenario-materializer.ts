@@ -3,7 +3,7 @@
  *
  * Converts canonical ScenarioEntry objects into Codex JSONL wire format.
  * Emits payload.type:"message" for text turns and payload.type:"function_call"
- * lines for tool_use blocks — matching what Codex actually writes to disk.
+ * lines for tool_use blocks - matching what Codex actually writes to disk.
  *
  * @module adapters/codex/scenario-materializer
  */

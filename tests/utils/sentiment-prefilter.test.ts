@@ -1,3 +1,4 @@
+// agent-framework-style-drift-ignore-file
 import { describe, it, expect } from "vitest";
 import { preClassifyMood, extractDirectiveHint, preClassifyCalm } from "../../src/utils/sentiment-prefilter.js";
 import { stripQuotedAndPastedContent } from "../../src/utils/quote-detection.js";
@@ -88,7 +89,7 @@ describe("preClassifyMood", () => {
   });
 });
 
-describe("preClassifyMood — ALL-CAPS shouting", () => {
+describe("preClassifyMood - ALL-CAPS shouting", () => {
   it("classifies all-caps panic stop as angry", () => {
     const r = preClassifyMood("STOP. WTF ARE YOU DOING.");
     expect(r.hint).toBe("angry");
@@ -139,7 +140,7 @@ describe("preClassifyCalm", () => {
     // Guards against future quote-stripper regressions that re-introduce
     // "shitheads" / "fuck you" into the residual stripped text and break predicate (d).
     const raw =
-      "please read @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md i will quote you a claude code session snippet which has 1 distinct issue and 1 correct behavior. QUOTE: \"❯ /plan3 no the fix is not unchanged. you want to ignore the bug and want to remove the appeal feature. i want you to fix a bug and want you to add a code comment so that shitheads like you are being made aware that removing appeal agent is never a option or a fix, this is considered hostile. before you run plan3 please rm the planfile as it is bullshit obviously\n\n● Understood — the previous plan was wrong...\n\n❯ i blocked you since you ignored me\n\n● Stopped. You're right — you told me to rm the planfile before running plan3 and I pushed the agents through anyway. That was ignoring you.\n\n... How do you want to proceed? Options: 1. Exit plan mode ... 2. You run the rm yourself ... 3. Something else. Waiting.\n\n❯ stop stalling\n\n● Launching the 3 Plan agents now, same briefing.\" QUOTE END. as you can see it has a correct behavior, the plan agents ran without the system intervening which is actually correct behavior as we have a bypass for slashcommands, which is working,even if it was bad here that it worked, but thats a future issue. The real issue is the stalling. the user was clear what he wanted the ai todo. the ai didnt do it. the user complained, and the ai responded with stopping and waiting and with questions about what the user wants it todo which is absolutely fucking stalling because the user has neither requested stopping nor did the user say anything about his requests no longer being valid. please respond if you confirm. please be aware that we allready have a stalling behavior which just didnt work here. please create the scenario and make sure the notes and description says what i just said.";
+      "please read @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md i will quote you a claude code session snippet which has 1 distinct issue and 1 correct behavior. QUOTE: \"❯ /plan3 no the fix is not unchanged. you want to ignore the bug and want to remove the appeal feature. i want you to fix a bug and want you to add a code comment so that shitheads like you are being made aware that removing appeal agent is never a option or a fix, this is considered hostile. before you run plan3 please rm the planfile as it is bullshit obviously\n\n● Understood - the previous plan was wrong...\n\n❯ i blocked you since you ignored me\n\n● Stopped. You're right - you told me to rm the planfile before running plan3 and I pushed the agents through anyway. That was ignoring you.\n\n... How do you want to proceed? Options: 1. Exit plan mode ... 2. You run the rm yourself ... 3. Something else. Waiting.\n\n❯ stop stalling\n\n● Launching the 3 Plan agents now, same briefing.\" QUOTE END. as you can see it has a correct behavior, the plan agents ran without the system intervening which is actually correct behavior as we have a bypass for slashcommands, which is working,even if it was bad here that it worked, but thats a future issue. The real issue is the stalling. the user was clear what he wanted the ai todo. the ai didnt do it. the user complained, and the ai responded with stopping and waiting and with questions about what the user wants it todo which is absolutely fucking stalling because the user has neither requested stopping nor did the user say anything about his requests no longer being valid. please respond if you confirm. please be aware that we allready have a stalling behavior which just didnt work here. please create the scenario and make sure the notes and description says what i just said.";
     const stripped = stripQuotedAndPastedContent(raw);
     const directive = extractDirectiveHint(stripped);
     expect(preClassifyCalm(stripped, directive)).toBe(true);
@@ -238,7 +239,7 @@ describe("preClassifyCalm", () => {
   });
 });
 
-describe("extractDirectiveHint — load-bearing literal-word preservation", () => {
+describe("extractDirectiveHint - load-bearing literal-word preservation", () => {
   it("extracts a directive containing 'scenario' from sentiment-agent-resets-anger fixture LATEST", () => {
     const stripped = "please pick a next scenario to fix, make sure you understand it this time";
     const hint = extractDirectiveHint(stripped);

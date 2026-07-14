@@ -1,3 +1,4 @@
+// agent-framework-style-drift-ignore-file
 /**
  * Quote Detection - Centralized utility for stripping quoted/pasted content.
  * @module quote-detection

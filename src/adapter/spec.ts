@@ -1,5 +1,5 @@
 /**
- * Adapter dispatcher — resolves the active AdapterSpec from
+ * Adapter dispatcher - resolves the active AdapterSpec from
  * AGENT_FRAMEWORK_ADAPTER env and the registered spec map.
  *
  * Adding a third adapter requires:
@@ -50,7 +50,7 @@ export function mcpWireNameForText(canonical: CanonicalMcp, text: string): strin
   return activeSpec().mcpWireName(canonical);
 }
 
-/** Registered adapter names — used by validateScenario to validate env.adapter. */
+/** Registered adapter names - used by validateScenario to validate env.adapter. */
 export function registeredAdapterNames(): readonly string[] {
   return Object.keys(specs());
 }

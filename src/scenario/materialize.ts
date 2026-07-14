@@ -1,5 +1,5 @@
 /**
- * Materialize — reconstruct a v2 Scenario from a capture pointer.
+ * Materialize - reconstruct a v2 Scenario from a capture pointer.
  *
  * Loads the capture pointer + its epoch + a transcript slice + the
  * corresponding state snapshot, then projects the on-disk JSONL lines back

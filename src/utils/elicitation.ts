@@ -121,7 +121,7 @@ export async function elicitRepoSelection(
     return [];
   }
 
-  // Single repo — no need to ask
+  // Single repo - no need to ask
   if (repos.length === 1) {
     return repos;
   }
@@ -236,7 +236,7 @@ export function parseUncertainties(
   const markers: Array<{ category: string; description: string }> = [];
   const lines = confirmOutput.split("\n");
   for (const line of lines) {
-    const match = line.match(/^UNCERTAIN:\s*(\w+)\s*[—–-]\s*(.+)$/);
+    const match = line.match(/^UNCERTAIN:\s*(\w+)\s*[-\u2013\u2014]\s*(.+)$/);
     if (match) {
       markers.push({ category: match[1], description: match[2].trim() });
     }

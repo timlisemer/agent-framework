@@ -1,5 +1,5 @@
 /**
- * Paths — shared agent-framework filesystem conventions.
+ * Paths - shared agent-framework filesystem conventions.
  *
  * Adapter-neutral runtime, session, scenario, and repository paths live here.
  * Adapter-specific host roots and transcript layouts live under

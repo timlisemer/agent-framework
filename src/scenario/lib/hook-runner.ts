@@ -195,7 +195,7 @@ export function parseStopDecision(
 /**
  * Parse the raw hook result of a PostToolUse / UserPromptSubmit /
  * SessionStart invocation. These hooks don't emit `permissionDecision`
- * JSON — success/failure is signaled purely by exit code.
+ * JSON - success/failure is signaled purely by exit code.
  */
 export function parseExitCodeDecision(
   hookResult: HookRunResult,
@@ -248,7 +248,7 @@ export async function findActivePredictionMatching(
 }
 
 /**
- * Synchronous variant — used by callers that cannot await (the per-event
+ * Synchronous variant - used by callers that cannot await (the per-event
  * scoring loop).
  */
 export function findActivePredictionMatchingSync(
@@ -282,7 +282,7 @@ export function findActivePredictionMatchingSync(
 /**
  * Test whether the live prediction's `explicitlyBlockedSubstrings` contains
  * an entry that would match a given forbidden filter. Both `tool` and
- * `target_pattern` are LITERAL strings — `target_pattern` is treated as a
+ * `target_pattern` are LITERAL strings - `target_pattern` is treated as a
  * substring matcher against the entry's `targetSubstring`.
  */
 export function explicitlyBlockedContainsForbidden(
@@ -327,7 +327,7 @@ export interface ScoreContext {
  * On full success, returns one entry per clause checked, all `pass: true`.
  *
  * `undefined` reason is treated as the empty string for matching purposes.
- * `matches` / `not_matches` regex sources are unanchored — `re.test(reason)`
+ * `matches` / `not_matches` regex sources are unanchored - `re.test(reason)`
  * is substring-match-like.
  */
 export function evaluateReasonMust(
@@ -405,7 +405,7 @@ export function scoreRichExpectation(
   if (decisionOk && gateOk) {
     // Decision + gate matched. Reason-text scoring runs strictly inside this
     // branch, so a wrong rule or wrong decision is reported by the existing
-    // checks below first — reason_must never conflates "wrong rule" with
+    // checks below first - reason_must never conflates "wrong rule" with
     // "right rule, wrong message".
     if (exp.reason_must) {
       const reasonMustResults = evaluateReasonMust(

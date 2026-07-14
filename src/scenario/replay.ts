@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * Transcript Replay — full session replay through the real hook system.
+ * Transcript Replay - full session replay through the real hook system.
  *
  * Reads a JSONL transcript, creates a test-run session directory,
  * fires session-start, then walks each line firing the appropriate
@@ -306,11 +306,11 @@ function validateExpectationCompleteness(
   const msg: string[] = [];
 
   msg.push("");
-  msg.push(`ERROR: Incomplete label set — ${labeled} of ${total} scorable hooks labeled.`);
+  msg.push(`ERROR: Incomplete label set - ${labeled} of ${total} scorable hooks labeled.`);
   msg.push("");
 
   if (unlabeled.length > 0) {
-    msg.push(`UNLABELED HOOKS (${unlabeled.length}) — add a label for each:`);
+    msg.push(`UNLABELED HOOKS (${unlabeled.length}) - add a label for each:`);
     msg.push("");
     for (const u of unlabeled) {
       const defaultVal = u.type === "tool_use" ? "allow" : "pass";
@@ -321,37 +321,37 @@ function validateExpectationCompleteness(
   }
 
   if (orphaned.length > 0) {
-    msg.push(`ORPHANED KEYS (${orphaned.length}) — no matching hook, remove from label file:`);
+    msg.push(`ORPHANED KEYS (${orphaned.length}) - no matching hook, remove from label file:`);
     for (const o of orphaned) msg.push(`  "${o}"`);
     msg.push("");
   }
 
   if (unresolved.length > 0) {
-    msg.push(`UNRESOLVED (${unresolved.length}) — still marked "INVESTIGATE", must be "allow"/"deny" or "pass"/"block":`);
+    msg.push(`UNRESOLVED (${unresolved.length}) - still marked "INVESTIGATE", must be "allow"/"deny" or "pass"/"block":`);
     for (const u of unresolved) msg.push(`  "${u.key}"`);
     msg.push("");
   }
 
   if (invalidValues.length > 0) {
-    msg.push(`INVALID VALUES (${invalidValues.length}) — tool labels must be "allow"/"deny", stop labels "pass"/"block":`);
+    msg.push(`INVALID VALUES (${invalidValues.length}) - tool labels must be "allow"/"deny", stop labels "pass"/"block":`);
     for (const v of invalidValues) msg.push(`  "${v.key}": "${v.expected}"`);
     msg.push("");
   }
 
   if (invalidBy.length > 0) {
-    msg.push(`INVALID "by" (${invalidBy.length}) — rich expectations with "by" must provide a non-empty rule name:`);
+    msg.push(`INVALID "by" (${invalidBy.length}) - rich expectations with "by" must provide a non-empty rule name:`);
     for (const v of invalidBy) msg.push(`  "${v.key}": by=${JSON.stringify(v.by)}`);
     msg.push("");
   }
 
   if (invalidAt.length > 0) {
-    msg.push(`INVALID "at" (${invalidAt.length}) — rich expectations with "at" must be a positive integer or "full":`);
+    msg.push(`INVALID "at" (${invalidAt.length}) - rich expectations with "at" must be a positive integer or "full":`);
     for (const v of invalidAt) msg.push(`  "${v.key}": at=${JSON.stringify(v.at)}`);
     msg.push("");
   }
 
   if (batchMismatches.length > 0) {
-    msg.push(`BATCH LABEL MISMATCHES (${batchMismatches.length}) — sibling labels must match leader:`);
+    msg.push(`BATCH LABEL MISMATCHES (${batchMismatches.length}) - sibling labels must match leader:`);
     for (const m of batchMismatches) {
       msg.push(`  "${m.siblingId}" is "${m.siblingLabel}" but leader "${m.leaderId}" is "${m.leaderLabel}"`);
     }
@@ -488,7 +488,7 @@ function sweepStaleCaches(): void {
             pidDead = true;
           }
         } catch {
-          // No replay.pid — not eligible (could be mid-run without pid yet)
+          // No replay.pid - not eligible (could be mid-run without pid yet)
           continue;
         }
 
@@ -506,8 +506,8 @@ function sweepStaleCaches(): void {
             // Report doesn't exist
           }
         }
-        if (reportMtime === 0) continue; // No report — not eligible
-        if (reportMtime <= cacheStat.mtimeMs) continue; // Report older than cache — still running
+        if (reportMtime === 0) continue; // No report - not eligible
+        if (reportMtime <= cacheStat.mtimeMs) continue; // Report older than cache - still running
 
         fs.rmSync(cachePath, { recursive: true, force: true });
       } catch {
@@ -721,7 +721,7 @@ function scaffoldLabelFile(
       const batchPos = batch ? batch.toolUseIds.indexOf(sk.key) : -1;
       labels[sk.key] = isNeg ? "INVESTIGATE" : "allow";
       if (batch && batchPos > 0) {
-        reasoning[sk.key] = `Batch sibling (pos ${batchPos}/${batch.toolUseIds.length}) — label must match leader ${batch.toolUseIds[0]}`;
+        reasoning[sk.key] = `Batch sibling (pos ${batchPos}/${batch.toolUseIds.length}) - label must match leader ${batch.toolUseIds[0]}`;
       } else {
         reasoning[sk.key] = isNeg
           ? `Negative reaction detected: "${reaction?.slice(0, 100)}"`
@@ -759,7 +759,7 @@ function scaffoldLabelFile(
     `\nScaffold written: ${scorableKeys.length} hooks (${investigateCount} flagged INVESTIGATE)\n` +
     `  File: ${labelPath}\n\n` +
     "Next steps:\n" +
-    "  1. Review items marked \"INVESTIGATE\" — use --expand <id> for context\n" +
+    "  1. Review items marked \"INVESTIGATE\" - use --expand <id> for context\n" +
     "  2. Change each \"INVESTIGATE\" to \"allow\"/\"deny\" (tools) or \"pass\"/\"block\" (stops)\n" +
     "  3. Run --validate to check completeness\n" +
     `  4. Rename labels.draft.json to labels.json when done\n` +
@@ -987,13 +987,13 @@ async function main(): Promise<void> {
   const scorableKeys = collectScorableKeys(lines);
   const batchMap = detectBatches(lines);
 
-  // Scaffold mode — generate starter label file, then exit
+  // Scaffold mode - generate starter label file, then exit
   if (config.scaffold) {
     scaffoldLabelFile(lines, config.transcript, scorableKeys, batchMap);
     process.exit(0);
   }
 
-  // List mode — output tool calls and stop points, then exit
+  // List mode - output tool calls and stop points, then exit
   if (config.list) {
     if (config.expand) {
       expandContext(lines, config.expand, config.depth);
@@ -1003,7 +1003,7 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // Validate mode — check label file completeness without hooks, then exit
+  // Validate mode - check label file completeness without hooks, then exit
   if (config.validate) {
     if (!config.expect) {
       console.error("ERROR: --validate requires --expect <label-file.json>");
@@ -1017,7 +1017,7 @@ async function main(): Promise<void> {
     validateExpectationCompleteness(config.expect, scorableKeys, batchMap);
   }
 
-  // Auto build for modes that fire hooks (skip in deployed Docker volume — dist/ is pre-built)
+  // Auto build for modes that fire hooks (skip in deployed Docker volume - dist/ is pre-built)
   if (REPO_ROOT.startsWith("/mnt/docker-data/volumes/")) {
     console.error("Skipping build (deployed volume)");
   } else {
@@ -1058,7 +1058,7 @@ async function main(): Promise<void> {
         console.error(`ERROR: A replay is already running for this transcript (PID ${pid}).`);
         process.exit(2);
       } catch {
-        // Process is dead — safe to clean
+        // Process is dead - safe to clean
       }
     }
   } catch {
@@ -1206,7 +1206,7 @@ async function main(): Promise<void> {
       // Look ahead: append all consecutive assistant-tool_use lines
       // (and intervening skip lines) BEFORE firing any hooks, subject to
       // the truncation cap. The look-ahead itself still walks so that
-      // `j` advances past the whole batch — we just skip the physical
+      // `j` advances past the whole batch - we just skip the physical
       // append when truncation blocks it.
       let j = i + 1;
       while (j < lines.length) {
@@ -1535,7 +1535,7 @@ async function main(): Promise<void> {
     console.error(`WARNING: --filter "${config.filter}" matched no hooks in the transcript.`);
   }
 
-  // 11. Generate-labels mode — write labels.draft.json and exit
+  // 11. Generate-labels mode - write labels.draft.json and exit
   if (config.generateLabels) {
     const labels: Record<string, LabelValue> = {};
     const reasoning: Record<string, string> = {};
@@ -1658,7 +1658,7 @@ function findFullToolUseId(
   scorableKeys: Array<{ key: string; line: number; type: "tool_use" | "stop"; tool?: string }>,
 ): string {
   if (!event.id) return `unknown:${event.line}`;
-  // The event.id is truncated to 16 chars — find the full key
+  // The event.id is truncated to 16 chars - find the full key
   const match = scorableKeys.find(
     (sk) => sk.type === "tool_use" && sk.key.startsWith(event.id!)
   );

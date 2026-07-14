@@ -56,7 +56,7 @@ async function loadDriftState(
   return loaded.driftState ?? {};
 }
 
-describe("driftDetectRule.check — end-to-end level behavior", () => {
+describe("driftDetectRule.check - end-to-end level behavior", () => {
   let sessionDir: string;
 
   beforeEach(() => {
@@ -182,7 +182,7 @@ describe("driftDetectRule.check — end-to-end level behavior", () => {
   });
 });
 
-describe("driftDetectRule.check — allow-path state preservation", () => {
+describe("driftDetectRule.check - allow-path state preservation", () => {
   let sessionDir: string;
 
   beforeEach(() => {
@@ -239,7 +239,7 @@ describe("driftDetectRule.check — allow-path state preservation", () => {
   });
 });
 
-describe("driftDetectRule.onDenialConfirmed — level transitions", () => {
+describe("driftDetectRule.onDenialConfirmed - level transitions", () => {
   let sessionDir: string;
 
   beforeEach(() => {
@@ -254,7 +254,7 @@ describe("driftDetectRule.onDenialConfirmed — level transitions", () => {
     const ctx = await buildCtx(sessionDir, { driftState: {} });
     await driftDetectRule.onDenialConfirmed!(
       ctx,
-      `5 edits to "${TARGET}" — stop making many small edits.`,
+      `5 edits to "${TARGET}" - stop making many small edits.`,
     );
     const after = await loadDriftState(sessionDir);
     expect(after[TARGET]).toEqual({ level: 1 });
@@ -266,7 +266,7 @@ describe("driftDetectRule.onDenialConfirmed — level transitions", () => {
     });
     await driftDetectRule.onDenialConfirmed!(
       ctx,
-      `10 edits to "${TARGET}" — final warning.`,
+      `10 edits to "${TARGET}" - final warning.`,
     );
     const after = await loadDriftState(sessionDir);
     expect(after[TARGET]).toEqual({ level: 2 });
@@ -278,7 +278,7 @@ describe("driftDetectRule.onDenialConfirmed — level transitions", () => {
     });
     await driftDetectRule.onDenialConfirmed!(
       ctx,
-      `10 edits to "${TARGET}" — final warning.`,
+      `10 edits to "${TARGET}" - final warning.`,
     );
     const after = await loadDriftState(sessionDir);
     expect(after[TARGET]).toEqual({ level: 2 });
@@ -300,7 +300,7 @@ describe("driftDetectRule.onDenialConfirmed — level transitions", () => {
     const ctx = await buildCtx(sessionDir, { driftState: {} }, {});
     await driftDetectRule.onDenialConfirmed!(
       ctx,
-      `5 edits to "${TARGET}" — stop making many small edits.`,
+      `5 edits to "${TARGET}" - stop making many small edits.`,
     );
     const after = await loadDriftState(sessionDir);
     expect(after).toEqual({});
@@ -310,7 +310,7 @@ describe("driftDetectRule.onDenialConfirmed — level transitions", () => {
     const ctx = await buildCtx(sessionDir, { driftState: {} }, { file_path: TARGET }, "Read");
     await driftDetectRule.onDenialConfirmed!(
       ctx,
-      `5 edits to "${TARGET}" — stop making many small edits.`,
+      `5 edits to "${TARGET}" - stop making many small edits.`,
     );
     const after = await loadDriftState(sessionDir);
     expect(after).toEqual({});

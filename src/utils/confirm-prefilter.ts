@@ -1,5 +1,5 @@
 /**
- * Confirm Pre-Filter — file/extension-aware regex scanner for the confirm agent.
+ * Confirm Pre-Filter - file/extension-aware regex scanner for the confirm agent.
  *
  * Pre-computes the deterministic CONFIRM_AGENT category-1 (unwanted files) and
  * a subset of category-2 (debug code, unused-code workarounds) signals so the
@@ -208,9 +208,9 @@ export function formatConfirmPrefilter(r: ConfirmPrefilterResult): string {
     lines.push("Files (CATEGORY 1): the following paths match unwanted-file patterns:");
     for (const f of r.unwantedFiles) lines.push(`  - ${formatGitPathForContext(f)}`);
   }
-  appendLabeledFindings("Code Quality (CATEGORY 2 — debug code added):", r.debugCode);
+  appendLabeledFindings("Code Quality (CATEGORY 2 - debug code added):", r.debugCode);
   appendLabeledFindings(
-    "Code Quality (CATEGORY 2 — unused-code workarounds):",
+    "Code Quality (CATEGORY 2 - unused-code workarounds):",
     r.unusedCodeWorkarounds,
   );
   lines.push("=== END PRECOMPUTED VIOLATIONS ===");

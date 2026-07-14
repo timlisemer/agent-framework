@@ -196,7 +196,7 @@ describe("detectParallelBatch", () => {
 
   // Live race: when the model emits a parallel tool_use batch, each
   // PreToolUse hook fires with the firing tool_use_id in input. The jsonl
-  // transcript writes are an asynchronous side effect — the firing line
+  // transcript writes are an asynchronous side effect - the firing line
   // for a sibling may not be flushed to disk yet when its hook process
   // reads the transcript. Without retroactive detection, the function
   // returns null and pre-tool-use.ts treats the call as solo, bypassing

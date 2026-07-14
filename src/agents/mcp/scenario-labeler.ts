@@ -1,5 +1,5 @@
 /**
- * Test Harness Labeler — MCP tool handler for the labeler agent role.
+ * Test Harness Labeler - MCP tool handler for the labeler agent role.
  *
  * Pure TypeScript + execFileSync. NO LLM calls. NO runAgent. NO Anthropic API.
  *
@@ -133,7 +133,7 @@ function handleAutoLabel(
 ): string {
   const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
 
-  // Step 1: Run scaffold (free heuristic) — enforces 1x limit inside auto_label only
+  // Step 1: Run scaffold (free heuristic) - enforces 1x limit inside auto_label only
   checkAndIncrementRunLimit(transcriptName, "scaffold");
   runReplayCommand(
     ["--scaffold", "--transcript", transcriptPath],
@@ -196,7 +196,7 @@ function handleAutoLabel(
   const genLabels: Record<string, LabelValue> = genData.labels;
   const genReasoning = genData.reasoning ?? {};
 
-  // Step 3: Merge — scaffold is baseline, hooks are advisory
+  // Step 3: Merge - scaffold is baseline, hooks are advisory
   const mergedLabels: Record<string, LabelValue> = {};
   const mergedReasoning: Record<string, string> = {};
   let agreeCount = 0;
@@ -396,7 +396,7 @@ function collectPredictionContext(transcriptName: string, target: string): strin
       }
     }
   } catch {
-    // No state.json or parse error — just emit what we have
+    // No state.json or parse error - just emit what we have
   }
   if (toolLogToolUseId) {
     lines.push(`Source tool_use_id: ${toolLogToolUseId}`);
@@ -509,7 +509,7 @@ function handleResetForRelabel(transcriptName: string): string {
     fs.unlinkSync(transcriptMcpStateFile(transcriptName));
     removed.push("mcp-state.json");
   } catch {
-    // Not present — nothing to remove
+    // Not present - nothing to remove
   }
   try {
     fs.rmSync(transcriptCacheDir(transcriptName), { recursive: true, force: true });
@@ -520,7 +520,7 @@ function handleResetForRelabel(transcriptName: string): string {
   const state = detectWorkflowState(transcriptName);
   return (
     `Reset for re-label of "${transcriptName}":\n` +
-    `  Removed: ${removed.length > 0 ? removed.join(", ") : "(nothing — already clean)"}\n` +
+    `  Removed: ${removed.length > 0 ? removed.join(", ") : "(nothing - already clean)"}\n` +
     `  Preserved: labels.json, labels.draft.json, notes_and_questions.md (if any)\n` +
     `  You can now re-run auto_label or generate_labels.` +
     formatStatusFooter(state)

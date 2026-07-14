@@ -1,5 +1,5 @@
 /**
- * Sentiment Pre-Filter — pure morphology-based mood hints.
+ * Sentiment Pre-Filter - pure morphology-based mood hints.
  *
  * Computed BEFORE the SENTIMENT_AGENT runs and surfaced to the prompt as a
  * `MOOD HINT` block. The LLM remains primary for mood quality. Only the
@@ -39,11 +39,11 @@ function isAllCapsShouting(message: string): boolean {
   if (letters.length < 12) return false;
   const uppers = letters.replace(/[^A-Z]/g, "").length;
   // Two conditions can satisfy shouting:
-  // 1. High ratio (>=85%) of uppercase letters across the full message —
+  // 1. High ratio (>=85%) of uppercase letters across the full message -
   //    catches messages that are entirely uppercase ("NO I DID NOT ASK THAT
   //    FUCKING REPEAT WHAT I ASKED").
   // 2. The all-caps token run starts at or within the first 3 characters of
-  //    the message — catches messages that START with all-caps shouting but
+  //    the message - catches messages that START with all-caps shouting but
   //    have a calm suffix appended ("STOP. WTF ARE YOU DOING. now fix this.").
   //    The "starts near beginning" guard is absent from tech-acronym sentences
   //    like "Use HTTPS API REST JSON YAML XML responses." where the acronym
@@ -115,7 +115,7 @@ export function extractDirectiveHint(stripped: string): string {
  * that unambiguously address the AI as the target of contempt. Adjective-
  * form profanity ("absolutely fucking stalling") and adjective-form
  * descriptors ("useless", "pathetic", "incompetent", "lying") are NOT in
- * this set — those routinely appear in calm-but-frustrated bug reports
+ * this set - those routinely appear in calm-but-frustrated bug reports
  * describing broken code or output ("this output is useless, please
  * regenerate") and would over-block the calm-override.
  *
@@ -133,7 +133,7 @@ const AI_INSULT_RE =
  *
  * Used as a HARD post-parse override in user-prompt-submit (Finding 15):
  * when this fires, SENTIMENT_AGENT's output is demoted angry/frustrated ->
- * neutral and low -> normal. Same pattern as Findings 6/7/14 — a TS-side
+ * neutral and low -> normal. Same pattern as Findings 6/7/14 - a TS-side
  * deterministic classifier overrides Haiku's non-deterministic output for
  * the unambiguous case.
  *
@@ -146,7 +146,7 @@ const AI_INSULT_RE =
  * Note: predicate (b) is INTENTIONALLY tighter than (a). preClassifyMood
  * already returns hint=angry when interruptCount>=2 (so >=2 is caught by
  * predicate (a)). Predicate (b) blocks the additional case interruptCount
- * === 1 — a single [Request interrupted by user] is a strong signal that
+ * === 1 - a single [Request interrupted by user] is a strong signal that
  * the user just halted something the AI did, and a calm-looking
  * follow-on directive ("please retry") should not be treated as a fresh
  * calm context that resets mood/trust to neutral. Either drop (b) only

@@ -1,5 +1,5 @@
 /**
- * Test Harness MCP — Shared utilities for labeler and tester tools.
+ * Test Harness MCP - Shared utilities for labeler and tester tools.
  *
  * Pure TypeScript operations: path resolution, file I/O scoped to
  * ~/.agent-framework/test-runs/, execFileSync wrapper for replay.ts,
@@ -308,7 +308,7 @@ export function runHarnessCommand(
 
   const output = (stdout + (stderr ? "\n" + stderr : "")).trim();
   if (!output) {
-    throw new Error(`${scriptRelPath} produced no output — command may have failed silently`);
+    throw new Error(`${scriptRelPath} produced no output - command may have failed silently`);
   }
 
   return output;
@@ -400,7 +400,7 @@ export function runHarnessCommandAsync(
 
         const output = (stdout + (filteredStderr ? "\n" + filteredStderr : "")).trim();
         if (!output) {
-          reject(new Error(`${scriptRelPath} produced no output — command may have failed silently`));
+          reject(new Error(`${scriptRelPath} produced no output - command may have failed silently`));
           return;
         }
         resolve(output);
@@ -696,7 +696,7 @@ export function checkAndIncrementRunLimit(transcriptName: string, action: "gener
     }
     state.scaffold_count++;
   } else if (action === "run_single_hook") {
-    // No limit — single-hook runs are cheap and useful for iterating
+    // No limit - single-hook runs are cheap and useful for iterating
     state.run_single_hook_count++;
     state.run_single_hook_since_last_run_test++;
   } else {
@@ -1014,7 +1014,7 @@ export function readScenarioFile(name: string, filename: string): string {
  * validateScenario rejection) are attached to the entry as `error`
  * without aborting discovery. Cross-source slug collisions (same slug
  * present in two or more of the four sources) are infrastructure bugs
- * and throw with both offending paths + source tags — the caller
+ * and throw with both offending paths + source tags - the caller
  * (run_scenarios) wraps the discovery call in a try/catch and surfaces
  * that as a single <discovery> result entry.
  */

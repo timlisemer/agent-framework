@@ -5,7 +5,7 @@ This adapter integrates agent-framework hooks with Claude Code.
 ## Symlink Instructions (NixOS)
 
 The `dotclaude/` directory contains files that Claude Code expects under
-`~/.claude/`. On NixOS these symlinks are managed declaratively — the user
+`~/.claude/`. On NixOS these symlinks are managed declaratively - the user
 updates their NixOS configuration and runs `nixos-rebuild switch`. The
 implementer must never run `ln` manually.
 
@@ -29,8 +29,8 @@ declares the hook commands.
 
 Build-then-rebuild ordering:
 
-1. `just build` — compile TypeScript to `dist/`
-2. NixOS rebuild — activates the new symlinks pointing into `dist/`
+1. `just build` - compile TypeScript to `dist/`
+2. NixOS rebuild - activates the new symlinks pointing into `dist/`
 
 ## Claude-Specific Quirks
 

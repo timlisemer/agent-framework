@@ -50,7 +50,7 @@ function makeCtx(overrides: Parameters<typeof makeRuleContext>[0] = {}) {
   });
 }
 
-describe("validateIntentRule — deterministic null paths", () => {
+describe("validateIntentRule - deterministic null paths", () => {
   const prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
 
   beforeEach(() => {
@@ -106,7 +106,7 @@ describe("validateIntentRule — deterministic null paths", () => {
   });
 });
 
-describe("validateIntentRule — LLM-call path", () => {
+describe("validateIntentRule - LLM-call path", () => {
   const prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
 
   beforeEach(() => {

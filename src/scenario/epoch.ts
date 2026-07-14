@@ -1,5 +1,5 @@
 /**
- * Epoch — transcript-continuity boundaries for session state.
+ * Epoch - transcript-continuity boundaries for session state.
  *
  * An epoch is a contiguous slice of the transcript during which state
  * (predictions, drift, tool-log, gate-reasoning) was accumulated. A new
@@ -94,7 +94,7 @@ export function detectEpochChange(
   transcriptPath: string,
   hookHint?: { sessionStartSource?: string },
 ): EpochChangeResult {
-  // Skip detection in replay/scenario context — the session dir is synthetic.
+  // Skip detection in replay/scenario context - the session dir is synthetic.
   if (isTestRunSessionDir(sessionDir)) {
     return { rotated: false };
   }
@@ -106,7 +106,7 @@ export function detectEpochChange(
 
   const tail = loadSnapshotUuidsTail(sessionDir);
   if (tail.length === 0) {
-    // No prior snapshots — nothing to compare against.
+    // No prior snapshots - nothing to compare against.
     return { rotated: false };
   }
 
@@ -177,7 +177,7 @@ export function initEpochSession(sessionDir: string): void {
   const last = loadLastEpoch(epochsFile);
   if (last !== null) return; // already initialized
 
-  // First hook of this session — write the initial epoch.
+  // First hook of this session - write the initial epoch.
   const epoch: Epoch = {
     id: crypto.randomUUID(),
     started_at: Date.now(),

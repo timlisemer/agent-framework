@@ -1,5 +1,5 @@
 /**
- * Scenario validators — split from types.ts so src-side and test-side code
+ * Scenario validators - split from types.ts so src-side and test-side code
  * can import validators without pulling in the full type tree.
  *
  * Re-exports the canonical validateScenario and validateReasonMustExpectation

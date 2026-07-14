@@ -1,5 +1,5 @@
 /**
- * Capture — append-only JSONL log of hook-fire events ("capture pointers").
+ * Capture - append-only JSONL log of hook-fire events ("capture pointers").
  *
  * Each line records the essential metadata for one hook invocation: when it
  * fired, which epoch it belongs to, which state snapshot was current, what
@@ -44,7 +44,7 @@ export interface CapturePointer {
   /** UUID of the user-prompt message that initiated this turn, when known. */
   prompt_uuid?: string;
   /**
-   * UUID of the transcript line that serves as the epoch anchor — the deepest
+   * UUID of the transcript line that serves as the epoch anchor - the deepest
    * line still present in the transcript after a rewind. Used by materialize
    * to slice the transcript correctly.
    */
@@ -123,7 +123,7 @@ function captureCap(): number {
  * Called after every append. O(N) but cap is bounded.
  */
 function rotateCapturesIfNeeded(filePath: string, cap: number): void {
-  if (cap === 0) return; // capture disabled — nothing to rotate
+  if (cap === 0) return; // capture disabled - nothing to rotate
   let raw: string;
   try {
     raw = fs.readFileSync(filePath, "utf-8");
@@ -168,7 +168,7 @@ export function appendCapture(sessionDir: string, pointer: Omit<CapturePointer, 
     appendJsonlEntrySync(filePath, record);
     rotateCapturesIfNeeded(filePath, cap);
   } catch {
-    // Best-effort — capture failures must never crash a hook process.
+    // Best-effort - capture failures must never crash a hook process.
   }
 }
 

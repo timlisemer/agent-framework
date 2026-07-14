@@ -6,7 +6,7 @@
  * are non-word characters (preserving \b boundaries) and the literal `<PATH>`
  * appears in no BLACKLIST regex. If you add a pattern that matches `<` or `>`
  * or the substring `path` AND opts into redactPaths, this placeholder will
- * interfere — either tighten your regex to require surrounding whitespace or
+ * interfere - either tighten your regex to require surrounding whitespace or
  * change the placeholder globally.
  */
 

@@ -137,7 +137,7 @@ export function getPlanClearingHighlights(content: string): string[] {
   const nonEmptyLines = content.split("\n").filter((l) => l.trim().length > 0);
   if (nonEmptyLines.length < 5) {
     return [
-      `[VIOLATION: plan clearing] Plan content has only ${nonEmptyLines.length} non-empty line(s) — this is placeholder/stub content. Use Bash rm to delete the plan file instead of writing placeholder content.`,
+      `[VIOLATION: plan clearing] Plan content has only ${nonEmptyLines.length} non-empty line(s) - this is placeholder/stub content. Use Bash rm to delete the plan file instead of writing placeholder content.`,
     ];
   }
   return [];

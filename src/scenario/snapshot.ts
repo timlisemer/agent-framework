@@ -1,5 +1,5 @@
 /**
- * State Snapshot — point-in-time freeze of hook-observable session state.
+ * State Snapshot - point-in-time freeze of hook-observable session state.
  *
  * A snapshot is written immediately before each hook fires (or after a
  * significant state change). Snapshots are deduplicated: a new snapshot is
@@ -154,7 +154,7 @@ export function appendStateSnapshot(
   try {
     appendJsonlEntrySync(filePath, snapshot);
   } catch {
-    // Best-effort — snapshot failures must never crash a hook process.
+    // Best-effort - snapshot failures must never crash a hook process.
   }
 
   return seq;

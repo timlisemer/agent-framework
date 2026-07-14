@@ -263,12 +263,12 @@ export interface Scenario {
   predictions?: ScenarioPredictionExpectation;
   /**
    * Seed for `state.json`. Materialized BEFORE session-start fires, so the
-   * hook pipeline observes the seeded state. Required for every scenario —
+   * hook pipeline observes the seeded state. Required for every scenario -
    * single-hook mode does NOT fire UserPromptSubmit before the target hook,
    * so a scenario author must declare the full prior-turn session state
    * explicitly. Every field is REQUIRED; `currentPrediction` must carry
    * every required `ToolPrediction` field. `timestamp` on the prediction is
-   * the single optional slot — the runner fills it with `Date.now()` when
+   * the single optional slot - the runner fills it with `Date.now()` when
    * omitted so authors don't have to hand-pick a stamp.
    */
   seed_state: {
@@ -314,7 +314,7 @@ export interface Scenario {
     /**
      * Optional graduated drift-block state keyed by absolute target path. Use
      * this to reproduce post-nudge / final-warning transitions without
-     * replaying the whole prior-denial history — seed `level` directly.
+     * replaying the whole prior-denial history - seed `level` directly.
      */
     driftState?: Record<
       string,
@@ -328,7 +328,7 @@ export interface Scenario {
      * fires, stamps `slug: <slug>` onto the first synthesized JSONL transcript
      * line so adapter plan-source lookup can find it, and unlinks the file in
      * the run's `finally` block. Slug uniqueness is the scenario author's
-     * responsibility — convention is to include the scenario fixture's
+     * responsibility - convention is to include the scenario fixture's
      * filename root.
      */
     planFile?: { slug: string; content: string };
@@ -383,7 +383,7 @@ export interface PredictionAssertionResult {
 }
 
 /**
- * Result of running a scenario — written to report-scenario.json and
+ * Result of running a scenario - written to report-scenario.json and
  * echoed to stdout by test-harness/scenario.ts.
  */
 export type ScenarioResult =
@@ -484,7 +484,7 @@ export function validateScenario(raw: unknown): Scenario {
   }
   if ("expectation_reality" in r || "expectation_reality_last_run_at" in r) {
     throw new Error(
-      "scenario fixture must not contain expectation_reality / expectation_reality_last_run_at — those live in last-run.json",
+      "scenario fixture must not contain expectation_reality / expectation_reality_last_run_at - those live in last-run.json",
     );
   }
   if (r.description !== undefined && typeof r.description !== "string") {
@@ -968,7 +968,7 @@ export function validateScenario(raw: unknown): Scenario {
   }
   if ("at" in expect) {
     throw new Error(
-      "scenario.expect.at is not allowed — scenarios always run against the full file state",
+      "scenario.expect.at is not allowed - scenarios always run against the full file state",
     );
   }
   // Per-hook vocabulary enforcement.
@@ -1134,14 +1134,14 @@ const validateExpectPredictionAnnotation = validatePredictionAnnotationShape;
  * fields are required; `currentPrediction` must carry every required
  * `ToolPrediction` field (mood, trust, intent, blockedIntent,
  * explicitlyAllowedTools, explicitlyBlockedSubstrings, userMessageSnippet).
- * `timestamp` is the sole optional slot — the runner fills it with
+ * `timestamp` is the sole optional slot - the runner fills it with
  * `Date.now()` when omitted. Unknown fields are rejected.
  */
 function validateScenarioSeedState(r: Record<string, unknown>): void {
   const seed = r.seed_state;
   if (seed === undefined) {
     throw new Error(
-      "scenario.seed_state is required — every scenario must declare the full prior-turn session state (currentPrediction, forceCheckPending, frustrationStreak, currentWindowSize)",
+      "scenario.seed_state is required - every scenario must declare the full prior-turn session state (currentPrediction, forceCheckPending, frustrationStreak, currentWindowSize)",
     );
   }
   if (typeof seed !== "object" || seed === null || Array.isArray(seed)) {
@@ -1477,7 +1477,7 @@ export function validateReasonMustExpectation(ctx: string, value: unknown): void
           new RegExp(entry);
         } catch (err) {
           throw new Error(
-            `${ctx}.reason_must.${field}[${i}] is not a valid regex: ${err instanceof Error ? err.message : String(err)} (note: regex source is unanchored — re.test(reason) is substring-match-like)`,
+            `${ctx}.reason_must.${field}[${i}] is not a valid regex: ${err instanceof Error ? err.message : String(err)} (note: regex source is unanchored - re.test(reason) is substring-match-like)`,
           );
         }
       }
@@ -1485,7 +1485,7 @@ export function validateReasonMustExpectation(ctx: string, value: unknown): void
   }
   if (!anyPresent) {
     throw new Error(
-      `${ctx}.reason_must is set but every sub-array is missing — provide at least one of ${knownFields.join(", ")}`,
+      `${ctx}.reason_must is set but every sub-array is missing - provide at least one of ${knownFields.join(", ")}`,
     );
   }
 }
@@ -1655,7 +1655,7 @@ function validateScenarioPredictions(r: Record<string, unknown>): void {
             `scenario.predictions.${name}[${i}].target_substring must be a string when set`,
           );
         }
-        // target_substring is a LITERAL substring — reject regex metachars.
+        // target_substring is a LITERAL substring - reject regex metachars.
         if (/[.*|[\]()^$+?\\]/.test(f.target_substring as string)) {
           throw new Error(
             `scenario.predictions.${name}[${i}].target_substring must be a LITERAL substring without regex metacharacters, got ${JSON.stringify(f.target_substring)}`,

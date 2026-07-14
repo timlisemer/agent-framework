@@ -1,3 +1,4 @@
+// agent-framework-style-drift-ignore-file
 import { describe, it, expect } from "vitest";
 import { hasQuotedContent, stripQuotedAndPastedContent, stripQuotedContent } from "./quote-detection.js";
 

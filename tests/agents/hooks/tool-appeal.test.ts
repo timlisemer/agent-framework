@@ -1,3 +1,4 @@
+// agent-framework-style-drift-ignore-file
 import { afterEach, describe, expect, it } from "vitest";
 
 import { appealHelper } from "../../../src/agents/hooks/tool-appeal.js";

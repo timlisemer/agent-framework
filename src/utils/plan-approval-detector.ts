@@ -9,7 +9,7 @@ import type { ToolPrediction } from "./prediction-types.js";
  * Plan approval (the user clicking "approve" in plan mode after an
  * ExitPlanMode tool_use) arrives in the transcript as a synthetic user-role
  * tool_result whose content begins with the literal marker
- * "User has approved your plan." — NOT as a fresh user-typed turn. As a
+ * "User has approved your plan." - NOT as a fresh user-typed turn. As a
  * result, the UserPromptSubmit hook never fires for it, so SENTIMENT_AGENT
  * never re-runs and `currentPrediction.intent` stays anchored to the
  * pre-approval task. Downstream consumers (gate, prediction-block,
@@ -58,11 +58,11 @@ function coerceToolResultContent(content: unknown): string {
  *       prior assistant `ExitPlanMode` tool_use, AND
  *   (b) we did NOT encounter any non-meta user TEXT entry between that
  *       approval and the end of file (a real user turn after the approval
- *       means UserPromptSubmit already fired and refreshed currentPrediction —
+ *       means UserPromptSubmit already fired and refreshed currentPrediction -
  *       nothing to do).
  *
- * Both halves of (a) must match — the literal marker AND the ExitPlanMode
- * tool name — to rule out false positives (assistant text quoting the string,
+ * Both halves of (a) must match - the literal marker AND the ExitPlanMode
+ * tool name - to rule out false positives (assistant text quoting the string,
  * a tool_result for a different tool whose content begins with it, etc.).
  */
 export async function findUnprocessedPlanApproval(
@@ -144,7 +144,7 @@ export async function findUnprocessedPlanApproval(
 
 /**
  * Pure: build a fresh ToolPrediction representing post-plan-approval intent.
- * Mood/trust default to neutral/normal — no signal to read since the user
+ * Mood/trust default to neutral/normal - no signal to read since the user
  * did not type anything. Conservative on field choices: do NOT pre-populate
  * explicitlyAllowedTools or pre-authorize edit intent; let downstream rules
  * evaluate each tool on its own merits with the new intent anchor.
