@@ -373,6 +373,8 @@ export interface AdapterSpec {
   ): readonly MaterializedScenarioLine[];
 
   // ── User-facing text helpers ────────────────────────────────────────────
+  /** Render the adapter-native way to wait for a long-running MCP call. */
+  renderMcpWaitRecommendation(timeoutMs: number): string;
   /** Adapter-active wire spelling rendered for user-facing text. */
   renderCheckMcpHint(): string;
   /** Render an "authorize via workflow" hint listing example invocations. */

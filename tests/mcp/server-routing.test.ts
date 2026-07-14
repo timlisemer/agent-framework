@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { mcpTimeoutForTool } from "../../src/mcp/timeout.js";
 
 const mocks = vi.hoisted(() => ({
   tools: new Map<string, { config: unknown; handler: (args: any, extra: any) => Promise<any> }>(),
@@ -183,6 +184,16 @@ describe("MCP server repo-scope routing", () => {
     mocks.runCommitAgent.mockResolvedValue("## Verdict\nCONFIRMED: ok\n\nSIZE: SMALL\ncommit: scoped\nHASH: def456");
     mocks.runImplementAgent.mockResolvedValue("implemented");
     mocks.runValidateImplementationAgent.mockResolvedValue("validated");
+  });
+
+  it("adds the configured wait recommendation to every registered MCP tool", () => {
+    expect(mocks.tools.size).toBeGreaterThan(0);
+    for (const [name, tool] of mocks.tools) {
+      const description = (tool.config as { description?: string }).description;
+      expect(description).toContain(
+        `Recommended wait time: ${mcpTimeoutForTool(name)} ms;`,
+      );
+    }
   });
 
   it("routes implement to the MCP-owned implementation workflow", async () => {

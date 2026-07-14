@@ -58,6 +58,7 @@ export const claudeSpec: AdapterSpec = {
   extractStopProposedPlan: PLS.extractStopProposedPlan,
   detectPlanMode:         PM.detectPlanMode,
   materializeScenarioEntry: SM.materializeScenarioEntry,
+  renderMcpWaitRecommendation:       PS.renderMcpWaitRecommendation,
   renderCheckMcpHint:               PS.renderCheckMcpHint,
   renderWorkflowAuthorizationHint:  PS.renderWorkflowAuthorizationHint,
   instructionLabel: PS.instructionLabel,
