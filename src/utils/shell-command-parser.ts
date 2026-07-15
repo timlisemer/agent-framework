@@ -13,6 +13,12 @@ export interface ShellCharEvent {
   active: boolean;
 }
 
+interface ShellCharacterWalkResult {
+  escaped: boolean;
+  quote: ShellQuote | null;
+  stopped: boolean;
+}
+
 export function stripShellGrouping(token: string): string {
   return token.replace(/^[({]+/, "").replace(/[)}]+$/, "");
 }
@@ -20,6 +26,22 @@ export function stripShellGrouping(token: string): string {
 export function commandBare(token: string): string {
   const cleaned = stripShellGrouping(token);
   return cleaned.startsWith("/") ? cleaned.split("/").pop()! : cleaned;
+}
+
+export function quoteShellToken(
+  token: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === "win32") return `"${token.replace(/"/g, '""')}"`;
+  return `'${token.replace(/'/g, `'\\''`)}'`;
+}
+
+export function serializeShellCommandTokens(
+  tokens: readonly string[],
+): string {
+  return tokens.map((token) =>
+    /^[A-Za-z0-9_@%+=:,./-]+$/.test(token) ? token : quoteShellToken(token, "linux")
+  ).join(" ");
 }
 
 export function optionConsumesSeparateValue(token: string, optionsWithValue: ReadonlySet<string>): boolean {
@@ -74,6 +96,171 @@ export function tokenHasOption(token: string, options: ReadonlySet<string>): boo
   return false;
 }
 
+export interface ShellOptionArgumentPolicy {
+  optionsWithOneValue?: ReadonlySet<string>;
+  optionsWithTwoValues?: ReadonlySet<string>;
+  trackedOptions?: ReadonlySet<string>;
+  knownOptions?: ReadonlySet<string>;
+}
+
+export interface ParsedShellOptionArguments {
+  positionals: string[];
+  encounteredOptions: ReadonlySet<string>;
+  incompleteOptions: readonly string[];
+  optionValues: ReadonlyMap<string, readonly string[]>;
+  unrecognizedOptions: readonly string[];
+}
+
+interface ParsedValuedOption {
+  option: string;
+  valueCount: number;
+  attachedValues: string[];
+}
+
+export function parseShellOptionArguments(
+  args: readonly string[],
+  policy: ShellOptionArgumentPolicy,
+): string[] {
+  return parseShellOptionArgumentsDetailed(args, policy).positionals;
+}
+
+export function parseShellOptionArgumentsDetailed(
+  args: readonly string[],
+  policy: ShellOptionArgumentPolicy,
+): ParsedShellOptionArguments {
+  const positionals: string[] = [];
+  const encounteredOptions = new Set<string>();
+  const incompleteOptions: string[] = [];
+  const optionValues = new Map<string, string[]>();
+  const unrecognizedOptions: string[] = [];
+  let parsingOptions = true;
+
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i];
+    if (parsingOptions && token === "--") {
+      parsingOptions = false;
+      continue;
+    }
+    if (parsingOptions && token.startsWith("-") && token !== "-") {
+      const parsedOption = parseShellOptionToken(token, policy);
+      for (const option of parsedOption.options) {
+        if (policy.trackedOptions?.has(option)) encounteredOptions.add(option);
+      }
+      unrecognizedOptions.push(...parsedOption.unrecognizedOptions);
+      if (parsedOption.valuedOption) {
+        const { values, consumedFollowingValues, complete } = consumeShellOptionValues(
+          args,
+          i,
+          parsedOption.valuedOption,
+        );
+        const { option } = parsedOption.valuedOption;
+        optionValues.set(option, [...(optionValues.get(option) ?? []), ...values]);
+        if (!complete) incompleteOptions.push(option);
+        i += consumedFollowingValues;
+      }
+      continue;
+    }
+    positionals.push(token);
+  }
+
+  return {
+    positionals,
+    encounteredOptions,
+    incompleteOptions,
+    optionValues,
+    unrecognizedOptions,
+  };
+}
+
+function parseShellOptionToken(
+  token: string,
+  policy: ShellOptionArgumentPolicy,
+): {
+  options: string[];
+  unrecognizedOptions: string[];
+  valuedOption: ParsedValuedOption | null;
+} {
+  const options: string[] = [];
+  const unrecognizedOptions: string[] = [];
+  const inline = inlineLongOptionValue(token);
+  const canonical = canonicalOptionName(token);
+  if (token.startsWith("--")) {
+    options.push(canonical);
+    if (policy.knownOptions && !policy.knownOptions.has(canonical)) {
+      unrecognizedOptions.push(canonical);
+    }
+    const valueCount = shellOptionValueCount(canonical, policy);
+    if (inline && valueCount === 0 && policy.knownOptions?.has(canonical)) {
+      unrecognizedOptions.push(token);
+    }
+    return {
+      options,
+      unrecognizedOptions,
+      valuedOption: valueCount === 0
+        ? null
+        : { option: canonical, valueCount, attachedValues: inline ? [inline.value] : [] },
+    };
+  }
+
+  const cluster = token.slice(1);
+  for (let index = 0; index < cluster.length; index++) {
+    const option = `-${cluster[index]}`;
+    options.push(option);
+    if (policy.knownOptions && !policy.knownOptions.has(option)) {
+      unrecognizedOptions.push(option);
+    }
+    const valueCount = shellOptionValueCount(option, policy);
+    if (valueCount === 0) continue;
+    return {
+      options,
+      unrecognizedOptions,
+      valuedOption: {
+        option,
+        valueCount,
+        attachedValues: index < cluster.length - 1 ? [cluster.slice(index + 1)] : [],
+      },
+    };
+  }
+  return { options, unrecognizedOptions, valuedOption: null };
+}
+
+function consumeShellOptionValues(
+  args: readonly string[],
+  optionIndex: number,
+  valuedOption: ParsedValuedOption,
+): {
+  values: string[];
+  consumedFollowingValues: number;
+  complete: boolean;
+} {
+  const values = [...valuedOption.attachedValues];
+  const consumedFollowingValues = Math.max(
+    0,
+    valuedOption.valueCount - valuedOption.attachedValues.length,
+  );
+  for (
+    let offset = 1;
+    offset <= consumedFollowingValues && optionIndex + offset < args.length;
+    offset++
+  ) {
+    values.push(args[optionIndex + offset]);
+  }
+  return {
+    values,
+    consumedFollowingValues,
+    complete: values.length === valuedOption.valueCount,
+  };
+}
+
+function shellOptionValueCount(
+  option: string,
+  policy: ShellOptionArgumentPolicy,
+): number {
+  if (policy.optionsWithTwoValues?.has(option)) return 2;
+  if (policy.optionsWithOneValue?.has(option)) return 1;
+  return 0;
+}
+
 export function hasShellOption(tokens: readonly string[], options: ReadonlySet<string>): boolean {
   for (const token of tokens) {
     if (token === "--") return false;
@@ -82,60 +269,126 @@ export function hasShellOption(tokens: readonly string[], options: ReadonlySet<s
   return false;
 }
 
-export function nonOptionTokens(tokens: readonly string[]): string[] {
-  const marker = tokens.indexOf("--");
-  if (marker >= 0) {
-    return [
-      ...tokens.slice(0, marker).filter((token) => !token.startsWith("-")),
-      ...tokens.slice(marker + 1),
-    ];
-  }
-  return tokens.filter((token) => !token.startsWith("-"));
-}
-
-export function stripOptionValueTokens(tokens: readonly string[], optionsWithValue: ReadonlySet<string>): string[] {
-  const result: string[] = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token === "--") {
-      result.push(...tokens.slice(i));
-      break;
-    }
-    result.push(token);
-    if (optionConsumesSeparateValue(token, optionsWithValue) && i + 1 < tokens.length) {
-      i++;
-    }
-  }
-  return result;
-}
-
 export const XARGS_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
   "-a", "--arg-file",
   "-d", "--delimiter",
   "-E", "--eof",
   "-I", "--replace",
+  "-L", "--max-lines",
   "-n", "--max-args",
   "-P", "--max-procs",
   "-s", "--max-chars",
+  "--process-slot-var",
 ]);
 
-export function xargsCommandTokens(tokens: string[]): string[] | null {
+const XARGS_OPTIONS_WITHOUT_VALUE: ReadonlySet<string> = new Set([
+  "-0", "--null",
+  "-o", "--open-tty",
+  "-p", "--interactive",
+  "-r", "--no-run-if-empty",
+  "-t", "--verbose",
+  "-x", "--exit",
+  "--show-limits",
+  "--help",
+  "--version",
+]);
+
+const XARGS_KNOWN_OPTIONS: ReadonlySet<string> = new Set([
+  ...XARGS_OPTIONS_WITH_VALUE,
+  ...XARGS_OPTIONS_WITHOUT_VALUE,
+]);
+
+function parseXargsPrefix(tokens: readonly string[]): {
+  payloadStart: number | null;
+  optionValues: ReadonlyMap<string, readonly string[]>;
+  valid: boolean;
+} {
+  const optionValues = new Map<string, string[]>();
   for (let i = 1; i < tokens.length; i++) {
     const token = tokens[i];
     if (token === "--") {
-      return i + 1 < tokens.length ? tokens.slice(i + 1) : null;
+      return {
+        payloadStart: i + 1 < tokens.length ? i + 1 : null,
+        optionValues,
+        valid: true,
+      };
     }
-    if (optionConsumesSeparateValue(token, XARGS_OPTIONS_WITH_VALUE)) {
-      i++;
-      continue;
+    if (!token.startsWith("-") || token === "-") {
+      return { payloadStart: i, optionValues, valid: true };
     }
-    if (token.startsWith("-")) continue;
-    return tokens.slice(i);
+
+    const parsed = parseShellOptionToken(token, {
+      optionsWithOneValue: XARGS_OPTIONS_WITH_VALUE,
+      knownOptions: XARGS_KNOWN_OPTIONS,
+    });
+    if (parsed.unrecognizedOptions.length > 0) {
+      return { payloadStart: null, optionValues, valid: false };
+    }
+    if (parsed.valuedOption) {
+      const { values, consumedFollowingValues, complete } = consumeShellOptionValues(
+        tokens,
+        i,
+        parsed.valuedOption,
+      );
+      const { option } = parsed.valuedOption;
+      optionValues.set(option, [...(optionValues.get(option) ?? []), ...values]);
+      if (!complete || values.some((value) => !validXargsOptionValue(option, value))) {
+        return { payloadStart: null, optionValues, valid: false };
+      }
+      i += consumedFollowingValues;
+    }
   }
-  return null;
+  return { payloadStart: null, optionValues, valid: true };
 }
 
-export function walkShellCharacters(input: string, visit: (event: ShellCharEvent) => boolean | void): boolean {
+function validXargsOptionValue(option: string, value: string): boolean {
+  if (option === "-n" || option === "--max-args" ||
+      option === "-L" || option === "--max-lines" ||
+      option === "-s" || option === "--max-chars") {
+    return /^[1-9]\d*$/.test(value);
+  }
+  if (option === "-P" || option === "--max-procs") {
+    return /^\d+$/.test(value);
+  }
+  if (option === "--process-slot-var") {
+    return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
+  }
+  if (option === "-d" || option === "--delimiter") {
+    return [...value].length === 1 || /^\\(?:[0-7]{1,3}|x[0-9A-Fa-f]{2}|.)$/.test(value);
+  }
+  if (option === "-I" || option === "--replace") {
+    return value.length > 0;
+  }
+  return value.length > 0 || option === "-E" || option === "--eof";
+}
+
+export interface XargsCommandAnalysis {
+  payloadTokens: string[] | null;
+  optionValues: ReadonlyMap<string, readonly string[]>;
+  valid: boolean;
+}
+
+export function analyzeXargsCommand(tokens: readonly string[]): XargsCommandAnalysis {
+  const { payloadStart, optionValues, valid } = parseXargsPrefix(tokens);
+  return {
+    payloadTokens: payloadStart === null ? null : tokens.slice(payloadStart),
+    optionValues,
+    valid,
+  };
+}
+
+export function xargsPrefixIsValid(tokens: readonly string[]): boolean {
+  return analyzeXargsCommand(tokens).valid;
+}
+
+export function xargsCommandTokens(tokens: string[]): string[] | null {
+  return analyzeXargsCommand(tokens).payloadTokens;
+}
+
+function walkShellCharactersDetailed(
+  input: string,
+  visit: (event: ShellCharEvent) => boolean | void,
+): ShellCharacterWalkResult {
   let quote: ShellQuote | null = null;
   let escaped = false;
 
@@ -158,12 +411,16 @@ export function walkShellCharacters(input: string, visit: (event: ShellCharEvent
         escapeInitiator: false,
         escaped: false,
         active: false,
-      })) return true;
+      })) return { escaped, quote, stopped: true };
       if (quoteBoundary) quote = null;
       continue;
     }
 
     if (escaped) {
+      if (ch === "\n") {
+        escaped = false;
+        continue;
+      }
       if (visit({
         ...eventBase,
         quote,
@@ -172,12 +429,29 @@ export function walkShellCharacters(input: string, visit: (event: ShellCharEvent
         escapeInitiator: false,
         escaped: true,
         active: false,
-      })) return true;
+      })) return { escaped, quote, stopped: true };
       escaped = false;
       continue;
     }
 
     if (ch === "\\") {
+      const doubleQuoteEscapable = eventBase.next === "$" ||
+        eventBase.next === "`" ||
+        eventBase.next === '"' ||
+        eventBase.next === "\\" ||
+        eventBase.next === "\n";
+      if (quote === '"' && !doubleQuoteEscapable) {
+        if (visit({
+          ...eventBase,
+          quote,
+          quoted: true,
+          quoteBoundary: false,
+          escapeInitiator: false,
+          escaped: false,
+          active: true,
+        })) return { escaped, quote, stopped: true };
+        continue;
+      }
       if (visit({
         ...eventBase,
         quote,
@@ -186,7 +460,7 @@ export function walkShellCharacters(input: string, visit: (event: ShellCharEvent
         escapeInitiator: true,
         escaped: false,
         active: false,
-      })) return true;
+      })) return { escaped, quote, stopped: true };
       escaped = true;
       continue;
     }
@@ -201,7 +475,7 @@ export function walkShellCharacters(input: string, visit: (event: ShellCharEvent
         escapeInitiator: false,
         escaped: false,
         active: false,
-      })) return true;
+      })) return { escaped, quote, stopped: true };
       continue;
     }
 
@@ -215,7 +489,7 @@ export function walkShellCharacters(input: string, visit: (event: ShellCharEvent
         escapeInitiator: false,
         escaped: false,
         active: false,
-      })) return true;
+      })) return { escaped, quote, stopped: true };
       quote = nextQuote;
       continue;
     }
@@ -228,10 +502,23 @@ export function walkShellCharacters(input: string, visit: (event: ShellCharEvent
       escapeInitiator: false,
       escaped: false,
       active: true,
-    })) return true;
+    })) return { escaped, quote, stopped: true };
   }
 
-  return false;
+  return { escaped, quote, stopped: false };
+}
+
+export function walkShellCharacters(
+  input: string,
+  visit: (event: ShellCharEvent) => boolean | void,
+): boolean {
+  return walkShellCharactersDetailed(input, visit).stopped;
+}
+
+/** True only when quotes are balanced and no escape is left dangling at EOF. */
+export function hasValidShellLexing(input: string): boolean {
+  const result = walkShellCharactersDetailed(input, () => false);
+  return result.quote === null && !result.escaped;
 }
 
 export function stripQuotedRegions(s: string): string {
@@ -245,22 +532,28 @@ export function stripQuotedRegions(s: string): string {
 export function tokenizeShellSegment(segment: string): string[] {
   const tokens: string[] = [];
   let current = "";
+  let tokenStarted = false;
 
   walkShellCharacters(segment.trim(), (event) => {
-    if (event.quoteBoundary || event.escapeInitiator) return;
+    if (event.quoteBoundary || event.escapeInitiator) {
+      tokenStarted = true;
+      return;
+    }
 
     if (!event.quoted && !event.escaped && /\s/.test(event.ch)) {
-      if (current) {
+      if (tokenStarted) {
         tokens.push(current);
         current = "";
+        tokenStarted = false;
       }
       return;
     }
 
     current += event.ch;
+    tokenStarted = true;
   });
 
-  if (current) tokens.push(current);
+  if (tokenStarted) tokens.push(current);
   return tokens;
 }
 

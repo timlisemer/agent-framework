@@ -104,6 +104,27 @@ latest user message already implies Bash, the Codex hook should not require a
 second permission request solely because the command head is outside the
 prediction-block read-only classifier. Deterministic blacklist checks and final
 tool approval still decide whether the specific command is safe and relevant.
+Codex file inspection normally arrives as Bash rather than a dedicated Read
+call. The shared classifier emits generic canonical capabilities containing
+only input facts it can prove, and the workflow queue matches those capabilities
+with the same logic used for native calls. Its current Bash producer emits a
+`Read` capability for selected safely classified content-reader commands when
+command-aware parsing identifies the exact required path as a real file operand.
+Programs, filters, option
+values, jq argument-only modes, pipelines, all input/output redirects,
+`&&`/`||` compounds, and every `xargs` payload are deliberately not treated as
+proof that the file was read. Even with a
+recognized unconditional prefix, dynamic stdin arguments are appended to the
+reader invocation and can change its behavior after static parsing. `xargs`
+token boundaries remain preserved for safety classification, but no `xargs`
+form advances a canonical `Read`. Unknown and malformed options also fail
+closed. The proof allowlist is intentionally limited to one standalone plain
+`cat`, validated `head`/`tail`, or direct safe `sed` print range such as
+`sed -n '1,240p' <path>`, with exactly one file operand. `awk` is not accepted as
+read proof because a `BEGIN` action can exit before input is opened; zero-output
+`head` and `tail` counts are excluded for the same reason. The adapter applies
+the same token-preserving serialization to structured `exec_command`
+`{ command, args }` input before shared policy classification.
 
 `apply_patch` arrives as `tool_name: "apply_patch"` with the patch in
 `tool_input.command`. The Codex adapter parses patch headers during

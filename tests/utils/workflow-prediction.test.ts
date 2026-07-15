@@ -7,6 +7,7 @@ import {
   decideRequiredWorkflowToolSequence,
   deriveWorkflowToolRequirementsFromText,
   toolRequirementMatches,
+  toolCapabilityMatchesRequirement,
   uniqueToolRequirements,
   type ToolPrediction,
   type ToolRequirement,
@@ -24,6 +25,13 @@ import {
   waitReq,
   type RequirementSignature,
 } from "../helpers/workflow-requirements.js";
+import {
+  bashExpansionReadProofCases,
+  bashDoesNotReadRequiredPathCommands,
+  bashNoReadCapabilityCommands,
+  bashReadCapabilityCommands,
+  unsafeBashReadCommands,
+} from "../helpers/bash-read-fixtures.js";
 
 function makePrediction(required: ToolRequirement[]): ToolPrediction {
   const { nonBlockingTools } = deriveWorkflowToolRequirementsFromText("Call `mcp-check`.");
@@ -40,6 +48,32 @@ function makePrediction(required: ToolRequirement[]): ToolPrediction {
     timestamp: Date.now(),
   };
 }
+
+describe("canonical tool capabilities", () => {
+  it("matches any capability with the same generic requirement rules", () => {
+    const capability = {
+      tool: "Grep",
+      input: { pattern: "needle", path: "src", matches: [1, 2] },
+    };
+
+    expect(toolCapabilityMatchesRequirement(
+      { tool: "Grep", input: { pattern: "needle", path: "src" } },
+      capability,
+    )).toBe(true);
+    expect(toolCapabilityMatchesRequirement(
+      { tool: "Grep", inputArrayLengths: { matches: 2 } },
+      capability,
+    )).toBe(true);
+    expect(toolCapabilityMatchesRequirement(
+      { tool: "Grep", input: { pattern: "other" } },
+      capability,
+    )).toBe(false);
+    expect(toolCapabilityMatchesRequirement(
+      { tool: "Read", input: { file_path: "src" } },
+      capability,
+    )).toBe(false);
+  });
+});
 
 const COMMON_WORKFLOW_EXPECTATIONS: Record<string, RequirementSignature[]> = {
   check: [req("mcp-check", undefined, undefined, ["working_dir"])],
@@ -464,5 +498,225 @@ Spawn exactly one \`default\` agent.
         0,
       ).decision).toBe("allow");
     }
+  });
+
+  it("matches canonical Read against each adapter's native file-reading surface", () => {
+    const planfile = "/tmp/agent-framework/plans/read-tool-surface.md";
+    const requirement: ToolRequirement = {
+      tool: "Read",
+      input: { file_path: planfile },
+    };
+
+    const claudeRead = claudeSpec.canonicalizeToolCall("Read", { file_path: planfile });
+    expect(toolRequirementMatches(
+      requirement,
+      claudeRead.toolName,
+      claudeRead.toolInput,
+    )).toBe(true);
+
+    const codexRead = codexSpec.canonicalizeToolCall("exec_command", {
+      command: `sed -n '1,240p' '${planfile}'`,
+    });
+    expect(codexRead.toolName).toBe("Bash");
+    expect(toolRequirementMatches(
+      requirement,
+      codexRead.toolName,
+      codexRead.toolInput,
+    )).toBe(true);
+    expect(toolRequirementMatches(
+      { tool: "Read", input: { path: planfile } },
+      codexRead.toolName,
+      codexRead.toolInput,
+    )).toBe(true);
+    expect(toolRequirementMatches(
+      { tool: "Read", input: { file_path: planfile, offset: 10 } },
+      codexRead.toolName,
+      codexRead.toolInput,
+    )).toBe(false);
+
+    for (const command of [
+      ...bashNoReadCapabilityCommands(planfile),
+      ...bashDoesNotReadRequiredPathCommands(planfile),
+      ...unsafeBashReadCommands(planfile),
+    ]) {
+      const call = codexSpec.canonicalizeToolCall("exec_command", { command });
+      expect(toolRequirementMatches(
+        requirement,
+        call.toolName,
+        call.toolInput,
+      ), command).toBe(false);
+    }
+
+    for (const command of bashReadCapabilityCommands(planfile)) {
+      const call = codexSpec.canonicalizeToolCall("exec_command", { command });
+      expect(toolRequirementMatches(
+        requirement,
+        call.toolName,
+        call.toolInput,
+      ), command).toBe(true);
+    }
+
+    const attachedRedirect = codexSpec.canonicalizeToolCall("exec_command", {
+      command: `cat '${planfile}'>/dev/stdout`,
+    });
+    expect(toolRequirementMatches(
+      { tool: "Read", input: { file_path: `${planfile}>/dev/stdout` } },
+      attachedRedirect.toolName,
+      attachedRedirect.toolInput,
+    )).toBe(false);
+    const attachedInputRedirect = codexSpec.canonicalizeToolCall("exec_command", {
+      command: `cat <'${planfile}'`,
+    });
+    expect(toolRequirementMatches(
+      { tool: "Read", input: { file_path: `<${planfile}` } },
+      attachedInputRedirect.toolName,
+      attachedInputRedirect.toolInput,
+    )).toBe(false);
+
+    const spacedPlanfile = "/tmp/agent-framework/plans/read tool surface.md";
+    const spacedRead = codexSpec.canonicalizeToolCall("exec_command", {
+      command: `cat '${spacedPlanfile}'`,
+    });
+    expect(toolRequirementMatches(
+      { tool: "Read", input: { file_path: spacedPlanfile } },
+      spacedRead.toolName,
+      spacedRead.toolInput,
+    )).toBe(true);
+
+    const structuredSpacedRead = codexSpec.canonicalizeToolCall("exec_command", {
+      command: "cat",
+      args: [spacedPlanfile],
+    });
+    expect(toolRequirementMatches(
+      { tool: "Read", input: { file_path: spacedPlanfile } },
+      structuredSpacedRead.toolName,
+      structuredSpacedRead.toolInput,
+    )).toBe(true);
+
+    for (const argument of [
+      `unrelated; cat ${planfile}`,
+      `unrelated | cat ${planfile}`,
+      `prefix ${planfile} suffix`,
+    ]) {
+      const structuredNonRead = codexSpec.canonicalizeToolCall("exec_command", {
+        command: "xargs",
+        args: ["cat", argument],
+      });
+      expect(toolRequirementMatches(
+        requirement,
+        structuredNonRead.toolName,
+        structuredNonRead.toolInput,
+      ), argument).toBe(false);
+    }
+
+    const malformedWindowsCount = codexSpec.canonicalizeToolCall("exec_command", {
+      command: "head",
+      args: ["-n", '1"0', "C:/plan.md"],
+    });
+    expect(toolRequirementMatches(
+      { tool: "Read", input: { file_path: "C:/plan.md" } },
+      malformedWindowsCount.toolName,
+      malformedWindowsCount.toolInput,
+    )).toBe(false);
+
+    for (const { literalPath, quotedCommand, unquotedCommand } of bashExpansionReadProofCases()) {
+      const literalRequirement: ToolRequirement = {
+        tool: "Read",
+        input: { file_path: literalPath },
+      };
+      const unquoted = codexSpec.canonicalizeToolCall("exec_command", {
+        command: unquotedCommand,
+      });
+      expect(toolRequirementMatches(
+        literalRequirement,
+        unquoted.toolName,
+        unquoted.toolInput,
+      ), unquotedCommand).toBe(false);
+
+      const quoted = codexSpec.canonicalizeToolCall("exec_command", {
+        command: quotedCommand,
+      });
+      expect(toolRequirementMatches(
+        literalRequirement,
+        quoted.toolName,
+        quoted.toolInput,
+      ), quotedCommand).toBe(true);
+    }
+  });
+
+  it("advances a canonical Read through Codex Bash before the native MCP call", () => {
+    const planfile = "/tmp/agent-framework/plans/implement.md";
+    const prediction = makePrediction([
+      { tool: "Read", input: { file_path: planfile } },
+      { tool: "mcp-check" },
+    ]);
+    const readCall = codexSpec.canonicalizeToolCall("exec_command", {
+      command: `sed -n '1,240p' '${planfile}'`,
+    });
+
+    expect(decidePrediction(
+      prediction,
+      readCall.toolName,
+      readCall.toolInput,
+      0,
+    ).decision).toBe("allow");
+
+    const afterRead = advanceRequiredToolsAfterAllowedToolSequence(prediction, [readCall]);
+    expect(afterRead.explicitlyRequiredTools).toEqual([{ tool: "mcp-check" }]);
+
+    const mcpCall = codexSpec.canonicalizeToolCall(codexSpec.mcpWireName("check"), {
+      working_dir: "/tmp/agent-framework",
+    });
+    expect(decidePrediction(
+      afterRead,
+      mcpCall.toolName,
+      mcpCall.toolInput,
+      0,
+    ).decision).toBe("allow");
+  });
+
+  it("keeps an MCP queued when Codex Bash satisfies non-blocking Read", () => {
+    const prediction = makePrediction([{ tool: "mcp-check" }]);
+    const readCall = codexSpec.canonicalizeToolCall("exec_command", {
+      command: "sed -n '1,240p' AGENTS.md",
+    });
+
+    expect(decidePrediction(
+      prediction,
+      readCall.toolName,
+      readCall.toolInput,
+      0,
+    ).decision).toBe("allow");
+    expect(advanceRequiredToolsAfterAllowedToolSequence(
+      prediction,
+      [readCall],
+    ).explicitlyRequiredTools).toEqual([{ tool: "mcp-check" }]);
+
+    const mcpCall = codexSpec.canonicalizeToolCall(codexSpec.mcpWireName("check"), {});
+    expect(decidePrediction(
+      prediction,
+      mcpCall.toolName,
+      mcpCall.toolInput,
+      0,
+    ).decision).toBe("allow");
+  });
+
+  it("keeps Claude native Read and MCP queue progression unchanged", () => {
+    const planfile = "/tmp/agent-framework/plans/claude.md";
+    const prediction = makePrediction([
+      { tool: "Read", input: { file_path: planfile } },
+      { tool: "mcp-check" },
+    ]);
+    const readCall = claudeSpec.canonicalizeToolCall("Read", { file_path: planfile });
+    const afterRead = advanceRequiredToolsAfterAllowedToolSequence(prediction, [readCall]);
+    expect(afterRead.explicitlyRequiredTools).toEqual([{ tool: "mcp-check" }]);
+
+    const mcpCall = claudeSpec.canonicalizeToolCall(claudeSpec.mcpWireName("check"), {});
+    expect(decidePrediction(
+      afterRead,
+      mcpCall.toolName,
+      mcpCall.toolInput,
+      0,
+    ).decision).toBe("allow");
   });
 });

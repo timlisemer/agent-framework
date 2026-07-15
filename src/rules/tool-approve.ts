@@ -101,7 +101,7 @@ export const toolApproveRule: PreToolRule = {
           String((ctx.toolInput as { command?: unknown }).command ?? ""),
           ctx.projectDir,
         );
-        return `\nBASH POLICY CLASSIFICATION:\nclass: ${classification.riskClass}\nread_only: ${classification.readOnly ? "true" : "false"}\nprediction identities: ${classification.predictionIdentities.join(", ")}\nread-only-heavy evaluation is not build/compile.\n`;
+        return `\nBASH POLICY CLASSIFICATION:\nclass: ${classification.riskClass}\nread_only: ${classification.readOnly ? "true" : "false"}\nprediction identities: ${classification.predictionIdentities.join(", ")}\ncapabilities: ${classification.capabilities.map((capability) => capability.tool).join(", ")}\nread-only-heavy evaluation is not build/compile.\n`;
       })()
       : "";
 

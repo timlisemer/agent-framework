@@ -14,6 +14,7 @@ import {
   codexPlan3AfterFirstAgentRequirements,
   codexPlan3InitialAgentBatchRequirements,
 } from "../helpers/workflow-requirements.js";
+import { bashReadProofExcludedCommands } from "../helpers/bash-read-fixtures.js";
 
 const mocks = vi.hoisted(() => ({
   exitAfterFlush: vi.fn().mockResolvedValue(undefined),
@@ -277,6 +278,69 @@ describe("pre-tool-use planfile writes", () => {
     expect(state.currentPrediction?.explicitlyRequiredTools ?? []).toEqual([]);
   });
 
+  it("consumes a required Read through Codex Bash before the native MCP call", async () => {
+    const planfile = path.join(tempDir, "implementation-plan.md");
+    await seedPrediction({
+      explicitlyRequiredTools: [
+        { tool: "Read", input: { file_path: planfile } },
+        { tool: "mcp-check" },
+      ],
+    });
+
+    await runToolHook(
+      "tool-read-plan",
+      "Bash",
+      { command: `sed -n '1,240p' '${planfile}'` },
+    );
+
+    let state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools).toEqual([
+      { tool: "mcp-check" },
+    ]);
+
+    await runToolHook(
+      "tool-check-after-read",
+      "mcp__agent_framework__check",
+      { working_dir: tempDir },
+    );
+
+    state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools).toEqual([]);
+    const [, stdout] = mocks.exitAfterFlush.mock.calls.at(-1)!;
+    expect(stdout).toBe("");
+  });
+
+  it("does not consume Read for excluded Codex Bash read-proof forms", async () => {
+    const planfile = path.join(tempDir, "conditional-plan.md");
+    for (const [index, command] of bashReadProofExcludedCommands(planfile).entries()) {
+      await seedPrediction({
+        explicitlyRequiredTools: [
+          { tool: "Read", input: { file_path: planfile } },
+          { tool: "mcp-check" },
+        ],
+      });
+      const toolUseId = `conditional-read-${index}`;
+      writeToolBatch([
+        { id: toolUseId, name: "Bash", input: { command } },
+        {
+          id: `conditional-check-${index}`,
+          name: "mcp__agent_framework__check",
+          input: { working_dir: tempDir },
+        },
+      ]);
+
+      await runToolHook(toolUseId, "Bash", { command });
+
+      const state = await getSessionState(sessionDir).load();
+      expect(state.currentPrediction?.explicitlyRequiredTools, command).toEqual([
+        { tool: "Read", input: { file_path: planfile } },
+        { tool: "mcp-check" },
+      ]);
+      const [, stdout] = mocks.exitAfterFlush.mock.calls.at(-1)!;
+      expect(JSON.parse(stdout).hookSpecificOutput.permissionDecision, command).toBe("deny");
+    }
+  });
+
   it("consumes the Codex wait continuation before allowing the next workflow tool", async () => {
     await seedPrediction({
       explicitlyRequiredTools: [
@@ -331,8 +395,8 @@ describe("pre-tool-use planfile writes", () => {
 
     await runToolHook(
       "tool-read",
-      "Read",
-      { file_path: path.join(tempDir, "README.md") },
+      "Bash",
+      { command: `sed -n '1,240p' '${path.join(tempDir, "README.md")}'` },
     );
     state = await getSessionState(sessionDir).load();
     expect(state.currentPrediction?.explicitlyRequiredTools).toEqual([]);

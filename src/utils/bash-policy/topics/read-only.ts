@@ -11,14 +11,12 @@ import {
 } from "./find-sed.js";
 import { SHELL_REDIRECT_DENY_REASON } from "./file-write.js";
 import { hasActiveFileRedirect } from "../analysis.js";
+import { setsOverlap } from "../helpers.js";
 import {
-  attachedShortOptionValue,
-  canonicalOptionName,
-  inlineLongOptionValue,
-  optionConsumesSeparateValue,
-  XARGS_OPTIONS_WITH_VALUE,
-  xargsCommandTokens,
+  analyzeXargsCommand,
+  parseShellOptionArgumentsDetailed,
 } from "../../shell-command-parser.js";
+import type { XargsCommandAnalysis } from "../../shell-command-parser.js";
 import { READ_ONLY_BASH_COMMANDS } from "./read-only-commands.js";
 import type { BashPolicyFinding, BlacklistPattern } from "../types.js";
 import { isSensitivePath } from "../../sensitive-paths.js";
@@ -157,13 +155,16 @@ function validateReadOnlyCommandHead(tokens: string[]): { allowed: true } | { al
   }
 
   if (bare === "xargs") {
-    const xargsSensitivePathReason = sensitiveXargsArgFileDenyReason(tokens);
+    const xargs = analyzeXargsCommand(tokens);
+    const xargsSensitivePathReason = sensitiveXargsArgFileDenyReason(xargs);
     if (xargsSensitivePathReason) {
       return { allowed: false, reason: xargsSensitivePathReason };
     }
-    const commandTokens = xargsCommandTokens(tokens);
-    if (!commandTokens) return { allowed: true };
-    return validateReadOnlyCommandHead(commandTokens);
+    if (!xargs.valid) {
+      return { allowed: false, reason: "xargs option prefix is not recognized or valid" };
+    }
+    if (!xargs.payloadTokens) return { allowed: true };
+    return validateReadOnlyCommandHead(xargs.payloadTokens);
   }
 
   return { allowed: true };
@@ -172,77 +173,39 @@ function validateReadOnlyCommandHead(tokens: string[]): { allowed: true } | { al
 function sensitivePathReadDenyReason(commandHead: string, tokens: string[]): string | null {
   if (!SENSITIVE_PATH_OPERAND_COMMANDS.has(commandHead)) return null;
   const searchOptionsWithValue = SEARCH_OPTIONS_WITH_VALUE[commandHead] ?? EMPTY_OPTION_SET;
-  const skipSearchPattern = shouldSkipFirstSearchPattern(commandHead, tokens);
-  let skippedSearchPattern = false;
-  let parsingOptions = true;
-  for (let i = 1; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (!token) continue;
-    if (parsingOptions && token === "--") {
-      parsingOptions = false;
-      continue;
+  const trackedOptions = new Set([
+    ...(SEARCH_NO_PATTERN_FLAGS[commandHead] ?? []),
+    ...(SEARCH_PATTERN_VALUE_OPTIONS[commandHead] ?? []),
+  ]);
+  const parsed = parseShellOptionArgumentsDetailed(tokens.slice(1), {
+    optionsWithOneValue: searchOptionsWithValue,
+    trackedOptions,
+  });
+  for (const [option, values] of parsed.optionValues) {
+    for (const value of values) {
+      const reason = sensitiveOptionValueDenyReason(commandHead, option, value);
+      if (reason) return reason;
     }
+  }
 
-    if (parsingOptions && token.startsWith("-")) {
-      const inlineValue = inlineLongOptionValue(token);
-      if (inlineValue) {
-        const reason = sensitiveOptionValueDenyReason(commandHead, inlineValue.option, inlineValue.value);
-        if (reason) return reason;
-        continue;
-      }
-
-      const attachedSensitiveOption = attachedSensitiveOptionValue(commandHead, token, searchOptionsWithValue);
-      if (attachedSensitiveOption) {
-        const reason = sensitiveOptionValueDenyReason(commandHead, attachedSensitiveOption.option, attachedSensitiveOption.value);
-        if (reason) return reason;
-        continue;
-      }
-
-      const attachedSearchPattern = attachedShortOptionValue(token, "-e", searchOptionsWithValue);
-      if (attachedSearchPattern) continue;
-
-      if (optionConsumesSeparateValue(token, searchOptionsWithValue) && i + 1 < tokens.length) {
-        const option = canonicalOptionName(token);
-        const reason = sensitiveOptionValueDenyReason(commandHead, option, tokens[i + 1] ?? "");
-        if (reason) return reason;
-        i++;
-        continue;
-      }
-
-      continue;
-    }
-
+  const skipSearchPattern = shouldSkipFirstSearchPattern(commandHead, parsed.encounteredOptions);
+  for (const [index, token] of parsed.positionals.entries()) {
+    if (skipSearchPattern && index === 0) continue;
     const normalized = normalizeSensitivePathCandidate(token);
-    if (skipSearchPattern && !skippedSearchPattern) {
-      skippedSearchPattern = true;
-      continue;
-    }
     if (isSensitivePath(normalized)) return `sensitive path read blocked: ${normalized}`;
   }
   return null;
 }
 
-function shouldSkipFirstSearchPattern(commandHead: string, tokens: string[]): boolean {
+function shouldSkipFirstSearchPattern(
+  commandHead: string,
+  encounteredOptions: ReadonlySet<string>,
+): boolean {
   if (!SEARCH_PATTERN_COMMANDS.has(commandHead)) return false;
-  if (hasNoPatternSearchFlag(commandHead, tokens)) return false;
-  return !hasSearchPatternOption(commandHead, tokens);
-}
-
-function hasNoPatternSearchFlag(commandHead: string, tokens: string[]): boolean {
-  const flags = SEARCH_NO_PATTERN_FLAGS[commandHead];
-  return Boolean(flags && tokens.some((token) => flags.has(token)));
-}
-
-function hasSearchPatternOption(commandHead: string, tokens: string[]): boolean {
-  const patternOptions = SEARCH_PATTERN_VALUE_OPTIONS[commandHead];
-  if (!patternOptions) return false;
-  return tokens.some((token) => {
-    const inlineValue = inlineLongOptionValue(token);
-    if (inlineValue && patternOptions.has(inlineValue.option)) return true;
-    if (attachedShortOptionValue(token, "-e", SEARCH_OPTIONS_WITH_VALUE[commandHead])) return true;
-    if (attachedShortOptionValue(token, "-f", SEARCH_OPTIONS_WITH_VALUE[commandHead])) return true;
-    return patternOptions.has(token);
-  });
+  const noPatternFlags = SEARCH_NO_PATTERN_FLAGS[commandHead] ?? EMPTY_OPTION_SET;
+  if (setsOverlap(noPatternFlags, encounteredOptions)) return false;
+  const patternOptions = SEARCH_PATTERN_VALUE_OPTIONS[commandHead] ?? EMPTY_OPTION_SET;
+  return !setsOverlap(patternOptions, encounteredOptions);
 }
 
 function sensitiveOptionValueDenyReason(commandHead: string, option: string, value: string): string | null {
@@ -255,49 +218,12 @@ function sensitivePathValueDenyReason(value: string): string | null {
   return isSensitivePath(normalized) ? `sensitive path read blocked: ${normalized}` : null;
 }
 
-function sensitiveXargsArgFileDenyReason(tokens: string[]): string | null {
-  let parsingOptions = true;
-  for (let i = 1; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (!token) continue;
-    if (parsingOptions && token === "--") return null;
-    if (!parsingOptions || !token.startsWith("-")) return null;
-
-    const inlineValue = inlineLongOptionValue(token);
-    if (inlineValue && XARGS_SENSITIVE_OPTION_VALUE_OPTIONS.has(inlineValue.option)) {
-      const reason = sensitivePathValueDenyReason(inlineValue.value);
+function sensitiveXargsArgFileDenyReason(xargs: XargsCommandAnalysis): string | null {
+  for (const option of XARGS_SENSITIVE_OPTION_VALUE_OPTIONS) {
+    for (const value of xargs.optionValues.get(option) ?? []) {
+      const reason = sensitivePathValueDenyReason(value);
       if (reason) return reason;
-      continue;
     }
-
-    const attachedArgFile = attachedShortOptionValue(token, "-a", XARGS_OPTIONS_WITH_VALUE);
-    if (attachedArgFile) {
-      const reason = sensitivePathValueDenyReason(attachedArgFile);
-      if (reason) return reason;
-      continue;
-    }
-
-    if (optionConsumesSeparateValue(token, XARGS_OPTIONS_WITH_VALUE) && i + 1 < tokens.length) {
-      const option = canonicalOptionName(token);
-      if (XARGS_SENSITIVE_OPTION_VALUE_OPTIONS.has(option)) {
-        const reason = sensitivePathValueDenyReason(tokens[i + 1] ?? "");
-        if (reason) return reason;
-      }
-      i++;
-      continue;
-    }
-  }
-  return null;
-}
-
-function attachedSensitiveOptionValue(
-  commandHead: string,
-  token: string,
-  optionsWithValue: ReadonlySet<string>,
-): { option: string; value: string } | null {
-  for (const option of SENSITIVE_OPTION_VALUE_OPTIONS[commandHead] ?? []) {
-    const value = attachedShortOptionValue(token, option, optionsWithValue);
-    if (value) return { option, value };
   }
   return null;
 }

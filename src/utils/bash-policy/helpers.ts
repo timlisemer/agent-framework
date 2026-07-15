@@ -1,6 +1,24 @@
 import { redactPathTokens } from "../path-redaction.js";
 import { commandOrNestedPayloadMatches, stripQuotedRegions } from "./analysis.js";
-import type { BashPolicyFinding, BashPolicyTopic, BlacklistPattern } from "./types.js";
+import type {
+  BashCommandRiskClass,
+  BashPolicyFinding,
+  BashPolicyTopic,
+  BlacklistPattern,
+} from "./types.js";
+
+export function isReadOnlyRiskClass(riskClass: BashCommandRiskClass): boolean {
+  return riskClass === "simple-read-only" ||
+    riskClass === "read-only-heavy" ||
+    riskClass === "read-only-complex";
+}
+
+export function setsOverlap<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
+  for (const value of left) {
+    if (right.has(value)) return true;
+  }
+  return false;
+}
 
 export function resolveAlternative(alt: string | (() => string)): string {
   return typeof alt === "function" ? alt() : alt;

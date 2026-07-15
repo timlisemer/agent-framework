@@ -25,6 +25,31 @@ describe("Codex canonicalizeToolCall", () => {
     });
   });
 
+  it("preserves exec_command structured argument boundaries", () => {
+    expect(canonicalizeToolCall("exec_command", {
+      command: "xargs",
+      args: ["cat", "unrelated; cat /required-plan.md", "name with spaces", "literal | pipe"],
+    })).toEqual({
+      toolName: "Bash",
+      toolInput: {
+        command: "xargs cat 'unrelated; cat /required-plan.md' 'name with spaces' 'literal | pipe'",
+      },
+    });
+    expect(canonicalizeToolCall("exec_command", {
+      cmd: "sed -n '1,20p' plan.md",
+    })).toEqual({
+      toolName: "Bash",
+      toolInput: { command: "sed -n '1,20p' plan.md" },
+    });
+    expect(canonicalizeToolCall("exec_command", {
+      command: "head",
+      args: ["-n", '1"0', "C:/plan.md"],
+    })).toEqual({
+      toolName: "Bash",
+      toolInput: { command: `head -n '1"0' C:/plan.md` },
+    });
+  });
+
   it("distinguishes MCP continuation waits from agent waits", () => {
     expect(canonicalizeToolCall("wait", { cell_id: "cell-1" })).toEqual({
       toolName: "Wait",

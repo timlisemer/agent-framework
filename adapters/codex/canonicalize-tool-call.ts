@@ -1,6 +1,7 @@
 import type { CanonicalToolCall } from "../../src/adapter/types.js";
 import { recognizeMcp } from "./recognize-mcp.js";
 import { extractApplyPatchPaths } from "./apply-patch-parser.js";
+import { serializeShellCommandTokens } from "../../src/utils/shell-command-parser.js";
 
 const ALIAS: Readonly<Record<string, string>> = {
   apply_patch: "Edit",
@@ -19,14 +20,19 @@ const ALIAS: Readonly<Record<string, string>> = {
 };
 
 function normalizeExecCommandInput(rawInput: unknown): unknown {
-  const input = rawInput as { command?: unknown; args?: unknown[] } | null | undefined;
+  const input = rawInput as { command?: unknown; cmd?: unknown; args?: unknown[] } | null | undefined;
   if (!input) return rawInput;
   // exec_command uses { command, args } shape; Bash uses { command: string }
+  const command = String(input.command ?? input.cmd ?? "");
   if (Array.isArray(input.args)) {
-    const cmd = [input.command, ...input.args].filter(Boolean).join(" ");
-    return { command: cmd };
+    return {
+      command: serializeShellCommandTokens([
+        command,
+        ...input.args.map((argument) => String(argument)),
+      ]),
+    };
   }
-  return { command: String(input.command ?? "") };
+  return { command };
 }
 
 function normalizeSpawnAgentInput(rawInput: unknown): unknown {

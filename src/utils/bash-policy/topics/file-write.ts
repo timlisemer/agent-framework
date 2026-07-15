@@ -1,10 +1,5 @@
 import {
-  attachedShortOptionValue,
-  hasShellOption,
-  inlineLongOptionValue,
-  nonOptionTokens,
-  optionConsumesSeparateValue,
-  stripOptionValueTokens,
+  parseShellOptionArgumentsDetailed,
 } from "../../shell-command-parser.js";
 import {
   analyzeBashCommand,
@@ -12,7 +7,7 @@ import {
   hasActiveFileRedirect,
   splitShellSegments,
 } from "../analysis.js";
-import { matchPatternInCommandTarget, matchingPatternFindings, payloadAwarePatternMatcher, resolveAlternative } from "../helpers.js";
+import { matchPatternInCommandTarget, matchingPatternFindings, payloadAwarePatternMatcher, resolveAlternative, setsOverlap } from "../helpers.js";
 import type { BashPolicyFinding, BlacklistPattern } from "../types.js";
 
 export const SHELL_REDIRECT_DENY_REASON = "shell redirect to file";
@@ -167,12 +162,29 @@ function commandHasDdOutputFile(command: string): boolean {
 
 function commandHasInstallTarget(command: string): boolean {
   return commandSegmentsContainCommandPredicate(command, "install", (tokens) => {
-    const positional = commandPositionalArgs(tokens, INSTALL_OPTIONS_WITH_VALUE);
-    if (hasShellOption(tokens.slice(1), INSTALL_DIRECTORY_OPTIONS)) {
-      return positional.length >= 1;
+    const parsed = parseCommandArguments(
+      tokens,
+      INSTALL_OPTIONS_WITH_VALUE,
+      new Set([...INSTALL_DIRECTORY_OPTIONS, ...TARGET_DIRECTORY_OPTIONS]),
+    );
+    if (setsOverlap(parsed.encounteredOptions, INSTALL_DIRECTORY_OPTIONS)) {
+      return parsed.positionals.length >= 1;
     }
-    if (hasTargetDirectoryOption(tokens)) return positional.length >= 1;
-    return positional.length >= 2;
+    if (setsOverlap(parsed.encounteredOptions, TARGET_DIRECTORY_OPTIONS)) {
+      return parsed.positionals.length >= 1;
+    }
+    return parsed.positionals.length >= 2;
+  });
+}
+
+function parseCommandArguments(
+  tokens: string[],
+  optionsWithValue: ReadonlySet<string>,
+  trackedOptions: ReadonlySet<string>,
+): ReturnType<typeof parseShellOptionArgumentsDetailed> {
+  return parseShellOptionArgumentsDetailed(tokens.slice(1), {
+    optionsWithOneValue: optionsWithValue,
+    trackedOptions,
   });
 }
 
@@ -186,30 +198,14 @@ function commandHasMoveTarget(command: string): boolean {
 
 function commandHasCopyMoveTarget(command: string, commandName: string): boolean {
   return commandSegmentsContainCommandPredicate(command, commandName, (tokens) => {
-    const positional = commandPositionalArgs(tokens, COPY_MOVE_OPTIONS_WITH_VALUE);
-    if (hasTargetDirectoryOption(tokens)) return positional.length >= 1;
-    return positional.length >= 2;
+    const parsed = parseCommandArguments(
+      tokens,
+      COPY_MOVE_OPTIONS_WITH_VALUE,
+      TARGET_DIRECTORY_OPTIONS,
+    );
+    if (setsOverlap(parsed.encounteredOptions, TARGET_DIRECTORY_OPTIONS)) {
+      return parsed.positionals.length >= 1;
+    }
+    return parsed.positionals.length >= 2;
   });
-}
-
-function commandPositionalArgs(tokens: string[], optionsWithValue: ReadonlySet<string>): string[] {
-  return nonOptionTokens(stripOptionValueTokens(tokens.slice(1), optionsWithValue));
-}
-
-function hasTargetDirectoryOption(tokens: string[]): boolean {
-  for (let i = 1; i < tokens.length; i++) {
-    const token = tokens[i];
-    if (token === "--") return false;
-    const inline = inlineLongOptionValue(token);
-    if (inline && TARGET_DIRECTORY_OPTIONS.has(inline.option) && inline.value.length > 0) {
-      return true;
-    }
-    if (attachedShortOptionValue(token, "-t", TARGET_DIRECTORY_OPTIONS) !== null) {
-      return true;
-    }
-    if (optionConsumesSeparateValue(token, TARGET_DIRECTORY_OPTIONS)) {
-      return i + 1 < tokens.length && tokens[i + 1].length > 0;
-    }
-  }
-  return false;
 }

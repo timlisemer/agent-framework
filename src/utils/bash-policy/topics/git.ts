@@ -1,7 +1,6 @@
 import {
   hasShellOption,
-  nonOptionTokens,
-  stripOptionValueTokens,
+  parseShellOptionArguments,
 } from "../../shell-command-parser.js";
 import {
   commandBare,
@@ -126,13 +125,13 @@ function readOnlyGitWithReadFilters(
   readFilterFlags: ReadonlySet<string>,
 ): boolean {
   if (hasShellOption(args, writeFlags)) return false;
-  const positional = nonOptionTokens(args);
+  const positional = parseShellOptionArguments(args, {});
   if (positional.length === 0) return true;
   return hasShellOption(args, readFilterFlags);
 }
 
 function readOnlyGitFirstArg(args: string[], allowed: ReadonlySet<string>, allowMissing = false): boolean {
-  const subcommand = nonOptionTokens(args)[0];
+  const subcommand = parseShellOptionArguments(args, {})[0];
   return subcommand === undefined ? allowMissing : allowed.has(subcommand);
 }
 
@@ -142,7 +141,9 @@ function readOnlyGitBranch(args: string[]): boolean {
 
 function readOnlyGitConfig(args: string[]): boolean {
   if (hasShellOption(args, GIT_CONFIG_WRITE_FLAGS)) return false;
-  const positional = nonOptionTokens(stripOptionValueTokens(args, GIT_CONFIG_OPTIONS_WITH_VALUE));
+  const positional = parseShellOptionArguments(args, {
+    optionsWithOneValue: GIT_CONFIG_OPTIONS_WITH_VALUE,
+  });
   const subcommand = positional[0];
   if (!subcommand) return true;
   if (GIT_CONFIG_WRITE_SUBCOMMANDS.has(subcommand)) return false;
@@ -156,7 +157,7 @@ function readOnlyGitReflog(args: string[]): boolean {
 }
 
 function readOnlyGitRemote(args: string[]): boolean {
-  const subcommand = nonOptionTokens(args)[0];
+  const subcommand = parseShellOptionArguments(args, {})[0];
   if (!subcommand) return true;
   if (subcommand === "show") return hasShellOption(args, GIT_REMOTE_SHOW_READ_FLAGS);
   return GIT_REMOTE_READ_SUBCOMMANDS.has(subcommand);

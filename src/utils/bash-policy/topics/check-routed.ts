@@ -2,7 +2,7 @@ import {
   analyzeBashCommand,
   splitShellSegments,
 } from "../analysis.js";
-import { optionConsumesSeparateValue } from "../../shell-command-parser.js";
+import { parseShellOptionArguments } from "../../shell-command-parser.js";
 import { contentCommandCandidate, policyTarget } from "../helpers.js";
 import { INSTALL_WORKAROUND_VARIANTS } from "../constants.js";
 import type { BashAnalysis, BashInvocation, BashPolicyFinding, CheckRoutedCommandPolicy } from "../types.js";
@@ -39,45 +39,16 @@ function packageManagerScript(invocation: BashInvocation, scripts: ReadonlySet<s
 function execTarget(invocation: BashInvocation): string | null {
   const args = invocation.args;
   if (args[0] !== "exec") return null;
-  for (let i = 1; i < args.length; i++) {
-    const token = args[i];
-    if (token === "--") return args[i + 1] ?? null;
-    if (optionConsumesSeparateValue(token, EXEC_OPTIONS_WITH_VALUE)) {
-      i++;
-      continue;
-    }
-    if (token.startsWith("--package=")) continue;
-    if (token.startsWith("-")) continue;
-    return token;
-  }
-  return null;
+  return parseShellOptionArguments(args.slice(1), {
+    optionsWithOneValue: EXEC_OPTIONS_WITH_VALUE,
+  })[0] ?? null;
 }
 
 function npxTarget(invocation: BashInvocation): string | null {
   if (invocation.executable !== "npx" && invocation.executable !== "bunx") return null;
-  const args = invocation.args;
-  for (let i = 0; i < args.length; i++) {
-    const token = args[i];
-    if (token === "--") return args[i + 1] ?? null;
-    if (
-      token === "--yes" ||
-      token === "-y" ||
-      token === "--no-install" ||
-      token === "--ignore-existing" ||
-      token === "--quiet" ||
-      token === "-q"
-    ) {
-      continue;
-    }
-    if (optionConsumesSeparateValue(token, NPX_OPTIONS_WITH_VALUE)) {
-      i++;
-      continue;
-    }
-    if (token.startsWith("--package=") || token.startsWith("--cache=") || token.startsWith("--userconfig=")) continue;
-    if (token.startsWith("-")) continue;
-    return token;
-  }
-  return null;
+  return parseShellOptionArguments(invocation.args, {
+    optionsWithOneValue: NPX_OPTIONS_WITH_VALUE,
+  })[0] ?? null;
 }
 
 function targetBinary(invocation: BashInvocation): string {
@@ -96,18 +67,9 @@ function matchesDirect(invocation: BashInvocation, names: ReadonlySet<string>): 
 function makeJustTargetArg(invocation: BashInvocation, executable: "make" | "just"): string | null {
   if (invocation.executable !== executable) return null;
   const optionsWithValue = executable === "make" ? MAKE_OPTIONS_WITH_VALUE : JUST_OPTIONS_WITH_VALUE;
-  for (let i = 0; i < invocation.args.length; i++) {
-    const token = invocation.args[i];
-    if (token === "--") return invocation.args[i + 1] ?? null;
-    if (optionConsumesSeparateValue(token, optionsWithValue)) {
-      i++;
-      continue;
-    }
-    if (token.includes("=") && optionsWithValue.has(token.slice(0, token.indexOf("=")))) continue;
-    if (token.startsWith("-")) continue;
-    return token;
-  }
-  return null;
+  return parseShellOptionArguments(invocation.args, {
+    optionsWithOneValue: optionsWithValue,
+  })[0] ?? null;
 }
 
 function makeJustTarget(invocation: BashInvocation, executable: "make" | "just", targets: ReadonlySet<string>): boolean {

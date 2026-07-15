@@ -1,9 +1,10 @@
-import { optionConsumesSeparateValue, stripShellGrouping } from "../../shell-command-parser.js";
+import { parseShellOptionArgumentsDetailed, stripShellGrouping } from "../../shell-command-parser.js";
 import {
   analyzeBashCommand,
   commandBare,
 } from "../analysis.js";
 import type { BashPolicyFinding } from "../types.js";
+import { setsOverlap } from "../helpers.js";
 
 export const FIND_DESTRUCTIVE_FLAG_NAMES = [
   "delete",
@@ -33,11 +34,18 @@ export const FIND_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
   "-printf",
 ]);
 
-export const SED_IN_PLACE_DENY_REASON = "sed in-place edit (-i)";
+const SED_PROGRAM_OPTIONS: ReadonlySet<string> = new Set([
+  "-e", "--expression",
+  "-f", "--file",
+]);
 
 const SED_OPTIONS_WITH_VALUE: ReadonlySet<string> = new Set([
-  "-e", "--expression", "-f", "--file",
+  ...SED_PROGRAM_OPTIONS,
+  "-l", "--line-length",
 ]);
+const SED_IN_PLACE_OPTIONS: ReadonlySet<string> = new Set(["-i", "--in-place"]);
+
+export const SED_IN_PLACE_DENY_REASON = "sed in-place edit (-i)";
 
 function findOptionConsumesSeparateValue(token: string): boolean {
   const normalized = stripShellGrouping(token);
@@ -81,21 +89,11 @@ export function tokensHaveFindDestructiveFlag(tokens: string[]): boolean {
 }
 
 export function tokensHaveSedInPlaceFlag(tokens: string[]): boolean {
-  const args = tokens.slice(1);
-  for (let i = 0; i < args.length; i++) {
-    const token = args[i];
-    if (token === "--") return false;
-    if (token === "--in-place" || token.startsWith("--in-place=")) return true;
-    if (token.startsWith("--expression=") || token.startsWith("--file=")) continue;
-    if (optionConsumesSeparateValue(token, SED_OPTIONS_WITH_VALUE)) {
-      i++;
-      continue;
-    }
-    if (/^-[ef].+/.test(token)) continue;
-    if (token.startsWith("--")) continue;
-    if (token.startsWith("-") && token.slice(1).includes("i")) return true;
-  }
-  return false;
+  const parsed = parseShellOptionArgumentsDetailed(tokens.slice(1), {
+    optionsWithOneValue: SED_OPTIONS_WITH_VALUE,
+    trackedOptions: SED_IN_PLACE_OPTIONS,
+  });
+  return setsOverlap(SED_IN_PLACE_OPTIONS, parsed.encounteredOptions);
 }
 
 export function hasFindDestructiveFlag(command: string): boolean {

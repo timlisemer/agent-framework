@@ -44,6 +44,7 @@ export const READ_ONLY_LITERAL_COMMAND_CASES = [
   "find . -- -delete",
   "sed -n -e '-i' file.txt",
   "sed -n --expression='-i' file.txt",
+  "sed -l80i 'p' file.txt",
   "rg foo > /dev/null",
   "rg foo > \"/dev/null\"",
 ] as const;
@@ -70,6 +71,9 @@ export const FILE_REDIRECT_DENY_COMMAND_CASES = [
   "eval 'printf x > out.txt'",
   "sh -c 'echo hi &> out.txt'",
   "eval 'printf x &>> out.txt'",
+  "cat plan.md > /dev/shm/agent-framework-read-copy.md",
+  "rg foo > ''/tmp/out.txt",
+  "rg foo > '/tmp/'out.txt",
 ] as const;
 
 export const DESTRUCTIVE_READ_ONLY_COMMAND_DENY_CASES = [
@@ -97,6 +101,10 @@ export const DESTRUCTIVE_READ_ONLY_COMMAND_DENY_CASES = [
   "xargs -a file sed -i 's/a/b/'",
   "xargs --arg-file file sed -i 's/a/b/'",
   "printf '%s\\n' file.txt | xargs sed -i 's/a/b/'",
+  "xargs --repl={} rm target",
+  "xargs --no-run-if-e rm target",
+  "xargs --definitely-unknown rm target",
+  "xargs -n nope rm target",
 ] as const;
 
 export const MUTATING_GIT_COMMAND_CASES = [

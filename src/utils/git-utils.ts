@@ -8,6 +8,7 @@ import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
 import { isPathAtOrInside } from "./path-containment.js";
 import { clipUtf8Bytes } from "./text-bounds.js";
 import { scanValidatedFileCancellable } from "./file-io.js";
+import { quoteShellToken } from "./shell-command-parser.js";
 import {
   assertCompleteGitOutput,
   formatUnifiedDiffPath,
@@ -37,17 +38,6 @@ export const REVIEW_CONTEXT_REDUCTION_LIMITS = {
   untrackedPrefilterCandidateLinesPerFile: 20,
 } as const;
 const REVIEW_DIFF_CONTEXT_LINES = REVIEW_CONTEXT_REDUCTION_LIMITS.trackedDiffContextLines;
-
-/**
- * Escape a file path for use in shell commands.
- * Uses single quotes on Unix, double quotes on Windows (cmd.exe).
- */
-function shellEscape(filePath: string): string {
-  if (isWindows) {
-    return '"' + filePath.replace(/"/g, '""') + '"';
-  }
-  return "'" + filePath.replace(/'/g, "'\\''") + "'";
-}
 
 /**
  * ============================================================================
@@ -403,7 +393,7 @@ export function getUncommittedChanges(workingDir: string): GitChanges {
    */
   let untrackedDiff = "";
   for (const file of splitGitNulRecords(untrackedFiles.output || "")) {
-    const escapedFile = shellEscape(file);
+    const escapedFile = quoteShellToken(file);
     const fileDiff = runCommand(`git diff --no-index ${NULL_DEVICE} ${escapedFile} ${SUPPRESS_STDERR} || ${isWindows ? "ver >NUL" : "true"}`, workingDir);
     untrackedDiff += fileDiff.output || "";
   }

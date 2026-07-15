@@ -3,6 +3,9 @@ import {
   analyzeBashCommand,
   hasActiveCommandOrProcessSubstitution,
   hasActiveFileRedirect,
+  hasActiveInputRedirect,
+  hasActiveOutputRedirect,
+  hasActiveShellExpansion,
   nestedPayloadCommands,
   wrappedExecutableInvocation,
 } from "../../../src/utils/bash-policy/analysis.js";
@@ -37,6 +40,19 @@ describe("bash policy analysis", () => {
     expect(analysis.invocations.some((i) => i.source === "xargs-payload" && i.executable === "sed")).toBe(true);
   });
 
+  it("preserves quoted xargs payload token boundaries", () => {
+    const analysis = analyzeBashCommand("xargs cat 'unrelated; cat required.md'");
+    const payloadInvocations = analysis.invocations.filter((invocation) =>
+      invocation.source === "xargs-payload"
+    );
+
+    expect(payloadInvocations).toHaveLength(1);
+    expect(payloadInvocations[0]).toMatchObject({
+      executable: "cat",
+      args: ["unrelated; cat required.md"],
+    });
+  });
+
   it("reports chain, background, redirect, and substitution facts", () => {
     const analysis = analyzeBashCommand("rg foo src && cat file &");
 
@@ -44,6 +60,22 @@ describe("bash policy analysis", () => {
     expect(analysis.backgrounded).toBe(true);
     expect(hasActiveFileRedirect("rg foo > out.txt")).toBe(true);
     expect(hasActiveFileRedirect("rg foo > /dev/null")).toBe(false);
+    expect(hasActiveFileRedirect("rg foo > /dev/shm/out.txt")).toBe(true);
+    expect(hasActiveFileRedirect("rg foo > ''/tmp/out.txt")).toBe(true);
+    expect(hasActiveFileRedirect("rg foo > '/tmp/'out.txt")).toBe(true);
+    expect(hasActiveFileRedirect("rg foo > '/dev/'null")).toBe(false);
+    expect(hasActiveFileRedirect('rg foo > "\\/dev/null"')).toBe(true);
+    expect(hasActiveFileRedirect('rg foo > "/dev/\\null"')).toBe(true);
+    expect(hasActiveFileRedirect('rg foo > "/dev/null"')).toBe(false);
+    expect(hasActiveOutputRedirect("cat plan.md >&/dev/null")).toBe(true);
+    expect(hasActiveOutputRedirect("cat plan.md 1>&-")).toBe(true);
+    expect(hasActiveOutputRedirect("cat plan.md 1>&2")).toBe(true);
+    expect(hasActiveInputRedirect("cat <plan.md")).toBe(true);
+    expect(hasActiveInputRedirect("cat file.md<input.md")).toBe(true);
+    expect(hasActiveInputRedirect("cat <<< data")).toBe(true);
     expect(hasActiveCommandOrProcessSubstitution('rg "$(pwd)" src')).toBe(true);
+    expect(hasActiveShellExpansion("cat '$PLAN_FILE'")).toBe(false);
+    expect(hasActiveShellExpansion('cat "$PLAN_FILE"')).toBe(true);
+    expect(hasActiveShellExpansion("cat $PLAN_FILE")).toBe(true);
   });
 });

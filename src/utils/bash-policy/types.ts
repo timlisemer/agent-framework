@@ -1,3 +1,5 @@
+import type { CanonicalToolCapability } from "../tool-capabilities.js";
+
 export type CheckRoutedCategory = "type-check" | "build" | "lint" | "format" | "test";
 
 export type BashPolicyTopic =
@@ -80,6 +82,7 @@ export interface BashPolicyResult {
 }
 
 export interface BashCommandClassification {
+  command: string;
   riskClass: BashCommandRiskClass;
   readOnly: boolean;
   reason?: string;
@@ -88,6 +91,7 @@ export interface BashCommandClassification {
   workaroundCategory?: string;
   blacklistHighlights: string[];
   predictionIdentities: string[];
+  capabilities: CanonicalToolCapability[];
 }
 
 export interface BlacklistPattern {

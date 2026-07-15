@@ -6,11 +6,19 @@ import {
   READ_ONLY_BASH_COMMANDS,
   READ_ONLY_HEAVY_BASH_COMMANDS,
   WORKAROUND_PATTERNS,
+  bashReadFileOperands,
   classifyBashCommand,
   getContentBlacklistHighlights,
   getCheckRoutedCommandHighlights,
   stripQuotedRegions,
 } from "../../src/utils/bash-command-policy.js";
+import {
+  bashExpansionReadProofCases,
+  bashDoesNotReadRequiredPathCommands,
+  bashNoReadCapabilityCommands,
+  bashReadCapabilityCommands,
+  unsafeBashReadCommands,
+} from "../helpers/bash-read-fixtures.js";
 import {
   COMMAND_SUBSTITUTION_DENY_COMMAND_CASES,
   DESTRUCTIVE_READ_ONLY_COMMAND_DENY_CASES,
@@ -40,6 +48,54 @@ describe("classifyBashCommand", () => {
 
   it("classifies rg as simple read-only", () => {
     expect(classifyBashCommand("rg -n foo src").riskClass).toBe("simple-read-only");
+  });
+
+  it("emits canonical Read capabilities only for safe file-content commands", () => {
+    for (const command of bashReadCapabilityCommands("plan.md")) {
+      const result = classifyBashCommand(command);
+      expect(result.readOnly, command).toBe(true);
+      expect(result.capabilities, command).toContainEqual({
+        tool: "Read",
+        input: { file_path: "plan.md", path: "plan.md" },
+      });
+      expect(result.predictionIdentities, command).not.toContain("Read");
+    }
+
+    for (const command of bashNoReadCapabilityCommands("plan.md")) {
+      const result = classifyBashCommand(command);
+      expect(result.capabilities, command).toEqual([]);
+      expect(bashReadFileOperands(command), command).toEqual([]);
+    }
+  });
+
+  it("reports only command-aware file operands", () => {
+    const path = "plan.md";
+    for (const command of bashDoesNotReadRequiredPathCommands(path)) {
+      expect(bashReadFileOperands(command), command).not.toContain(path);
+    }
+    expect(bashReadFileOperands("cat 'plan file.md'")).toContain("plan file.md");
+  });
+
+  it("requires shell-expansion syntax in literal paths to be quoted", () => {
+    for (const { literalPath, quotedCommand, unquotedCommand } of bashExpansionReadProofCases()) {
+      expect(bashReadFileOperands(unquotedCommand), unquotedCommand).not.toContain(literalPath);
+      expect(classifyBashCommand(unquotedCommand).capabilities, unquotedCommand)
+        .toEqual([]);
+      expect(bashReadFileOperands(quotedCommand), quotedCommand).toEqual([literalPath]);
+      expect(classifyBashCommand(quotedCommand).capabilities, quotedCommand)
+        .toContainEqual({
+          tool: "Read",
+          input: { file_path: literalPath, path: literalPath },
+        });
+    }
+  });
+
+  it("does not advertise canonical Read for unsafe file-content commands", () => {
+    for (const command of unsafeBashReadCommands("plan.md")) {
+      const result = classifyBashCommand(command);
+      expect(result.readOnly, command).toBe(false);
+      expect(result.capabilities, command).toEqual([]);
+    }
   });
 
   it("classifies rg pattern with escaped quote and slash alternative as simple read-only", () => {
@@ -77,12 +133,15 @@ describe("classifyBashCommand", () => {
       "install /tmp/source /tmp/target",
       "install -d /tmp/outdir",
       "install -t /tmp/outdir /tmp/source",
+      "install -vtdest /tmp/source",
       "install --target-directory=/tmp/outdir /tmp/source",
       "cp /tmp/source /tmp/target",
       "cp -t /tmp/outdir /tmp/source",
+      "cp -vtdest /tmp/source",
       "cp --target-directory=/tmp/outdir /tmp/source",
       "mv /tmp/source /tmp/target",
       "mv -t /tmp/outdir /tmp/source",
+      "mv -vtdest /tmp/source",
       "mv --target-directory=/tmp/outdir /tmp/source",
     ]) {
       const result = classifyBashCommand(command);

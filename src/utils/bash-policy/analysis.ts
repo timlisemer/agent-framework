@@ -1,6 +1,9 @@
 import {
+  analyzeXargsCommand,
   commandBare,
+  hasValidShellLexing,
   optionConsumesSeparateValue,
+  serializeShellCommandTokens,
   splitShellSegments,
   stripQuotedRegions,
   tokenizeShellSegment,
@@ -8,7 +11,13 @@ import {
   xargsCommandTokens,
 } from "../shell-command-parser.js";
 import type { ShellCharEvent } from "../shell-command-parser.js";
-import type { BashAnalysis, BashInvocation, BashInvocationSource } from "./types.js";
+import type { XargsCommandAnalysis } from "../shell-command-parser.js";
+import type {
+  BashAnalysis,
+  BashInvocation,
+  BashInvocationSource,
+  BashSegmentAnalysis,
+} from "./types.js";
 
 export { commandBare, splitShellSegments, stripQuotedRegions, tokenizeShellSegment, xargsCommandTokens };
 
@@ -159,49 +168,49 @@ export function evalPayloadCommand(invocation: BashInvocation): string | null {
   return command ? command : null;
 }
 
-export function xargsPayloadTokens(invocation: BashInvocation): string[] | null {
+export function xargsPayloadAnalysis(invocation: BashInvocation): XargsCommandAnalysis | null {
   if (invocation.executable !== "xargs") return null;
-  return xargsCommandTokens(invocation.tokens);
+  return analyzeXargsCommand(invocation.tokens);
 }
 
-function collectInvocations(command: string, source: BashInvocationSource, seen: Set<string>): BashInvocation[] {
-  const seenKey = `${source}:${command}`;
-  if (seen.has(seenKey)) return [];
-  seen.add(seenKey);
-  const { segments } = splitShellSegments(command);
-  const invocations: BashInvocation[] = [];
+export interface BashInvocationTraversalOptions {
+  shouldTraverseCommand?(input: {
+    command: string;
+    source: BashInvocationSource;
+    segments: readonly BashSegmentAnalysis[];
+  }): boolean;
+  shouldTraversePayload?(input: {
+    parent: BashInvocation;
+    source: Exclude<BashInvocationSource, "direct">;
+    command: string;
+    xargs?: XargsCommandAnalysis;
+  }): boolean;
+}
 
-  for (const segment of segments) {
-    const trimmed = segment.trim();
-    if (!trimmed) continue;
-    const tokens = tokenizeShellSegment(trimmed);
-    const invocation = wrappedExecutableInvocation(tokens, trimmed, source);
-    if (!invocation) continue;
-    invocations.push(invocation);
+interface BashTraversalVisitor {
+  visitCommand?(input: {
+    command: string;
+    source: BashInvocationSource;
+    segments: readonly BashSegmentAnalysis[];
+  }): boolean;
+  visitInvocation?(invocation: BashInvocation): boolean;
+}
 
-    const shellPayload = shellPayloadCommand(invocation);
-    if (shellPayload) {
-      invocations.push(...collectInvocations(shellPayload, "shell-payload", seen));
-    }
-
-    const evalPayload = evalPayloadCommand(invocation);
-    if (evalPayload) {
-      invocations.push(...collectInvocations(evalPayload, "eval-payload", seen));
-    }
-
-    const xargsTokens = xargsPayloadTokens(invocation);
-    if (xargsTokens && xargsTokens.length > 0) {
-      invocations.push(...collectInvocations(xargsTokens.join(" "), "xargs-payload", seen));
-    }
+type NestedInvocationPayload =
+  | {
+    source: "shell-payload" | "eval-payload";
+    command: string;
   }
+  | {
+    source: "xargs-payload";
+    command: string;
+    tokens: string[];
+    xargs: XargsCommandAnalysis;
+  };
 
-  return invocations;
-}
-
-export function analyzeBashCommand(command: string): BashAnalysis {
-  const trimmed = command.trim();
-  const split = splitShellSegments(trimmed);
-  const segments = split.segments.map((segment, index) => {
+function directSegments(command: string, source: BashInvocationSource): BashSegmentAnalysis[] {
+  const split = splitShellSegments(command);
+  return split.segments.map((segment, index) => {
     const tokens = tokenizeShellSegment(segment.trim());
     const operator = split.operators[index] ?? null;
     return {
@@ -209,9 +218,110 @@ export function analyzeBashCommand(command: string): BashAnalysis {
       tokens,
       operator,
       backgrounded: operator === "&",
-      invocation: wrappedExecutableInvocation(tokens, segment.trim(), "direct"),
+      invocation: wrappedExecutableInvocation(tokens, segment.trim(), source),
     };
   });
+}
+
+function tokenPayloadSegments(
+  tokens: string[],
+  source: BashInvocationSource,
+): BashSegmentAnalysis[] {
+  const command = serializeShellCommandTokens(tokens);
+  return [{
+    segment: command,
+    tokens,
+    operator: null,
+    backgrounded: false,
+    invocation: wrappedExecutableInvocation(tokens, command, source),
+  }];
+}
+
+function nestedInvocationPayloads(invocation: BashInvocation): NestedInvocationPayload[] {
+  const payloads: NestedInvocationPayload[] = [];
+  const shellPayload = shellPayloadCommand(invocation);
+  if (shellPayload) {
+    payloads.push({ source: "shell-payload", command: shellPayload });
+  }
+  const evalPayload = evalPayloadCommand(invocation);
+  if (evalPayload) {
+    payloads.push({ source: "eval-payload", command: evalPayload });
+  }
+  const xargs = xargsPayloadAnalysis(invocation);
+  if (xargs?.payloadTokens && xargs.payloadTokens.length > 0) {
+    payloads.push({
+      source: "xargs-payload",
+      command: serializeShellCommandTokens(xargs.payloadTokens),
+      tokens: xargs.payloadTokens,
+      xargs,
+    });
+  }
+  return payloads;
+}
+
+function walkBashPayload(
+  command: string,
+  source: BashInvocationSource,
+  seen: Set<string>,
+  options: BashInvocationTraversalOptions,
+  visitor: BashTraversalVisitor,
+  tokenPayload?: string[],
+): boolean {
+  const seenKey = tokenPayload
+    ? `${source}:tokens:${JSON.stringify(tokenPayload)}`
+    : `${source}:command:${command}`;
+  if (seen.has(seenKey)) return false;
+  seen.add(seenKey);
+  const segments = tokenPayload
+    ? tokenPayloadSegments(tokenPayload, source)
+    : directSegments(command, source);
+  if (options.shouldTraverseCommand?.({ command, source, segments }) === false) return false;
+  if (visitor.visitCommand?.({ command, source, segments })) return true;
+
+  for (const segment of segments) {
+    const invocation = segment.invocation;
+    if (!invocation) continue;
+    if (visitor.visitInvocation?.(invocation)) return true;
+
+    for (const payload of nestedInvocationPayloads(invocation)) {
+      if (options.shouldTraversePayload?.({
+        parent: invocation,
+        source: payload.source,
+        command: payload.command,
+        xargs: "xargs" in payload ? payload.xargs : undefined,
+      }) === false) continue;
+      if (walkBashPayload(
+        payload.command,
+        payload.source,
+        seen,
+        options,
+        visitor,
+        "tokens" in payload ? payload.tokens : undefined,
+      )) return true;
+    }
+  }
+
+  return false;
+}
+
+export function collectBashInvocations(
+  command: string,
+  options: BashInvocationTraversalOptions = {},
+): BashInvocation[] {
+  const invocations: BashInvocation[] = [];
+  walkBashPayload(command, "direct", new Set(), options, {
+    visitInvocation: (invocation) => {
+      invocations.push(invocation);
+      return false;
+    },
+  });
+  return invocations;
+}
+
+export function analyzeBashCommand(command: string): BashAnalysis {
+  const trimmed = command.trim();
+  const split = splitShellSegments(trimmed);
+  const segments = directSegments(trimmed, "direct");
 
   return {
     command,
@@ -219,21 +329,18 @@ export function analyzeBashCommand(command: string): BashAnalysis {
     segments,
     backgrounded: split.backgrounded,
     hasComplexOperator: split.hasComplexOperator,
-    invocations: collectInvocations(trimmed, "direct", new Set()),
+    invocations: collectBashInvocations(trimmed),
   };
 }
 
 export function nestedPayloadCommands(analysis: BashAnalysis): string[] {
   const payloads: string[] = [];
-  for (const { invocation } of analysis.segments) {
-    if (!invocation) continue;
-    const shellPayload = shellPayloadCommand(invocation);
-    if (shellPayload) payloads.push(shellPayload);
-    const evalPayload = evalPayloadCommand(invocation);
-    if (evalPayload) payloads.push(evalPayload);
-    const xargsTokens = xargsPayloadTokens(invocation);
-    if (xargsTokens) payloads.push(xargsTokens.join(" "));
-  }
+  walkBashPayload(analysis.trimmed, "direct", new Set(), {}, {
+    visitCommand: ({ command, source }) => {
+      if (source !== "direct") payloads.push(command);
+      return false;
+    },
+  });
   return payloads;
 }
 
@@ -244,60 +351,13 @@ export function firstCommandHead(command: string): string | undefined {
   return token ? commandBare(token) : undefined;
 }
 
-export function segmentContainsShellLauncherOperation(tokens: string[], commandPredicate: (command: string) => boolean): boolean {
-  const invocation = wrappedExecutableInvocation(tokens);
-  if (!invocation) return false;
-  const payload = shellPayloadCommand(invocation);
-  return payload ? commandPredicate(payload) : false;
-}
-
-export function segmentContainsEvalOperation(tokens: string[], commandPredicate: (command: string) => boolean): boolean {
-  const invocation = wrappedExecutableInvocation(tokens);
-  if (!invocation) return false;
-  const payload = evalPayloadCommand(invocation);
-  return payload ? commandPredicate(payload) : false;
-}
-
-export function tokensContainCommandPredicate(
-  tokens: string[],
-  commandName: string,
-  predicate: (tokens: string[]) => boolean,
-): boolean {
-  if (tokens.length === 0) return false;
-  const bare = commandBare(tokens[0]);
-  if (bare === commandName) return predicate(tokens);
-  if (bare === "xargs") {
-    const commandTokens = xargsCommandTokens(tokens);
-    return commandTokens ? tokensContainCommandPredicate(commandTokens, commandName, predicate) : false;
-  }
-  return false;
-}
-
-export function segmentContainsCommandPredicate(
-  segment: string,
-  commandName: string,
-  predicate: (tokens: string[]) => boolean,
-): boolean {
-  const tokens = tokenizeShellSegment(segment);
-  if (tokens.length === 0) return false;
-
-  const commandPredicate = (command: string): boolean =>
-    commandSegmentsContainCommandPredicate(command, commandName, predicate);
-
-  if (segmentContainsShellLauncherOperation(tokens, commandPredicate)) return true;
-  if (segmentContainsEvalOperation(tokens, commandPredicate)) return true;
-
-  const index = wrappedExecutableTokenIndex(tokens);
-  return index >= 0 && tokensContainCommandPredicate(tokens.slice(index), commandName, predicate);
-}
-
 export function commandSegmentsContainCommandPredicate(
   command: string,
   commandName: string,
   predicate: (tokens: string[]) => boolean,
 ): boolean {
-  return splitShellSegments(command).segments.some((segment) =>
-    segmentContainsCommandPredicate(segment.trim(), commandName, predicate)
+  return collectBashInvocations(command).some((invocation) =>
+    invocation.executable === commandName && predicate(invocation.tokens)
   );
 }
 
@@ -316,17 +376,8 @@ function scanShellSubstitutionChars(command: string, predicate: (state: ShellCha
 }
 
 export function commandOrNestedPayloadMatches(command: string, predicate: (command: string) => boolean): boolean {
-  if (predicate(command)) return true;
-
-  return splitShellSegments(command).segments.some((segment) => {
-    const tokens = tokenizeShellSegment(segment.trim());
-    if (tokens.length === 0) return false;
-    return segmentContainsShellLauncherOperation(tokens, (payload) => commandOrNestedPayloadMatches(payload, predicate)) ||
-      segmentContainsEvalOperation(tokens, (payload) => commandOrNestedPayloadMatches(payload, predicate)) ||
-      commandBare(tokens[0]) === "xargs" && (() => {
-        const xargsTokens = xargsCommandTokens(tokens);
-        return xargsTokens ? commandOrNestedPayloadMatches(xargsTokens.join(" "), predicate) : false;
-      })();
+  return walkBashPayload(command, "direct", new Set(), {}, {
+    visitCommand: ({ command: candidateCommand }) => predicate(candidateCommand),
   });
 }
 
@@ -343,20 +394,116 @@ export function hasActiveCommandOrProcessSubstitution(command: string): boolean 
   return commandOrNestedPayloadMatches(command, commandHasActiveCommandOrProcessSubstitution);
 }
 
-function commandHasActiveFileRedirect(command: string): boolean {
-  return scanShellActiveChars(command, ({ ch, next, index: i, quote }) => {
-    if (quote !== null || ch !== ">") return false;
-    if (next === "(" || next === "&") return false;
+function commandHasActiveShellExpansion(command: string): boolean {
+  return scanShellActiveChars(command, ({ ch, quote }) =>
+    (ch === "$" && quote !== "'") ||
+    quote === null && (ch === "*" || ch === "?" || ch === "[" || ch === "{" || ch === "~")
+  );
+}
 
-    let j = next === ">" || next === "|" ? i + 2 : i + 1;
-    while (j < command.length && /\s/.test(command[j])) j++;
-    if (command[j] === "'" || command[j] === "\"") j++;
-    if (command.startsWith("/dev/", j)) return false;
-    if (j < command.length && !/[|&(\s]/.test(command[j])) return true;
+export function hasActiveShellExpansion(command: string): boolean {
+  return commandOrNestedPayloadMatches(command, commandHasActiveShellExpansion);
+}
+
+function commandHasActiveShellGrouping(command: string): boolean {
+  return scanShellActiveChars(command, ({ ch, quote }) =>
+    quote === null && (ch === "(" || ch === ")")
+  );
+}
+
+export function hasActiveShellGrouping(command: string): boolean {
+  return commandOrNestedPayloadMatches(command, commandHasActiveShellGrouping);
+}
+
+interface ActiveOutputRedirect {
+  operator: ">" | ">>" | ">|";
+  target: string;
+  targetResolved: boolean;
+}
+
+const SAFE_DEVICE_REDIRECT_TARGETS: ReadonlySet<string> = new Set([
+  "/dev/null",
+  "/dev/stdout",
+  "/dev/stderr",
+  "/dev/fd/1",
+  "/dev/fd/2",
+]);
+
+function shellWordAt(command: string, start: number): {
+  target: string;
+  resolved: boolean;
+} {
+  const remainder = command.slice(start);
+  const targetSegment = splitShellSegments(remainder).segments[0] ?? "";
+  const target = tokenizeShellSegment(targetSegment)[0] ?? "";
+  return {
+    target,
+    resolved: target.length > 0 && hasValidShellLexing(targetSegment),
+  };
+}
+
+function activeOutputRedirects(command: string): ActiveOutputRedirect[] {
+  const redirects: ActiveOutputRedirect[] = [];
+  scanShellActiveChars(command, ({ ch, next, prev, index, quote }) => {
+    if (
+      quote !== null ||
+      ch !== ">" ||
+      prev === ">" ||
+      next === "(" ||
+      next === "&"
+    ) return false;
+
+    const operator: ActiveOutputRedirect["operator"] = next === ">"
+      ? ">>"
+      : next === "|"
+        ? ">|"
+        : ">";
+    let targetStart = index + operator.length;
+    while (targetStart < command.length && /\s/.test(command[targetStart])) targetStart++;
+    if (command[targetStart] === "&") return false;
+    const parsedTarget = shellWordAt(command, targetStart);
+    redirects.push({
+      operator,
+      target: parsedTarget.target,
+      targetResolved: parsedTarget.resolved,
+    });
     return false;
   });
+  return redirects;
+}
+
+function commandHasActiveFileRedirect(command: string): boolean {
+  return activeOutputRedirects(command).some((redirect) =>
+    !redirect.targetResolved || !SAFE_DEVICE_REDIRECT_TARGETS.has(redirect.target)
+  );
 }
 
 export function hasActiveFileRedirect(command: string): boolean {
   return commandOrNestedPayloadMatches(command, commandHasActiveFileRedirect);
+}
+
+function commandHasActiveRedirect(
+  command: string,
+  operator: "<" | ">",
+): boolean {
+  return scanShellActiveChars(command, ({ ch, next, quote }) =>
+    quote === null && ch === operator && next !== "("
+  );
+}
+
+function hasActiveRedirect(
+  command: string,
+  operator: "<" | ">",
+): boolean {
+  return commandOrNestedPayloadMatches(command, (candidateCommand) =>
+    commandHasActiveRedirect(candidateCommand, operator)
+  );
+}
+
+export function hasActiveOutputRedirect(command: string): boolean {
+  return hasActiveRedirect(command, ">");
+}
+
+export function hasActiveInputRedirect(command: string): boolean {
+  return hasActiveRedirect(command, "<");
 }

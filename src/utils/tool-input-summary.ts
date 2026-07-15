@@ -47,6 +47,7 @@ export function summarizeToolInputForLlm(toolName: string, toolInput: unknown): 
         ["class", classification.riskClass],
         ["read_only", classification.readOnly ? "true" : "false"],
         ["prediction_identities", classification.predictionIdentities.join("|")],
+        ["capabilities", classification.capabilities.map((capability) => capability.tool).join("|")],
         ["description", typeof i.description === "string" ? q(i.description) : undefined],
         ["timeout", typeof i.timeout === "number" ? String(i.timeout) : undefined],
         ["run_in_background", i.run_in_background === true ? "true" : undefined],

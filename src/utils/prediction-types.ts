@@ -37,7 +37,13 @@ import {
   CHECK_VERB_RE,
   READ_VERB_RE,
 } from "./edit-intent.js";
-import { classifyBashCommand, evaluateBashPolicy, type BashCommandClassification } from "./command-patterns.js";
+import {
+  classifyBashCommand,
+  evaluateBashPolicy,
+  isReadOnlyRiskClass,
+  type BashCommandClassification,
+} from "./command-patterns.js";
+import type { CanonicalToolCapability } from "./tool-capabilities.js";
 
 export type Mood = "angry" | "frustrated" | "neutral" | "satisfied" | "happy";
 export type Trust = "low" | "normal" | "high";
@@ -135,10 +141,9 @@ export interface ToolPrediction {
 
 function bashSafetyBlocksPredictionOverride(
   classification: BashCommandClassification,
-  command: string,
 ): boolean {
   if (classification.riskClass === "blocked") return true;
-  const terminal = evaluateBashPolicy(command).terminal;
+  const terminal = evaluateBashPolicy(classification.command).terminal;
   if (classification.blacklistHighlights.some((highlight) => highlight.startsWith("[CHECK-ROUTED:")) && terminal.ownerTopic !== "check-routed") return true;
   if (classification.workaroundCategory) return terminal.ownerTopic !== "check-routed";
   if (classification.riskClass !== "high-risk-workaround") return false;
@@ -1077,24 +1082,66 @@ export function deriveWorkflowToolRequirementsFromText(
   };
 }
 
-function toolIdentitiesForCall(toolName: string, toolInput: unknown): string[] {
-  if (toolName !== "Bash") return predictionToolIdentityNames(toolName);
-  const command = String((toolInput as { command?: unknown } | null | undefined)?.command ?? "");
-  return classifyBashCommand(command).predictionIdentities;
+interface ToolMatchContext {
+  bashClassification: BashCommandClassification | null;
+  candidates: readonly ToolMatchCandidate[];
+  toolIdentities: readonly string[];
 }
 
-function toolRequirementMatchesIdentities(
-  requirement: ToolRequirement,
+interface ToolMatchCandidate {
+  input: unknown;
+  toolIdentities: readonly string[];
+}
+
+function toolMatchCandidateForCapability(
+  capability: CanonicalToolCapability,
+): ToolMatchCandidate {
+  return {
+    input: capability.input,
+    toolIdentities: predictionToolIdentityNames(capability.tool),
+  };
+}
+
+function toolMatchContextForCall(
+  toolName: string,
   toolInput: unknown,
-  toolIdentities: readonly string[],
+): ToolMatchContext {
+  const bashClassification = toolName === "Bash"
+    ? classifyBashCommand(String(
+      (toolInput as { command?: unknown } | null | undefined)?.command ?? "",
+    ))
+    : null;
+  const surfaceIdentities = bashClassification?.predictionIdentities ??
+    predictionToolIdentityNames(toolName);
+  const inferredCapabilities = bashClassification?.capabilities ?? [];
+  const capabilityCandidates = inferredCapabilities.map(toolMatchCandidateForCapability);
+  const toolIdentities = [...new Set([
+    ...surfaceIdentities,
+    ...capabilityCandidates.flatMap((candidate) => candidate.toolIdentities),
+  ])];
+  return {
+    bashClassification,
+    candidates: [
+      { input: toolInput, toolIdentities: surfaceIdentities },
+      ...capabilityCandidates,
+    ],
+    toolIdentities,
+  };
+}
+
+function toolRequirementMatchesCandidate(
+  requirement: ToolRequirement,
+  candidate: ToolMatchCandidate,
 ): boolean {
   const canonicalRequirement = canonicalizeToolRequirement(requirement);
   const requiredIdentityMatches = predictionToolIdentityNames(canonicalRequirement.tool)
-    .some((identity) => toolIdentities.includes(identity));
+    .some((identity) => candidate.toolIdentities.includes(identity));
   if (!requiredIdentityMatches) return false;
 
-  const input = toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)
-    ? toolInput as Record<string, unknown>
+  const input = candidate.input &&
+      typeof candidate.input === "object" &&
+      !Array.isArray(candidate.input)
+    ? candidate.input as Record<string, unknown>
     : {};
   for (const [key, expected] of Object.entries(canonicalRequirement.input ?? {})) {
     if (input[key] !== expected) return false;
@@ -1106,11 +1153,30 @@ function toolRequirementMatchesIdentities(
   for (const key of canonicalRequirement.inputRequiredKeys ?? []) {
     if (!(key in input)) return false;
   }
-  const inputStr = stringifyToolInput(toolInput);
+  const inputStr = stringifyToolInput(candidate.input);
   for (const literal of canonicalRequirement.inputSubstrings ?? []) {
     if (!inputStr.includes(literal)) return false;
   }
   return true;
+}
+
+function toolRequirementMatchesContext(
+  requirement: ToolRequirement,
+  context: ToolMatchContext,
+): boolean {
+  return context.candidates.some((candidate) =>
+    toolRequirementMatchesCandidate(requirement, candidate)
+  );
+}
+
+export function toolCapabilityMatchesRequirement(
+  requirement: ToolRequirement,
+  capability: CanonicalToolCapability,
+): boolean {
+  return toolRequirementMatchesCandidate(
+    requirement,
+    toolMatchCandidateForCapability(capability),
+  );
 }
 
 export function toolRequirementMatches(
@@ -1118,11 +1184,8 @@ export function toolRequirementMatches(
   toolName: string,
   toolInput: unknown,
 ): boolean {
-  return toolRequirementMatchesIdentities(
-    requirement,
-    toolInput,
-    toolIdentitiesForCall(toolName, toolInput),
-  );
+  const matchContext = toolMatchContextForCall(toolName, toolInput);
+  return toolRequirementMatchesContext(requirement, matchContext);
 }
 
 export function formatToolRequirement(requirement: ToolRequirement): string {
@@ -1168,7 +1231,10 @@ function consumeRequiredWorkflowTools(
   if (remaining.length === 0) return { remaining };
 
   for (const [callIndex, call] of calls.entries()) {
-    const callIdentities = toolIdentitiesForCall(call.toolName, call.toolInput);
+    const matchContext = toolMatchContextForCall(call.toolName, call.toolInput);
+    const callIdentities = matchContext.toolIdentities;
+    const requirementMatches = (requirement: ToolRequirement): boolean =>
+      toolRequirementMatchesContext(requirement, matchContext);
     const callInputStr = stringifyToolInput(call.toolInput);
     for (const blk of prediction.explicitlyBlockedSubstrings) {
       const blockedIdentityMatches = predictionToolIdentityNames(blk.tool)
@@ -1186,7 +1252,7 @@ function consumeRequiredWorkflowTools(
     }
 
     const nextRequired = remaining[0];
-    if (nextRequired && toolRequirementMatches(nextRequired, call.toolName, call.toolInput)) {
+    if (nextRequired && requirementMatches(nextRequired)) {
       if (
         SERIAL_WORKFLOW_BARRIER_TOOLS.has(canonicalPredictionToolName(nextRequired.tool)) &&
         callIndex < calls.length - 1
@@ -1205,7 +1271,7 @@ function consumeRequiredWorkflowTools(
 
     const nonBlockingMatch = nonBlockingRequirementsForNextTool(prediction, nextRequired)
       .find((requirement) =>
-        toolRequirementMatches(requirement, call.toolName, call.toolInput)
+        requirementMatches(requirement)
       );
     if (nonBlockingMatch) continue;
 
@@ -1325,11 +1391,8 @@ export function decidePrediction(
       ? deriveEditIntentFromPrediction({ ...prediction, intent: "" })
       : null;
   const inputStr = stringifyToolInput(toolInput);
-  const bashCommand = String((toolInput as { command?: unknown })?.command ?? "");
-  const bashClassification = toolName === "Bash"
-    ? classifyBashCommand(bashCommand)
-    : null;
-  const toolIdentities = bashClassification?.predictionIdentities ?? predictionToolIdentityNames(toolName);
+  const matchContext = toolMatchContextForCall(toolName, toolInput);
+  const { bashClassification, toolIdentities } = matchContext;
   const matchesToolIdentity = (candidate: string): boolean =>
     predictionToolIdentityNames(candidate).some((identity) => toolIdentities.includes(identity));
   const blockedForThisToolByName = prediction.explicitlyBlockedSubstrings.some(
@@ -1349,11 +1412,7 @@ export function decidePrediction(
     hasAuthoritativeLatestTurn &&
     toolName === "Bash" &&
     !!bashClassification &&
-    (
-      bashClassification.riskClass === "simple-read-only" ||
-      bashClassification.riskClass === "read-only-complex" ||
-      bashClassification.riskClass === "read-only-heavy"
-    ) &&
+    isReadOnlyRiskClass(bashClassification.riskClass) &&
     liveAllowedTools.some((t) => isPredictionEditTool(t) || t === "Read");
 
   if (hasAuthoritativeLatestTurn && EXPLICIT_PROHIBITION_RE.test(liveLogicText)) {
@@ -1393,7 +1452,7 @@ export function decidePrediction(
   // and prevents X -> Z -> Y drift without adding skill-specific policy.
   const nextRequiredTool = prediction.explicitlyRequiredTools?.[0];
   if (nextRequiredTool) {
-    if (toolRequirementMatchesIdentities(nextRequiredTool, toolInput, toolIdentities)) {
+    if (toolRequirementMatchesContext(nextRequiredTool, matchContext)) {
       return {
         decision: "allow",
         reason: `Workflow requires ${formatToolRequirement(nextRequiredTool)} next; this tool call matches.`,
@@ -1401,7 +1460,7 @@ export function decidePrediction(
     }
     const nonBlockingMatch = nonBlockingRequirementsForNextTool(prediction, nextRequiredTool)
       .find((requirement) =>
-        toolRequirementMatchesIdentities(requirement, toolInput, toolIdentities)
+        toolRequirementMatchesContext(requirement, matchContext)
       );
     if (nonBlockingMatch) {
       return {
@@ -1591,7 +1650,7 @@ export function decidePrediction(
             reason: "User's latest transcript message authorizes Bash rm, but no Bash command was provided.",
           };
         }
-        if (bashSafetyBlocksPredictionOverride(bashClassification, command)) {
+        if (bashSafetyBlocksPredictionOverride(bashClassification)) {
           return {
             decision: "deny",
             reason: `User's latest transcript message authorizes Bash rm, but Bash safety policy blocks this command. ${bashClassification.reason ?? "command is blocked"}`,
@@ -1612,7 +1671,7 @@ export function decidePrediction(
             reason: "User's latest transcript message implies Bash, but no Bash command was provided.",
           };
         }
-        if (bashSafetyBlocksPredictionOverride(bashClassification, bashCommand)) {
+        if (bashSafetyBlocksPredictionOverride(bashClassification)) {
           return {
             decision: "deny",
             reason: `User's latest transcript message implies Bash, but Bash safety policy blocks this command. ${bashClassification.reason ?? "command is blocked"}`,

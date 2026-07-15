@@ -145,8 +145,23 @@ and validator half for already-applied changes.
 │  prediction gate enforces the next required tool, `nonBlockingTools` may run
 │  without consuming the queue. Default non-blocking support tools are derived
 │  from the shared low-risk tool list, excluding queue-consuming waits. MCP
-│  discovery calls remain available while an MCP is next. Adapter continuations
-│  are queued after observing MCP results: when Codex receives a yielded cell ID,
+│  discovery calls remain available while an MCP is next. Surface tool calls
+│  may also emit canonical capabilities containing only deterministically
+│  proven input facts. Native calls and inferred capabilities pass through the
+│  same requirement matcher; adding another equivalence does not add a new
+│  workflow-matching branch. The current Bash capability producer lets a
+│  `Read` requirement be satisfied by a safely classified content-reader whose
+│  parsed file operand exactly matches the required path. Option values, programs,
+│  filters, argument-only modes, pipelines, all input/output redirects,
+│  `&&`/`||` compounds, and every `xargs` payload are excluded. Dynamic stdin
+│  arguments can change an `xargs` reader after
+│  static parsing, so it cannot establish read proof. `awk`, malformed reader
+│  options, and zero-output `head`/`tail` modes are also excluded because they
+│  need not inspect file content. The proof allowlist is intentionally narrow:
+│  one standalone plain `cat`, validated `head`/`tail`, or direct safe `sed`
+│  print range such as `sed -n '1,240p' <path>`, with exactly one file operand.
+│  Adapter continuations are queued after observing MCP results: when Codex
+│  receives a yielded cell ID,
 │  it requires `Wait` with that cell ID and the exact `yield_time_ms` rendered in
 │  the MCP's description. Synchronous completion/failure adds no wait; Claude
 │  waits in-call. Codex routes raw `wait` through PreToolUse, PermissionRequest,

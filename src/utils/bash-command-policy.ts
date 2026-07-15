@@ -40,6 +40,11 @@ import type {
   CheckRoutedCommandPolicy,
   ContentBlacklistOptions,
 } from "./bash-policy/types.js";
+import { isReadOnlyRiskClass } from "./bash-policy/helpers.js";
+import {
+  bashReadCapabilities,
+  bashReadFileOperands,
+} from "./bash-policy/read-capability.js";
 
 export { commandBare, stripQuotedRegions } from "./shell-command-parser.js";
 
@@ -55,6 +60,9 @@ export {
   detectCheckRoutedWorkaroundCommand,
   detectWorkaroundCommand,
   detectWorkaroundPattern,
+  bashReadCapabilities,
+  bashReadFileOperands,
+  isReadOnlyRiskClass,
 };
 
 export type {

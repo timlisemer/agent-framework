@@ -4,7 +4,12 @@ import {
   firstCommandHead,
   shellPayloadCommand,
 } from "./analysis.js";
-import { matchPatternInCommandTarget, resolveAlternative, resolvePatternAlternative } from "./helpers.js";
+import {
+  isReadOnlyRiskClass,
+  matchPatternInCommandTarget,
+  resolveAlternative,
+  resolvePatternAlternative,
+} from "./helpers.js";
 import {
   CHECK_EQUIVALENTS,
   CHECK_ROUTED_COMMAND_POLICIES,
@@ -52,6 +57,7 @@ import {
   findDestructiveFlagsFromFindArgs,
   findSedPolicyFindings,
 } from "./topics/find-sed.js";
+import { bashReadCapabilities } from "./read-capability.js";
 import type {
   BashCommandClassification,
   BashCommandRiskClass,
@@ -134,7 +140,11 @@ function hardPatternFindings(command: string, messages: BashPolicyMessageOptions
 }
 
 function basePredictionIdentities(riskClass: BashCommandRiskClass, commandHead?: string): string[] {
-  return ["Bash", `Bash:${riskClass}`, ...(commandHead ? [`Bash:${commandHead}`] : [])];
+  return [
+    "Bash",
+    `Bash:${riskClass}`,
+    ...(commandHead ? [`Bash:${commandHead}`] : []),
+  ];
 }
 
 function checkHighlight(policy: CheckRoutedCommandPolicy, workingDir?: string, messages: BashPolicyMessageOptions = DEFAULT_MESSAGES): string {
@@ -156,7 +166,7 @@ function terminalFromFinding(
     ownerTopic: finding.topic,
     ownerName: finding.name,
     riskClass,
-    readOnly: riskClass === "simple-read-only" || riskClass === "read-only-heavy" || riskClass === "read-only-complex",
+    readOnly: isReadOnlyRiskClass(riskClass),
     reason: finding.reason,
     alternative: finding.alternative,
     commandHead,
@@ -415,7 +425,11 @@ export function evaluateBashPolicy(command: string, workingDir?: string, message
 
 export function classifyBashCommand(command: string, workingDir?: string, messages: BashPolicyMessageOptions = DEFAULT_MESSAGES): BashCommandClassification {
   const result = evaluateBashPolicy(command, workingDir, messages);
+  const capabilities = isReadOnlyRiskClass(result.terminal.riskClass)
+    ? bashReadCapabilities(command)
+    : [];
   return {
+    command,
     riskClass: result.terminal.riskClass,
     readOnly: result.terminal.readOnly,
     reason: result.terminal.reason,
@@ -423,7 +437,9 @@ export function classifyBashCommand(command: string, workingDir?: string, messag
     commandHead: result.terminal.commandHead,
     workaroundCategory: result.terminal.workaroundCategory,
     blacklistHighlights: result.terminal.blacklistHighlights ?? [],
-    predictionIdentities: result.terminal.predictionIdentities ?? basePredictionIdentities(result.terminal.riskClass, result.terminal.commandHead),
+    predictionIdentities: result.terminal.predictionIdentities ??
+      basePredictionIdentities(result.terminal.riskClass, result.terminal.commandHead),
+    capabilities,
   };
 }
 

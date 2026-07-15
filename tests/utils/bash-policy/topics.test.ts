@@ -63,6 +63,11 @@ describe("bash policy topics", () => {
       name: "install file write",
       category: "file-write",
     });
+    expect(fileWritePolicyFindings("install -vtdest /tmp/source")[0]).toMatchObject({
+      topic: "file-write",
+      name: "install file write",
+      category: "file-write",
+    });
     expect(fileWritePolicyFindings("install --target-directory=/tmp/outdir /tmp/source")[0]).toMatchObject({
       topic: "file-write",
       name: "install file write",
@@ -78,6 +83,11 @@ describe("bash policy topics", () => {
       name: "cp file write",
       category: "file-write",
     });
+    expect(fileWritePolicyFindings("cp -vtdest /tmp/source")[0]).toMatchObject({
+      topic: "file-write",
+      name: "cp file write",
+      category: "file-write",
+    });
     expect(fileWritePolicyFindings("cp --target-directory=/tmp/outdir /tmp/source")[0]).toMatchObject({
       topic: "file-write",
       name: "cp file write",
@@ -89,6 +99,11 @@ describe("bash policy topics", () => {
       category: "file-write",
     });
     expect(fileWritePolicyFindings("mv -t /tmp/outdir /tmp/source")[0]).toMatchObject({
+      topic: "file-write",
+      name: "mv file write",
+      category: "file-write",
+    });
+    expect(fileWritePolicyFindings("mv -vtdest /tmp/source")[0]).toMatchObject({
       topic: "file-write",
       name: "mv file write",
       category: "file-write",
