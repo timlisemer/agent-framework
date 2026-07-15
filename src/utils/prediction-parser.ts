@@ -10,6 +10,7 @@
  */
 
 import {
+  canonicalizeToolRequirement,
   parseToolRequirementScalar,
   type Mood,
   type ToolPrediction,
@@ -157,13 +158,13 @@ function parseToolRequirements(raw: string): ToolRequirement[] {
     const { input, inputArrayLengths } = parseRequirementInput(parts[1] ?? "");
     const inputSubstrings = parseRequirementSubstrings(parts[2] ?? "");
     const reason = parts.slice(3).join(" | ").trim();
-    out.push({
+    out.push(canonicalizeToolRequirement({
       tool,
       ...(Object.keys(input).length > 0 ? { input } : {}),
       ...(Object.keys(inputArrayLengths).length > 0 ? { inputArrayLengths } : {}),
       ...(inputSubstrings.length > 0 ? { inputSubstrings } : {}),
       ...(reason ? { reason } : {}),
-    });
+    }));
   }
   return out;
 }

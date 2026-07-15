@@ -4,6 +4,7 @@ import { isSessionPlanfilePath } from "../utils/planfile.js";
 import { RESTRICTED_MCPS } from "../utils/slash-commands.js";
 import { activeSpec } from "../adapter/spec.js";
 import type { CanonicalMcp } from "../adapter/types.js";
+import { recognizeMcpToolName } from "../adapter/mcp-wire.js";
 import { EDIT_TOOL_NAMES } from "../utils/edit-tools.js";
 export { isSensitivePath } from "../utils/sensitive-paths.js";
 
@@ -17,21 +18,24 @@ export const FILE_TOOLS = EDIT_TOOL_NAMES;
 // Low-risk tools are read-only or side-effect-free for prediction policy and
 // default workflow non-blocking support. Contrast with FILE_TOOLS above, which
 // go through write-specific gates (edit-intent, etc.).
+export const MCP_DISCOVERY_TOOLS = [
+  "ToolSearch",
+  "ListMcpResources",
+  "ReadMcpResource",
+] as const;
+
 export const LOW_RISK_TOOLS = [
   // Read-only file/search/navigation
   "Read",
   "LSP",
   "WebSearch",
   "WebFetch",
-  "ToolSearch",
-
-  // MCP resource reading (read-only)
-  "ListMcpResources",
-  "ReadMcpResource",
+  ...MCP_DISCOVERY_TOOLS,
 
   // Internal/meta tools (low impact)
   "TodoWrite",
   "TaskOutput",
+  "Wait",
   "EnterPlanMode",
   "Skill",
 ];
@@ -54,13 +58,7 @@ const HEAVY_MCPS: ReadonlySet<CanonicalMcp> = new Set(["scenario_tester", "scena
  */
 export function isLowRiskTool(toolName: string): boolean {
   if (LOW_RISK_TOOLS.includes(toolName)) return true;
-  // Check if it's a canonical mcp- prefixed tool
-  if (toolName.startsWith("mcp-")) {
-    const canonical = toolName.slice(4) as CanonicalMcp;
-    return !RESTRICTED_MCPS.has(canonical) && !HEAVY_MCPS.has(canonical);
-  }
-  // Legacy: recognize via active spec (wire names that weren't yet canonicalized)
-  const mcp = activeSpec().recognizeMcp(toolName);
+  const mcp = recognizeMcpToolName(toolName, activeSpec());
   if (mcp) {
     return !RESTRICTED_MCPS.has(mcp) && !HEAVY_MCPS.has(mcp);
   }
@@ -72,14 +70,10 @@ export function isLowRiskTool(toolName: string): boolean {
  * workflow/meta tools such as Skill, TodoWrite, TaskOutput, and EnterPlanMode.
  */
 export function isLowRiskInspectionTool(toolName: string): boolean {
-  if (["Read", "LSP", "WebSearch", "WebFetch", "ToolSearch", "ListMcpResources", "ReadMcpResource"].includes(toolName)) {
+  if (["Read", "LSP", "WebSearch", "WebFetch", ...MCP_DISCOVERY_TOOLS].includes(toolName)) {
     return true;
   }
-  if (toolName.startsWith("mcp-")) {
-    const canonical = toolName.slice(4) as CanonicalMcp;
-    return !RESTRICTED_MCPS.has(canonical) && !HEAVY_MCPS.has(canonical);
-  }
-  const mcp = activeSpec().recognizeMcp(toolName);
+  const mcp = recognizeMcpToolName(toolName, activeSpec());
   if (mcp) {
     return !RESTRICTED_MCPS.has(mcp) && !HEAVY_MCPS.has(mcp);
   }

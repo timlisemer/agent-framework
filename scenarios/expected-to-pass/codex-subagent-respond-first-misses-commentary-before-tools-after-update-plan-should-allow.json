@@ -150,7 +150,6 @@
       "questionIsStalling": "n/a",
       "userMessageSnippet": "You are planning only. Do not edit files or run mutating commands.\n\nTask: Produce a concrete implementation plan for the architecture described in /home/tim/Downloads/ai-ui.txt, using both repositorie"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   },

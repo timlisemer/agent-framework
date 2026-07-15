@@ -731,7 +731,6 @@ async function main() {
         contextSwitch: seedPrediction.contextSwitch,
         questionIsStalling: seedPrediction.questionIsStalling,
       },
-      forceCheckPending: scenario.seed_state.forceCheckPending,
       frustrationStreak: scenario.seed_state.frustrationStreak,
       currentWindowSize: scenario.seed_state.currentWindowSize,
       driftState: scenario.seed_state.driftState ?? {},
@@ -744,8 +743,8 @@ async function main() {
   }
 
   // Seed cache/tool-log.jsonl from scenario.seed_state.toolLog BEFORE
-  // session-start fires so rules that read the tool log (drift-detect,
-  // force-check-required's denial cache) observe the prior-turn state.
+  // session-start fires so rules such as drift-detect can observe prior-turn
+  // state.
   // Defaults: ts = now - (reverse index * 1000ms) so older entries are older,
   // ms = 0 when omitted.
   if (scenario.seed_state.toolLog && scenario.seed_state.toolLog.length > 0) {

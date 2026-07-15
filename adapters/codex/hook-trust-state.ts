@@ -1,12 +1,17 @@
 import { hashSha256, stableJsonStringify } from "../../src/utils/hash-utils.js";
+import {
+  CODEX_HOOK_EVENTS,
+  type CodexHookEvent,
+} from "./hook-config.js";
 
 export const CODEX_HOOK_TRUST_BEGIN = "# BEGIN GENERATED CODEX HOOK TRUST STATE";
 export const CODEX_HOOK_TRUST_END = "# END GENERATED CODEX HOOK TRUST STATE";
 
-const EVENT_NAMES: Record<string, string> = {
+const EVENT_NAMES: Record<CodexHookEvent, string> = {
   PreToolUse: "pre_tool_use",
   PermissionRequest: "permission_request",
   PostToolUse: "post_tool_use",
+  PostToolUseFailure: "post_tool_use_failure",
   PreCompact: "pre_compact",
   PostCompact: "post_compact",
   SessionStart: "session_start",
@@ -14,10 +19,11 @@ const EVENT_NAMES: Record<string, string> = {
   Stop: "stop",
 };
 
-const MATCHER_EVENTS = new Set([
+const MATCHER_EVENTS = new Set<CodexHookEvent>([
   "PreToolUse",
   "PermissionRequest",
   "PostToolUse",
+  "PostToolUseFailure",
   "PreCompact",
   "PostCompact",
   "SessionStart",
@@ -35,8 +41,11 @@ export function buildCodexHookTrustBlock(input: {
     "# Regenerate them with `just build` after changing Codex hook commands.",
   ];
   for (const [eventName, eventGroups] of Object.entries(hooksConfig.hooks ?? {})) {
+    if (!isCodexHookEvent(eventName)) {
+      throw new Error(`Unknown Codex hook event: ${eventName}`);
+    }
     const codexEventName = EVENT_NAMES[eventName];
-    if (!codexEventName || !Array.isArray(eventGroups)) continue;
+    if (!Array.isArray(eventGroups)) continue;
     for (const [groupIndex, group] of eventGroups.entries()) {
       const hooks = (group as { hooks?: unknown[] }).hooks ?? [];
       for (const [hookIndex, hook] of hooks.entries()) {
@@ -52,7 +61,11 @@ export function buildCodexHookTrustBlock(input: {
   return lines.join("\n");
 }
 
-function hookIdentity(eventName: string, group: unknown, hook: unknown): Record<string, unknown> {
+function isCodexHookEvent(value: string): value is CodexHookEvent {
+  return (CODEX_HOOK_EVENTS as readonly string[]).includes(value);
+}
+
+function hookIdentity(eventName: CodexHookEvent, group: unknown, hook: unknown): Record<string, unknown> {
   const rawGroup = group as { matcher?: unknown };
   const rawHook = hook as {
     type?: unknown;

@@ -42,7 +42,7 @@ src/                                # TypeScript source
     background-agent-block.ts       # Priority 25:  Deny Agent(run_in_background=true) from main session
     prediction-question-judge.ts    # Priority 28:  Block stalling AskUserQuestion under frustration
     question-validate.ts            # Priority 30:  Validate AskUserQuestion
-    force-check-required.ts         # Priority 32:  Lock to check-satisfying MCPs after workaround denial
+    blacklist.ts                    # Priority 34:  Deterministic Bash policy; check redirects seed prediction
     prediction-block.ts             # Priority 35:  Block predicted-bad tools (non-appealable)
     create-planfile-allow.ts        # Priority 36:  Deterministically allow authorized create_planfile calls
     drift-detect.ts                 # Priority 40:  Detect drift from intent
@@ -172,17 +172,21 @@ how to add a new adapter.
 
 ### Codex Hook Trust State
 
-Codex separates hook definition from hook review. `adapters/codex/dotcodex/hooks.json`
-defines the hook commands, while `adapters/codex/dotcodex/config.toml` stores
-`[features].hooks = true` and generated `[hooks.state]` entries. Each
+Codex separates hook definition from hook review. The typed
+`adapters/codex/hook-config.ts` configuration defines the hook commands and
+shared lifecycle matcher. `just build` generates
+`adapters/codex/dotcodex/hooks.json` from that source of truth, while
+`adapters/codex/dotcodex/config.toml` stores `[features].hooks = true` and
+generated `[hooks.state]` entries. Each
 `trusted_hash` fingerprints one hook definition: event name, matcher, command,
 timeout, async flag, and status message. If the hook definition changes, the
 hash changes and Codex asks the user to review the hook again before it runs.
 
-The generated block in `config.toml` is owned by
+The generated `hooks.json` file and block in `config.toml` are owned by
 `scripts/update-codex-hook-state.mjs` and refreshed by `just build`. This keeps
-the Codex review state in the agent-framework repo so downstream builders such
-as mcp-toolbox only need to run the normal build command.
+the Codex hook configuration and review state in the agent-framework repo so
+downstream builders such as mcp-toolbox only need to run the normal build
+command.
 
 ## Unified Agent Execution
 
@@ -426,7 +430,7 @@ Tool call received
 │   ├─> background-agent-block (25) Fast deny Agent(run_in_background=true)
 │   ├─> prediction-question-judge (28) Block stalling AskUserQuestion under frustration
 │   ├─> question-validate (30) Validate AskUserQuestion
-│   ├─> force-check-required (32) Lock to check-satisfying MCPs after workaround denial
+│   ├─> blacklist (34)          Deny unsafe/check-routed Bash; seed check prediction on redirects
 │   ├─> prediction-block (35)  Block predicted-bad tools (deterministic, non-appealable)
 │   ├─> create-planfile-allow (36) Deterministically allow authorized create_planfile calls
 │   ├─> drift-detect (40)      Detect drift from user intent (appealable)
@@ -580,12 +584,6 @@ Standard configurations for different use cases:
 | `TELEMETRY_ENDPOINT` | No | Telemetry service URL |
 | `AGENT_FRAMEWORK_API_KEY` | No | Telemetry API key |
 
-## Temporary Files
-
-| File | Purpose | Expiry |
-|------|---------|--------|
-| `/tmp/claude-hook-denials.json` | Workaround tracking | 1 minute |
-
 ## Telemetry
 
 Telemetry is sent to a remote endpoint for monitoring agent decisions.
@@ -642,7 +640,7 @@ Write-capable internal implementation runs persist under
 `~/.agent-framework/internal/sessions/write/<run-id>`. Unavoidable scratch
 space is rooted under `/tmp/agent-framework`.
 
-1. **`state.json`** - SessionState (prediction, edit-intent, force-check lockout, frustration streak, window size, tool count).
+1. **`state.json`** - SessionState (prediction, edit-intent, frustration streak, window size, tool count).
 2. **`gate-reasoning.json`** - priority-evicted denial memory with NOTE/WARNING/appeal outcomes.
 3. **`tool-log.jsonl`** - append-only audit trail consumed by drift-detect, error-acknowledge, pre-tool-use, gate-reasoning, the test-harness, and AI backend UI/resume metadata hydration.
 

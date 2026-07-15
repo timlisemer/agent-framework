@@ -220,7 +220,6 @@ describe("mainUserPromptSubmit slash/skill workflow bypass", () => {
               userMessageSnippet: "what?? in what sense",
               timestamp: 1,
             },
-            forceCheckPending: false,
             frustrationStreak: 2,
             currentWindowSize: 8,
             driftState: {},

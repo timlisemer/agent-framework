@@ -40,7 +40,6 @@
       "questionIsStalling": "n/a",
       "userMessageSnippet": "Please investigate and produce a plan."
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   },

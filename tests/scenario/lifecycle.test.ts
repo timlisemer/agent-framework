@@ -27,7 +27,6 @@ describe("onUserPromptTurn", () => {
 
   it("clears decision caches and state transients but preserves forensic tool log", async () => {
     fs.writeFileSync(path.join(tempDir, "gate-reasoning.json"), "{}");
-    fs.writeFileSync(path.join(tempDir, "hook-denials.json"), "{}");
     await appendToolLog(tempDir, {
       ts: Date.now(),
       tool: "Bash",
@@ -40,7 +39,6 @@ describe("onUserPromptTurn", () => {
     const stateManager = getSessionState(tempDir);
     await stateManager.save({
       ...sessionStateDefaults(),
-      forceCheckPending: true,
       currentEditIntent: true,
       editIntentOverturnCount: 2,
       respondFirstChecked: true,
@@ -54,11 +52,9 @@ describe("onUserPromptTurn", () => {
     await onUserPromptTurn(tempDir);
 
     expect(fs.existsSync(path.join(tempDir, "gate-reasoning.json"))).toBe(false);
-    expect(fs.existsSync(path.join(tempDir, "hook-denials.json"))).toBe(false);
     expect(fs.existsSync(path.join(tempDir, "tool-log.jsonl"))).toBe(true);
 
     const state = await stateManager.load();
-    expect(state.forceCheckPending).toBe(false);
     expect(state.previousEditIntent).toBe(true);
     expect(state.currentEditIntent).toBeNull();
     expect(state.editIntentOverturnCount).toBe(0);
@@ -82,7 +78,6 @@ describe("onUserPromptTurn", () => {
     const stateManager = getSessionState(tempDir);
     await stateManager.save({
       ...sessionStateDefaults(),
-      forceCheckPending: true,
       currentEditIntent: true,
       editIntentOverturnCount: 2,
       respondFirstChecked: true,
@@ -99,7 +94,6 @@ describe("onUserPromptTurn", () => {
     expect(fs.existsSync(path.join(tempDir, "tool-log.jsonl"))).toBe(true);
 
     const state = await stateManager.load();
-    expect(state.forceCheckPending).toBe(true);
     expect(state.currentEditIntent).toBe(true);
     expect(state.editIntentOverturnCount).toBe(2);
     expect(state.respondFirstChecked).toBe(true);

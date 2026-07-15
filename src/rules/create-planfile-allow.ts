@@ -20,7 +20,6 @@ export const createPlanfileAllowRule: PreToolRule = {
       currentPrediction: ctx.state.currentPrediction,
     });
     if (!authorization) return null;
-    if (ctx.state.forceCheckPending) return null;
 
     if (authorization === "workflow") {
       return { fastAllow: "Workflow requires create_planfile next; planfile creation is authorized." };

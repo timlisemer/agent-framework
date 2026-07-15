@@ -50,7 +50,6 @@
       "questionIsStalling": "n/a",
       "userMessageSnippet": "Please update the file now."
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 4
   },

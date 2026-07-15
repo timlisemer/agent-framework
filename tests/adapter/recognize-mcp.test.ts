@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import * as claudeMcp from "../../adapters/claude/recognize-mcp.js";
 import * as codexMcp from "../../adapters/codex/recognize-mcp.js";
+import { recognizeMcpToolName } from "../../src/adapter/mcp-wire.js";
 
 describe("adapter MCP recognition", () => {
   it("recognizes Claude validate_plan wire name", () => {
@@ -27,5 +28,14 @@ describe("adapter MCP recognition", () => {
     expect(codexMcp.mcpWireName("fullconfirm")).toBe("mcp__agent_framework__fullconfirm");
     expect(codexMcp.recognizeMcp("mcp__agent_framework__implement")).toBe("implement");
     expect(codexMcp.mcpWireName("validate_implementation")).toBe("mcp__agent_framework__validate_implementation");
+  });
+
+  it("recognizes validated canonical and adapter wire names through the shared helper", () => {
+    expect(recognizeMcpToolName("mcp-check", codexMcp)).toBe("check");
+    expect(recognizeMcpToolName("mcp__agent_framework__check", codexMcp)).toBe("check");
+    expect(recognizeMcpToolName("mcp__agent_frameworkscenario_tester", codexMcp))
+      .toBe("scenario_tester");
+    expect(recognizeMcpToolName("mcp-not_real", codexMcp)).toBeNull();
+    expect(recognizeMcpToolName("mcp__agent_frameworknotcheck", codexMcp)).toBeNull();
   });
 });

@@ -105,6 +105,13 @@ export interface CanonicalToolCall {
   toolInput: unknown;
 }
 
+export interface AdapterToolContinuation {
+  /** Adapter-canonical continuation tool name. */
+  toolName: string;
+  /** Exact scalar inputs the continuation call must preserve. */
+  toolInput?: Record<string, string | number | boolean>;
+}
+
 export interface AdapterToolCallContext {
   rawToolName: string;
   rawToolInput: unknown;
@@ -372,9 +379,24 @@ export interface AdapterSpec {
     ctx: ScenarioMaterializeCtx,
   ): readonly MaterializedScenarioLine[];
 
+  // ── Adapter tool continuation semantics ─────────────────────────────────
+  /** True when this call's result may require an adapter-owned continuation. */
+  toolResultMayRequireContinuation(call: CanonicalToolCall): boolean;
+  /** Adapter-canonical continuation required by an observed tool result. */
+  continuationAfterToolResult(
+    call: CanonicalToolCall,
+    toolResponse: unknown,
+  ): AdapterToolContinuation | null;
+  /** Adapter-canonical continuation to restore after a tool failure. */
+  continuationAfterToolFailure(
+    call: CanonicalToolCall,
+    error: string,
+    isInterrupt: boolean,
+  ): AdapterToolContinuation | null;
+
   // ── User-facing text helpers ────────────────────────────────────────────
   /** Render the adapter-native way to wait for a long-running MCP call. */
-  renderMcpWaitRecommendation(timeoutMs: number): string;
+  renderMcpContinuationRecommendation(timeoutMs: number): string;
   /** Adapter-active wire spelling rendered for user-facing text. */
   renderCheckMcpHint(): string;
   /** Render an "authorize via workflow" hint listing example invocations. */

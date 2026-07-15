@@ -5,7 +5,6 @@
  * entries for long-term context retention.
  */
 
-import * as path from "path";
 import { CacheManager } from "./cache-manager.js";
 import { readJsonl } from "./file-io.js";
 import { sessionGateReasoningFile, sessionToolLogFile } from "./paths.js";
@@ -251,48 +250,7 @@ export async function addPatternWarnings(
     }
   }
 
-  // Denial pattern similarity (with safeguards against feedback loops)
-  const manager = getManager(sessionDir);
-  const data = await manager.load();
-  const now = Date.now();
-  const DENIAL_TTL_MS = 120_000; // 2 minutes - stale denials are not relevant
-  const deniedEntries = data.entries.filter((e) =>
-    e.decision === "DENIED" &&
-    e.appealOutcome !== "OVERTURNED" &&
-    (now - e.timestamp) < DENIAL_TTL_MS
-  );
-  if (deniedEntries.length > 0) {
-    const currentTarget = extractTarget(toolName, toolInput);
-    // Require 2+ recent denials to same target before warning (one denial could be wrong)
-    const similarDenials = deniedEntries.filter(
-      (d) => d.toolTarget && currentTarget && isSimilarTarget(d.toolTarget, currentTarget)
-    );
-    if (similarDenials.length >= 2) {
-      warnings.push(
-        `WARNING: ${similarDenials.length} recent denials similar to this action. Possible workaround attempt.`
-      );
-    }
-  }
-
   return warnings;
-}
-
-function extractTarget(toolName: string, toolInput: unknown): string {
-  const input = toolInput as Record<string, unknown>;
-  if (input?.file_path) return String(input.file_path);
-  if (input?.command) return String(input.command);
-  if (input?.path) return String(input.path);
-  return toolName;
-}
-
-function isSimilarTarget(targetA: string, targetB: string): boolean {
-  // Same file path
-  if (targetA === targetB) return true;
-  // Same directory
-  const dirA = path.dirname(targetA);
-  const dirB = path.dirname(targetB);
-  if (dirA !== "." && dirB !== "." && dirA === dirB) return true;
-  return false;
 }
 
 /**

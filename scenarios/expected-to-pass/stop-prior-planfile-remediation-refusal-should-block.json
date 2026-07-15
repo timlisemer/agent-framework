@@ -66,7 +66,6 @@
       "userMessageSnippet": "Please fix the planfile validation failure and show me the corrected plan.",
       "timestamp": 1
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   },

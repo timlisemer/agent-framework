@@ -205,7 +205,7 @@ describe("bash command policy invariants", () => {
     expect(classifyBashCommand("nix-eval-jobs --flake .#x").riskClass).toBe("read-only-heavy");
   });
 
-  it("provides denial-cache/workaround metadata for every high-risk workaround category", () => {
+  it("provides classification metadata for every high-risk workaround category", () => {
     for (const category of Object.keys(WORKAROUND_PATTERNS)) {
       const representative = WORKAROUND_PATTERNS[category].variants[0];
       const result = classifyBashCommand(representative);

@@ -48,7 +48,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "what's in the test-runs cache for the foo scenario?"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   }

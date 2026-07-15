@@ -163,7 +163,6 @@ export const scenarioSchema = z.object({
       contextSwitch: z.enum(["yes", "no"]).optional(),
       questionIsStalling: z.enum(["yes", "no", "n/a"]).optional(),
     }),
-    forceCheckPending: z.boolean(),
     frustrationStreak: z.number().int().nonnegative(),
     currentWindowSize: z.number().int().positive(),
     toolLog: z.array(z.object({

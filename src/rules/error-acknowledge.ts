@@ -2,11 +2,29 @@ import * as path from "path";
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { readToolLogEntries } from "../utils/session-store.js";
 import { readTranscriptExact } from "../utils/transcript.js";
-import { stringifyToolInput } from "../utils/prediction-types.js";
-import { isForceCheckSatisfyingMcpToolName } from "../utils/force-check-tools.js";
+import {
+  decideRequiredWorkflowToolSequence,
+  stringifyToolInput,
+} from "../utils/prediction-types.js";
 import { isEditToolName } from "../utils/edit-tools.js";
 import { extractFilePaths } from "./utils.js";
 import { summarizeRuleToolCall } from "./tool-call-context.js";
+import { activeSpec } from "../adapter/spec.js";
+import type { CanonicalMcp } from "../adapter/types.js";
+import { recognizeMcpToolName } from "../adapter/mcp-wire.js";
+
+const DENIAL_RESOLVING_MCPS = new Set<CanonicalMcp>([
+  "check",
+  "commit",
+  "confirm",
+  "fullconfirm",
+  "validate_implementation",
+]);
+
+function isDenialResolvingMcp(toolName: string): boolean {
+  const canonical = recognizeMcpToolName(toolName, activeSpec());
+  return canonical !== null && DENIAL_RESOLVING_MCPS.has(canonical);
+}
 
 export const errorAcknowledgeRule: PreToolRule = {
   name: "error-acknowledge",
@@ -29,14 +47,24 @@ DENY if:
 NO error can be ignored. Every denial must be acknowledged before moving on.`,
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    // Read recent tool log for denials. A later successful framework
-    // check/commit/confirm/fullconfirm/validate_implementation satisfies older workaround denials, matching
-    // pre-tool-use's forceCheckPending clear semantics.
+    const prediction = ctx.state.currentPrediction;
+    if (
+      prediction?.explicitlyRequiredTools?.length &&
+      decideRequiredWorkflowToolSequence(prediction, [{
+        toolName: ctx.toolName,
+        toolInput: ctx.toolInput,
+      }]).decision === "allow"
+    ) {
+      return null;
+    }
+
+    // Read recent tool log for denials. A successful framework validation
+    // resolves older denials before subsequent workflow progress.
     const recentLog = readToolLogEntries(ctx.sessionDir, 5);
     let recentDenial: ReturnType<typeof readToolLogEntries>[number] | undefined;
     for (let i = recentLog.length - 1; i >= 0; i--) {
       const entry = recentLog[i];
-      if (entry.status === "allowed" && isForceCheckSatisfyingMcpToolName(entry.tool)) {
+      if (entry.status === "allowed" && isDenialResolvingMcp(entry.tool)) {
         break;
       }
       if (entry.status === "denied") {

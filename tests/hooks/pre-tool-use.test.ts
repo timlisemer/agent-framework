@@ -4,6 +4,8 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
 import { mainPreToolUse } from "../../src/hooks/pre-tool-use.js";
+import { mainPostToolUse } from "../../src/hooks/post-tool-use.js";
+import { mainPostToolUseFailure } from "../../src/hooks/post-tool-use-failure.js";
 import { getAgentFrameworkSessionDir } from "../../src/utils/paths.js";
 import { getSessionState } from "../../src/utils/session-store.js";
 import type { ToolPrediction } from "../../src/utils/prediction-types.js";
@@ -258,6 +260,328 @@ describe("pre-tool-use planfile writes", () => {
     });
   });
 
+  it("does not predict a Codex wait before the MCP result is known", async () => {
+    await mainPreToolUse(
+      {
+        session_id: "session-pre",
+        tool_use_id: "tool-check",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "mcp__agent_framework__check",
+        tool_input: { working_dir: tempDir },
+      },
+      codexEncoder,
+    );
+
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools ?? []).toEqual([]);
+  });
+
+  it("consumes the Codex wait continuation before allowing the next workflow tool", async () => {
+    await seedPrediction({
+      explicitlyRequiredTools: [
+        { tool: "mcp-check" },
+        { tool: "Read" },
+      ],
+    });
+
+    await runToolHook(
+      "tool-check",
+      "mcp__agent_framework__check",
+      { working_dir: tempDir },
+    );
+    await mainPostToolUse(
+      {
+        session_id: "session-pre",
+        tool_use_id: "tool-check",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "mcp__agent_framework__check",
+        tool_input: { working_dir: tempDir },
+        tool_response: "Script running with cell ID cell-check",
+      },
+      codexEncoder,
+    );
+
+    let state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools?.map((requirement) => requirement.tool))
+      .toEqual(["Wait", "Read"]);
+
+    await runToolHook(
+      "tool-wait",
+      "wait",
+      { cell_id: "cell-check", yield_time_ms: 330000 },
+    );
+    state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools?.map((requirement) => requirement.tool))
+      .toEqual(["Read"]);
+
+    await mainPostToolUse(
+      {
+        session_id: "session-pre",
+        tool_use_id: "tool-wait",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "wait",
+        tool_input: { cell_id: "cell-check", yield_time_ms: 330000 },
+        tool_response: "Status: PASS",
+      },
+      codexEncoder,
+    );
+
+    await runToolHook(
+      "tool-read",
+      "Read",
+      { file_path: path.join(tempDir, "README.md") },
+    );
+    state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools).toEqual([]);
+  });
+
+  it("re-queues the exact wait when the same cell is still running", async () => {
+    await seedPrediction({
+      explicitlyRequiredTools: [
+        { tool: "Wait", input: { cell_id: "cell-check", yield_time_ms: 330000 } },
+        { tool: "Read" },
+      ],
+    });
+
+    await runToolHook(
+      "tool-wait",
+      "wait",
+      { cell_id: "cell-check", yield_time_ms: 330000 },
+    );
+    await mainPostToolUse(
+      {
+        session_id: "session-pre",
+        tool_use_id: "tool-wait",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "wait",
+        tool_input: { cell_id: "cell-check", yield_time_ms: 330000 },
+        tool_response: "Script running with cell ID cell-check",
+      },
+      codexEncoder,
+    );
+
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools).toEqual([
+      {
+        tool: "Wait",
+        input: { cell_id: "cell-check", yield_time_ms: 330000 },
+        reason: "Wait must continue the preceding MCP call for this adapter",
+      },
+      { tool: "Read" },
+    ]);
+  });
+
+  it("restores a failed wait but treats an interrupted wait as cancelled", async () => {
+    const waitRequirement = {
+      tool: "Wait",
+      input: { cell_id: "cell-check", yield_time_ms: 330000 },
+    };
+    await seedPrediction({
+      explicitlyRequiredTools: [waitRequirement, { tool: "Read" }],
+    });
+    await runToolHook("tool-wait", "wait", waitRequirement.input);
+    await mainPostToolUseFailure(
+      {
+        session_id: "session-pre",
+        tool_name: "wait",
+        tool_input: waitRequirement.input,
+        error: "wait timed out",
+        is_interrupt: false,
+        transcript_path: transcriptPath,
+      },
+      codexEncoder,
+    );
+
+    let state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools?.map((requirement) => requirement.tool))
+      .toEqual(["Wait", "Read"]);
+
+    await runToolHook("tool-wait-retry", "wait", waitRequirement.input);
+    await mainPostToolUseFailure(
+      {
+        session_id: "session-pre",
+        tool_name: "wait",
+        tool_input: waitRequirement.input,
+        error: "user interrupted wait",
+        is_interrupt: true,
+        transcript_path: transcriptPath,
+      },
+      codexEncoder,
+    );
+    state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools?.map((requirement) => requirement.tool))
+      .toEqual(["Read"]);
+  });
+
+  it("denies later workflow tools parallelized with a wait barrier", async () => {
+    const waitInput = { cell_id: "cell-check", yield_time_ms: 330000 };
+    await seedPrediction({
+      explicitlyRequiredTools: [
+        { tool: "Wait", input: waitInput },
+        { tool: "Read" },
+      ],
+    });
+    writeToolBatch([
+      { id: "tool-wait", name: "wait", input: waitInput },
+      {
+        id: "tool-read",
+        name: "Read",
+        input: { file_path: path.join(tempDir, "README.md") },
+      },
+    ]);
+
+    await runToolHook("tool-wait", "wait", waitInput);
+
+    const [, stdout] = mocks.exitAfterFlush.mock.calls.at(-1)!;
+    expect(JSON.parse(stdout).hookSpecificOutput.permissionDecisionReason)
+      .toContain("complete before later parallel tools");
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools?.map((requirement) => requirement.tool))
+      .toEqual(["Wait", "Read"]);
+  });
+
+  it("does not pre-seed an orphan wait for an MCP behind a parallel leader", async () => {
+    writeToolBatch([
+      { id: "call-search", name: "tool_search", input: { query: "check MCP" } },
+      {
+        id: "call-check",
+        name: "mcp__agent_framework__check",
+        input: { working_dir: tempDir },
+      },
+    ]);
+
+    await runToolHook("call-search", "tool_search", { query: "check MCP" });
+
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools ?? []).toEqual([]);
+  });
+
+  it("does not pre-seed waits for parallel MCPs before their results", async () => {
+    writeToolBatch([
+      {
+        id: "call-check",
+        name: "mcp__agent_framework__check",
+        input: { working_dir: tempDir },
+      },
+      {
+        id: "call-confirm",
+        name: "mcp__agent_framework__confirm",
+        input: { working_dir: tempDir },
+      },
+    ]);
+
+    await runToolHook(
+      "call-check",
+      "mcp__agent_framework__check",
+      { working_dir: tempDir },
+    );
+
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools ?? []).toEqual([]);
+  });
+
+  it("denies unqueued work parallelized after a Codex MCP continuation boundary", async () => {
+    writeToolBatch([
+      {
+        id: "call-check",
+        name: "mcp__agent_framework__check",
+        input: { working_dir: tempDir },
+      },
+      {
+        id: "call-read",
+        name: "Read",
+        input: { file_path: path.join(tempDir, "README.md") },
+      },
+    ]);
+
+    await runToolHook(
+      "call-check",
+      "mcp__agent_framework__check",
+      { working_dir: tempDir },
+    );
+
+    const [, stdout] = mocks.exitAfterFlush.mock.calls.at(-1)!;
+    expect(JSON.parse(stdout).hookSpecificOutput.permissionDecisionReason)
+      .toContain("must complete before later parallel tools");
+  });
+
+  it("does not consume a queued MCP when later workflow work is parallelized", async () => {
+    await seedPrediction({
+      explicitlyRequiredTools: [
+        { tool: "mcp-check" },
+        { tool: "Read" },
+      ],
+    });
+    writeToolBatch([
+      {
+        id: "call-check",
+        name: "mcp__agent_framework__check",
+        input: { working_dir: tempDir },
+      },
+      {
+        id: "call-read",
+        name: "Read",
+        input: { file_path: path.join(tempDir, "README.md") },
+      },
+    ]);
+
+    await runToolHook(
+      "call-check",
+      "mcp__agent_framework__check",
+      { working_dir: tempDir },
+    );
+
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools?.map((requirement) => requirement.tool))
+      .toEqual(["mcp-check", "Read"]);
+  });
+
+  it("allows the next queued tool after a synchronous Codex MCP completes", async () => {
+    const readInput = { file_path: path.join(tempDir, "README.md") };
+    await seedPrediction({
+      explicitlyRequiredTools: [
+        { tool: "mcp-check" },
+        { tool: "Read" },
+      ],
+    });
+    writeToolBatch([{
+      id: "call-check",
+      name: "mcp__agent_framework__check",
+      input: { working_dir: tempDir },
+    }]);
+
+    await runToolHook(
+      "call-check",
+      "mcp__agent_framework__check",
+      { working_dir: tempDir },
+    );
+    await mainPostToolUse(
+      {
+        session_id: "session-pre",
+        tool_use_id: "call-check",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "mcp__agent_framework__check",
+        tool_input: { working_dir: tempDir },
+        tool_response: "Status: PASS",
+      },
+      codexEncoder,
+    );
+    writeToolBatch([{
+      id: "call-read",
+      name: "Read",
+      input: readInput,
+    }]);
+    await runToolHook("call-read", "Read", readInput);
+
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools).toEqual([]);
+  });
+
   it("denies a strict workflow parallel batch when a sibling has the wrong agent type", async () => {
     await seedPrediction({
       explicitlyRequiredTools: codexPlan3InitialAgentBatchRequirements(),
@@ -384,20 +708,36 @@ describe("pre-tool-use planfile writes", () => {
   }
 
   async function runSpawnAgentHook(toolUseId: string, agentType = "default"): Promise<void> {
+    await runToolHook(toolUseId, "spawn_agent", { agent_type: agentType });
+  }
+
+  async function runToolHook(
+    toolUseId: string,
+    toolName: string,
+    toolInput: unknown,
+  ): Promise<void> {
     await mainPreToolUse(
       {
         session_id: "session-pre",
         tool_use_id: toolUseId,
         transcript_path: transcriptPath,
         cwd: tempDir,
-        tool_name: "spawn_agent",
-        tool_input: { agent_type: agentType },
+        tool_name: toolName,
+        tool_input: toolInput,
       },
       codexEncoder,
     );
   }
 
   function writeAssistantBatch(calls: Array<{ id: string; agent_type: string }>): void {
+    writeToolBatch(calls.map((call) => ({
+      id: call.id,
+      name: "spawn_agent",
+      input: { agent_type: call.agent_type },
+    })));
+  }
+
+  function writeToolBatch(calls: Array<{ id: string; name: string; input: unknown }>): void {
     fs.writeFileSync(
       transcriptPath,
       JSON.stringify({
@@ -406,8 +746,8 @@ describe("pre-tool-use planfile writes", () => {
           content: calls.map((call) => ({
             type: "tool_use",
             id: call.id,
-            name: "spawn_agent",
-            input: { agent_type: call.agent_type },
+            name: call.name,
+            input: call.input,
           })),
         },
       }) + "\n",

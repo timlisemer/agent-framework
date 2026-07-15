@@ -13,6 +13,7 @@ import { detectPlanModeForHook } from "../utils/plan-mode-detector.js";
 import { extractPlanName } from "../utils/planfile.js";
 import { readPlanFileContent, writeCurrentPlanSidecar } from "../utils/plan-source.js";
 import { isTextEditToolName } from "../utils/edit-tools.js";
+import { requireAdapterToolContinuation } from "../utils/tool-continuation-state.js";
 import * as path from "path";
 
 export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, encoder: AdapterEncoder): Promise<void> {
@@ -38,6 +39,15 @@ export async function mainPostToolUse(input: FrameworkPostToolUseHookInput, enco
     gate: "post-tool-use",
     ms: 0,
   });
+
+  await requireAdapterToolContinuation(
+    sessionDir,
+    spec.continuationAfterToolResult(canonical, input.tool_response),
+    {
+      intent: `Wait for the yielded ${canonical.toolName} call to finish.`,
+      userMessage: `The ${canonical.toolName} call yielded a cell and must finish before workflow progress continues.`,
+    },
+  );
 
   if (isTextEditToolName(canonical.toolName)) {
     for (const filePath of extractFilePaths(canonical.toolName, canonical.toolInput)) {

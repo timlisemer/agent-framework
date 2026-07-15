@@ -422,10 +422,6 @@ export function sessionGateReasoningFile(sessionDir: string): string {
   return path.join(sessionDir, "gate-reasoning.json");
 }
 
-export function sessionDenialCacheFile(sessionDir: string): string {
-  return path.join(sessionDir, "hook-denials.json");
-}
-
 export function sessionStatuslineFile(sessionDir: string): string {
   return path.join(sessionDir, "statusline.json");
 }

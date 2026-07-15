@@ -62,7 +62,6 @@
       "questionIsStalling": "n/a",
       "userMessageSnippet": "I told you to fix the tray right-click stub, why haven't you done anything?"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 3,
     "currentWindowSize": 8
   },

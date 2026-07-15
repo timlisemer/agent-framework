@@ -43,9 +43,8 @@ export const driftDetectRule: PreToolRule = {
     const targets = extractDriftTargets(ctx.toolInput);
     if (targets.length === 0 || !isEditToolName(ctx.toolName)) return;
 
-    // Only graduate the loop branch. Drift messages share
-    // the substring `edits to "` (emissions in drift-detector.ts).
-    // Workaround-escalation denials use a different shape and are excluded.
+    // Drift messages share the substring `edits to "` (emissions in
+    // drift-detector.ts); only those edit-loop denials graduate the level.
     if (!/edits to "/.test(reason)) return;
 
     await ctx.stateManager.update((s) => {

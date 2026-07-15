@@ -45,7 +45,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "please look at X and propose a fix"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   },

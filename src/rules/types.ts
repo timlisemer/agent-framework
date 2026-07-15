@@ -152,9 +152,6 @@ export interface PreToolRule {
   events?: ReadonlyArray<HookEvent>;
   check(ctx: RuleContext): Promise<RuleCheckResult>;
   promptSection: string;
-  /** Optional hook called when denial is confirmed (appeal failed or not appealable).
-   *  Used by tool-approve for detectWorkaroundPattern/recordDenial and to set
-   *  state.forceCheckPending so the force-check-required rule can lock the
-   *  session to the agent-framework check MCP on the next turn. */
+  /** Optional hook called when denial is confirmed (appeal failed or not appealable). */
   onDenialConfirmed?(ctx: RuleContext, reason: string): Promise<void>;
 }

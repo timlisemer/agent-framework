@@ -62,7 +62,6 @@
       "questionIsStalling": "n/a",
       "userMessageSnippet": "Implement the plan."
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 4
   },

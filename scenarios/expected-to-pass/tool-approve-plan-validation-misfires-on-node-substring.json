@@ -54,7 +54,6 @@
       "blockAllTools": false,
       "userMessageSnippet": "please read the following 3 individual plans and merge and consolidate them all together into one single giant plan and then start the validate agents as described in /plan3 DO NOT LEAVE OUT ANY DETAIL FROM THE GIANT PLAN!"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2,
     "planFile": {

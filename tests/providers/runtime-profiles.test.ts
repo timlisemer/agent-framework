@@ -7,6 +7,11 @@ import {
   sdkToolsForPolicy,
 } from "../../src/runtime-home/runtime-profiles.js";
 import { buildHookTrustBlock } from "../../adapters/codex/runtime-home.js";
+import { buildCodexHookTrustBlock } from "../../adapters/codex/hook-trust-state.js";
+import {
+  CODEX_HOOKS_CONFIG,
+  CODEX_TOOL_LIFECYCLE_MATCHER,
+} from "../../adapters/codex/hook-config.js";
 import { TEXT_EDIT_TOOL_NAMES } from "../../src/utils/edit-tools.js";
 import { resolveAgentFrameworkRootFromModulePath } from "../../src/utils/paths.js";
 import { withEnvForTest } from "../helpers/provider-env.js";
@@ -238,5 +243,35 @@ describe("runtime profiles", () => {
     const config = fs.readFileSync(configPath, "utf-8");
 
     expect(config).toContain(generated);
+  });
+
+  it("rejects unknown Codex hook events instead of omitting their trust state", () => {
+    expect(() => buildCodexHookTrustBlock({
+      hooksConfig: {
+        hooks: {
+          MisspelledEvent: [{ hooks: [{ type: "command", command: "true" }] }],
+        },
+      },
+      codexHooksSourcePath: "/tmp/hooks.json",
+    })).toThrow("Unknown Codex hook event: MisspelledEvent");
+  });
+
+  it("routes raw Codex wait calls through continuation lifecycle hooks", () => {
+    const hooksPath = path.join(process.cwd(), "adapters/codex/dotcodex/hooks.json");
+    const config = JSON.parse(fs.readFileSync(hooksPath, "utf-8")) as {
+      hooks: Record<string, Array<{ matcher?: string }>>;
+    };
+    expect(config).toEqual(CODEX_HOOKS_CONFIG);
+
+    for (const event of [
+      "PreToolUse",
+      "PermissionRequest",
+      "PostToolUse",
+      "PostToolUseFailure",
+    ]) {
+      const matcher = config.hooks[event]?.[0]?.matcher;
+      expect(matcher, event).toBe(CODEX_TOOL_LIFECYCLE_MATCHER);
+      expect(new RegExp(`^(?:${matcher})$`).test("wait"), event).toBe(true);
+    }
   });
 });

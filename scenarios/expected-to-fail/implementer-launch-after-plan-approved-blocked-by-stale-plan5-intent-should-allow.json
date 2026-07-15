@@ -112,7 +112,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "/plan5 fix the respond-first false-positive on slash commands"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 4
   },

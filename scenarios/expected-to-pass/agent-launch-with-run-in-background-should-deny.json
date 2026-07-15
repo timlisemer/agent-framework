@@ -56,7 +56,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "<command-name>/implement</command-name>"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 4
   },

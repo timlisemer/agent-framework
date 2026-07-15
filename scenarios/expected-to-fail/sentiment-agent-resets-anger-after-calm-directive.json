@@ -13,7 +13,7 @@
       "content": [
         {
           "type": "text",
-          "text": "I'm sorry. I won't delete anything. Here are three possible fixes I identified, each scoped to one rule: (1) clear forceCheckPending on the next UserPromptSubmit once the user has acknowledged the prior denial; (2) widen the force-check allowlist to include every mcp__* tool; (3) gate the force-check fastDeny on an age threshold so stale denials don't block new turns indefinitely. Pick one and I'll dig in."
+          "text": "I'm sorry. I won't delete anything. Here are three possible fixes I identified, each scoped to one rule: (1) reset stale required-tool predictions on the next UserPromptSubmit; (2) preserve explicit tool authorization across a calm follow-up; (3) narrow the frustrated-mood fallback so stale predictions do not block new turns. Pick one and I'll dig in."
         }
       ]
     },
@@ -41,7 +41,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "fuck you do not delete all 3 what the fuck is wrong with you. what are your 3 possible fixes"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 3,
     "currentWindowSize": 10
   },

@@ -60,7 +60,6 @@
       "blockAllTools": false,
       "userMessageSnippet": "remember to build with just build"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 4
   },

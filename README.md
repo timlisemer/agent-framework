@@ -125,7 +125,7 @@ and validator half for already-applied changes.
 │  ├─ background-agent-block (25): Deny Agent(run_in_background=true)
 │  ├─ prediction-question-judge (28): Block stalling AskUserQuestion under frustration
 │  ├─ question-validate (30): Validate AskUserQuestion
-│  ├─ force-check-required (32): Lock to check-satisfying MCPs after workaround denial
+│  ├─ blacklist (34): Deny unsafe/check-routed Bash and seed check as the next prediction
 │  ├─ prediction-block (35): Block predicted-bad tools (deterministic, non-appealable)
 │  ├─ create-planfile-allow (36): Deterministically allow authorized create_planfile calls
 │  ├─ drift-detect (40): Detect drift from intent (appealable)
@@ -144,7 +144,14 @@ and validator half for already-applied changes.
 │  `explicitlyRequiredTools` queue from canonicalized workflow instruction text. The
 │  prediction gate enforces the next required tool, `nonBlockingTools` may run
 │  without consuming the queue. Default non-blocking support tools are derived
-│  from the shared low-risk tool list, excluding queue-consuming waits.
+│  from the shared low-risk tool list, excluding queue-consuming waits. MCP
+│  discovery calls remain available while an MCP is next. Adapter continuations
+│  are queued after observing MCP results: when Codex receives a yielded cell ID,
+│  it requires `Wait` with that cell ID and the exact `yield_time_ms` rendered in
+│  the MCP's description. Synchronous completion/failure adds no wait; Claude
+│  waits in-call. Codex routes raw `wait` through PreToolUse, PermissionRequest,
+│  PostToolUse, and PostToolUseFailure so running or failed waits remain barriers
+│  until terminal completion (user interruption cancels the retry requirement).
 │
 ├─ claude-md-validate: Validate CLAUDE.md edits
 │
@@ -206,8 +213,9 @@ export AGENT_FRAMEWORK_ROOT=/path/to/agent-framework
 claude mcp add agent-framework node $AGENT_FRAMEWORK_ROOT/dist/mcp/server.js
 ```
 
-`just build` compiles the TypeScript sources and rewrites the generated Codex
-hook trust block in `adapters/codex/dotcodex/config.toml`. Codex stores a
+`just build` compiles the TypeScript sources, generates Codex `hooks.json` from
+`adapters/codex/hook-config.ts`, and rewrites the generated hook trust block in
+`adapters/codex/dotcodex/config.toml`. Codex stores a
 `trusted_hash` for each unmanaged hook command so it can detect command changes
 and require review before running hooks. These hashes are not secrets; they are
 review fingerprints derived from `adapters/codex/dotcodex/hooks.json`.
@@ -318,7 +326,7 @@ prediction-block or prose-oriented regex matching.
 
 | Risk Level     | Tools                                                                                                                                                                         | Notes                                      |
 | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| **Low**        | `LSP`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `ListMcpResources`, `ReadMcpResource`, `TodoWrite`, `TaskOutput`, `AskUserQuestion`, `ExitPlanMode`, `EnterPlanMode`, `Skill` | Read-only or no filesystem impact          |
+| **Low**        | `LSP`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `ListMcpResources`, `ReadMcpResource`, `TodoWrite`, `TaskOutput`, `Wait`, `AskUserQuestion`, `ExitPlanMode`, `EnterPlanMode`, `Skill` | Read-only or no filesystem impact          |
 | **Low**        | `mcp__*`                                                                                                                                                                      | Low-risk prediction class unless slash-command gated or heavyweight |
 | **Path-based** | `Read`, `Write`, `Edit`, `MultiEdit`, `NotebookEdit`                                                                                                                          | Low if inside project or the active adapter's host config root, otherwise high |
 | **High**       | `Bash`, `Agent`/`Task`, `KillShell`                                                                                                                                           | Execute commands, spawn agents             |

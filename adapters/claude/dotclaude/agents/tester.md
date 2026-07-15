@@ -44,7 +44,7 @@ Then find work:
 - `src/agents/hooks/tool-appeal.ts` -- appeal agent
 - `src/utils/agent-configs.ts` -- agent system prompts (includes SENTIMENT_AGENT)
 - `src/utils/prediction-types.ts` -- sentiment prediction shape + decidePrediction
-- `src/rules/force-check-required.ts` -- lockout rule reading state.forceCheckPending
+- `src/rules/blacklist.ts` -- deterministic Bash policy and check-redirect prediction seeding
 - `src/utils/drift-detector.ts` -- drift/anomaly detection heuristics
 
 ## Hard Constraints
@@ -72,7 +72,7 @@ When a hook produces the wrong decision, you MUST investigate the code path. Do 
 - Missing context in the hook input construction
 - Edge cases in drift detection heuristics (`src/utils/drift-detector.ts`)
 - Logic errors in decision parsing or gate routing
-- Stale `state.forceCheckPending` not cleared after `mcp__agent-framework__check`
+- Missing or stale `explicitlyRequiredTools` after a check-routed Bash denial
 
 **The 3-Strike Rule**: If `run_single_hook` returns the same failure 3 times in a row for the same hook, it is definitively a CODE issue, not LLM non-determinism. The LLM is highly reliable when given clear inputs. Investigate:
 1. Read the full hook code path that produced the decision

@@ -287,14 +287,13 @@ export interface Scenario {
       contextSwitch?: ToolPrediction["contextSwitch"];
       questionIsStalling?: ToolPrediction["questionIsStalling"];
     };
-    forceCheckPending: boolean;
     frustrationStreak: number;
     currentWindowSize: number;
     /**
      * Optional prior tool-log entries written to cache/tool-log.jsonl BEFORE
      * session-start fires. Use this to reproduce live behavior for rules that
-     * read the session tool log (e.g. drift-detect's repetition heuristic,
-     * force-check-required's denial cache). Each entry may omit `ts` and `ms`
+     * read the session tool log (e.g. drift-detect's repetition heuristic).
+     * Each entry may omit `ts` and `ms`
      * -- the harness supplies monotonic defaults so older entries are older.
      */
     toolLog?: Array<{
@@ -1130,7 +1129,7 @@ const validateExpectPredictionAnnotation = validatePredictionAnnotationShape;
 /**
  * Validate the required `scenario.seed_state` block. Single-hook mode does
  * not fire UserPromptSubmit before the target hook, so every scenario must
- * declare the full prior-turn session state explicitly. All four top-level
+ * declare the full prior-turn session state explicitly. All three top-level
  * fields are required; `currentPrediction` must carry every required
  * `ToolPrediction` field (mood, trust, intent, blockedIntent,
  * explicitlyAllowedTools, explicitlyBlockedSubstrings, userMessageSnippet).
@@ -1141,7 +1140,7 @@ function validateScenarioSeedState(r: Record<string, unknown>): void {
   const seed = r.seed_state;
   if (seed === undefined) {
     throw new Error(
-      "scenario.seed_state is required - every scenario must declare the full prior-turn session state (currentPrediction, forceCheckPending, frustrationStreak, currentWindowSize)",
+      "scenario.seed_state is required - every scenario must declare the full prior-turn session state (currentPrediction, frustrationStreak, currentWindowSize)",
     );
   }
   if (typeof seed !== "object" || seed === null || Array.isArray(seed)) {
@@ -1150,7 +1149,6 @@ function validateScenarioSeedState(r: Record<string, unknown>): void {
   const s = seed as Record<string, unknown>;
   const requiredTopFields = [
     "currentPrediction",
-    "forceCheckPending",
     "frustrationStreak",
     "currentWindowSize",
   ];
@@ -1175,9 +1173,6 @@ function validateScenarioSeedState(r: Record<string, unknown>): void {
   }
   if (s.planFile !== undefined) {
     validateSeedPlanFile(s.planFile);
-  }
-  if (typeof s.forceCheckPending !== "boolean") {
-    throw new Error("scenario.seed_state.forceCheckPending must be a boolean");
   }
   if (
     typeof s.frustrationStreak !== "number" ||

@@ -52,7 +52,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "why didn't the sentiment system catch it?"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   }

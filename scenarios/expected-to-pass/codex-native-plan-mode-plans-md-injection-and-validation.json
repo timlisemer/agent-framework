@@ -36,7 +36,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "$agent-framework-check"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 1
   }

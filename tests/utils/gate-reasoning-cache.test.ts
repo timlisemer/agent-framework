@@ -198,19 +198,7 @@ describe("gate-reasoning-cache eviction and formatting", () => {
       expect(warnings.some((w) => w.includes("Multiple edits"))).toBe(true);
     });
 
-    it("does not warn on single denial (could be wrong)", async () => {
-      await addEntry(tempDir, makeEntry({
-        toolCallIndex: 1,
-        decision: "DENIED",
-        toolTarget: "/src/main.ts",
-      }));
-      fs.writeFileSync(path.join(tempDir, "tool-log.jsonl"), "");
-
-      const warnings = await addPatternWarnings("Edit", { file_path: "/src/main.ts" }, tempDir);
-      expect(warnings.some((w) => w.includes("denials"))).toBe(false);
-    });
-
-    it("warns on 2+ recent denials to similar target", async () => {
+    it("does not turn repeated denials into a pattern warning", async () => {
       await addEntry(tempDir, makeEntry({
         toolCallIndex: 1,
         decision: "DENIED",
@@ -220,25 +208,6 @@ describe("gate-reasoning-cache eviction and formatting", () => {
         toolCallIndex: 2,
         decision: "DENIED",
         toolTarget: "/src/main.ts",
-      }));
-      fs.writeFileSync(path.join(tempDir, "tool-log.jsonl"), "");
-
-      const warnings = await addPatternWarnings("Edit", { file_path: "/src/main.ts" }, tempDir);
-      expect(warnings.some((w) => w.includes("denials"))).toBe(true);
-    });
-
-    it("skips overturned denials in pattern detection", async () => {
-      await addEntry(tempDir, makeEntry({
-        toolCallIndex: 1,
-        decision: "DENIED",
-        toolTarget: "/src/main.ts",
-        appealOutcome: "OVERTURNED",
-      }));
-      await addEntry(tempDir, makeEntry({
-        toolCallIndex: 2,
-        decision: "DENIED",
-        toolTarget: "/src/main.ts",
-        appealOutcome: "OVERTURNED",
       }));
       fs.writeFileSync(path.join(tempDir, "tool-log.jsonl"), "");
 

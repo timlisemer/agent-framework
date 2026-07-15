@@ -90,7 +90,6 @@
         "reason": "All checks passed"
       }
     ],
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   },

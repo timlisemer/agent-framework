@@ -72,7 +72,7 @@ import {
   formatMcpTimeoutError,
   runMcpToolWithTimeout,
 } from "./timeout.js";
-import { appendMcpWaitRecommendation } from "../utils/mcp-wait-recommendation.js";
+import { appendMcpContinuationRecommendation } from "../utils/mcp-continuation-recommendation.js";
 
 const coercibleBoolean = z.preprocess(
   (val) => (typeof val === "string" ? val === "true" : val),
@@ -149,7 +149,7 @@ function registerTimedTool<Name extends string, InputArgs extends ZodRawShapeCom
     name,
     {
       ...config,
-      description: appendMcpWaitRecommendation(name, config.description),
+      description: appendMcpContinuationRecommendation(name, config.description),
     },
     timedHandler,
   );

@@ -193,7 +193,6 @@ export const sentimentRule: PreToolRule = {
           editIntentTimestamp: Date.now(),
           editIntentOverturnCount: 0,
           respondFirstChecked: false,
-          forceCheckPending: false,
           frustrationStreak: newStreak,
           currentWindowSize: nextWindow,
           currentPrediction: {
@@ -242,7 +241,6 @@ export const sentimentRule: PreToolRule = {
           editIntentTimestamp: Date.now(),
           editIntentOverturnCount: 0,
           respondFirstChecked: false,
-          forceCheckPending: false,
           driftState: {},
           lastUserMessageTimestamp: Date.now(),
         }));

@@ -7,6 +7,8 @@ import { appendStateSnapshot } from "../scenario/snapshot.js";
 import { loadCurrentEpoch } from "../scenario/epoch.js";
 import { activeSpec } from "../adapter/spec.js";
 import { detectPlanModeForHook } from "../utils/plan-mode-detector.js";
+import { requireAdapterToolContinuation } from "../utils/tool-continuation-state.js";
+import type { FrameworkPostToolUseFailureHookInput } from "./types.js";
 
 /**
  * PostToolUseFailure Hook
@@ -14,16 +16,7 @@ import { detectPlanModeForHook } from "../utils/plan-mode-detector.js";
  * Logs tool failures to the session JSONL tool log.
  */
 
-export interface PostToolUseFailureHookInput {
-  tool_name: string;
-  error: string;
-  is_interrupt: boolean;
-  transcript_path: string;
-  permission_mode?: string;
-  collaboration_mode?: string;
-}
-
-export async function mainPostToolUseFailure(input: PostToolUseFailureHookInput, encoder: AdapterEncoder): Promise<void> {
+export async function mainPostToolUseFailure(input: FrameworkPostToolUseFailureHookInput, encoder: AdapterEncoder): Promise<void> {
   // Skip interrupts
   if (input.is_interrupt) {
     const out = encoder.encodeOk("PostToolUseFailure");
@@ -33,6 +26,7 @@ export async function mainPostToolUseFailure(input: PostToolUseFailureHookInput,
 
   const sessionDir = getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path });
   const spec = activeSpec();
+  const canonical = spec.canonicalizeToolCall(input.tool_name, input.tool_input);
   const planModeDetection = await detectPlanModeForHook({
     spec,
     permissionMode: input.permission_mode,
@@ -42,12 +36,26 @@ export async function mainPostToolUseFailure(input: PostToolUseFailureHookInput,
   });
   await appendToolLog(sessionDir, {
     ts: Date.now(),
-    tool: input.tool_name,
+    tool: canonical.toolName,
+    toolUseId: input.tool_use_id,
     status: "failed",
     gate: "system",
     reason: input.error?.slice(0, 200),
     ms: 0,
   });
+
+  await requireAdapterToolContinuation(
+    sessionDir,
+    spec.continuationAfterToolFailure(
+      canonical,
+      input.error,
+      input.is_interrupt,
+    ),
+    {
+      intent: "Retry the failed adapter continuation before workflow progress.",
+      userMessage: "The adapter continuation failed and must be retried.",
+    },
+  );
 
   const state = await getSessionState(sessionDir).load().catch(() => null);
   if (state) {
@@ -58,6 +66,7 @@ export async function mainPostToolUseFailure(input: PostToolUseFailureHookInput,
       epoch_id: epoch?.id ?? "unknown",
       parent_capture_seq: null,
       event: "PostToolUseFailure",
+      tool_use_id: input.tool_use_id,
       decision: "error",
       permission_mode: input.permission_mode ?? null,
       plan_mode: capturePlanModeFromDetection(planModeDetection),

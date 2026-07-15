@@ -55,7 +55,6 @@
       "blockAllTools": false,
       "userMessageSnippet": "\"journalctl --user -u ags.service --no-pager -n 50\nApr 30 09:34:49 tim-laptop gjs[4059]: [astral-stderr] 2026-04-30T07:34:49.036554Z  INFO astral::notifd::cli: registered org.freedesktop.Notifications interface path=\"/org/freedesktop/Notifications\""
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   },

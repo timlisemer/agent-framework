@@ -48,7 +48,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "find all callsites of `appealHelper`"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   }

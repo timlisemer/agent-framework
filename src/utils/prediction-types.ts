@@ -9,8 +9,21 @@
  * @module prediction-types
  */
 
-import { LOW_RISK_TOOLS, isLowRiskTool, isLowRiskInspectionTool } from "../rules/utils.js";
-import { CANONICAL_MCPS } from "../adapter/types.js";
+import {
+  LOW_RISK_TOOLS,
+  MCP_DISCOVERY_TOOLS,
+  isLowRiskTool,
+  isLowRiskInspectionTool,
+} from "../rules/utils.js";
+import {
+  type AdapterToolContinuation,
+  type CanonicalMcp,
+} from "../adapter/types.js";
+import {
+  canonicalMcpFromName,
+  recognizeMcpToolName,
+} from "../adapter/mcp-wire.js";
+import { allAdapterSpecs } from "../adapter/spec.js";
 import {
   isEditTool,
   deriveEditIntentFromPrediction,
@@ -296,19 +309,20 @@ export const TOOL_NAME_ALIASES: ReadonlyMap<string, ReadonlyArray<string>> = new
   ["Agent", ["validator agent", "another validator agent", "spawn an agent", "spawn a subagent", "launch an agent", "launch a subagent", "start an agent", "start a subagent", "run an agent", "run a subagent", "another subagent"]],
 ]);
 
-function predictionCanonicalToolName(toolName: string): string {
-  if (toolName === "apply_patch") return "Edit";
-  if (toolName.startsWith("mcp__")) {
-    const suffix = CANONICAL_MCPS.find((mcp) => toolName.endsWith(mcp));
-    if (suffix) return `mcp-${suffix}`;
+export function canonicalPredictionToolName(toolName: string): string {
+  for (const spec of allAdapterSpecs()) {
+    const canonicalMcp = recognizeMcpToolName(toolName, spec);
+    if (canonicalMcp) return `mcp-${canonicalMcp}`;
   }
-  const mcpWireMatch = /^mcp__[^_\s]+(?:_[^_\s]+)*__?(.+)$/.exec(toolName);
-  if (mcpWireMatch) return `mcp-${mcpWireMatch[1].replace(/^_+/, "")}`;
+  for (const spec of allAdapterSpecs()) {
+    const canonical = spec.canonicalizeToolCall(toolName, {});
+    if (canonical.toolName !== toolName) return canonical.toolName;
+  }
   return toolName;
 }
 
 function predictionToolIdentityNames(toolName: string): string[] {
-  const canonical = predictionCanonicalToolName(toolName);
+  const canonical = canonicalPredictionToolName(toolName);
   return [...new Set([toolName, canonical])];
 }
 
@@ -569,7 +583,7 @@ export function latestUserMessageAuthorizesBashCommand(
  * function grows a new verb→tool mapping, this helper must too.
  */
 function verbRegexesProducingTool(toolName: string): RegExp[] {
-  switch (predictionCanonicalToolName(toolName)) {
+  switch (canonicalPredictionToolName(toolName)) {
     case "Read":
       return [READ_VERB_RE];
     case "Edit":
@@ -691,7 +705,8 @@ export function classifyBlockAllTools(
   return "ambiguous";
 }
 
-const LOW_RISK_TOOLS_THAT_CONSUME_WORKFLOW_QUEUE = new Set(["TaskOutput"]);
+const LOW_RISK_TOOLS_THAT_CONSUME_WORKFLOW_QUEUE = new Set(["TaskOutput", "Wait"]);
+const SERIAL_WORKFLOW_BARRIER_TOOLS = new Set(["Wait"]);
 
 const DEFAULT_WORKFLOW_NON_BLOCKING_TOOLS: readonly ToolRequirement[] = [
   ...LOW_RISK_TOOLS
@@ -702,6 +717,13 @@ const DEFAULT_WORKFLOW_NON_BLOCKING_TOOLS: readonly ToolRequirement[] = [
     })),
   { tool: "CloseAgent", reason: "close an unneeded agent without advancing workflow" },
 ];
+
+const MCP_DISCOVERY_NON_BLOCKING_TOOLS: readonly ToolRequirement[] = [
+  ...MCP_DISCOVERY_TOOLS,
+].map((tool) => ({
+  tool,
+  reason: `${tool} may inspect the required MCP before it is called`,
+}));
 
 const EXACT_INPUT_KEYS = new Set([
   "auto_push",
@@ -741,7 +763,7 @@ function canonicalMcpToolFromToken(token: string): string | null {
   const wire = /^mcp__.*__([a-z0-9_]+)$/i.exec(token);
   const mcpName = direct?.[1] ?? wire?.[1] ?? (/^[A-Za-z0-9_]+$/.test(token) ? token : null);
   if (!mcpName) return null;
-  const canonical = CANONICAL_MCPS.find((mcp) => mcp === mcpName);
+  const canonical = canonicalMcpFromName(mcpName);
   return canonical ? `mcp-${canonical}` : null;
 }
 
@@ -819,13 +841,132 @@ function lineStartsWithCall(line: string): boolean {
 export function uniqueToolRequirements(requirements: readonly ToolRequirement[]): ToolRequirement[] {
   const seen = new Set<string>();
   const out: ToolRequirement[] = [];
-  for (const req of requirements) {
-    const key = JSON.stringify(req);
+  for (const rawRequirement of requirements) {
+    const req = canonicalizeToolRequirement(rawRequirement);
+    const key = toolRequirementIdentity(req);
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(req);
   }
   return out;
+}
+
+function sortedRecord<T>(record: Record<string, T> | undefined): Record<string, T> | undefined {
+  if (!record) return undefined;
+  return Object.fromEntries(
+    Object.entries(record).sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+function toolRequirementIdentity(requirement: ToolRequirement): string {
+  const canonical = canonicalizeToolRequirement(requirement);
+  return JSON.stringify({
+    tool: canonical.tool,
+    input: sortedRecord(canonical.input),
+    inputArrayLengths: sortedRecord(canonical.inputArrayLengths),
+    inputRequiredKeys: canonical.inputRequiredKeys
+      ? [...canonical.inputRequiredKeys].sort()
+      : undefined,
+    inputSubstrings: canonical.inputSubstrings
+      ? [...canonical.inputSubstrings].sort()
+      : undefined,
+  });
+}
+
+export function canonicalizeToolRequirement(
+  requirement: ToolRequirement,
+): ToolRequirement {
+  const tool = canonicalPredictionToolName(requirement.tool);
+  return tool === requirement.tool ? requirement : { ...requirement, tool };
+}
+
+export function toolContinuationRequirement(
+  continuation: AdapterToolContinuation | null,
+): ToolRequirement | null {
+  if (!continuation) return null;
+  return {
+    tool: continuation.toolName,
+    ...(continuation.toolInput ? { input: continuation.toolInput } : {}),
+    reason: `${continuation.toolName} must continue the preceding MCP call for this adapter`,
+  };
+}
+
+function nonBlockingRequirementsForNextTool(
+  prediction: ToolPrediction,
+  nextRequired: ToolRequirement | undefined,
+): ToolRequirement[] {
+  return uniqueToolRequirements([
+    ...(prediction.nonBlockingTools ?? []),
+    ...(nextRequired && canonicalPredictionToolName(nextRequired.tool).startsWith("mcp-")
+      ? MCP_DISCOVERY_NON_BLOCKING_TOOLS
+      : []),
+  ]);
+}
+
+export function requiredMcpToolSequence(
+  mcp: CanonicalMcp,
+  reason = `Run the agent-framework ${mcp} MCP`,
+): ToolRequirement[] {
+  return [{ tool: `mcp-${mcp}`, reason }];
+}
+
+function requirementsMatchIgnoringReason(
+  left: ToolRequirement,
+  right: ToolRequirement,
+): boolean {
+  return toolRequirementIdentity(left) === toolRequirementIdentity(right);
+}
+
+/**
+ * Make a concrete tool sequence the prediction's immediate next action. This
+ * is used when deterministic policy redirects an attempted tool call to the
+ * supported workflow, so subsequent detours are handled by prediction-block
+ * instead of a second session-wide lockout system.
+ */
+export function requireToolSequenceNext(
+  prediction: ToolPrediction | null,
+  required: readonly ToolRequirement[],
+  fallback: { intent: string; userMessage: string },
+): ToolPrediction {
+  const normalizedRequired = required.map(canonicalizeToolRequirement);
+  const existing = (prediction?.explicitlyRequiredTools ?? []).map(canonicalizeToolRequirement);
+  const alreadyPrefixed = normalizedRequired.every((requirement, index) =>
+    existing[index] !== undefined &&
+    requirementsMatchIgnoringReason(requirement, existing[index])
+  );
+  const explicitlyRequiredTools = alreadyPrefixed
+    ? [...existing]
+    : [...normalizedRequired, ...existing];
+  const nonBlockingTools = uniqueToolRequirements([
+    ...(prediction?.nonBlockingTools ?? []),
+    ...DEFAULT_WORKFLOW_NON_BLOCKING_TOOLS,
+  ]);
+
+  if (prediction) {
+    return {
+      ...prediction,
+      explicitlyRequiredTools,
+      nonBlockingTools,
+    };
+  }
+
+  return {
+    mood: "neutral",
+    trust: "normal",
+    intent: fallback.intent,
+    blockedIntent: "",
+    explicitlyAllowedTools: [],
+    explicitlyRequiredTools,
+    nonBlockingTools,
+    explicitlyBlockedSubstrings: [],
+    blockAllTools: false,
+    hasExplicitOverride: false,
+    contextSwitch: "no",
+    questionIsStalling: "n/a",
+    userMessageFull: fallback.userMessage,
+    userMessageSnippet: fallback.userMessage.slice(0, 200),
+    timestamp: Date.now(),
+  };
 }
 
 function waitTargetCount(line: string): number | undefined {
@@ -849,7 +990,9 @@ function waitTargetCount(line: string): number | undefined {
  * imperative structure (call MCP X, spawn N agents of type Y, call
  * ExitPlanMode) rather than any named scenario or skill.
  */
-export function deriveWorkflowToolRequirementsFromText(text: string): {
+export function deriveWorkflowToolRequirementsFromText(
+  text: string,
+): {
   explicitlyRequiredTools: ToolRequirement[];
   nonBlockingTools: ToolRequirement[];
 } {
@@ -945,25 +1088,26 @@ function toolRequirementMatchesIdentities(
   toolInput: unknown,
   toolIdentities: readonly string[],
 ): boolean {
-  const requiredIdentityMatches = predictionToolIdentityNames(requirement.tool)
+  const canonicalRequirement = canonicalizeToolRequirement(requirement);
+  const requiredIdentityMatches = predictionToolIdentityNames(canonicalRequirement.tool)
     .some((identity) => toolIdentities.includes(identity));
   if (!requiredIdentityMatches) return false;
 
   const input = toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)
     ? toolInput as Record<string, unknown>
     : {};
-  for (const [key, expected] of Object.entries(requirement.input ?? {})) {
+  for (const [key, expected] of Object.entries(canonicalRequirement.input ?? {})) {
     if (input[key] !== expected) return false;
   }
-  for (const [key, expectedLength] of Object.entries(requirement.inputArrayLengths ?? {})) {
+  for (const [key, expectedLength] of Object.entries(canonicalRequirement.inputArrayLengths ?? {})) {
     const actual = input[key];
     if (!Array.isArray(actual) || actual.length !== expectedLength) return false;
   }
-  for (const key of requirement.inputRequiredKeys ?? []) {
+  for (const key of canonicalRequirement.inputRequiredKeys ?? []) {
     if (!(key in input)) return false;
   }
   const inputStr = stringifyToolInput(toolInput);
-  for (const literal of requirement.inputSubstrings ?? []) {
+  for (const literal of canonicalRequirement.inputSubstrings ?? []) {
     if (!inputStr.includes(literal)) return false;
   }
   return true;
@@ -982,18 +1126,19 @@ export function toolRequirementMatches(
 }
 
 export function formatToolRequirement(requirement: ToolRequirement): string {
-  const scalarConstraints = Object.entries(requirement.input ?? {})
+  const canonical = canonicalizeToolRequirement(requirement);
+  const scalarConstraints = Object.entries(canonical.input ?? {})
     .map(([key, value]) => `${key}=${JSON.stringify(value)}`);
-  const arrayConstraints = Object.entries(requirement.inputArrayLengths ?? {})
+  const arrayConstraints = Object.entries(canonical.inputArrayLengths ?? {})
     .map(([key, value]) => `${key}.length=${value}`);
-  const requiredKeys = (requirement.inputRequiredKeys ?? [])
+  const requiredKeys = (canonical.inputRequiredKeys ?? [])
     .map((key) => `${key}=<required>`);
   const constraints = [...scalarConstraints, ...arrayConstraints, ...requiredKeys]
     .join(", ");
-  const substrings = requirement.inputSubstrings?.length
-    ? ` inputSubstrings=${JSON.stringify(requirement.inputSubstrings)}`
+  const substrings = canonical.inputSubstrings?.length
+    ? ` inputSubstrings=${JSON.stringify(canonical.inputSubstrings)}`
     : "";
-  return `${requirement.tool}${constraints ? `(${constraints})` : ""}${substrings}`;
+  return `${canonical.tool}${constraints ? `(${constraints})` : ""}${substrings}`;
 }
 
 export function advanceRequiredToolsAfterAllowedTool(
@@ -1021,9 +1166,8 @@ function consumeRequiredWorkflowTools(
 } {
   let remaining = [...(prediction.explicitlyRequiredTools ?? [])];
   if (remaining.length === 0) return { remaining };
-  const nonBlockingTools = prediction.nonBlockingTools ?? [];
 
-  for (const call of calls) {
+  for (const [callIndex, call] of calls.entries()) {
     const callIdentities = toolIdentitiesForCall(call.toolName, call.toolInput);
     const callInputStr = stringifyToolInput(call.toolInput);
     for (const blk of prediction.explicitlyBlockedSubstrings) {
@@ -1043,13 +1187,26 @@ function consumeRequiredWorkflowTools(
 
     const nextRequired = remaining[0];
     if (nextRequired && toolRequirementMatches(nextRequired, call.toolName, call.toolInput)) {
+      if (
+        SERIAL_WORKFLOW_BARRIER_TOOLS.has(canonicalPredictionToolName(nextRequired.tool)) &&
+        callIndex < calls.length - 1
+      ) {
+        return {
+          remaining,
+          violation: {
+            decision: "deny",
+            reason: `Workflow requires ${formatToolRequirement(nextRequired)} to complete before later parallel tools can run.`,
+          },
+        };
+      }
       remaining = remaining.slice(1);
       continue;
     }
 
-    const nonBlockingMatch = nonBlockingTools.find((requirement) =>
-      toolRequirementMatches(requirement, call.toolName, call.toolInput)
-    );
+    const nonBlockingMatch = nonBlockingRequirementsForNextTool(prediction, nextRequired)
+      .find((requirement) =>
+        toolRequirementMatches(requirement, call.toolName, call.toolInput)
+      );
     if (nonBlockingMatch) continue;
 
     if (!nextRequired) {
@@ -1242,10 +1399,10 @@ export function decidePrediction(
         reason: `Workflow requires ${formatToolRequirement(nextRequiredTool)} next; this tool call matches.`,
       };
     }
-    const nonBlockingTools = prediction.nonBlockingTools ?? [];
-    const nonBlockingMatch = nonBlockingTools.find((requirement) =>
-      toolRequirementMatchesIdentities(requirement, toolInput, toolIdentities)
-    );
+    const nonBlockingMatch = nonBlockingRequirementsForNextTool(prediction, nextRequiredTool)
+      .find((requirement) =>
+        toolRequirementMatchesIdentities(requirement, toolInput, toolIdentities)
+      );
     if (nonBlockingMatch) {
       return {
         decision: "allow",

@@ -4,8 +4,10 @@ import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
 import { mainPostToolUse } from "../../src/hooks/post-tool-use.js";
+import { mainPostToolUseFailure } from "../../src/hooks/post-tool-use-failure.js";
 import { getAgentFrameworkSessionDir, sessionCurrentPlanFile, sessionPlanFile } from "../../src/utils/paths.js";
-import { readToolLogEntries } from "../../src/utils/session-store.js";
+import { getSessionState, readToolLogEntries } from "../../src/utils/session-store.js";
+import { decidePrediction } from "../../src/utils/prediction-types.js";
 
 vi.mock("../../src/utils/hook-bootstrap.js", async () => {
   const actual = await vi.importActual<typeof import("../../src/utils/hook-bootstrap.js")>(
@@ -188,5 +190,132 @@ describe("mainPostToolUse planfile sidecar", () => {
     expect(entry.tool).toBe("Write");
     expect(entry.path).toBe(filePath);
     expect(entry.paths).toEqual([filePath]);
+  });
+
+  it("requires the exact Codex wait only after an MCP yields a cell", async () => {
+    await mainPostToolUse(
+      {
+        session_id: "session-post",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "mcp__agent_framework__check",
+        tool_input: { working_dir: tempDir },
+        tool_response: {
+          content: [{ type: "text", text: "Script running with cell ID cell-check" }],
+        },
+      },
+      codexEncoder,
+    );
+
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools).toEqual([
+      {
+        tool: "Wait",
+        input: { cell_id: "cell-check", yield_time_ms: 330000 },
+        reason: "Wait must continue the preceding MCP call for this adapter",
+      },
+    ]);
+    expect(decidePrediction(state.currentPrediction, "Wait", {
+      cell_id: "cell-check",
+      yield_time_ms: 1,
+    }, 0).decision).toBe("deny");
+    expect(decidePrediction(state.currentPrediction, "Wait", {
+      cell_id: "cell-check",
+      yield_time_ms: 330000,
+    }, 0).decision).toBe("allow");
+  });
+
+  it("does not require a wait after a synchronous MCP result", async () => {
+    await mainPostToolUse(
+      {
+        session_id: "session-post",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "mcp__agent_framework__check",
+        tool_input: { working_dir: tempDir },
+        tool_response: { content: [{ type: "text", text: "Status: PASS" }] },
+      },
+      codexEncoder,
+    );
+
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools ?? []).toEqual([]);
+  });
+
+  it("does not treat incidental cell-like MCP output as a yielded continuation", async () => {
+    await mainPostToolUse(
+      {
+        session_id: "session-post",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "mcp__agent_framework__check",
+        tool_input: { working_dir: tempDir },
+        tool_response: {
+          content: [{
+            type: "text",
+            text: "Checked fixture: {\"cell_id\":\"example\"}; phrase: cell ID example",
+          }],
+          metadata: { cellId: "example" },
+        },
+      },
+      codexEncoder,
+    );
+
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools ?? []).toEqual([]);
+  });
+
+  it("does not require a wait after an MCP failure without a cell", async () => {
+    await mainPostToolUseFailure(
+      {
+        session_id: "session-post",
+        tool_use_id: "tool-failed-check",
+        tool_name: "mcp__agent_framework__check",
+        error: "MCP failed before yielding",
+        is_interrupt: false,
+        transcript_path: transcriptPath,
+      },
+      codexEncoder,
+    );
+
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools ?? []).toEqual([]);
+    expect(readToolLogEntries(sessionDir, 1)[0]?.toolUseId).toBe("tool-failed-check");
+  });
+
+  it("does not orphan a wait for a synchronous parallel MCP sibling", async () => {
+    await mainPostToolUse(
+      {
+        session_id: "session-post",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_use_id: "call-check",
+        tool_name: "mcp__agent_framework__check",
+        tool_input: { working_dir: tempDir },
+        tool_response: "Status: PASS",
+      },
+      codexEncoder,
+    );
+    await mainPostToolUse(
+      {
+        session_id: "session-post",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_use_id: "call-confirm",
+        tool_name: "mcp__agent_framework__confirm",
+        tool_input: { working_dir: tempDir },
+        tool_response: "Script running with cell ID cell-confirm",
+      },
+      codexEncoder,
+    );
+
+    const state = await getSessionState(sessionDir).load();
+    expect(state.currentPrediction?.explicitlyRequiredTools).toEqual([
+      {
+        tool: "Wait",
+        input: { cell_id: "cell-confirm", yield_time_ms: 1500000 },
+        reason: "Wait must continue the preceding MCP call for this adapter",
+      },
+    ]);
   });
 });

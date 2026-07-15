@@ -46,7 +46,6 @@
       "userMessageSnippet": "please print the captured tail in the enriched sentinel for verification",
       "blockAllTools": false
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 4
   },

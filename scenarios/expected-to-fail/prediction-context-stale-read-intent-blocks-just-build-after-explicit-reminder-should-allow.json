@@ -60,7 +60,6 @@
       "blockAllTools": false,
       "userMessageSnippet": "i need you to find a scenario that i want fixed @scenarios/LOCATE-SCENARIO.md"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 4
   },

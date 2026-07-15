@@ -697,49 +697,6 @@ export async function currentTurnAssistantState(
 }
 
 /**
- * Returns true iff the most recent non-meta user-text entry in the transcript
- * has no `tool_result` block following it.
- */
-export async function userTurnIsFreshSinceLockout(
-  transcriptPath: string,
-): Promise<boolean> {
-  const content = await fs.promises.readFile(transcriptPath, "utf-8");
-  const allLines = content.trim().split("\n");
-  const parsedEntries = parseActiveTranscriptLines(allLines, transcriptPath);
-
-  let userIdx = -1;
-  for (let i = parsedEntries.length - 1; i >= 0; i--) {
-    const entry = parsedEntries[i];
-    if (!entry || !entry.message) continue;
-    if (entry.message.role !== "user" || entry.isMeta === true) continue;
-    const blocks = entry.message.content;
-    const hasText =
-      typeof blocks === "string"
-        ? blocks.length > 0
-        : Array.isArray(blocks) &&
-          blocks.some((b) => b && b.type === "text" && (b.text ?? "").length > 0);
-    if (hasText) {
-      userIdx = i;
-      break;
-    }
-  }
-
-  if (userIdx < 0) return false;
-
-  for (let i = userIdx + 1; i < parsedEntries.length; i++) {
-    const entry = parsedEntries[i];
-    if (!entry || !entry.message) continue;
-    const blocks = entry.message.content;
-    if (!Array.isArray(blocks)) continue;
-    if (blocks.some((b) => b && b.type === "tool_result")) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/**
  * Process a user entry (may contain text blocks and/or tool_result blocks)
  */
 function processUserEntry(

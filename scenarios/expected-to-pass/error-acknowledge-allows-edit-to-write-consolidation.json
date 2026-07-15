@@ -45,7 +45,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "yes user override please write it in one go. permission for all write tools granted unless stated otherwise"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2,
     "driftState": {

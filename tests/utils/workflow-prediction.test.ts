@@ -7,10 +7,12 @@ import {
   decideRequiredWorkflowToolSequence,
   deriveWorkflowToolRequirementsFromText,
   toolRequirementMatches,
+  uniqueToolRequirements,
   type ToolPrediction,
   type ToolRequirement,
 } from "../../src/utils/prediction-types.js";
 import type { CanonicalWorkflow, HostContext } from "../../src/adapter/types.js";
+import { activeSpec } from "../../src/adapter/spec.js";
 import { claudeSpec } from "../../adapters/claude/index.js";
 import { codexSpec } from "../../adapters/codex/index.js";
 import {
@@ -233,11 +235,15 @@ Spawn exactly one \`default\` agent.
     const prediction = makePrediction(explicitlyRequiredTools);
 
     expect(explicitlyRequiredTools.map(requirementSignature)).toEqual([
-      req("mcp-implement", undefined, undefined, ["working_dir"]),
+      ...implementWorkflowRequirementSignatures(),
     ]);
     expect(decidePrediction(prediction, "Agent", { subagent_type: "implementer" }, 5).decision).toBe("deny");
     expect(decidePrediction(prediction, "mcp-implement", { planfile: "/repo/plan.md" }, 5).decision).toBe("deny");
     expect(decidePrediction(prediction, "mcp-implement", { working_dir: "/repo", planfile: "/repo/plan.md" }, 5).decision).toBe("allow");
+    expect(advanceRequiredToolsAfterAllowedToolSequence(
+      prediction,
+      [{ toolName: "mcp-implement", toolInput: { working_dir: "/repo", planfile: "/repo/plan.md" } }],
+    ).explicitlyRequiredTools?.map(requirementSignature)).toEqual([]);
   });
 
   it("validates all members of a strict parallel Agent batch before advancing", () => {
@@ -283,6 +289,7 @@ Spawn exactly one \`default\` agent.
 
     expect(prediction.nonBlockingTools?.map(requirementSignature)).toContainEqual(req("TodoWrite"));
     expect(prediction.nonBlockingTools?.map(requirementSignature)).not.toContainEqual(req("TaskOutput"));
+    expect(prediction.nonBlockingTools?.map(requirementSignature)).not.toContainEqual(req("Wait"));
     expect(decidePrediction(
       prediction,
       "TodoWrite",
@@ -295,6 +302,60 @@ Spawn exactly one \`default\` agent.
       { targets: ["agent-1"] },
       0,
     ).decision).toBe("deny");
+  });
+
+  it("allows MCP description discovery even when the prediction omitted non-blocking tools", () => {
+    const prediction = {
+      ...makePrediction([{ tool: "mcp-check" }]),
+      nonBlockingTools: [],
+    };
+
+    for (const tool of ["ToolSearch", "ListMcpResources", "ReadMcpResource"]) {
+      expect(decidePrediction(prediction, tool, {}, 0).decision).toBe("allow");
+    }
+    expect(decidePrediction(prediction, "Read", { file_path: "README.md" }, 0).decision)
+      .toBe("deny");
+  });
+
+  it("strictly recognizes full MCP names without suffix collisions", () => {
+    const fullconfirmWire = activeSpec().mcpWireName("fullconfirm");
+    const prediction = makePrediction([{ tool: "mcp-fullconfirm" }]);
+
+    expect(decidePrediction(prediction, fullconfirmWire, {}, 0).decision).toBe("allow");
+    expect(decidePrediction(
+      prediction,
+      fullconfirmWire.replace(/fullconfirm$/, "notcheck"),
+      {},
+      0,
+    ).decision).toBe("deny");
+    expect(deriveWorkflowToolRequirementsFromText("Call `mcp-notcheck`.")
+      .explicitlyRequiredTools).toEqual([]);
+  });
+
+  it("deduplicates MCP discovery support by requirement identity", () => {
+    const prediction = makePrediction([{ tool: "mcp-check" }]);
+    for (const tool of ["ToolSearch", "ListMcpResources", "ReadMcpResource"]) {
+      const matches = uniqueToolRequirements([
+        ...(prediction.nonBlockingTools ?? []),
+        { tool, reason: "duplicate discovery reason" },
+      ]).filter((requirement) => requirement.tool === tool);
+      expect(matches).toHaveLength(1);
+    }
+  });
+
+  it("deduplicates equivalent inputs independent of key insertion order", () => {
+    const first: ToolRequirement = {
+      tool: "mcp-commit",
+      input: { auto_push: true, skip_elicitation: true },
+      reason: "first",
+    };
+    const second: ToolRequirement = {
+      tool: "mcp-commit",
+      input: { skip_elicitation: true, auto_push: true },
+      reason: "second",
+    };
+
+    expect(uniqueToolRequirements([first, second])).toEqual([first]);
   });
 
   it("matches Codex raw spawn_agent input only after adapter canonicalization normalizes agent_type", () => {
@@ -326,7 +387,45 @@ Spawn exactly one \`default\` agent.
       .toBe(true);
   });
 
+  it("normalizes raw Codex requirement names through adapter canonicalization", () => {
+    const rawRequirement: ToolRequirement = { tool: "exec_command" };
+    const prediction = makePrediction([rawRequirement]);
+    const observed = codexSpec.canonicalizeToolCall("exec_command", {
+      command: "pwd",
+    });
+
+    expect(observed.toolName).toBe("Bash");
+    expect(decidePrediction(
+      prediction,
+      observed.toolName,
+      observed.toolInput,
+      0,
+    ).decision).toBe("allow");
+    expect(advanceRequiredToolsAfterAllowedToolSequence(
+      prediction,
+      [observed],
+    ).explicitlyRequiredTools).toEqual([]);
+    expect(uniqueToolRequirements([rawRequirement])).toEqual([{ tool: "Bash" }]);
+
+    for (const { raw, canonical } of [
+      { raw: "apply_patch", canonical: "Edit" },
+      { raw: "spawn_agent", canonical: "Agent" },
+      { raw: "wait_agent", canonical: "TaskOutput" },
+      { raw: "tool_search", canonical: "ToolSearch" },
+      { raw: "list_mcp_resources", canonical: "ListMcpResources" },
+      { raw: "read_mcp_resource", canonical: "ReadMcpResource" },
+      { raw: "wait", canonical: "Wait" },
+    ]) {
+      expect(uniqueToolRequirements([{ tool: raw }])).toEqual([{ tool: canonical }]);
+    }
+  });
+
   it("canonicalizes Codex wait and close lifecycle tools for workflow matching", () => {
+    expect(codexSpec.canonicalizeToolCall("wait", { cell_id: "cell-1" })).toEqual({
+      toolName: "Wait",
+      toolInput: { cell_id: "cell-1" },
+    });
+
     const waitMany = codexSpec.canonicalizeToolCall("wait_agent", { targets: ["agent-1"] });
     expect(waitMany.toolName).toBe("TaskOutput");
     expect(waitMany.toolInput).toMatchObject({ targets: ["agent-1"] });

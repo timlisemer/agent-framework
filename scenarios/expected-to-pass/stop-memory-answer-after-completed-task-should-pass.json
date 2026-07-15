@@ -38,7 +38,6 @@
       "questionIsStalling": "n/a",
       "userMessageSnippet": "Can you remember the first message of this session?"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 6
   },

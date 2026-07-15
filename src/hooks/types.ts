@@ -19,6 +19,14 @@ export interface FrameworkPostToolUseHookInput extends BaseHookInput {
   tool_use_id?: string;
 }
 
+export interface FrameworkPostToolUseFailureHookInput extends BaseHookInput {
+  tool_name: string;
+  tool_input?: unknown;
+  tool_use_id?: string;
+  error: string;
+  is_interrupt: boolean;
+}
+
 export interface FrameworkStopHookInput extends BaseHookInput {
   stop_hook_active?: boolean;
   last_assistant_message?: string | null;

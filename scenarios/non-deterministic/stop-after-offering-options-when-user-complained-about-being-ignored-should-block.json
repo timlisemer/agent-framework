@@ -80,7 +80,6 @@
       "blockAllTools": false,
       "userMessageSnippet": "i blocked you since you ignored me"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 3,
     "currentWindowSize": 6
   },

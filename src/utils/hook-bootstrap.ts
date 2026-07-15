@@ -13,7 +13,6 @@ import { flushTelemetry } from "../telemetry/index.js";
 import { flushStatuslineUpdates } from "./logger.js";
 import { setTranscriptPath } from "./execution-context.js";
 import { getAgentFrameworkSessionDir } from "./paths.js";
-import { initDenialSession } from "./denial-cache.js";
 import { initStatuslineSession } from "./statusline-state.js";
 import { initEpochSession } from "../scenario/epoch.js";
 
@@ -78,7 +77,6 @@ export async function exitAfterFlush(code = 0, output?: string): Promise<never> 
 export function initHookProcess(transcriptPath: string): void {
   setTranscriptPath(transcriptPath);
   const sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
-  initDenialSession(sessionDir);
   initStatuslineSession(sessionDir);
   initEpochSession(sessionDir);
 }

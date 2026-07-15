@@ -46,7 +46,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "search the agent-framework session captures for the recent denial text"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2,
     "toolLog": [

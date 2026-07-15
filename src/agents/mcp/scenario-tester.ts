@@ -716,7 +716,7 @@ Key source files:
 - src/rules/evaluator.ts -- rule-gate LLM aggregator
 - src/utils/agent-configs.ts -- agent system prompts (includes SENTIMENT_AGENT)
 - src/utils/prediction-types.ts -- sentiment-prediction shape + decidePrediction
-- src/rules/force-check-required.ts -- workaround-denial lockout
+- src/rules/blacklist.ts -- deterministic Bash policy and check-redirect prediction seeding
 - src/utils/drift-detector.ts -- drift/anomaly detection heuristics
 
 ### A.7 Fix hook code
@@ -1321,8 +1321,8 @@ Primitives:
 The predictions block is evaluated AFTER the target hook fires.
 Run \`pass\` is \`expect-pass AND every prediction assertion passes\`.
 
-Scenarios may also pre-seed \`state.json\` via the optional
-\`seed_state.currentPrediction\` / \`seed_state.forceCheckPending\` fields.
+Scenarios may also pre-seed \`state.json\` via
+\`seed_state.currentPrediction\`.
 The seed is materialized BEFORE session-start fires so the hook pipeline
 observes it.
 

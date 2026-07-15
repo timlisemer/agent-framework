@@ -48,7 +48,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "apply the next change"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2,
     "driftState": {

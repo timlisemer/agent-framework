@@ -46,7 +46,6 @@
       "userMessageSnippet": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
       "timestamp": 1
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   },

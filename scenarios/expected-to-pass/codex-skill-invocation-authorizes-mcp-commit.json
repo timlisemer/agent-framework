@@ -49,7 +49,6 @@
       "questionIsStalling": "n/a",
       "userMessageSnippet": "$agent-framework-commit"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   },

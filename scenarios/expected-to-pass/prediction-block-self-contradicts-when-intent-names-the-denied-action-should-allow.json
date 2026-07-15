@@ -167,7 +167,6 @@
       "userMessageSnippet": "\"which doesn't map slash-command target plan3 → canonical Skill\" why is that relevant? Isnt the only thing that is relevant the fact that it correctly repeated the user intent, but then blocked the ai",
       "blockAllTools": false
     },
-    "forceCheckPending": false,
     "frustrationStreak": 2,
     "currentWindowSize": 4
   },

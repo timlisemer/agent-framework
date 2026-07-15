@@ -13,7 +13,6 @@
 import * as fs from "fs";
 import {
   sessionGateReasoningFile,
-  sessionDenialCacheFile,
   sessionPlanModeStateFile,
   sessionStatuslineFile,
 } from "../utils/paths.js";
@@ -27,7 +26,6 @@ import { detectEpochChange, rotateEpoch, type Epoch } from "./epoch.js";
  * Resets:
  *   - state.json  → sessionStateDefaults()
  *   - gate-reasoning.json → unlinked
- *   - hook-denials.json   → unlinked
  *   - statusline.json     → unlinked
  *
  * Does NOT touch: captures.jsonl, state-snapshots.jsonl, epochs.jsonl,
@@ -45,7 +43,6 @@ export async function onEpochRotation(sessionDir: string, _epoch: Epoch): Promis
   // Unlink derived caches.
   const toUnlink = [
     sessionGateReasoningFile(sessionDir),
-    sessionDenialCacheFile(sessionDir),
     sessionPlanModeStateFile(sessionDir),
     sessionStatuslineFile(sessionDir),
   ];
@@ -81,7 +78,6 @@ export async function rotateEpochIfNeeded(
 export async function onUserPromptTurn(sessionDir: string): Promise<void> {
   const toUnlink = [
     sessionGateReasoningFile(sessionDir),
-    sessionDenialCacheFile(sessionDir),
   ];
   for (const filePath of toUnlink) {
     try {
@@ -95,7 +91,6 @@ export async function onUserPromptTurn(sessionDir: string): Promise<void> {
     const stateManager = getSessionState(sessionDir);
     await stateManager.update((s) => ({
       ...s,
-      forceCheckPending: false,
       previousEditIntent: s.currentEditIntent ?? null,
       currentEditIntent: null,
       editIntentTimestamp: Date.now(),

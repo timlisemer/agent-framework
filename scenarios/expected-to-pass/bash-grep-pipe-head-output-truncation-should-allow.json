@@ -48,7 +48,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "find references to respondFirst, just first 20 lines"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   }

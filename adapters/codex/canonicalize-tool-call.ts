@@ -13,6 +13,7 @@ const ALIAS: Readonly<Record<string, string>> = {
   send_input: "SendInput",
   spawn_agent: "Agent",
   tool_search: "ToolSearch",
+  wait: "Wait",
   wait_agent: "TaskOutput",
   write_file: "Write",
 };

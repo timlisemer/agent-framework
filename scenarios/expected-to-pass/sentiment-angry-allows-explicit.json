@@ -45,7 +45,6 @@
       "userMessageSnippet": "stop everything except just READ src/foo.ts please.",
       "blockAllTools": true
     },
-    "forceCheckPending": false,
     "frustrationStreak": 1,
     "currentWindowSize": 4
   }

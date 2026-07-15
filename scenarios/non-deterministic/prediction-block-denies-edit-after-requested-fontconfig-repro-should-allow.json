@@ -83,7 +83,6 @@
       "questionIsStalling": "n/a",
       "userMessageSnippet": "please first try to reproduce the fontconfig error, and then edit"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 4
   },

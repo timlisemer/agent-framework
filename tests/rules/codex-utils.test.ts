@@ -44,4 +44,8 @@ describe("Codex apply_patch tool normalization", () => {
   it("does not classify apply_patch as low-risk", () => {
     expect(isLowRiskTool("apply_patch")).toBe(false);
   });
+
+  it("does not classify unknown canonical-looking MCP names as low-risk", () => {
+    expect(isLowRiskTool("mcp-not_real")).toBe(false);
+  });
 });

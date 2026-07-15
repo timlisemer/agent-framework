@@ -76,7 +76,6 @@
       "explicitlyBlockedSubstrings": [],
       "userMessageSnippet": "please run \"just build\" then run all scenarios"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   }

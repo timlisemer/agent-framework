@@ -21,6 +21,11 @@ import { extractJsonContextMessage } from "../../src/adapter/context-message.js"
 import { summarizeToolInputForLlm } from "../../src/utils/tool-input-summary.js";
 import { extractApplyPatchPaths } from "./apply-patch-parser.js";
 import {
+  continuationAfterToolFailure,
+  continuationAfterToolResult,
+  toolResultMayRequireContinuation,
+} from "./tool-continuation.js";
+import {
   codexToolLogEntryMatchesToolCall,
   codexTranscriptToolLogIdentityKey,
   codexTranscriptToolLogMatchIsStable,
@@ -96,7 +101,10 @@ export const codexSpec: AdapterSpec = {
   extractStopProposedPlan: PLS.extractStopProposedPlan,
   detectPlanMode:         PM.detectPlanMode,
   materializeScenarioEntry: SM.materializeScenarioEntry,
-  renderMcpWaitRecommendation:       PS.renderMcpWaitRecommendation,
+  toolResultMayRequireContinuation,
+  continuationAfterToolResult,
+  continuationAfterToolFailure,
+  renderMcpContinuationRecommendation: PS.renderMcpContinuationRecommendation,
   renderCheckMcpHint:               PS.renderCheckMcpHint,
   renderWorkflowAuthorizationHint:  PS.renderWorkflowAuthorizationHint,
   instructionLabel: PS.instructionLabel,

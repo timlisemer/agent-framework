@@ -47,7 +47,6 @@
       "userMessageSnippet": "I need to lay out context before the actual instruction. context context context context context context context context context context context context context context context context context context context",
       "blockAllTools": false
     },
-    "forceCheckPending": false,
     "frustrationStreak": 4,
     "currentWindowSize": 4
   },

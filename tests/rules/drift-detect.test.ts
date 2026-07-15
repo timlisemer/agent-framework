@@ -284,13 +284,13 @@ describe("driftDetectRule.onDenialConfirmed - level transitions", () => {
     expect(after[TARGET]).toEqual({ level: 2 });
   });
 
-  it("ignores non-drift denial reasons (e.g. workaround escalation)", async () => {
+  it("ignores non-drift denial reasons", async () => {
     const ctx = await buildCtx(sessionDir, {
       driftState: { [TARGET]: { level: 1 } },
     });
     await driftDetectRule.onDenialConfirmed!(
       ctx,
-      "2 recent denials targeting \"foo\" - possible workaround escalation",
+      "A different rule denied this tool call.",
     );
     const after = await loadDriftState(sessionDir);
     expect(after[TARGET]).toEqual({ level: 1 });

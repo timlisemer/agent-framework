@@ -45,7 +45,6 @@
       "blockAllTools": false,
       "userMessageSnippet": "run npx tsc --noEmit to check the diagnostics directly"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   },

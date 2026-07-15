@@ -11,7 +11,6 @@ import {
   readTranscriptExact,
   formatTranscriptResult,
   detectParallelBatch,
-  userTurnIsFreshSinceLockout,
   readRecentUserMessagesArray,
   userTurnFollowedByCompletedToolRoundtrip,
   resolveActiveSlashCommandAllowedTools,
@@ -63,7 +62,6 @@ import {
   decideRequiredWorkflowToolSequence,
   type PredictionToolCall,
 } from "../utils/prediction-types.js";
-import { isForceCheckSatisfyingCanonicalMcp } from "../utils/force-check-tools.js";
 
 interface PipelineExit {
   decision: "allow" | "deny";
@@ -110,21 +108,6 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
   });
   const planMode = planModeDetection.active;
   const planModeCtx = getPlanModeContext(planMode);
-
-  // Clear stale forceCheckPending when a fresh user turn has begun: the most
-  // recent non-meta user-text message has no completed tool roundtrip after
-  // it. Mirrors the user-prompt-submit clear semantic (UserPromptSubmit
-  // clears unconditionally on every fresh prompt). The PreToolUse-side
-  // fallback is necessary because the test harness fires only SessionStart +
-  // the target hook for a PreToolUse target, and live sessions can compact
-  // the originating errored tool_result out of the visible window.
-  if (state.forceCheckPending) {
-    const freshTurn = await userTurnIsFreshSinceLockout(input.transcript_path);
-    if (freshTurn) {
-      await stateManager.update((s) => ({ ...s, forceCheckPending: false }));
-      state = { ...state, forceCheckPending: false };
-    }
-  }
 
   // Plan-approval intent supersession. The synthetic "User has approved your
   // plan." tool_result is wrapped in a user-role entry but is NOT a
@@ -187,25 +170,28 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
 
   /**
    * Sole exit function - replaces all direct outputAllow()/outputDeny() calls.
-   * Handles telemetry, tool log, gate reasoning, and output.
-   */
+  * Handles telemetry, tool log, gate reasoning, and output.
+  */
   async function exitPipeline(exit: PipelineExit): Promise<never> {
     let assignedToolCallIndex = -1;
     if (!exit.mirroredFromLeader) {
       await stateManager.update((s) => {
         const next = { ...s, toolCallCount: s.toolCallCount + 1 };
         assignedToolCallIndex = s.toolCallCount;
-        if (exit.decision === "allow" && next.currentPrediction) {
-          next.currentPrediction = workflowBatchAdvanceCalls
-            ? advanceRequiredToolsAfterAllowedToolSequence(
-                next.currentPrediction,
-                workflowBatchAdvanceCalls,
-              )
-            : advanceRequiredToolsAfterAllowedTool(
-                next.currentPrediction,
-                toolName,
-                toolInput,
-              );
+        if (exit.decision === "allow") {
+          const advancedPrediction = next.currentPrediction
+            ? workflowBatchAdvanceCalls
+              ? advanceRequiredToolsAfterAllowedToolSequence(
+                  next.currentPrediction,
+                  workflowBatchAdvanceCalls,
+                )
+              : advanceRequiredToolsAfterAllowedTool(
+                  next.currentPrediction,
+                  toolName,
+                  toolInput,
+                )
+            : null;
+          next.currentPrediction = advancedPrediction;
         }
         if (exit.decision === "allow" && planExit) {
           next.currentEditIntent = true as const;
@@ -253,21 +239,8 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
         ...s,
         currentPrediction: s.currentPrediction
           ? advanceRequiredToolsAfterAllowedTool(s.currentPrediction, toolName, toolInput)
-          : s.currentPrediction,
+          : null,
       }));
-    }
-
-    // forceCheckPending clear: keyed on THIS hook's toolName, not the leader's.
-    // Applies to both leader and mirrored siblings - if THIS hook is an MCP
-    // commit/confirm/check/validate_implementation that was allowed (directly or mirrored), it
-    // satisfies the force-check lockout. Keeping this outside the
-    // `!mirroredFromLeader` guard preserves today's semantics where every
-    // allowed MCP-matching tool clears the flag.
-    {
-      const mcp = spec.recognizeMcp(rawToolName);
-      if (exit.decision === "allow" && isForceCheckSatisfyingCanonicalMcp(mcp)) {
-        await stateManager.update((s) => ({ ...s, forceCheckPending: false }));
-      }
     }
 
     await appendToolLog(sessionDir, {
@@ -314,21 +287,34 @@ export async function mainPreToolUse(input: FrameworkPreToolUseHookInput, encode
 
   if (batchInfo) {
     const strictWorkflowBatch = (state.currentPrediction?.explicitlyRequiredTools?.length ?? 0) > 0;
-    if (strictWorkflowBatch && batchInfo.position === 0 && state.currentPrediction) {
+    if (batchInfo.position === 0) {
       const calls = canonicalBatchCalls(batchInfo);
-      const sequenceDecision = decideRequiredWorkflowToolSequence(
-        state.currentPrediction,
-        calls,
+      const continuationBoundary = calls.findIndex((call) =>
+        spec.toolResultMayRequireContinuation(call)
       );
-      if (sequenceDecision.decision === "deny") {
+      if (continuationBoundary >= 0 && continuationBoundary < calls.length - 1) {
         await exitPipeline({
           decision: "deny",
           agent: "prediction-block",
-          reason: sequenceDecision.reason ?? "Workflow batch violates required tool order.",
+          reason: `${calls[continuationBoundary].toolName} may require an adapter continuation and must complete before later parallel tools run.`,
         });
         return;
       }
-      workflowBatchAdvanceCalls = calls;
+      if (strictWorkflowBatch && state.currentPrediction) {
+        const sequenceDecision = decideRequiredWorkflowToolSequence(
+          state.currentPrediction,
+          calls,
+        );
+        if (sequenceDecision.decision === "deny") {
+          await exitPipeline({
+            decision: "deny",
+            agent: "prediction-block",
+            reason: sequenceDecision.reason ?? "Workflow batch violates required tool order.",
+          });
+          return;
+        }
+        workflowBatchAdvanceCalls = calls;
+      }
     }
 
     // Leader (position 0) always runs the full pipeline.

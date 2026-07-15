@@ -20,7 +20,6 @@ export const planModeBlockRule: PreToolRule = {
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     if (isCreatePlanfileTool(ctx.toolName, ctx.rawToolName)) {
-      if (ctx.state.forceCheckPending) return null;
       if (!createPlanfileAuthorization({
         toolName: ctx.toolName,
         rawToolName: ctx.rawToolName,

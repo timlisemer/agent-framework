@@ -40,13 +40,6 @@ export interface SessionState {
    */
   currentPrediction: ToolPrediction | null;
   /**
-   * Set true by tool-approve.onDenialConfirmed when a workaround Bash command is
-   * denied. Cleared when a check-satisfying agent-framework MCP is allowed.
-   * While true, the force-check-required rule denies all tools
-   * except check / ToolSearch.
-   */
-  forceCheckPending: boolean;
-  /**
    * Consecutive UserPromptSubmit turns where prediction.mood was angry/frustrated.
    * Reset to 0 on neutral/satisfied/happy. Capped at 5. Used by decidePrediction
    * to harden policy and surfaced to SENTIMENT_AGENT prompt.
@@ -98,7 +91,6 @@ export function sessionStateDefaults(): SessionState {
     editIntentOverturnCount: 0,
     respondFirstChecked: false,
     currentPrediction: null,
-    forceCheckPending: false,
     frustrationStreak: 0,
     currentWindowSize: 2,
     driftState: {},

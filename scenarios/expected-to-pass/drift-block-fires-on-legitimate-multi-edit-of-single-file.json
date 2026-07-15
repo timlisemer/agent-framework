@@ -47,7 +47,6 @@
       "blockAllTools": false,
       "userMessageSnippet": "The lockscreen crashed. Fix it with a retry-with-backoff machine in session-lock.ts."
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2,
     "toolLog": [

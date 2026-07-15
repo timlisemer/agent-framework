@@ -75,7 +75,6 @@
       "questionIsStalling": "n/a",
       "userMessageSnippet": "error:\n       ... while calling the 'head' builtin\n         at /nix/store/85f9midijl8vwcf3qs9pmf3s5n13s5nc-source/lib/attrsets.nix:1696:13:"
     },
-    "forceCheckPending": false,
     "frustrationStreak": 0,
     "currentWindowSize": 2
   },

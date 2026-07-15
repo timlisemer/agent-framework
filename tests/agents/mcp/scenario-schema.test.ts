@@ -32,7 +32,6 @@ function minimalInlineScenario(): Record<string, unknown> {
         explicitlyBlockedSubstrings: [],
         userMessageSnippet: "read src/foo.ts",
       },
-      forceCheckPending: false,
       frustrationStreak: 0,
       currentWindowSize: 4,
     },

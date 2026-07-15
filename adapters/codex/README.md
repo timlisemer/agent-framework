@@ -41,10 +41,11 @@ is stored in `dotcodex/config.toml` as generated `[hooks.state]` entries with a
 they fingerprint the event, matcher, command, timeout, async flag, and status
 message from `dotcodex/hooks.json`.
 
-Run `just build` from the repo root after changing Codex hook commands. The
-build runs `scripts/update-codex-hook-state.mjs`, regenerates the trust hashes,
-and keeps the generated block in `dotcodex/config.toml` in sync with
-`dotcodex/hooks.json`.
+Define Codex hooks and the shared tool-lifecycle matcher in `hook-config.ts`.
+Run `just build` from the repo root after changing that typed configuration.
+The build runs `scripts/update-codex-hook-state.mjs`, regenerates
+`dotcodex/hooks.json` and its trust hashes, and keeps the generated block in
+`dotcodex/config.toml` in sync.
 
 Codex planning currently receives the planning contract from `~/.codex/AGENTS.md`
 as a temporary global workaround. The hook-based hidden context injection code is
@@ -92,9 +93,11 @@ under `~/.codex/agents/`.
 
 Codex `PreToolUse` can intercept `Read`, Bash, `apply_patch`, canonical edit
 tools, and MCP tool calls, but it is not a complete enforcement boundary. The
-adapter also registers `PermissionRequest`, `PostToolUse`, and `Stop` hooks so
-approval prompts and post-tool feedback still pass through the framework where
-Codex exposes them.
+adapter also registers `PermissionRequest`, `PostToolUse`,
+`PostToolUseFailure`, and `Stop` hooks so approval prompts and post-tool
+feedback still pass through the framework where Codex exposes them. A
+non-interrupted failed `wait` is re-queued with its exact cell ID and wait
+interval; an interrupted `wait` is cancelled.
 
 For Bash, the shared policy keeps authorization and safety separate. If the
 latest user message already implies Bash, the Codex hook should not require a

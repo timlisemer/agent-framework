@@ -24,4 +24,15 @@ describe("Codex canonicalizeToolCall", () => {
       toolInput: { file_path: "/repo/src/b.ts" },
     });
   });
+
+  it("distinguishes MCP continuation waits from agent waits", () => {
+    expect(canonicalizeToolCall("wait", { cell_id: "cell-1" })).toEqual({
+      toolName: "Wait",
+      toolInput: { cell_id: "cell-1" },
+    });
+    expect(canonicalizeToolCall("wait_agent", { target: "agent-1" })).toEqual({
+      toolName: "TaskOutput",
+      toolInput: { target: "agent-1", targets: ["agent-1"] },
+    });
+  });
 });

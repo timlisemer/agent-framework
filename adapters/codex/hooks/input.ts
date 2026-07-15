@@ -3,6 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import type {
   FrameworkPermissionRequestHookInput,
+  FrameworkPostToolUseFailureHookInput,
   FrameworkPostToolUseHookInput,
   FrameworkPreToolUseHookInput,
   FrameworkStopHookInput,
@@ -33,13 +34,19 @@ type CodexCollaborationModeValue =
 export interface CodexToolInput extends CodexBaseInput {
   tool_name?: string;
   toolName?: string;
-  tool_input: unknown;
+  tool_input?: unknown;
   toolInput?: unknown;
   input?: unknown;
   tool_use_id?: string;
   toolUseId?: string;
   tool_response?: unknown;
   toolResponse?: unknown;
+}
+
+export interface CodexFailureInput extends CodexToolInput {
+  error?: string;
+  is_interrupt?: boolean;
+  isInterrupt?: boolean;
 }
 
 export interface CodexSessionStartInput extends CodexBaseInput {
@@ -88,6 +95,16 @@ export function toPostToolUse(input: CodexToolInput): FrameworkPostToolUseHookIn
   return {
     ...toPreToolUse(input),
     tool_response: input.tool_response ?? input.toolResponse,
+  };
+}
+
+export function toPostToolUseFailure(
+  input: CodexFailureInput,
+): FrameworkPostToolUseFailureHookInput {
+  return {
+    ...toPreToolUse(input),
+    error: input.error ?? "Tool failed.",
+    is_interrupt: input.is_interrupt ?? input.isInterrupt ?? false,
   };
 }
 

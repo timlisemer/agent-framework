@@ -376,7 +376,6 @@ export async function materializeScenario(
       : {}),
     seed_state: {
       currentPrediction: seedCurrentPrediction(state.currentPrediction),
-      forceCheckPending: state.forceCheckPending,
       frustrationStreak: state.frustrationStreak,
       currentWindowSize: state.currentWindowSize,
       ...(toolLog.length > 0 ? { toolLog } : {}),

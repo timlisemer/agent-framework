@@ -31,7 +31,6 @@ export function baseValidationScenario(options?: {
         explicitlyBlockedSubstrings: [],
         userMessageSnippet: "do something",
       },
-      forceCheckPending: false,
       frustrationStreak: 0,
       currentWindowSize: 4,
       ...options?.seedState,

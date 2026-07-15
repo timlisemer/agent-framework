@@ -3,7 +3,6 @@ import { respondFirstRule } from "./respond-first.js";
 import { planModeBlockRule } from "./plan-mode-block.js";
 import { backgroundAgentBlockRule } from "./background-agent-block.js";
 import { questionValidateRule } from "./question-validate.js";
-import { forceCheckRequiredRule } from "./force-check-required.js";
 import { blacklistRule } from "./blacklist.js";
 import { predictionQuestionJudgeRule } from "./prediction-question-judge.js";
 import { predictionBlockRule } from "./prediction-block.js";
@@ -32,7 +31,6 @@ export const ALL_RULES: PreToolRule[] = [
   planModeBlockRule,
   backgroundAgentBlockRule,
   questionValidateRule,
-  forceCheckRequiredRule,
   blacklistRule,
   predictionQuestionJudgeRule,
   predictionBlockRule,

@@ -13,7 +13,7 @@
 
 import * as fs from "fs";
 import { appendJsonlEntrySync, fileSizeOrZero, findJsonlEntry, readLastJsonlEntryFromTail } from "../utils/file-io.js";
-import { sessionStateSnapshotsFile, sessionToolLogFile, sessionGateReasoningFile, sessionDenialCacheFile, sessionPlanModeStateFile, sessionInjectionsFile } from "../utils/paths.js";
+import { sessionStateSnapshotsFile, sessionToolLogFile, sessionGateReasoningFile, sessionPlanModeStateFile, sessionInjectionsFile } from "../utils/paths.js";
 import type { SessionState } from "../utils/session-store.js";
 import { parsePlanModeStoredState, type PlanModeStoredState } from "../utils/plan-mode-entry-state.js";
 import { readTranscriptUuidTail } from "./transcript-uuids.js";
@@ -36,8 +36,6 @@ export interface StateSnapshot {
   tool_log_offset: number;
   /** SHA-256 (first 16 hex chars) of gate-reasoning.json content, or null when absent. */
   gate_reasoning_hash: string | null;
-  /** SHA-256 (first 16 hex chars) of hook-denials.json content, or null when absent. */
-  denials_hash: string | null;
   /** Current persisted plan-mode sidecar state, or null when absent/corrupt. */
   plan_mode_state: PlanModeStoredState | null;
   /** Byte offset immediately after the most-recent session-injections entry. */
@@ -88,7 +86,6 @@ function loadLastSnapshot(filePath: string): StateSnapshot | null {
  * - SessionState (hashed as JSON)
  * - tool-log.jsonl size (byte offset)
  * - gate-reasoning.json hash
- * - hook-denials.json hash
  * - transcript_uuids_tail
  *
  * Returns the seq of the new snapshot (>=1), or the seq of the existing
@@ -103,14 +100,12 @@ export function appendStateSnapshot(
 
   const toolLogPath = sessionToolLogFile(sessionDir);
   const gateReasoningPath = sessionGateReasoningFile(sessionDir);
-  const denialsPath = sessionDenialCacheFile(sessionDir);
   const planModePath = sessionPlanModeStateFile(sessionDir);
   const injectionsPath = sessionInjectionsFile(sessionDir);
 
   const stateHash = shortHash(JSON.stringify(state));
   const toolLogOffset = fileSizeOrZero(toolLogPath);
   const gateReasoningHash = fileHash(gateReasoningPath);
-  const denialsHash = fileHash(denialsPath);
   const planModeState = readPlanModeState(planModePath);
   const planModeStateHash = shortHash(JSON.stringify(planModeState));
   const injectionLogOffset = fileSizeOrZero(injectionsPath);
@@ -127,7 +122,6 @@ export function appendStateSnapshot(
       lastStateHash === stateHash &&
       last.tool_log_offset === toolLogOffset &&
       last.gate_reasoning_hash === gateReasoningHash &&
-      last.denials_hash === denialsHash &&
       shortHash(JSON.stringify(last.plan_mode_state ?? null)) === planModeStateHash &&
       (last.injection_log_offset ?? 0) === injectionLogOffset &&
       (last.injection_log_hash ?? null) === injectionLogHash &&
@@ -144,7 +138,6 @@ export function appendStateSnapshot(
     state,
     tool_log_offset: toolLogOffset,
     gate_reasoning_hash: gateReasoningHash,
-    denials_hash: denialsHash,
     plan_mode_state: planModeState,
     injection_log_offset: injectionLogOffset,
     injection_log_hash: injectionLogHash,

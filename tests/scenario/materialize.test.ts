@@ -65,7 +65,6 @@ describe("materializeScenario", () => {
     expect(scenario.transcript.length).toBeGreaterThan(0);
     expect(scenario.target.hook).toBe("Stop");
     expect(scenario.seed_state).toBeDefined();
-    expect(scenario.seed_state.forceCheckPending).toBe(false);
     expect(scenario.seed_state.frustrationStreak).toBe(0);
   });
 
