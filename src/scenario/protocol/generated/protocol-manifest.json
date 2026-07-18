@@ -1,5 +1,9 @@
 {
   "schemaId": "agent-framework://scenario",
+  "limits": {
+    "maximumClientFrameBytes": 1048576,
+    "maximumArtifactBytes": 16777216
+  },
   "enumValues": {
     "commandType": [
       "startRun",

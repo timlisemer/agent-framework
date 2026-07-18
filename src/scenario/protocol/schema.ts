@@ -46,6 +46,10 @@ import {
   scenarioRecordSchema,
 } from "./records.js";
 import {
+  MAXIMUM_ARTIFACT_BYTES,
+  MAXIMUM_CLIENT_FRAME_BYTES,
+} from "./limits.js";
+import {
   scenarioSnapshotSchema,
   effectSnapshotSchema,
   messageSnapshotSchema,
@@ -96,6 +100,10 @@ export function buildScenarioProtocolSchemaBundle() {
 export function buildScenarioProtocolManifest() {
   return {
     schemaId: SCENARIO_PROTOCOL_SCHEMA_ID,
+    limits: {
+      maximumClientFrameBytes: MAXIMUM_CLIENT_FRAME_BYTES,
+      maximumArtifactBytes: MAXIMUM_ARTIFACT_BYTES,
+    },
     enumValues: {
       commandType: scenarioCommandTypes,
       recordType: scenarioEventTypes,

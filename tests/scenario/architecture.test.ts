@@ -13,6 +13,10 @@ import {
   scenarioGatewayOperationScopes,
   scenarioGatewayScopes,
 } from "../../src/scenario/protocol/gateway.js";
+import {
+  MAXIMUM_ARTIFACT_BYTES,
+  MAXIMUM_CLIENT_FRAME_BYTES,
+} from "../../src/scenario/protocol/limits.js";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 
@@ -53,10 +57,19 @@ describe("Scenario Magna Lingua dependency boundaries", () => {
       "utf8",
     )) as {
       enumValues: { visibility: string[] };
+      limits: {
+        maximumClientFrameBytes: number;
+        maximumArtifactBytes: number;
+      };
       gatewayScopes: string[];
       gatewayOperationScopes: Record<string, string>;
     };
 
+    expect(manifest.limits).toEqual({
+      maximumClientFrameBytes: MAXIMUM_CLIENT_FRAME_BYTES,
+      maximumArtifactBytes: MAXIMUM_ARTIFACT_BYTES,
+    });
+    expect(generated.limits).toEqual(manifest.limits);
     expect(manifest.enumValues.visibility).toEqual(scenarioVisibilityValues);
     expect(generated.enumValues.visibility).toEqual(scenarioVisibilityValues);
     expect(manifest.enumValues).not.toHaveProperty("runtimeHomeKind");
