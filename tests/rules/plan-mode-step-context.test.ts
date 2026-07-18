@@ -4,20 +4,21 @@ import * as os from "os";
 import * as path from "path";
 import { planModeStepContextRule } from "../../src/rules/plan-mode-step-context.js";
 import { intentFulfillmentContextRule } from "../../src/rules/intent-fulfillment-context.js";
-import { sessionStateDefaults, type ToolLogEntry } from "../../src/utils/session-store.js";
-import { appendJsonlEntrySync } from "../../src/utils/file-io.js";
+import { sessionStateDefaults, type ToolLogEntry } from "../helpers/session-workflow.js";
 import { makeRuleContext } from "../helpers/rule-context.js";
 
 describe("plan-mode stale workflow intent context", () => {
   let tempDir: string;
   let transcriptPath: string;
   let predictionTimestamp: number;
+  let toolHistory: ToolLogEntry[];
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "plan-mode-step-context-"));
     transcriptPath = path.join(tempDir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
     predictionTimestamp = Date.now() - 10_000;
+    toolHistory = [];
   });
 
   afterEach(() => {
@@ -25,7 +26,7 @@ describe("plan-mode stale workflow intent context", () => {
   });
 
   function appendToolLog(entry: Partial<ToolLogEntry> & Pick<ToolLogEntry, "tool" | "status">): void {
-    appendJsonlEntrySync(path.join(tempDir, "tool-log.jsonl"), {
+    toolHistory.push({
       ts: entry.ts ?? Date.now(),
       toolUseId: entry.toolUseId ?? `${entry.tool}-${entry.status}`,
       tool: entry.tool,
@@ -63,6 +64,7 @@ describe("plan-mode stale workflow intent context", () => {
         frustrationStreak: 4,
         currentWindowSize: 4,
       },
+      toolHistory,
     });
   }
 

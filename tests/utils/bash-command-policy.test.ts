@@ -50,7 +50,7 @@ describe("classifyBashCommand", () => {
     expect(classifyBashCommand("rg -n foo src").riskClass).toBe("simple-read-only");
   });
 
-  it("emits canonical Read capabilities only for safe file-content commands", () => {
+  it("emits canonical Read capabilities only for proven content inspection", () => {
     for (const command of bashReadCapabilityCommands("plan.md")) {
       const result = classifyBashCommand(command);
       expect(result.readOnly, command).toBe(true);
@@ -63,9 +63,16 @@ describe("classifyBashCommand", () => {
 
     for (const command of bashNoReadCapabilityCommands("plan.md")) {
       const result = classifyBashCommand(command);
-      expect(result.capabilities, command).toEqual([]);
+      expect(result.capabilities, command).toEqual(
+        command.startsWith("rg ") ? [{ tool: "Read" }] : [],
+      );
       expect(bashReadFileOperands(command), command).toEqual([]);
     }
+
+    expect(classifyBashCommand("git diff -- src tests").capabilities)
+      .toEqual([{ tool: "Read" }]);
+    expect(classifyBashCommand("rg -n needle src | head -n 20").capabilities)
+      .toContainEqual({ tool: "Read" });
   });
 
   it("reports only command-aware file operands", () => {

@@ -11,7 +11,7 @@ vi.mock("../../src/utils/transcript.js", () => ({
 import { predictionQuestionJudgeRule } from "../../src/rules/prediction-question-judge.js";
 import { runAgent } from "../../src/utils/agent-runner.js";
 import { readRecentUserMessages } from "../../src/utils/transcript.js";
-import { sessionStateDefaults } from "../../src/utils/session-store.js";
+import { sessionStateDefaults } from "../helpers/session-workflow.js";
 import { makeRuleContext } from "../helpers/rule-context.js";
 
 const mockRunAgent = vi.mocked(runAgent);

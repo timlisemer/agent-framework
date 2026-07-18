@@ -50,7 +50,6 @@ vi.mock("../../src/providers/anthropic-api-skin.js", () => ({
 vi.mock("../../src/utils/logger.js", () => ({
   logAgentDecision: vi.fn(),
   extractDecision: vi.fn(),
-  logAgentStarted: vi.fn(),
 }));
 
 import { query as queryMock } from "@anthropic-ai/claude-agent-sdk";

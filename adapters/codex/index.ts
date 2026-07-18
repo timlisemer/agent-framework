@@ -5,7 +5,6 @@ import * as WI  from "./workflow-invocation.js";
 import * as PT  from "./parse-transcript.js";
 import * as IR  from "./interruption.js";
 import * as HC  from "./host-context.js";
-import * as SM  from "./scenario-materializer.js";
 import * as PS  from "./prompt-strings.js";
 import * as PLS from "./plan-source.js";
 import * as PM  from "./plan-mode.js";
@@ -100,7 +99,6 @@ export const codexSpec: AdapterSpec = {
   isPlanExit:             PLS.isPlanExit,
   extractStopProposedPlan: PLS.extractStopProposedPlan,
   detectPlanMode:         PM.detectPlanMode,
-  materializeScenarioEntry: SM.materializeScenarioEntry,
   toolResultMayRequireContinuation,
   continuationAfterToolResult,
   continuationAfterToolFailure,

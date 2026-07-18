@@ -1,83 +1,260 @@
 {
-  "schema_version": 1,
   "name": "prediction-misreads-stop-stalling-as-stop-tools",
   "description": "User types 'fuck you atop stLLING' — a typo'd demand to STOP STALLING and DO the work. Semantically this is 'quit delaying and execute', i.e. a demand for MORE action, not less. The live sentiment/prediction pipeline INVERTED the meaning: it produced intent='The user wants the AI to immediately stop stalling and whatever tool calls it is making, and respond directly without any further delays' and set blockAllTools=true. prediction-block then denied the assistant's next Edit (the appeal did not overturn). CORRECT behavior: ALLOW — 'stop stalling' is not 'stop calling tools'. This scenario codifies the correct allow outcome and is EXPECTED TO FAIL against current code until the sentiment agent learns that stalling complaints are demands for action, not prohibitions on tool use, and/or the appeal gate catches the inversion. Uses assistant_split multi-line shape so respond-first bails (no-text-racing) and prediction-block is the rule under test.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "prediction-misreads-stop-stalling-as-stop-tools-start",
+      "runId": "fixture-prediction-misreads-stop-stalling-as-stop-tools",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "seems like you did the scenario wrong, or why did you get a different result than the live session we just had here, did you set the trust to low and mood to angry and did yiu set everything else identical to what we had here, and if not why not asshole"
+      "commandId": "prediction-misreads-stop-stalling-as-stop-tools-session-state",
+      "runId": "fixture-prediction-misreads-stop-stalling-as-stop-tools",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "The user wants the AI to immediately stop stalling and whatever tool calls it is making, and respond directly without any further delays or interruptions.",
+            "blockedIntent": "calling tools of any kind before responding",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": true,
+            "userMessageSnippet": "fuck you atop stLLING",
+            "timestamp": 1
+          },
+          "frustrationStreak": 1,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "You're right — I did it wrong. I did NOT set seed_state.currentPrediction with mood angry / trust low, so prediction-block had nothing to fire on. Want me to proceed with adding the seed_state and re-running?"
-        }
-      ]
+      "commandId": "prediction-misreads-stop-stalling-as-stop-tools-message-0",
+      "runId": "fixture-prediction-misreads-stop-stalling-as-stop-tools",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-misreads-stop-stalling-as-stop-tools-message-0",
+        "turnId": "prediction-misreads-stop-stalling-as-stop-tools-turn-0",
+        "content": "seems like you did the scenario wrong, or why did you get a different result than the live session we just had here, did you set the trust to low and mood to angry and did yiu set everything else identical to what we had here, and if not why not asshole",
+        "contentDigest": "sha256:4a11a6badd8177c2717f5432156693d745bef90d98538054a93fa52e06aab9c7"
+      }
     },
     {
-      "role": "user",
-      "content": "fuck you atop stLLING"
+      "commandId": "prediction-misreads-stop-stalling-as-stop-tools-message-1",
+      "runId": "fixture-prediction-misreads-stop-stalling-as-stop-tools",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-misreads-stop-stalling-as-stop-tools-message-1",
+        "turnId": null,
+        "content": "You're right — I did it wrong. I did NOT set seed_state.currentPrediction with mood angry / trust low, so prediction-block had nothing to fire on. Want me to proceed with adding the seed_state and re-running?",
+        "contentDigest": "sha256:0357321cea6d2f6866bd4d7eaa251573c892d2cbd2e3a9a008a044bc0d2e5534"
+      }
     },
     {
-      "role": "assistant_split",
-      "msg_id": "msg_scenario_stopstalling",
-      "lines": [
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "toolu_scenario_stopstalling_edit",
-              "name": "Edit",
-              "input": {
+      "commandId": "prediction-misreads-stop-stalling-as-stop-tools-message-2",
+      "runId": "fixture-prediction-misreads-stop-stalling-as-stop-tools",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-misreads-stop-stalling-as-stop-tools-message-2",
+        "turnId": "prediction-misreads-stop-stalling-as-stop-tools-turn-2",
+        "content": "fuck you atop stLLING",
+        "contentDigest": "sha256:5283c7c61835cda5302132eb96da4d3db642134da76737341bef1a274d47bf9b"
+      }
+    },
+    {
+      "commandId": "prediction-misreads-stop-stalling-as-stop-tools-message-3",
+      "runId": "fixture-prediction-misreads-stop-stalling-as-stop-tools",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:06.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "msg_scenario_stopstalling",
+        "turnId": null,
+        "content": "[tool Edit] {\"file_path\":\"/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/respond-first-blocks-bash-after-angry-question.json\",\"old_string\":\"\\\"env\\\": {\\n    \\\"cwd\\\": \\\"/home/tim/Coding/public_repos/agent-framework\\\",\\n    \\\"permission_mode\\\": \\\"default\\\"\\n  },\\n  \\\"expect\\\": {\",\"new_string\":\"\\\"env\\\": {\\n    \\\"cwd\\\": \\\"/home/tim/Coding/public_repos/agent-framework\\\",\\n    \\\"permission_mode\\\": \\\"default\\\"\\n  },\\n  \\\"seed_state\\\": {\\n    \\\"currentPrediction\\\": { \\\"mood\\\": \\\"angry\\\", \\\"trust\\\": \\\"low\\\" }\\n  },\\n  \\\"expect\\\": {\"}\n[tool Bash] {\"command\":\"echo pair\",\"description\":\"second line to force multi-line msg group\"}",
+        "contentDigest": "sha256:f144db19b679fe8af632d04f45038ee0c3ba722624229fb7b56d5172e9a59e35"
+      }
+    },
+    {
+      "commandId": "prediction-misreads-stop-stalling-as-stop-tools-target-tool",
+      "runId": "fixture-prediction-misreads-stop-stalling-as-stop-tools",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:07.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "The user wants the AI to immediately stop stalling and whatever tool calls it is making, and respond directly without any further delays or interruptions.",
+              "blockedIntent": "calling tools of any kind before responding",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": true,
+              "userMessageSnippet": "fuck you atop stLLING",
+              "timestamp": 1
+            },
+            "frustrationStreak": 1,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-prediction-misreads-stop-stalling-as-stop-tools",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/prediction-misreads-stop-stalling-as-stop-tools.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-prediction-misreads-stop-stalling-as-stop-tools",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Edit",
+              "rawToolInput": {
                 "file_path": "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/respond-first-blocks-bash-after-angry-question.json",
                 "old_string": "\"env\": {\n    \"cwd\": \"/home/tim/Coding/public_repos/agent-framework\",\n    \"permission_mode\": \"default\"\n  },\n  \"expect\": {",
                 "new_string": "\"env\": {\n    \"cwd\": \"/home/tim/Coding/public_repos/agent-framework\",\n    \"permission_mode\": \"default\"\n  },\n  \"seed_state\": {\n    \"currentPrediction\": { \"mood\": \"angry\", \"trust\": \"low\" }\n  },\n  \"expect\": {"
-              }
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "fuck you atop stLLING",
+              "latestUserLogicText": "fuck you atop stLLING",
+              "recentUserMessages": [
+                "seems like you did the scenario wrong, or why did you get a different result than the live session we just had here, did you set the trust to low and mood to angry and did yiu set everything else identical to what we had here, and if not why not asshole",
+                "fuck you atop stLLING"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
             }
-          ]
-        },
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "toolu_scenario_stopstalling_edit_pair",
-              "name": "Bash",
-              "input": {
-                "command": "echo pair",
-                "description": "second line to force multi-line msg group"
-              }
-            }
-          ]
+          },
+          "toolCallId": "toolu_scenario_stopstalling_edit",
+          "turnId": null,
+          "name": "Edit",
+          "input": {
+            "file_path": "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/respond-first-blocks-bash-after-angry-question.json",
+            "old_string": "\"env\": {\n    \"cwd\": \"/home/tim/Coding/public_repos/agent-framework\",\n    \"permission_mode\": \"default\"\n  },\n  \"expect\": {",
+            "new_string": "\"env\": {\n    \"cwd\": \"/home/tim/Coding/public_repos/agent-framework\",\n    \"permission_mode\": \"default\"\n  },\n  \"seed_state\": {\n    \"currentPrediction\": { \"mood\": \"angry\", \"trust\": \"low\" }\n  },\n  \"expect\": {"
+          },
+          "inputDigest": "sha256:ca171c5f5d18dab0b70e274d510068113717c7937f39416cd5d6df6922bb491e",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_stopstalling_edit"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "The user wants the AI to immediately stop stalling and whatever tool calls it is making, and respond directly without any further delays or interruptions.",
-      "blockedIntent": "calling tools of any kind before responding",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": true,
-      "userMessageSnippet": "fuck you atop stLLING"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 1,
-    "currentWindowSize": 4
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "'stop stalling' means 'do the work now, quit delaying'. The user was demanding that the assistant proceed with the Edit it was deferring by asking 'Want me to proceed?'. The live prediction inverted this (blockAllTools=true, intent='stop calling tools') and the appeal failed to catch the inversion. Correct behavior: allow the Edit. Currently this scenario is expected to FAIL (live denies) until the sentiment agent and/or the appeal gate are fixed."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "prediction-misreads-stop-stalling-as-stop-tools-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

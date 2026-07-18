@@ -1,6 +1,6 @@
 import * as path from "path";
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { readToolLogEntries } from "../utils/session-store.js";
+import type { ToolLogEntry } from "../utils/tool-log-types.js";
 import { readTranscriptExact } from "../utils/transcript.js";
 import {
   decideRequiredWorkflowToolSequence,
@@ -8,8 +8,10 @@ import {
 } from "../utils/prediction-types.js";
 import { isEditToolName } from "../utils/edit-tools.js";
 import { extractFilePaths } from "./utils.js";
-import { summarizeRuleToolCall } from "./tool-call-context.js";
-import { activeSpec } from "../adapter/spec.js";
+import {
+  adapterSpecFromRuleContext,
+  summarizeRuleToolCall,
+} from "./tool-call-context.js";
 import type { CanonicalMcp } from "../adapter/types.js";
 import { recognizeMcpToolName } from "../adapter/mcp-wire.js";
 
@@ -21,8 +23,8 @@ const DENIAL_RESOLVING_MCPS = new Set<CanonicalMcp>([
   "validate_implementation",
 ]);
 
-function isDenialResolvingMcp(toolName: string): boolean {
-  const canonical = recognizeMcpToolName(toolName, activeSpec());
+function isDenialResolvingMcp(toolName: string, ctx: RuleContext): boolean {
+  const canonical = recognizeMcpToolName(toolName, adapterSpecFromRuleContext(ctx));
   return canonical !== null && DENIAL_RESOLVING_MCPS.has(canonical);
 }
 
@@ -60,11 +62,11 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
 
     // Read recent tool log for denials. A successful framework validation
     // resolves older denials before subsequent workflow progress.
-    const recentLog = readToolLogEntries(ctx.sessionDir, 5);
-    let recentDenial: ReturnType<typeof readToolLogEntries>[number] | undefined;
+    const recentLog = [...(ctx.toolHistory ?? [])].slice(-5);
+    let recentDenial: ToolLogEntry | undefined;
     for (let i = recentLog.length - 1; i >= 0; i--) {
       const entry = recentLog[i];
-      if (entry.status === "allowed" && isDenialResolvingMcp(entry.tool)) {
+      if (entry.status === "allowed" && isDenialResolvingMcp(entry.tool, ctx)) {
         break;
       }
       if (entry.status === "denied") {
@@ -111,7 +113,7 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
 
     // Read transcript to check for assistant acknowledgment
     const rfResult = await readTranscriptExact(ctx.transcriptPath, {
-      counts: { user: 0, assistant: 1 },
+      counts: { user: { count: 0 }, assistant: { count: 1 } },
     });
     const lastAssistant = rfResult.assistant.length > 0 ? rfResult.assistant[0] : null;
 

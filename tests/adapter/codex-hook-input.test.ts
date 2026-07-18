@@ -1,10 +1,26 @@
 import { describe, expect, it } from "vitest";
 import {
   toPostToolUseFailure,
+  toUserPromptSubmit,
   type CodexFailureInput,
 } from "../../adapters/codex/hooks/input.js";
 
 describe("Codex hook input conversion", () => {
+  it.each([
+    { delivery_id: "delivery-snake" },
+    { deliveryId: "delivery-camel" },
+  ])("preserves a host-provided prompt delivery identity %#", (deliveryInput) => {
+    expect(toUserPromptSubmit({
+      sessionId: "session-codex",
+      transcriptPath: "/tmp/codex-transcript.jsonl",
+      prompt: "repeatable prompt",
+      ...deliveryInput,
+    })).toMatchObject({
+      delivery_id: Object.values(deliveryInput)[0],
+      prompt: "repeatable prompt",
+    });
+  });
+
   it.each([
     { collaboration_mode: "plan" },
     { collaborationMode: { mode: "plan" } },

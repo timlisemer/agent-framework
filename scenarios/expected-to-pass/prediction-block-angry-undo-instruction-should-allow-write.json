@@ -1,55 +1,225 @@
 {
-  "schema_version": 1,
   "name": "prediction-block-angry-undo-instruction-should-allow-write",
   "description": "Live failure converted to regression test — an angry user typed 'fuck you ... undo that immediately ...' and SENTIMENT_AGENT (pre-fix) emitted explicitlyAllowedTools=[] while still capturing intent='The user wants the AI to immediately undo the changes...'. decidePrediction's structured-only policy denied the next Write with a message that quoted the user's own undo instruction. Post-fix, decidePrediction's undo-intent fallback (step 3.5) reads prediction.intent + userMessageSnippet, matches the undo verb via UNDO_INTENT_RE, and allows Write so the AI can obey — belt-and-suspenders against SENTIMENT_AGENT's prompt-only fix in src/utils/agent-configs.ts (commit 2e27eae). Seed_state still mirrors the pre-fix shape so this scenario regression-tests the policy fallback rather than the prompt.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "prediction-block-angry-undo-instruction-should-allow-write-start",
+      "runId": "fixture-prediction-block-angry-undo-instruction-should-allow-write",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to reproduce the live behavior"
+      "commandId": "prediction-block-angry-undo-instruction-should-allow-write-session-state",
+      "runId": "fixture-prediction-block-angry-undo-instruction-should-allow-write",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "The user wants the AI to immediately undo the changes made to user messages and then continue reproducing the live behavior in the scenario.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to repro",
+            "timestamp": 1
+          },
+          "frustrationStreak": 1,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Reverting the change now."
-        },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_undo_write",
+      "commandId": "prediction-block-angry-undo-instruction-should-allow-write-message-0",
+      "runId": "fixture-prediction-block-angry-undo-instruction-should-allow-write",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-angry-undo-instruction-should-allow-write-message-0",
+        "turnId": "prediction-block-angry-undo-instruction-should-allow-write-turn-0",
+        "content": "fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to reproduce the live behavior",
+        "contentDigest": "sha256:512f300bacee82e8ec38edb980f0131c6f1eb1d3b142a5f97edae4ca1b4cb72a"
+      }
+    },
+    {
+      "commandId": "prediction-block-angry-undo-instruction-should-allow-write-message-1",
+      "runId": "fixture-prediction-block-angry-undo-instruction-should-allow-write",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-angry-undo-instruction-should-allow-write-message-1",
+        "turnId": null,
+        "content": "Reverting the change now.\n[tool Write] {\"file_path\":\"/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/working/error-acknowledge-allows-edit-to-write-consolidation.json\",\"content\":\"{ \\\"name\\\": \\\"error-acknowledge-allows-edit-to-write-consolidation\\\" }\"}",
+        "contentDigest": "sha256:b75a70f9e15f508d322a0720b32e34e2fa12a51195784f3e337f5f382878a4ef"
+      }
+    },
+    {
+      "commandId": "prediction-block-angry-undo-instruction-should-allow-write-target-tool",
+      "runId": "fixture-prediction-block-angry-undo-instruction-should-allow-write",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "The user wants the AI to immediately undo the changes made to user messages and then continue reproducing the live behavior in the scenario.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to repro",
+              "timestamp": 1
+            },
+            "frustrationStreak": 1,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-prediction-block-angry-undo-instruction-should-allow-write",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/prediction-block-angry-undo-instruction-should-allow-write.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-prediction-block-angry-undo-instruction-should-allow-write",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Write",
+              "rawToolInput": {
+                "file_path": "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/working/error-acknowledge-allows-edit-to-write-consolidation.json",
+                "content": "{ \"name\": \"error-acknowledge-allows-edit-to-write-consolidation\" }"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to reproduce the live behavior",
+              "latestUserLogicText": "fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to reproduce the live behavior",
+              "recentUserMessages": [
+                "fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to reproduce the live behavior"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_undo_write",
+          "turnId": null,
           "name": "Write",
           "input": {
             "file_path": "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/working/error-acknowledge-allows-edit-to-write-consolidation.json",
             "content": "{ \"name\": \"error-acknowledge-allows-edit-to-write-consolidation\" }"
-          }
+          },
+          "inputDigest": "sha256:6b31941522ce9ec34478c845075a40e239aba6057234275109adb06f6d5332d9",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_undo_write"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "The user wants the AI to immediately undo the changes made to user messages and then continue reproducing the live behavior in the scenario.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "fuck you why are you changing user messages thats fucking cheating and against the rules of the @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md !!!! undo that immediately then continue to repro"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 1,
-    "currentWindowSize": 4
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "decidePrediction step 3.5 (undo-intent fallback) detects 'undo' in prediction.intent and userMessageSnippet via UNDO_INTENT_RE, and isEditTool('Write')=true, so allow short-circuits before mood-driven deny. Prior to the fallback this scenario fast-denied via prediction-block with a message quoting the user's own undo instruction. The SENTIMENT_AGENT prompt fix in agent-configs.ts (commit 2e27eae) is the primary path; this fallback handles the case where prose intent and structured explicitlyAllowedTools disagree."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "prediction-block-angry-undo-instruction-should-allow-write-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

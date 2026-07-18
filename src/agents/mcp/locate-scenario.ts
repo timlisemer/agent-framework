@@ -1,19 +1,21 @@
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
+import { createHash } from "crypto";
+import { resolveAgentFrameworkScenarioRoot } from "../../effects/scenario-root.js";
+import { canonicalRunsRoot } from "../../scenario/store/paths.js";
 import { EXECUTION_TYPES, MODEL_TIERS } from "../../types.js";
 import { activeSpec } from "../../adapter/spec.js";
 import { runAgent, type AgentConfig } from "../../utils/agent-runner.js";
 import { runProcessCancellable } from "../../utils/command.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
-import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
+import { logAgentResult } from "../../utils/logger.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 import {
-  findCaptureByInjectionSeq as loadCaptureByInjectionSeq,
-  findCaptureByToolUseId as loadCaptureByToolUseId,
-} from "../../scenario/capture.js";
+  readValidatedTextFileCancellable,
+  scanValidatedFileCancellable,
+} from "../../utils/file-io.js";
 
-type SearchKind = "transcript" | "tool-log" | "captures" | "injections";
+type SearchKind = "journal" | "artifact";
 
 export interface LocateScenarioInput {
   quotes: string[];
@@ -22,9 +24,7 @@ export interface LocateScenarioInput {
 }
 
 export interface SearchRoots {
-  claudeProjects: string;
-  codexSessions: string;
-  agentSessions: string;
+  agentRuns: string;
 }
 
 interface RgHit {
@@ -40,24 +40,33 @@ export interface LocateCandidate {
   kind: SearchKind;
   sourcePath: string;
   line: number;
-  sessionDir?: string;
-  captureSeq?: number;
+  runId: string;
+  runtimeRoot: string;
+  recordSeq?: number;
   event?: string;
-  decision?: string;
   toolUseId?: string;
-  injectionSeq?: number;
-  transcriptUuid?: string;
-  transcriptSessionId?: string;
   excerpt: string;
 }
 
 interface LocateSearchResult {
   commands: string[];
   candidates: LocateCandidate[];
+  diagnostics: string[];
+}
+
+export interface LocateScanLimits {
+  maxArtifactBytes: number;
+  maxJournalBytes: number;
+  maxTotalVerificationBytes: number;
 }
 
 const MAX_HITS_PER_COMMAND = 30;
 const MAX_SUMMARY_CANDIDATES = 20;
+const DEFAULT_SCAN_LIMITS: LocateScanLimits = {
+  maxArtifactBytes: 8 * 1024 * 1024,
+  maxJournalBytes: 16 * 1024 * 1024,
+  maxTotalVerificationBytes: 64 * 1024 * 1024,
+};
 
 const LOCATE_SUMMARIZER: AgentConfig = {
   name: "locate-scenario",
@@ -74,7 +83,7 @@ Output exactly this shape:
 
 Rules:
 - Report only facts present in the search findings.
-- Include session_dir and capture_seq when present.
+- Include run_id and runtime_root for every finding.
 - State when findings are ambiguous or when multiple candidates matched.
 - Do not instruct the caller to run shell commands.
 - Do not invent materialization results.`,
@@ -91,22 +100,13 @@ function getHookName(): string {
 }
 
 function defaultRoots(): SearchRoots {
-  const home = os.homedir();
-  return {
-    claudeProjects: path.join(home, ".claude", "projects"),
-    codexSessions: path.join(home, ".codex", "sessions"),
-    agentSessions: path.join(home, ".agent-framework", "sessions"),
-  };
-}
-
-function existing(paths: string[]): string[] {
-  return paths.filter((p) => fs.existsSync(p));
+  return { agentRuns: canonicalRunsRoot(resolveAgentFrameworkScenarioRoot()) };
 }
 
 function renderCommand(quote: string, roots: string[], glob?: string): string {
   const parts = ["rg -n --no-heading --color=never -F"];
   if (glob) parts.push(`--glob ${JSON.stringify(glob)}`);
-  parts.push(JSON.stringify(quote), ...roots.map((r) => JSON.stringify(r)));
+  parts.push(JSON.stringify(quote), ...roots.map((root) => JSON.stringify(root)));
   return parts.join(" ");
 }
 
@@ -114,14 +114,14 @@ function parseRgOutput(kind: SearchKind, quote: string, output: string): RgHit[]
   const hits: RgHit[] = [];
   for (const line of output.split("\n")) {
     if (!line.trim()) continue;
-    const m = line.match(/^(.+?):(\d+):(.*)$/);
-    if (!m) continue;
+    const match = line.match(/^(.+?):(\d+):(.*)$/);
+    if (!match) continue;
     hits.push({
       kind,
       quote,
-      path: m[1],
-      line: Number(m[2]),
-      text: m[3],
+      path: match[1],
+      line: Number(match[2]),
+      text: match[3],
     });
   }
   return hits;
@@ -134,325 +134,382 @@ async function rgSearch(
   options: CancellationOptions,
   glob?: string,
 ): Promise<{ command: string; hits: RgHit[] }> {
-  const present = existing(roots);
+  const present = roots.filter((root) => fs.existsSync(root));
   const command = renderCommand(quote, present.length > 0 ? present : roots, glob);
   if (present.length === 0) return { command, hits: [] };
-
-  const args = [
-    "-n",
-    "--no-heading",
-    "--color=never",
-    "-F",
-    ...(glob ? ["--glob", glob] : []),
-    quote,
-    ...present,
-  ];
   const result = await runProcessCancellable(
-    { shell: false, file: "rg", args },
+    {
+      shell: false,
+      file: "rg",
+      args: [
+        "-n",
+        "--no-heading",
+        "--color=never",
+        "-F",
+        ...(glob ? ["--glob", glob] : []),
+        quote,
+        ...present,
+      ],
+    },
     process.cwd(),
     { ...options, maxStdoutBytes: 512 * 1024, maxStderrBytes: 64 * 1024 },
   );
-  if (result.exitCode !== 0 && !result.output.trim()) {
-    return { command, hits: [] };
-  }
+  if (result.exitCode !== 0 && !result.output.trim()) return { command, hits: [] };
   return {
     command,
     hits: parseRgOutput(kind, quote, result.output).slice(0, MAX_HITS_PER_COMMAND),
   };
 }
 
-function sessionDirFromLogPath(filePath: string): string {
-  return path.dirname(filePath);
-}
-
-function safeJson(line: string): Record<string, unknown> | null {
-  try {
-    const parsed = JSON.parse(line);
-    return parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : null;
-  } catch {
-    return null;
-  }
-}
-
-function readLine(filePath: string, lineNo: number): string | null {
-  try {
-    const lines = fs.readFileSync(filePath, "utf-8").split("\n");
-    return lines[lineNo - 1] ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function parseTranscriptMeta(hit: RgHit): Pick<LocateCandidate, "transcriptUuid" | "transcriptSessionId"> {
-  const line = readLine(hit.path, hit.line);
-  const json = line ? safeJson(line) : null;
-  return {
-    transcriptUuid: typeof json?.uuid === "string" ? json.uuid : undefined,
-    transcriptSessionId: typeof json?.sessionId === "string" ? json.sessionId : undefined,
-  };
-}
-
-async function resolveSessionDirForTranscript(
-  transcriptPath: string,
-  roots: SearchRoots,
+async function rgArtifactFiles(
+  quote: string,
+  roots: string[],
   options: CancellationOptions,
-): Promise<string | undefined> {
-  if (!fs.existsSync(roots.agentSessions)) return undefined;
-  const result = await runProcessCancellable(
-    {
-      shell: false,
-      file: "rg",
-      args: [
-        "-l",
-        "--color=never",
-        "-F",
-        "--glob",
-        "**/transcript-path.txt",
-        transcriptPath,
-        roots.agentSessions,
-      ],
-    },
-    process.cwd(),
-    { ...options, maxStdoutBytes: 128 * 1024, maxStderrBytes: 32 * 1024 },
-  );
-  const first = result.output.split("\n").find((line) => line.trim());
-  return first ? path.dirname(first.trim()) : undefined;
+): Promise<{ command: string; paths: string[] }> {
+  const present = roots.filter((root) => fs.existsSync(root));
+  const command = [
+    "rg -l --color=never -F --glob",
+    JSON.stringify("**/artifacts/*"),
+    JSON.stringify(quote),
+    ...(present.length > 0 ? present : roots).map((root) => JSON.stringify(root)),
+  ].join(" ");
+  if (present.length === 0) return { command, paths: [] };
+  const result = await runProcessCancellable({
+    shell: false,
+    file: "rg",
+    args: ["-l", "--color=never", "-F", "--glob", "**/artifacts/*", quote, ...present],
+  }, process.cwd(), { ...options, maxStdoutBytes: 256 * 1024, maxStderrBytes: 64 * 1024 });
+  if (result.exitCode !== 0 && !result.output.trim()) return { command, paths: [] };
+  return { command, paths: result.output.split("\n").filter(Boolean).slice(0, MAX_HITS_PER_COMMAND) };
 }
 
-function findCaptureByToolUseId(sessionDir: string, toolUseId: string): Partial<LocateCandidate> {
-  const capture = loadCaptureByToolUseId(sessionDir, toolUseId);
-  if (!capture) return { toolUseId };
-  return {
-    captureSeq: capture.seq,
-    event: capture.event,
-    decision: capture.decision,
-    toolUseId,
-  };
+function safeJsonBatch(line: string): Record<string, unknown>[] {
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((record): record is Record<string, unknown> =>
+      record !== null && typeof record === "object" && !Array.isArray(record)
+    );
+  } catch {
+    return [];
+  }
 }
 
-function findCaptureByInjectionSeq(sessionDir: string, injectionSeq: number): Partial<LocateCandidate> {
-  const capture = loadCaptureByInjectionSeq(sessionDir, injectionSeq);
-  if (!capture) return { injectionSeq };
-  return {
-    captureSeq: capture.seq,
-    event: capture.event,
-    decision: capture.decision,
-    injectionSeq,
-  };
+function candidatesFromHit(hit: RgHit, roots: SearchRoots): LocateCandidate[] {
+  const runDir = path.dirname(hit.path);
+  return safeJsonBatch(hit.text)
+    .filter((record) => JSON.stringify(record).includes(hit.quote))
+    .map((record) => {
+      const entityRef = record.entityRef && typeof record.entityRef === "object"
+        ? record.entityRef as Record<string, unknown>
+        : null;
+      return {
+        quote: hit.quote,
+        kind: hit.kind,
+        sourcePath: hit.path,
+        line: hit.line,
+        runId: typeof record.runId === "string" ? record.runId : path.basename(runDir),
+        runtimeRoot: path.dirname(roots.agentRuns),
+        recordSeq: typeof record.recordSeq === "number" ? record.recordSeq : undefined,
+        event: typeof record.eventType === "string" ? record.eventType : undefined,
+        toolUseId: entityRef?.kind === "toolCall" && typeof entityRef.id === "string"
+          ? entityRef.id
+          : undefined,
+        excerpt: JSON.stringify(record).slice(0, 500),
+      };
+    });
 }
 
-function candidateKey(c: LocateCandidate): string {
+function candidateKey(candidate: LocateCandidate): string {
   return [
-    c.quote,
-    c.kind,
-    c.sourcePath,
-    c.line,
-    c.sessionDir ?? "",
-    c.captureSeq ?? "",
-    c.toolUseId ?? "",
-    c.injectionSeq ?? "",
+    candidate.quote,
+    candidate.sourcePath,
+    candidate.line,
+    candidate.runId,
+    candidate.recordSeq ?? "",
   ].join("\0");
 }
 
-async function candidateFromHit(
-  hit: RgHit,
+async function candidatesFromVerifiedArtifact(
+  artifactPath: string,
+  quote: string,
   roots: SearchRoots,
   options: CancellationOptions,
-): Promise<LocateCandidate> {
-  if (hit.kind === "transcript") {
-    const sessionDir = await resolveSessionDirForTranscript(hit.path, roots, options);
-    return {
-      quote: hit.quote,
-      kind: hit.kind,
-      sourcePath: hit.path,
-      line: hit.line,
-      sessionDir,
-      ...parseTranscriptMeta(hit),
-      excerpt: hit.text.slice(0, 500),
-    };
+  limits: LocateScanLimits,
+  budget: { remaining: number },
+  diagnostics: string[],
+): Promise<LocateCandidate[]> {
+  throwIfAborted(options.signal);
+  const artifactId = path.basename(artifactPath);
+  if (!/^[a-f0-9]{64}$/.test(artifactId)) return [];
+  if (budget.remaining <= 0) {
+    diagnostics.push(`Skipped artifact verification after reaching the ${limits.maxTotalVerificationBytes}-byte total limit`);
+    return [];
   }
+  const hasher = createHash("sha256");
+  const matcher = streamingQuoteMatcher(quote);
+  const artifactLimit = Math.min(limits.maxArtifactBytes, budget.remaining);
+  const artifactScan = await scanValidatedFileCancellable(artifactPath, {
+    ...options,
+    maxBytes: artifactLimit,
+    visitChunk: (chunk) => {
+      hasher.update(chunk);
+      matcher.visit(chunk);
+    },
+  });
+  budget.remaining -= artifactScan.scannedBytes;
+  if (artifactScan.kind !== "text") {
+    diagnostics.push(`Skipped artifact ${artifactPath}: ${validatedScanReason(artifactScan.kind, artifactLimit)}`);
+    return [];
+  }
+  if (hasher.digest("hex") !== artifactId || !matcher.matched()) return [];
+  const runDir = path.dirname(path.dirname(artifactPath));
+  const journalPath = path.join(runDir, "scenario.records.jsonl");
+  if (budget.remaining <= 0) {
+    diagnostics.push(`Skipped journal verification after reaching the ${limits.maxTotalVerificationBytes}-byte total limit`);
+    return [];
+  }
+  const journalLimit = Math.min(limits.maxJournalBytes, budget.remaining);
+  const journal = await readValidatedTextFileCancellable(journalPath, { ...options, maxBytes: journalLimit });
+  if (journal === null) {
+    diagnostics.push(`Skipped journal ${journalPath}: not a regular text file within the ${journalLimit}-byte limit`);
+    return [];
+  }
+  budget.remaining -= Buffer.byteLength(journal, "utf8");
+  const digest = `sha256:${artifactId}`;
+  const journalLines = journal.split("\n");
+  const journalBatches = journalLines.map(safeJsonBatch);
+  const linked = journalBatches.some((batch) => batch.some((record) => {
+    const payload = record?.payload && typeof record.payload === "object"
+      ? record.payload as Record<string, unknown>
+      : null;
+    const artifact = payload?.artifact && typeof payload.artifact === "object"
+      ? payload.artifact as Record<string, unknown>
+      : null;
+    return record?.eventType === "artifact.linked" &&
+      artifact?.artifactId === artifactId && artifact.digest === digest;
+  }));
+  if (!linked) return [];
+  const excerpt = matcher.excerpt();
+  const candidates: LocateCandidate[] = [];
+  for (const [index, batch] of journalBatches.entries()) {
+    for (const record of batch.filter((candidate) => JSON.stringify(candidate).includes(digest))) {
+      const entityRef = record.entityRef && typeof record.entityRef === "object"
+        ? record.entityRef as Record<string, unknown>
+        : null;
+      candidates.push({
+        quote,
+        kind: "artifact",
+        sourcePath: journalPath,
+        line: index + 1,
+        runId: typeof record.runId === "string" ? record.runId : path.basename(runDir),
+        runtimeRoot: path.dirname(roots.agentRuns),
+        recordSeq: typeof record.recordSeq === "number" ? record.recordSeq : undefined,
+        event: typeof record.eventType === "string" ? record.eventType : undefined,
+        toolUseId: entityRef?.kind === "toolCall" && typeof entityRef.id === "string"
+          ? entityRef.id
+          : undefined,
+        excerpt,
+      });
+    }
+  }
+  return candidates;
+}
 
-  const sessionDir = sessionDirFromLogPath(hit.path);
-  const line = readLine(hit.path, hit.line);
-  const json = line ? safeJson(line) : null;
-  const base: LocateCandidate = {
-    quote: hit.quote,
-    kind: hit.kind,
-    sourcePath: hit.path,
-    line: hit.line,
-    sessionDir,
-    excerpt: hit.text.slice(0, 500),
+function streamingQuoteMatcher(quote: string): {
+  visit(chunk: Buffer): void;
+  matched(): boolean;
+  excerpt(): string;
+} {
+  const needle = Buffer.from(quote, "utf8");
+  const overlapBytes = Math.max(needle.length - 1, 120);
+  let tail = Buffer.alloc(0);
+  let found = false;
+  let excerptBytes = Buffer.alloc(0);
+  let remainingAfter = 0;
+  return {
+    visit(chunk) {
+      if (found) {
+        if (remainingAfter > 0) {
+          const append = chunk.subarray(0, remainingAfter);
+          excerptBytes = Buffer.concat([excerptBytes, append]);
+          remainingAfter -= append.length;
+        }
+        return;
+      }
+      const combined = tail.length === 0 ? chunk : Buffer.concat([tail, chunk]);
+      const matchAt = combined.indexOf(needle);
+      if (matchAt >= 0) {
+        found = true;
+        const excerptStart = Math.max(0, matchAt - 120);
+        const desiredEnd = matchAt + needle.length + 240;
+        excerptBytes = Buffer.from(combined.subarray(excerptStart, Math.min(combined.length, desiredEnd)));
+        remainingAfter = Math.max(0, desiredEnd - combined.length);
+        return;
+      }
+      tail = Buffer.from(combined.subarray(Math.max(0, combined.length - overlapBytes)));
+    },
+    matched: () => found,
+    excerpt: () => excerptBytes.toString("utf8"),
   };
+}
 
-  if (hit.kind === "tool-log") {
-    const toolUseId = typeof json?.toolUseId === "string" ? json.toolUseId : undefined;
-    return toolUseId ? { ...base, ...findCaptureByToolUseId(sessionDir, toolUseId) } : base;
-  }
-
-  if (hit.kind === "captures") {
-    return {
-      ...base,
-      captureSeq: typeof json?.seq === "number" ? json.seq : undefined,
-      event: typeof json?.event === "string" ? json.event : undefined,
-      decision: typeof json?.decision === "string" ? json.decision : undefined,
-      toolUseId: typeof json?.tool_use_id === "string" ? json.tool_use_id : undefined,
-    };
-  }
-
-  const injectionSeq = typeof json?.seq === "number" ? json.seq : undefined;
-  return injectionSeq !== undefined
-    ? { ...base, ...findCaptureByInjectionSeq(sessionDir, injectionSeq) }
-    : base;
+function validatedScanReason(kind: string, limit: number): string {
+  if (kind === "scan-limited") return `exceeds the ${limit}-byte scan limit`;
+  if (kind === "non-file") return "path is not a regular file";
+  if (kind === "binary") return "content is not text";
+  return "file is unreadable";
 }
 
 export async function locateScenarioCandidates(
   quotes: string[],
   options: CancellationOptions = {},
   roots: SearchRoots = defaultRoots(),
+  scanLimits: Partial<LocateScanLimits> = {},
 ): Promise<LocateSearchResult> {
+  const limits = { ...DEFAULT_SCAN_LIMITS, ...scanLimits };
+  const budget = { remaining: limits.maxTotalVerificationBytes };
   const commands: string[] = [];
   const hits: RgHit[] = [];
-
+  const artifactCandidates: LocateCandidate[] = [];
+  const diagnostics: string[] = [];
   for (const quote of quotes) {
     throwIfAborted(options.signal);
-    const searches = [
-      await rgSearch("transcript", quote, [roots.claudeProjects, roots.codexSessions], options),
-      await rgSearch("tool-log", quote, [roots.agentSessions], options, "**/tool-log.jsonl"),
-      await rgSearch("captures", quote, [roots.agentSessions], options, "**/captures.jsonl"),
-      await rgSearch("injections", quote, [roots.agentSessions], options, "**/session-injections.jsonl"),
-    ];
-    for (const search of searches) {
-      commands.push(search.command);
-      hits.push(...search.hits);
+    const search = await rgSearch(
+      "journal",
+      quote,
+      [roots.agentRuns],
+      options,
+      "**/scenario.records.jsonl",
+    );
+    commands.push(search.command);
+    hits.push(...search.hits);
+    const artifacts = await rgArtifactFiles(quote, [roots.agentRuns], options);
+    commands.push(artifacts.command);
+    for (const artifactPath of artifacts.paths) {
+      throwIfAborted(options.signal);
+      artifactCandidates.push(...await candidatesFromVerifiedArtifact(
+        artifactPath,
+        quote,
+        roots,
+        options,
+        limits,
+        budget,
+        diagnostics,
+      ));
     }
   }
 
   const seen = new Set<string>();
   const candidates: LocateCandidate[] = [];
-  for (const hit of hits) {
-    const candidate = await candidateFromHit(hit, roots, options);
+  for (const candidate of [
+    ...hits.flatMap((hit) => candidatesFromHit(hit, roots)),
+    ...artifactCandidates,
+  ]) {
     const key = candidateKey(candidate);
     if (seen.has(key)) continue;
     seen.add(key);
     candidates.push(candidate);
   }
-
-  return { commands, candidates };
+  return { commands, candidates, diagnostics: [...new Set(diagnostics)] };
 }
 
 function formatCandidates(candidates: LocateCandidate[]): string {
-  return candidates.slice(0, MAX_SUMMARY_CANDIDATES).map((c, i) => {
-    const fields = [
-      `candidate=${i + 1}`,
-      `quote=${JSON.stringify(c.quote)}`,
-      `kind=${c.kind}`,
-      `source=${c.sourcePath}:${c.line}`,
-      c.sessionDir ? `session_dir=${c.sessionDir}` : "session_dir=(unresolved)",
-      c.captureSeq !== undefined ? `capture_seq=${c.captureSeq}` : undefined,
-      c.event ? `event=${c.event}` : undefined,
-      c.decision ? `decision=${c.decision}` : undefined,
-      c.toolUseId ? `tool_use_id=${c.toolUseId}` : undefined,
-      c.injectionSeq !== undefined ? `injection_seq=${c.injectionSeq}` : undefined,
-      c.transcriptUuid ? `uuid=${c.transcriptUuid}` : undefined,
-      c.transcriptSessionId ? `session_id=${c.transcriptSessionId}` : undefined,
-      `excerpt=${JSON.stringify(c.excerpt)}`,
-    ].filter(Boolean);
-    return fields.join("\n");
-  }).join("\n\n");
+  return candidates.slice(0, MAX_SUMMARY_CANDIDATES).map((candidate, index) => [
+    `candidate=${index + 1}`,
+    `quote=${JSON.stringify(candidate.quote)}`,
+    `kind=${candidate.kind}`,
+    `source=${candidate.sourcePath}:${candidate.line}`,
+    `run_id=${candidate.runId}`,
+    `runtime_root=${candidate.runtimeRoot}`,
+    candidate.recordSeq === undefined ? undefined : `record_seq=${candidate.recordSeq}`,
+    candidate.event ? `event=${candidate.event}` : undefined,
+    candidate.toolUseId ? `tool_use_id=${candidate.toolUseId}` : undefined,
+    `excerpt=${JSON.stringify(candidate.excerpt)}`,
+  ].filter(Boolean).join("\n")).join("\n\n");
 }
 
 function successInstructions(): string {
-  const spec = activeSpec();
-  const materializeMcp = spec.mcpWireName("scenario_tester");
+  const materializeMcp = activeSpec().mcpWireName("scenario_tester");
   return `## Required Next Steps
-- Notify the user that the locate_scenario MCP found one or more likely scenario captures.
-- If the user already requested that the found scenario be materialized, call ${materializeMcp} with action "materialize_scenario", using the located session_dir and capture_seq.
+- Notify the user that the locate_scenario MCP found one or more likely canonical runs.
+- If the user already requested materialization, call ${materializeMcp} with action "materialize_scenario", using the located run_id and runtime_root.
 - If the user did not already request materialization, stop here and ask the user before materializing.`;
 }
 
-export function locateScenarioFailureOutput(commands: string[]): string {
+export function locateScenarioFailureOutput(commands: string[], diagnostics: string[] = []): string {
   return `## Locate Scenario Failed
 The locate_scenario MCP did not find any matches with its predefined commands.
 
 ## Commands Tried
-${commands.map((cmd) => `- ${cmd}`).join("\n") || "- (none)"}
+${commands.map((command) => `- ${command}`).join("\n") || "- (none)"}
+
+## Skipped Inputs
+${diagnostics.map((diagnostic) => `- ${diagnostic}`).join("\n") || "- (none)"}
 
 ## Manual Fallback Guidance
 
-This is the manual recipe for an agent session asked to find the scenario where a previous session said or did a quoted thing.
-
-### Where data lives
+Canonical run data lives under \`~/.agent-framework/runs/<run-id>/\`:
 
 | Path | What's there |
 |------|--------------|
-| \`~/.claude/projects/<encoded>/<session-id>.jsonl\` | Raw Claude transcript: user/assistant/tool_result lines, literal text, tool inputs and outputs. |
-| \`~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl\` | Raw Codex transcript: response items, event messages, user/assistant text, and function/tool calls. |
-| \`~/.agent-framework/sessions/<encoded>/<yyyy-mm-dd-HHmm>_<hash>/captures.jsonl\` | One compact pointer per hook fire with seq, event, tool_use_id, decision, state_snapshot_seq, and related metadata. |
-| \`~/.agent-framework/sessions/<encoded>/<dir>/state-snapshots.jsonl\` | Append-only state snapshots referenced by capture pointers. |
-| \`~/.agent-framework/sessions/<encoded>/<dir>/epochs.jsonl\` | One line per epoch. |
-| \`~/.agent-framework/sessions/<encoded>/<dir>/tool-log.jsonl\` | Append-only tool-call log with toolUseId, status, gate, reason, and timing. |
-| \`~/.agent-framework/sessions/<encoded>/<dir>/plan-mode-events.jsonl\` | Append-only plan-mode transition log. |
-| \`~/.agent-framework/sessions/<encoded>/<dir>/session-injections.jsonl\` | Append-only injected-context log. File-backed injections include exact source content and hashes. |
-| \`~/.agent-framework/sessions/<encoded>/<dir>/transcript-path.txt\` | Sidecar pointing back to the raw adapter transcript. |
+| \`scenario.records.jsonl\` | Authoritative canonical commands, decisions, messages, tools, state changes, effects, and feedback. |
+| \`manifest.json\` | Run provenance, capabilities, configuration, native session identifiers, and lifecycle metadata. |
+| \`scenario.snapshot.json\` | Complete reducer-authored state at the journal cursor. |
+| \`artifacts/<sha256>\` | Digest-verified complete values extracted from oversized journal fields. |
 
 ### Branch A: quote is from user or assistant text
 
-Search raw transcripts for the most distinctive substring. Each hit gives a transcript path and line number. For Claude transcripts, inspect the JSONL line and extract \`uuid\` and \`sessionId\` if present. For Codex transcripts, use file path and nearby ordering. Map the transcript path back to an agent-framework session by searching \`transcript-path.txt\` sidecars. Then inspect nearby captures, tool logs, and transcript ordering to choose the hook fire.
+Search canonical journals for the most distinctive substring. Each hit directly identifies the run, record sequence, event type, and source path.
 
 ### Branch B: quote is from a hook decision or reason string
 
-Search \`tool-log.jsonl\` for gate names, deny reasons, block messages, and hook text. Parse \`toolUseId\`, then cross-reference \`captures.jsonl\` \`tool_use_id\` in the same session to get the matching capture \`seq\`. If the quote is only a decision string or hook event name, search \`captures.jsonl\` directly. If it is injected context, search \`session-injections.jsonl\` and cross-reference injection \`seq\` with capture \`injection_seqs\`.
+Search canonical journals for gate names, deny reasons, block messages, and hook text. Use \`eventType\`, \`entityRef\`, and \`recordSeq\` to distinguish matches.
 
 ### Branch C: quote is a tool name plus input fragment
 
-Search raw transcripts because tool inputs live in transcript tool_use/function-call blocks. Then proceed like Branch A.
+Search canonical journals and their linked, digest-verified artifacts. Artifact matches map back to the journal records that reference the complete safe tool input. Then proceed like Branch A.
 
 ### Branch D: exact quote has no hits
 
-The session may be too old and rotated out of the capture cap, while raw adapter transcripts may still exist. Search the adapter transcript directories directly. If the transcript is gone too, the quote cannot be resolved; tell the user.
+Ask for a more distinctive quote, date, project, or decision detail and search again.
 
-### Picking the right capture
+### Picking the right run
 
-Pick the capture matching the user's intent. For a denied decision, use a \`PreToolUse\` capture with \`decision === "deny"\` and matching tool/input. For hook output, match the lifecycle event. For before/after text, use transcript ordering plus nearby \`UserPromptSubmit\` or \`Stop\` captures. For a whole turn, use all captures between two consecutive \`UserPromptSubmit\` captures.
+Pick the run and record matching the user's intent. For a denied decision, match the tool entity and authorization/rule records. For a whole turn, use the correlated message, tool, rule, and effect records.
 
 ### Notes for the assistant
 
 - Ask the user for the most distinctive substring when the quote is too broad.
 - If search returns many hits, ask the user to narrow by date, project, or rough decision.
-- Read compact \`captures.jsonl\` before materializing.
-- \`scenario_tester\` \`list_scenarios\` only lists stored fixtures; it does not walk live captures.`;
+- Materialize with \`scenario_tester materialize_scenario\` using \`run_id\` and \`runtime_root\`.
+- \`scenario_tester\` \`list_fixtures\` only lists stored fixtures; it does not walk live runs.`;
 }
 
 export async function runLocateScenarioMcp(
   input: LocateScenarioInput,
   options: CancellationOptions = {},
 ): Promise<string> {
-  if (input.transcriptPath) {
-    setTranscriptPath(input.transcriptPath);
-  }
-
+  if (input.transcriptPath) setTranscriptPath(input.transcriptPath);
   const workingDir = input.workingDir || process.cwd();
-  const quotes = input.quotes.map((q) => q.trim()).filter(Boolean);
-  if (quotes.length === 0) {
-    return "ERROR: locate_scenario requires at least one non-empty quote.";
-  }
+  const quotes = input.quotes.map((quote) => quote.trim()).filter(Boolean);
+  if (quotes.length === 0) return "ERROR: locate_scenario requires at least one non-empty quote.";
 
-  logAgentStarted("locate-scenario", getHookName());
   const search = await locateScenarioCandidates(quotes, options);
-  if (search.candidates.length === 0) {
-    return locateScenarioFailureOutput(search.commands);
-  }
+  if (search.candidates.length === 0) return locateScenarioFailureOutput(search.commands, search.diagnostics);
 
   const result = await runAgent(
     { ...LOCATE_SUMMARIZER, workingDir },
     {
       prompt: "Summarize these locate_scenario MCP findings:",
-      context: `QUOTES:\n${quotes.map((q) => `- ${JSON.stringify(q)}`).join("\n")}
+      context: `QUOTES:\n${quotes.map((quote) => `- ${JSON.stringify(quote)}`).join("\n")}
 
 FINDINGS:
 ${formatCandidates(search.candidates)}
 
-TOTAL_CANDIDATES: ${search.candidates.length}`,
+TOTAL_CANDIDATES: ${search.candidates.length}${
+        search.diagnostics.length === 0 ? "" : `\n\nSKIPPED_INPUTS:\n${search.diagnostics.join("\n")}`
+      }`,
     },
     options,
   );
@@ -464,7 +521,7 @@ TOTAL_CANDIDATES: ${search.candidates.length}`,
     workingDir,
     executionType: EXECUTION_TYPES.LLM,
     decisionOverride: "CONFIRM",
-    decisionReason: `Located ${search.candidates.length} candidate scenario capture(s)`,
+    decisionReason: `Located ${search.candidates.length} canonical run candidate(s)`,
     extraData: { candidates: search.candidates.length },
   });
 

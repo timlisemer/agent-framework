@@ -1,17 +1,25 @@
-export type PriorErrorSource =
-  | "stop-feedback"
-  | "plan-validation"
-  | "tool-denial"
-  | "tool-failure";
+import { z } from "zod";
 
-export interface PriorErrorContext {
-  source: PriorErrorSource;
-  provenance: ReadonlyArray<"transcript" | "tool-log">;
-  gate?: string;
-  tool?: string;
-  toolUseId?: string;
-  text: string;
-  index?: number;
-  ts?: number;
-  isError?: boolean;
-}
+export const PRIOR_ERROR_SOURCES = [
+  "stop-feedback",
+  "plan-validation",
+  "tool-denial",
+  "tool-failure",
+] as const;
+
+export const PRIOR_ERROR_PROVENANCE = ["transcript", "tool-log"] as const;
+
+export const priorErrorContextSchema = z.object({
+  source: z.enum(PRIOR_ERROR_SOURCES),
+  provenance: z.array(z.enum(PRIOR_ERROR_PROVENANCE)),
+  gate: z.string().optional(),
+  tool: z.string().optional(),
+  toolUseId: z.string().optional(),
+  text: z.string(),
+  index: z.number().int().optional(),
+  ts: z.number().optional(),
+  isError: z.boolean().optional(),
+}).strict();
+
+export type PriorErrorSource = z.infer<typeof priorErrorContextSchema>["source"];
+export type PriorErrorContext = z.infer<typeof priorErrorContextSchema>;

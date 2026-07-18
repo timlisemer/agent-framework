@@ -6,7 +6,7 @@ This provider uses the Claude Agent SDK / Claude Code runtime instead of Anthrop
 
 - `direct`: one Claude SDK turn, no tools.
 - `sdk`: Claude SDK with the framework's default read-only `Read` and `Bash` tool policy for reviewer-style agents.
-- Internal implementation workflows can opt into a disposable write-capable SDK profile that keeps the same configured adapter tool surface as managed Astral, including MCP tools and file editing tools, while removing only the Stop hook. Those runs still use per-run framework-owned fake homes and leave parent-owned check/validation available to the workflow.
+- Internal implementation workflows can opt into a disposable write-capable SDK profile that keeps the same configured adapter tool surface as the generic managed profile, including MCP tools and file editing tools, while removing only the Stop hook. Those runs still use per-run framework-owned fake homes and leave parent-owned check/validation available to the workflow.
 
 Recommended config:
 
@@ -30,5 +30,5 @@ Compliance stance:
 Silence/session behavior:
 
 - Agent-framework passes `persistSession: false` for one-shot Claude SDK calls. Internal direct/read-only/write runs use per-run homes under `~/.agent-framework/internal/{direct,read-only,write}/claude/<runId>` and clean disposable runtime state when the run ends. Opt-in continuable SDK sessions preserve the native Claude session ID across turns until the owning session is disposed.
-- In managed Astral user-runtime sessions (`sdkRuntimeHome: "managedAstral"`), agent-framework sets `CLAUDE_CONFIG_DIR` and `CLAUDE_HOME` to `~/.agent-framework/astral-ai/claude`, refreshes framework-owned adapter config there, preserves `projects/` history plus top-level auth/local-secret files, and uses it for session history listing/resume.
+- In generic managed user-runtime sessions (`{ kind: "managed", configuration: { profile: "default" } }`), agent-framework sets `CLAUDE_CONFIG_DIR` and `CLAUDE_HOME` to `~/.agent-framework/managed/default/claude`, refreshes framework-owned adapter config there, and preserves `projects/` history plus top-level auth/local-secret files.
 - It scrubs OpenRouter and Anthropic API-key environment variables when this provider is selected so the runtime uses the signed-in Claude Code account path instead of accidentally falling back to API billing.

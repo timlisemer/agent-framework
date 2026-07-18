@@ -36,7 +36,7 @@ function readClaudeSession(filePath: string): AdapterSessionHistoryRecord | null
     contentPaths: [["content"], ["message", "content"]],
     fallbackWorkingDir: inferWorkingDirFromSidecar,
     targetKeyFor: (sessionId, transcriptPath) => `claude:${sessionId}:${transcriptPath}`,
-    resumeTargetFor: (sessionId, transcriptPath) => ({ provider: "claude", target: { sessionId, transcriptPath } }),
+    resumeTargetFor: (sessionId) => ({ sdkRuntime: "claude", nativeSessionId: sessionId }),
   });
 }
 

@@ -15,12 +15,10 @@ checks.
 
 See [`src/adapter/types.ts`](../src/adapter/types.ts) for the full interface.
 
-Adapters also own transcript normalization. The scenario materializer reads a
-live session's `transcript-path.txt`, infers the adapter from the raw transcript
-path when possible, then calls that adapter's `parseTranscript` before
-projecting a captured hook fire into scenario JSON. New adapters should keep
-all raw transcript shape knowledge inside their adapter parser so
-`src/scenario/materialize.ts` stays adapter-independent.
+Adapters also own transcript normalization. Native hook boundaries call the
+active adapter's `parseTranscript` and dispatch the resulting observation into
+the canonical runtime. New adapters must keep all raw transcript shape
+knowledge inside their adapter parser.
 
 Adapters also expose `workflowInstructionText` for canonical slash/skill
 workflows. Each adapter normalizes host wire spellings in that instruction
@@ -35,7 +33,7 @@ definitions before host config copies, so enforcement follows reviewed source;
 the host config path is a fallback for installed or out-of-tree runtimes.
 
 Real `~/.claude` and `~/.codex` homes remain managed outside runtime code.
-Managed Astral homes under `~/.agent-framework/astral-ai/{claude,codex}` mirror
+Managed runtime homes under `~/.agent-framework/managed/default/{claude,codex}` mirror
 the bundled adapter dotfolders while preserving auth/local-secret files.
 Internal framework homes live under
 `~/.agent-framework/internal/{direct,read-only,write}` and are selected by

@@ -140,6 +140,18 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
     expect(deny.fastDeny).toContain("requires explicit workflow authorization");
   });
 
+  it("fast-denies a canonical restricted MCP without raw adapter provenance", async () => {
+    const result = await toolApproveRule.check(makeCtx({
+      toolName: "mcp-commit",
+      rawToolName: undefined,
+      toolInput: {},
+    }));
+
+    expect(result).toEqual({
+      fastDeny: expect.stringContaining("requires explicit workflow authorization"),
+    });
+  });
+
   it("allows RESTRICTED_MCP_TOOLS when workflow authorization is active", async () => {
     const commitTool = activeSpec().mcpWireName("commit");
     const ctx = makeCtx({
@@ -172,6 +184,18 @@ describe("toolApproveRule deterministic fastDeny paths", () => {
     });
 
     const result = await toolApproveRule.check(ctx);
+    expect(result).toEqual({
+      fastAllow: "agent-framework check MCP is always available for verification",
+    });
+  });
+
+  it("fast-allows the canonical check MCP without raw adapter provenance", async () => {
+    const result = await toolApproveRule.check(makeCtx({
+      toolName: "mcp-check",
+      rawToolName: undefined,
+      toolInput: { working_dir: tempDir },
+    }));
+
     expect(result).toEqual({
       fastAllow: "agent-framework check MCP is always available for verification",
     });

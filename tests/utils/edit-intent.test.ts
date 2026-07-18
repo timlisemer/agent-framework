@@ -8,7 +8,7 @@ import {
   deriveEditIntentFromPrediction,
   deriveAllowedToolsFromIntent,
 } from "../../src/utils/edit-intent.js";
-import type { ToolPrediction } from "../../src/utils/prediction-types.js";
+import type { ToolPrediction } from "../../src/utils/prediction-schema.js";
 
 describe("Claude adapter edit-intent paths", () => {
   const prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;

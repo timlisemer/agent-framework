@@ -26,10 +26,6 @@ vi.mock("../../src/utils/logger.js", () => ({
   logWarn: vi.fn(),
 }));
 
-vi.mock("../../src/utils/gate-reasoning-cache.js", () => ({
-  clearGateReasoning: vi.fn().mockResolvedValue(undefined),
-}));
-
 vi.mock("../../src/utils/quote-detection.js", () => ({
   stripQuotedAndPastedContent: vi.fn((s: string) => s),
   stripQuotedContent: vi.fn((s: string) => s),
@@ -50,7 +46,7 @@ import {
   preClassifyCalm,
 } from "../../src/utils/sentiment-prefilter.js";
 import type { RuleContext } from "../../src/rules/types.js";
-import { sessionStateDefaults, type SessionState } from "../../src/utils/session-store.js";
+import { sessionStateDefaults, type SessionState } from "../helpers/session-workflow.js";
 import type { CacheManager } from "../../src/utils/cache-manager.js";
 import { makeRuleContext } from "../helpers/rule-context.js";
 import {

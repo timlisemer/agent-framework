@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import type { ContentBlock } from "../adapter/types.js";
 import { parseActiveTranscriptLines } from "./canonical-transcript.js";
-import type { ToolPrediction } from "./prediction-types.js";
+import type { ToolPrediction } from "./prediction-schema.js";
 
 /**
  * Plan-approval detection.

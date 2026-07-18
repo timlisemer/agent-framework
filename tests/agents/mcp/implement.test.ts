@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   runAgent: vi.fn(),
   runCheckAgent: vi.fn(),
-  logAgentStarted: vi.fn(),
   logAgentResult: vi.fn(),
 }));
 
@@ -19,7 +18,6 @@ vi.mock("../../../src/agents/mcp/check.js", () => ({
 }));
 
 vi.mock("../../../src/utils/logger.js", () => ({
-  logAgentStarted: mocks.logAgentStarted,
   logAgentResult: mocks.logAgentResult,
 }));
 
@@ -27,8 +25,8 @@ import { runImplementAgent } from "../../../src/agents/mcp/implement.js";
 import { runValidateImplementationAgent } from "../../../src/agents/mcp/implement.js";
 import { validateQuotedExtraContext } from "../../../src/agents/mcp/implementation-workflow.js";
 import { getAgentFrameworkSessionDir } from "../../../src/utils/paths.js";
-import { writeCurrentPlanSidecar } from "../../../src/utils/plan-source.js";
 import { withEnvForTest } from "../../helpers/provider-env.js";
+import { canonicalHookState } from "../../helpers/canonical-hook-state.js";
 
 type TempPlanfileFixture = {
   workingDir: string;
@@ -64,13 +62,26 @@ async function withCurrentPlanSession<T>(
   fn: (fixture: CurrentPlanFixture) => Promise<T>,
 ): Promise<T> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), input.homePrefix));
-  const restoreEnv = withEnvForTest({ HOME: home, AGENT_FRAMEWORK_ADAPTER: "claude" });
+  const restoreEnv = withEnvForTest({
+    HOME: home,
+    AGENT_FRAMEWORK_ADAPTER: "claude",
+    AGENT_FRAMEWORK_SCENARIO_ROOT: path.join(home, ".agent-framework"),
+  });
   try {
     return await withTempPlanfile(input.workPrefix, async ({ workingDir, planfile }) => {
       const transcriptPath = path.join(workingDir, "transcript.jsonl");
       fs.writeFileSync(transcriptPath, `${JSON.stringify({ message: { role: "user", content: input.userText } })}\n`);
       const sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: workingDir });
-      writeCurrentPlanSidecar(sessionDir, { kind: "file", path: planfile });
+      await canonicalHookState({
+        adapter: "claude",
+        nativeSessionId: "implementation-current-plan-session",
+        transcriptPath,
+        projectDir: workingDir,
+      }).setStateSlice(
+        "plan.current",
+        "agent-framework://state/current-plan",
+        { kind: "file", path: planfile },
+      );
       return fn({ home, workingDir, planfile, transcriptPath, sessionDir });
     });
   } finally {
@@ -106,16 +117,6 @@ describe("implement MCP workflow", () => {
         expect.objectContaining({ runtimeHomeProfile: "internalReadOnly", sdkToolPolicy: "read-only" }),
         expect.any(Object),
         expect.any(Object),
-      );
-      expect(mocks.logAgentStarted).toHaveBeenNthCalledWith(
-        1,
-        "implement",
-        expect.stringContaining("implement"),
-      );
-      expect(mocks.logAgentStarted).toHaveBeenNthCalledWith(
-        2,
-        "implement-validator",
-        expect.stringContaining("validate"),
       );
       expect(mocks.logAgentResult).toHaveBeenNthCalledWith(
         1,
@@ -234,7 +235,7 @@ typecheck failed`);
     });
   });
 
-  it("resolves omitted implement planfile from the working_dir current-plan sidecar", async () => {
+  it("uses the canonical current planfile for implement", async () => {
     await withCurrentPlanSession(
       {
         homePrefix: "agent-framework-current-plan-home-",
@@ -250,7 +251,7 @@ typecheck failed`);
     );
   });
 
-  it("resolves omitted validate_implementation planfile from the working_dir current-plan sidecar", async () => {
+  it("uses the canonical current planfile for validate_implementation", async () => {
     await withCurrentPlanSession(
       {
         homePrefix: "agent-framework-current-validate-home-",

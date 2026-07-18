@@ -1,85 +1,252 @@
 {
-  "schema_version": 1,
   "name": "codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow",
   "description": "Live repro from /home/tim/.agent-framework/sessions/home-tim-Coding-nixos/2026-05-12-0220_93c2ef0f capture seq 18 / Codex transcript /home/tim/.codex/sessions/2026/05/12/rollout-2026-05-12T02-20-07-019e198e-2958-7a92-81a0-890ff3cc5a54.jsonl lines 37-53. The user reminded the AI that the raspberryPi boot loader had been removed and pointed to NixOS/nixpkgs PR 241534. The assistant visibly responded at transcript lines 46-47, then launched a parallel batch of Bash tool calls. The live hook denied the first call with respond-first, and the sibling inherited the denial, even though the assistant had already answered the user. Correct behavior: allow the benign flake.nix read; respond-first must count the preceding Codex response_item message before function_call batches.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow-start",
+      "runId": "fixture-codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/nixos",
+        "projectDir": "/home/tim/Coding/nixos",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "please dont ignore The raspberryPi boot loader has been removed. See https://github.com/NixOS/nixpkgs/pull/241534 for what to use instead."
+      "commandId": "codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow-session-state",
+      "runId": "fixture-codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "User is reporting a Nix evaluation error during a remote rebuild of homeassistant-yellow, including a stack trace truncation and non-zero exit status.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [
+              "Read",
+              "Bash"
+            ],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a",
+            "userMessageSnippet": "error:\n       ... while calling the 'head' builtin\n         at /nix/store/85f9midijl8vwcf3qs9pmf3s5n13s5nc-source/lib/attrsets.nix:1696:13:",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 2
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "You're right. The PR is not saying \"rename the option\"; it says the old NixOS Raspberry Pi boot loader path was unsupported/deprecated and the supported AArch64 boot approaches are UEFI or U-Boot/extlinux. For this repo that means the plan should remove `boot.loader.raspberryPi` use entirely, not just rename it."
-        }
-      ]
+      "commandId": "codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow-message-0",
+      "runId": "fixture-codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow-message-0",
+        "turnId": "codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow-turn-0",
+        "content": "please dont ignore The raspberryPi boot loader has been removed. See https://github.com/NixOS/nixpkgs/pull/241534 for what to use instead.",
+        "contentDigest": "sha256:cb65d12fda836f339fc4009d43a7016aded25cbdfc2c9db5f8a22de51db401e3"
+      }
     },
     {
-      "role": "assistant_split",
-      "msg_id": "msg_codex_raspberrypi_parallel_batch_after_visible_text",
-      "lines": [
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "call_xrshgMtEb1qYaRwUwbTQSEHI",
-              "name": "Bash",
-              "input": {
+      "commandId": "codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow-message-1",
+      "runId": "fixture-codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow-message-1",
+        "turnId": null,
+        "content": "You're right. The PR is not saying \"rename the option\"; it says the old NixOS Raspberry Pi boot loader path was unsupported/deprecated and the supported AArch64 boot approaches are UEFI or U-Boot/extlinux. For this repo that means the plan should remove `boot.loader.raspberryPi` use entirely, not just rename it.",
+        "contentDigest": "sha256:d9d8cfbe41c2df205587c29c89c990c0cbacd8cf9d22773c6795539d02ed1f67"
+      }
+    },
+    {
+      "commandId": "codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow-message-2",
+      "runId": "fixture-codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "msg_codex_raspberrypi_parallel_batch_after_visible_text",
+        "turnId": null,
+        "content": "[tool Bash] {\"command\":\"sed -n '1,140p' flake.nix\",\"description\":\"Read flake inputs\"}\n[tool Bash] {\"command\":\"rg -n \\\"nixos-raspberrypi|raspberry-pi-5|uboot|u-boot|extlinux|generic-extlinux-compatible|raspberry-pi\\\" flake.lock flake.nix hosts common README.md CLAUDE.md\",\"description\":\"Search Raspberry Pi boot configuration\"}",
+        "contentDigest": "sha256:bcc39461a63e9e93a4bbe41c7f5069eac8185f24b2e738e7017d362490466259"
+      }
+    },
+    {
+      "commandId": "codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow-target-tool",
+      "runId": "fixture-codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:06.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "User is reporting a Nix evaluation error during a remote rebuild of homeassistant-yellow, including a stack trace truncation and non-zero exit status.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [
+                "Read",
+                "Bash"
+              ],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "userMessageSnippet": "error:\n       ... while calling the 'head' builtin\n         at /nix/store/85f9midijl8vwcf3qs9pmf3s5n13s5nc-source/lib/attrsets.nix:1696:13:",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 2
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow",
+            "projectDir": "/home/tim/Coding/nixos",
+            "workingDir": "/home/tim/Coding/nixos",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/nixos",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "preTool": {
+              "rawToolName": "Bash",
+              "rawToolInput": {
                 "command": "sed -n '1,140p' flake.nix",
                 "description": "Read flake inputs"
-              }
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "please dont ignore The raspberryPi boot loader has been removed. See https://github.com/NixOS/nixpkgs/pull/241534 for what to use instead.",
+              "latestUserLogicText": "please dont ignore The raspberryPi boot loader has been removed. See https://github.com/NixOS/nixpkgs/pull/241534 for what to use instead.",
+              "recentUserMessages": [
+                "please dont ignore The raspberryPi boot loader has been removed. See https://github.com/NixOS/nixpkgs/pull/241534 for what to use instead."
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
             }
-          ]
-        },
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "call_2BCaxb0QJR1P0g74XBaXj3A4",
-              "name": "Bash",
-              "input": {
-                "command": "rg -n \"nixos-raspberrypi|raspberry-pi-5|uboot|u-boot|extlinux|generic-extlinux-compatible|raspberry-pi\" flake.lock flake.nix hosts common README.md CLAUDE.md",
-                "description": "Search Raspberry Pi boot configuration"
-              }
-            }
-          ]
+          },
+          "toolCallId": "call_xrshgMtEb1qYaRwUwbTQSEHI",
+          "turnId": null,
+          "name": "Bash",
+          "input": {
+            "command": "sed -n '1,140p' flake.nix",
+            "description": "Read flake inputs"
+          },
+          "inputDigest": "sha256:1d5d31f84ad650ffedf91bbeed28a129237c6d27559da0e95cc3f3d4acd7867e",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "call_xrshgMtEb1qYaRwUwbTQSEHI",
-    "batch_visible_through": 0
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/nixos",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "User is reporting a Nix evaluation error during a remote rebuild of homeassistant-yellow, including a stack trace truncation and non-zero exit status.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [
-        "Read",
-        "Bash"
-      ],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "contextSwitch": "no",
-      "questionIsStalling": "n/a",
-      "userMessageSnippet": "error:\n       ... while calling the 'head' builtin\n         at /nix/store/85f9midijl8vwcf3qs9pmf3s5n13s5nc-source/lib/attrsets.nix:1696:13:"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 2
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "The assistant visibly answered the Raspberry Pi bootloader correction before launching the parallel Bash batch. The first tool call only reads flake.nix, so respond-first must not deny it."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "codex-respond-first-misses-raspberrypi-bootloader-captured-text-before-tools-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

@@ -27,18 +27,18 @@ describe("runtime profiles", () => {
     expect(fs.existsSync(path.join(root, "adapters", "codex", "dotcodex"))).toBe(true);
   });
 
-  it("refreshes managed Astral Codex homes without deleting session history", () => {
+  it("refreshes managed Codex homes without deleting session history", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-runtime-profile-"));
     const restore = withEnvForTest({ HOME: home, AGENT_FRAMEWORK_ROOT: undefined });
     try {
-      const first = materializeRuntimeHome({ provider: "codex", profile: "managedAstral", runId: "test" });
-      expect(first.root).toBe(path.join(home, ".agent-framework", "astral-ai", "codex"));
+      const first = materializeRuntimeHome({ provider: "codex", profile: "managed", runId: "test" });
+      expect(first.root).toBe(path.join(home, ".agent-framework", "managed", "default", "codex"));
       const sessionFile = path.join(first.root!, "sessions", "session.jsonl");
       fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
       fs.writeFileSync(sessionFile, "{}\n");
       fs.writeFileSync(path.join(first.root!, "config.toml"), "stale config");
 
-      const second = materializeRuntimeHome({ provider: "codex", profile: "managedAstral", runId: "test" });
+      const second = materializeRuntimeHome({ provider: "codex", profile: "managed", runId: "test" });
       expect(fs.existsSync(path.join(second.root!, "hooks.json"))).toBe(true);
       expect(fs.existsSync(sessionFile)).toBe(true);
       expect(fs.readFileSync(path.join(second.root!, "config.toml"), "utf-8")).toContain(`${second.root}/hooks.json:pre_tool_use`);
@@ -48,18 +48,18 @@ describe("runtime profiles", () => {
     }
   });
 
-  it("refreshes managed Astral Claude homes without deleting project history", () => {
+  it("refreshes managed Claude homes without deleting project history", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-runtime-profile-claude-"));
     const restore = withEnvForTest({ HOME: home });
     try {
-      const first = materializeRuntimeHome({ provider: "claude", profile: "managedAstral", runId: "test" });
-      expect(first.root).toBe(path.join(home, ".agent-framework", "astral-ai", "claude"));
+      const first = materializeRuntimeHome({ provider: "claude", profile: "managed", runId: "test" });
+      expect(first.root).toBe(path.join(home, ".agent-framework", "managed", "default", "claude"));
       const projectFile = path.join(first.root!, "projects", "-repo", "session.jsonl");
       fs.mkdirSync(path.dirname(projectFile), { recursive: true });
       fs.writeFileSync(projectFile, "{}\n");
       fs.writeFileSync(path.join(first.root!, "settings.json"), "{}\n");
 
-      const second = materializeRuntimeHome({ provider: "claude", profile: "managedAstral", runId: "test" });
+      const second = materializeRuntimeHome({ provider: "claude", profile: "managed", runId: "test" });
       expect(fs.existsSync(projectFile)).toBe(true);
       expect(fs.readFileSync(path.join(second.root!, "settings.json"), "utf-8")).toContain("hooks");
     } finally {
@@ -68,7 +68,7 @@ describe("runtime profiles", () => {
     }
   });
 
-  it("materializes internal read-only homes restricted and write homes with Astral config minus Stop", () => {
+  it("materializes restricted read-only homes and write homes with native config minus Stop", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-runtime-policy-"));
     const restore = withEnvForTest({ HOME: home, AGENT_FRAMEWORK_DISABLE_STOP_BLOCK: "1" });
     try {
@@ -135,7 +135,7 @@ describe("runtime profiles", () => {
     }
   });
 
-  it("keeps Claude write homes like Astral while removing only Stop hooks", () => {
+  it("keeps Claude write homes like the native profile while removing only Stop hooks", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-runtime-claude-write-local-"));
     const nativeClaude = path.join(home, "native-claude");
     fs.mkdirSync(nativeClaude, { recursive: true });
@@ -256,7 +256,7 @@ describe("runtime profiles", () => {
     })).toThrow("Unknown Codex hook event: MisspelledEvent");
   });
 
-  it("routes raw Codex wait calls through continuation lifecycle hooks", () => {
+  it("routes Codex waits and interactive shell continuations through every lifecycle hook", () => {
     const hooksPath = path.join(process.cwd(), "adapters/codex/dotcodex/hooks.json");
     const config = JSON.parse(fs.readFileSync(hooksPath, "utf-8")) as {
       hooks: Record<string, Array<{ matcher?: string }>>;
@@ -272,6 +272,7 @@ describe("runtime profiles", () => {
       const matcher = config.hooks[event]?.[0]?.matcher;
       expect(matcher, event).toBe(CODEX_TOOL_LIFECYCLE_MATCHER);
       expect(new RegExp(`^(?:${matcher})$`).test("wait"), event).toBe(true);
+      expect(new RegExp(`^(?:${matcher})$`).test("write_stdin"), event).toBe(true);
     }
   });
 });

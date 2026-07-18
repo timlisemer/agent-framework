@@ -3,8 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { activeSpec } from "../../../src/adapter/spec.js";
-import { getAgentFrameworkSessionDir, sessionPlanValidationStatusFile } from "../../../src/utils/paths.js";
-import { hashPlanContent, planValidationStatusKey } from "../../../src/utils/plan-validation-status.js";
+import { getAgentFrameworkSessionDir } from "../../../src/utils/paths.js";
 import { validPlanFixture } from "../../helpers/plan-fixtures.js";
 
 function validPlan(planPath = "/tmp/validate-plan.md", planName = "validate-plan"): string {
@@ -286,8 +285,6 @@ describe("runValidatePlanAgent", () => {
         transcriptPath,
       });
       expect(result).toContain("- Status: PASS");
-      const status = JSON.parse(fs.readFileSync(sessionPlanValidationStatusFile(sessionDir), "utf-8"));
-      expect(Object.values(status)[0]).toMatchObject({ status: "pass", planPath });
     } finally {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -310,13 +307,6 @@ describe("runValidatePlanAgent", () => {
         transcriptPath,
       });
       expect(result).toContain("- Status: FAIL");
-      const status = JSON.parse(fs.readFileSync(sessionPlanValidationStatusFile(sessionDir), "utf-8"));
-      expect(Object.values(status)[0]).toMatchObject({
-        status: "fail",
-        planPath,
-      });
-      expect((Object.values(status)[0] as { reasons: string[] }).reasons[0]).toContain("Missing required heading \"## Relevant Files\".");
-      expect((Object.values(status)[0] as { reasons: string[] }).reasons[0]).not.toContain("Iterate on the planfile using");
     } finally {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -331,7 +321,7 @@ describe("runValidatePlanAgent", () => {
       const plan = validPlan(planPath);
       fs.writeFileSync(transcriptPath, "");
       fs.writeFileSync(planPath, plan);
-      const sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: tempDir });
+      getAgentFrameworkSessionDir({ transcriptPath, projectDir: tempDir });
 
       const runValidatePlanAgent = await loadRunValidatePlanAgent("VALID");
       const result = await runValidatePlanAgent({
@@ -340,11 +330,6 @@ describe("runValidatePlanAgent", () => {
       });
 
       expect(result).toContain("- Status: PASS");
-      const statusStore = JSON.parse(fs.readFileSync(sessionPlanValidationStatusFile(sessionDir), "utf-8"));
-      expect(statusStore[planValidationStatusKey(planPath, hashPlanContent(plan))]).toMatchObject({
-        status: "pass",
-        planPath,
-      });
     } finally {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }

@@ -40,7 +40,7 @@ import {
   type RepoNormalizedMoveSummary,
   type RepoInfo,
 } from "../../utils/git-utils.js";
-import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
+import { logAgentResult } from "../../utils/logger.js";
 import { confirmResultFailed, runConfirmAgent } from "./confirm.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 import { clipUtf8Bytes } from "../../utils/text-bounds.js";
@@ -214,7 +214,6 @@ async function commitWithConfirmResult(
     status,
     diff,
     diffStat,
-    untrackedDiff,
     untrackedInventory,
     untrackedLinesChanged,
     untrackedContentDiff,
@@ -234,7 +233,7 @@ async function commitWithConfirmResult(
   // TS-side size classification (folds in untracked-file accounting). The LLM
   // still emits a SIZE: line per its prompt format; we override the parsed
   // value with the TS-authoritative classification before returning.
-  const tsSize = classifyCommitSize(diffStat, untrackedDiff, status, untrackedLinesChanged);
+  const tsSize = classifyCommitSize(diffStat, status, untrackedLinesChanged);
   const boundSection = (value: string, maxBytes: number): string => clipUtf8Bytes(
     value,
     maxBytes,
@@ -350,7 +349,6 @@ export async function runCommitAgentWithSharedConfirm(
   sharedCommitContext?: string,
   options: CancellationOptions = {},
 ): Promise<string> {
-  logAgentStarted("commit", getHookName());
   return commitWithConfirmResult(workingDir, confirmResult, sharedCommitContext, options);
 }
 
@@ -370,7 +368,6 @@ export async function runCommitAgent(
   optionalPlanfile?: string,
   options: CommitOptions = {}
 ): Promise<string> {
-  logAgentStarted("commit", getHookName());
 
   const { status } = await getUncommittedChangesCancellable(workingDir, options);
 

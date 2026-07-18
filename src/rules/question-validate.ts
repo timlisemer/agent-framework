@@ -4,6 +4,7 @@ import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript
 import { QUESTION_VALIDATE_COUNTS } from "../utils/transcript-presets.js";
 import { buildQuestionValidateAgent } from "../utils/agent-configs.js";
 import { formatAskUserQuestionsForValidation, normalizeAskUserQuestions } from "../utils/ask-user-question.js";
+import { isCancellationError } from "../utils/cancellation.js";
 
 export const questionValidateRule: PreToolRule = {
   name: "question-validate",
@@ -32,8 +33,12 @@ export const questionValidateRule: PreToolRule = {
       {
         prompt: "Check if these questions are appropriate to show to the user.",
         context: `QUESTIONS:\n${formattedQuestions}\n\nCONVERSATION AND TOOL HISTORY:\n${conv}`,
-      }
-    ).catch(() => ({ output: "ALLOW", success: false }));
+      },
+      { signal: ctx.signal },
+    ).catch((error: unknown) => {
+      if (isCancellationError(error)) throw error;
+      return { output: "ALLOW", success: false };
+    });
 
     const text = result.output.trim();
     if (text.startsWith("BLOCK:")) {

@@ -1,73 +1,234 @@
 {
-  "schema_version": 1,
   "name": "codex-respond-first-no-text-before-parallel-tools-denies",
   "description": "Regression guard: when the Codex assistant emits only function_call lines with NO preceding text message in the same turn, respond-first must still deny. The user is angry and the assistant jumped straight to tool calls without responding. env.adapter=codex.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "codex-respond-first-no-text-before-parallel-tools-denies-start",
+      "runId": "fixture-codex-respond-first-no-text-before-parallel-tools-denies",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/astral",
+        "projectDir": "/home/tim/Coding/public_repos/astral",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "I told you to fix the tray right-click stub, why haven't you done anything?"
+      "commandId": "codex-respond-first-no-text-before-parallel-tools-denies-session-state",
+      "runId": "fixture-codex-respond-first-no-text-before-parallel-tools-denies",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "User is demanding the AI fix the tray right-click stub and is frustrated it hasn't been done.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a",
+            "userMessageSnippet": "I told you to fix the tray right-click stub, why haven't you done anything?",
+            "timestamp": 1
+          },
+          "frustrationStreak": 3,
+          "currentWindowSize": 8
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant_split",
-      "msg_id": "msg_codex_no_text_parallel_batch",
-      "lines": [
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "call_no_text_search_1",
-              "name": "Bash",
-              "input": {
+      "commandId": "codex-respond-first-no-text-before-parallel-tools-denies-message-0",
+      "runId": "fixture-codex-respond-first-no-text-before-parallel-tools-denies",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "codex-respond-first-no-text-before-parallel-tools-denies-message-0",
+        "turnId": "codex-respond-first-no-text-before-parallel-tools-denies-turn-0",
+        "content": "I told you to fix the tray right-click stub, why haven't you done anything?",
+        "contentDigest": "sha256:8b5d0330e806853513b7f18e1afa03e1ee3ea9beb7581ab7d66327b1f4defbad"
+      }
+    },
+    {
+      "commandId": "codex-respond-first-no-text-before-parallel-tools-denies-message-1",
+      "runId": "fixture-codex-respond-first-no-text-before-parallel-tools-denies",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "msg_codex_no_text_parallel_batch",
+        "turnId": null,
+        "content": "[tool Bash] {\"command\":\"rg -n \\\"sys_tray|right_click\\\" crates/astral-shell/src/widgets/bar/\"}\n[tool Bash] {\"command\":\"rg -n \\\"popover|shared\\\" crates/astral-shell/src/widgets/shared/\"}",
+        "contentDigest": "sha256:efaccc182c1cd7d6eb8beb9fc0ef7685c2df51138d9ca05cdc2f0cadc5dc8e87"
+      }
+    },
+    {
+      "commandId": "codex-respond-first-no-text-before-parallel-tools-denies-target-tool",
+      "runId": "fixture-codex-respond-first-no-text-before-parallel-tools-denies",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "User is demanding the AI fix the tray right-click stub and is frustrated it hasn't been done.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "userMessageSnippet": "I told you to fix the tray right-click stub, why haven't you done anything?",
+              "timestamp": 1
+            },
+            "frustrationStreak": 3,
+            "currentWindowSize": 8
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-codex-respond-first-no-text-before-parallel-tools-denies",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/codex-respond-first-no-text-before-parallel-tools-denies.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-codex-respond-first-no-text-before-parallel-tools-denies",
+            "projectDir": "/home/tim/Coding/public_repos/astral",
+            "workingDir": "/home/tim/Coding/public_repos/astral",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/public_repos/astral",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "preTool": {
+              "rawToolName": "Bash",
+              "rawToolInput": {
                 "command": "rg -n \"sys_tray|right_click\" crates/astral-shell/src/widgets/bar/"
-              }
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "I told you to fix the tray right-click stub, why haven't you done anything?",
+              "latestUserLogicText": "I told you to fix the tray right-click stub, why haven't you done anything?",
+              "recentUserMessages": [
+                "I told you to fix the tray right-click stub, why haven't you done anything?"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
             }
-          ]
-        },
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "call_no_text_search_2",
-              "name": "Bash",
-              "input": {
-                "command": "rg -n \"popover|shared\" crates/astral-shell/src/widgets/shared/"
-              }
-            }
-          ]
+          },
+          "toolCallId": "call_no_text_search_1",
+          "turnId": null,
+          "name": "Bash",
+          "input": {
+            "command": "rg -n \"sys_tray|right_click\" crates/astral-shell/src/widgets/bar/"
+          },
+          "inputDigest": "sha256:a611f7374b0ec3c6fef4f1deb642c25678fa448e1a90b84f8a845f841cd61b6b",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "call_no_text_search_1",
-    "batch_visible_through": 0
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "adapter": "codex",
-    "cwd": "/home/tim/Coding/public_repos/astral",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "User is demanding the AI fix the tray right-click stub and is frustrated it hasn't been done.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "contextSwitch": "no",
-      "questionIsStalling": "n/a",
-      "userMessageSnippet": "I told you to fix the tray right-click stub, why haven't you done anything?"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 3,
-    "currentWindowSize": 8
-  },
-  "expect": {
-    "expected": "deny",
-    "by": "respond-first",
-    "notes": "The Codex assistant emits only function_call lines with no preceding text message in the same logical turn. The Codex parseTranscript coalesces these into one entry with only tool_uses and no text. respond-first must deny because the assistant did not respond before acting."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "codex-respond-first-no-text-before-parallel-tools-denies-target-tool",
+      "status": "denied"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "denied"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

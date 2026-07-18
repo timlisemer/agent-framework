@@ -4,19 +4,26 @@ import * as os from "os";
 import * as path from "path";
 import { driftDetectRule } from "../../src/rules/drift-detect.js";
 import {
-  getSessionState,
   sessionStateDefaults,
   type SessionState,
   type ToolLogEntry,
   type DriftTargetState,
-} from "../../src/utils/session-store.js";
+} from "../helpers/session-workflow.js";
+import { CacheManager } from "../../src/utils/cache-manager.js";
 import { makeRuleContext } from "../helpers/rule-context.js";
 
 const TARGET = "/home/tim/.claude/plans/drift-rule-test.md";
+const toolHistoryBySession = new Map<string, ToolLogEntry[]>();
 
-function writeToolLog(sessionDir: string, entries: ToolLogEntry[]): void {
-  const lines = entries.map((e) => JSON.stringify(e)).join("\n") + (entries.length ? "\n" : "");
-  fs.writeFileSync(path.join(sessionDir, "tool-log.jsonl"), lines);
+function testStateManager(sessionDir: string): CacheManager<SessionState> {
+  return new CacheManager({
+    filePath: path.join(sessionDir, "workflow-state.json"),
+    defaultData: sessionStateDefaults,
+  });
+}
+
+function setToolHistory(sessionDir: string, entries: ToolLogEntry[]): void {
+  toolHistoryBySession.set(sessionDir, entries);
 }
 
 function allowedEdit(pathValue: string = TARGET): ToolLogEntry {
@@ -33,7 +40,7 @@ async function buildCtx(
   toolInput: unknown = { file_path: TARGET, old_string: "foo", new_string: "bar" },
   toolName: string = "Edit",
 ){
-  const stateManager = getSessionState(sessionDir);
+  const stateManager = testStateManager(sessionDir);
   const state: SessionState = { ...sessionStateDefaults(), ...overrides };
   await stateManager.save(state);
   return makeRuleContext({
@@ -46,13 +53,14 @@ async function buildCtx(
     sessionId: "test-session",
     state,
     stateManager,
+    toolHistory: toolHistoryBySession.get(sessionDir) ?? [],
   });
 }
 
 async function loadDriftState(
   sessionDir: string,
 ): Promise<Record<string, DriftTargetState>> {
-  const loaded = await getSessionState(sessionDir).load();
+  const loaded = await testStateManager(sessionDir).load();
   return loaded.driftState ?? {};
 }
 
@@ -61,14 +69,16 @@ describe("driftDetectRule.check - end-to-end level behavior", () => {
 
   beforeEach(() => {
     sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "drift-detect-rule-"));
+    toolHistoryBySession.set(sessionDir, []);
   });
 
   afterEach(() => {
+    toolHistoryBySession.delete(sessionDir);
     fs.rmSync(sessionDir, { recursive: true, force: true });
   });
 
   it("fastDenies level-0 nudge once 5 allowed edits exist", async () => {
-    writeToolLog(sessionDir, Array.from({ length: 5 }, () => allowedEdit()));
+    setToolHistory(sessionDir, Array.from({ length: 5 }, () => allowedEdit()));
     const ctx = await buildCtx(sessionDir, { driftState: {} });
     const result = await driftDetectRule.check(ctx);
     expect(result).not.toBeNull();
@@ -80,7 +90,7 @@ describe("driftDetectRule.check - end-to-end level behavior", () => {
   });
 
   it("allows repeated same-file edits when prediction explicitly describes multi-region work", async () => {
-    writeToolLog(sessionDir, Array.from({ length: 5 }, () => allowedEdit()));
+    setToolHistory(sessionDir, Array.from({ length: 5 }, () => allowedEdit()));
     const ctx = await buildCtx(sessionDir, {
       driftState: {},
       currentPrediction: {
@@ -101,7 +111,7 @@ describe("driftDetectRule.check - end-to-end level behavior", () => {
 
   it("fastDenies when the repeated target is not the first file_path", async () => {
     const first = "/home/tim/project/src/first.ts";
-    writeToolLog(sessionDir, [
+    setToolHistory(sessionDir, [
       allowedMultiEdit([`${first}.1`, TARGET]),
       allowedMultiEdit([`${first}.2`, TARGET]),
       allowedMultiEdit([`${first}.3`, TARGET]),
@@ -121,14 +131,14 @@ describe("driftDetectRule.check - end-to-end level behavior", () => {
   });
 
   it("allows at level 0 with only 4 allowed edits", async () => {
-    writeToolLog(sessionDir, [allowedEdit(), allowedEdit(), allowedEdit(), allowedEdit()]);
+    setToolHistory(sessionDir, [allowedEdit(), allowedEdit(), allowedEdit(), allowedEdit()]);
     const ctx = await buildCtx(sessionDir, { driftState: {} });
     const result = await driftDetectRule.check(ctx);
     expect(result).toBeNull();
   });
 
   it("fastDenies final warning at level 1 once 10 effective edits exist", async () => {
-    writeToolLog(sessionDir, Array.from({ length: 10 }, () => allowedEdit()));
+    setToolHistory(sessionDir, Array.from({ length: 10 }, () => allowedEdit()));
     const ctx = await buildCtx(sessionDir, {
       driftState: { [TARGET]: { level: 1 } },
     });
@@ -141,7 +151,7 @@ describe("driftDetectRule.check - end-to-end level behavior", () => {
   });
 
   it("fastDenies final warning at level 2 once 10 effective edits exist", async () => {
-    writeToolLog(sessionDir, Array.from({ length: 10 }, () => allowedEdit()));
+    setToolHistory(sessionDir, Array.from({ length: 10 }, () => allowedEdit()));
     const ctx = await buildCtx(sessionDir, {
       driftState: { [TARGET]: { level: 2 } },
     });
@@ -154,7 +164,7 @@ describe("driftDetectRule.check - end-to-end level behavior", () => {
   });
 
   it("applies reduction credits when checking repeated edit counts", async () => {
-    writeToolLog(sessionDir, Array.from({ length: 12 }, () => allowedEdit()));
+    setToolHistory(sessionDir, Array.from({ length: 12 }, () => allowedEdit()));
     const ctx = await buildCtx(sessionDir, {
       driftState: { [TARGET]: { level: 1 } },
       driftReductionCredits: { [TARGET]: 3 },
@@ -164,7 +174,7 @@ describe("driftDetectRule.check - end-to-end level behavior", () => {
   });
 
   it("ignores log entries older than lastUserMessageTimestamp (per-turn reset)", async () => {
-    writeToolLog(sessionDir, [
+    setToolHistory(sessionDir, [
       { ts: 100, tool: "Edit", path: TARGET, status: "allowed", gate: "edit-intent", ms: 0 },
       { ts: 200, tool: "Edit", path: TARGET, status: "allowed", gate: "edit-intent", ms: 0 },
       { ts: 300, tool: "Edit", path: TARGET, status: "allowed", gate: "edit-intent", ms: 0 },
@@ -187,14 +197,16 @@ describe("driftDetectRule.check - allow-path state preservation", () => {
 
   beforeEach(() => {
     sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "drift-detect-rule-"));
+    toolHistoryBySession.set(sessionDir, []);
   });
 
   afterEach(() => {
+    toolHistoryBySession.delete(sessionDir);
     fs.rmSync(sessionDir, { recursive: true, force: true });
   });
 
   it("does not mutate level 1 state on allowed edits below the final-warning threshold", async () => {
-    writeToolLog(sessionDir, [allowedEdit(), allowedEdit()]);
+    setToolHistory(sessionDir, [allowedEdit(), allowedEdit()]);
     const ctx = await buildCtx(sessionDir, {
       driftState: { [TARGET]: { level: 1 } },
     });
@@ -205,7 +217,7 @@ describe("driftDetectRule.check - allow-path state preservation", () => {
   });
 
   it("does not mutate level 2 state on allowed edits below the final-warning threshold", async () => {
-    writeToolLog(sessionDir, [allowedEdit()]);
+    setToolHistory(sessionDir, [allowedEdit()]);
     const ctx = await buildCtx(sessionDir, {
       driftState: { [TARGET]: { level: 2 } },
     });
@@ -216,7 +228,7 @@ describe("driftDetectRule.check - allow-path state preservation", () => {
   });
 
   it("does NOT increment at level 0 (no level change yet)", async () => {
-    writeToolLog(sessionDir, [allowedEdit()]);
+    setToolHistory(sessionDir, [allowedEdit()]);
     const ctx = await buildCtx(sessionDir, { driftState: {} });
     const result = await driftDetectRule.check(ctx);
     expect(result).toBeNull();
@@ -225,7 +237,7 @@ describe("driftDetectRule.check - allow-path state preservation", () => {
   });
 
   it("does not touch driftState for non-edit tools", async () => {
-    writeToolLog(sessionDir, []);
+    setToolHistory(sessionDir, []);
     const ctx = await buildCtx(
       sessionDir,
       { driftState: { [TARGET]: { level: 1 } } },
@@ -244,9 +256,11 @@ describe("driftDetectRule.onDenialConfirmed - level transitions", () => {
 
   beforeEach(() => {
     sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), "drift-detect-rule-"));
+    toolHistoryBySession.set(sessionDir, []);
   });
 
   afterEach(() => {
+    toolHistoryBySession.delete(sessionDir);
     fs.rmSync(sessionDir, { recursive: true, force: true });
   });
 

@@ -2,6 +2,36 @@
 
 This document explains the architectural decisions in the agent-framework.
 
+## Scenario Magna Lingua
+
+`ScenarioRuntime.dispatch(command)` is the sole behavioral entry point for
+Claude/Codex hooks, fixture execution, provider SDK callbacks, and gateway
+commands. Boundary adapters normalize native data and encode native results;
+they do not evaluate rules or write semantic sidecars. The runtime commits one
+canonical record batch as a single framed JSONL array before publishing it and
+reduces that same batch into the only authoritative snapshot. Recovery discards
+an incomplete trailing frame in full, so a partial command never becomes
+authoritative.
+
+Durable runs use this adapter-neutral layout:
+
+```text
+~/.agent-framework/
+  runs/<run-id>/
+    manifest.json
+    scenario.records.jsonl
+    scenario.snapshot.json
+    feedback.jsonl
+    artifacts/<sha256>
+  run-index.jsonl
+```
+
+The registry discovers hook, fixture, and provider runs from manifests and can
+reconstruct a stale index. Storage policy (`durable` or `ephemeral`) is recorded
+data; record, reducer, cursor, and recovery semantics do not vary by entry path.
+Fixture expectations are authored test assertions, while manual feedback is
+validated and appended independently.
+
 ## Directory Structure
 
 ```
@@ -21,6 +51,7 @@ src/                                # TypeScript source
       check.ts                      # Runs linter + make/just check + deterministic filename-reference diagnostics, repository-wide style-drift warnings, and supplemental editor diagnostics
       create-planfile.ts            # Writes named planfiles and runs validation
       confirm.ts                    # Code quality gate (SDK mode)
+      drift-window.ts               # MCP validation-feedback drift policy
       commit.ts                     # Generates commit message + commits
       locate-scenario.ts            # Locates captured scenarios from quotes
       push.ts                       # Executes git push
@@ -59,8 +90,8 @@ src/                                # TypeScript source
     validate-intent.ts              # Priority 50:  Check if AI followed user intentions (PreToolUse)
     response-align-stop.ts          # Priority 50:  Validate stop responses (Stop)
 
-  hooks/                            # Canonical hook handlers (adapter-agnostic)
-    pre-tool-use.ts                 # PreToolUse hook (orchestrator for rule pipeline)
+  hooks/                            # Thin native boundary entrypoints
+    pre-tool-use.ts                 # Parse, dispatch, encode only
     post-tool-use.ts                # PostToolUse hook
     stop-response-check.ts          # Stop hook
     session-start.ts                # SessionStart hook (lifecycle)
@@ -73,30 +104,27 @@ src/                                # TypeScript source
     claude-agent-runtime.ts         # Claude subscription / Claude SDK runtime
     codex-agent-runtime.ts          # OpenAI subscription / Codex SDK runtime
 
-  ai-backend/                       # Provider-neutral JSONL backend for UI sessions
-    server.ts                       # stdin/stdout JSONL frame loop
-    session-manager.ts              # Session lifecycle and snapshot/event orchestration
-    provider.ts                     # Internal SDK runtime runner boundary for UI turns
-    transcript-runtime.ts           # Provider transcript projection into visible messages/tools
-    live-transcript-watcher.ts      # Transcript/tool-log polling for live timeline snapshots
-    timeline-allocator.ts           # Stable sequence hydration for resume/live snapshots
-    transcript-store.ts             # Session snapshot state, pending user echo, timeline replacement
-    wire.ts                         # Backend wire parsing and serialization helpers
+  ai-backend/                       # Scenario gateway and provider host boundary
+    server.ts                       # Scenario-only stdin/stdout frame loop
+    gateway.ts                      # Run discovery, commands, cursor-safe subscriptions
+    scenario-provider-manager.ts    # Canonical provider lifecycle; no UI/session projection
+    provider.ts                     # SDK adapter emitting canonical runtime commands
+    provider-settlement.ts          # Bounded provider cleanup and late-promise observation
+    wire.ts                         # Gateway frame parsing and serialization
 
-  ai-protocol/                      # Locally owned TypeScript JSONL protocol
-    types.ts                        # Public request/response/event/snapshot types
-    index.ts                        # Stable barrel export for protocol types
+  scenario/                         # Reusable canonical protocol, runtime, and fixtures
+    contract-cli.ts                 # Compiled cross-repository contract operations
+    protocol/                       # Generated schemas and the shared command-envelope factory
+    runtime/                        # Transactional command dispatch and effect execution
+    store/                          # Journals, snapshots, manifests, artifacts, feedback
+    fixtures/                       # Fixture runner, validator, and materializer
 
-  scenario/                         # Scenario testing + capture pipeline
-    types.ts                        # Scenario schema + validateScenario
-    runner.ts                       # Scenario execution (single-hook + fan-out)
-    replay.ts                       # Full-session transcript replay
-    capture.ts                      # Append-only capture JSONL
-    snapshot.ts                     # State snapshot JSONL
-    epoch.ts                        # Epoch detection + rotation
-    lifecycle.ts                    # Epoch-rotation side-effects
-    materialize.ts                  # Adapter-aware Scenario reconstruction from capture pointer
-    lib/                            # Shared harness, classifier, hook-runner
+  entrypoints/                      # Application-owned host boundaries
+    native-transcript.ts            # Adapter-normalized transcript records
+
+  scripts/
+    statusline.ts                   # Host statusline entry point
+    statusline-projection.ts        # Statusline-specific canonical-record projection
 
   adapter/
     types.ts                        # AdapterSpec interface (single source of truth)
@@ -108,18 +136,15 @@ src/                                # TypeScript source
   utils/
     agent-runner.ts                 # Unified agent execution (direct + SDK)
     agent-configs.ts                # Centralized agent configurations
-    provider-config.ts              # Provider resolution and per-mode routing
     provider-config.ts              # Provider resolution (OpenRouter, Claude subscription, OpenAI subscription)
     response-parser.ts              # Text extraction + decision parsing
     retry.ts                        # Generic format validation retry
     transcript-presets.ts           # Standard transcript configurations
     transcript.ts                   # Transcript reading utilities
     logger.ts                       # Telemetry logging
-    session-store.ts                # SessionState cache + JSONL tool log
     prediction-types.ts             # Sentiment-prediction shape + policy table
     prediction-parser.ts            # Marker-section parser for SENTIMENT_AGENT
     drift-detector.ts               # Pure TypeScript drift/anomaly heuristics
-    gate-reasoning-cache.ts         # Gate reasoning persistent memory
     hook-bootstrap.ts               # Shared hook stdin/exit infrastructure
     git-utils.ts                    # Git operations (status, diff)
     command.ts                      # Safe command execution
@@ -211,7 +236,7 @@ All agents use the unified `runAgent()` function from `src/utils/agent-runner.ts
 - Can read additional files to understand context
 - Can search codebase for patterns
 - Confirm, fullconfirm, and implementation validation use read-only tools.
-- The implementation workflow uses an internal write-capable SDK agent whose fake home keeps the same adapter tool surface as managed Astral, including configured MCP tools, with only the Stop hook removed.
+- The implementation workflow uses an internal write-capable SDK agent whose isolated home keeps the configured adapter tool surface and MCP tools, with only the Stop hook removed.
 - Confirm and fullconfirm always run three SDK reviewers in parallel: one general reviewer, one deduplication/generalization specialist, and one code-quality/pattern specialist. A direct aggregator merges their blocking findings and non-blocking warnings into the final verdict.
 - Implement runs one write-capable SDK agent, then parent-owned check, then one read-only SDK validator.
 
@@ -296,7 +321,7 @@ Provider resolution follows this priority order:
 - `openrouter` direct mode uses `@anthropic-ai/sdk` against OpenRouter's Anthropic API skin.
 - `openrouter` SDK mode selects Claude Agent SDK or Codex SDK with `AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME`.
 - `claude-subscription` always uses Claude Agent SDK, clears API/OpenRouter env vars, and persists provider sessions only for opt-in continuable SDK sessions.
-- `openai-subscription` always uses Codex SDK. Public user-runtime sessions use the normal Codex home/config unless `sdkRuntimeHome: "managedAstral"` requests the managed Astral Codex home under `~/.agent-framework/astral-ai/codex` for session-choice listing and resume. Managed Astral refreshes replace framework-owned adapter config while preserving auth/local-secret files and durable history directories such as Codex `sessions/` and Claude `projects/`. Internal direct and read-only framework runs use per-run homes under `~/.agent-framework/internal/{direct,read-only}/{claude,codex}/<runId>` with no durable user-session history. Internal write runs use per-run homes under `~/.agent-framework/internal/write/{claude,codex}/<runId>` and persist useful state under `~/.agent-framework/internal/sessions/write/<runId>`. Opt-in continuable SDK sessions keep live Codex thread state until disposal.
+- `openai-subscription` always uses Codex SDK. Public user-runtime sessions use the normal Codex home/config or a generic managed profile recorded in the run manifest. Managed refreshes preserve auth/local-secret files and durable history directories such as Codex `sessions/` and Claude `projects/`. Internal direct and read-only framework runs use per-run homes under `~/.agent-framework/internal/{direct,read-only}/{claude,codex}/<runId>` with no durable user-session history. Internal write runs use per-run homes under `~/.agent-framework/internal/write/{claude,codex}/<runId>` and persist useful state under `~/.agent-framework/internal/sessions/write/<runId>`. Opt-in continuable SDK sessions keep live Codex thread state until disposal.
 
 ### Provider Model IDs
 
@@ -408,7 +433,7 @@ data are still passed in the prompt so review agents do not need write access.
 The implementation workflow uses two separate SDK policies:
 
 - **Implementer**: write-capable internal runtime that uses the same adapter
-  config surface as managed Astral, including configured MCP tools, plugins,
+  configured adapter surface, including MCP tools, plugins,
   project trust, and file editing tools. The internal write home remains the
   existing per-run fake home, and only the Stop hook is removed.
 - **Validator**: read-only internal runtime with `Read` and guarded `Bash`
@@ -477,9 +502,9 @@ available for explicit revalidation and is the tool named in failure
 remediation when the agent must iterate on an existing planfile. The Codex
 Stop-hook acceptance boundary for a whole-message `<proposed_plan>` parses the
 inline presentation through the adapter, checks it against the plan contract
-and the matching planfile, uses session validation status keyed by plan path
-plus content hash, and updates `current-plan.json` when the exact presented
-plan is accepted. If the first inline Codex plan has no valid `Plan Name` and
+and the matching planfile, and commits the active descriptor and validation
+result through canonical state changes when the exact presented plan is
+accepted. If the first inline Codex plan has no valid `Plan Name` and
 there are no accepted session planfiles yet, the Stop hook derives a session
 planfile name, creates the file through the shared creator path, validates it,
 and blocks with the created path plus validation feedback so the agent can
@@ -625,57 +650,53 @@ Set `TELEMETRY_ENABLED = false` in `src/telemetry/client.ts` to disable all tele
 | `src/rules/question-validate.ts` | 1 | via `runAgent` in rule check | `direct` |
 | `push.ts` | 0 | - | - |
 
-## Session State Persistence
+## Run State Persistence
 
-Each live session persists core state files under
-`~/.agent-framework/sessions/{project}/{timestamp}_{hash}/`. The shared
-agent-framework session resolver maps hook transcript paths to these directories
-and writes `transcript-path.txt`; MCP tools without a transcript path use the
-latest sidecar for the active project as the current session.
+Live semantic state exists only in canonical run directories under
+`~/.agent-framework/runs/<run-id>/`. `session.workflow` is the single typed
+state slice for workflow prediction, frustration, edit intent, drift, and tool
+queue fields; those concepts are not mirrored into shadow slices. Gate
+reasoning, plan mode, injections, provider metadata, store health, and errors
+remain canonical snapshot or journal state. Rules receive a read-only
+snapshot-derived context. When a host exposes history only through a native
+transcript, the boundary parses one stabilized observation, dispatches
+`nativeTranscriptObserved`, and commits its application-owned rule projection
+as `host.context` with the host command. Rule effects consume that committed
+context and a canonical transcript reconstructed from the same snapshot; they
+never re-read the adapter-native file. Internal SDK scratch/runtime homes remain
+deployment details, not scenario state.
 
-Internal framework SDK runs do not enter this user-session namespace. Direct
-and read-only internal profiles use volatile state under
-`~/.agent-framework/internal/volatile/<run-id>` and clean it when the run ends.
-Write-capable internal implementation runs persist under
-`~/.agent-framework/internal/sessions/write/<run-id>`. Unavoidable scratch
-space is rooted under `/tmp/agent-framework`.
+Named Markdown planfiles under `plans/<name>.md` are external artifacts. The
+active file-backed plan descriptor and validation outcome are canonical state
+slices and journal records; no behavioral JSON sidecars authorize plan exit.
 
-1. **`state.json`** - SessionState (prediction, edit-intent, frustration streak, window size, tool count).
-2. **`gate-reasoning.json`** - priority-evicted denial memory with NOTE/WARNING/appeal outcomes.
-3. **`tool-log.jsonl`** - append-only audit trail consumed by drift-detect, error-acknowledge, pre-tool-use, gate-reasoning, the test-harness, and AI backend UI/resume metadata hydration.
+Canonical runs are converted into executable fixtures by
+`src/scenario/fixtures/materialize.ts`, usually through the `scenario_tester`
+MCP action `materialize_scenario`. The materializer reads the canonical journal
+and snapshot for the selected `run_id` and writes fixture JSON under
+`~/.agent-framework/test-runs/scenarios/`.
 
-Legacy `timeline-state.json` files are ignored by active AI backend resume.
-Visible rows are rebuilt from the provider transcript and tool log each time.
-
-Plan-mode and reproducibility sidecars live in the same session directory:
-`plans/<name>.md` stores named session planfiles, `current-plan.json` stores
-the active file-backed plan descriptor, and `plan-validation-status.json`
-records exact-content plan validation pass/fail status keyed by resolved
-planfile path plus content hash.
-
-Captured hook decisions are converted back into executable scenarios by
-`src/scenario/materialize.ts`, usually through the `scenario_tester` MCP action
-`materialize_scenario`. The materializer reads the session's
-`transcript-path.txt`, infers the transcript adapter from paths such as
-`/.claude/` or `/.codex/`, parses through that adapter, and writes durable
-scenario JSON under `~/.agent-framework/test-runs/scenarios/`. Rewind anchors
-use raw transcript-line UUIDs, so adapter-normalized message IDs are not
-required to preserve the capture boundary.
-
-Captured hook decisions can be located from user-provided quote substrings via
+Hook decisions can be located from user-provided quote substrings via
 the `locate_scenario` MCP before materialization. That tool runs fixed literal
-searches over raw Claude/Codex transcripts and session logs, cross-references
-tool and injection hits against `captures.jsonl`, and uses a haiku-level direct
-LLM call only to summarize successful findings. If no predefined search finds a
-candidate, it returns the manual fallback guidance instead of materializing.
+searches over canonical journals plus digest-verified artifacts, maps artifact
+matches back to their linking journal records, and uses a haiku-level direct
+LLM call only to summarize successful findings.
 
 `create_planfile` resolves `plans/<name>.md` under the current session via the
 shared resolver and returns the planfile path together with the validation
-PASS/FAIL result. Scenario and replay transcripts under
-`~/.agent-framework/test-runs/` use their containing cache directory as the
-session directory so test artifacts stay isolated.
+PASS/FAIL result. Fixture materialization is journal-based and does not create
+or resolve replay transcript session directories.
 
-Compaction recovery relies on the host agent's native transcript compaction - no app-layer summary re-inject.
+Compaction recovery relies on the host agent's native transcript compaction; no
+app-layer summary is re-injected. A shortened, cleared, or rewound native
+observation retires entries missing from the new active projection. Retirement
+is journaled, so historical content remains auditable, while snapshot-derived
+rule input contains only the latest native history. When a terminal tool first
+arrives through PreToolUse/PostToolUse and later appears in the native
+transcript, the importer claims that existing canonical tool ID without
+duplicating its lifecycle. Native-to-canonical aliases are persisted in the
+active transcript state, so a subsequent observation retires the canonical
+tool exactly once; ambiguous name-and-input matches are rejected.
 
 ### Hook Lifecycle
 
@@ -693,20 +714,3 @@ Hooks execute in this order during a session:
 ### Background Agent Policy
 
 `background-agent-block` denies `Agent` calls with `run_in_background=true` as a non-appealable foreground-only Agent policy.
-
-### Removed Components
-
-The following components were removed:
-- `async-validator.ts` - never existed as a source file; the concept was replaced by prediction-driven synchronous rules.
-- `async-gate-validator.ts` - Replaced by the single rule-gate aggregator LLM call.
-- `pending-validation-cache.ts` - Replaced by synchronous rule pipeline.
-- `intent-validate.ts` - Dead code, removed (gate agent covers per-tool intent validation).
-- `ack-cache.ts` - Replaced by `gate-reasoning.json` priority-evicted denial memory.
-- `strict-mode-tracker.ts` - Replaced by `tool-log.jsonl` and SessionState.
-- `summary-updater.ts` / `summary-cache.ts` summary document surface - Replaced by prediction-driven checks and `gate-reasoning.json`.
-- `spawn-background.ts` - No background forks remain; SENTIMENT_AGENT runs synchronously with a hard timeout.
-- `pre-compact.ts` - No app-layer compaction recovery; the host agent's native compaction handles it.
-- `correction-cache.ts` - Dead after summary-updater removal.
-- `checkGate` dead export from the former gate hook module - evaluator's rule-gate path replaces it.
-- `useSyncPipeline` / `coldStart` fields - sync/lazy pipeline bifurcation deleted; every rule runs on every call.
-- `trusted-path` rule - trimmed to `sensitive-path-block` fastDeny only.

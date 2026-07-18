@@ -60,6 +60,7 @@ export const predictionQuestionJudgeRule: PreToolRule = {
           `LATEST USER MESSAGE:\n${userMessageForLogic}\n\n` +
           `ASKUSERQUESTION CONTENT:\n${askPayload}`,
       },
+      { signal: ctx.signal },
     );
 
     const parsed = parseSentimentOutput(r.output);

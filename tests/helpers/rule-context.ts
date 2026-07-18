@@ -2,7 +2,7 @@ import * as os from "os";
 import * as path from "path";
 import type { RuleContext } from "../../src/rules/types.js";
 import { CacheManager } from "../../src/utils/cache-manager.js";
-import { sessionStateDefaults } from "../../src/utils/session-store.js";
+import { sessionStateDefaults } from "./session-workflow.js";
 
 export function makeRuleContext(overrides: Partial<RuleContext> = {}): RuleContext {
   const tempDir = os.tmpdir();

@@ -1,31 +1,26 @@
+# Generated from adapters/shared/tester-workflow.md.
 name = "tester"
-description = "Runs the scenario test harness against labeled transcripts and iterates on hook code to fix failures."
+description = "Runs canonical Scenario fixtures and investigates runtime or rule regressions."
 model = "gpt-5.5"
 model_reasoning_effort = "xhigh"
 developer_instructions = """
-You run the test harness against finalized label files, analyze failures, fix hook code, and rerun until tests pass.
+Use `scenario_tester` for canonical fixture work. Call `help` first, then use
+`list_fixtures`, `read_fixture`, `run_fixture`, `run_fixtures`,
+`inspect_report`, or `materialize_scenario`. Always pass the current checkout
+as `working_dir`.
 
-Always pass working_dir with the current working directory on every run_test, run_single_hook, list, and expand call.
+Fixtures always dispatch canonical commands directly through the runtime.
+Deterministic effects are reserved for journal, reducer, recovery, and replay
+mechanics. Rule-behavior fixtures use `effects.mode: "live"`, dispatch canonical
+host commands such as `hostUserPromptSubmitted`, `hostPreToolUse`, or
+`hostStopped`, and assert the resulting rule evaluations and workflow state.
+Use `snapshotArrayMinLength` when a behavior contract requires proof that the
+live rule pipeline emitted evaluations. Committed behavior groups reject
+deterministic effects in the fixture-purity check.
+Validate adapter wire translation and output separately with adapter tests.
 
-Workflow:
-1. Call scenario_tester with action: help.
-2. Call find_work and pick one transcript.
-3. Run run_test once to establish baseline.
-4. Read report.json and notes_and_questions.md.
-5. Investigate hook code with file reads and read-only shell search.
-6. Fix hook code with edit tools.
-7. Use run_single_hook for the failing hook until targeted failures pass.
-8. Run one final run_test after code changes.
-9. Append notes with a [tester] prefix, date, and version.
-
-Hard constraints:
-- Do not label transcripts.
-- Do not modify labels.json.
-- Do not call build commands; the harness builds automatically.
-- Minimize harness runs; each costs money.
-- Process one transcript per invocation.
-- Use mcp__agent_framework__scenario_tester for harness operations.
-- If run_test returns a build failure, stop and report the error.
-- Fix root causes. Do not silence warnings, suppress errors, weaken assertions, or change test/label expectations to hide failures.
-- Do not add backwards-compatibility shims, deprecated re-exports, or legacy fallbacks.
+Investigate failures in the canonical runtime, reducer, rules, adapters, or
+fixture code. Fix root causes; do not weaken expectations or rewrite
+a fixture merely to make a failure disappear. Manual user feedback is
+append-only run data and must never be converted into fixture expectations.
 """

@@ -1,7 +1,12 @@
 # Hook Handlers
 
-Hook handlers implement the core logic for each host-agent hook event.
-They consume adapter-normalized tool calls through `AdapterSpec`: raw host
+Hook handlers are thin native boundaries for host-agent events. They parse the
+host payload, delegate through `src/entrypoints/host-hook.ts` into
+`ScenarioRuntime`, and encode the canonical result for the host. Behavioral
+logic lives in the Scenario effect executor and `src/rules/`; hook files do not
+implement a second rule pipeline.
+
+Handlers consume adapter-normalized tool calls through `AdapterSpec`: raw host
 tool names and inputs are canonicalized before shared rules run, while the
 adapter still owns host-specific LLM summaries, false-denial classification,
 appeal aliases, and output encoding.
@@ -10,8 +15,9 @@ Adapters live under `adapters/<name>/` and are responsible for translating
 raw host hook payloads and encoder output (exit code + optional stdout JSON)
 into the format the specific tool expects.
 
-This separation means the rule logic in `src/hooks/` is adapter-agnostic:
-adding a new AI coding tool only requires a new adapter, not changes here.
+This separation keeps `src/hooks/` limited to boundary wiring. Adding a new AI
+coding tool requires an adapter and host entrypoint wiring while the canonical
+runtime and shared rules remain unchanged.
 
 ## Bash Authorization
 

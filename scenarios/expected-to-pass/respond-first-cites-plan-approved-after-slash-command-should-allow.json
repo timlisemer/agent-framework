@@ -1,95 +1,294 @@
 {
-  "schema_version": 1,
   "name": "respond-first-cites-plan-approved-after-slash-command-should-allow",
   "description": "Live repro from ~/.claude/projects/-home-tim-Coding-nixos-files-ags/1ce7bbee-3ab5-4eec-b834-602d4663c3db.jsonl (lines 260, 300, 301, 305-306). User approved a plan yesterday (synthetic 'Plan approved. Proceed with implementation.' user msg at line 260), then today invoked /quickpush. Claude Code wrote two user-role entries for the slash command: line 300 carries the `<command-name>/quickpush</command-name>` tag, line 301 carries the slash-command body text ('You MUST use the MCP tools...') WITH `isMeta: true`. Assistant called mcp__agent-framework__commit with no preceding text. PreToolUse hook fastDenied: 'You must respond to the user with text before calling tools. The user said: \"Plan approved. Proceed with implementation.\"'. Bug: in src/utils/transcript.ts readTranscriptExact (~line 644) the `newestUserWasSlashCommand` flag is set on the FIRST user-role entry encountered during backward iteration, BEFORE the `excludeMetaMessages` filter. Line 301 (meta) is hit before line 300 (slash). Line 301's content lacks the `<command-name>` tag, so the flag becomes false. The meta filter then skips line 301, the slash filter skips line 300, leaving line 260 ('Plan approved...') as `lastUser`, and respond-first fastDenies citing it. Expected: allow -- newest user turn IS a slash command and respond-first must skip. This scenario is EXPECTED TO FAIL against current code.",
-  "transcript": [
-    {
-      "role": "user",
-      "content": "Plan approved. Proceed with implementation."
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "tool_use",
-          "id": "toolu_prior_exitplanmode",
-          "name": "ExitPlanMode",
-          "input": {
-            "plan": "# Plan (elided)"
+  "initialRun": {
+    "startCommand": {
+      "commandId": "respond-first-cites-plan-approved-after-slash-command-should-allow-start",
+      "runId": "fixture-respond-first-cites-plan-approved-after-slash-command-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/nixos/files/ags",
+        "projectDir": "/home/tim/Coding/nixos/files/ags",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
           }
-        }
-      ]
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
+    {
+      "commandId": "respond-first-cites-plan-approved-after-slash-command-should-allow-session-state",
+      "runId": "fixture-respond-first-cites-plan-approved-after-slash-command-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "User invoked /quickpush after approving a plan; assistant must commit and push.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "/quickpush",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 2
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "user",
-      "content": [
-        {
-          "type": "tool_result",
-          "tool_use_id": "toolu_prior_exitplanmode",
-          "content": "[ExitPlanMode] Exiting plan mode."
-        }
-      ]
+      "commandId": "respond-first-cites-plan-approved-after-slash-command-should-allow-message-0",
+      "runId": "fixture-respond-first-cites-plan-approved-after-slash-command-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "respond-first-cites-plan-approved-after-slash-command-should-allow-message-0",
+        "turnId": "respond-first-cites-plan-approved-after-slash-command-should-allow-turn-0",
+        "content": "Plan approved. Proceed with implementation.",
+        "contentDigest": "sha256:9ef69c67dc3609e54f54451d8d3d621c2997ff56315db77c9cd486b92972d7ab"
+      }
     },
     {
-      "role": "user",
-      "content": "<command-message>quickpush</command-message>\n<command-name>/quickpush</command-name>"
+      "commandId": "respond-first-cites-plan-approved-after-slash-command-should-allow-message-1",
+      "runId": "fixture-respond-first-cites-plan-approved-after-slash-command-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "respond-first-cites-plan-approved-after-slash-command-should-allow-message-1",
+        "turnId": null,
+        "content": "[tool ExitPlanMode] {\"plan\":\"# Plan (elided)\"}",
+        "contentDigest": "sha256:a3fda48fe0031dce59c3299d490d8d5980aa8536153d139592206c96c7ce1ede"
+      }
     },
     {
-      "role": "user",
-      "isMeta": true,
-      "content": [
-        {
-          "type": "text",
-          "text": "You MUST use the MCP tools listed in allowed-tools above. Under NO circumstances use raw git commands (git commit, git push, git add, etc.) directly.\n\n1. Call mcp__agent-framework__commit with:\n   - working_dir: current working directory\n   - model_tier: \"haiku\"\n   - skip_elicitation: true\n   - auto_push: true\n\n2. Report the commit and push results to the user.\n"
-        }
-      ]
+      "commandId": "respond-first-cites-plan-approved-after-slash-command-should-allow-message-2",
+      "runId": "fixture-respond-first-cites-plan-approved-after-slash-command-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "respond-first-cites-plan-approved-after-slash-command-should-allow-message-2",
+        "turnId": "respond-first-cites-plan-approved-after-slash-command-should-allow-turn-2",
+        "content": "[tool result toolu_prior_exitplanmode] [ExitPlanMode] Exiting plan mode.",
+        "contentDigest": "sha256:212876174d36c53b2a995f0a7a248f246fe17e76b9ac3217f60b4a26ad9bf496"
+      }
     },
     {
-      "role": "assistant_split",
-      "msg_id": "msg_scenario_quickpush_commit",
-      "lines": [
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "toolu_scenario_quickpush_commit",
-              "name": "mcp__agent-framework__commit",
-              "input": {
+      "commandId": "respond-first-cites-plan-approved-after-slash-command-should-allow-message-3",
+      "runId": "fixture-respond-first-cites-plan-approved-after-slash-command-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:06.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "respond-first-cites-plan-approved-after-slash-command-should-allow-message-3",
+        "turnId": "respond-first-cites-plan-approved-after-slash-command-should-allow-turn-3",
+        "content": "<command-message>quickpush</command-message>\n<command-name>/quickpush</command-name>",
+        "contentDigest": "sha256:d9d924936d927997437ce60f1d32df58221d6b89ae2e3d19db21c907c9fcb633"
+      }
+    },
+    {
+      "commandId": "respond-first-cites-plan-approved-after-slash-command-should-allow-message-4",
+      "runId": "fixture-respond-first-cites-plan-approved-after-slash-command-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:07.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "respond-first-cites-plan-approved-after-slash-command-should-allow-message-4",
+        "turnId": "respond-first-cites-plan-approved-after-slash-command-should-allow-turn-4",
+        "content": "You MUST use the MCP tools listed in allowed-tools above. Under NO circumstances use raw git commands (git commit, git push, git add, etc.) directly.\n\n1. Call mcp__agent-framework__commit with:\n   - working_dir: current working directory\n   - model_tier: \"haiku\"\n   - skip_elicitation: true\n   - auto_push: true\n\n2. Report the commit and push results to the user.\n",
+        "contentDigest": "sha256:d978525b6006fc52a380e9dad6fba54d3722a4b54ef57887380425ff83011ad1"
+      }
+    },
+    {
+      "commandId": "respond-first-cites-plan-approved-after-slash-command-should-allow-message-5",
+      "runId": "fixture-respond-first-cites-plan-approved-after-slash-command-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:08.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "msg_scenario_quickpush_commit",
+        "turnId": null,
+        "content": "[tool mcp__agent-framework__commit] {\"working_dir\":\"/home/tim/Coding/nixos/files/ags\",\"model_tier\":\"haiku\",\"skip_elicitation\":true,\"auto_push\":true}",
+        "contentDigest": "sha256:3c555da8a2a94db585b400d03fa6c4132f4f72b90c26227802103b1cdcfe17a6"
+      }
+    },
+    {
+      "commandId": "respond-first-cites-plan-approved-after-slash-command-should-allow-target-tool",
+      "runId": "fixture-respond-first-cites-plan-approved-after-slash-command-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:09.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "User invoked /quickpush after approving a plan; assistant must commit and push.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "/quickpush",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 2
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-respond-first-cites-plan-approved-after-slash-command-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/respond-first-cites-plan-approved-after-slash-command-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-respond-first-cites-plan-approved-after-slash-command-should-allow",
+            "projectDir": "/home/tim/Coding/nixos/files/ags",
+            "workingDir": "/home/tim/Coding/nixos/files/ags",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/nixos/files/ags",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "mcp__agent-framework__commit",
+              "rawToolInput": {
                 "working_dir": "/home/tim/Coding/nixos/files/ags",
                 "model_tier": "haiku",
                 "skip_elicitation": true,
                 "auto_push": true
-              }
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "You MUST use the MCP tools listed in allowed-tools above. Under NO circumstances use raw git commands (git commit, git push, git add, etc.) directly.\n\n1. Call mcp__agent-framework__commit with:\n   - working_dir: current working directory\n   - model_tier: \"haiku\"\n   - skip_elicitation: true\n   - auto_push: true\n\n2. Report the commit and push results to the user.\n",
+              "latestUserLogicText": "You MUST use the MCP tools listed in allowed-tools above. Under NO circumstances use raw git commands (git commit, git push, git add, etc.) directly.\n\n1. Call mcp__agent-framework__commit with:\n   - working_dir: current working directory\n   - model_tier: \"haiku\"\n   - skip_elicitation: true\n   - auto_push: true\n\n2. Report the commit and push results to the user.\n",
+              "recentUserMessages": [
+                "Plan approved. Proceed with implementation.",
+                "[tool result toolu_prior_exitplanmode] [ExitPlanMode] Exiting plan mode.",
+                "<command-message>quickpush</command-message>\n<command-name>/quickpush</command-name>",
+                "You MUST use the MCP tools listed in allowed-tools above. Under NO circumstances use raw git commands (git commit, git push, git add, etc.) directly.\n\n1. Call mcp__agent-framework__commit with:\n   - working_dir: current working directory\n   - model_tier: \"haiku\"\n   - skip_elicitation: true\n   - auto_push: true\n\n2. Report the commit and push results to the user.\n"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": [
+                "mcp-commit"
+              ],
+              "planExit": false,
+              "batch": null
             }
-          ]
+          },
+          "toolCallId": "toolu_scenario_quickpush_commit",
+          "turnId": null,
+          "name": "mcp-commit",
+          "input": {
+            "working_dir": "/home/tim/Coding/nixos/files/ags",
+            "model_tier": "haiku",
+            "skip_elicitation": true,
+            "auto_push": true
+          },
+          "inputDigest": "sha256:d0d6ee7c84db206f23b0f031504244ddb5ef57ed43ac0161d28a29c078b1558c",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_quickpush_commit"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/nixos/files/ags",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "User invoked /quickpush after approving a plan; assistant must commit and push.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "/quickpush"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 2
-  },
-  "expect": {
-    "expected": "allow",
-    "by": "all-rules",
-    "notes": "Newest non-meta user turn is a slash command; respond-first must skip. Fix: the `newestUserWasSlashCommand` detection in readTranscriptExact must skip meta messages when finding the 'newest' user entry -- or look across all non-meta user entries until it finds the slash-command tag."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "respond-first-cites-plan-approved-after-slash-command-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

@@ -21,7 +21,6 @@ import {
   getGitStatusCancellable,
   getGitVisibleFileInventoryCancellable,
   getUncommittedChangesCancellable,
-  getUncommittedChanges,
   parsePorcelainStatusLine,
   sortReposWithChangesSubmodulesFirst,
 } from "../../src/utils/git-utils.js";
@@ -395,16 +394,6 @@ describe("bounded git utilities", () => {
       );
     }
     expect(changes.untrackedLinesChanged).toBe(8);
-  });
-
-  it("preserves unusual untracked paths in the synchronous collector", () => {
-    const relativePath = "sync-line\nbreak.ts";
-    fs.writeFileSync(path.join(repoDir, relativePath), "export const syncValue = 1;\n");
-
-    const changes = getUncommittedChanges(repoDir);
-
-    expect(changes.status).toContain(`?? ${JSON.stringify(relativePath)}`);
-    expect(changes.diff).toContain("+export const syncValue = 1;");
   });
 
   it("retains compact deterministic prefilter candidates from untracked text", async () => {
@@ -1384,7 +1373,8 @@ describe("multi-repo git context helpers", () => {
           status: " M sub.ts",
           diff: "diff --git a/sub.ts b/sub.ts",
           diffStat: "sub.ts | 1 +",
-          untrackedDiff: "",
+          untrackedInventory: "",
+          untrackedLinesChanged: 0,
         },
       },
     ];

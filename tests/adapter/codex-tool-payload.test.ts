@@ -5,7 +5,7 @@ import {
   codexTranscriptToolLogMatchIsStable,
   extractCodexToolPaths,
 } from "../../adapters/codex/tool-payload.js";
-import type { ToolLogEntry } from "../../src/utils/session-store.js";
+import type { ToolLogEntry } from "../../src/utils/tool-log-types.js";
 
 describe("Codex tool payload helpers", () => {
   it("canonicalizes path fields with one sorted unique policy", () => {
@@ -35,6 +35,18 @@ describe("Codex tool payload helpers", () => {
       "exec_command",
       { command: "sed -n '1,20p' .env" }
     )).toBe(false);
+  });
+
+  it("identifies write_stdin as continuation of canonical Bash work", () => {
+    expect(codexTranscriptToolLogIdentityKey(
+      "write_stdin",
+      { session_id: 42, chars: "cargo test\n" },
+    )).toBe("Bash:cmd:cargo test");
+    expect(codexToolLogEntryMatchesToolCall(
+      toolLog({ tool: "Bash", cmd: "cargo test" }),
+      "write_stdin",
+      { session_id: 42, chars: "cargo test\n" },
+    )).toBe(true);
   });
 
   it("matches file tools by canonical full path list", () => {

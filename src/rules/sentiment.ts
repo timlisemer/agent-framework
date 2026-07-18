@@ -12,14 +12,14 @@ import {
   decideNextWindowSize,
   deriveWorkflowToolRequirementsFromText,
   uniqueToolRequirements,
-  type ToolRequirement,
 } from "../utils/prediction-types.js";
+import type { ToolRequirement } from "../utils/prediction-schema.js";
 import { preClassifyMood, extractDirectiveHint, preClassifyCalm } from "../utils/sentiment-prefilter.js";
 import {
   deriveEditIntentFromPrediction,
   deriveAllowedToolsFromIntent,
 } from "../utils/edit-intent.js";
-import { clearGateReasoning } from "../utils/gate-reasoning-cache.js";
+import { isCancellationError } from "../utils/cancellation.js";
 
 const SENTIMENT_TIMEOUT_MS = 12000;
 
@@ -45,7 +45,6 @@ export const sentimentRule: PreToolRule = {
 
     const userPrompt = ctx.userPrompt;
     const projectDir = ctx.projectDir;
-    const sessionDir = ctx.sessionDir;
     const planMode = ctx.planMode;
     const stateManager = ctx.stateManager;
 
@@ -94,7 +93,8 @@ export const sentimentRule: PreToolRule = {
           `RECENT USER MESSAGES (with [Tn] indices, T0 = newest; full unstripped text):\n${recent}\n\n` +
           `LATEST USER MESSAGE (authoritative full unstripped text):\n${userPrompt}\n\n` +
           strippedHelperSection,
-      }
+      },
+      { signal: ctx.signal },
     );
     const timeoutPromise = new Promise<null>((resolve) =>
       setTimeout(() => resolve(null), SENTIMENT_TIMEOUT_MS)
@@ -183,9 +183,6 @@ export const sentimentRule: PreToolRule = {
         const derivedEditIntent = deriveEditIntentFromPrediction(predictionForDerivation);
         const finalEditIntent = planMode ? false : derivedEditIntent;
 
-        if (parsed.contextSwitch === "yes") {
-          await clearGateReasoning(sessionDir);
-        }
         await stateManager.update((s) => ({
           ...s,
           previousEditIntent: s.currentEditIntent ?? null,
@@ -207,6 +204,7 @@ export const sentimentRule: PreToolRule = {
           lastProcessedPlanApprovalToolUseId: null,
           driftState: {},
           lastUserMessageTimestamp: Date.now(),
+          gateReasoningResetAt: parsed.contextSwitch === "yes" ? Date.now() : s.gateReasoningResetAt,
         }));
       } else {
         const reason = !sentimentResult
@@ -246,6 +244,7 @@ export const sentimentRule: PreToolRule = {
         }));
       }
     } catch (err) {
+      if (isCancellationError(err)) throw err;
       console.error("[sentiment-rule] sentiment agent failed:", err);
     }
 

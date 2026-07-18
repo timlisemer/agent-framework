@@ -16,6 +16,7 @@ import { hashString } from "./hash-utils.js";
 import { resolveHostContext } from "./host-context.js";
 import { isPathAtOrInside } from "./path-containment.js";
 import { internalRuntimeDirNameForProfile, type RuntimeHomeProfile } from "../runtime-home/profiles.js";
+import { requireScenarioName } from "../scenario/name.js";
 
 // ─── In-memory caches ─────────────────────────────────────────────────────
 
@@ -44,15 +45,15 @@ export function runtimeRoot(): string {
 /**
  * Shared root for managed AI runtime homes.
  */
-export function astralAiRoot(): string {
-  return path.join(runtimeRoot(), "astral-ai");
+export function managedRuntimeRoot(profile = "default"): string {
+  return path.join(runtimeRoot(), "managed", profile);
 }
 
 /**
  * Managed runtime home for a provider or adapter runtime name.
  */
 export function managedProviderRoot(provider: string): string {
-  return path.join(astralAiRoot(), provider);
+  return path.join(managedRuntimeRoot(), provider);
 }
 
 /**
@@ -382,48 +383,12 @@ function writeSidecarIfNeeded(dirPath: string, transcriptPath: string): void {
   }
 }
 
-export function sessionStateFile(sessionDir: string): string {
-  return path.join(sessionDir, "state.json");
-}
-
-export function sessionCurrentPlanFile(sessionDir: string): string {
-  return path.join(sessionDir, "current-plan.json");
-}
-
-export function sessionPlanValidationStatusFile(sessionDir: string): string {
-  return path.join(sessionDir, "plan-validation-status.json");
-}
-
 export function sessionPlansDir(sessionDir: string): string {
   return path.join(sessionDir, "plans");
 }
 
 export function sessionPlanFile(sessionDir: string, planName: string): string {
   return path.join(sessionPlansDir(sessionDir), `${planName}.md`);
-}
-
-export function sessionToolLogFile(sessionDir: string): string {
-  return path.join(sessionDir, "tool-log.jsonl");
-}
-
-export function sessionPlanModeStateFile(sessionDir: string): string {
-  return path.join(sessionDir, "plan-mode-state.json");
-}
-
-export function sessionPlanModeEventsFile(sessionDir: string): string {
-  return path.join(sessionDir, "plan-mode-events.jsonl");
-}
-
-export function sessionInjectionsFile(sessionDir: string): string {
-  return path.join(sessionDir, "session-injections.jsonl");
-}
-
-export function sessionGateReasoningFile(sessionDir: string): string {
-  return path.join(sessionDir, "gate-reasoning.json");
-}
-
-export function sessionStatuslineFile(sessionDir: string): string {
-  return path.join(sessionDir, "statusline.json");
 }
 
 /**
@@ -443,40 +408,8 @@ export function transcriptRunDir(name: string): string {
   return path.join(testRunsRoot(), name);
 }
 
-export function testRunFile(name: string, filename: string): string {
-  return path.join(transcriptRunDir(name), filename);
-}
-
-export function transcriptCopyFile(name: string): string {
-  return path.join(transcriptRunDir(name), "transcript.jsonl");
-}
-
-export function transcriptLabelFile(name: string): string {
-  return path.join(transcriptRunDir(name), "labels.json");
-}
-
-export function transcriptDraftLabelFile(name: string): string {
-  return path.join(transcriptRunDir(name), "labels.draft.json");
-}
-
-export function transcriptReportFile(name: string, single: boolean): string {
-  return path.join(transcriptRunDir(name), single ? "report-single.json" : "report.json");
-}
-
-export function transcriptNotesFile(name: string): string {
-  return path.join(transcriptRunDir(name), "notes_and_questions.md");
-}
-
-export function transcriptMcpStateFile(name: string): string {
-  return path.join(transcriptRunDir(name), "mcp-state.json");
-}
-
 export function transcriptCacheDir(name: string): string {
   return path.join(transcriptRunDir(name), "cache");
-}
-
-export function transcriptReplayPidFile(name: string): string {
-  return path.join(transcriptCacheDir(name), "replay.pid");
 }
 
 // ─── Scenario paths (flat layout) ─────────────────────────────────────────
@@ -486,12 +419,7 @@ export function scenariosRoot(): string {
 }
 
 export function scenarioRunDir(name: string): string {
-  if (!/^[A-Za-z0-9._-]+$/.test(name)) {
-    throw new Error(`invalid scenario name (must match [A-Za-z0-9._-]+): ${name}`);
-  }
-  if (name === "." || name === "..") {
-    throw new Error(`invalid scenario name (must not be "." or ".."): ${name}`);
-  }
+  requireScenarioName(name);
   const root = path.resolve(scenariosRoot());
   const candidate = path.resolve(root, name);
   if (!isPathAtOrInside(candidate, root)) {
@@ -500,47 +428,10 @@ export function scenarioRunDir(name: string): string {
   return candidate;
 }
 
-export function scenarioJsonFile(name: string): string {
-  return path.join(scenarioRunDir(name), "scenario.json");
-}
-
-export function scenarioReportFile(name: string): string {
-  return path.join(scenarioRunDir(name), "report-scenario.json");
-}
-
-export function scenarioLastRunFile(name: string): string {
-  return path.join(scenarioRunDir(name), "last-run.json");
-}
-
-export function scenarioCacheDir(name: string): string {
-  return path.join(scenarioRunDir(name), "cache");
-}
-
-export function scenarioPlansDir(name: string): string {
-  return path.join(scenarioRunDir(name), "plans");
-}
-
 // ─── Repo-relative + safety ────────────────────────────────────────────────
 
 export function distAdapterHookScript(name: string, adapter: string = "claude"): string {
   return path.join(agentFrameworkRoot(), "dist", "adapters", adapter, "hooks", `${name}.js`);
-}
-
-/** @deprecated Use distAdapterHookScript instead */
-export function distHookScript(name: string): string {
-  return distAdapterHookScript(name);
-}
-
-export function sessionCapturesFile(dir: string): string {
-  return path.join(dir, "captures.jsonl");
-}
-
-export function sessionStateSnapshotsFile(dir: string): string {
-  return path.join(dir, "state-snapshots.jsonl");
-}
-
-export function sessionEpochsFile(dir: string): string {
-  return path.join(dir, "epochs.jsonl");
 }
 
 export function packageJsonPath(): string {

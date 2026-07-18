@@ -35,8 +35,9 @@ Build-then-rebuild ordering:
 ## Claude-Specific Quirks
 
 - **assistant_split**: Claude Code sometimes writes one assistant message
-  as multiple JSONL lines that share the same `message.id`. The scenario
-  runner handles this via `role: "assistant_split"` entries.
+  as multiple JSONL lines that share the same `message.id`. The shared
+  transcript grouping path uses Claude's adapter-owned message group key to
+  aggregate their text and retain every tool block before canonical import.
 - **isMeta**: System-injected user messages (slash-command bodies,
   stop-hook feedback) carry `isMeta: true`. Rules like `respond-first` skip
   meta messages.

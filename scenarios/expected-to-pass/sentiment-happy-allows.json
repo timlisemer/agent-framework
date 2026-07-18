@@ -1,53 +1,241 @@
 {
-  "schema_version": 1,
   "name": "sentiment-happy-allows",
-  "description": "Happy mood allows the next Edit by default policy.",
-  "transcript": [
+  "description": "Live canonical PreToolUse regression: a happy, high-trust prediction reaches the real rule pipeline and allows the requested Edit.",
+  "initialRun": {
+    "startCommand": {
+      "commandId": "sentiment-happy-allows-start",
+      "runId": "fixture-sentiment-happy-allows",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": null,
+        "projectDir": null,
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "perfect, exactly what I wanted, please continue."
+      "commandId": "sentiment-happy-allows-session-state",
+      "runId": "fixture-sentiment-happy-allows",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "happy",
+            "trust": "high",
+            "intent": "user approves and wants AI to continue",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "perfect, exactly what I wanted, please continue.",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 2
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Continuing with the next change."
-        },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_edit_happy",
+      "commandId": "sentiment-happy-allows-message-0",
+      "runId": "fixture-sentiment-happy-allows",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "sentiment-happy-allows-message-0",
+        "turnId": "sentiment-happy-allows-turn-0",
+        "content": "perfect, exactly what I wanted, please continue.",
+        "contentDigest": "sha256:992ba49365bfdb044b7e96eae3ada80b7bf3c848fbef205749cc24c4e4fd2a25"
+      }
+    },
+    {
+      "commandId": "sentiment-happy-allows-message-1",
+      "runId": "fixture-sentiment-happy-allows",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "sentiment-happy-allows-message-1",
+        "turnId": null,
+        "content": "Continuing with the next change.\n[tool Edit] {\"file_path\":\"src/foo.ts\",\"old_string\":\"old\",\"new_string\":\"new\"}",
+        "contentDigest": "sha256:9228026c8951d991d380fc5c6ec3f0a02c703dbfba2b0e150f86f59417308570"
+      }
+    },
+    {
+      "commandId": "sentiment-happy-allows-target-tool",
+      "runId": "fixture-sentiment-happy-allows",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "happy",
+              "trust": "high",
+              "intent": "user approves and wants AI to continue",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "perfect, exactly what I wanted, please continue.",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 2,
+            "currentEditIntent": true
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-sentiment-happy-allows",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/sentiment-happy-allows.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-sentiment-happy-allows",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Edit",
+              "rawToolInput": {
+                "file_path": "src/foo.ts",
+                "old_string": "old",
+                "new_string": "new"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "perfect, exactly what I wanted, please continue.",
+              "latestUserLogicText": "perfect, exactly what I wanted, please continue.",
+              "recentUserMessages": [
+                "perfect, exactly what I wanted, please continue."
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_edit_happy",
+          "turnId": null,
           "name": "Edit",
           "input": {
             "file_path": "src/foo.ts",
             "old_string": "old",
             "new_string": "new"
-          }
+          },
+          "inputDigest": "sha256:070a7031f032499734220ee36e618f78cdbbf5fc31380190072ec2b3c2c614ad",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_edit_happy"
+  "effects": {
+    "mode": "live"
   },
-  "expect": {
-    "expected": "allow"
-  },
-  "predictions": {
-    "must_have_mood": "happy"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "happy",
-      "trust": "high",
-      "intent": "user approves and wants AI to continue",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "perfect, exactly what I wanted, please continue."
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 2
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "sentiment-happy-allows-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "payloadContains": {
+        "extensionId": "agent-framework.rule-pipeline",
+        "event": "rule.evaluation.completed",
+        "evaluation": {
+          "ruleId": "agent-framework.rule.prediction-block",
+          "result": "noMatch"
+        }
+      },
+      "count": 1
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

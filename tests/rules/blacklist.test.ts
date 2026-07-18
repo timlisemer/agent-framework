@@ -7,8 +7,7 @@ import { ALL_RULES } from "../../src/rules/index.js";
 import { evaluateRules } from "../../src/rules/evaluator.js";
 import { errorAcknowledgeRule } from "../../src/rules/error-acknowledge.js";
 import { predictionBlockRule } from "../../src/rules/prediction-block.js";
-import { sessionStateDefaults, type SessionState } from "../../src/utils/session-store.js";
-import { appendJsonlEntrySync } from "../../src/utils/file-io.js";
+import { sessionStateDefaults, type SessionState } from "../helpers/session-workflow.js";
 import {
   advanceRequiredToolsAfterAllowedTool,
   decidePrediction,
@@ -162,18 +161,6 @@ describe("blacklistRule", () => {
       stateManager: manager.stateManager,
       latestUserMessage: "validate the repository",
     });
-    const appendToolLog = (tool: string, status: "allowed" | "denied", reason?: string) => {
-      appendJsonlEntrySync(path.join(tempDir, "tool-log.jsonl"), {
-        ts: Date.now(),
-        toolUseId: `${tool}-${status}`,
-        tool,
-        status,
-        gate: "test",
-        reason,
-        ms: 1,
-      });
-    };
-
     try {
       const deniedCheckCommand = await evaluateRules(
         rules,
@@ -184,7 +171,6 @@ describe("blacklistRule", () => {
         decision: "deny",
         agent: "blacklist",
       });
-      appendToolLog("Bash", "denied", deniedCheckCommand?.reason);
       expect(manager.current().currentPrediction?.explicitlyRequiredTools?.map((item) => item.tool))
         .toEqual(["mcp-check"]);
 
@@ -220,7 +206,6 @@ describe("blacklistRule", () => {
             )
           : null,
       }));
-      appendToolLog("mcp-check", "allowed");
       await expect(evaluateRules(
         rules,
         pipelineCtx("Read", { file_path: path.join(tempDir, "README.md") }),

@@ -56,7 +56,7 @@ export function runtimeProfileRoot(
   runId?: string,
 ): string | null {
   if (profile === "native") return null;
-  if (profile === "managedAstral") return managedProviderRoot(provider);
+  if (profile === "managed") return managedProviderRoot(provider);
   const base = internalRuntimeHomeRoot(profile, provider);
   return runId ? path.join(base, runId) : base;
 }
@@ -82,7 +82,7 @@ export function materializeRuntimeHome(input: {
   try {
     if (root) {
       ensurePrivateDirectory(root);
-      if (input.profile === "managedAstral") {
+      if (input.profile === "managed") {
         syncAdapterHome(input.provider, root, env, input.profile);
       } else if (input.profile === "internalDirect") {
         syncMinimalAuthHome(input.provider, root, env);
@@ -151,13 +151,13 @@ export function sessionPolicyForProfile(profile: RuntimeHomeProfile): SessionPol
 
 export function resolveRuntimeHomeProfile(input: {
   runtimeHomeProfile?: RuntimeHomeProfile;
-  sdkRuntimeHome?: "native" | "managedAstral";
+  sdkRuntimeHome?: "native" | "managed";
   sdkRuntimeEnvironment?: "user" | "isolated";
   sdkToolPolicy?: SdkToolPolicy;
   runtimeExecutionMode?: "direct" | "sdk";
 }): RuntimeHomeProfile {
   if (input.runtimeHomeProfile) return input.runtimeHomeProfile;
-  if (input.sdkRuntimeHome === "managedAstral") return "managedAstral";
+  if (input.sdkRuntimeHome === "managed") return "managed";
   if (input.sdkRuntimeEnvironment === "user") return "native";
   if (input.sdkToolPolicy === "write") return "internalWrite";
   if (input.sdkToolPolicy === "none" || input.runtimeExecutionMode === "direct") return "internalDirect";
@@ -200,7 +200,7 @@ function syncAdapterHome(
   const adapter = runtimeHomeAdapter(provider);
   const sourceRoot = adapter.dotRoot(adapterRoot(provider));
   const preserved = preserveAuthFiles(provider, destinationRoot);
-  if (profile === "managedAstral") {
+  if (profile === "managed") {
     removeAdapterOwnedEntries(destinationRoot, [
       ...adapter.durableManagedEntries,
       ...adapter.authFiles,

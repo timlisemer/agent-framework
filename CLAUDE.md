@@ -22,11 +22,11 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical details and design decision
 | `src/utils/elicitation.ts`          | MCP elicitation helpers (repo selection, preferences, uncertainty) |
 | `adapters/claude/dotclaude/settings.json` | Hook configuration for Claude Code                           |
 | `src/adapter/types.ts`              | AdapterEncoder interface (single source of truth)                  |
-| `src/scenario/types.ts`             | Scenario schema + validateScenario + hook vocabularies             |
-| `src/utils/session-store.ts`        | SessionState cache + JSONL tool log                                |
-| `src/utils/prediction-types.ts`     | Sentiment-prediction shape + decidePrediction policy table         |
+| `src/scenario/fixtures/types.ts`    | Canonical scenario fixture schema                                  |
+| `src/effects/session-workflow.ts`   | Application-owned canonical workflow schema and retry helper       |
+| `src/utils/prediction-schema.ts`    | Authoritative sentiment-prediction and tool-requirement schemas    |
+| `src/utils/prediction-types.ts`     | Pure prediction decision and workflow-requirement logic            |
 | `src/utils/drift-detector.ts`      | Pure TypeScript drift/anomaly detection heuristics                 |
-| `src/utils/gate-reasoning-cache.ts` | Gate reasoning persistent memory for tool-approve                  |
 | `src/hooks/session-start.ts`        | Session lifecycle                                                  |
 | `src/utils/hook-bootstrap.ts`       | Shared hook stdin/exit infrastructure                              |
 

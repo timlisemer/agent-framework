@@ -1,8 +1,8 @@
-import type { SessionState } from "../../utils/session-store.js";
+import type { SessionWorkflowState } from "../../effects/session-workflow.js";
 import type { AppealUserState } from "../../rules/types.js";
 import { isSustainedFrustration } from "../../utils/prediction-types.js";
 
-export function buildAppealUserState(state: SessionState): AppealUserState {
+export function buildAppealUserState(state: SessionWorkflowState): AppealUserState {
   const p = state.currentPrediction;
   return {
     mood: p?.mood ?? null,

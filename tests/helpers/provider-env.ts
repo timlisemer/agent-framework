@@ -1,4 +1,5 @@
 import { resetProviderConfig } from "../../src/utils/provider-config.js";
+import { withEnvironmentForTest } from "./environment.js";
 
 const PROVIDER_ENV_KEYS = [
   "AGENT_FRAMEWORK_PROVIDER",
@@ -12,26 +13,11 @@ export function clearProviderEnvForTest(): () => void {
 }
 
 export function withEnvForTest(values: Record<string, string | undefined>): () => void {
-  const saved = new Map<string, string | undefined>();
-  for (const [key, value] of Object.entries(values)) {
-    saved.set(key, process.env[key]);
-    if (value === undefined) {
-      delete process.env[key];
-    } else {
-      process.env[key] = value;
-    }
-  }
+  const restoreEnvironment = withEnvironmentForTest(values);
   resetProviderConfig();
 
   return () => {
-    for (const key of Object.keys(values)) {
-      const value = saved.get(key);
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
-    }
+    restoreEnvironment();
     resetProviderConfig();
   };
 }

@@ -1,60 +1,238 @@
 {
-  "schema_version": 1,
   "name": "codex-apply-patch-angry-explicit-edit-should-allow",
   "description": "Live repro from ~/.agent-framework/sessions/home-tim-Coding-nixos/2026-05-04-1338_1cfd11d1 capture seq 19 / Codex toolUseId call_3wHQzbjry2uj6YUs8mZL7u4x. User angrily but explicitly requested the exact edit: 'FUCK YOU DO THE FUCKING EDIT NOW'. SENTIMENT_AGENT extracted intent='User demands the AI immediately perform the edit right now.' and explicitlyAllowedTools=['Edit','Write']; nevertheless prediction-block denied Codex apply_patch with 'Blocking apply_patch unless explicitly requested.' Correct behavior: allow. User anger/profanity must not block a directly requested edit, and Codex apply_patch should inherit the same edit authorization as Edit/Write.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "codex-apply-patch-angry-explicit-edit-should-allow-start",
+      "runId": "fixture-codex-apply-patch-angry-explicit-edit-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/nixos",
+        "projectDir": "/home/tim/Coding/nixos",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "FUCK YOU DO THE FUCKING EDIT NOW"
+      "commandId": "codex-apply-patch-angry-explicit-edit-should-allow-session-state",
+      "runId": "fixture-codex-apply-patch-angry-explicit-edit-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "User demands the AI immediately perform the edit right now.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [
+              "Edit",
+              "Write"
+            ],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a",
+            "userMessageSnippet": "FUCK YOU DO THE FUCKING EDIT NOW",
+            "timestamp": 1
+          },
+          "frustrationStreak": 4,
+          "currentWindowSize": 12
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "I will finish the missing edit now."
-        },
-        {
-          "type": "tool_use",
-          "id": "toolu_codex_apply_patch_explicit_edit",
-          "name": "apply_patch",
+      "commandId": "codex-apply-patch-angry-explicit-edit-should-allow-message-0",
+      "runId": "fixture-codex-apply-patch-angry-explicit-edit-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "codex-apply-patch-angry-explicit-edit-should-allow-message-0",
+        "turnId": "codex-apply-patch-angry-explicit-edit-should-allow-turn-0",
+        "content": "FUCK YOU DO THE FUCKING EDIT NOW",
+        "contentDigest": "sha256:78235ef5e4d4845c90c3b2098cb13db9aec859fb673550b89b2223b8473199a0"
+      }
+    },
+    {
+      "commandId": "codex-apply-patch-angry-explicit-edit-should-allow-message-1",
+      "runId": "fixture-codex-apply-patch-angry-explicit-edit-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "codex-apply-patch-angry-explicit-edit-should-allow-message-1",
+        "turnId": null,
+        "content": "I will finish the missing edit now.\n[tool apply_patch] {\"command\":\"*** Begin Patch\\n*** Update File: /home/tim/Coding/nixos/desktop-environments/hyprland.nix\\n@@\\n-  hyprlandPackage = unstable.hyprland.overrideAttrs (old: {\\n+  hyprlandPackage = unstable.hyprland.overrideAttrs (old: {\\n+    postInstall =\\n+      (old.postInstall or \\\"\\\")\\n+      + ''\\n+        rm -f $out/share/wayland-sessions/hyprland-uwsm.desktop\\n+      '';\\n     passthru =\\n       (old.passthru or {})\\n       // {\\n*** End Patch\\n\"}",
+        "contentDigest": "sha256:a1ad5a7e0f69d3f8e5b40e17d7de5a13de500ea76c59daf9213130bf9ccdb66f"
+      }
+    },
+    {
+      "commandId": "codex-apply-patch-angry-explicit-edit-should-allow-target-tool",
+      "runId": "fixture-codex-apply-patch-angry-explicit-edit-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "User demands the AI immediately perform the edit right now.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [
+                "Edit",
+                "Write"
+              ],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "userMessageSnippet": "FUCK YOU DO THE FUCKING EDIT NOW",
+              "timestamp": 1
+            },
+            "frustrationStreak": 4,
+            "currentWindowSize": 12
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-codex-apply-patch-angry-explicit-edit-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/codex-apply-patch-angry-explicit-edit-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-codex-apply-patch-angry-explicit-edit-should-allow",
+            "projectDir": "/home/tim/Coding/nixos",
+            "workingDir": "/home/tim/Coding/nixos",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/nixos",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "preTool": {
+              "rawToolName": "apply_patch",
+              "rawToolInput": {
+                "command": "*** Begin Patch\n*** Update File: /home/tim/Coding/nixos/desktop-environments/hyprland.nix\n@@\n-  hyprlandPackage = unstable.hyprland.overrideAttrs (old: {\n+  hyprlandPackage = unstable.hyprland.overrideAttrs (old: {\n+    postInstall =\n+      (old.postInstall or \"\")\n+      + ''\n+        rm -f $out/share/wayland-sessions/hyprland-uwsm.desktop\n+      '';\n     passthru =\n       (old.passthru or {})\n       // {\n*** End Patch\n"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "FUCK YOU DO THE FUCKING EDIT NOW",
+              "latestUserLogicText": "FUCK YOU DO THE FUCKING EDIT NOW",
+              "recentUserMessages": [
+                "FUCK YOU DO THE FUCKING EDIT NOW"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_codex_apply_patch_explicit_edit",
+          "turnId": null,
+          "name": "Edit",
           "input": {
-            "command": "*** Begin Patch\n*** Update File: /home/tim/Coding/nixos/desktop-environments/hyprland.nix\n@@\n-  hyprlandPackage = unstable.hyprland.overrideAttrs (old: {\n+  hyprlandPackage = unstable.hyprland.overrideAttrs (old: {\n+    postInstall =\n+      (old.postInstall or \"\")\n+      + ''\n+        rm -f $out/share/wayland-sessions/hyprland-uwsm.desktop\n+      '';\n     passthru =\n       (old.passthru or {})\n       // {\n*** End Patch\n"
-          }
+            "file_path": "/home/tim/Coding/nixos/desktop-environments/hyprland.nix",
+            "file_paths": [
+              "/home/tim/Coding/nixos/desktop-environments/hyprland.nix"
+            ]
+          },
+          "inputDigest": "sha256:a7ae14d5f377c0e0bcc93db2d56da05f474e937214f6ddec7729affeae2cd551",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_codex_apply_patch_explicit_edit"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/nixos",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "User demands the AI immediately perform the edit right now.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [
-        "Edit",
-        "Write"
-      ],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "contextSwitch": "no",
-      "questionIsStalling": "n/a",
-      "userMessageSnippet": "FUCK YOU DO THE FUCKING EDIT NOW"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 4,
-    "currentWindowSize": 12
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "Correct behavior is allow because the latest user request explicitly commands this edit; mood-driven denial must not override explicit user authorization. Codex apply_patch is an edit-class tool and should be covered by Edit/Write authorization."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "codex-apply-patch-angry-explicit-edit-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

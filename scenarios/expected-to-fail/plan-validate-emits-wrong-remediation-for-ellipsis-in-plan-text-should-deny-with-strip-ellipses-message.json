@@ -1,65 +1,227 @@
 {
-  "schema_version": 1,
   "name": "plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message",
   "description": "Live repro from ~/.claude/projects/-home-tim-Coding-nixos/e05c9f83-d2ae-4b48-84d9-6296f5e5905d.jsonl (2026-04-28, line 161 firing tool toolu_01GZ9fW5pyv1ud43y4pbFy4S). Two-layer regression: (1) the bash blacklist regex /\\btail\\s+/ in src/utils/command-patterns.ts originally matched the literal word 'tail' anywhere — including inside string literals embedded in shell commands — so a command like `node -e 'console.log(\"Capture the tail in the enriched sentinel\")'` was denied with the nonsense suffix 'Use Read tool with offset'; (2) the deterministic fastDeny was further masked by the tool-approve appeal LLM (appealable per src/rules/tool-approve.ts:19), which consistently OVERTURNED a correct check-redirect deny on `node -e` because TOOL_APPEAL_AGENT.systemPrompt's Rule 2 NEVER-OVERTURN list omitted code-execution interpreters and Rule 3's 'Used node/python/other language' wording was misread when node IS the denied command. Both layers are fixed: (a) src/utils/command-patterns.ts now scopes the cat/head/tail head-command match to the executable head of each shell command segment (split on ;, &&, ||, and & with a (?!\\d) lookahead preserving 2>&1; pipe `|` remains non-separating; quoted spans stripped before splitting); (b) src/utils/agent-configs.ts strengthens Rule 4 (CHECK-REDIRECT) to TRUMP Rules 1/2/3, extends Rule 2's NEVER-OVERTURN list to cover node/python/python3/ruby/perl direct invocations including -e/-c/-r/--eval inline scripts, and tightens Rule 3 with a precondition that fails when the BLOCK REASON names the same runtime being attempted; src/agents/hooks/tool-appeal.ts now extracts the denied-command token from canonical resolveCheckMessage shapes and surfaces it inside the DENIAL CLASS block. Now passes deterministically 3/3.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message-start",
+      "runId": "fixture-plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "please print the captured tail in the enriched sentinel for verification"
+      "commandId": "plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message-session-state",
+      "runId": "fixture-plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "User wants a quick verification print of a captured tail value via node.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "please print the captured tail in the enriched sentinel for verification",
+            "blockAllTools": false,
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Running the verification script now."
-        },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_bash_with_tail_word_in_string",
+      "commandId": "plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message-message-0",
+      "runId": "fixture-plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message-message-0",
+        "turnId": "plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message-turn-0",
+        "content": "please print the captured tail in the enriched sentinel for verification",
+        "contentDigest": "sha256:3703322d5768822d557f162132375f1389d18a32fd1b1656331b0f83b3306e16"
+      }
+    },
+    {
+      "commandId": "plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message-message-1",
+      "runId": "fixture-plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message-message-1",
+        "turnId": null,
+        "content": "Running the verification script now.\n[tool Bash] {\"command\":\"node -e 'console.log(\\\"Capture the tail in the enriched sentinel\\\")'\",\"description\":\"Print captured tail in enriched sentinel\"}",
+        "contentDigest": "sha256:7f24ec2f60dc4fbbb77b18e001b1658187f9455b72deff66d1eff35843c9137c"
+      }
+    },
+    {
+      "commandId": "plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message-target-tool",
+      "runId": "fixture-plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "User wants a quick verification print of a captured tail value via node.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "please print the captured tail in the enriched sentinel for verification",
+              "blockAllTools": false,
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Bash",
+              "rawToolInput": {
+                "command": "node -e 'console.log(\"Capture the tail in the enriched sentinel\")'",
+                "description": "Print captured tail in enriched sentinel"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "please print the captured tail in the enriched sentinel for verification",
+              "latestUserLogicText": "please print the captured tail in the enriched sentinel for verification",
+              "recentUserMessages": [
+                "please print the captured tail in the enriched sentinel for verification"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_bash_with_tail_word_in_string",
+          "turnId": null,
           "name": "Bash",
           "input": {
             "command": "node -e 'console.log(\"Capture the tail in the enriched sentinel\")'",
             "description": "Print captured tail in enriched sentinel"
-          }
+          },
+          "inputDigest": "sha256:108b5d7f2cc5375d2febaf364a863113de3d16e5ecc2ce684b4331aebcf0f0ce",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_bash_with_tail_word_in_string"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "User wants a quick verification print of a captured tail value via node.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "please print the captured tail in the enriched sentinel for verification",
-      "blockAllTools": false
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 4
-  },
-  "expect": {
-    "expected": "deny",
-    "by": "tool-approve",
-    "reason_must": {
-      "not_contains": [
-        "Use Read tool with offset"
-      ],
-      "contains": [
-        "node not covered by just check"
-      ]
+    {
+      "kind": "commandResult",
+      "commandId": "plan-validate-emits-wrong-remediation-for-ellipsis-in-plan-text-should-deny-with-strip-ellipses-message-target-tool",
+      "status": "denied"
     },
-    "notes": "Exercises the reason_must harness assertion: deny reason MUST contain 'node not covered by just check' and MUST NOT contain 'Use Read tool with offset'. The upstream src/utils/command-patterns.ts head-command scoping fix removes the bogus 'Use Read tool with offset' suffix; the appeal-LLM tightening in src/utils/agent-configs.ts (Rule 4 trumps Rules 2/3, Rule 2 NEVER-OVERTURN extended for node/python/ruby/perl, Rule 3 precondition narrowed) plus the denied-command-token surfacing in src/agents/hooks/tool-appeal.ts ensures the deterministic fastDeny is no longer overturned."
-  }
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "denied"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

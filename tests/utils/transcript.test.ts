@@ -607,7 +607,7 @@ describe("currentTurnAssistantState", () => {
     ]);
 
     const result = await readTranscriptExact(filePath, {
-      counts: { user: 1, assistant: 1 },
+      counts: { user: { count: 1 }, assistant: { count: 1 } },
     });
 
     expect(result.assistant).toEqual([
@@ -628,7 +628,7 @@ describe("currentTurnAssistantState", () => {
     ]);
 
     const result = await readTranscriptExact(filePath, {
-      counts: { user: 1, assistant: 2 },
+      counts: { user: { count: 1 }, assistant: { count: 2 } },
     });
 
     expect(result.assistantTextCandidates).toEqual([
@@ -660,7 +660,7 @@ describe("currentTurnAssistantState", () => {
     ]);
 
     const result = await readTranscriptExact(filePath, {
-      counts: { user: 1, assistant: 1, tool: 1 },
+      counts: { user: { count: 1 }, assistant: { count: 1 }, tool: { count: 1 } },
     });
 
     expect(result.assistant).toEqual([
@@ -755,7 +755,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
     ]);
 
     const result = await readTranscriptExact(filePath, {
-      counts: { user: 1 },
+      counts: { user: { count: 1 } },
       excludeSlashCommandPrompts: true,
       includeSlashCommandContext: true,
     });
@@ -774,7 +774,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
       ]);
 
       const result = await readTranscriptExact(filePath, {
-        counts: { user: 1 },
+        counts: { user: { count: 1 } },
         excludeSlashCommandPrompts: true,
         includeSlashCommandContext: true,
       });
@@ -802,7 +802,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
     ]);
 
     const result = await readTranscriptExact(filePath, {
-      counts: { user: 1 },
+      counts: { user: { count: 1 } },
       includeSlashCommandContext: true,
     });
 
@@ -820,7 +820,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
       ]);
 
       const result = await readTranscriptExact(filePath, {
-        counts: { user: 1 },
+        counts: { user: { count: 1 } },
         excludeSlashCommandPrompts: true,
         includeSlashCommandContext: true,
       });
@@ -851,7 +851,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
       ]);
 
       const exact = await readTranscriptExact(filePath, {
-        counts: { user: 2 },
+        counts: { user: { count: 2 } },
         excludeSlashCommandPrompts: true,
         includeSlashCommandContext: true,
       });
@@ -889,7 +889,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
       ]);
 
       const result = await readTranscriptExact(filePath, {
-        counts: { user: 1, assistant: 1 },
+        counts: { user: { count: 1 }, assistant: { count: 1 } },
         includeSlashCommandContext: true,
       });
       expect(result.user[0].content).toBe("$agent-framework-quickpush");
@@ -953,7 +953,7 @@ describe("resolveActiveSlashCommandAllowedTools", () => {
     expect(arrayResult).toEqual([message]);
   });
 
-  it("readRecentUserMessages keeps legacy stripped behavior by default", async () => {
+  it("readRecentUserMessages strips quoted content by default", async () => {
     const filePath = writeTranscript([
       userText('please do this "quoted text"'),
     ]);

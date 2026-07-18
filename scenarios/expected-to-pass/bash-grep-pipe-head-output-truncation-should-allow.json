@@ -1,54 +1,225 @@
 {
-  "schema_version": 1,
   "name": "bash-grep-pipe-head-output-truncation-should-allow",
   "description": "`grep ... | head -N` is output truncation, NOT a duplicate of the Read tool — Read has no equivalent capability for piping search results into a line-count slice. The deterministic blacklist's cat/head/tail rule applies only to `head FILE`, not to `cmd | head`. The LLM judge must not hallucinate a `duplicates Read tool` rule for the head-of-pipe case. Includes assistant text block before tool_use so respond-first (priority 5) does not fastDeny before tool-approve (priority 100) is reached.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "bash-grep-pipe-head-output-truncation-should-allow-start",
+      "runId": "fixture-bash-grep-pipe-head-output-truncation-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "find references to respondFirst, just first 20 lines"
+      "commandId": "bash-grep-pipe-head-output-truncation-should-allow-session-state",
+      "runId": "fixture-bash-grep-pipe-head-output-truncation-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "user wants references to respondFirst, first 20 lines only",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "find references to respondFirst, just first 20 lines",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 2
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Searching with output truncation."
-        },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_grep_pipe_head",
+      "commandId": "bash-grep-pipe-head-output-truncation-should-allow-message-0",
+      "runId": "fixture-bash-grep-pipe-head-output-truncation-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "bash-grep-pipe-head-output-truncation-should-allow-message-0",
+        "turnId": "bash-grep-pipe-head-output-truncation-should-allow-turn-0",
+        "content": "find references to respondFirst, just first 20 lines",
+        "contentDigest": "sha256:b6f8a538a32084bff85899e1b57bf4f4e49059bdf4e397df0021e683d1a22a9e"
+      }
+    },
+    {
+      "commandId": "bash-grep-pipe-head-output-truncation-should-allow-message-1",
+      "runId": "fixture-bash-grep-pipe-head-output-truncation-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "bash-grep-pipe-head-output-truncation-should-allow-message-1",
+        "turnId": null,
+        "content": "Searching with output truncation.\n[tool Bash] {\"command\":\"grep -n \\\"respondFirst\\\" src/utils/respond-first.ts | head -20\",\"description\":\"Grep with output truncation\"}",
+        "contentDigest": "sha256:def3edf0ce154375585cf7225dc0bc681f24ca5be235bcf2ae3d8ee54e5053f0"
+      }
+    },
+    {
+      "commandId": "bash-grep-pipe-head-output-truncation-should-allow-target-tool",
+      "runId": "fixture-bash-grep-pipe-head-output-truncation-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "user wants references to respondFirst, first 20 lines only",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "find references to respondFirst, just first 20 lines",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 2
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-bash-grep-pipe-head-output-truncation-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/bash-grep-pipe-head-output-truncation-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-bash-grep-pipe-head-output-truncation-should-allow",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Bash",
+              "rawToolInput": {
+                "command": "grep -n \"respondFirst\" src/utils/respond-first.ts | head -20",
+                "description": "Grep with output truncation"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "find references to respondFirst, just first 20 lines",
+              "latestUserLogicText": "find references to respondFirst, just first 20 lines",
+              "recentUserMessages": [
+                "find references to respondFirst, just first 20 lines"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_grep_pipe_head",
+          "turnId": null,
           "name": "Bash",
           "input": {
             "command": "grep -n \"respondFirst\" src/utils/respond-first.ts | head -20",
             "description": "Grep with output truncation"
-          }
+          },
+          "inputDigest": "sha256:3b2e943b67bb329f367705b4bbfcb03ec9307ae1408aba03811daa882b242f2e",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_grep_pipe_head"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "permission_mode": "default",
-    "cwd": "/home/tim/Coding/public_repos/agent-framework"
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "grep | head -N is the canonical output-truncation idiom; not covered by the head-of-file blacklist. Must approve."
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "user wants references to respondFirst, first 20 lines only",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "find references to respondFirst, just first 20 lines"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 2
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "bash-grep-pipe-head-output-truncation-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

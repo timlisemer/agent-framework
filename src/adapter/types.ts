@@ -8,9 +8,10 @@
  * @module adapter/types
  */
 
-import type { AiMetadata, AiProviderMetadataState, TokenUsage } from "../ai-protocol/index.js";
+import { z } from "zod";
+import type { ProviderMetadata, ProviderMetadataState, TokenUsage } from "../providers/provider-contract.js";
 import type { RuntimeHomeProfile, RuntimeToolPolicy } from "../runtime-home/profiles.js";
-import type { ToolLogEntry } from "../utils/session-store.js";
+import type { ToolLogEntry } from "../utils/tool-log-types.js";
 
 export type EventName =
   | "PreToolUse"
@@ -56,23 +57,30 @@ export type PlanExitDetectionInput =
   | { event: "Stop"; assistantText?: string | null }
   | { event: "UserPromptSubmit"; prompt: string };
 
-export type PlanModeDetectionSource =
-  | "codex-collaboration-mode"
-  | "hook-permission-mode"
-  | "transcript-permission-mode"
-  | "none";
+export const PLAN_MODE_DETECTION_SOURCES = [
+  "codex-collaboration-mode",
+  "hook-permission-mode",
+  "transcript-permission-mode",
+  "none",
+] as const;
+
+export const planModeDetectionSchema = z.object({
+  active: z.boolean(),
+  mode: z.string().nullable(),
+  source: z.enum(PLAN_MODE_DETECTION_SOURCES),
+}).strict();
+
+export type PlanModeDetectionSource = z.infer<typeof planModeDetectionSchema>["source"];
 
 export interface PlanModeDetectionInput {
   permissionMode?: string;
   collaborationMode?: string;
   transcriptPath?: string;
+  /** Stable adapter-native rows supplied by a boundary that already read the transcript. */
+  transcriptLines?: readonly string[];
 }
 
-export interface PlanModeDetection {
-  active: boolean;
-  mode: string | null;
-  source: PlanModeDetectionSource;
-}
+export type PlanModeDetection = z.infer<typeof planModeDetectionSchema>;
 
 // ── Canonical names ─────────────────────────────────────────────────────────
 
@@ -80,11 +88,11 @@ export type CanonicalMcp =
   | "check" | "commit" | "push" | "confirm" | "fullconfirm"
   | "implement" | "validate_implementation"
   | "transcript" | "validate_intent" | "validate_plan" | "create_planfile"
-  | "scenario_tester" | "scenario_labeler" | "locate_scenario";
+  | "scenario_tester" | "locate_scenario";
 
 export const CANONICAL_MCPS: readonly CanonicalMcp[] = [
   "check", "commit", "push", "confirm", "fullconfirm", "transcript",
-  "implement", "validate_implementation", "validate_intent", "validate_plan", "create_planfile", "scenario_tester", "scenario_labeler",
+  "implement", "validate_implementation", "validate_intent", "validate_plan", "create_planfile", "scenario_tester",
   "locate_scenario",
 ] as const;
 
@@ -119,21 +127,6 @@ export interface AdapterToolCallContext {
   canonicalToolInput: unknown;
 }
 
-export interface ScenarioMaterializeCtx {
-  sessionId: string;
-  cwd: string;
-  permissionMode: string;
-  codexCollaborationMode?: "plan" | "default";
-  prevUuid: string | null;
-  baseTs: number;
-}
-
-export interface MaterializedScenarioLine {
-  jsonl: string;
-  uuid: string;
-  toolUseIds: ReadonlyArray<{ refKey: string; resolvedId: string }>;
-}
-
 export interface AdapterRuntimeHomeSpec {
   dotRoot(adapterRoot: string): string;
   authFiles: readonly string[];
@@ -156,15 +149,17 @@ export interface AdapterRuntimeHomeSpec {
 
 // ── Host context (used by resolveHostContext) ────────────────────────────────
 
-export interface HostContext {
+export const hostContextSchema = z.object({
   /** Adapter name string. Typed as string to allow extension. */
-  adapter: string;
-  projectDir: string;
-  configRoot: string;
-  plansRoot: string;
-  instructionFiles: string[];
-  instructionLabel: string;
-}
+  adapter: z.string().min(1),
+  projectDir: z.string().min(1),
+  configRoot: z.string(),
+  plansRoot: z.string(),
+  instructionFiles: z.array(z.string()),
+  instructionLabel: z.string(),
+}).strict();
+
+export type HostContext = z.infer<typeof hostContextSchema>;
 
 export interface HostContextInput {
   cwd?: string;
@@ -178,8 +173,8 @@ export interface AdapterTranscriptFile {
 }
 
 export type AdapterResumeTarget = {
-  provider: string;
-  target: Record<string, string>;
+  sdkRuntime: string;
+  nativeSessionId: string;
 };
 
 export type AdapterSessionHistoryRecord = {
@@ -232,7 +227,7 @@ export interface ContentBlock {
   input?: Record<string, unknown>;
   is_error?: boolean;
   source?: TranscriptSource;
-  metadata?: AiMetadata;
+  metadata?: ProviderMetadata;
 }
 
 export interface TranscriptEntry {
@@ -240,7 +235,7 @@ export interface TranscriptEntry {
   source?: TranscriptSource;
   createdAt?: string;
   usage?: TokenUsage | null;
-  metadata?: AiMetadata;
+  metadata?: ProviderMetadata;
   message?: {
     id?: string;
     role: string;
@@ -329,7 +324,7 @@ export interface AdapterSpec {
   /** Extract provider-owned metadata from adapter-native transcript rows. */
   extractProviderMetadata?(
     input: ProviderMetadataExtractionInput,
-  ): Partial<AiProviderMetadataState>;
+  ): Partial<ProviderMetadataState>;
 
   /** True if a content string is an adapter-injected interruption message. */
   isInterruptionMessage(content: string): boolean;
@@ -370,14 +365,6 @@ export interface AdapterSpec {
 
   /** Detect native plan mode using adapter-owned host signals. */
   detectPlanMode(input: PlanModeDetectionInput): PlanModeDetection;
-
-  // ── Scenario materialization ────────────────────────────────────────────
-  /** Convert one canonical ScenarioEntry into JSONL line(s) on disk
-   *  in this adapter's wire format. */
-  materializeScenarioEntry(
-    entry: unknown,
-    ctx: ScenarioMaterializeCtx,
-  ): readonly MaterializedScenarioLine[];
 
   // ── Adapter tool continuation semantics ─────────────────────────────────
   /** True when this call's result may require an adapter-owned continuation. */

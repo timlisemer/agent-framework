@@ -1,0 +1,431 @@
+{
+  "name": "prediction-block-requires-exec-command-after-fulfilled-should-allow",
+  "description": "Minimized from live materialized scenario `requires-exec-command-repeated-after-checklist`: the hook requires `functions.exec_command` before Bash, but an earlier Codex exec_command/canonical Bash read has already completed successfully. Correct behavior is to allow the next read-only planfile inspection instead of blocking with the same already-satisfied prerequisite.",
+  "initialRun": {
+    "startCommand": {
+      "commandId": "prediction-block-requires-exec-command-after-fulfilled-should-allow-start",
+      "runId": "fixture-prediction-block-requires-exec-command-after-fulfilled-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
+    {
+      "commandId": "prediction-block-requires-exec-command-after-fulfilled-should-allow-session-state",
+      "runId": "fixture-prediction-block-requires-exec-command-after-fulfilled-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "high",
+            "intent": "The user wants a fresh critique of the edited planfile, using a read-only review workflow.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [
+              "functions.exec_command",
+              "Read"
+            ],
+            "explicitlyRequiredTools": [
+              {
+                "tool": "functions.exec_command"
+              }
+            ],
+            "nonBlockingTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back.",
+            "blockAllTools": false,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "commandId": "prediction-block-requires-exec-command-after-fulfilled-should-allow-message-0",
+      "runId": "fixture-prediction-block-requires-exec-command-after-fulfilled-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-requires-exec-command-after-fulfilled-should-allow-message-0",
+        "turnId": "prediction-block-requires-exec-command-after-fulfilled-should-allow-turn-0",
+        "content": "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back.",
+        "contentDigest": "sha256:446fe4c312410e72992fbde705226a3c37bd1ba9a5dcaa235d9610452a56020a"
+      }
+    },
+    {
+      "commandId": "prediction-block-requires-exec-command-after-fulfilled-should-allow-required-tool",
+      "runId": "fixture-prediction-block-requires-exec-command-after-fulfilled-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "high",
+              "intent": "The user wants a fresh critique of the edited planfile, using a read-only review workflow.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [
+                "functions.exec_command",
+                "Read"
+              ],
+              "explicitlyRequiredTools": [
+                {
+                  "tool": "functions.exec_command"
+                }
+              ],
+              "nonBlockingTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back.",
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-prediction-block-requires-exec-command-after-fulfilled-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/prediction-block-requires-exec-command-after-fulfilled-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-prediction-block-requires-exec-command-after-fulfilled-should-allow",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "preTool": {
+              "rawToolName": "exec_command",
+              "rawToolInput": {
+                "cmd": "sed -n '1,260p' /home/tim/.agent-framework/sessions/home-tim-Coding-private_repos-astral/2026-06-20-1301_b228dc2b/plans/astral-ai-panel-sessions-and-tabs.md",
+                "workdir": "/home/tim/Coding/public_repos/agent-framework",
+                "max_output_tokens": 12000
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back.",
+              "latestUserLogicText": "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back.",
+              "recentUserMessages": [
+                "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back."
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "call_required_exec_command",
+          "turnId": null,
+          "name": "Bash",
+          "input": {
+            "command": "sed -n '1,260p' /home/tim/.agent-framework/sessions/home-tim-Coding-private_repos-astral/2026-06-20-1301_b228dc2b/plans/astral-ai-panel-sessions-and-tabs.md"
+          },
+          "inputDigest": "sha256:f585cac8f30f2d370a9c135c3a78dc1b5de6bc44fb305121a9cd2c5fce60ba95",
+          "requiresUserDecision": false
+        }
+      }
+    },
+    {
+      "commandId": "prediction-block-requires-exec-command-after-fulfilled-should-allow-required-tool-completed",
+      "runId": "fixture-prediction-block-requires-exec-command-after-fulfilled-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPostToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "high",
+              "intent": "The user wants a fresh critique of the edited planfile, using a read-only review workflow.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [
+                "functions.exec_command",
+                "Read"
+              ],
+              "explicitlyRequiredTools": [],
+              "nonBlockingTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back.",
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 4,
+            "toolCallCount": 1
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-prediction-block-requires-exec-command-after-fulfilled-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/prediction-block-requires-exec-command-after-fulfilled-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-prediction-block-requires-exec-command-after-fulfilled-should-allow",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "postTool": {
+              "rawToolName": "exec_command",
+              "rawToolInput": {
+                "cmd": "sed -n '1,260p' /home/tim/.agent-framework/sessions/home-tim-Coding-private_repos-astral/2026-06-20-1301_b228dc2b/plans/astral-ai-panel-sessions-and-tabs.md",
+                "workdir": "/home/tim/Coding/public_repos/agent-framework",
+                "max_output_tokens": 12000
+              }
+            }
+          },
+          "toolCallId": "call_required_exec_command",
+          "name": "Bash",
+          "input": {
+            "command": "sed -n '1,260p' /home/tim/.agent-framework/sessions/home-tim-Coding-private_repos-astral/2026-06-20-1301_b228dc2b/plans/astral-ai-panel-sessions-and-tabs.md"
+          },
+          "inputDigest": "sha256:f585cac8f30f2d370a9c135c3a78dc1b5de6bc44fb305121a9cd2c5fce60ba95",
+          "outcome": "completed",
+          "output": "Planfile lines 1-260",
+          "error": null
+        }
+      }
+    },
+    {
+      "commandId": "prediction-block-requires-exec-command-after-fulfilled-should-allow-target-tool",
+      "runId": "fixture-prediction-block-requires-exec-command-after-fulfilled-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:06.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "high",
+              "intent": "The user wants a fresh critique of the edited planfile, using a read-only review workflow.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [
+                "functions.exec_command",
+                "Read"
+              ],
+              "explicitlyRequiredTools": [],
+              "nonBlockingTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back.",
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 4,
+            "toolCallCount": 1
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-prediction-block-requires-exec-command-after-fulfilled-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/prediction-block-requires-exec-command-after-fulfilled-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-prediction-block-requires-exec-command-after-fulfilled-should-allow",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "preTool": {
+              "rawToolName": "exec_command",
+              "rawToolInput": {
+                "cmd": "sed -n '261,520p' /home/tim/.agent-framework/sessions/home-tim-Coding-private_repos-astral/2026-06-20-1301_b228dc2b/plans/astral-ai-panel-sessions-and-tabs.md",
+                "workdir": "/home/tim/Coding/public_repos/agent-framework",
+                "max_output_tokens": 12000
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back.",
+              "latestUserLogicText": "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back.",
+              "recentUserMessages": [
+                "i have edited the planfile, please once again critique it with your read only workflow. dont hold yourself back."
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "call_planfile_read_after_required_exec_command",
+          "turnId": null,
+          "name": "Bash",
+          "input": {
+            "command": "sed -n '261,520p' /home/tim/.agent-framework/sessions/home-tim-Coding-private_repos-astral/2026-06-20-1301_b228dc2b/plans/astral-ai-panel-sessions-and-tabs.md"
+          },
+          "inputDigest": "sha256:184299ac7d9d44e1810826279f5b1a6d2d37e1e0e4292976d472159b443827fb",
+          "requiresUserDecision": false
+        }
+      }
+    }
+  ],
+  "effects": {
+    "mode": "live"
+  },
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
+    },
+    {
+      "kind": "commandResult",
+      "commandId": "prediction-block-requires-exec-command-after-fulfilled-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.1.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 2,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PostToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/result/stateChanges/0/value/currentPrediction/explicitlyRequiredTools",
+      "equals": []
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/1/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/1/result/evaluations",
+      "minLength": 1
+    }
+  ]
+}

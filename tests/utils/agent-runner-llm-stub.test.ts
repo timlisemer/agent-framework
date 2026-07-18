@@ -19,12 +19,10 @@ vi.mock("../../src/providers/anthropic-api-skin.js", () => ({
   runAnthropicApiSkinDirect: (...args: unknown[]) => runAnthropicApiSkinDirectSpy(...args),
 }));
 
-const logAgentStartedSpy = vi.fn();
 const logAgentDecisionSpy = vi.fn();
 
 vi.mock("../../src/utils/logger.js", () => ({
   logAgentDecision: (...args: unknown[]) => logAgentDecisionSpy(...args),
-  logAgentStarted: (...args: unknown[]) => logAgentStartedSpy(...args),
   extractDecision: (output: string) => {
     const t = output.trim();
     if (t.startsWith("APPROVE") || t === "OVERTURN: APPROVE") return "APPROVE";
@@ -62,7 +60,6 @@ describe("runAgentWithRetryAndTelemetry - env-keyed LLM stub", () => {
     restoreProviderEnv = clearProviderEnvForTest();
     queryMock.mockReset();
     runAnthropicApiSkinDirectSpy.mockReset();
-    logAgentStartedSpy.mockReset();
     logAgentDecisionSpy.mockReset();
     delete process.env.AGENT_FRAMEWORK_LLM_STUBS;
     process.env.AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME = "claude";
@@ -338,7 +335,7 @@ describe("runAgentWithRetryAndTelemetry - env-keyed LLM stub", () => {
     expect(result.modelName).not.toBe("stub");
   });
 
-  it("telemetry side effects fire on the stub path", async () => {
+  it("decision telemetry fires on the stub path", async () => {
     process.env.AGENT_FRAMEWORK_LLM_STUBS = JSON.stringify({
       "tool-appeal": "UPHOLD",
     });
@@ -358,7 +355,6 @@ describe("runAgentWithRetryAndTelemetry - env-keyed LLM stub", () => {
       baseTelemetry,
     );
 
-    expect(logAgentStartedSpy).toHaveBeenCalled();
     expect(logAgentDecisionSpy).toHaveBeenCalled();
   });
 

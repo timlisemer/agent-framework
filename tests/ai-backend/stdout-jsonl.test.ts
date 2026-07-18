@@ -2,66 +2,59 @@ import { describe, expect, it } from "vitest";
 import { Readable } from "node:stream";
 import { PassThrough } from "node:stream";
 import { parseClientFrame, readClientFrames, writeBackendFrame } from "../../src/ai-backend/wire.js";
-import { createDefaultProviderMetadata } from "../../src/ai-backend/provider-metadata.js";
-import type { AiBackendMessage, AiSessionSnapshot } from "../../src/ai-protocol/index.js";
+import { MAXIMUM_CLIENT_FRAME_BYTES } from "../../src/scenario/protocol/limits.js";
+import type {
+  ScenarioBackendFrame,
+  ScenarioClientFrame,
+} from "../../src/scenario/protocol/gateway.js";
 
 describe("AI backend JSONL wire", () => {
-  it("parses client request frames", () => {
+  it("parses Scenario hello frames", () => {
     const frame = parseClientFrame(
       JSON.stringify({
-        type: "request",
-        request: {
-          type: "startSession",
-          sessionId: "session-jsonl",
-          config: { model: null, workingDir: null, systemPrompt: null },
-        },
-      })
-    );
-
-    expect(frame.type).toBe("request");
-    if (frame.type === "request" && frame.request.type === "startSession") {
-      expect(frame.request.config.continuable).toBe(false);
-      expect(frame.request.config.sdkRuntimeEnvironment).toBe("isolated");
-      expect(frame.request.config.sdkRuntimeHome).toBe("native");
-    }
-  });
-
-  it("parses continuable session config", () => {
-    const frame = parseClientFrame(
-      JSON.stringify({
-        type: "request",
-        request: {
-          type: "startSession",
-          sessionId: "session-jsonl",
-          config: {
-            model: null,
-            workingDir: null,
-            systemPrompt: null,
-            continuable: true,
-          },
-        },
+        type: "hello",
+        client: { name: "wire-test", version: "1" },
+        capabilities: ["run.read"],
+        schemaDigests: ["sha256:test"],
       })
     );
 
     expect(frame).toMatchObject({
-      type: "request",
-      request: { type: "startSession", config: { continuable: true } },
+      type: "hello",
+      capabilities: ["run.read"],
     });
   });
 
-  it("parses user SDK runtime environment session config", () => {
+  it("rejects client-asserted authority on the stdio protocol", () => {
+    expect(() => parseClientFrame(JSON.stringify({
+      type: "hello",
+      client: { name: "untrusted-client", version: "1" },
+      capabilities: ["feedback.write"],
+      schemaDigests: [],
+      authority: {
+        subjectId: "another-user",
+        clientId: "forged-transport",
+        clientVersion: "999",
+        scopes: ["state.inspectSensitive"],
+        visibilityScope: ["authorizedSensitive"],
+      },
+    }))).toThrow();
+  });
+
+  it("parses Scenario gateway request frames", () => {
     const frame = parseClientFrame(
       JSON.stringify({
         type: "request",
-        request: {
-          type: "startSession",
-          sessionId: "session-jsonl",
+        requestId: "request-1",
+        payload: {
+          operation: "startProviderRun",
           config: {
             model: null,
             workingDir: null,
             systemPrompt: null,
             continuable: true,
             sdkRuntimeEnvironment: "user",
+            runtimeHome: { kind: "managed", configuration: { profile: "default" } },
           },
         },
       })
@@ -69,54 +62,40 @@ describe("AI backend JSONL wire", () => {
 
     expect(frame).toMatchObject({
       type: "request",
-      request: { type: "startSession", config: { sdkRuntimeEnvironment: "user" } },
+      requestId: "request-1",
+      payload: {
+        operation: "startProviderRun",
+        config: { continuable: true, runtimeHome: { kind: "managed" } },
+      },
     });
   });
 
-  it("parses request-correlated session choice, resume, and close requests", () => {
+  it("parses run attachment, cursor, and control requests", () => {
     expect(parseClientFrame(JSON.stringify({
       type: "request",
-      request: {
-        type: "listSessionChoices",
-        requestId: "request-1",
-        config: { sdkRuntimeHome: "managedAstral", maxResults: 10 },
-      },
+      requestId: "request-1",
+      payload: { operation: "attachRun", runId: "run-1" },
     }))).toMatchObject({
       type: "request",
-      request: { type: "listSessionChoices", requestId: "request-1" },
+      payload: { operation: "attachRun", runId: "run-1" },
     });
 
     expect(parseClientFrame(JSON.stringify({
       type: "request",
-      request: {
-        type: "resumeSession",
-        requestId: "request-2",
-        sessionId: "session-jsonl",
-        resumeId: "resume-1",
-        config: {
-          model: null,
-          workingDir: "/tmp/project",
-          systemPrompt: null,
-          continuable: true,
-          sdkRuntimeEnvironment: "user",
-          sdkRuntimeHome: "managedAstral",
-        },
-      },
+      requestId: "request-2",
+      payload: { operation: "recordsAfter", runId: "run-1", afterSeq: 4 },
     }))).toMatchObject({
       type: "request",
-      request: { type: "resumeSession", requestId: "request-2" },
+      payload: { operation: "recordsAfter", afterSeq: 4 },
     });
 
     expect(parseClientFrame(JSON.stringify({
       type: "request",
-      request: {
-        type: "closeSession",
-        requestId: "request-3",
-        sessionId: "session-jsonl",
-      },
+      requestId: "request-3",
+      payload: { operation: "closeProviderRun", runId: "run-1" },
     }))).toMatchObject({
       type: "request",
-      request: { type: "closeSession", requestId: "request-3" },
+      payload: { operation: "closeProviderRun", runId: "run-1" },
     });
   });
 
@@ -128,8 +107,8 @@ describe("AI backend JSONL wire", () => {
       parseClientFrame(JSON.stringify({
         type: "request",
         request: {
-          type: "sendInput",
-          sessionId: "session-jsonl",
+          operation: "sendConversationInput",
+          runId: "run-1",
           input: "missing turn id",
         },
       }))
@@ -140,12 +119,10 @@ describe("AI backend JSONL wire", () => {
     const input = Readable.from([
       `${JSON.stringify({ type: "request" })}\n`,
       `${JSON.stringify({
-        type: "request",
-        request: {
-          type: "startSession",
-          sessionId: "session-jsonl",
-          config: { model: null, workingDir: null, systemPrompt: null },
-        },
+        type: "hello",
+        client: { name: "wire-test", version: "1" },
+        capabilities: [],
+        schemaDigests: [],
       })}\n`,
     ]);
     let parseErrors = 0;
@@ -162,101 +139,79 @@ describe("AI backend JSONL wire", () => {
     expect(parseErrors).toBe(1);
   });
 
-  it("parses generated tool-decision request frames", () => {
+  it("rejects an oversized unterminated frame before the input stream ends", async () => {
+    const input = new PassThrough();
+    let resolveRejected!: () => void;
+    const rejected = new Promise<void>((resolve) => { resolveRejected = resolve; });
+    const frames: ScenarioClientFrame[] = [];
+    const reading = readClientFrames(
+      (frame) => { frames.push(frame); },
+      input,
+      (error) => {
+        expect(error).toEqual(expect.objectContaining({ message: "Client frame exceeds maximum size" }));
+        resolveRejected();
+      },
+    );
+    input.write(Buffer.alloc(Math.floor(MAXIMUM_CLIENT_FRAME_BYTES / 2), 0x78));
+    input.write(Buffer.alloc(Math.floor(MAXIMUM_CLIENT_FRAME_BYTES / 2) + 2, 0x78));
+
+    await rejected;
+    expect(input.writableEnded).toBe(false);
+
+    input.write(`\n${JSON.stringify({
+      type: "hello",
+      client: { name: "bounded-wire-test", version: "1" },
+      capabilities: [],
+      schemaDigests: [],
+    })}\n`);
+    input.end();
+    await reading;
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toMatchObject({ type: "hello", client: { name: "bounded-wire-test" } });
+  });
+
+  it("parses Scenario tool-decision request frames", () => {
     const frame = parseClientFrame(
       JSON.stringify({
         type: "request",
-        request: {
-          type: "submitToolDecision",
-          sessionId: "session-jsonl",
-          turnId: "turn-jsonl",
-          decision: {
-            toolCallId: "tool-1",
-            decision: "deny",
-            reason: "not needed",
-          },
+        requestId: "request-decision",
+        payload: {
+          operation: "submitToolDecision",
+          runId: "run-1",
+          toolCallId: "tool-1",
+          decision: "deny",
+          reason: "not needed",
         },
       })
     );
 
     expect(frame).toMatchObject({
       type: "request",
-      request: { type: "submitToolDecision", sessionId: "session-jsonl" },
+      payload: { operation: "submitToolDecision", runId: "run-1" },
     });
   });
 
-  it("writes one JSON object per stdout line and serializes number token counts", () => {
+  it("writes one Scenario JSON object per stdout line", () => {
     const stdout = new PassThrough();
     let output = "";
     stdout.on("data", (chunk: Buffer) => {
       output += chunk.toString("utf8");
     });
 
-    const frame: AiBackendMessage = {
-      type: "event",
-      event: {
-        type: "turnFinished",
-        sessionId: "session-1",
-        turnId: "turn-1",
-        seq: 1,
-        createdAt: "2026-05-22T00:00:00.000Z",
-        usage: {
-          promptTokens: 1,
-          cachedTokens: null,
-          completionTokens: 2,
-          reasoningTokens: null,
-          totalTokens: 3,
-        },
-      },
-      snapshot: snapshotFixture(),
+    const frame: ScenarioBackendFrame = {
+      type: "welcome",
+      subjectId: "test-user",
+      engineVersion: "test",
+      schemaDigest: "sha256:test",
+      capabilities: ["run.read"],
+      maximumFrameBytes: 1024,
+      maximumArtifactBytes: 2048,
+      visibilityScope: ["public"],
+      extensionSchemas: [],
     };
 
     writeBackendFrame(frame, stdout);
     expect(output.endsWith("\n")).toBe(true);
-    expect(JSON.parse(output).event.usage.totalTokens).toBe(3);
-  });
-
-  it("serializes bigint values in unknown output payloads", () => {
-    const stdout = new PassThrough();
-    let output = "";
-    stdout.on("data", (chunk: Buffer) => {
-      output += chunk.toString("utf8");
-    });
-
-    const frame: AiBackendMessage = {
-      type: "event",
-      event: {
-        type: "toolCallOutput",
-        sessionId: "session-1",
-        turnId: "turn-1",
-        seq: 1,
-        createdAt: "2026-05-22T00:00:00.000Z",
-        toolCallId: "tool-1",
-        output: [{ type: "json", value: { count: BigInt(1) } }],
-      },
-      snapshot: snapshotFixture(),
-    };
-
-    writeBackendFrame(frame, stdout);
-    expect(JSON.parse(output).event.output[0].value.count).toBe("1");
+    expect(JSON.parse(output)).toMatchObject({ type: "welcome", schemaDigest: "sha256:test" });
   });
 });
-
-function snapshotFixture(): AiSessionSnapshot {
-  return {
-    sessionId: "session-1",
-    workingDir: null,
-    agentFrameworkSessionDir: null,
-    status: "idle",
-    revision: 1,
-    lastEventSeq: 1,
-    transcript: [],
-    toolCalls: [],
-    backendProcesses: [],
-    provider: createDefaultProviderMetadata(),
-    plan: { mode: "disabled", planText: null, approved: false },
-    continuation: { enabled: false, available: false, updatedAt: null },
-    errors: [],
-    error: null,
-  };
-}

@@ -1,52 +1,227 @@
 {
-  "schema_version": 1,
   "name": "respond-first-failed-to-block-tool-calls-without-response-should-deny",
   "description": "User sent a multi-step instruction. Assistant tried to call Grep with no preceding text. respond-first must fastDeny on the silent shape — slash commands and confirmation patterns are the only carve-outs, and neither applies here.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "respond-first-failed-to-block-tool-calls-without-response-should-deny-start",
+      "runId": "fixture-respond-first-failed-to-block-tool-calls-without-response-should-deny",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "now delete the now obsolte sceneario, then create the thrashing hook block scenario, and then make sure both this and the other scenario weve been working on both reproduce just like live"
+      "commandId": "respond-first-failed-to-block-tool-calls-without-response-should-deny-session-state",
+      "runId": "fixture-respond-first-failed-to-block-tool-calls-without-response-should-deny",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "frustrated",
+            "trust": "low",
+            "intent": "User instructed the AI to delete an obsolete scenario file first, then create a thrashing-hook scenario, then verify live reproduction.",
+            "blockedIntent": "calling tools without first acknowledging the user's multi-step instruction",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "now delete the now obsolte sceneario, then create the thrashing hook block scenario, and then make sure both this and the other scenario weve been working on both reproduce just like live",
+            "timestamp": 1
+          },
+          "frustrationStreak": 2,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_respond_first_grep",
+      "commandId": "respond-first-failed-to-block-tool-calls-without-response-should-deny-message-0",
+      "runId": "fixture-respond-first-failed-to-block-tool-calls-without-response-should-deny",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "respond-first-failed-to-block-tool-calls-without-response-should-deny-message-0",
+        "turnId": "respond-first-failed-to-block-tool-calls-without-response-should-deny-turn-0",
+        "content": "now delete the now obsolte sceneario, then create the thrashing hook block scenario, and then make sure both this and the other scenario weve been working on both reproduce just like live",
+        "contentDigest": "sha256:b830afb2a3b131e22f7a74df2aad16510a3a1bf648e69821ab483d48e6918461"
+      }
+    },
+    {
+      "commandId": "respond-first-failed-to-block-tool-calls-without-response-should-deny-message-1",
+      "runId": "fixture-respond-first-failed-to-block-tool-calls-without-response-should-deny",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "respond-first-failed-to-block-tool-calls-without-response-should-deny-message-1",
+        "turnId": null,
+        "content": "[tool Grep] {\"pattern\":\"thrashing|possible loop\",\"path\":\"/home/tim/Coding/public_repos/agent-framework/src\",\"output_mode\":\"content\"}",
+        "contentDigest": "sha256:63cf8f50ae0a9700f8c92f8be12de65fbfd03470ff249da2eea73785dc80d1bc"
+      }
+    },
+    {
+      "commandId": "respond-first-failed-to-block-tool-calls-without-response-should-deny-target-tool",
+      "runId": "fixture-respond-first-failed-to-block-tool-calls-without-response-should-deny",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "frustrated",
+              "trust": "low",
+              "intent": "User instructed the AI to delete an obsolete scenario file first, then create a thrashing-hook scenario, then verify live reproduction.",
+              "blockedIntent": "calling tools without first acknowledging the user's multi-step instruction",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "now delete the now obsolte sceneario, then create the thrashing hook block scenario, and then make sure both this and the other scenario weve been working on both reproduce just like live",
+              "timestamp": 1
+            },
+            "frustrationStreak": 2,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-respond-first-failed-to-block-tool-calls-without-response-should-deny",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/respond-first-failed-to-block-tool-calls-without-response-should-deny.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-respond-first-failed-to-block-tool-calls-without-response-should-deny",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Grep",
+              "rawToolInput": {
+                "pattern": "thrashing|possible loop",
+                "path": "/home/tim/Coding/public_repos/agent-framework/src",
+                "output_mode": "content"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "now delete the now obsolte sceneario, then create the thrashing hook block scenario, and then make sure both this and the other scenario weve been working on both reproduce just like live",
+              "latestUserLogicText": "now delete the now obsolte sceneario, then create the thrashing hook block scenario, and then make sure both this and the other scenario weve been working on both reproduce just like live",
+              "recentUserMessages": [
+                "now delete the now obsolte sceneario, then create the thrashing hook block scenario, and then make sure both this and the other scenario weve been working on both reproduce just like live"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_respond_first_grep",
+          "turnId": null,
           "name": "Grep",
           "input": {
             "pattern": "thrashing|possible loop",
             "path": "/home/tim/Coding/public_repos/agent-framework/src",
             "output_mode": "content"
-          }
+          },
+          "inputDigest": "sha256:f86df11be32ea58faa2edebc1788220c4a85c69275fb7157ef0a9d687dadc24b",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_respond_first_grep"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "frustrated",
-      "trust": "low",
-      "intent": "User instructed the AI to delete an obsolete scenario file first, then create a thrashing-hook scenario, then verify live reproduction.",
-      "blockedIntent": "calling tools without first acknowledging the user's multi-step instruction",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "now delete the now obsolte sceneario, then create the thrashing hook block scenario, and then make sure both this and the other scenario weve been working on both reproduce just like live"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 2,
-    "currentWindowSize": 4
-  },
-  "expect": {
-    "expected": "deny",
-    "by": "respond-first",
-    "notes": "Assistant entry contains only a tool_use (no text block), so currentTurnAssistantState returns kind: silent and respond-first fastDenies. The frustrated/low-trust seed plus blockedIntent gives the appeal LLM clear signal to uphold the deny (mirrors respond-first-blocks-bash-after-angry-question's appeal-survival shape). Slash commands and CONFIRMATION_PATTERN are the only deterministic carve-outs; neither applies."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "respond-first-failed-to-block-tool-calls-without-response-should-deny-target-tool",
+      "status": "denied"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "denied"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

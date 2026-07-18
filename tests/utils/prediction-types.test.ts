@@ -12,8 +12,8 @@ import {
   latestUserMessageAuthorizesBashCommand,
   latestUserMessageReauthorizesClass,
   type LatestUserTurn,
-  type ToolPrediction,
 } from "../../src/utils/prediction-types.js";
+import type { ToolPrediction } from "../../src/utils/prediction-schema.js";
 
 function makePrediction(overrides: Partial<ToolPrediction> = {}): ToolPrediction {
   return {
@@ -477,7 +477,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
     const result = decidePrediction(
       pred,
       "mcp-scenario_tester",
-      { action: "run_scenario", scenario_name: "x" },
+      { action: "run_fixture", scenario_name: "x" },
       3,
     );
     expect(result.decision).toBe("allow");
@@ -634,7 +634,7 @@ describe("step 3.6: re-authorization prose-intent fallback", () => {
       pred,
       "mcp-scenario_tester",
       {
-        action: "run_scenario",
+        action: "run_fixture",
         scenario_name: "bash-blocked-after-mcp-help",
         working_dir: "/home/tim/Coding/public_repos/agent-framework",
       },
@@ -656,7 +656,7 @@ describe("step 3.7: latest user tool reauthorization", () => {
     const result = decidePrediction(
       pred,
       "mcp-scenario_tester",
-      { action: "run_scenario", scenario_name: "x" },
+      { action: "run_fixture", scenario_name: "x" },
       1,
       "call the scenario tester, you are still banned from bash",
     );
@@ -691,7 +691,7 @@ describe("step 3.7: latest user tool reauthorization", () => {
     const result = decidePrediction(
       pred,
       "mcp-scenario_tester",
-      { action: "run_scenario", scenario_name: "x" },
+      { action: "run_fixture", scenario_name: "x" },
       1,
       "stop using the scenario tester",
     );
@@ -708,7 +708,7 @@ describe("step 3.7: latest user tool reauthorization", () => {
     const result = decidePrediction(
       pred,
       "mcp-scenario_tester",
-      { action: "run_scenario", scenario_name: "x" },
+      { action: "run_fixture", scenario_name: "x" },
       1,
       "stop using the tester",
     );
@@ -1778,7 +1778,7 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     const result = decidePrediction(
       sidePred(),
       TESTER,
-      { action: "run_scenarios" },
+      { action: "run_fixtures" },
       0,
       sideClarification,
       [original, sideClarification],
@@ -1847,42 +1847,7 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     const result = decidePrediction(
       pred,
       "mcp__agent_framework__scenario_tester",
-      { action: "run_scenario", scenario_name: "x" },
-      1,
-    );
-    expect(result.decision).toBe("allow");
-    expect(result.reason).toContain("favorably");
-  });
-
-  it("cached intent naming scenario labeler authorizes the labeler MCP under stale anger", () => {
-    const pred = makePrediction({
-      mood: "angry",
-      trust: "low",
-      intent:
-        "User demands the AI continue using the labeler mcp as previously instructed, without stopping or deviating.",
-      userMessageSnippet: "i told you to replicate the live behavior",
-    });
-    const result = decidePrediction(
-      pred,
-      "mcp__agent-framework__scenario_labeler",
-      { action: "list" },
-      2,
-    );
-    expect(result.decision).toBe("allow");
-    expect(result.reason).toContain("prediction.intent");
-  });
-
-  it("legacy raw Codex MCP wire name without second separator uses canonical aliases", () => {
-    const pred = makePrediction({
-      mood: "frustrated",
-      trust: "low",
-      intent: "The user is insisting that the assistant stay on the workflow.",
-      userMessageSnippet: "call the scenario tester, you are still banned from bash, unless it is the mv command",
-    });
-    const result = decidePrediction(
-      pred,
-      "mcp__agent_frameworkscenario_tester",
-      { action: "run_scenario", scenario_name: "x" },
+      { action: "run_fixture", scenario_name: "x" },
       1,
     );
     expect(result.decision).toBe("allow");
@@ -1893,7 +1858,7 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     const result = decidePrediction(
       sidePred(),
       TESTER,
-      { action: "run_scenarios" },
+      { action: "run_fixtures" },
       0,
       sideClarification,
       [original, sideClarification],
@@ -1906,7 +1871,7 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     const result = decidePrediction(
       sidePred(),
       TESTER,
-      { action: "run_scenarios" },
+      { action: "run_fixtures" },
       0,
       "stop using the tester right now",
       [original, "stop using the tester right now"],
@@ -1919,7 +1884,7 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     const result = decidePrediction(
       sidePred(),
       TESTER,
-      { action: "run_scenarios" },
+      { action: "run_fixtures" },
       0,
       "freeze. no tools.",
       [original, "freeze. no tools."],
@@ -1938,7 +1903,7 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     const result = decidePrediction(
       pred,
       TESTER,
-      { action: "run_scenarios" },
+      { action: "run_fixtures" },
       0,
       "freeze. no tools.",
       [original, "freeze. no tools."],
@@ -1960,7 +1925,7 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     const result = decidePrediction(
       pred,
       TESTER,
-      { action: "run_scenarios" },
+      { action: "run_fixtures" },
       0,
       sideClarification,
       [original, sideClarification],
@@ -1973,7 +1938,7 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     const result = decidePrediction(
       sidePred(),
       TESTER,
-      { action: "run_scenarios" },
+      { action: "run_fixtures" },
       0,
       sideClarification,
       ["please run the build now", sideClarification],
@@ -1986,7 +1951,7 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     const result = decidePrediction(
       sidePred(),
       TESTER,
-      { action: "run_scenarios" },
+      { action: "run_fixtures" },
       0,
       sideClarification,
       [sideClarification],
@@ -1999,7 +1964,7 @@ describe("step 3.10: discharged-side-clarification fallback", () => {
     const result = decidePrediction(
       sidePred(),
       TESTER,
-      { action: "run_scenarios" },
+      { action: "run_fixtures" },
       0,
       sideClarification,
     );

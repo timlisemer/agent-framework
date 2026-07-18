@@ -25,7 +25,7 @@ const ALL = Infinity;
  * Plan approval and todo state are always synthesized into transcript.
  */
 export const APPEAL_COUNTS: TranscriptReadOptions = {
-  counts: { user: ALL, assistant: 10, tool: 3 },
+  counts: { user: { count: ALL }, assistant: { count: 10 }, tool: { count: 3 } },
   includeFirstUserMessage: true,
 };
 
@@ -37,7 +37,7 @@ export const APPEAL_COUNTS: TranscriptReadOptions = {
  * Always includes first user message to capture initial request.
  */
 export const PLAN_VALIDATE_COUNTS: TranscriptReadOptions = {
-  counts: { user: ALL, assistant: 10, tool: 10 },
+  counts: { user: { count: ALL }, assistant: { count: 10 }, tool: { count: 10 } },
   includeFirstUserMessage: true,
   toolOptions: {
     trim: false,
@@ -51,7 +51,7 @@ export const PLAN_VALIDATE_COUNTS: TranscriptReadOptions = {
  * Focus is on request vs response alignment, not intermediate tool calls.
  */
 export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
-  counts: { user: ALL, assistant: 5 },
+  counts: { user: { count: ALL }, assistant: { count: 5 } },
   includeFirstUserMessage: true,
 };
 
@@ -69,8 +69,8 @@ export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
 export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
   counts: {
     user: { count: 3, maxStale: 5 },
-    assistant: 3,
-    tool: 8,
+    assistant: { count: 3 },
+    tool: { count: 8 },
   },
 };
 
@@ -82,7 +82,7 @@ export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
  * Recent tool results - to see what Claude has done (Write to plan, etc.).
  */
 export const QUESTION_VALIDATE_COUNTS: TranscriptReadOptions = {
-  counts: { user: ALL, assistant: 20, tool: 15 },
+  counts: { user: { count: ALL }, assistant: { count: 20 }, tool: { count: 15 } },
   includeFirstUserMessage: true,
   toolOptions: {
     trim: true,

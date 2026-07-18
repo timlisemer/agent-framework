@@ -24,7 +24,9 @@ import { sentimentRule } from "./sentiment.js";
 import { responseAlignStopRule } from "./response-align-stop.js";
 
 export type { PreToolRule, RuleContext, RuleCheckResult, HookEvent } from "./types.js";
+export type { RuleTraceOptions } from "./evaluator.js";
 export { evaluateRules, evaluateRulesForUserPromptSubmit, evaluateRulesForStop } from "./evaluator.js";
+export { describeRule, describeRules, ruleId } from "./descriptors.js";
 
 export const ALL_RULES: PreToolRule[] = [
   respondFirstRule,

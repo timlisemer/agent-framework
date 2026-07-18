@@ -6,6 +6,8 @@ import type {
   SdkRuntime,
 } from "./types.js";
 
+export const sdkRuntimeValues = ["claude", "codex"] as const;
+
 export const PROVIDER_TYPES = {
   OPENROUTER: "openrouter" as ProviderType,
   CLAUDE_SUBSCRIPTION: "claude-subscription" as ProviderType,
@@ -75,8 +77,8 @@ export function tierKey(tier: unknown): ModelTierKey {
 
 export function parseSdkRuntimeStrict(value: string, source: string): SdkRuntime {
   const normalized = value.toLowerCase();
-  if (normalized !== "claude" && normalized !== "codex") {
+  if (!(sdkRuntimeValues as readonly string[]).includes(normalized)) {
     throw new Error(`Invalid SDK runtime '${value}' from ${source}. Expected 'claude' or 'codex'.`);
   }
-  return normalized;
+  return normalized as SdkRuntime;
 }

@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
 import { mainPostToolUse } from "../../src/hooks/post-tool-use.js";
 import { mainPostToolUseFailure } from "../../src/hooks/post-tool-use-failure.js";
-import { getAgentFrameworkSessionDir, sessionCurrentPlanFile, sessionPlanFile } from "../../src/utils/paths.js";
-import { getSessionState, readToolLogEntries } from "../../src/utils/session-store.js";
+import { getAgentFrameworkSessionDir, sessionPlanFile } from "../../src/utils/paths.js";
 import { decidePrediction } from "../../src/utils/prediction-types.js";
+import { canonicalHookState } from "../helpers/canonical-hook-state.js";
+import { withEnvironmentForTest } from "../helpers/environment.js";
 
 vi.mock("../../src/utils/hook-bootstrap.js", async () => {
   const actual = await vi.importActual<typeof import("../../src/utils/hook-bootstrap.js")>(
@@ -19,29 +20,38 @@ vi.mock("../../src/utils/hook-bootstrap.js", async () => {
   };
 });
 
-describe("mainPostToolUse planfile sidecar", () => {
+describe("mainPostToolUse canonical projections", () => {
   let tempDir: string;
   let transcriptPath: string;
   let sessionDir: string;
-  let prevAdapter: string | undefined;
+  let restoreEnvironment: () => void;
+  let hookState: ReturnType<typeof canonicalHookState>;
+  const getSessionState = (_sessionDir: string) => hookState;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "post-tool-use-plan-"));
     transcriptPath = path.join(tempDir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
     sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
-    prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
-    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    restoreEnvironment = withEnvironmentForTest({
+      AGENT_FRAMEWORK_ADAPTER: "codex",
+      AGENT_FRAMEWORK_SCENARIO_ROOT: path.join(tempDir, "scenario-runtime"),
+    });
+    hookState = canonicalHookState({
+      adapter: "codex",
+      nativeSessionId: "session-post",
+      transcriptPath,
+      projectDir: tempDir,
+    });
   });
 
   afterEach(() => {
     fs.rmSync(sessionDir, { recursive: true, force: true });
     fs.rmSync(tempDir, { recursive: true, force: true });
-    if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
-    else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
+    restoreEnvironment();
   });
 
-  it("records the active current-plan sidecar after a successful session planfile write", async () => {
+  it("records the active current plan after a successful session planfile write", async () => {
     const planPath = sessionPlanFile(sessionDir, "named-plan");
     fs.mkdirSync(path.dirname(planPath), { recursive: true });
     fs.writeFileSync(
@@ -69,14 +79,14 @@ describe("mainPostToolUse planfile sidecar", () => {
       codexEncoder,
     );
 
-    expect(JSON.parse(fs.readFileSync(sessionCurrentPlanFile(sessionDir), "utf-8"))).toEqual({
+    expect((await hookState.snapshot()).stateSlices["plan.current"].value).toEqual({
       kind: "file",
       path: planPath,
       planName: "named-plan",
     });
   });
 
-  it("records the current-plan sidecar when a multi-file edit touches a planfile second", async () => {
+  it("records the current plan when a multi-file edit touches a planfile second", async () => {
     const sourcePath = path.join(tempDir, "src", "main.ts");
     fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
     fs.writeFileSync(sourcePath, "source");
@@ -107,14 +117,14 @@ describe("mainPostToolUse planfile sidecar", () => {
       codexEncoder,
     );
 
-    expect(JSON.parse(fs.readFileSync(sessionCurrentPlanFile(sessionDir), "utf-8"))).toEqual({
+    expect((await hookState.snapshot()).stateSlices["plan.current"].value).toEqual({
       kind: "file",
       path: planPath,
       planName: "second-plan",
     });
   });
 
-  it("records the current-plan sidecar after a successful planfile MultiEdit", async () => {
+  it("records the current plan after a successful planfile MultiEdit", async () => {
     const planPath = sessionPlanFile(sessionDir, "multi-edit-plan");
     fs.mkdirSync(path.dirname(planPath), { recursive: true });
     fs.writeFileSync(
@@ -145,7 +155,7 @@ describe("mainPostToolUse planfile sidecar", () => {
       codexEncoder,
     );
 
-    expect(JSON.parse(fs.readFileSync(sessionCurrentPlanFile(sessionDir), "utf-8"))).toEqual({
+    expect((await hookState.snapshot()).stateSlices["plan.current"].value).toEqual({
       kind: "file",
       path: planPath,
       planName: "multi-edit-plan",
@@ -166,10 +176,9 @@ describe("mainPostToolUse planfile sidecar", () => {
       codexEncoder,
     );
 
-    const [entry] = readToolLogEntries(sessionDir, 1);
-    expect(entry.tool).toBe("Edit");
-    expect(entry.path).toBe(filePath);
-    expect(entry.paths).toEqual([filePath]);
+    const [tool] = (await hookState.snapshot()).toolCalls;
+    expect(tool.name).toBe("Edit");
+    expect(tool.input).toEqual({ file_path: filePath });
   });
 
   it("logs raw Codex write_file successes as canonical Write entries", async () => {
@@ -186,10 +195,9 @@ describe("mainPostToolUse planfile sidecar", () => {
       codexEncoder,
     );
 
-    const [entry] = readToolLogEntries(sessionDir, 1);
-    expect(entry.tool).toBe("Write");
-    expect(entry.path).toBe(filePath);
-    expect(entry.paths).toEqual([filePath]);
+    const [tool] = (await hookState.snapshot()).toolCalls;
+    expect(tool.name).toBe("Write");
+    expect(tool.input).toEqual({ file_path: filePath });
   });
 
   it("requires the exact Codex wait only after an MCP yields a cell", async () => {
@@ -274,13 +282,14 @@ describe("mainPostToolUse planfile sidecar", () => {
         error: "MCP failed before yielding",
         is_interrupt: false,
         transcript_path: transcriptPath,
+        cwd: tempDir,
       },
       codexEncoder,
     );
 
     const state = await getSessionState(sessionDir).load();
     expect(state.currentPrediction?.explicitlyRequiredTools ?? []).toEqual([]);
-    expect(readToolLogEntries(sessionDir, 1)[0]?.toolUseId).toBe("tool-failed-check");
+    expect((await hookState.snapshot()).toolCalls[0]?.id).toBe("tool-failed-check");
   });
 
   it("does not orphan a wait for a synchronous parallel MCP sibling", async () => {

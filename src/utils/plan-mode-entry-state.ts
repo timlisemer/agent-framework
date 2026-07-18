@@ -1,7 +1,4 @@
-import * as fs from "fs";
-import * as path from "path";
 import type { PlanModeDetection, PlanModeDetectionSource } from "../adapter/types.js";
-import { sessionPlanModeEventsFile, sessionPlanModeStateFile } from "./paths.js";
 
 export type PlanModeEntrySource = "SessionStart" | "UserPromptSubmit";
 
@@ -26,35 +23,29 @@ export interface PlanModeTransition {
   detection_source: PlanModeDetectionSource;
 }
 
-export interface PlanModeEntryInput {
+export function derivePlanModeTransition(input: {
   source: PlanModeEntrySource;
-  sessionDir: string;
   detection: PlanModeDetection;
-}
-
-export async function computePlanModeTransition(
-  input: PlanModeEntryInput,
-): Promise<PlanModeTransition> {
-  const previous = await readPlanModeEntryState(sessionPlanModeStateFile(input.sessionDir));
+  previous: PlanModeStoredState | null;
+}): PlanModeTransition {
   const active = input.detection.active;
-  const sameEpisode = active && previous?.active === true;
+  const sameEpisode = active && input.previous?.active === true;
   const current: PlanModeStoredState = {
     active,
     updatedAt: Date.now(),
     lastSource: input.source,
     mode: input.detection.mode,
     detection_source: input.detection.source,
-    deliveredPlansMdHash: sameEpisode ? previous.deliveredPlansMdHash : null,
-    deliveredPlansMdAt: sameEpisode ? previous.deliveredPlansMdAt : null,
+    deliveredPlansMdHash: sameEpisode ? input.previous?.deliveredPlansMdHash ?? null : null,
+    deliveredPlansMdAt: sameEpisode ? input.previous?.deliveredPlansMdAt ?? null : null,
   };
-
   return {
     source: input.source,
-    previous,
+    previous: input.previous,
     current,
     active,
-    entered: active && previous?.active !== true,
-    exited: !active && previous?.active === true,
+    entered: active && input.previous?.active !== true,
+    exited: !active && input.previous?.active === true,
     mode: input.detection.mode,
     detection_source: input.detection.source,
   };
@@ -66,45 +57,6 @@ export function markPlansMdDelivered(
 ): void {
   transition.current.deliveredPlansMdHash = contentHash;
   transition.current.deliveredPlansMdAt = Date.now();
-}
-
-export async function commitPlanModeTransition(
-  sessionDir: string,
-  transition: PlanModeTransition,
-): Promise<void> {
-  const statePath = sessionPlanModeStateFile(sessionDir);
-  await fs.promises.mkdir(path.dirname(statePath), { recursive: true });
-  await fs.promises.writeFile(
-    statePath,
-    `${JSON.stringify(transition.current, null, 2)}\n`,
-    "utf-8",
-  );
-
-  if (!transition.entered && !transition.exited) return;
-
-  const eventPath = sessionPlanModeEventsFile(sessionDir);
-  await fs.promises.mkdir(path.dirname(eventPath), { recursive: true });
-  await fs.promises.appendFile(
-    eventPath,
-    JSON.stringify({
-      ts: Date.now(),
-      event: transition.entered ? "entered" : "exited",
-      source: transition.source,
-      mode: transition.mode,
-      detection_source: transition.detection_source,
-      previous: transition.previous,
-      current: transition.current,
-      entered: transition.entered,
-      exited: transition.exited,
-    }) + "\n",
-    "utf-8",
-  );
-}
-
-export async function readPlanModeStoredState(
-  sessionDir: string,
-): Promise<PlanModeStoredState | null> {
-  return readPlanModeEntryState(sessionPlanModeStateFile(sessionDir));
 }
 
 export function parsePlanModeStoredState(
@@ -130,17 +82,6 @@ export function parsePlanModeStoredState(
       ? parsed.deliveredPlansMdAt
       : null,
   };
-}
-
-async function readPlanModeEntryState(
-  statePath: string,
-): Promise<PlanModeStoredState | null> {
-  try {
-    const raw = await fs.promises.readFile(statePath, "utf-8");
-    return parsePlanModeStoredState(JSON.parse(raw));
-  } catch {
-    return null;
-  }
 }
 
 function isPlanModeDetectionSource(raw: unknown): raw is PlanModeDetectionSource {

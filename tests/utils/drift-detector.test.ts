@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { detectDrift } from "../../src/utils/drift-detector.js";
-import type { DriftTargetState, ToolLogEntry } from "../../src/utils/session-store.js";
+import type { DriftTargetState, ToolLogEntry } from "../helpers/session-workflow.js";
 
 const TARGET = "/home/tim/.claude/plans/drift.md";
 
@@ -105,11 +105,4 @@ describe("detectDrift - graduated repetition block", () => {
     expect(signal.detected).toBe(false);
   });
 
-  it("works without a driftState argument (backward compatible)", () => {
-    const log: ToolLogEntry[] = Array.from({ length: 5 }, () => allowedEdit());
-    const signal = detectDrift("Edit", { file_path: TARGET }, log);
-    expect(signal.detected).toBe(true);
-    expect(signal.reason).toContain(`5 edits to "${TARGET}"`);
-    expect(signal.reason).toContain("stop making many small edits");
-  });
 });

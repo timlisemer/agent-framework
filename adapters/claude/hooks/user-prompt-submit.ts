@@ -9,6 +9,7 @@ interface UserPromptSubmitHookInput {
   prompt: string;
   transcript_path: string;
   session_id: string;
+  delivery_id?: string;
   permission_mode?: string;
 }
 

@@ -39,6 +39,6 @@ function readCodexSession(filePath: string): AdapterSessionHistoryRecord | null 
     contentPaths: [["content"], ["message", "content"], ["payload", "content"]],
     fallbackWorkingDir: (filePath) => codexTranscriptCwd(filePath) ?? null,
     targetKeyFor: (threadId, transcriptPath) => `codex:${threadId}:${transcriptPath}`,
-    resumeTargetFor: (threadId, transcriptPath) => ({ provider: "codex", target: { threadId, transcriptPath } }),
+    resumeTargetFor: (threadId) => ({ sdkRuntime: "codex", nativeSessionId: threadId }),
   });
 }

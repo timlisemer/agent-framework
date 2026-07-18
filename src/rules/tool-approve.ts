@@ -5,10 +5,11 @@ import { buildToolApprovePromptSection } from "../utils/agent-configs.js";
 import { FILE_TOOLS, extractFilePaths, isPlanFile } from "./utils.js";
 import { planModeEditBlock, planModeBashBlock } from "../utils/edit-intent.js";
 import { RESTRICTED_MCPS, SLASH_COMMAND_WORKFLOWS } from "../utils/slash-commands.js";
-import { activeSpec } from "../adapter/spec.js";
 import { classifyBashCommand } from "../utils/command-patterns.js";
 import { validateCurrentPlanExit } from "../utils/plan-source.js";
 import { logFastPathDeny } from "../utils/logger.js";
+import { recognizeMcpToolName } from "../adapter/mcp-wire.js";
+import { adapterSpecFromRuleContext } from "./tool-call-context.js";
 
 export const toolApproveRule: PreToolRule = {
   name: "tool-approve",
@@ -33,7 +34,7 @@ export const toolApproveRule: PreToolRule = {
       })) return null;
     }
 
-    if (activeSpec().isPlanExit({
+    if (adapterSpecFromRuleContext(ctx).isPlanExit({
       event: "PreToolUse",
       canonicalToolName: ctx.toolName,
       rawToolName: ctx.rawToolName,
@@ -44,6 +45,7 @@ export const toolApproveRule: PreToolRule = {
         sessionDir: ctx.sessionDir,
         projectDir: ctx.projectDir,
         hookName: "PreToolUse",
+        currentPlan: ctx.currentPlan,
       });
       if (!exitValidation.approved) {
         if (exitValidation.reason === "Cannot exit plan mode without a plan.") {
@@ -70,8 +72,8 @@ export const toolApproveRule: PreToolRule = {
     }
 
     {
-      const spec = activeSpec();
-      const mcp = spec.recognizeMcp(ctx.rawToolName ?? ctx.toolName);
+      const spec = adapterSpecFromRuleContext(ctx);
+      const mcp = recognizeMcpToolName(ctx.rawToolName ?? ctx.toolName, spec);
       if (mcp === "check") {
         return { fastAllow: "agent-framework check MCP is always available for verification" };
       }

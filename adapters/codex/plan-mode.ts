@@ -72,6 +72,14 @@ function findCodexCollaborationModeInTranscript(transcriptPath: string): string 
   return null;
 }
 
+function findCodexCollaborationModeInLines(lines: readonly string[]): string | null {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const mode = findCodexCollaborationModeInLine(lines[index] ?? "");
+    if (mode !== null) return mode;
+  }
+  return null;
+}
+
 function detectionFromCollaborationMode(mode: string): PlanModeDetection {
   return {
     active: mode === "plan",
@@ -85,9 +93,9 @@ export function detectPlanMode(input: PlanModeDetectionInput): PlanModeDetection
     return detectionFromCollaborationMode(input.collaborationMode);
   }
 
-  const collaborationMode = input.transcriptPath
-    ? findCodexCollaborationModeInTranscript(input.transcriptPath)
-    : null;
+  const collaborationMode = input.transcriptLines === undefined
+    ? input.transcriptPath ? findCodexCollaborationModeInTranscript(input.transcriptPath) : null
+    : findCodexCollaborationModeInLines(input.transcriptLines);
   if (collaborationMode !== null) {
     return detectionFromCollaborationMode(collaborationMode);
   }

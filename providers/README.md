@@ -6,8 +6,8 @@ Agent-framework has one provider abstraction for both execution modes:
 - `sdk`: autonomous investigation through a host-agent runtime. Framework-owned
   agents default to per-run isolated runtime homes; explicit user-runtime UI
   sessions either use the user's native host-agent home or, with
-  `sdkRuntimeHome: "managedAstral"`, a managed home under
-  `~/.agent-framework/astral-ai/<provider>` for session history and resume.
+  `{ kind: "managed", configuration: { profile: "default" } }`, a managed home under
+  `~/.agent-framework/managed/default/<provider>` for durable runtime state.
   Managed refreshes replace framework-owned adapter config and preserve durable
   history directories such as Codex `sessions/` and Claude `projects/`.
 

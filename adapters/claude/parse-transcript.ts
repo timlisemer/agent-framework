@@ -9,7 +9,6 @@
  */
 
 import type {
-  ContentBlock,
   TranscriptEntry,
   TranscriptParseOptions,
   TranscriptSource,
@@ -68,6 +67,3 @@ function sourceFor(raw: unknown, lineNumber: number, options: TranscriptParseOpt
     raw,
   });
 }
-
-// Re-export ContentBlock so scenario-materializer can use it without importing from src/.
-export type { ContentBlock };

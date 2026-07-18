@@ -1,52 +1,231 @@
 {
-  "schema_version": 1,
   "name": "sentiment-mood-relief-resets",
   "description": "Promoted to expected-to-pass on 2026-05-19 after repeated scenario_tester runs passed consistently. Seeded angry/low-trust prediction; user's relieved follow-up should let the SENTIMENT_AGENT downgrade mood and allow the next Edit. Note: this scenario relies on UserPromptSubmit firing first (the test harness fires the listed target hook), so the seed is observed unchanged by PreToolUse - verifying the seed_state plumbing rather than the agent downgrade. The downgrade itself is exercised by manual user verification (see the plan).",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "sentiment-mood-relief-resets-start",
+      "runId": "fixture-sentiment-mood-relief-resets",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": null,
+        "projectDir": null,
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "ok thanks, that fixed it, please continue."
+      "commandId": "sentiment-mood-relief-resets-session-state",
+      "runId": "fixture-sentiment-mood-relief-resets",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "user was furious before this turn",
+            "blockedIntent": "no further changes",
+            "explicitlyAllowedTools": [
+              "Edit"
+            ],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "previous angry message",
+            "timestamp": 1
+          },
+          "frustrationStreak": 1,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Continuing."
-        },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_relief_edit",
+      "commandId": "sentiment-mood-relief-resets-message-0",
+      "runId": "fixture-sentiment-mood-relief-resets",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "sentiment-mood-relief-resets-message-0",
+        "turnId": "sentiment-mood-relief-resets-turn-0",
+        "content": "ok thanks, that fixed it, please continue.",
+        "contentDigest": "sha256:96c78d3165ae0dc6acb6150df7b7bbc39adf068b1ede3ab0a3ffa2cc0e376db3"
+      }
+    },
+    {
+      "commandId": "sentiment-mood-relief-resets-message-1",
+      "runId": "fixture-sentiment-mood-relief-resets",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "sentiment-mood-relief-resets-message-1",
+        "turnId": null,
+        "content": "Continuing.\n[tool Edit] {\"file_path\":\"src/foo.ts\",\"old_string\":\"old\",\"new_string\":\"new\"}",
+        "contentDigest": "sha256:4d498b758091527d933e2573903e8e057b612819d339ee2fe82021961e16e2e3"
+      }
+    },
+    {
+      "commandId": "sentiment-mood-relief-resets-target-tool",
+      "runId": "fixture-sentiment-mood-relief-resets",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "user was furious before this turn",
+              "blockedIntent": "no further changes",
+              "explicitlyAllowedTools": [
+                "Edit"
+              ],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "previous angry message",
+              "timestamp": 1
+            },
+            "frustrationStreak": 1,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-sentiment-mood-relief-resets",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/sentiment-mood-relief-resets.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-sentiment-mood-relief-resets",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": null,
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Edit",
+              "rawToolInput": {
+                "file_path": "src/foo.ts",
+                "old_string": "old",
+                "new_string": "new"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "ok thanks, that fixed it, please continue.",
+              "latestUserLogicText": "ok thanks, that fixed it, please continue.",
+              "recentUserMessages": [
+                "ok thanks, that fixed it, please continue."
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_relief_edit",
+          "turnId": null,
           "name": "Edit",
           "input": {
             "file_path": "src/foo.ts",
             "old_string": "old",
             "new_string": "new"
-          }
+          },
+          "inputDigest": "sha256:070a7031f032499734220ee36e618f78cdbbf5fc31380190072ec2b3c2c614ad",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_relief_edit"
+  "effects": {
+    "mode": "live"
   },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "user was furious before this turn",
-      "blockedIntent": "no further changes",
-      "explicitlyAllowedTools": [
-        "Edit"
-      ],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "previous angry message"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 1,
-    "currentWindowSize": 4
-  },
-  "expect": {
-    "expected": "allow"
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "sentiment-mood-relief-resets-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

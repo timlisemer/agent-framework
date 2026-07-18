@@ -1,110 +1,250 @@
 {
-  "schema_version": 1,
   "name": "codex-respond-first-misses-text-before-parallel-tools-should-allow",
   "description": "Live repro from /home/tim/.agent-framework/sessions/home-tim-Coding-public_repos-astral/2026-05-05-0321_74e48fd4 capture seq 34 / Codex transcript /home/tim/.codex/sessions/2026/05/04/rollout-2026-05-04T18-30-52-019df3d4-0685-73a3-8345-a5374461063c.jsonl lines 1089-1103. The user angrily asked about the system tray right-click stub. The assistant responded with visible text, then immediately issued a parallel batch of four Bash tool calls. The live hook denied the first call with respond-first, and siblings inherited the denial, even though the assistant had already responded in the same Codex turn. Correct behavior: allow the benign first rg search; respond-first must count the preceding assistant text for Codex-style response_item message + function_call batches, not only Claude same-message-id assistant_split batches.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "codex-respond-first-misses-text-before-parallel-tools-should-allow-start",
+      "runId": "fixture-codex-respond-first-misses-text-before-parallel-tools-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/astral",
+        "projectDir": "/home/tim/Coding/public_repos/astral",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you"
+      "commandId": "codex-respond-first-misses-text-before-parallel-tools-should-allow-session-state",
+      "runId": "fixture-codex-respond-first-misses-text-before-parallel-tools-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "User is challenging the AI to explain or address the system tray right-click issue that only shows a stub instead of content, emphasizing that they already told the AI about it previously.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [
+              "Read"
+            ],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a",
+            "userMessageSnippet": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you",
+            "timestamp": 1
+          },
+          "frustrationStreak": 1,
+          "currentWindowSize": 6
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "You’re right to push on that. The system tray “No actions” result is a separate strong signal that the generic popover/menu path is still a placeholder in at least one bar surface, not just an app-preview parity issue. I’ll inspect the tray right-click implementation and the old AGS tray/menu reference before making a stronger audit claim."
-        }
-      ]
+      "commandId": "codex-respond-first-misses-text-before-parallel-tools-should-allow-message-0",
+      "runId": "fixture-codex-respond-first-misses-text-before-parallel-tools-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "codex-respond-first-misses-text-before-parallel-tools-should-allow-message-0",
+        "turnId": "codex-respond-first-misses-text-before-parallel-tools-should-allow-turn-0",
+        "content": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you",
+        "contentDigest": "sha256:b368057d2dd0a1aaa220f7f8026dd98abecff75b65ae02fe1171305cca0af3f4"
+      }
     },
     {
-      "role": "assistant_split",
-      "msg_id": "msg_codex_parallel_batch_after_visible_text",
-      "lines": [
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "call_OTqvWANTXFWnNbnqcqIYCqfd",
-              "name": "Bash",
-              "input": {
+      "commandId": "codex-respond-first-misses-text-before-parallel-tools-should-allow-message-1",
+      "runId": "fixture-codex-respond-first-misses-text-before-parallel-tools-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "codex-respond-first-misses-text-before-parallel-tools-should-allow-message-1",
+        "turnId": null,
+        "content": "You’re right to push on that. The system tray “No actions” result is a separate strong signal that the generic popover/menu path is still a placeholder in at least one bar surface, not just an app-preview parity issue. I’ll inspect the tray right-click implementation and the old AGS tray/menu reference before making a stronger audit claim.",
+        "contentDigest": "sha256:9f5677cad4ca41615fdd68e3ab24aa888ba205824f139d4e09eb448b20eca906"
+      }
+    },
+    {
+      "commandId": "codex-respond-first-misses-text-before-parallel-tools-should-allow-message-2",
+      "runId": "fixture-codex-respond-first-misses-text-before-parallel-tools-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "msg_codex_parallel_batch_after_visible_text",
+        "turnId": null,
+        "content": "[tool Bash] {\"command\":\"rg -n \\\"sys_tray|tray|No actions|MenuSection|show_menu|shared::popover|app_popover|right_click|on_right_click|context\\\" crates/astral-shell/src/widgets crates/astral-shell/src/services crates/astral-core/src\",\"description\":\"Search tray and popover code for right-click/menu handling\"}\n[tool Bash] {\"command\":\"git -C /home/tim/Coding/nixos ls-tree -r --name-only 8be1dfd987bd586f43c00a435b740b8d5a089862:files/ags/src | rg \\\"tray|status|popover|menu\\\"\",\"description\":\"Find old AGS tray/menu reference files\"}\n[tool Bash] {\"command\":\"nl -ba crates/astral-shell/src/widgets/shared/popover.rs | sed -n '1,180p'\",\"description\":\"Read shared popover implementation\"}\n[tool Bash] {\"command\":\"nl -ba crates/astral-shell/src/widgets/bar/sys_tray.rs | sed -n '1,320p'\",\"description\":\"Read system tray widget implementation\"}",
+        "contentDigest": "sha256:9405e7b57247a525063a85745f88b34d4cf10888a1011066b8b8abcebdc3444d"
+      }
+    },
+    {
+      "commandId": "codex-respond-first-misses-text-before-parallel-tools-should-allow-target-tool",
+      "runId": "fixture-codex-respond-first-misses-text-before-parallel-tools-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:06.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "User is challenging the AI to explain or address the system tray right-click issue that only shows a stub instead of content, emphasizing that they already told the AI about it previously.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [
+                "Read"
+              ],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "userMessageSnippet": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you",
+              "timestamp": 1
+            },
+            "frustrationStreak": 1,
+            "currentWindowSize": 6
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-codex-respond-first-misses-text-before-parallel-tools-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/codex-respond-first-misses-text-before-parallel-tools-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-codex-respond-first-misses-text-before-parallel-tools-should-allow",
+            "projectDir": "/home/tim/Coding/public_repos/astral",
+            "workingDir": "/home/tim/Coding/public_repos/astral",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/public_repos/astral",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "preTool": {
+              "rawToolName": "Bash",
+              "rawToolInput": {
                 "command": "rg -n \"sys_tray|tray|No actions|MenuSection|show_menu|shared::popover|app_popover|right_click|on_right_click|context\" crates/astral-shell/src/widgets crates/astral-shell/src/services crates/astral-core/src",
                 "description": "Search tray and popover code for right-click/menu handling"
-              }
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you",
+              "latestUserLogicText": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you",
+              "recentUserMessages": [
+                "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
             }
-          ]
-        },
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "call_mTRID9ngHuQmu9VG1DrRijWy",
-              "name": "Bash",
-              "input": {
-                "command": "git -C /home/tim/Coding/nixos ls-tree -r --name-only 8be1dfd987bd586f43c00a435b740b8d5a089862:files/ags/src | rg \"tray|status|popover|menu\"",
-                "description": "Find old AGS tray/menu reference files"
-              }
-            }
-          ]
-        },
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "call_uVpb0lMoF3nsnDeRhS3vnfaJ",
-              "name": "Bash",
-              "input": {
-                "command": "nl -ba crates/astral-shell/src/widgets/shared/popover.rs | sed -n '1,180p'",
-                "description": "Read shared popover implementation"
-              }
-            }
-          ]
-        },
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "call_BYFzMJKqRJcP7HLGY5BXlvc9",
-              "name": "Bash",
-              "input": {
-                "command": "nl -ba crates/astral-shell/src/widgets/bar/sys_tray.rs | sed -n '1,320p'",
-                "description": "Read system tray widget implementation"
-              }
-            }
-          ]
+          },
+          "toolCallId": "call_OTqvWANTXFWnNbnqcqIYCqfd",
+          "turnId": null,
+          "name": "Bash",
+          "input": {
+            "command": "rg -n \"sys_tray|tray|No actions|MenuSection|show_menu|shared::popover|app_popover|right_click|on_right_click|context\" crates/astral-shell/src/widgets crates/astral-shell/src/services crates/astral-core/src",
+            "description": "Search tray and popover code for right-click/menu handling"
+          },
+          "inputDigest": "sha256:c821151472e23e23baa006c16c66e843eace97be77e4627c2d724152b2d20973",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "call_OTqvWANTXFWnNbnqcqIYCqfd",
-    "batch_visible_through": 0
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/astral",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "User is challenging the AI to explain or address the system tray right-click issue that only shows a stub instead of content, emphasizing that they already told the AI about it previously.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [
-        "Read"
-      ],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "contextSwitch": "no",
-      "questionIsStalling": "n/a",
-      "userMessageSnippet": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 1,
-    "currentWindowSize": 6
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "The assistant visibly answered before the tool batch. The first command is a benign rg search, so respond-first must not deny just because Codex records assistant text and function calls as separate response items."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "codex-respond-first-misses-text-before-parallel-tools-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

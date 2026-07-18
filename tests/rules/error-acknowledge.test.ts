@@ -4,18 +4,20 @@ import * as os from "os";
 import * as path from "path";
 import { errorAcknowledgeRule } from "../../src/rules/error-acknowledge.js";
 import { activeSpec } from "../../src/adapter/spec.js";
-import { sessionStateDefaults } from "../../src/utils/session-store.js";
-import { appendJsonlEntrySync } from "../../src/utils/file-io.js";
+import { sessionStateDefaults } from "../helpers/session-workflow.js";
 import { makeRuleContext } from "../helpers/rule-context.js";
+import type { ToolLogEntry } from "../../src/utils/tool-log-types.js";
 
 describe("errorAcknowledgeRule", () => {
   let tempDir: string;
   let transcriptPath: string;
+  let toolHistory: ToolLogEntry[];
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "error-ack-test-"));
     transcriptPath = path.join(tempDir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
+    toolHistory = [];
   });
 
   afterEach(() => {
@@ -35,6 +37,7 @@ describe("errorAcknowledgeRule", () => {
       sessionDir: tempDir,
       sessionId: "session",
       state: sessionStateDefaults(),
+      toolHistory,
     });
   }
 
@@ -45,7 +48,7 @@ describe("errorAcknowledgeRule", () => {
     path?: string;
     paths?: string[];
   }): void {
-    appendJsonlEntrySync(path.join(tempDir, "tool-log.jsonl"), {
+    toolHistory.push({
       ts: Date.now(),
       toolUseId: `${entry.tool}-${entry.status}`,
       tool: entry.tool,

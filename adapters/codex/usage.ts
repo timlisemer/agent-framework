@@ -1,4 +1,4 @@
-import type { TokenUsage } from "../../src/ai-protocol/index.js";
+import type { TokenUsage } from "../../src/providers/provider-contract.js";
 import { numberOrNull, recordFromUnknown } from "../../src/utils/output.js";
 
 type CodexProviderUsage = {

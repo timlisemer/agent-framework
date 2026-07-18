@@ -43,6 +43,7 @@ import type {
 import { isReadOnlyRiskClass } from "./bash-policy/helpers.js";
 import {
   bashReadCapabilities,
+  bashReviewReadCapabilities,
   bashReadFileOperands,
 } from "./bash-policy/read-capability.js";
 
@@ -61,6 +62,7 @@ export {
   detectWorkaroundCommand,
   detectWorkaroundPattern,
   bashReadCapabilities,
+  bashReviewReadCapabilities,
   bashReadFileOperands,
   isReadOnlyRiskClass,
 };

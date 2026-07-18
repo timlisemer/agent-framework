@@ -16,7 +16,97 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { randomUUID } from "crypto";
+import type { z } from "zod";
 import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
+import { isMissingFileError } from "./filesystem-errors.js";
+
+export type ValidatedJsonlReadResult<T> = {
+  values: T[];
+  validByteLength: number;
+  hadPartialTail: boolean;
+};
+
+export async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.promises.access(filePath);
+    return true;
+  } catch (error) {
+    if (isMissingFileError(error)) return false;
+    throw error;
+  }
+}
+
+export async function writeFileAtomically(
+  filePath: string,
+  contents: string | Uint8Array,
+): Promise<void> {
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+  const temporaryPath = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`);
+  let committed = false;
+  try {
+    const handle = await fs.promises.open(temporaryPath, "wx", 0o600);
+    try {
+      await handle.writeFile(contents);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.promises.rename(temporaryPath, filePath);
+    committed = true;
+  } finally {
+    if (!committed) await fs.promises.unlink(temporaryPath).catch((error: unknown) => {
+      if (!isMissingFileError(error)) throw error;
+    });
+  }
+}
+
+export async function writeJsonAtomically(filePath: string, value: unknown): Promise<void> {
+  await writeFileAtomically(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+export async function readValidatedJsonl<T>(
+  filePath: string,
+  schema: z.ZodType<T>,
+): Promise<ValidatedJsonlReadResult<T>> {
+  let contents: string;
+  try {
+    contents = await fs.promises.readFile(filePath, "utf8");
+  } catch (error) {
+    if (isMissingFileError(error)) return { values: [], validByteLength: 0, hadPartialTail: false };
+    throw error;
+  }
+  const hadPartialTail = contents.length > 0 && !contents.endsWith("\n");
+  const validContents = hadPartialTail ? contents.slice(0, contents.lastIndexOf("\n") + 1) : contents;
+  return {
+    values: validContents.split("\n").filter((line) => line.trim() !== "")
+      .map((line) => schema.parse(JSON.parse(line))),
+    validByteLength: Buffer.byteLength(validContents, "utf8"),
+    hadPartialTail,
+  };
+}
+
+export async function appendValidatedJsonl<T>(
+  filePath: string,
+  schema: z.ZodType<T>,
+  values: readonly T[],
+): Promise<void> {
+  if (values.length === 0) return;
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+  const handle = await fs.promises.open(filePath, "a", 0o600);
+  try {
+    await handle.writeFile(`${values.map((value) => JSON.stringify(schema.parse(value))).join("\n")}\n`, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function truncateFileIfPresent(filePath: string, byteLength: number): Promise<void> {
+  await fs.promises.truncate(filePath, byteLength).catch((error: unknown) => {
+    if (!isMissingFileError(error)) throw error;
+  });
+}
 
 export type ValidatedFileScanResult =
   | { kind: "text"; bytes: number; scannedBytes: number }
@@ -152,7 +242,7 @@ export async function scanValidatedFileCancellable(
 }
 
 type JsonReplacer = (this: unknown, key: string, value: unknown) => unknown;
-type JsonWriteOptions = { indent?: number; replacer?: JsonReplacer };
+type JsonWriteOptions = { indent?: number; replacer?: JsonReplacer; mode?: number };
 
 export function readFirstUtf8File(filePaths: readonly string[]): string | null {
   for (const filePath of filePaths) {
@@ -582,7 +672,9 @@ export function writeJsonAtomic<T>(filePath: string, value: T, opts?: JsonWriteO
   fs.mkdirSync(dir, { recursive: true });
   const tempPath = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
   try {
-    fs.writeFileSync(tempPath, JSON.stringify(value, opts?.replacer, opts?.indent ?? 2) + "\n");
+    fs.writeFileSync(tempPath, JSON.stringify(value, opts?.replacer, opts?.indent ?? 2) + "\n", {
+      ...(opts?.mode === undefined ? {} : { mode: opts.mode }),
+    });
     fs.renameSync(tempPath, filePath);
   } catch (error) {
     try {

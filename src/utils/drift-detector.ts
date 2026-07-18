@@ -7,7 +7,8 @@
  * @module drift-detector
  */
 
-import type { DriftTargetState, ToolLogEntry } from "./session-store.js";
+import type { DriftTargetState } from "../effects/session-workflow.js";
+import type { ToolLogEntry } from "./tool-log-types.js";
 import { isEditToolName, TEXT_EDIT_TOOL_NAMES_DISPLAY } from "./edit-tools.js";
 
 export interface DriftSignal {
@@ -50,19 +51,18 @@ export function extractDriftTarget(toolInput: unknown): string {
  * Uses pure string/regex operations for speed.
  *
  * `driftState` holds the per-target escalation level (Warning → Final Warning)
- * maintained by the drift-detect rule; when omitted, all targets are
- * treated as level 0.
+ * maintained by the drift-detect rule.
  */
 export function detectDrift(
   toolName: string,
   toolInput: unknown,
   recentToolLog: ToolLogEntry[],
-  driftState?: Record<string, DriftTargetState>,
+  driftState: Record<string, DriftTargetState>,
   options: DriftDetectionOptions = {},
 ): DriftSignal {
   const targets = extractDriftTargets(toolInput);
   for (const target of targets) {
-    const state = driftState?.[target] ?? { level: 0 as const };
+    const state = driftState[target] ?? { level: 0 as const };
     const repetitionSignal = checkRepetition(
       toolName,
       target,

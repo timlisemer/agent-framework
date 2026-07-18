@@ -1,6 +1,5 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { readToolLogEntries } from "../utils/session-store.js";
-import { detectIntentFulfillment } from "../utils/intent-fulfillment.js";
+import { detectRecentIntentFulfillment } from "../utils/intent-fulfillment.js";
 import { EDIT_TOOL_NAMES_DISPLAY } from "../utils/edit-tools.js";
 
 const PLAN_MODE_STEP_CONTEXT_STRING = `=== PLAN MODE STEP AWARENESS ===
@@ -29,8 +28,7 @@ export const planModeStepContextRule: PreToolRule = {
     if (!ctx.planModeCtx.active) return null;
     const prediction = ctx.state.currentPrediction;
     if (!prediction) return null;
-    const tail = readToolLogEntries(ctx.sessionDir, 50);
-    const signal = detectIntentFulfillment(prediction, tail);
+    const signal = detectRecentIntentFulfillment(prediction, ctx.toolHistory ?? []);
     if (!signal) return null;
     return { llmContext: PLAN_MODE_STEP_CONTEXT_STRING };
   },

@@ -1,66 +1,229 @@
 {
-  "schema_version": 1,
   "name": "exit-plan-mode-after-angry-bash-rejection-should-allow",
   "description": "Live repro: in plan mode, user snapped at the assistant for attempting Bash ('fuck you stop with these bash commands'). Assistant called ExitPlanMode on the very next turn (thinking + tool_use, no text). Hook blocked with sentiment message: 'User appears angry (trust: low). Blocking ExitPlanMode unless explicitly requested.' -- prediction-block (priority 35) fastDenied based on mood alone, ignoring that the user's anger was Bash-scoped (captured in explicitlyBlockedSubstrings for tool='Bash') and that ExitPlanMode is the correct action in plan mode after writing the plan the user asked for. Seeds mood:angry,trust:low to match the live sentiment-agent output (scenarios do not re-run the sentiment agent, so the post-UserPromptSubmit prediction is seeded directly). Expected: allow -- ExitPlanMode is not Bash and should not inherit Bash-scoped anger. This scenario is EXPECTED TO FAIL against current code and reproduces the live deny via gate=prediction-block.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "exit-plan-mode-after-angry-bash-rejection-should-allow-start",
+      "runId": "fixture-exit-plan-mode-after-angry-bash-rejection-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "fuck you stop with these bash commands"
+      "commandId": "exit-plan-mode-after-angry-bash-rejection-should-allow-session-state",
+      "runId": "fixture-exit-plan-mode-after-angry-bash-rejection-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "User is angry about bash attempts and wants them to stop.",
+            "blockedIntent": "using bash commands",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [
+              {
+                "tool": "Bash",
+                "reason": "User said 'fuck you stop with these bash commands'."
+              }
+            ],
+            "userMessageSnippet": "fuck you stop with these bash commands",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 2
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant_split",
-      "msg_id": "msg_scenario_exit_plan_mode_after_angry",
-      "lines": [
-        {
-          "blocks": [
-            {
-              "type": "thinking",
-              "thinking": "Exit plan mode."
+      "commandId": "exit-plan-mode-after-angry-bash-rejection-should-allow-message-0",
+      "runId": "fixture-exit-plan-mode-after-angry-bash-rejection-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "exit-plan-mode-after-angry-bash-rejection-should-allow-message-0",
+        "turnId": "exit-plan-mode-after-angry-bash-rejection-should-allow-turn-0",
+        "content": "fuck you stop with these bash commands",
+        "contentDigest": "sha256:0b71fbf03a94d1e448e412584ea0191dcbb97ec822fd776c7cfbce1284296f7a"
+      }
+    },
+    {
+      "commandId": "exit-plan-mode-after-angry-bash-rejection-should-allow-message-1",
+      "runId": "fixture-exit-plan-mode-after-angry-bash-rejection-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "msg_scenario_exit_plan_mode_after_angry",
+        "turnId": null,
+        "content": "Exit plan mode.\n[tool ExitPlanMode] {}",
+        "contentDigest": "sha256:20cf127460e0b53070056fdb86fa394c24e3162b87ed6a74f5085d56c2202fbd"
+      }
+    },
+    {
+      "commandId": "exit-plan-mode-after-angry-bash-rejection-should-allow-target-tool",
+      "runId": "fixture-exit-plan-mode-after-angry-bash-rejection-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "User is angry about bash attempts and wants them to stop.",
+              "blockedIntent": "using bash commands",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [
+                {
+                  "tool": "Bash",
+                  "reason": "User said 'fuck you stop with these bash commands'."
+                }
+              ],
+              "userMessageSnippet": "fuck you stop with these bash commands",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 2
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-exit-plan-mode-after-angry-bash-rejection-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/exit-plan-mode-after-angry-bash-rejection-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-exit-plan-mode-after-angry-bash-rejection-should-allow",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "plan",
+            "collaborationMode": null,
+            "planMode": true,
+            "planModeDetection": {
+              "active": true,
+              "mode": "plan",
+              "source": "hook-permission-mode"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "ExitPlanMode",
+              "rawToolInput": {},
+              "outsideRootPath": null,
+              "latestUserMessage": "fuck you stop with these bash commands",
+              "latestUserLogicText": "fuck you stop with these bash commands",
+              "recentUserMessages": [
+                "fuck you stop with these bash commands"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": true,
+              "batch": null
             }
-          ]
-        },
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "toolu_scenario_exit_plan_mode_after_angry",
-              "name": "ExitPlanMode",
-              "input": {}
-            }
-          ]
+          },
+          "toolCallId": "toolu_scenario_exit_plan_mode_after_angry",
+          "turnId": null,
+          "name": "ExitPlanMode",
+          "input": {},
+          "inputDigest": "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_exit_plan_mode_after_angry"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "plan"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "User is angry about bash attempts and wants them to stop.",
-      "blockedIntent": "using bash commands",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [
-        {
-          "tool": "Bash",
-          "reason": "User said 'fuck you stop with these bash commands'."
-        }
-      ],
-      "userMessageSnippet": "fuck you stop with these bash commands"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 2
-  },
-  "expect": {
-    "expected": "deny",
-    "by": "tool-approve",
-    "notes": "Captures the Bash-scoped-anger regression: Bash is listed in explicitlyBlockedSubstrings, so prediction-block must NOT generalize the anger to ExitPlanMode. Post-fix (decidePrediction step 4 treats a non-empty explicitlyBlockedSubstrings that doesn't target the current tool as a scoped allow), prediction-block steps aside and the deny falls through to tool-approve's plan-file existence check. This expectation pins the correct post-fix gate: gate=tool-approve with reason 'Cannot exit plan mode without a plan.' If gate=prediction-block appears again the Bash-scope fix is broken. To exercise the full ExitPlanMode allow path end-to-end, the scenario harness would need to create a plan file at the slug-resolved path -- tracked as a harness extension, not part of this regression gate."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "exit-plan-mode-after-angry-bash-rejection-should-allow-target-tool",
+      "status": "denied"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "denied"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

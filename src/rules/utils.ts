@@ -45,7 +45,7 @@ export const LOW_RISK_TOOLS = [
  * the user is calm. These run heavyweight side effects (multi-minute test
  * suites, label rewrites). Cost-gated, not user-state-gated.
  */
-const HEAVY_MCPS: ReadonlySet<CanonicalMcp> = new Set(["scenario_tester", "scenario_labeler"]);
+const HEAVY_MCPS: ReadonlySet<CanonicalMcp> = new Set(["scenario_tester"]);
 
 /**
  * True iff a tool is generally safe for low-risk prediction treatment.

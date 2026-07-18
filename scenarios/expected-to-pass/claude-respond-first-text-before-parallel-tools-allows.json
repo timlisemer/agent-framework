@@ -1,93 +1,233 @@
 {
-  "schema_version": 1,
   "name": "claude-respond-first-text-before-parallel-tools-allows",
   "description": "Claude parity twin of codex-respond-first-text-before-parallel-tools-allows. The assistant responds with text and then issues a parallel batch of Bash tool calls in the same assistant_split. Because the assistant already responded (text is in the same msg_id group), respond-first must allow.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "claude-respond-first-text-before-parallel-tools-allows-start",
+      "runId": "fixture-claude-respond-first-text-before-parallel-tools-allows",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/astral",
+        "projectDir": "/home/tim/Coding/public_repos/astral",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you"
+      "commandId": "claude-respond-first-text-before-parallel-tools-allows-session-state",
+      "runId": "fixture-claude-respond-first-text-before-parallel-tools-allows",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "User is challenging the AI to explain or address the system tray right-click issue that only shows a stub instead of content, emphasizing that they already told the AI about it previously.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [
+              "Read"
+            ],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a",
+            "userMessageSnippet": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you",
+            "timestamp": 1
+          },
+          "frustrationStreak": 1,
+          "currentWindowSize": 6
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant_split",
-      "msg_id": "msg_claude_parallel_batch_after_visible_text",
-      "lines": [
-        {
-          "blocks": [
-            {
-              "type": "text",
-              "text": "You're right to push on that. The system tray \"No actions\" result is a separate strong signal that the generic popover/menu path is still a placeholder. I'll inspect the tray right-click implementation before making a stronger audit claim."
-            }
-          ]
-        },
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "toolu_claude_tray_search_1",
-              "name": "Bash",
-              "input": {
+      "commandId": "claude-respond-first-text-before-parallel-tools-allows-message-0",
+      "runId": "fixture-claude-respond-first-text-before-parallel-tools-allows",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "claude-respond-first-text-before-parallel-tools-allows-message-0",
+        "turnId": "claude-respond-first-text-before-parallel-tools-allows-turn-0",
+        "content": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you",
+        "contentDigest": "sha256:b368057d2dd0a1aaa220f7f8026dd98abecff75b65ae02fe1171305cca0af3f4"
+      }
+    },
+    {
+      "commandId": "claude-respond-first-text-before-parallel-tools-allows-message-1",
+      "runId": "fixture-claude-respond-first-text-before-parallel-tools-allows",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "msg_claude_parallel_batch_after_visible_text",
+        "turnId": null,
+        "content": "You're right to push on that. The system tray \"No actions\" result is a separate strong signal that the generic popover/menu path is still a placeholder. I'll inspect the tray right-click implementation before making a stronger audit claim.\n[tool Bash] {\"command\":\"rg -n \\\"sys_tray|tray|right_click|context\\\" crates/astral-shell/src/widgets\"}\n[tool Bash] {\"command\":\"rg -n \\\"popover|shared\\\" crates/astral-shell/src/widgets/shared/\"}\n[tool Bash] {\"command\":\"rg -n \\\"sys_tray|right_click\\\" crates/astral-shell/src/widgets/bar/\"}",
+        "contentDigest": "sha256:b6c7014d18dafa78a3c9d0f08f5a9d49e1799144b0077065ba5dee3c14f651e4"
+      }
+    },
+    {
+      "commandId": "claude-respond-first-text-before-parallel-tools-allows-target-tool",
+      "runId": "fixture-claude-respond-first-text-before-parallel-tools-allows",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "User is challenging the AI to explain or address the system tray right-click issue that only shows a stub instead of content, emphasizing that they already told the AI about it previously.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [
+                "Read"
+              ],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "userMessageSnippet": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you",
+              "timestamp": 1
+            },
+            "frustrationStreak": 1,
+            "currentWindowSize": 6
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-claude-respond-first-text-before-parallel-tools-allows",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/claude-respond-first-text-before-parallel-tools-allows.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-claude-respond-first-text-before-parallel-tools-allows",
+            "projectDir": "/home/tim/Coding/public_repos/astral",
+            "workingDir": "/home/tim/Coding/public_repos/astral",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/astral",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Bash",
+              "rawToolInput": {
                 "command": "rg -n \"sys_tray|tray|right_click|context\" crates/astral-shell/src/widgets"
-              }
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you",
+              "latestUserLogicText": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you",
+              "recentUserMessages": [
+                "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
             }
-          ]
-        },
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "toolu_claude_tray_search_2",
-              "name": "Bash",
-              "input": {
-                "command": "rg -n \"popover|shared\" crates/astral-shell/src/widgets/shared/"
-              }
-            }
-          ]
-        },
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "toolu_claude_tray_search_3",
-              "name": "Bash",
-              "input": {
-                "command": "rg -n \"sys_tray|right_click\" crates/astral-shell/src/widgets/bar/"
-              }
-            }
-          ]
+          },
+          "toolCallId": "toolu_claude_tray_search_1",
+          "turnId": null,
+          "name": "Bash",
+          "input": {
+            "command": "rg -n \"sys_tray|tray|right_click|context\" crates/astral-shell/src/widgets"
+          },
+          "inputDigest": "sha256:8412d4f46967825d0be33381cb795a2639f2e175d224fbb42b0db7f13e502dea",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_claude_tray_search_1",
-    "batch_visible_through": 1
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/astral",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "User is challenging the AI to explain or address the system tray right-click issue that only shows a stub instead of content, emphasizing that they already told the AI about it previously.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [
-        "Read"
-      ],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "contextSwitch": "no",
-      "questionIsStalling": "n/a",
-      "userMessageSnippet": "yes but that is certanly not all, or how do you explain the fact that the system tray right click doesnt open any content but instead only a stub, which i allready told you"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 1,
-    "currentWindowSize": 6
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "The assistant text is in the same assistant_split msg_id as the tool calls. buildAssistantGroups groups them together, so currentTurnAssistantState sees text+tool_uses and respond-first allows."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "claude-respond-first-text-before-parallel-tools-allows-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

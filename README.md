@@ -2,7 +2,7 @@
 
 A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
 
-1. **MCP Server** - For `check`, `confirm`, `fullconfirm`, `commit`, `push`, `implement`, `validate_implementation`, `validate_intent`, `create_planfile`, `validate_plan`, `scenario_labeler`, `scenario_tester`, `locate_scenario` tools (portable, works with any MCP client)
+1. **MCP Server** - For `check`, `confirm`, `fullconfirm`, `commit`, `push`, `implement`, `validate_implementation`, `validate_intent`, `create_planfile`, `validate_plan`, `scenario_tester`, `locate_scenario` tools (portable, works with any MCP client)
 2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
 3. **Stop Hook** - For `response-align-stop` and Codex `<proposed_plan>` acceptance validation
 4. **UserPromptSubmit Hook** - For `sentiment` rule and slash/skill workflow prediction seeding before each tool call sequence
@@ -11,33 +11,51 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for technical implementation details.
 
 ## AI Backend
 
-The `ai-backend` package entry runs a provider-neutral JSONL session backend
-for UI clients. Clients send typed `startSession`, `sendInput`,
-`listSessionChoices`, `resumeSession`, `closeSession`, snapshot, event-cursor,
-plan-state, tool-decision, and cancel frames. The backend emits ordered session,
-turn lifecycle, session-update, continuation, plan-state, provider-metadata,
-and error events plus request-correlated `sessionChoices`, `sessionClosed`,
-and `requestError` responses using the local protocol exported from
-`src/ai-protocol`. Visible transcript rows and tool calls are rebuilt from
-provider transcripts through per-event timeline snapshots rather than reduced
-from provider stream items. Snapshots carry transcript-projected messages,
-tool state, provider metadata, usage, context-window details, compaction
-events, and agent-framework session bindings; runtime control events only
-cover continuation, plan state, provider metadata, timeline snapshots, turn
-completion, and errors. Claude manual tool approvals are overlaid onto the
-current transcript snapshot while the SDK is blocked on `canUseTool`, using
-the native tool-use ID for follow-up decisions. `sdkRuntimeHome:
-"managedAstral"` enables managed Claude/Codex homes and resumable history
-discovery for user-runtime sessions. Managed Astral homes mirror the bundled
-adapter dotfolders under `adapters/claude/dotclaude` and
-`adapters/codex/dotcodex` while preserving local auth files.
-The protocol is owned in this repository and uses opaque resume targets instead
-of native runtime IDs. Build before running the backend:
+The `ai-backend` package entry is the transport-neutral scenario gateway.
+It performs hello/welcome negotiation, lists and attaches to canonical runs,
+starts provider runs, streams committed `EventBatch` values, dispatches
+capability-authorized commands, submits tool decisions and feedback, and
+fetches authorized artifacts. Hooks, fixture execution, and provider SDK
+callbacks all enter the same `ScenarioRuntime.dispatch` path. The gateway does
+not reconstruct UI state from provider transcripts and tool logs.
+
+Every run is reduced from `scenario.records.jsonl` into the backend-authored
+`scenario.snapshot.json`. Native transcript parsing is limited to the adapter
+import boundary when an SDK/host cannot provide structured history. The
+importer submits canonical observation commands; it never authors the snapshot.
+The generic wire contract represents runtime homes as
+`{ kind, configuration }` and provider resume targets as
+`{ sdkRuntime, nativeSessionId }`. It deliberately does not enumerate SDKs,
+runtime environments, home kinds, profiles, or provider-specific native ID
+fields. The composing provider layer owns and validates those policies; Agent
+Framework currently accepts its Claude/Codex environments and native or
+managed-default homes there.
+
+Manual feedback is stored separately and never rewrites fixture expectations.
+
+Preserved boundary quirks are explicit: Claude and Codex retain their native
+hook encodings and transcript parsers, provider adapters translate their SDKs'
+structured event shapes directly into canonical command payloads, compact/clear
+retain host lifecycle provenance while retiring removed native messages and
+tools from the active snapshot, and interactive tool decisions remain
+capability-dependent. Retirement records preserve compacted history in the
+append-only journal without exposing it to current rule evaluation. None selects
+a different rule engine, reducer, journal, or state model.
+
+The protocol and generated schema bundle are owned by this repository. Build
+before running the backend:
 
 ```bash
 npm run build
 npm run ai-backend
 ```
+
+Provider cancellation and shutdown are bounded. If an SDK runner ignores abort
+or disposal, the backend terminalizes and detaches it, ignores late events, and
+records a canonical `providerShutdown` recovery diagnostic instead of hanging
+the client. Continuable runs can then resume through a fresh provider manager.
+Cross-repository contract checks use the compiled `scenario:contract` package
+script documented in [`src/scenario/README.md`](src/scenario/README.md).
 
 ## Agents
 
@@ -57,15 +75,14 @@ The framework implements specialized agents and MCP tools organized into three c
 | validate_implementation| sonnet | Read-only validation of completed implementation against plan |
 | create_planfile        | -      | Create a named planfile and validate it                     |
 | validate_plan          | sonnet | Validate an existing planfile against the planning contract  |
-| scenario_labeler   | -      | Test harness operations for the @labeler agent role          |
 | scenario_tester    | -      | Scenario execution, reports, and capture materialization     |
 | locate_scenario    | haiku  | Locate captured scenario candidates from quote substrings    |
 
 **Note on validate_intent**: Unlike other MCP tools, `validate_intent` is not auto-triggered. It's a manual post-session review tool that analyzes a conversation transcript to check if the AI followed user intentions. Requires `transcript_path` parameter pointing to a `.jsonl` transcript file. Returns `ALIGNED` or `DRIFTED` verdict.
 
-**Note on scenario tools**: These tools wrap scenario runner operations for the labeler and tester workflows. The labeler tool handles transcript labeling workflows; the tester tool handles test execution, report reading, and `materialize_scenario` for converting live capture pointers into stored scenario JSON. Neither makes LLM calls internally.
+**Note on scenario tools**: `scenario_tester` lists, reads, materializes, and executes canonical fixtures. Live rule-behavior fixtures run through the production rule executor; deterministic effects are reserved for journal, reducer, recovery, and other runtime-mechanics fixtures. Manual feedback is stored separately from fixture expectations.
 
-**Note on locate_scenario**: This tool replaces the manual `scenarios/LOCATE-SCENARIO.md` recipe. It accepts one or more quote substrings, runs predefined literal searches over raw Claude/Codex transcripts and agent-framework session logs, resolves candidate session directories/capture sequences where possible, and uses a haiku-level LLM only to summarize successful findings. If no predefined search matches, it returns a failure notice plus manual fallback guidance.
+**Note on locate_scenario**: This tool accepts one or more quote substrings, searches canonical run journals and digest-verified linked artifacts under `~/.agent-framework/runs/`, maps matches back to stable journal records, and uses a haiku-level LLM only to summarize successful findings.
 
 **Style-drift warnings:** `check` performs a bounded scan of tracked and non-ignored untracked text files and reports unreadable, non-regular, or safety-limit omissions in its warning output. Intentional fixtures can place `agent-framework-style-drift-ignore-next-line` in a comment immediately above one exempt line, or `agent-framework-style-drift-ignore-file` in a comment to exempt a fixture file. These markers affect only deterministic style warnings.
 
@@ -189,22 +206,22 @@ content so the remediation workflow has a concrete file to edit. If the first
 inline Codex plan has no valid `Plan Name` and the session has no accepted
 planfiles yet, the Stop hook derives a session planfile name, creates that
 planfile through the same creator path, validates it, and blocks with the
-created path plus validation feedback. The session current-plan sidecar is
-updated only after validation passes.
+created path plus validation feedback. Accepted descriptors and exact-content
+validation results are committed as `plan.current` and `plan.validation`
+canonical snapshot slices.
 
 Captured hook decisions can be reconstructed through the `scenario_tester` MCP
-action `materialize_scenario`. The materializer reads `transcript-path.txt`,
-parses the raw transcript through the inferred adapter (`/.claude/` or
-`/.codex/`, with active-adapter fallback), writes the scenario under
+action `materialize_scenario`. Pass the canonical `run_id`; the materializer
+reads that run's journal and snapshot, writes a replayable fixture under
 `~/.agent-framework/test-runs/scenarios/`, and can immediately run it with
-`run_materialized: true`. Use this MCP action instead of `node -e` snippets in
-agent sessions.
+`run_materialized: true`. Use this MCP action instead of ad-hoc scripts in agent
+sessions.
 
-Captured scenario lookup should go through the `locate_scenario` MCP first. It
-searches quote substrings across raw adapter transcripts and live
-agent-framework session logs, summarizes found candidates, and tells the caller
-to materialize via the adapter-active `scenario_tester` MCP only when the user
-already requested materialization.
+Canonical run lookup should go through the `locate_scenario` MCP first. It
+searches quote substrings across authoritative run journals and their verified
+artifact-backed values, summarizes stable run and record candidates, and tells the caller to materialize the selected
+run via the adapter-active `scenario_tester` MCP only when the user already
+requested materialization.
 
 ## Performance
 
@@ -431,7 +448,7 @@ export AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=codex # claude | codex
 - `openrouter` direct mode uses `https://openrouter.ai/api`, `ANTHROPIC_AUTH_TOKEN`, and an explicitly empty `ANTHROPIC_API_KEY`.
 - `openrouter` SDK mode uses `AGENT_FRAMEWORK_OPENROUTER_SDK_RUNTIME=claude|codex`.
 - `claude-subscription` scrubs API/OpenRouter env vars and uses persistent Claude sessions only for opt-in continuable SDK sessions.
-- `openai-subscription` uses Codex SDK with ChatGPT/Codex sign-in and scrubs API env vars. Internal direct/read-only SDK runs use per-run framework-owned homes under `~/.agent-framework/internal/{direct,read-only}/codex/<runId>` plus volatile state, not raw `/tmp/agent-framework-*` homes. Internal write runs use disposable per-run homes under `~/.agent-framework/internal/write/codex/<runId>` and persist framework implementation session state under `~/.agent-framework/internal/sessions/write/<runId>`. User-runtime sessions use the normal Codex home/config unless `sdkRuntimeHome: "managedAstral"` requests the managed Astral Codex home under `~/.agent-framework/astral-ai/codex` for history listing and resume. Managed Astral refreshes replace framework-owned adapter config while preserving `sessions/` history and auth/local-secret files. Opt-in continuable SDK sessions keep live Codex thread state until the owning session is disposed.
+- `openai-subscription` uses Codex SDK with ChatGPT/Codex sign-in and scrubs API env vars. Internal direct/read-only SDK runs use per-run framework-owned homes under `~/.agent-framework/internal/{direct,read-only}/codex/<runId>` plus volatile state, not raw `/tmp/agent-framework-*` homes. Internal write runs use disposable per-run homes under `~/.agent-framework/internal/write/codex/<runId>` and persist framework implementation session state under `~/.agent-framework/internal/sessions/write/<runId>`. User-runtime sessions use the normal Codex home/config or the Scenario protocol's single managed `default` profile. Managed refreshes preserve `sessions/` history and auth/local-secret files. Opt-in continuable SDK sessions keep live Codex thread state until the owning session is disposed.
 
 `implement` is an MCP-owned workflow: the slash command/skill calls the MCP,
 which runs the internal write implementer, runs parent-owned check, then runs

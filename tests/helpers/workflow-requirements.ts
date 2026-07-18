@@ -1,4 +1,4 @@
-import type { ToolRequirement } from "../../src/utils/prediction-types.js";
+import type { ToolRequirement } from "../../src/utils/prediction-schema.js";
 
 export type RequirementSignature = {
   tool: string;

@@ -2,7 +2,7 @@ import type { AdapterSpec, PlanModeDetection, PlanModeDetectionInput } from "../
 import { READ_ONLY_GIT_COMMANDS_DESCRIPTION } from "./bash-command-policy.js";
 import { EDIT_TOOL_NAMES_DISPLAY } from "./edit-tools.js";
 import { readFileTailBuffer } from "./file-io.js";
-import { readPlanModeStoredState } from "./plan-mode-entry-state.js";
+import type { PlanModeStoredState } from "./plan-mode-entry-state.js";
 
 export interface PlanModeContext {
   active: boolean;
@@ -55,7 +55,7 @@ function findPermissionMode(content: string): string | null {
 }
 
 export function detectPermissionPlanMode(
-  input: Pick<PlanModeDetectionInput, "permissionMode" | "transcriptPath">,
+  input: Pick<PlanModeDetectionInput, "permissionMode" | "transcriptPath" | "transcriptLines">,
 ): PlanModeDetection | null {
   if (input.permissionMode !== undefined) {
     return {
@@ -65,7 +65,9 @@ export function detectPermissionPlanMode(
     };
   }
 
-  const content = input.transcriptPath ? readTranscriptTail(input.transcriptPath) : "";
+  const content = input.transcriptLines === undefined
+    ? input.transcriptPath ? readTranscriptTail(input.transcriptPath) : ""
+    : input.transcriptLines.join("\n");
   const transcriptPermissionMode = content ? findPermissionMode(content) : null;
   if (transcriptPermissionMode !== null) {
     return {
@@ -83,24 +85,30 @@ export async function detectPlanModeForHook(input: {
   permissionMode?: string;
   collaborationMode?: string;
   transcriptPath: string;
-  sessionDir?: string;
+  storedState: PlanModeStoredState | null;
+  observedDetection?: PlanModeDetection;
 }): Promise<PlanModeDetection> {
-  const direct = input.spec.detectPlanMode({
-    permissionMode: input.permissionMode,
-    collaborationMode: input.collaborationMode,
-    transcriptPath: input.transcriptPath,
-  });
+  const direct = input.observedDetection ?? input.spec.detectPlanMode({
+      permissionMode: input.permissionMode,
+      collaborationMode: input.collaborationMode,
+      transcriptPath: input.transcriptPath,
+    });
 
-  if (direct.source === "codex-collaboration-mode" || direct.active || !input.sessionDir) {
-    return direct;
-  }
+  return resolveObservedPlanModeForHook(direct, input.storedState);
+}
 
-  const stored = await readPlanModeStoredState(input.sessionDir);
-  if (stored?.active === true) {
+/** Reconcile one stable boundary observation with canonical persisted plan-mode state. */
+export function resolveObservedPlanModeForHook(
+  direct: PlanModeDetection,
+  storedState: PlanModeStoredState | null,
+): PlanModeDetection {
+  if (direct.source === "codex-collaboration-mode" || direct.active) return direct;
+
+  if (storedState?.active === true) {
     return {
       active: true,
-      mode: stored.mode,
-      source: stored.detection_source,
+      mode: storedState.mode,
+      source: storedState.detection_source,
     };
   }
 

@@ -8,7 +8,6 @@ import { type CancellationOptions, throwIfAborted } from "./cancellation.js";
 import { isPathAtOrInside } from "./path-containment.js";
 import { clipUtf8Bytes } from "./text-bounds.js";
 import { scanValidatedFileCancellable } from "./file-io.js";
-import { quoteShellToken } from "./shell-command-parser.js";
 import {
   assertCompleteGitOutput,
   formatUnifiedDiffPath,
@@ -17,7 +16,6 @@ import {
   formatRenameStatus,
   parseCompleteGitNulRecords,
   parsePorcelainStatusLine,
-  splitGitNulRecords,
 } from "./git-status.js";
 export {
   formatGitPathForContext,
@@ -26,7 +24,6 @@ export {
 } from "./git-status.js";
 
 const isWindows = process.platform === "win32";
-const NULL_DEVICE = isWindows ? "NUL" : "/dev/null";
 const SUPPRESS_STDERR = isWindows ? "2>NUL" : "2>/dev/null";
 const DEFAULT_GIT_STATUS_MAX_BYTES = 512 * 1024;
 const DEFAULT_GIT_DIFF_MAX_BYTES = 4 * 1024 * 1024;
@@ -76,24 +73,14 @@ export interface GitChanges {
   /** List of changed files in short format (e.g., "M  file.ts", "?? new.ts") */
   status: string;
 
-  /**
-   * Tracked unified diff plus untracked review context. The synchronous collector
-   * appends synthesized untracked diffs; the cancellable MCP collector appends a
-   * complete path inventory without duplicating untracked file contents.
-   */
+  /** Tracked unified diff plus the complete untracked path inventory. */
   diff: string;
 
   /** Summary statistics: files changed, insertions, deletions */
   diffStat: string;
 
-  /**
-   * Synthesized untracked unified diff in the legacy synchronous collector;
-   * empty for the cancellable collector, which uses `untrackedInventory`.
-   */
-  untrackedDiff: string;
-
-  /** Complete nonignored untracked-path metadata from the cancellable collector. */
-  untrackedInventory?: string;
+  /** Complete nonignored untracked-path metadata. */
+  untrackedInventory: string;
 
   /** Compact untracked lines selected by an optional caller-supplied matcher. */
   untrackedMatchedLineDiff?: string;
@@ -104,8 +91,8 @@ export interface GitChanges {
   /** Bounded untracked source excerpt requested by consumers that lack file tools. */
   untrackedContentDiff?: string;
 
-  /** Authoritative untracked line count used by the cancellable collector. */
-  untrackedLinesChanged?: number;
+  /** Authoritative untracked line count. */
+  untrackedLinesChanged: number;
 
   /** Move pairs normalized while constructing the diff, if any. */
   normalizedMoves?: NormalizedMoveSummary[];
@@ -149,10 +136,8 @@ type GitChangeCollectionOptions = CancellationOptions & {
  * Classify commit size from git diff stats and untracked-file accounting.
  *
  * `diffStat` (output of `git diff --stat HEAD`) only covers tracked changes.
- * Untracked files appear as `??` lines in porcelain status. The cancellable
- * collector supplies their authoritative line count through
- * `untrackedLinesChanged`; callers of the legacy synchronous collector fall
- * back to counting additions in its synthesized untracked diff.
+ * Untracked files appear as `??` lines in porcelain status, and the collector
+ * supplies their authoritative line count separately.
  *
  * Buckets:
  * - LARGE:  >= 10 files OR >= 200 lines changed
@@ -161,9 +146,8 @@ type GitChangeCollectionOptions = CancellationOptions & {
  */
 export function classifyCommitSize(
   diffStat: string,
-  untrackedDiff: string,
   status: string,
-  untrackedLinesChanged?: number,
+  untrackedLinesChanged: number,
 ): { size: CommitSize; filesChanged: number; linesChanged: number } {
   const last = diffStat.trim().split("\n").pop() ?? "";
   const filesM = last.match(/(\d+)\s+files?\s+changed/);
@@ -179,7 +163,7 @@ export function classifyCommitSize(
     .map(parsePorcelainStatusLine)
     .filter((entry) => entry?.indexStatus === "?" && entry.workTreeStatus === "?");
   filesChanged += untrackedPaths.length;
-  linesChanged += untrackedLinesChanged ?? countUnifiedDiffAddedLines(untrackedDiff);
+  linesChanged += untrackedLinesChanged;
 
   let size: CommitSize;
   if (filesChanged >= 10 || linesChanged >= 200) size = "LARGE";
@@ -313,97 +297,6 @@ export function allReposInScope(repoInfo: RepoInfo): Array<{ path: string; name:
     })),
     { path: repoInfo.mainRepo, name: repoInfo.mainRepoName },
   ];
-}
-
-/**
- * Get all uncommitted code changes from a git repository.
- *
- * @param workingDir - The directory containing the git repository
- * @returns GitChanges object with status, diff, and diffStat
- */
-export function getUncommittedChanges(workingDir: string): GitChanges {
-  /**
-   * COMMAND: git status --porcelain -z
-   *
-   * WHY: The --porcelain flag outputs a stable, machine-parseable format that
-   * won't change between git versions. Without it, git status outputs human-friendly
-   * text that varies based on locale and git version.
-   *
-   * OUTPUT FORMAT:
-   *   "M  file.ts"  = modified and staged
-   *   " M file.ts"  = modified but not staged
-   *   "MM file.ts"  = modified, staged, then modified again
-   *   "A  file.ts"  = new file, staged
-   *   "?? file.ts"  = untracked (new file, never added to git)
-   *   "D  file.ts"  = deleted and staged
-   */
-  const status = runCommand("git status --porcelain -z", workingDir);
-
-  /**
-   * COMMAND: git diff --stat HEAD
-   *
-   * WHY: The --stat flag gives a summary showing which files changed and how many
-   * lines were added/removed. HEAD means "compare against the last commit".
-   * This is used by the commit agent to classify commit size (small/medium/large).
-   *
-   * OUTPUT FORMAT:
-   *   src/file.ts | 10 ++++------
-   *   2 files changed, 4 insertions(+), 6 deletions(-)
-   */
-  const diffStat = runCommand("git diff --stat HEAD", workingDir);
-
-  /**
-   * COMMAND: git diff HEAD
-   *
-   * WHY: Shows the actual code changes (unified diff format) for all TRACKED files.
-   * HEAD means compare working directory against the last commit.
-   * This captures both staged AND unstaged changes to existing files.
-   *
-   * LIMITATION: Does NOT show content of untracked files (new files never added).
-   * We handle untracked files separately below.
-   */
-  const trackedDiff = runCommand("git diff HEAD", workingDir);
-
-  /**
-   * COMMAND: git ls-files --others --exclude-standard -z
-   *
-   * WHY: Lists all UNTRACKED files (files that exist but were never git added).
-   *   --others        = show untracked files
-   *   --exclude-standard = respect .gitignore rules (don't show node_modules, etc.)
-   *
-   * We need this because `git diff HEAD` only shows changes to tracked files.
-   * New files that were never added to git won't appear in that diff.
-   */
-  const untrackedFiles = runCommand("git ls-files --others --exclude-standard -z", workingDir);
-
-  /**
-   * COMMAND: git diff --no-index <null-device> "<file>"
-   *
-   * WHY: This is a trick to generate a diff for a file that git doesn't track.
-   *   --no-index    = compare two files outside of git's index
-   *   /dev/null|NUL = empty file (represents "nothing"; NUL on Windows)
-   *   "<file>"      = the actual untracked file
-   *
-   * This produces output like "diff --git a/dev/null b/file.ts" showing the
-   * entire file content as additions (+lines). This way untracked files appear
-   * in the same unified diff format as tracked file changes.
-   *
-   * Stderr is suppressed and the command is forced to succeed (exit 0)
-   * even if the file can't be read.
-   */
-  let untrackedDiff = "";
-  for (const file of splitGitNulRecords(untrackedFiles.output || "")) {
-    const escapedFile = quoteShellToken(file);
-    const fileDiff = runCommand(`git diff --no-index ${NULL_DEVICE} ${escapedFile} ${SUPPRESS_STDERR} || ${isWindows ? "ver >NUL" : "true"}`, workingDir);
-    untrackedDiff += fileDiff.output || "";
-  }
-
-  return {
-    status: formatPorcelainStatusZ(status.output || ""),
-    diff: (trackedDiff.output || "") + untrackedDiff,
-    diffStat: diffStat.output || "",
-    untrackedDiff,
-  };
 }
 
 async function readGitBlobText(
@@ -1869,7 +1762,7 @@ function resolvePreparedNormalizedMovesForRepo(
 }
 
 /**
- * Cancellable async variant of getUncommittedChanges for MCP request paths.
+ * Collect all uncommitted changes with bounded, cancellable Git operations.
  */
 export async function getUncommittedChangesCancellable(
   workingDir: string,
@@ -1933,7 +1826,6 @@ export async function getUncommittedChangesCancellable(
     status: normalizeStatusForVirtualMoves(status, normalizedMoves),
     diff: `${normalizedTrackedDiff ?? trackedDiff}\n${untrackedInventory.context}`,
     diffStat: diffStat.output || "",
-    untrackedDiff: "",
     untrackedInventory: untrackedInventory.context,
     untrackedMatchedLineDiff: untrackedInventory.matchedLineDiff,
     untrackedOmittedMatchedLines: untrackedInventory.omittedMatchedLines,
@@ -2109,7 +2001,8 @@ async function getRepoGitOverviewContextsCancellable(
         status,
         diff: "",
         diffStat: diffStat.output || "",
-        untrackedDiff: "",
+        untrackedInventory: "",
+        untrackedLinesChanged: 0,
       },
     });
   }

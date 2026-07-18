@@ -1,1426 +1,293 @@
-/**
- * Test Harness Tester - MCP tool handler for the tester agent role.
- *
- * Pure TypeScript + execFileSync. NO LLM calls. NO runAgent. NO Anthropic API.
- *
- * Actions:
- *   find_work       - Scan for testable transcripts (labeled but untested/failing)
- *   run_test        - Run replay.ts with --expect (costs $, max 5x)
- *   run_single_hook - Run replay.ts with --filter for one hook (max 20x)
- *   list            - Run replay.ts --list (free)
- *   expand          - Run replay.ts --list --expand (free)
- *   read_file       - Read report, labels, or notes
- *   append_notes    - Append to notes_and_questions.md
- *   materialize_scenario - Materialize a live capture into a stored scenario
- *   run_scenario    - Execute a synthetic scenario (unit-test a single hook)
- *   list_scenarios  - List stored scenarios
- *   read_scenario   - Read scenario.json or report-scenario.json
- *   git_hash        - Get current framework version
- *   help            - Full tester documentation
- *
- * @module test-harness-tester
- */
-
+/** Canonical Scenario fixture MCP. This is deliberately independent of labeled transcript replay. */
 import * as fs from "fs";
 import * as path from "path";
-import { validateScenario } from "../../scenario/types.js";
 import {
-  findTestableTranscripts,
-  transcriptRunDir,
-  readAllowedTestRunFile,
-  runReplayCommand,
-  runTranscriptListWithFooter,
-  runTranscriptExpandWithFooter,
-  runScenarioCommand,
-  runScenarioCommandAsync,
-  runJustBuild,
-  getVersion,
-  checkAndIncrementRunLimit,
-  rollbackRunLimit,
-  detectWorkflowState,
-  formatStatusFooter,
-  appendTestRunNotes,
-  scenarioDir,
-  writeScenarioFile,
-  readScenarioFile,
-  listAllScenarios,
-  filterScenariosBySource,
-  resolveScenarioTranscriptPath,
-  type ScenarioSource,
+  materializeScenarioFixture,
+  runScenarioFixture,
+  validateScenarioFixture,
+  type ScenarioFixtureReport,
+  type ScenarioFixture,
+} from "../../scenario/fixtures/index.js";
+import { RulePipelineEffectExecutor } from "../../effects/rule-pipeline-executor.js";
+import { agentFrameworkScenarioFixturePolicy } from "../../effects/scenario-fixture-policy.js";
+import { createAgentFrameworkScenarioRuntime } from "../../effects/scenario-runtime-factory.js";
+import {
+  SCENARIO_SOURCE_TAGS,
+  type ScenarioCatalogEntry,
   type ScenarioSourceTag,
-} from "./scenario-mcp-shared.js";
-import { materializeScenario } from "../../scenario/materialize.js";
+} from "./scenario-catalog.js";
+import { VERSION } from "../../version.js";
+import { writeJsonAtomic } from "../../utils/file-io.js";
+import { errorMessage } from "../../utils/output.js";
+import { isScenarioName, requireScenarioName } from "../../scenario/name.js";
+import { scenarioRunDir, scenariosRoot } from "../../utils/paths.js";
 
-const SINGLE_SCENARIO_TIMEOUT_MS = 300_000;
-const ALL_SCENARIOS_TIMEOUT_MS = 3_600_000;
-const ALL_SCENARIOS_CONCURRENCY = 8;
-const TESTER_ALLOWED_READ_FILES = [
-  "report.json",
-  "report-single.json",
-  "labels.json",
-  "labels.draft.json",
-  "notes_and_questions.md",
+const FIXTURE_FILE = "fixture.json";
+const REPORT_FILE = "report.json";
+
+export const SCENARIO_TESTER_ACTIONS = [
+  "list_fixtures",
+  "read_fixture",
+  "run_fixture",
+  "run_fixtures",
+  "inspect_report",
+  "materialize_scenario",
+  "git_hash",
+  "help",
 ] as const;
 
-// ─── Action Handlers ───────────────────────────────────────────────────────
-
-function handleFindWork(): string {
-  const transcripts = findTestableTranscripts();
-  if (transcripts.length === 0) {
-    return "No testable transcripts found. All labeled transcripts are passing or none have labels.json.";
-  }
-  const lines = ["TESTABLE TRANSCRIPTS:", ""];
-  for (const t of transcripts) {
-    lines.push(`  ${t.status}  ${t.name}`);
-  }
-  lines.push("");
-  lines.push("Pick ONE transcript to test. UNTESTED transcripts have no report yet. FAILING transcripts have failures to investigate.");
-  return lines.join("\n");
-}
-
-function handleRunTest(
-  transcriptName: string,
-  rootOverride?: string,
-  transcriptPathOverride?: string,
-): string {
-  checkAndIncrementRunLimit(transcriptName, "run_test");
-  let output: string;
-  try {
-    const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
-    const labelsPath = path.join(transcriptRunDir(transcriptName), "labels.json");
-    if (!fs.existsSync(labelsPath)) {
-      throw new Error("labels.json not found. This transcript is not ready for testing.");
-    }
-    output = runReplayCommand([
-      "--transcript", transcriptPath,
-      "--expect", labelsPath,
-    ], 1800000, rootOverride);
-  } catch (err) {
-    rollbackRunLimit(transcriptName, "run_test");
-    throw err;
-  }
-  const state = detectWorkflowState(transcriptName);
-  return output + formatStatusFooter(state) + "\n\nWORKFLOW: You must call run_single_hook (free, unlimited) before your next run_test.";
-}
-
-function handleRunSingleHook(
-  transcriptName: string,
-  hookKey: string,
-  rootOverride?: string,
-  truncateToLine?: number,
-  transcriptPathOverride?: string,
-): string {
-  checkAndIncrementRunLimit(transcriptName, "run_single_hook");
-  let output: string;
-  try {
-    const transcriptPath = resolveTranscriptPath(transcriptName, transcriptPathOverride);
-    const labelsPath = path.join(transcriptRunDir(transcriptName), "labels.json");
-    if (!fs.existsSync(labelsPath)) {
-      throw new Error("labels.json not found. This transcript is not ready for testing.");
-    }
-    if (truncateToLine !== undefined) {
-      if (!Number.isFinite(truncateToLine) || truncateToLine < 1) {
-        throw new Error(
-          `truncate_to_line must be a positive 1-based integer, got ${truncateToLine}`,
-        );
-      }
-    }
-    const args = [
-      "--transcript", transcriptPath,
-      "--expect", labelsPath,
-      "--filter", hookKey,
-    ];
-    if (truncateToLine !== undefined) {
-      args.push("--truncate-to-line", String(truncateToLine));
-    }
-    output = runReplayCommand(args, 300000, rootOverride);
-  } catch (err) {
-    rollbackRunLimit(transcriptName, "run_single_hook");
-    throw err;
-  }
-  const state = detectWorkflowState(transcriptName);
-  return output + formatStatusFooter(state) + "\n\nWORKFLOW: You must call run_single_hook (free, unlimited) before your next run_test.";
-}
-
-function handleRunScenario(
-  scenarioName: string | undefined,
-  inline: unknown | undefined,
-  rootOverride?: string,
-): string {
-  if (!scenarioName && inline === undefined) {
-    throw new Error(
-      "run_scenario: scenario_name or scenario (inline) is required",
-    );
-  }
-
-  // Inline authoring always targets the home tree.
-  if (inline !== undefined) {
-    const scenario = validateScenario(inline);
-    const name = scenarioName ?? scenario.name;
-    writeScenarioFile(name, scenario);
-    const outputDir = scenarioDir(name);
-    const inputPath = path.join(outputDir, "scenario.json");
-    runJustBuild(rootOverride);
-    return runScenarioCommand(
-      ["--scenario", inputPath, "--source", "home"],
-      SINGLE_SCENARIO_TIMEOUT_MS,
-      rootOverride,
-    );
-  }
-
-  // By-name lookup across all four sources (home + expected-to-pass + non-deterministic + expected-to-fail).
-  const all = listAllScenarios(rootOverride);
-  const target = all.find((s) => s.name === scenarioName);
-  if (!target) {
-    throw new Error(
-      `scenario "${scenarioName}" not found under ~/.agent-framework/test-runs/scenarios/ or scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/. Pass 'scenario' inline to author a new one.`,
-    );
-  }
-  if (target.error) {
-    throw new Error(
-      `scenario "${scenarioName}" is malformed: ${target.error}`,
-    );
-  }
-  fs.mkdirSync(target.outputDir, { recursive: true });
-  runJustBuild(rootOverride);
-  return runScenarioCommand(
-    ["--scenario", target.inputPath, "--source", target.source],
-    SINGLE_SCENARIO_TIMEOUT_MS,
-    rootOverride,
-  );
-}
-
-async function handleMaterializeScenario(
-  sessionDir: string | undefined,
-  captureSeq: number | undefined,
-  scenarioName: string | undefined,
-  rootOverride: string | undefined,
-  runMaterialized: boolean | undefined,
-): Promise<string> {
-  if (!sessionDir) throw new Error("session_dir is required");
-  if (captureSeq === undefined) throw new Error("capture_seq is required");
-  if (!Number.isInteger(captureSeq) || captureSeq < 1) {
-    throw new Error(`capture_seq must be a positive integer, got ${captureSeq}`);
-  }
-
-  const scenario = validateScenario(await materializeScenario(sessionDir, captureSeq));
-  const name = scenarioName ?? scenario.name;
-  const storedScenario = { ...scenario, name };
-  writeScenarioFile(name, storedScenario);
-  const outputDir = scenarioDir(name);
-  const scenarioPath = path.join(outputDir, "scenario.json");
-
-  const payload: Record<string, unknown> = {
-    scenario_name: name,
-    scenario_path: scenarioPath,
-    scenario: storedScenario,
-  };
-
-  if (runMaterialized) {
-    runJustBuild(rootOverride);
-    payload.run = JSON.parse(runScenarioCommand(
-      ["--scenario", scenarioPath, "--source", "home"],
-      SINGLE_SCENARIO_TIMEOUT_MS,
-      rootOverride,
-    ));
-  }
-
-  return JSON.stringify(payload, null, 2);
-}
-
-function handleListScenarios(
-  rootOverride?: string,
-  sourceFilter?: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home",
-): string {
-  const all = listAllScenarios(rootOverride);
-  const items = sourceFilter ? filterScenariosBySource(all, sourceFilter) : all;
-  if (items.length === 0) {
-    if (sourceFilter) {
-      return `No scenarios in source "${sourceFilter}". ` +
-        (sourceFilter === "non-deterministic"
-          ? "An empty non-deterministic/ folder is the healthy state."
-          : sourceFilter === "expected-to-fail"
-            ? "An empty expected-to-fail/ folder means every codified TODO feature has landed."
-            : "");
-    }
-    return (
-      "No scenarios. Use run_scenario with an inline 'scenario' object, " +
-      "or add a fixture at scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/<name>.json."
-    );
-  }
-  const lines = ["SCENARIOS:", ""];
-  for (const s of items) {
-    const tags: string[] = [s.source];
-    if (s.hasReport) tags.push("has-report");
-    if (s.lastRun) {
-      tags.push(`last-run:${s.lastRun.reality ?? "null"} at ${s.lastRun.at.slice(0, 10)}`);
-    }
-    lines.push(`  ${s.name}  [${tags.join(", ")}]`);
-  }
-  return lines.join("\n");
-}
-
-/**
- * Run several scenarios in one MCP call. Resolves names against the UNION
- * of ~/.agent-framework/test-runs/scenarios/ (home) and the three
- * repo-tracked fixture subfolders scenarios/
- * {expected-to-pass,non-deterministic,expected-to-fail}/. Slug collisions across
- * any two sources are a hard error. With no names supplied, runs every
- * scenario across all four sources alphabetically. Fixtures run IN PLACE
- * from the repo; reports + cache always land under the home tree. The optional
- * `sourceFilter` scopes the batch to one source; slug-uniqueness is enforced
- * across all four sources regardless.
- */
-async function handleRunScenarios(
-  scenarioNames: string[] | undefined,
-  rootOverride?: string,
-  sourceFilter?: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home",
-): Promise<string> {
-  type ScenarioResult = {
-    name: string;
-    source?: ScenarioSourceTag;
-    pass?: boolean;
-    decision?: string;
-    gate?: string;
-    expected?: string;
-    reason?: string;
-    ms?: number;
-    error?: string;
-    expectation_reality?: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | null;
-    expectation_reality_last_run_at?: string;
-  };
-
-  let all: ScenarioSource[];
-  try {
-    all = listAllScenarios(rootOverride);
-  } catch (err) {
-    return JSON.stringify(
-      {
-        total: 0,
-        passed: 0,
-        failed: 1,
-        results: [
-          {
-            name: "<discovery>",
-            error: err instanceof Error ? err.message : String(err),
-          },
-        ],
-      },
-      null,
-      2,
-    );
-  }
-
-  const scoped = sourceFilter ? filterScenariosBySource(all, sourceFilter) : all;
-  const byName = new Map(scoped.map((s) => [s.name, s]));
-  const targets: Array<ScenarioSource | { missing: string }> =
-    scenarioNames && scenarioNames.length > 0
-      ? scenarioNames.map((n) =>
-          byName.has(n) ? byName.get(n)! : { missing: n },
-        )
-      : scoped;
-
-  if (targets.length === 0) {
-    const scopeMsg = sourceFilter
-      ? `No scenarios in source "${sourceFilter}"` +
-        (sourceFilter === "non-deterministic" || sourceFilter === "expected-to-fail"
-          ? ` (empty ${sourceFilter}/ is the healthy state).`
-          : ".")
-      : "No scenarios discoverable under ~/.agent-framework/test-runs/scenarios/ or scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/. " +
-        "Create one via run_scenario with an inline 'scenario' object, or add a fixture.";
-    return JSON.stringify(
-      {
-        total: 0,
-        passed: 0,
-        failed: 0,
-        results: [],
-        message: scopeMsg,
-      },
-      null,
-      2,
-    );
-  }
-
-  runJustBuild(rootOverride);
-
-  const startedAt = Date.now();
-  const results = new Array<ScenarioResult>(targets.length);
-
-  async function runOne(t: ScenarioSource | { missing: string }, index: number): Promise<void> {
-    if ("missing" in t) {
-      const inScope = sourceFilter
-        ? `source "${sourceFilter}"`
-        : "home or scenarios/{expected-to-pass,non-deterministic,expected-to-fail}";
-      results[index] = {
-        name: t.missing,
-        error: `scenario "${t.missing}" not found in ${inScope}`,
-      };
-      return;
-    }
-    if (t.error) {
-      results[index] = { name: t.name, source: t.source, error: t.error };
-      return;
-    }
-    try {
-      fs.mkdirSync(t.outputDir, { recursive: true });
-      const remainingMs = ALL_SCENARIOS_TIMEOUT_MS - (Date.now() - startedAt);
-      if (remainingMs <= 0) {
-        throw new Error(`run_scenarios batch timed out after ${Math.round(ALL_SCENARIOS_TIMEOUT_MS / 1000)}s`);
-      }
-      const raw = await runScenarioCommandAsync(
-        ["--scenario", t.inputPath, "--source", t.source],
-        Math.min(SINGLE_SCENARIO_TIMEOUT_MS, remainingMs),
-        rootOverride,
-      );
-      try {
-        const parsed = JSON.parse(raw) as {
-          pass?: boolean;
-          decision?: string;
-          gate?: string;
-          expected?: string;
-          reason?: string;
-          ms?: number;
-          expectation_reality?: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | null;
-          expectation_reality_last_run_at?: string;
-        };
-        results[index] = {
-          name: t.name,
-          source: t.source,
-          pass: parsed.pass,
-          decision: parsed.decision,
-          gate: parsed.gate,
-          expected: parsed.expected,
-          reason: parsed.reason,
-          ms: parsed.ms,
-          expectation_reality: parsed.expectation_reality,
-          expectation_reality_last_run_at: parsed.expectation_reality_last_run_at,
-        };
-      } catch {
-        results[index] = {
-          name: t.name,
-          source: t.source,
-          error: `non-JSON output: ${raw.slice(0, 200)}`,
-        };
-      }
-    } catch (err: unknown) {
-      results[index] = {
-        name: t.name,
-        source: t.source,
-        error: err instanceof Error ? err.message : String(err),
-      };
-    }
-  }
-
-  let next = 0;
-  async function worker(): Promise<void> {
-    while (next < targets.length) {
-      const index = next++;
-      await runOne(targets[index], index);
-    }
-  }
-  await Promise.all(
-    Array.from(
-      { length: Math.min(ALL_SCENARIOS_CONCURRENCY, targets.length) },
-      () => worker(),
-    ),
-  );
-
-  const compactResults = results.filter((r): r is ScenarioResult => r !== undefined);
-
-  const passed = compactResults.filter((r) => r.pass === true).length;
-  const failed = compactResults.filter(
-    (r) => r.pass === false || r.error !== undefined,
-  ).length;
-  return JSON.stringify(
-    { total: compactResults.length, passed, failed, results: compactResults },
-    null,
-    2,
-  );
-}
-
-function handleReadScenario(scenarioName: string, filename: string): string {
-  return readScenarioFile(scenarioName, filename);
-}
-
-// ─── Transcript Path Resolution ────────────────────────────────────────────
-
-function resolveTranscriptPath(transcriptName: string, override?: string): string {
-  return resolveScenarioTranscriptPath(transcriptName, override, { prefer: "run" });
-}
-
-// ─── Main Handler ──────────────────────────────────────────────────────────
+type FixtureSource = ScenarioCatalogEntry & {
+  fixture?: ScenarioFixture;
+};
 
 export interface TesterInput {
   action: string;
-  transcript_name?: string;
-  target?: string;
-  depth?: number;
-  filename?: string;
-  content?: string;
   working_dir?: string;
-  hook_key?: string;
-  /** For materialize_scenario: agent-framework session directory. */
-  session_dir?: string;
-  /** For materialize_scenario: capture seq from captures.jsonl. */
-  capture_seq?: number;
-  /** For materialize_scenario: immediately run the stored scenario. */
-  run_materialized?: boolean;
-  /**
-   * For run_single_hook: optional 1-based transcript line cap. When set,
-   * replay.ts appends only transcript entries whose 1-based line index is
-   * <= truncate_to_line before firing the target hook. Lets you score the
-   * hook against a partial file state (e.g. pre-flush timing replay).
-   */
-  truncate_to_line?: number;
-  /**
-   * Absolute path to the transcript .jsonl file. Use when the transcript
-   * lives outside the active adapter's default transcript storage (for
-   * example ~/.claude/projects/<encoded-project>/ or ~/.codex/sessions/...).
-   * You may also pass a session folder name (e.g. "2025-01-15-1430_abc12345")
-   * to resolve via the session sidecar. After auto_label/scaffold has copied
-   * the transcript into ~/.agent-framework/test-runs/<name>/, the override
-   * is no longer needed; the resolver finds it there automatically.
-   */
-  transcript_path?: string;
-  /**
-   * For run_scenario / read_scenario: slug identifying a scenario. For
-   * run_scenario the slug is resolved across the union of four sources:
-   * ~/.agent-framework/test-runs/scenarios/<name>/scenario.json (home)
-   * and <root>/scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/<name>.json
-   * (committed fixtures). A slug must be unique across all four sources.
-   * read_scenario still only reads home (reports + inline-authored
-   * scenario.json live there). Must match [A-Za-z0-9._-]+.
-   */
   scenario_name?: string;
-  /**
-   * For run_scenario: inline Scenario JSON. When set, the handler
-   * validates the object and writes it to
-   * ~/.agent-framework/test-runs/scenarios/<name>/scenario.json
-   * (overwriting) before executing. When omitted, the handler loads the
-   * previously stored scenario by name from home or any fixture subfolder.
-   */
-  scenario?: unknown;
-  /**
-   * For run_scenarios (batch action): explicit list of scenario slugs to
-   * run. Slugs are resolved against the UNION of four sources: home
-   * (~/.agent-framework/test-runs/scenarios/) and the three fixture
-   * subfolders (scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/).
-   * A slug that exists in two or more sources is a hard error. Omit or
-   * pass an empty array to run EVERY scenario across all four sources,
-   * alphabetically by name. Per-result output shape:
-   *   {source: "home" | "expected-to-pass" | "non-deterministic" | "expected-to-fail"}.
-   */
   scenario_names?: string[];
-  /**
-   * For run_scenarios / list_scenarios: restrict to ONE source tree.
-   * "expected-to-pass" | "non-deterministic" | "expected-to-fail" select fixture
-   * subfolders; "home" selects ~/.agent-framework/test-runs/scenarios/. Omit
-   * to include all four. Slug uniqueness is enforced across all four roots
-   * regardless of this filter.
-   */
-  scenario_source?: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home";
+  scenario_source?: ScenarioSourceTag;
+  scenario?: unknown;
+  run_id?: string;
+  runtime_root?: string;
+  run_materialized?: boolean;
 }
 
 export async function handleScenarioTester(input: TesterInput): Promise<string> {
   try {
     switch (input.action) {
-      case "find_work":
-        return handleFindWork();
-
-      case "run_test":
-        if (!input.transcript_name) throw new Error("transcript_name is required");
-        return handleRunTest(input.transcript_name, input.working_dir, input.transcript_path);
-
-      case "run_single_hook":
-        if (!input.transcript_name) throw new Error("transcript_name is required");
-        if (!input.hook_key) throw new Error("hook_key is required (tool_use_id or stop:N)");
-        return handleRunSingleHook(
-          input.transcript_name,
-          input.hook_key,
-          input.working_dir,
-          input.truncate_to_line,
-          input.transcript_path,
-        );
-
-      case "list":
-        if (!input.transcript_name) throw new Error("transcript_name is required");
-        return runTranscriptListWithFooter(input.transcript_name, {
-          prefer: "run",
-          rootOverride: input.working_dir,
-          transcriptPathOverride: input.transcript_path,
-        });
-
-      case "expand":
-        if (!input.transcript_name) throw new Error("transcript_name is required");
-        if (!input.target) throw new Error("target is required (tool_use_id or stop:N)");
-        return runTranscriptExpandWithFooter(input.transcript_name, input.target, input.depth ?? 1, {
-          prefer: "run",
-          rootOverride: input.working_dir,
-          transcriptPathOverride: input.transcript_path,
-        });
-
-      case "read_file":
-        if (!input.transcript_name) throw new Error("transcript_name is required");
-        if (!input.filename) throw new Error("filename is required");
-        return readAllowedTestRunFile(input.transcript_name, input.filename, TESTER_ALLOWED_READ_FILES);
-
-      case "append_notes":
-        if (!input.transcript_name) throw new Error("transcript_name is required");
-        if (!input.content) throw new Error("content is required");
-        return appendTestRunNotes(input.transcript_name, input.content);
-
+      case "list_fixtures":
+        return JSON.stringify(listFixtures(input.working_dir, input.scenario_source).map(publicSource), null, 2);
+      case "read_fixture":
+        return JSON.stringify(readFixture(requiredName(input), input.working_dir), null, 2);
+      case "run_fixture":
+        return JSON.stringify(await runOneFixture(input), null, 2);
+      case "run_fixtures":
+        return JSON.stringify(await runManyFixtures(input), null, 2);
+      case "inspect_report":
+        return readReport(requiredName(input));
       case "materialize_scenario":
-        return await handleMaterializeScenario(
-          input.session_dir,
-          input.capture_seq,
-          input.scenario_name,
-          input.working_dir,
-          input.run_materialized,
-        );
-
-      case "run_scenario":
-        return handleRunScenario(input.scenario_name, input.scenario, input.working_dir);
-
-      case "run_scenarios":
-        return await handleRunScenarios(input.scenario_names, input.working_dir, input.scenario_source);
-
-      case "list_scenarios":
-        return handleListScenarios(input.working_dir, input.scenario_source as "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home" | undefined);
-
-      case "read_scenario":
-        if (!input.scenario_name) throw new Error("scenario_name is required");
-        if (!input.filename) throw new Error("filename is required (scenario.json or report-scenario.json)");
-        return handleReadScenario(input.scenario_name, input.filename);
-
+        return JSON.stringify(await materializeFixture(input), null, 2);
       case "git_hash":
-        return getVersion();
-
+        return VERSION;
       case "help":
         return TESTER_HELP;
-
       default:
-        throw new Error(
-          `Unknown action: "${input.action}". ` +
-          "Valid actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, materialize_scenario, run_scenario, run_scenarios, list_scenarios, read_scenario, git_hash, help"
-        );
+        throw new Error(`Unknown action: "${input.action}". Valid actions: ${SCENARIO_TESTER_ACTIONS.join(", ")}`);
     }
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `ERROR: ${message}`;
+    return `ERROR: ${errorMessage(error, "Scenario tester error")}`;
   }
 }
 
-// ─── Help Documentation ────────────────────────────────────────────────────
-
-export const TESTER_HELP = `# Test Harness Tester -- Full Workflow Reference
-
-## Two testing modes
-
-The tester supports two complementary ways to test hook behavior:
-
-1. TRANSCRIPT REPLAY (run_test / run_single_hook) -- replays a real recorded
-   transcript from the active adapter's default storage (for example
-   ~/.claude/projects/*/session.jsonl or ~/.codex/sessions/.../*.jsonl)
-   against the real hook system and scores decisions against labels.json.
-   Use this to verify that a fix works on real historical sessions and to
-   catch regressions on known-good transcripts.
-
-2. SCENARIOS (run_scenario) -- hand-author a small synthetic session state
-   in a JSON blob, fire exactly one hook against it, and score the result.
-   Use this for unit-test-style verification of a specific hook rule
-   against a hypothetical state ("what if permission_mode is plan and the
-   assistant tries to Edit?") without needing a recorded session.
-
-Choose Scenario mode first when you can -- it is faster, cheaper, and
-isolates one rule. Fall back to Transcript Replay only when the rule
-depends on state Scenarios cannot express.
-
----
-
-## Workflow A: Transcript Replay (real sessions + labels)
-
-### A.0 Find work
-Action: find_work
-Returns transcripts with labels.json that need testing (UNTESTED or FAILING).
-Pick ONE to process fully.
-
-### A.1 Run the full test
-Action: run_test (transcript_name required)
-Runs all hooks against the transcript and compares decisions to labels.
-COSTS REAL MONEY (LLM API calls). Maximum 5 runs per transcript.
-The harness automatically builds the project first.
-
-### A.2 Run a single hook (iterative development)
-Action: run_single_hook (transcript_name + hook_key required, working_dir required)
-Runs ONLY the specified hook point. Skips all other pre-tool-use and stop LLM
-calls. Does NOT count against the 5-run limit. Max 20 per transcript.
-hook_key: tool_use_id prefix from report failures, or stop:N key.
-Use this for iterative fix-test cycles. Read report-single.json for results.
-
-Optional parameter: truncate_to_line (1-based integer).
-  When set, the harness appends only transcript lines whose 1-based index
-  is <= truncate_to_line before firing the target hook. The hook still
-  fires with its original tool_use_id because the input is built from the
-  in-memory parsed lines, not from the on-disk temp transcript. Use this
-  to reproduce timing-sensitive states (e.g. pre-flush replay where the
-  text entry preceding a tool_use has not been written yet).
-
-  report-single.json will include \`truncate_to_line\` at the top level and
-  each scored event will carry an \`at\` field ("full" or the cap line).
-
-### A.3 Rich labels (labels.json)
-
-A labels.json entry may be a legacy string, a rich object, or an array of
-rich objects:
-
-  "toolu_014rEfFTifPuw3iud1KWZCQg": {
-    "expected": "deny",
-    "by": "respond-first",
-    "at": "full"
-  }
-
-  "toolu_01R7fQpyC7s6E3BazAoBhM6y": [
-    { "expected": "allow", "at": 105,
-      "notes": "Pre-flush timing state: respond-first must skip, not fastDeny" },
-    { "expected": "allow", "at": "full" }
-  ]
-
-- "expected": allow/deny for tool hooks, pass/block for Stop.
-- "by": optional rule name. When set, the hook passes only if the
-  decision matches AND the \`gate\` in tool-log matches \`by\`. A failure
-  reason like \`decision matched (deny) but wrong rule: got "X", expected "Y"\`
-  is written to the report when the decision is right but the rule is wrong.
-- "at": 1-based transcript line index or "full". Each rich entry is scored
-  only on a run whose truncate_to_line matches \`at\` (or "full" when \`at\`
-  is absent/"full" and no truncation was requested).
-
-### A.4 Read the report
-Action: read_file (transcript_name, filename: "report.json")
-Check failed count and failures array. For each failure:
-- expected: what the label says should happen
-- actual: what the hook actually decided
-- gate and reason: which gate agent made the decision and why
-
-### A.5 Check labeler notes
-Action: read_file (transcript_name, filename: "notes_and_questions.md")
-If a failure corresponds to an uncertain label, it may be acceptable.
-Add a note that the failure matches a known uncertainty.
-
-### A.6 Investigate hook code
-Use Read and read-only Bash (grep, rg, find, ls) -- NOT this MCP tool -- to examine hook source code.
-Key source files:
-- src/hooks/pre-tool-use.ts -- main safety gate (~400 lines)
-- src/hooks/stop-response-check.ts -- stop hook
-- src/rules/tool-approve.ts -- tool approval rule (deterministic + llmContext contributor)
-- src/agents/hooks/tool-appeal.ts -- appeal agent
-- src/rules/evaluator.ts -- rule-gate LLM aggregator
-- src/utils/agent-configs.ts -- agent system prompts (includes SENTIMENT_AGENT)
-- src/utils/prediction-types.ts -- sentiment-prediction shape + decidePrediction
-- src/rules/blacklist.ts -- deterministic Bash policy and check-redirect prediction seeding
-- src/utils/drift-detector.ts -- drift/anomaly detection heuristics
-
-### A.7 Fix hook code
-Use Write/Edit/MultiEdit tools to fix hook source files. Plan fixes carefully.
-Batch ALL fixes before re-running.
-
-### A.8 Iterate with single-hook runs
-Action: run_single_hook (transcript_name + hook_key)
-For each failure: fix code, then run_single_hook to test just that hook.
-If the same failure appears 3 times in a row, it is a CODE BUG, not LLM
-non-determinism. Investigate the code path deeper.
-
-### A.9 Confirm with full run
-Action: run_test (same transcript_name)
-Only after all individual hooks pass via run_single_hook, run full test
-to confirm no regressions. Skip if no code changes were made.
-
-### A.10 Record findings
-Action: append_notes (transcript_name, content)
-Prefix additions with [tester], include date and git hash. Mark resolved
-items by appending resolution notes (never delete existing notes).
-
-### A.11 Using expand for investigation
-Action: expand (transcript_name, target, depth)
-Shows surrounding context for a specific hook point.
-- target: tool_use_id or stop:N key from the report failures
-- depth: 1 = +-3 messages, 2 = +-6, 3 = +-9
-
-### A.12 Workflow A report format
-
-{
-  "transcript": "/path/to/transcript.jsonl",
-  "label_file": "~/.agent-framework/test-runs/<name>/labels.json",
-  "commit": "abc1234...",
-  "total_hooks_fired": 185,
-  "scored": 73,
-  "passed": 71,
-  "failed": 2,
-  "errors": 0,
-  "elapsed_ms": 45200,
-  "truncate_to_line": 95,             // only when run_single_hook used it
-  "failures": [{ line, hook, tool, id, expected, actual, gate, gate_expected, at, reason }]
+function requiredName(input: TesterInput): string {
+  if (!input.scenario_name) throw new Error("scenario_name is required");
+  return requireScenarioName(input.scenario_name);
 }
 
-### A.13 Workflow A folder structure
-
-~/.agent-framework/test-runs/{transcript-name}/
-  transcript.jsonl          Copy of original transcript
-  labels.draft.json         Label file in progress (NOT ready for testing)
-  labels.json               Finalized label file (ready for testing)
-  report.json               Test report from last full run
-  report-single.json        Test report from last single-hook run
-  notes_and_questions.md    Labeler/tester notes on uncertain decisions
-  mcp-state.json            Run limit tracking
-  cache/                    Ephemeral hook runtime files
-
-### A.14 Workflow A rules
-
-- Process ONE transcript per invocation
-- MINIMIZE test harness runs -- each costs real money (max 5)
-- Do NOT modify labels.json -- only add notes
-- Do NOT call build commands -- the harness builds automatically
-- Do NOT label transcripts -- that is the labeler's job
-- Use Read and read-only Bash (grep, rg, find, ls) for investigation; Write/Edit/MultiEdit for fixes. Bash is gated to a read-only allowlist by the pre-tool-use hook -- mutation, execution, and network commands are denied.
-- Use this MCP tool ONLY for harness operations
-- Use run_single_hook for iterative development (cheap, does not count
-  against run limit)
-- NEVER dismiss failures as "non-deterministic LLM behavior" without
-  investigating code
-- If run_single_hook returns the same result 3x in a row, it IS a code bug
-
----
-
-## Workflow B: Scenario Testing (synthetic unit tests)
-
-### B.1 When to use scenarios
-
-Use run_scenario when ANY of the following is true:
-- You are writing a new hook rule and want to verify it against specific
-  inputs before deploying to production sessions.
-- You are debugging an existing rule and need to isolate its behavior
-  from other rules and real transcript state.
-- You want to catch a regression that no historical transcript happens
-  to contain (e.g. "assistant goes straight from thinking to tool_use
-  with no text, in plan mode").
-- The bug report is a hypothetical ("what if X?") -- scenarios turn
-  hypotheticals into executable tests.
-
-DO NOT use scenarios when the behavior you care about depends on:
-- Multi-turn LLM reasoning outside the rule itself (use Workflow A).
-- Cached state that can only accumulate over a long session (use
-  Workflow A or ask the user to extend the scenario schema).
-- Background processes, spawned agents, or MCP-side I/O not covered
-  by the scenario env flags (ask the user before expanding).
-
-### B.2 Scenario-first workflow
-
-Step 1 -- Identify the hook + rule you want to test.
-  What file holds the rule? What decision should it emit on what input?
-  What does the rule read (hook stdin, transcript file, session state)?
-
-Step 2 -- Write the smallest scenario that exercises the rule.
-  Start with ONE user message and ONE assistant turn. Only add prior
-  turns when the rule genuinely needs them.
-
-Step 3 -- Call run_scenario with the inline \`scenario\` object. The first
-  call creates scenarios/<name>/scenario.json and executes it. Review
-  report-scenario.json for pass/fail.
-
-Step 4 -- Iterate. If the hook decides wrong, fix the rule, rebuild
-  (via the agent-framework check MCP), re-run the same scenario by name
-  (no inline blob) to confirm the fix. Iteration is free -- run_scenario
-  has no LLM cost and no run-limit.
-
-Step 5 -- Keep the scenario. Every scenario file under
-  ~/.agent-framework/test-runs/scenarios/ AND every committed fixture at
-  <repo>/scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/<name>.json
-  is a permanent regression test. Pick the subfolder per category:
-  expected-to-pass/ = passes today; non-deterministic/ = behavior is flaky;
-  expected-to-fail/ = feature not yet implemented. See each subfolder's
-  README.md for the full move policy. run_scenarios (no filter) runs the
-  UNION of all four sources in one MCP call. Fixtures run in place from
-  the repo; reports + cache always land under
-  ~/.agent-framework/test-runs/scenarios/<name>/.
-
-### B.3 Scenario actions
-
-**materialize_scenario** -- reconstruct a stored scenario from a live capture
-  Required: session_dir, capture_seq
-  Optional: scenario_name, working_dir, run_materialized
-  Behavior:
-    - Loads the capture pointer, state snapshot, transcript sidecar, tool-log
-      prefix, and injection records from the agent-framework session dir.
-    - Parses the transcript through the captured adapter when it can be
-      inferred from the transcript path (.codex or .claude), falling back to
-      the active adapter only when the path does not identify one.
-    - Writes the result to
-      ~/.agent-framework/test-runs/scenarios/<scenario_name or generated>/scenario.json.
-    - If run_materialized=true, immediately executes the written scenario and
-      returns both the materialized JSON and the run_scenario report JSON.
-  Use this instead of ad-hoc node -e calls when shell execution is blocked or
-  when you need a durable scenario artifact for a captured hook decision.
-
-**run_scenario** -- create and/or execute a SINGLE scenario
-  Required: scenario_name OR scenario (inline JSON)
-  Optional: working_dir
-  Behavior:
-    - If scenario (inline) is provided: validate it, write to
-      ~/.agent-framework/test-runs/scenarios/<scenario_name or
-      scenario.name>/scenario.json (overwriting), then execute.
-    - If only scenario_name is provided: resolve the slug against the
-      UNION of four sources: home (~/.agent-framework/test-runs/scenarios/)
-      and fixtures (<repo>/scenarios/{expected-to-pass,
-      non-deterministic,expected-to-fail}/). Fixtures run in place; cache/ and
-      report-scenario.json always land under
-      ~/.agent-framework/test-runs/scenarios/<name>/.
-    - Exit status: pass -> 0, fail -> 1, validation error -> 2.
-    - Returned JSON (both single and fanout modes) carries
-      \`expectation_reality: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | null\`
-      and \`expectation_reality_last_run_at: ISO-8601\` at the top level -
-      the reflection of this run's pass state, also persisted to the
-      sibling sidecar
-      ~/.agent-framework/test-runs/scenarios/<name>/last-run.json
-      (NOT written back to the fixture). A \`non-deterministic/\` fixture
-      reporting reality=expected-to-pass is a promotion candidate; an
-      \`expected-to-pass/\` fixture reporting reality=non-deterministic is a
-      regression.
-
-**run_scenarios** -- execute MULTIPLE scenarios in one MCP call
-  Optional: scenario_names (string[]), working_dir, scenario_source
-  Sources (unioned):
-    1. ~/.agent-framework/test-runs/scenarios/<name>/scenario.json
-       User-authored / inline-created originals.
-    2. <AGENT_FRAMEWORK_ROOT>/scenarios/expected-to-pass/<name>.json
-       Committed fixtures that pass consistently against current code.
-    3. <AGENT_FRAMEWORK_ROOT>/scenarios/non-deterministic/<name>.json
-       Committed fixtures whose current behavior is nondeterministic.
-    4. <AGENT_FRAMEWORK_ROOT>/scenarios/expected-to-fail/<name>.json
-       Committed fixtures codifying unimplemented features. See each
-       subfolder's README.md.
-  Filename stem MUST equal scenario.name; validateScenario enforced at load.
-  Slug collisions across ANY two or more sources are a HARD ERROR -- the
-  whole batch fails with a message listing every offending path with its
-  source tag. Delete all but one copy to proceed.
-  Optional scenario_source: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home" --
-    when set, restricts the batch to that single source tree. Slug
-    uniqueness is still enforced across all four sources regardless.
-  Behavior:
-    - scenario_names provided and non-empty: runs only those names
-      (resolved against the filtered union if scenario_source is set,
-      else against all four sources). Unknown slugs produce per-result
-      error entries; batch continues.
-    - scenario_names omitted or empty: runs EVERY scenario in the
-      (filtered) union, alphabetically by name.
-    - Empty scenario_source="non-deterministic" result is NOT an error -- an empty
-      non-deterministic/ folder is the healthy state.
-    - Fixtures run IN PLACE (no staging, no copy). scenario.ts is
-      invoked with --scenario <fixture-path> and writes cache/ and
-      report-scenario.json under
-      ~/.agent-framework/test-runs/scenarios/<name>/, never next to the
-      repo fixture. Edits to a fixture are picked up on the next run.
-    - Returns aggregated JSON: {total, passed, failed, results[]}.
-      Each result: {name, source: "home"|"expected-to-pass"|"non-deterministic"
-      |"expected-to-fail", pass, decision, gate, expected, reason, ms,
-      expectation_reality: "expected-to-pass"|"non-deterministic"|"expected-to-fail"|null,
-      expectation_reality_last_run_at: ISO-8601, error?}. A \`non-deterministic/\`
-      fixture whose result has expectation_reality="expected-to-pass" is a
-      promotion candidate; an \`expected-to-pass/\` fixture whose result has
-      expectation_reality="non-deterministic" is a regression. The aggregate
-      response does NOT summarize mismatches; callers inspect results[]
-      directly.
-    - Writes scenarios/<name>/report-scenario.json per scenario. Each
-      run also writes \`expectation_reality\` and
-      \`expectation_reality_last_run_at\` to the sibling sidecar
-      ~/.agent-framework/test-runs/scenarios/<name>/last-run.json
-      (NOT to the fixture - fixtures stay read-only at runtime).
-
-**list_scenarios** -- list all scenarios across home + fixture subfolders
-  Optional: working_dir, scenario_source
-  Each row tagged [home] or [expected-to-pass] or [non-deterministic] or
-  [expected-to-fail], with "has-report" when a prior run produced
-  ~/.agent-framework/test-runs/scenarios/<name>/report-scenario.json.
-  Optional scenario_source: "expected-to-pass" | "non-deterministic" | "expected-to-fail" | "home" --
-    when set, filters the list to that single source tree.
-  Slug collisions across trees throw here as well -- fix them before
-  continuing.
-
-**read_scenario** -- read ~/.agent-framework/test-runs/scenarios/<name>/
-  scenario.json or report-scenario.json
-  Required: scenario_name, filename
-  Reads only the home tree. For fixture-sourced scenarios there is no
-  home scenario.json (fixtures run in place), so
-  read_scenario <fixture-slug> filename=scenario.json returns an error
-  -- read the fixture file directly from
-  <repo>/scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/<name>.json
-  instead. Reports always land in home and can be read here.
-
-### B.4 Scenario JSON schema
-
-Top-level fields:
-  name           (required)  Slug under scenarios/. Must match
-                             [A-Za-z0-9._-]+. Used as the on-disk dir name.
-  description    (optional)  Human note. Not scored.
-  transcript     (required)  Non-empty array of user/assistant entries,
-                             oldest first.
-  target         (required)  Which hook to fire and what it fires for.
-  env            (optional)  Environment flags (see B.5).
-  expect         (required)  { expected, by?, notes? } -- scoring spec.
-
-Transcript entry shapes:
-
-  { "role": "user", "content": "plain string OR array of content blocks" }
-
-  { "role": "assistant", "content": [
-      { "type": "text",      "text": "..." },
-      { "type": "thinking",  "thinking": "..." },
-      { "type": "tool_use",  "id": "toolu_*", "name": "Edit",
-                              "input": { ... } },
-      { "type": "tool_result", "tool_use_id": "toolu_*", "content": "..." }
-  ] }
-
-Target shapes:
-
-  PreToolUse / PostToolUse:
-    { "hook": "PreToolUse", "tool_use_ref": "last" }
-    -- "last" picks the final tool_use block in the last assistant entry
-    OR supply a specific id that matches a block in the transcript.
-
-  Stop:
-    { "hook": "Stop" }
-    -- no tool_use needed. Final entry must be assistant with no tool_use.
-
-  UserPromptSubmit:
-    { "hook": "UserPromptSubmit", "prompt_override": "..." }
-    -- defaults to the last user entry's text.
-
-  SessionStart:
-    { "hook": "SessionStart" }
-
-### B.4a Authoring parallel tool_use batches
-
-Real Claude Code writes a parallel tool_use batch as multiple jsonl
-assistant lines that all share one \`message.id\`. Author that shape with
-an \`assistant_split\` entry -- one \`tool_use\` per sub-line, all sharing
-\`msg_id\`:
-
-  { "role": "assistant_split", "msg_id": "msg_batch_1", "lines": [
-      { "blocks": [{ "type": "tool_use", "id": "toolu_p1",
-                     "name": "Agent", "input": { ... } }] },
-      { "blocks": [{ "type": "tool_use", "id": "toolu_p2",
-                     "name": "Agent", "input": { ... } }] },
-      { "blocks": [{ "type": "tool_use", "id": "toolu_p3",
-                     "name": "Agent", "input": { ... } }] }
-  ]}
-
-Text-bundled form (text block shares the same \`msg_id\` as the batch --
-the "response is part of the batch" shape): put the text on sub-line 0
-and the tool_uses on subsequent sub-lines of the SAME split. Text and
-thinking sub-lines must occur strictly before any tool_use sub-line; an
-interleaved text sub-line between tool_uses is rejected because
-\`detectParallelBatch\`'s back-walk breaks on text-only assistant lines
-and would orphan tool_uses on one side.
-
-  { "role": "assistant_split", "msg_id": "msg_batch_2", "lines": [
-      { "blocks": [{ "type": "text", "text": "running 3 plan agents" }] },
-      { "blocks": [{ "type": "tool_use", "id": "toolu_p1", ... }] },
-      { "blocks": [{ "type": "tool_use", "id": "toolu_p2", ... }] },
-      { "blocks": [{ "type": "tool_use", "id": "toolu_p3", ... }] }
-  ]}
-
-Per-position pre-flush: a single hook fires per \`run_scenario\`, and in
-real Claude Code the on-disk transcript at the instant sub-line K's
-hook fires contains only sub-lines 0..K. Set
-\`target.batch_visible_through\` to the 0-based sub-line index through
-which flushing has occurred, and set \`target.tool_use_ref\` to the
-concrete id of the tool_use whose hook is firing. The ref must lie
-inside the visible slice; "last" and omitted refs are rejected under a
-cap because they are ambiguous under truncation. The cap only applies
-to the FINAL entry's flush state -- earlier-entry targets are not
-valid with it.
-
-Worked example -- a 3-call parallel batch produces 3 scenarios, one per
-firing position:
-
-  Position 0: batch_visible_through: 0, tool_use_ref: "toolu_p1"
-    -- only the leader is on disk. \`detectParallelBatch\` returns null
-       because batchIds.length < 2 at that instant; this matches real
-       Claude Code. Rules that key off ParallelBatchInfo see no batch.
-  Position 1: batch_visible_through: 1, tool_use_ref: "toolu_p2"
-  Position 2: batch_visible_through: 2, tool_use_ref: "toolu_p3"
-    -- steady state, full batch visible.
-
-Text-bundled caveat: when sub-line 0 is a text block, \`batch_visible_through\`
-must be >= the index of the first tool_use sub-line. Setting it to 0
-would put no tool_use on disk at all, and firing a hook against a
-tool_use id that isn't in the visible slice is incoherent -- the
-validator rejects it.
-
-B.4a verifies one isolated per-position state per scenario. To verify
-the full leader-denies -> siblings-inherit chain end-to-end in a single
-run, use the fan-out mode described in B.4b below.
-
-### B.4b End-to-end batch fan-out
-
-When to use: verifying the leader's decision AND the sibling inheritance
-path (\`src/hooks/pre-tool-use.ts\` lines 95-118, 228-239) in one run.
-B.4a's per-position pre-flush single-hook mode cannot observe
-\`waitForBatchLeader\` because each scenario run starts with an empty
-cache and never writes a leader entry first. Use B.4a for isolated
-per-position assertions; use B.4b for the full chain.
-
-Schema summary: \`target.fanout: true\`, mutually exclusive with
-\`tool_use_ref\` and \`batch_visible_through\`. Final entry must be
-\`assistant_split\`. Sub-lines strictly before the first tool_use may
-be \`text\`/\`thinking\` (exactly one block each). Sub-lines at and
-after the first tool_use must each contain exactly one \`tool_use\`
-block. At least two tool_use sub-lines are required -- a batch of 1
-should use single-hook mode.
-
-\`expect\` must be the array form, keyed by 0-based \`position\` in
-\`assistant_split.lines\`:
-
-  "expect": [
-    { "position": 1, "expected": "deny", "by": "respond-first" },
-    { "position": 2, "expected": "deny", "by": "batch-sibling" },
-    { "position": 3, "expected": "deny", "by": "batch-sibling" }
-  ]
-
-Positions not listed are still fired and recorded, but their decisions
-do not contribute to the aggregate pass/fail. The run passes iff every
-listed position's fire matches its \`expected\` (and \`by\` when set).
-
-Worked example -- leader fast-deny + siblings inherit. Batch of 3 Bash
-tool_uses preceded by a thinking sub-line, no user-visible text:
-
-  {
-    "name": "fanout-bash-thinking-leader",
-    "transcript": [
-      { "role": "user", "content": "delete everything" },
-      { "role": "assistant_split", "msg_id": "msg_f1", "lines": [
-        { "blocks": [{ "type": "thinking", "thinking": "planning..." }] },
-        { "blocks": [{ "type": "tool_use", "id": "toolu_b1",
-                       "name": "Bash", "input": { "command": "rm -rf /" } }] },
-        { "blocks": [{ "type": "tool_use", "id": "toolu_b2",
-                       "name": "Bash", "input": { "command": "rm -rf a" } }] },
-        { "blocks": [{ "type": "tool_use", "id": "toolu_b3",
-                       "name": "Bash", "input": { "command": "rm -rf b" } }] }
-      ]}
-    ],
-    "target": { "hook": "PreToolUse", "fanout": true },
-    "expect": [
-      { "position": 1, "expected": "deny", "by": "respond-first" },
-      { "position": 2, "expected": "deny", "by": "batch-sibling" },
-      { "position": 3, "expected": "deny", "by": "batch-sibling" }
-    ]
-  }
-
-Expected report: 3 fires, \`fires[0].gate === "respond-first"\`,
-\`fires[1..2].gate === "batch-sibling"\`, all deny, \`pass: true\`.
-
-Report shape (fan-out):
-
-  {
-    "mode": "fanout",
-    "scenario": "...",
-    "hook": "PreToolUse",
-    "fires": [
-      { "position": 1, "tool_use_id": "toolu_b1",
-        "decision": "deny", "gate": "respond-first",
-        "expected": "deny", "gate_expected": "respond-first",
-        "pass": true, "asserted": true, "ms": 157, "reason": "..." },
-      ...
-    ],
-    "pass": true,
-    "ms": 480,
-    "transcript_path": "...",
-    "commit": "..."
-  }
-
-Single-hook mode's report still uses \`mode: "single"\` with the
-existing fields. Report readers must dispatch on \`mode\`.
-
-### B.5 env flags (setup knobs)
-
-  permission_mode   One of "default" | "plan" | "acceptEdits"
-                    | "bypassPermissions" | "dontAsk".
-                    Copied into hook stdin's \`permission_mode\` (read by
-                    isPlanModeFromInput) AND written onto every transcript
-                    entry's \`permissionMode\` (read by isPlanModeActive's
-                    file-scan fallback). Both detection paths agree.
-
-  codex_collaboration_mode
-                    Codex-only. One of "plan" | "default". Materializes
-                    native Codex collaboration-mode transcript markers.
-
-  cwd               Directory the hook runs in (passed as
-                    CLAUDE_PROJECT_DIR and \`cwd\` in hook stdin). Defaults
-                    to the scenario run dir under test-runs/scenarios/.
-
-  timeout_ms        Hook timeout in milliseconds. Defaults to 60000.
-
-### B.6 expect spec
-
-  {
-    "expected": "<value>",    // required
-    "by":       "<rule-name>",// optional -- matches tool-log \`gate\`
-    "notes":    "<string>"    // optional, for documentation only
-  }
-
-Vocabulary for \`expected\`, by hook type:
-  PreToolUse:       "allow" | "deny"
-  PostToolUse:      "ok"    | "error"
-  Stop:             "pass"  | "block"
-  UserPromptSubmit: "ok"    | "error"
-  SessionStart:     "ok"    | "error"
-
-\`by\` is the rule name that produced the decision. For PreToolUse denials
-this must match the \`gate\` field in the cache dir's tool-log.jsonl
-(e.g. "plan-mode-block", "respond-first"). When set, the scenario passes
-only if the decision matches AND the denying rule matches. Omit \`by\` to
-accept any rule.
-
-\`at\` is NOT allowed in scenario expectations -- scenarios always run
-against the full file state. Passing \`at\` is a validation error.
-
-### B.7 End-to-end example: plan-mode blocks Edit
-
-  run_scenario
-    working_dir: /home/tim/Coding/public_repos/agent-framework
-    scenario: {
-      "schema_version": 1,
-      "name": "plan-mode-blocks-edit",
-      "description": "Edit tool in plan mode must be denied by plan-mode-block rule",
-      "transcript": [
-        { "role": "user", "content": "quick edit please" },
-        { "role": "assistant", "content": [
-          { "type": "text", "text": "on it" },
-          { "type": "tool_use", "id": "toolu_s1", "name": "Edit",
-            "input": { "file_path": "/tmp/a.ts",
-                       "old_string": "x", "new_string": "y" } }
-        ]}
-      ],
-      "target": { "hook": "PreToolUse", "tool_use_ref": "last" },
-      "env":    { "permission_mode": "plan", "cwd": "/tmp" },
-      "expect": { "expected": "deny", "by": "plan-mode-block" }
+function listFixtures(workingDir?: string, sourceFilter?: ScenarioSourceTag): FixtureSource[] {
+  const result = new Map<string, FixtureSource>();
+  const add = (entry: FixtureSource): void => {
+    const prior = result.get(entry.name);
+    if (prior) {
+      throw new Error(
+        `fixture slug "${entry.name}" exists in multiple sources: ` +
+        `${prior.source} (${prior.inputPath}) and ${entry.source} (${entry.inputPath})`,
+      );
     }
+    result.set(entry.name, entry);
+  };
 
-Expected result:
-  pass: true
-  decision: "deny"
-  gate: "plan-mode-block"
-
-Re-run later with: run_scenario scenario_name: "plan-mode-blocks-edit"
-
-### B.8 End-to-end example: respond-first no-text violation
-
-  run_scenario
-    working_dir: /home/tim/Coding/public_repos/agent-framework
-    scenario: {
-      "schema_version": 1,
-      "name": "respond-first-no-text",
-      "transcript": [
-        { "role": "user", "content": "go" },
-        { "role": "assistant", "content": [
-          { "type": "thinking", "thinking": "starting now" },
-          { "type": "tool_use", "id": "toolu_s2", "name": "Bash",
-            "input": { "command": "ls" } }
-        ]}
-      ],
-      "target": { "hook": "PreToolUse", "tool_use_ref": "last" },
-      "expect": { "expected": "deny", "by": "respond-first" }
+  const homeRoot = scenariosRoot();
+  if (fs.existsSync(homeRoot)) {
+    for (const name of fs.readdirSync(homeRoot).sort()) {
+      if (!isScenarioName(name)) continue;
+      const fixturePath = path.join(homeRoot, name, FIXTURE_FILE);
+      if (!fs.existsSync(fixturePath)) continue;
+      add(loadSource(name, "home", fixturePath, path.join(homeRoot, name)));
     }
-
-Notes:
-- The user prompt "go" does not match CONFIRMATION_PATTERN, so the rule
-  runs. Avoid prompts like "ok", "yes", "sure", "please do" -- those are
-  whitelisted by respond-first and produce an allow decision.
-- The assistant turn has a thinking block + tool_use, no text block.
-  respond-first reads the materialized transcript file and -- because the
-  tool_use id is present with no text preceding it -- fastDenies.
-
-### B.9 End-to-end example: legitimate turn (allow)
-
-Same transcript as B.8 but with a text block before the tool_use:
-
-  run_scenario
-    working_dir: /home/tim/Coding/public_repos/agent-framework
-    scenario: {
-      "schema_version": 1,
-      "name": "respond-first-with-text",
-      "transcript": [
-        { "role": "user", "content": "go" },
-        { "role": "assistant", "content": [
-          { "type": "text", "text": "working on it" },
-          { "type": "tool_use", "id": "toolu_s3", "name": "Bash",
-            "input": { "command": "ls" } }
-        ]}
-      ],
-      "target": { "hook": "PreToolUse", "tool_use_ref": "last" },
-      "expect": { "expected": "allow" }
-    }
-
-### B.10 Multi-rule scenario sets
-
-When a rule interacts with others (edit-intent, plan-mode-block, style-
-drift), store a set of related scenarios with a shared prefix:
-
-  plan-mode-blocks-edit       (Edit denied in plan mode)
-  plan-mode-allows-plan-file  (plan file is exempt)
-  plan-mode-allows-claude-md  (CLAUDE.md is exempt)
-  plan-mode-blocks-bash-git   (git commit denied in plan mode)
-
-Run the whole set with list_scenarios + iterate. The set becomes a
-regression suite for that rule family.
-
-### B.11 Debugging scenario failures
-
-1. Read report-scenario.json via read_scenario. It has the decision,
-   gate (the rule that actually produced it), reason, and the
-   transcript_path of the materialized file.
-
-2. Inspect the materialized transcript at transcript_path. It's a real
-   .jsonl file -- open it, check that the messages and tool_use blocks
-   match what your scenario specified.
-
-3. If the gate in the failure is a DIFFERENT rule than your \`expect.by\`,
-   that rule fired first. Either adjust the scenario so the earlier rule
-   doesn't trigger, or update expect.by to match.
-
-4. Check ~/.agent-framework/test-runs/scenarios/<name>/cache/tool-log.jsonl
-   for the full chain of rule decisions.
-
-5. If the hook behaves one way via scenario and another way in a real
-   session, the scenario is likely missing state the real session has.
-   Inspect the real session's transcript around the failing tool_use and
-   look for differences. If you cannot express the difference in a
-   scenario field, STOP and ask the user to extend the schema.
-
-### B.13 Asserting prediction state
-
-Scenarios may include an optional \`predictions\` block that asserts on the
-live \`state.json\` \`currentPrediction\` AFTER the target hook fires.
-Primitives:
-
-  must_block             Array of {tool, target_substring?} filters. Pass iff
-                         the live prediction's explicitlyBlockedSubstrings
-                         contains an entry matching each filter. Both
-                         \`tool\` and \`target_substring\` are LITERAL
-                         strings (no regex metachars); target_substring
-                         matches by .includes against the entry's literal
-                         targetSubstring.
-  must_not_block         Inverse: pass iff no entry matches.
-  must_be_empty          Boolean. Pass iff currentPrediction is null after
-                         the hook fires. Mutually exclusive with all other
-                         assertions.
-  must_have_mood         Pass iff currentPrediction.mood equals the given
-                         enum (angry|frustrated|neutral|satisfied|happy).
-  must_have_trust        Pass iff currentPrediction.trust equals the given
-                         enum (low|normal|high).
-  intent_must_contain    Pass iff currentPrediction.intent.includes(value).
-
-The predictions block is evaluated AFTER the target hook fires.
-Run \`pass\` is \`expect-pass AND every prediction assertion passes\`.
-
-Scenarios may also pre-seed \`state.json\` via
-\`seed_state.currentPrediction\`.
-The seed is materialized BEFORE session-start fires so the hook pipeline
-observes it.
-
-  // Positive: angry seed denies the next Edit
-  {
-    "name": "sentiment-angry-blocks-edits",
-    "transcript": [...],
-    "target": { "hook": "PreToolUse", "tool_use_ref": "toolu_..." },
-    "seed_state": {
-      "currentPrediction": { "mood": "angry", "trust": "normal", "intent": "user is upset" }
-    },
-    "expect": { "expected": "deny", "by": "prediction-block" },
-    "predictions": { "must_have_mood": "angry" }
   }
 
-  // Negative: explicit literal substring block on Bash 'git push'
-  {
-    "name": "sentiment-explicit-forbid-push",
-    "transcript": [...],
-    "target": { "hook": "PreToolUse", "tool_use_ref": "toolu_..." },
-    "seed_state": {
-      "currentPrediction": {
-        "explicitlyBlockedSubstrings": [{ "tool": "Bash", "targetSubstring": "git push", "reason": "user said don't push" }]
-      }
-    },
-    "expect": { "expected": "deny", "by": "prediction-block" },
-    "predictions": { "must_block": [{ "tool": "Bash", "target_substring": "git push" }] }
+  const repositoryRoot = workingDir ?? process.env.AGENT_FRAMEWORK_ROOT ?? process.cwd();
+  for (const source of SCENARIO_SOURCE_TAGS) {
+    if (source === "home") continue;
+    const directory = path.join(repositoryRoot, "scenarios", source);
+    if (!fs.existsSync(directory)) continue;
+    for (const file of fs.readdirSync(directory).filter((entry) => entry.endsWith(".json")).sort()) {
+      const name = file.slice(0, -5);
+      if (!isScenarioName(name)) continue;
+      add(loadSource(name, source, path.join(directory, file), scenarioRunDir(name)));
+    }
   }
+  return [...result.values()]
+    .filter((entry) => sourceFilter === undefined || entry.source === sourceFilter)
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
 
-### B.12 Scenario folder structure
+function loadSource(
+  name: string,
+  source: ScenarioSourceTag,
+  inputPath: string,
+  outputDir: string,
+  initialError?: string,
+): FixtureSource {
+  try {
+    if (initialError) throw new Error(initialError);
+    const fixture = validateScenarioFixture(JSON.parse(fs.readFileSync(inputPath, "utf8")));
+    if (fixture.name !== name) {
+      throw new Error(`fixture name ${JSON.stringify(fixture.name)} must equal filename slug ${JSON.stringify(name)}`);
+    }
+    return { name, source, inputPath, outputDir, fixture };
+  } catch (error) {
+    return {
+      name,
+      source,
+      inputPath,
+      outputDir,
+      error: errorMessage(error, "Scenario fixture load failed"),
+    };
+  }
+}
 
-Four sources feed list_scenarios / run_scenario / run_scenarios. All use
-the same scenario JSON schema.
+function readFixture(name: string, workingDir?: string): Record<string, unknown> {
+  const source = findFixture(name, workingDir);
+  return { ...publicSource(source), fixture: requireValidFixture(source) };
+}
 
-1. Home (mutable, user-authored, output target for every run):
-   ~/.agent-framework/test-runs/scenarios/{scenario-name}/
-     scenario.json             Scenario definition (only when originally
-                               authored here; fixture-sourced runs do
-                               NOT place a scenario.json copy here).
-     report-scenario.json      Last run's decision, gate, pass flag.
-     cache/                    Ephemeral hook runtime files
-       scenario-<name>.jsonl   Materialized transcript
-       tool-log.jsonl          Rule decisions from the last hook run
-       state.json              Seeded prior-turn session state
+function runAgentFrameworkFixture(fixture: ScenarioFixture) {
+  return runScenarioFixture(fixture, {
+    policy: agentFrameworkScenarioFixturePolicy,
+    ...(fixture.effects.mode === "live"
+      ? { liveEffectExecutor: new RulePipelineEffectExecutor() }
+      : {}),
+  });
+}
 
-2. Fixtures (repo-tracked, read-only source) -- three category subfolders:
-   <AGENT_FRAMEWORK_ROOT>/scenarios/
-     REPRODUCTION-NOTES.md     Authoring notes (not a scenario; stays at root).
-     expected-to-pass/
-       README.md               Category definition + scenario list + move policy.
-       {scenario-name}.json    Scenario passes consistently against current code.
-     non-deterministic/
-       README.md               Category definition + scenario list + move policy.
-      {scenario-name}.json    Behavior is currently nondeterministic.
-     expected-to-fail/
-       README.md               Category definition + scenario list + move policy.
-       {scenario-name}.json    Codifies unimplemented feature.
-   Filename stem MUST equal inner scenario.name (enforced at load).
-   validateScenario enforced per entry.
+async function runOneFixture(input: TesterInput): Promise<Record<string, unknown>> {
+  const source = input.scenario === undefined
+    ? findFixture(requiredName(input), input.working_dir)
+    : storeInlineFixture(input.scenario, input.scenario_name);
+  const fixture = requireValidFixture(source);
+  const report = await runAgentFrameworkFixture(fixture);
+  writeReport(source.name, report);
+  return { source: source.source, report };
+}
 
-Invariant: a given slug may live in EXACTLY ONE of the four sources
-(home, expected-to-pass, non-deterministic, expected-to-fail). A collision
-throws with every offending path labeled by its source tag. Fixtures
-run IN PLACE from the repo; run_scenario / run_scenarios always write
-artifacts under tree (1) above so the repo is never polluted. Edits to
-a fixture are picked up on the very next run.
+async function runManyFixtures(input: TesterInput): Promise<Record<string, unknown>> {
+  const all = listFixtures(input.working_dir, input.scenario_source);
+  const wanted = input.scenario_names?.length
+    ? new Set(input.scenario_names.map(requireScenarioName))
+    : undefined;
+  const selected = wanted ? all.filter((entry) => wanted.has(entry.name)) : all;
+  if (wanted) {
+    const found = new Set(selected.map((entry) => entry.name));
+    const missing = [...wanted].filter((name) => !found.has(name));
+    if (missing.length > 0) throw new Error(`fixtures not found in selected source: ${missing.join(", ")}`);
+  }
+  const results = await Promise.all(selected.map(async (source) => {
+    if (source.error) return { name: source.name, source: source.source, pass: false, error: source.error };
+    try {
+      const fixture = requireValidFixture(source);
+      const report = await runAgentFrameworkFixture(fixture);
+      writeReport(source.name, report);
+      return { name: source.name, source: source.source, pass: report.pass, report };
+    } catch (error) {
+      return {
+        name: source.name,
+        source: source.source,
+        pass: false,
+        error: errorMessage(error, "Scenario fixture run failed"),
+      };
+    }
+  }));
+  return {
+    total: results.length,
+    passed: results.filter((result) => result.pass).length,
+    failed: results.filter((result) => !result.pass).length,
+    results,
+  };
+}
 
----
+async function materializeFixture(input: TesterInput): Promise<Record<string, unknown>> {
+  if (!input.run_id) throw new Error("run_id is required");
+  const runtime = createAgentFrameworkScenarioRuntime(input.runtime_root ? { root: input.runtime_root } : {});
+  const fixture = await materializeScenarioFixture(runtime, input.run_id, {
+    policy: agentFrameworkScenarioFixturePolicy,
+    ...(input.scenario_name ? { name: input.scenario_name } : {}),
+  });
+  const source = storeCanonicalFixture(fixture);
+  const response: Record<string, unknown> = {
+    ...publicSource(source),
+    fixture,
+  };
+  if (input.run_materialized) {
+    const report = await runAgentFrameworkFixture(fixture);
+    writeReport(fixture.name, report);
+    response.report = report;
+  }
+  return response;
+}
 
-## Workflow C: ESCAPE HATCH -- expanding the MCP
+function storeInlineFixture(input: unknown, expectedName?: string): FixtureSource {
+  const fixture = validateScenarioFixture(input);
+  if (expectedName !== undefined && fixture.name !== expectedName) {
+    throw new Error(`scenario_name ${JSON.stringify(expectedName)} must equal fixture.name ${JSON.stringify(fixture.name)}`);
+  }
+  return storeCanonicalFixture(fixture);
+}
 
-The scenario schema intentionally covers the common setup knobs:
-permission_mode, cwd, timeout_ms, and arbitrary transcript
-content. That is the minimum contract. If your test case needs a setup
-knob NOT in that list -- for example:
+function storeCanonicalFixture(fixture: ScenarioFixture): FixtureSource {
+  const validated = validateScenarioFixture(fixture);
+  const directory = scenarioRunDir(validated.name);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const inputPath = path.join(directory, FIXTURE_FILE);
+  writeJsonAtomic(inputPath, validated, { mode: 0o600 });
+  return { name: validated.name, source: "home", inputPath, outputDir: directory, fixture: validated };
+}
 
-  - a specific session-state file under ~/.agent-framework/sessions/
-  - hook-internal cache state (gate-reasoning cache)
-  - a new hook event not in the 5 supported
-  - a way to inject fake tool_result content from prior calls
-  - running multiple hooks in sequence in one scenario
+function findFixture(name: string, workingDir?: string): FixtureSource {
+  const source = listFixtures(workingDir).find((entry) => entry.name === name);
+  if (!source) throw new Error(`fixture "${name}" not found`);
+  return source;
+}
 
-STOP. Do not work around a missing knob by faking transcript entries,
-mutating labels.json, editing session-state files, or patching source.
+function requireValidFixture(source: FixtureSource): ScenarioFixture {
+  if (source.error) throw new Error(`fixture "${source.name}" is malformed: ${source.error}`);
+  if (!source.fixture) throw new Error(`fixture "${source.name}" was not loaded`);
+  return source.fixture;
+}
 
-The correct workflow is:
+function writeReport(name: string, report: ScenarioFixtureReport): void {
+  const directory = scenarioRunDir(name);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  writeJsonAtomic(path.join(directory, REPORT_FILE), report, { mode: 0o600 });
+}
 
-  1. Describe to the user, in plain language, which hook/rule you cannot
-     test and why the scenario schema can't express it.
+function readReport(name: string): string {
+  const reportPath = path.join(scenarioRunDir(name), REPORT_FILE);
+  if (!fs.existsSync(reportPath)) throw new Error(`${REPORT_FILE} not found for fixture "${name}"`);
+  return fs.readFileSync(reportPath, "utf8");
+}
 
-  2. Propose the smallest possible extension: a new env flag, a new block
-     type, a new hook event, a new cache-seed field on env, etc. Be
-     specific about what field and what value shape you need.
+function publicSource(source: FixtureSource): Record<string, unknown> {
+  return {
+    name: source.name,
+    source: source.source,
+    input_path: source.inputPath,
+    report_path: path.join(source.outputDir, REPORT_FILE),
+    ...(source.error ? { error: source.error } : {}),
+  };
+}
 
-  3. Wait for explicit approval before editing test-harness/scenario.ts,
-     test-harness/lib/types.ts, the tester MCP schema in src/mcp/server.ts,
-     or any other test-harness code.
+export const TESTER_HELP = `# Scenario Tester
 
-The user owns scenario expressiveness as a design decision. Do not make
-that decision for them.
+The tester operates on canonical Scenario fixtures and canonical run journals. It does not create, read, or score transcript label files.
+
+Actions:
+- list_fixtures: list home and repository fixtures. Optional scenario_source and working_dir.
+- read_fixture: return the canonical fixture for scenario_name.
+- run_fixture: run scenario_name, or validate/store/run an inline scenario. This is the primary deterministic lane.
+- run_fixtures: run scenario_names, or every fixture when omitted.
+- inspect_report: read report.json for scenario_name.
+- materialize_scenario: materialize run_id from the canonical journal.
+- git_hash, help.
 `;

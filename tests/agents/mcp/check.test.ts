@@ -11,7 +11,6 @@ const mocks = vi.hoisted(() => ({
   getGitStatusCancellable: vi.fn(),
   getRepoInfoCancellable: vi.fn(),
   sortReposWithChangesSubmodulesFirst: vi.fn(),
-  logAgentStarted: vi.fn(),
   logAgentResult: vi.fn(),
   setTranscriptPath: vi.fn(),
   getAgentFrameworkSessionDir: vi.fn(),
@@ -40,7 +39,6 @@ vi.mock("../../../src/utils/git-utils.js", () => ({
 }));
 
 vi.mock("../../../src/utils/logger.js", () => ({
-  logAgentStarted: mocks.logAgentStarted,
   logAgentResult: mocks.logAgentResult,
 }));
 
@@ -52,8 +50,8 @@ vi.mock("../../../src/utils/paths.js", () => ({
   getAgentFrameworkSessionDir: mocks.getAgentFrameworkSessionDir,
 }));
 
-vi.mock("../../../src/scenario/lifecycle.js", () => ({
-  reduceDriftDetectionWindow: mocks.reduceDriftDetectionWindow,
+vi.mock("../../../src/agents/mcp/drift-window.js", () => ({
+  reduceCanonicalDriftWindow: mocks.reduceDriftDetectionWindow,
 }));
 
 vi.mock("../../../src/utils/supplemental-diagnostics.js", () => ({
@@ -358,7 +356,6 @@ src/example.ts:1:1 warning TS6385: deprecated
   it("appends supplemental diagnostics before CHECK_AGENT summarization", async () => {
     await runCheckAgent(tempDir);
 
-    expect(mocks.reduceDriftDetectionWindow).toHaveBeenCalledWith(path.join(tempDir, ".agent-framework-session"), 3);
     expect(mocks.runSupplementalDiagnosticProviders).toHaveBeenCalledWith(tempDir, expect.any(Object));
     expect(mocks.runAgent).toHaveBeenCalled();
     const context = mocks.runAgent.mock.calls[0][1].context as string;

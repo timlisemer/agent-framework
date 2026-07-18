@@ -1,19 +1,35 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
 import { extractFilePaths } from "./utils.js";
-import { appealHelper } from "../agents/hooks/tool-appeal.js";
-import { buildAppealUserState } from "../agents/hooks/tool-appeal-user-state.js";
-import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
-import { APPEAL_COUNTS } from "../utils/transcript-presets.js";
-import { appealToolIdentityFromRuleContext } from "./tool-call-context.js";
+
+const EDIT_INTENT_APPEAL_GUIDANCE = `=== EDIT INTENT WARNING ===
+The edit intent classifier has determined the user does NOT want file edits right now.
+This is a STRONG signal. The user's message was analyzed and classified as non-edit intent.
+You should STRONGLY LEAN toward UPHOLD unless you find EXPLICIT, UNAMBIGUOUS user approval
+for editing files (e.g., "make the change", "fix it", "implement it", "go ahead and edit").
+Questions, discussions, or exploration of code do NOT count as edit approval.
+If in doubt, UPHOLD.
+=== END EDIT INTENT WARNING ===`;
 
 export const editIntentRule: PreToolRule = {
   name: "edit-intent",
   displayName: "Edit Intent",
   priority: 60,
-  appealable: false,
-  usesLlm: false,
+  appealable: true,
+  usesLlm: true,
   promptSection: "",
+  appealGuidance: EDIT_INTENT_APPEAL_GUIDANCE,
+
+  async onAppealOverturned(ctx: RuleContext): Promise<void> {
+    await ctx.stateManager.update((state) => {
+      const overturnCount = (state.editIntentOverturnCount ?? 0) + 1;
+      return {
+        ...state,
+        editIntentOverturnCount: overturnCount,
+        ...(overturnCount >= 2 ? { currentEditIntent: true as const, editIntentTimestamp: Date.now() } : {}),
+      };
+    });
+  },
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     if (!isEditTool(ctx.toolName)) {
@@ -38,45 +54,6 @@ export const editIntentRule: PreToolRule = {
 
     const target = blockedPaths.join(", ");
     const editIntentReason = `Edit intent is false - user has not requested file modifications. Target: ${target}`;
-
-    // Appeal with MAJOR HINT (strong signal to uphold)
-    const eiTranscript = formatTranscriptResult(
-      await readTranscriptExact(ctx.transcriptPath, APPEAL_COUNTS)
-    );
-
-    const appeal = await appealHelper(
-      ctx.toolName,
-      `${ctx.toolName} to ${target}`,
-      eiTranscript,
-      editIntentReason,
-      ctx.projectDir,
-      "PreToolUse",
-      buildAppealUserState(ctx.state),
-      `=== EDIT INTENT WARNING ===
-The edit intent classifier has determined the user does NOT want file edits right now.
-This is a STRONG signal. The user's message was analyzed and classified as non-edit intent.
-You should STRONGLY LEAN toward UPHOLD unless you find EXPLICIT, UNAMBIGUOUS user approval
-for editing files (e.g., "make the change", "fix it", "implement it", "go ahead and edit").
-Questions, discussions, or exploration of code do NOT count as edit approval.
-If in doubt, UPHOLD.
-=== END EDIT INTENT WARNING ===`,
-      undefined,
-      appealToolIdentityFromRuleContext(ctx),
-    );
-
-    if (!appeal.overturned) {
-      return { fastDeny: editIntentReason };
-    }
-
-    // BREAKTHROUGH: Track overturned edit-intent appeals (persisted in SessionState)
-    const overturnCount = (ctx.state.editIntentOverturnCount ?? 0) + 1;
-    await ctx.stateManager.update((s) => ({
-      ...s,
-      editIntentOverturnCount: overturnCount,
-      ...(overturnCount >= 2 ? { currentEditIntent: true as const, editIntentTimestamp: Date.now() } : {}),
-    }));
-
-    // Return null to continue pipeline (appeal overturned)
-    return null;
+    return { fastDeny: editIntentReason };
   },
 };

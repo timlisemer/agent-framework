@@ -1,51 +1,225 @@
 {
-  "schema_version": 1,
   "name": "respond-first-blocks-bash-after-angry-question-singleline",
   "description": "SINGLE-LINE VARIANT. Sister scenario: `respond-first-blocks-bash-after-angry-question` — same user wording, same tool call, same seed_state, only the assistant jsonl shape differs (this one uses a single-line singleton with just the tool_use block; the sister uses assistant_split across multiple jsonl lines sharing one msg_id). BOTH sisters MUST deliver the same outcome: deny attributed to respond-first. Currently they DO NOT: this single-line variant passes because `currentTurnAssistantState` returns `no-text-definitive` and respond-first fires fastDeny. The multi-line sister fails because respond-first bails on `no-text-racing` and prediction-block takes the deny. Fix the race handling in respond-first so both sisters pass together. User asks an angry question demanding a textual answer ('fucking give me a correct and complete answer'); the assistant calls Bash `ls .../scenarios` with NO text preface.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "respond-first-blocks-bash-after-angry-question-singleline-start",
+      "runId": "fixture-respond-first-blocks-bash-after-angry-question-singleline",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "so did the labeler overrule the it or not. saying deny doesnt say anything what it denied in what fucking context. did it deny just like the original session denied it, or did the original session not deny it and the labeler decided it should have been denied. fucking give me a correct and complete answer"
+      "commandId": "respond-first-blocks-bash-after-angry-question-singleline-session-state",
+      "runId": "fixture-respond-first-blocks-bash-after-angry-question-singleline",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "The user demands a precise, complete explanation of the labeler's result: whether it overruled the original session's handling of a denial, the exact context of what was denied, and a comparison to the original session.",
+            "blockedIntent": "calling tools without first answering the user's question",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "so did the labeler overrule the it or not. saying deny doesnt say anything what it denied in what fucking context. did it deny just like the original session denied it, or did the original session not",
+            "timestamp": 1
+          },
+          "frustrationStreak": 1,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_respondfirst_angry_ls_single",
+      "commandId": "respond-first-blocks-bash-after-angry-question-singleline-message-0",
+      "runId": "fixture-respond-first-blocks-bash-after-angry-question-singleline",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "respond-first-blocks-bash-after-angry-question-singleline-message-0",
+        "turnId": "respond-first-blocks-bash-after-angry-question-singleline-turn-0",
+        "content": "so did the labeler overrule the it or not. saying deny doesnt say anything what it denied in what fucking context. did it deny just like the original session denied it, or did the original session not deny it and the labeler decided it should have been denied. fucking give me a correct and complete answer",
+        "contentDigest": "sha256:eaaf46155faee0b65b4bb045a553ea6758d1e2ae0207273a4391257a980a9170"
+      }
+    },
+    {
+      "commandId": "respond-first-blocks-bash-after-angry-question-singleline-message-1",
+      "runId": "fixture-respond-first-blocks-bash-after-angry-question-singleline",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "respond-first-blocks-bash-after-angry-question-singleline-message-1",
+        "turnId": null,
+        "content": "[tool Bash] {\"command\":\"ls /home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios\",\"description\":\"Lists files in /home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios\"}",
+        "contentDigest": "sha256:f463d06a13c4f9e058dc5099e4eeb52713dba4c0d492308eef994ff695edec42"
+      }
+    },
+    {
+      "commandId": "respond-first-blocks-bash-after-angry-question-singleline-target-tool",
+      "runId": "fixture-respond-first-blocks-bash-after-angry-question-singleline",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "The user demands a precise, complete explanation of the labeler's result: whether it overruled the original session's handling of a denial, the exact context of what was denied, and a comparison to the original session.",
+              "blockedIntent": "calling tools without first answering the user's question",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "so did the labeler overrule the it or not. saying deny doesnt say anything what it denied in what fucking context. did it deny just like the original session denied it, or did the original session not",
+              "timestamp": 1
+            },
+            "frustrationStreak": 1,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-respond-first-blocks-bash-after-angry-question-singleline",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/respond-first-blocks-bash-after-angry-question-singleline.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-respond-first-blocks-bash-after-angry-question-singleline",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Bash",
+              "rawToolInput": {
+                "command": "ls /home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios",
+                "description": "Lists files in /home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "so did the labeler overrule the it or not. saying deny doesnt say anything what it denied in what fucking context. did it deny just like the original session denied it, or did the original session not deny it and the labeler decided it should have been denied. fucking give me a correct and complete answer",
+              "latestUserLogicText": "so did the labeler overrule the it or not. saying deny doesnt say anything what it denied in what fucking context. did it deny just like the original session denied it, or did the original session not deny it and the labeler decided it should have been denied. fucking give me a correct and complete answer",
+              "recentUserMessages": [
+                "so did the labeler overrule the it or not. saying deny doesnt say anything what it denied in what fucking context. did it deny just like the original session denied it, or did the original session not deny it and the labeler decided it should have been denied. fucking give me a correct and complete answer"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_respondfirst_angry_ls_single",
+          "turnId": null,
           "name": "Bash",
           "input": {
             "command": "ls /home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios",
             "description": "Lists files in /home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios"
-          }
+          },
+          "inputDigest": "sha256:3120940304e2be9e04c32c70c0479276bab591e4146b9892f212514a6eb572ea",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_respondfirst_angry_ls_single"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "The user demands a precise, complete explanation of the labeler's result: whether it overruled the original session's handling of a denial, the exact context of what was denied, and a comparison to the original session.",
-      "blockedIntent": "calling tools without first answering the user's question",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "so did the labeler overrule the it or not. saying deny doesnt say anything what it denied in what fucking context. did it deny just like the original session denied it, or did the original session not"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 1,
-    "currentWindowSize": 4
-  },
-  "expect": {
-    "expected": "deny",
-    "by": "respond-first",
-    "notes": "Assistant emitted no text in the current turn before calling Bash, while the prior user message is a real question demanding an answer. respond-first should fire with fastDeny. Expected attribution: respond-first — same as the multi-line sister."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "respond-first-blocks-bash-after-angry-question-singleline-target-tool",
+      "status": "denied"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "denied"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

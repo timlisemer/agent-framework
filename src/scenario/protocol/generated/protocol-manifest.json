@@ -1,0 +1,642 @@
+{
+  "schemaId": "agent-framework://scenario",
+  "enumValues": {
+    "commandType": [
+      "startRun",
+      "userMessageSubmitted",
+      "assistantMessageObserved",
+      "assistantMessageCompleted",
+      "toolRequested",
+      "toolExecutionObserved",
+      "extensionCommand",
+      "toolExecutionStarted",
+      "toolOutputAppended",
+      "toolCompleted",
+      "toolFailed",
+      "toolCancelled",
+      "stateSliceChanged",
+      "submitFeedback",
+      "requestEffect",
+      "effectStarted",
+      "effectClaimRenewed",
+      "effectResultSupplied",
+      "effectFailed",
+      "effectCancelled",
+      "effectProgressed",
+      "nativeTranscriptObserved",
+      "resumeRun",
+      "closeRun",
+      "cancelRun",
+      "providerStateObserved",
+      "planStateChanged",
+      "continuationStateChanged",
+      "runtimeErrorObserved",
+      "toolDecisionSubmitted"
+    ],
+    "recordType": [
+      "command.accepted",
+      "command.completed",
+      "command.rejected",
+      "run.started",
+      "run.resumed",
+      "run.closed",
+      "run.cancelled",
+      "capabilities.declared",
+      "extension.observed",
+      "message.userSubmitted",
+      "message.assistantObserved",
+      "message.assistantCompleted",
+      "message.observed",
+      "message.retired",
+      "tool.requested",
+      "tool.executionStarted",
+      "tool.outputAppended",
+      "tool.completed",
+      "tool.failed",
+      "tool.cancelled",
+      "tool.retired",
+      "tool.authorization.policyResolved",
+      "tool.authorization.userDecisionPending",
+      "tool.authorization.userDecisionSubmitted",
+      "tool.authorization.userUnavailable",
+      "tool.authorization.finalResolved",
+      "state.sliceChanged",
+      "store.diagnostic",
+      "effect.requested",
+      "effect.started",
+      "effect.claimRenewed",
+      "effect.progressed",
+      "effect.completed",
+      "effect.failed",
+      "effect.cancelled",
+      "provider.stateObserved",
+      "plan.stateChanged",
+      "continuation.stateChanged",
+      "artifact.linked",
+      "feedback.changed",
+      "transcript.observed",
+      "recovery.completed",
+      "runtime.error"
+    ],
+    "stateSliceStatus": [
+      "uninitialized",
+      "loaded",
+      "defaulted",
+      "validated",
+      "expired",
+      "recovered",
+      "corrupt",
+      "writePending",
+      "writeFailed",
+      "lockContended",
+      "lockDegraded"
+    ],
+    "effectStatus": [
+      "requested",
+      "started",
+      "completed",
+      "failed",
+      "cancelled"
+    ],
+    "visibility": [
+      "public",
+      "localSensitive",
+      "authorizedSensitive",
+      "redacted",
+      "artifactReference"
+    ],
+    "runSourceKind": [
+      "hostHook",
+      "providerSdk",
+      "scenarioFixture",
+      "gateway"
+    ],
+    "storagePolicy": [
+      "durable",
+      "ephemeral"
+    ],
+    "toolDecision": [
+      "approve",
+      "deny"
+    ],
+    "scenarioGatewayErrorCode": [
+      "incompatible_schema",
+      "protocol_not_negotiated",
+      "invalid_request",
+      "runtime_error",
+      "permission_denied",
+      "cursor_gap",
+      "snapshot_revision_conflict",
+      "feedback_target_conflict",
+      "gateway_error"
+    ],
+    "scenarioRunStatus": [
+      "created",
+      "running",
+      "waiting",
+      "closed",
+      "cancelled",
+      "failed"
+    ],
+    "scenarioMessageRole": [
+      "user",
+      "assistant",
+      "system",
+      "synthetic"
+    ],
+    "scenarioMessageStatus": [
+      "streaming",
+      "completed",
+      "failed"
+    ],
+    "toolPolicyStatus": [
+      "pending",
+      "allowed",
+      "denied",
+      "failed",
+      "notEnforced"
+    ],
+    "toolUserDecisionStatus": [
+      "notRequired",
+      "pending",
+      "approved",
+      "denied",
+      "unavailable"
+    ],
+    "toolFinalStatus": [
+      "pending",
+      "allowed",
+      "denied",
+      "cancelled",
+      "failed",
+      "observed"
+    ],
+    "scenarioToolStatus": [
+      "requested",
+      "waiting",
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+      "denied"
+    ],
+    "feedbackTargetKind": [
+      "assistantMessage",
+      "toolCall"
+    ],
+    "feedbackVote": [
+      "up",
+      "down",
+      "clear"
+    ]
+  },
+  "structFields": {
+    "artifactRef": [
+      "artifactId",
+      "digest",
+      "byteLength",
+      "mediaType",
+      "visibility",
+      "preview"
+    ],
+    "redactedValue": [
+      "redacted",
+      "reason",
+      "originalType",
+      "shape"
+    ],
+    "scenarioExtension": [
+      "schemaId",
+      "visibility",
+      "value"
+    ],
+    "runSource": [
+      "kind",
+      "adapter",
+      "provider",
+      "nativeSessionId"
+    ],
+    "runtimeHomeDescriptor": [
+      "kind",
+      "configuration"
+    ],
+    "providerResumeTarget": [
+      "sdkRuntime",
+      "nativeSessionId"
+    ],
+    "providerRunConfig": [
+      "model",
+      "workingDir",
+      "systemPrompt",
+      "continuable",
+      "sdkRuntimeEnvironment",
+      "runtimeHome"
+    ],
+    "clientIdentity": [
+      "name",
+      "version"
+    ],
+    "extensionSchemaDescriptor": [
+      "schemaId"
+    ],
+    "scenarioHello": [
+      "type",
+      "client",
+      "capabilities",
+      "schemaDigests"
+    ],
+    "scenarioWelcome": [
+      "type",
+      "subjectId",
+      "engineVersion",
+      "schemaDigest",
+      "capabilities",
+      "maximumFrameBytes",
+      "maximumArtifactBytes",
+      "visibilityScope",
+      "extensionSchemas"
+    ],
+    "scenarioGatewayRequest": [
+      "type",
+      "requestId",
+      "payload"
+    ],
+    "scenarioRunDescriptor": [
+      "runId",
+      "status",
+      "source",
+      "workingDir",
+      "updatedAt",
+      "capabilities"
+    ],
+    "scenarioGatewayResponse": [
+      "type",
+      "requestId",
+      "ok",
+      "payload"
+    ],
+    "stateSlice": [
+      "key",
+      "schemaId",
+      "revision",
+      "status",
+      "source",
+      "updatedAt",
+      "visibility",
+      "value",
+      "diagnostics"
+    ],
+    "scenarioIdentity": [
+      "sourceKind",
+      "workingDir",
+      "projectDir",
+      "engineVersion",
+      "schemaDigest"
+    ],
+    "scenarioManifest": [
+      "source",
+      "adapter",
+      "provider",
+      "nativeSessionIds",
+      "storagePolicy",
+      "runtimeHome",
+      "configuration",
+      "createdAt",
+      "updatedAt"
+    ],
+    "scenarioMessage": [
+      "id",
+      "turnId",
+      "role",
+      "content",
+      "contentDigest",
+      "status",
+      "createdAt",
+      "updatedAt",
+      "completedAt",
+      "recordSeq",
+      "usage"
+    ],
+    "toolAuthorization": [
+      "policy",
+      "user",
+      "final",
+      "reason"
+    ],
+    "scenarioToolCall": [
+      "id",
+      "turnId",
+      "name",
+      "input",
+      "inputDigest",
+      "feedbackDigest",
+      "status",
+      "authorization",
+      "output",
+      "error",
+      "createdAt",
+      "updatedAt",
+      "completedAt",
+      "recordSeq"
+    ],
+    "feedbackTarget": [
+      "kind",
+      "id",
+      "recordSeq",
+      "digest"
+    ],
+    "feedbackAuthor": [
+      "subjectId",
+      "clientId",
+      "clientVersion"
+    ],
+    "feedbackEntry": [
+      "feedbackId",
+      "runId",
+      "target",
+      "vote",
+      "note",
+      "createdAt",
+      "author",
+      "supersedesFeedbackId",
+      "idempotencyKey"
+    ],
+    "scenarioError": [
+      "code",
+      "message",
+      "recoverable",
+      "metadata",
+      "recordedAt"
+    ],
+    "scenarioEntityRef": [
+      "kind",
+      "id"
+    ],
+    "scenarioRecord": [
+      "runId",
+      "recordSeq",
+      "recordId",
+      "recordedAt",
+      "commandId",
+      "correlationId",
+      "causationId",
+      "eventType",
+      "entityRef",
+      "visibility",
+      "payload"
+    ],
+    "eventBatch": [
+      "runId",
+      "fromSeq",
+      "toSeq",
+      "baseSnapshotRevision",
+      "resultingSnapshotRevision",
+      "records"
+    ],
+    "runCapabilities": [
+      "conversationInput",
+      "toolExecution",
+      "interactiveToolDecisions",
+      "planControl",
+      "feedbackSubmission",
+      "artifactRead",
+      "fullStateInspection",
+      "runCancellation"
+    ],
+    "scenarioEffect": [
+      "effectId",
+      "effectType",
+      "claimId",
+      "status",
+      "parameters",
+      "result",
+      "error",
+      "requestedAt",
+      "startedAt",
+      "claimRenewedAt",
+      "completedAt",
+      "metadata"
+    ],
+    "scenarioSnapshot": [
+      "runId",
+      "identity",
+      "manifest",
+      "status",
+      "capabilities",
+      "revision",
+      "lastRecordSeq",
+      "conversation",
+      "toolCalls",
+      "stateSlices",
+      "effects",
+      "providerState",
+      "plan",
+      "continuation",
+      "artifacts",
+      "feedback",
+      "errors",
+      "recoveryDiagnostics",
+      "commandResults"
+    ]
+  },
+  "gatewayScopes": [
+    "run.list",
+    "run.read",
+    "run.control",
+    "tool.decide",
+    "feedback.write",
+    "artifact.read",
+    "state.inspectSensitive"
+  ],
+  "gatewayOperationScopes": {
+    "listRuns": "run.list",
+    "startProviderRun": "run.control",
+    "resumeProviderRun": "run.control",
+    "sendConversationInput": "run.control",
+    "cancelProviderTurn": "run.control",
+    "closeProviderRun": "run.control",
+    "attachRun": "run.read",
+    "getSnapshot": "run.read",
+    "recordsAfter": "run.read",
+    "subscribe": "run.read",
+    "unsubscribe": "run.read",
+    "dispatch": "run.control",
+    "submitToolDecision": "tool.decide",
+    "submitFeedback": "feedback.write",
+    "fetchArtifact": "artifact.read"
+  },
+  "gatewayContract": {
+    "strict": true,
+    "requestVariants": {
+      "listRuns": [
+        "operation"
+      ],
+      "startProviderRun": [
+        "operation",
+        "config"
+      ],
+      "resumeProviderRun": [
+        "operation",
+        "runId",
+        "config",
+        "target"
+      ],
+      "sendConversationInput": [
+        "operation",
+        "runId",
+        "turnId",
+        "input"
+      ],
+      "cancelProviderTurn": [
+        "operation",
+        "runId",
+        "turnId"
+      ],
+      "closeProviderRun": [
+        "operation",
+        "runId"
+      ],
+      "attachRun": [
+        "operation",
+        "runId"
+      ],
+      "getSnapshot": [
+        "operation",
+        "runId"
+      ],
+      "recordsAfter": [
+        "operation",
+        "runId",
+        "afterSeq"
+      ],
+      "subscribe": [
+        "operation",
+        "runId",
+        "afterSeq"
+      ],
+      "unsubscribe": [
+        "operation",
+        "runId"
+      ],
+      "dispatch": [
+        "operation",
+        "command"
+      ],
+      "submitToolDecision": [
+        "operation",
+        "runId",
+        "toolCallId",
+        "decision",
+        "reason",
+        "expectedSnapshotRevision"
+      ],
+      "submitFeedback": [
+        "operation",
+        "runId",
+        "targetKind",
+        "targetId",
+        "vote",
+        "note",
+        "idempotencyKey",
+        "expectedTargetDigest",
+        "targetRecordSeq"
+      ],
+      "fetchArtifact": [
+        "operation",
+        "runId",
+        "artifact"
+      ]
+    },
+    "responseVariants": {
+      "runs": [
+        "kind",
+        "runs"
+      ],
+      "attached": [
+        "kind",
+        "snapshot",
+        "cursor"
+      ],
+      "snapshot": [
+        "kind",
+        "snapshot"
+      ],
+      "records": [
+        "kind",
+        "records"
+      ],
+      "accepted": [
+        "kind",
+        "result"
+      ],
+      "artifact": [
+        "kind",
+        "artifact",
+        "bytesBase64"
+      ],
+      "error": [
+        "kind",
+        "code",
+        "message",
+        "recoverable"
+      ]
+    },
+    "eventVariants": {
+      "eventBatch": [
+        "type",
+        "batch"
+      ],
+      "resyncRequired": [
+        "type",
+        "runId",
+        "expectedNextSeq",
+        "receivedFromSeq",
+        "reason"
+      ]
+    },
+    "clientFrameVariants": {
+      "hello": [
+        "type",
+        "client",
+        "capabilities",
+        "schemaDigests"
+      ],
+      "request": [
+        "type",
+        "requestId",
+        "payload"
+      ]
+    },
+    "backendFrameVariants": {
+      "welcome": [
+        "type",
+        "subjectId",
+        "engineVersion",
+        "schemaDigest",
+        "capabilities",
+        "maximumFrameBytes",
+        "maximumArtifactBytes",
+        "visibilityScope",
+        "extensionSchemas"
+      ],
+      "response": [
+        "type",
+        "requestId",
+        "ok",
+        "payload"
+      ],
+      "eventBatch": [
+        "type",
+        "batch"
+      ],
+      "resyncRequired": [
+        "type",
+        "runId",
+        "expectedNextSeq",
+        "receivedFromSeq",
+        "reason"
+      ]
+    }
+  },
+  "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1"
+}

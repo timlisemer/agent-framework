@@ -1,6 +1,5 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
-import { readToolLogEntries } from "../utils/session-store.js";
-import { detectIntentFulfillment, formatIntentFulfillment } from "../utils/intent-fulfillment.js";
+import { detectRecentIntentFulfillment, formatIntentFulfillment } from "../utils/intent-fulfillment.js";
 
 export const intentFulfillmentContextRule: PreToolRule = {
   name: "intent-fulfillment-context",
@@ -13,8 +12,7 @@ export const intentFulfillmentContextRule: PreToolRule = {
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     const prediction = ctx.state.currentPrediction;
     if (!prediction) return null;
-    const tail = readToolLogEntries(ctx.sessionDir, 50);
-    const signal = detectIntentFulfillment(prediction, tail);
+    const signal = detectRecentIntentFulfillment(prediction, ctx.toolHistory ?? []);
     if (!signal) return null;
     return { llmContext: formatIntentFulfillment(signal) };
   },

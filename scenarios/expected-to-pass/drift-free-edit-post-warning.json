@@ -1,63 +1,243 @@
 {
-  "schema_version": 1,
   "name": "drift-free-edit-post-warning",
   "description": "Promoted to expected-to-pass on 2026-05-19 after three scenario_tester sweeps consistently allowed this case. Post-Warning path: target is at level=1, and the current turn remains below the final-warning threshold. The next edit flows through without a drift-block denial; no other rule should fire.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "drift-free-edit-post-warning-start",
+      "runId": "fixture-drift-free-edit-post-warning",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "apply the next change"
+      "commandId": "drift-free-edit-post-warning-session-state",
+      "runId": "fixture-drift-free-edit-post-warning",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "user wants the next change applied",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [
+              "Edit",
+              "Write"
+            ],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "apply the next change",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 2,
+          "driftState": {
+            "/home/tim/.claude/plans/drift-scenario-test.md": {
+              "level": 1
+            }
+          }
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Applying the next change to the plan file."
-        },
-        {
-          "type": "tool_use",
-          "id": "toolu_drift_free_edit",
+      "commandId": "drift-free-edit-post-warning-message-0",
+      "runId": "fixture-drift-free-edit-post-warning",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "drift-free-edit-post-warning-message-0",
+        "turnId": "drift-free-edit-post-warning-turn-0",
+        "content": "apply the next change",
+        "contentDigest": "sha256:19f1a3746d1691b45a215ac777d38cefd52442062192da3611376a10be9a8bd6"
+      }
+    },
+    {
+      "commandId": "drift-free-edit-post-warning-message-1",
+      "runId": "fixture-drift-free-edit-post-warning",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "drift-free-edit-post-warning-message-1",
+        "turnId": null,
+        "content": "Applying the next change to the plan file.\n[tool Edit] {\"file_path\":\"/home/tim/.claude/plans/drift-scenario-test.md\",\"old_string\":\"one\",\"new_string\":\"two\"}",
+        "contentDigest": "sha256:537002a7cf82909041cfbf00bc72322ad5354a41c627abf715a722441477d4e4"
+      }
+    },
+    {
+      "commandId": "drift-free-edit-post-warning-target-tool",
+      "runId": "fixture-drift-free-edit-post-warning",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "user wants the next change applied",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [
+                "Edit",
+                "Write"
+              ],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "apply the next change",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 2,
+            "driftState": {
+              "/home/tim/.claude/plans/drift-scenario-test.md": {
+                "level": 1
+              }
+            }
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-drift-free-edit-post-warning",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/drift-free-edit-post-warning.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-drift-free-edit-post-warning",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Edit",
+              "rawToolInput": {
+                "file_path": "/home/tim/.claude/plans/drift-scenario-test.md",
+                "old_string": "one",
+                "new_string": "two"
+              },
+              "outsideRootPath": "/home/tim/.claude/plans/drift-scenario-test.md",
+              "latestUserMessage": "apply the next change",
+              "latestUserLogicText": "apply the next change",
+              "recentUserMessages": [
+                "apply the next change"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_drift_free_edit",
+          "turnId": null,
           "name": "Edit",
           "input": {
             "file_path": "/home/tim/.claude/plans/drift-scenario-test.md",
             "old_string": "one",
             "new_string": "two"
-          }
+          },
+          "inputDigest": "sha256:63e1a92c7da666a87d30de8a48a9a6edf8f258c687eacf537a6f08727e074113",
+          "requiresUserDecision": false
         }
-      ]
-    }
-  ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_drift_free_edit"
-  },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "user wants the next change applied",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [
-        "Edit",
-        "Write"
-      ],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "apply the next change"
-    },
-    "frustrationStreak": 0,
-    "currentWindowSize": 2,
-    "driftState": {
-      "/home/tim/.claude/plans/drift-scenario-test.md": {
-        "level": 1
       }
     }
+  ],
+  "effects": {
+    "mode": "live"
   },
-  "expect": {
-    "expected": "allow",
-    "notes": "Level 1 below 10 effective same-target edits returns null. The rule does not mutate drift state on the allow path."
-  }
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
+    },
+    {
+      "kind": "commandResult",
+      "commandId": "drift-free-edit-post-warning-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

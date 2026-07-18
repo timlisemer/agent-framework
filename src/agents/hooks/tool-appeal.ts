@@ -61,10 +61,15 @@ import { runAgentWithRetryAndTelemetry } from "../../utils/agent-runner.js";
 import { buildToolAppealAgent } from "../../utils/agent-configs.js";
 import { logFastPathApproval } from "../../utils/logger.js";
 import { startsWithAny } from "../../utils/retry.js";
-import { extractGateNote } from "../../utils/gate-reasoning-cache.js";
+import { extractGateNote } from "../../rules/gate-note.js";
 import type { SlashCommandContext } from "../../utils/transcript.js";
 import type { AppealUserState } from "../../rules/types.js";
 import { stripQuotedAndPastedContent } from "../../utils/quote-detection.js";
+import {
+  abortableDelay,
+  isCancellationError,
+  throwIfAborted,
+} from "../../utils/cancellation.js";
 
 // The literal "ACTION" suffix appended by resolveCheckMessage
 // (src/utils/check-target-context.ts:120) and used by the static `alternative`
@@ -166,8 +171,10 @@ export async function appealHelper(
   userState: AppealUserState,
   additionalContext?: string,
   slashCommandContext?: SlashCommandContext,
-  toolIdentity?: AppealToolIdentity
+  toolIdentity?: AppealToolIdentity,
+  signal?: AbortSignal,
 ): Promise<{ overturned: boolean; gateNote?: string }> {
+  throwIfAborted(signal);
   const rawToolName = toolIdentity?.rawToolName;
   const canonicalToolName = toolIdentity?.canonicalToolName ?? toolName;
   const userMessage = userState.userMessageFull || userState.userMessageSnippet;
@@ -263,7 +270,8 @@ ${transcript}`,
           toolName,
           workingDir,
           executionType: EXECUTION_TYPES.LLM,
-        }
+        },
+        { signal },
       );
 
       const gateNote = extractGateNote(result.output);
@@ -271,9 +279,10 @@ ${transcript}`,
 
       return { overturned, gateNote };
     } catch (err) {
+      if (isCancellationError(err)) throw err;
       lastError = err;
       if (attempt < maxRetries) {
-        await new Promise((resolve) => setTimeout(resolve, 100 * Math.pow(2, attempt)));
+        await abortableDelay(100 * Math.pow(2, attempt), signal);
       }
     }
   }

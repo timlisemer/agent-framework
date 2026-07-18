@@ -58,18 +58,16 @@ not include a transcript path, the resolver uses the latest
 `transcript-path.txt` sidecar for the active project.
 
 Codex planfiles live under the agent-framework session `plans/` directory.
-The session `current-plan.json` sidecar stores only the active planfile
-descriptor, not plan content. Implementation workflows are MCP-owned:
+The canonical run stores the active descriptor and validation result in the
+`plan.current` and `plan.validation` snapshot slices. Implementation workflows are MCP-owned:
 `$agent-framework-implement` calls `mcp__agent_framework__implement`, which
 runs the internal write implementer, parent-owned check, and read-only
 implementation validator. `$agent-framework-validate` calls
 `mcp__agent_framework__validate_implementation` for validation only.
 
-Scenario materialization for Codex sessions uses the shared `scenario_tester`
-MCP action `materialize_scenario`. The materializer infers Codex from
-`/.codex/` transcript paths and parses `response_item` / `event_msg` JSONL
-through `adapters/codex/parse-transcript.ts`, including normalized function-call
-inputs, before writing the stored scenario.
+Scenario materialization uses the shared `scenario_tester` MCP action
+`materialize_scenario`. Given a canonical `run_id`, it reads the authoritative
+journal and snapshot and writes a replayable stored scenario.
 
 When Codex stops with a whole-message `<proposed_plan>...</proposed_plan>`, the
 Stop hook treats that block as the plan presentation for user acceptance, not

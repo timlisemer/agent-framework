@@ -1,10 +1,10 @@
 import type { CancellationOptions } from "../utils/cancellation.js";
 import type { AgentConfig } from "../utils/agent-runner.js";
-import type { SdkRuntimeEnvironment } from "../ai-protocol/index.js";
+import type { SdkRuntimeEnvironment } from "./provider-contract.js";
 import type { ProviderType, ResolvedProvider } from "./types.js";
 import type { RuntimeHomeProfile, SdkToolPolicy } from "../runtime-home/runtime-profiles.js";
 
-export type { SdkRuntimeEnvironment, SdkRuntimeHome } from "../ai-protocol/index.js";
+export type { SdkRuntimeEnvironment, SdkRuntimeHome } from "./provider-contract.js";
 export type { RuntimeHomeProfile, SdkToolPolicy } from "../runtime-home/runtime-profiles.js";
 
 export interface ProviderUsage {

@@ -57,7 +57,7 @@ import {
   findDestructiveFlagsFromFindArgs,
   findSedPolicyFindings,
 } from "./topics/find-sed.js";
-import { bashReadCapabilities } from "./read-capability.js";
+import { readOnlyBashCapabilities } from "./read-capability.js";
 import type {
   BashCommandClassification,
   BashCommandRiskClass,
@@ -426,7 +426,7 @@ export function evaluateBashPolicy(command: string, workingDir?: string, message
 export function classifyBashCommand(command: string, workingDir?: string, messages: BashPolicyMessageOptions = DEFAULT_MESSAGES): BashCommandClassification {
   const result = evaluateBashPolicy(command, workingDir, messages);
   const capabilities = isReadOnlyRiskClass(result.terminal.riskClass)
-    ? bashReadCapabilities(command)
+    ? readOnlyBashCapabilities(command)
     : [];
   return {
     command,

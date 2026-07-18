@@ -76,15 +76,10 @@ describe("AI backend OpenRouter provider resolution", () => {
       systemPrompt: null,
       continuable: true,
       sdkRuntimeEnvironment: "user",
-      sdkRuntimeHome: "managedAstral",
+      sdkRuntimeHome: "managed",
     }, {
-      provider: "codex",
-      transcriptPath: "/tmp/codex-session.jsonl",
+      sdkRuntime: "codex",
       nativeSessionId: "codex-thread",
-      target: {
-        threadId: "codex-thread",
-        transcriptPath: "/tmp/codex-session.jsonl",
-      },
     });
 
     expect(runner.resolvedProvider.type).toBe(PROVIDER_TYPES.OPENAI_SUBSCRIPTION);
@@ -99,15 +94,10 @@ describe("AI backend OpenRouter provider resolution", () => {
         systemPrompt: null,
         continuable: true,
         sdkRuntimeEnvironment: "user",
-        sdkRuntimeHome: "managedAstral",
+        sdkRuntimeHome: "managed",
       }, {
-        provider: "codex",
-        transcriptPath: "/tmp/codex-session.jsonl",
+        sdkRuntime: "codex",
         nativeSessionId: "codex-thread",
-        target: {
-          threadId: "codex-thread",
-          transcriptPath: "/tmp/codex-session.jsonl",
-        },
       })
     ).toThrow(ResumeProviderMismatchError);
   });

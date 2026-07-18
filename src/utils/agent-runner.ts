@@ -86,7 +86,7 @@ import {
   resolveProvider,
   resolveProviderForType,
 } from "../types.js";
-import { logAgentDecision, extractDecision, logAgentStarted } from "./logger.js";
+import { logAgentDecision, extractDecision } from "./logger.js";
 import type { DecisionType } from "../telemetry/types.js";
 import {
   isCancellationError,
@@ -96,7 +96,7 @@ import {
 import { runProviderDirect, runProviderSdk } from "../providers/index.js";
 import type { ProviderContinuationState, ProviderExecutionResult } from "../providers/execution-types.js";
 import type { RuntimeHomeProfile, SdkToolPolicy } from "../providers/execution-types.js";
-import type { SdkRuntimeEnvironment } from "../ai-protocol/index.js";
+import type { SdkRuntimeEnvironment } from "../providers/provider-contract.js";
 import { makeRuntimeRunId, resolveRuntimeHomeProfile, sdkToolsForPolicy } from "../runtime-home/runtime-profiles.js";
 
 /**
@@ -946,7 +946,6 @@ export async function runAgentWithTelemetry(
   telemetry: TelemetryContext
 ): Promise<AgentExecutionResult> {
   // Mark agent as running in statusline before execution
-  logAgentStarted(telemetry.agent, telemetry.toolName);
 
   const result = await runAgent(config, input);
 
@@ -1001,7 +1000,6 @@ export async function runAgentWithRetryAndTelemetry(
   const stubs = readLlmStubsFromEnv();
   const stubbedOutput = stubs[telemetry.agent];
   if (typeof stubbedOutput === "string") {
-    logAgentStarted(telemetry.agent, telemetry.toolName);
     const decision = telemetry.decisionOverride ?? extractDecision(stubbedOutput) ?? "DENY";
     logAgentDecision({
       agent: telemetry.agent,
@@ -1028,7 +1026,6 @@ export async function runAgentWithRetryAndTelemetry(
   }
 
   // Mark agent as running in statusline before execution
-  logAgentStarted(telemetry.agent, telemetry.toolName);
 
   const result = await runAgentWithRetry(config, input, retryOptions, options);
 

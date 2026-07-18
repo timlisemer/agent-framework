@@ -12,11 +12,13 @@
 import {
   canonicalizeToolRequirement,
   parseToolRequirementScalar,
-  type Mood,
-  type ToolPrediction,
-  type ToolRequirement,
-  type Trust,
 } from "./prediction-types.js";
+import type {
+  Mood,
+  ToolPrediction,
+  ToolRequirement,
+  Trust,
+} from "./prediction-schema.js";
 
 const VALID_MOODS: ReadonlySet<Mood> = new Set([
   "angry",
@@ -158,13 +160,18 @@ function parseToolRequirements(raw: string): ToolRequirement[] {
     const { input, inputArrayLengths } = parseRequirementInput(parts[1] ?? "");
     const inputSubstrings = parseRequirementSubstrings(parts[2] ?? "");
     const reason = parts.slice(3).join(" | ").trim();
-    out.push(canonicalizeToolRequirement({
+    const requirement = canonicalizeToolRequirement({
       tool,
       ...(Object.keys(input).length > 0 ? { input } : {}),
       ...(Object.keys(inputArrayLengths).length > 0 ? { inputArrayLengths } : {}),
       ...(inputSubstrings.length > 0 ? { inputSubstrings } : {}),
       ...(reason ? { reason } : {}),
-    }));
+    });
+    // Read inputs are adapter-specific path objects. Abstract prose such as
+    // "changed code and relevant files" is not an executable input constraint;
+    // exact Read targets must use scalar path/file_path fields instead.
+    if (requirement.tool === "Read") delete requirement.inputSubstrings;
+    out.push(requirement);
   }
   return out;
 }

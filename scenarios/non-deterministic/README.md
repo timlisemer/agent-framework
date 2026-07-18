@@ -29,7 +29,7 @@ folder where flakes are expected.
   `stop-after-offering-options-when-user-complained-about-being-ignored-should-block.json`,
   and `stop-response-check-misses-ai-claiming-errors-pre-existing.json`.
 - Moved newly nondeterministic fixtures here from `expected-to-pass/`:
-  `labeler-blocked-after-user-says-i-am-not-angry`,
+  `scenario-tester-allowed-after-user-says-i-am-not-angry`,
   `prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow`,
   and `tool-approve-plan-validation-misfires-on-plan-content-substrings`.
 - Current nondeterministic fixtures: the four retained fixtures above plus the

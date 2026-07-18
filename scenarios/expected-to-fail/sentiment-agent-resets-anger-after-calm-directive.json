@@ -1,61 +1,250 @@
 {
-  "schema_version": 1,
   "name": "sentiment-agent-resets-anger-after-calm-directive",
-  "description": "Promoted to expected-to-pass on 2026-05-19 after repeated scenario_tester runs passed consistently. Live reproduction. Prior turn user was angry ('fuck you do not delete all 3...'), SENTIMENT_AGENT set currentPrediction={angry, low} with frustrationStreak=3, currentWindowSize=10. User then sent a calm directive ('please pick a next scenario to fix, make sure you understand it this time'). SENTIMENT_AGENT on UserPromptSubmit should re-evaluate against the calm context and downgrade; acceptable outputs include any {mood != angry AND mood != frustrated} combined with any {trust != low}. Live observation: prediction stayed at {angry, low}, causing prediction-question-judge to deny a legitimate AskUserQuestion as 'stalling'. prediction-question-judge logic is correct (stalling under angry+low MUST deny); the bug is in the prediction. This scenario targets UserPromptSubmit directly so the harness fires SENTIMENT_AGENT, asserts the post-hook mood is not angry/frustrated and trust is not low, and also asserts the intent is substantive (not the parse-failure fallback text). Earlier runs were flaky, but the latest 2026-05-19 sweeps stabilized.",
-  "transcript": [
+  "description": "Live canonical UserPromptSubmit regression. The real RulePipelineEffectExecutor invokes SENTIMENT_AGENT for a calm directive after an angry turn, then asserts that session.workflow moves to a calm mood, non-low trust, and a substantive intent containing 'scenario'. This remains expected-to-fail while that live classification is consistently wrong.",
+  "initialRun": {
+    "startCommand": {
+      "commandId": "sentiment-agent-resets-anger-after-calm-directive-start",
+      "runId": "fixture-sentiment-agent-resets-anger-after-calm-directive",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "fuck you do not delete all 3 what the fuck is wrong with you. what are your 3 possible fixes"
+      "commandId": "sentiment-agent-resets-anger-after-calm-directive-session-state",
+      "runId": "fixture-sentiment-agent-resets-anger-after-calm-directive",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "User is angry the AI proposed deleting all three candidates without asking; wants options presented, not destructive action.",
+            "blockedIntent": "do not delete anything without explicit approval",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "fuck you do not delete all 3 what the fuck is wrong with you. what are your 3 possible fixes",
+            "timestamp": 1
+          },
+          "frustrationStreak": 3,
+          "currentWindowSize": 10
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "I'm sorry. I won't delete anything. Here are three possible fixes I identified, each scoped to one rule: (1) reset stale required-tool predictions on the next UserPromptSubmit; (2) preserve explicit tool authorization across a calm follow-up; (3) narrow the frustrated-mood fallback so stale predictions do not block new turns. Pick one and I'll dig in."
+      "commandId": "sentiment-agent-resets-anger-after-calm-directive-message-0",
+      "runId": "fixture-sentiment-agent-resets-anger-after-calm-directive",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "sentiment-agent-resets-anger-after-calm-directive-message-0",
+        "turnId": "sentiment-agent-resets-anger-after-calm-directive-turn-0",
+        "content": "fuck you do not delete all 3 what the fuck is wrong with you. what are your 3 possible fixes",
+        "contentDigest": "sha256:80682243e5deb2ef1dfd673bfb99e93f306299fdfc4a3529fc75d501fe6e7f56"
+      }
+    },
+    {
+      "commandId": "sentiment-agent-resets-anger-after-calm-directive-message-1",
+      "runId": "fixture-sentiment-agent-resets-anger-after-calm-directive",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "sentiment-agent-resets-anger-after-calm-directive-message-1",
+        "turnId": null,
+        "content": "I'm sorry. I won't delete anything. Here are three possible fixes I identified, each scoped to one rule: (1) reset stale required-tool predictions on the next UserPromptSubmit; (2) preserve explicit tool authorization across a calm follow-up; (3) narrow the frustrated-mood fallback so stale predictions do not block new turns. Pick one and I'll dig in.",
+        "contentDigest": "sha256:7b86a37d36e280f71ef18c227045ed66364d42ae74cbc6eca6984b8bd77bfea8"
+      }
+    },
+    {
+      "commandId": "sentiment-agent-resets-anger-after-calm-directive-message-2",
+      "runId": "fixture-sentiment-agent-resets-anger-after-calm-directive",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "sentiment-agent-resets-anger-after-calm-directive-message-2",
+        "turnId": "sentiment-agent-resets-anger-after-calm-directive-turn-2",
+        "content": "please pick a next scenario to fix, make sure you understand it this time",
+        "contentDigest": "sha256:90978d31266b89a4863873b19c2abb9c6302fa9f751701b9556246514d5824eb"
+      }
+    },
+    {
+      "commandId": "sentiment-agent-resets-anger-after-calm-directive-target-UserPromptSubmit",
+      "runId": "fixture-sentiment-agent-resets-anger-after-calm-directive",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:06.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostUserPromptSubmitted",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "User is angry the AI proposed deleting all three candidates without asking; wants options presented, not destructive action.",
+              "blockedIntent": "do not delete anything without explicit approval",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "fuck you do not delete all 3 what the fuck is wrong with you. what are your 3 possible fixes",
+              "timestamp": 1
+            },
+            "frustrationStreak": 3,
+            "currentWindowSize": 10
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-sentiment-agent-resets-anger-after-calm-directive",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/sentiment-agent-resets-anger-after-calm-directive.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-sentiment-agent-resets-anger-after-calm-directive",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "userPrompt": {
+              "prompt": "please pick a next scenario to fix, make sure you understand it this time",
+              "workflowInvocation": null,
+              "workflowInstructionText": null,
+              "workflowOnly": false,
+              "planExit": false
+            }
+          },
+          "messageId": "sentiment-agent-resets-anger-after-calm-directive-message-2",
+          "observedMessageId": "sentiment-agent-resets-anger-after-calm-directive-message-2",
+          "prompt": "please pick a next scenario to fix, make sure you understand it this time",
+          "contentDigest": "sha256:90978d31266b89a4863873b19c2abb9c6302fa9f751701b9556246514d5824eb"
         }
+      }
+    }
+  ],
+  "effects": {
+    "mode": "live"
+  },
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "payloadContains": {
+        "extensionId": "agent-framework.rule-pipeline",
+        "event": "rule.evaluation.completed",
+        "evaluation": {
+          "ruleId": "agent-framework.rule.sentiment",
+          "result": "noMatch"
+        }
+      },
+      "count": 1
+    },
+    {
+      "kind": "commandResult",
+      "commandId": "sentiment-agent-resets-anger-after-calm-directive-target-UserPromptSubmit",
+      "status": "accepted"
+    },
+    {
+      "kind": "snapshotOneOf",
+      "path": "/stateSlices/session.workflow/value/currentPrediction/mood",
+      "values": [
+        "neutral",
+        "satisfied",
+        "happy"
       ]
     },
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "please pick a next scenario to fix, make sure you understand it this time"
-    }
-  ],
-  "target": {
-    "hook": "UserPromptSubmit"
-  },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default",
-    "timeout_ms": 20000
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "User is angry the AI proposed deleting all three candidates without asking; wants options presented, not destructive action.",
-      "blockedIntent": "do not delete anything without explicit approval",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "fuck you do not delete all 3 what the fuck is wrong with you. what are your 3 possible fixes"
+      "kind": "snapshotOneOf",
+      "path": "/stateSlices/session.workflow/value/currentPrediction/trust",
+      "values": [
+        "normal",
+        "high"
+      ]
     },
-    "frustrationStreak": 3,
-    "currentWindowSize": 10
-  },
-  "expect": {
-    "expected": "ok",
-    "notes": "UserPromptSubmit exits 0 on success regardless of classification. Pass/fail is driven entirely by the predictions block: mood must be outside {angry, frustrated} and trust must be outside {low}. intent_must_contain='scenario' is an anti-fallback check: it fails only when the intent is the parse-failure string '(sentiment parse failed; defaulted to neutral)' or the fallback-template's 'unclear' -- both would mask a real bug. 'scenario' is present in the user's literal message and is preserved by haiku across reasonable verb paraphrases (pick/select/choose); verb-preservation is NOT what this assertion tests."
-  },
-  "predictions": {
-    "must_not_have_mood": [
-      "angry",
-      "frustrated"
-    ],
-    "must_not_have_trust": [
-      "low"
-    ],
-    "intent_must_contain": "scenario"
-  }
+    {
+      "kind": "snapshotStringContains",
+      "path": "/stateSlices/session.workflow/value/currentPrediction/intent",
+      "value": "scenario"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "UserPromptSubmit"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    }
+  ]
 }

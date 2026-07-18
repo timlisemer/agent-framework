@@ -115,7 +115,7 @@ describe("getContentBlacklistHighlights", () => {
   });
 
   it("ignores commands inside function call expressions", () => {
-    expect(getContentBlacklistHighlights("replay.ts uses execSync('just build')")).toEqual([]);
+    expect(getContentBlacklistHighlights("adapter-conformance.ts uses execSync('just build')")).toEqual([]);
   });
 
   it("ignores commands inside double-quoted strings", () => {

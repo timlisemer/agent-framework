@@ -36,5 +36,4 @@ export { runConfirmAgent, runFullConfirmAgent } from "./confirm.js";
 export { runCommitAgent } from "./commit.js";
 export { runPushAgent } from "./push.js";
 export { runLocateScenarioMcp } from "./locate-scenario.js";
-export { handleScenarioLabeler } from "./scenario-labeler.js";
 export { handleScenarioTester } from "./scenario-tester.js";

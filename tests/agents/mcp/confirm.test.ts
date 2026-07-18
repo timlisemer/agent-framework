@@ -34,11 +34,16 @@ vi.mock("../../../src/utils/git-utils.js", async (importOriginal) => {
   };
 });
 
-vi.mock("../../../src/scenario/lifecycle.js", () => ({
-  resetDriftDetectionWindow: mocks.resetDriftDetectionWindow,
+vi.mock("../../../src/agents/mcp/drift-window.js", () => ({
+  resetCanonicalDriftWindow: mocks.resetDriftDetectionWindow,
 }));
 
-import { formatCheckFailure, runConfirmAgent, runFullConfirmAgent } from "../../../src/agents/mcp/confirm.js";
+import {
+  compactUnifiedDiffForConfirmPrompt,
+  formatCheckFailure,
+  runConfirmAgent,
+  runFullConfirmAgent,
+} from "../../../src/agents/mcp/confirm.js";
 import {
   CONFIRM_AGENT,
   CONFIRM_AGGREGATOR_AGENT,
@@ -48,8 +53,11 @@ import {
 import {
   getAgentFrameworkSessionDir,
   readSessionTranscriptPath,
-  sessionCurrentPlanFile,
 } from "../../../src/utils/paths.js";
+import { canonicalHookRunIdForSession } from "../../../src/entrypoints/host-run-id.js";
+import { canonicalHookState } from "../../helpers/canonical-hook-state.js";
+import { withEnvironmentForTest } from "../../helpers/environment.js";
+import { activeSpec } from "../../../src/adapter/spec.js";
 
 describe("formatCheckFailure", () => {
   it("returns check output verbatim when confirm declines before investigation", () => {
@@ -82,6 +90,26 @@ src/bar.ts:8: 'unusedValue' is declared but its value is never read.
   });
 });
 
+describe("compactUnifiedDiffForConfirmPrompt", () => {
+  it("keeps small diffs intact", () => {
+    const diff = "diff --git a/src/a.ts b/src/a.ts\n@@ -1 +1 @@\n-old\n+new\n";
+    expect(compactUnifiedDiffForConfirmPrompt(diff)).toBe(diff);
+  });
+
+  it("replaces oversized file bodies with inspectable metadata", () => {
+    const hugeBody = Array.from({ length: 40_000 }, (_, index) => `+generated-${index}`).join("\n");
+    const diff = `diff --git a/generated/schema.json b/generated/schema.json\n--- a/generated/schema.json\n+++ b/generated/schema.json\n@@ -0,0 +1,40000 @@\n${hugeBody}\n`;
+
+    const compacted = compactUnifiedDiffForConfirmPrompt(diff);
+
+    expect(Buffer.byteLength(compacted, "utf8")).toBeLessThan(600_000);
+    expect(compacted).toContain("diff --git a/generated/schema.json b/generated/schema.json");
+    expect(compacted).toContain("diff body omitted from the initial prompt");
+    expect(compacted).toContain("40000 changed lines");
+    expect(compacted).not.toContain("generated-39999");
+  });
+});
+
 describe("runConfirmAgent planfile context", () => {
   let tempDir: string;
   let sessionDir: string;
@@ -106,7 +134,8 @@ describe("runConfirmAgent planfile context", () => {
       status: " M src/example.ts",
       diff: "diff --git a/src/example.ts b/src/example.ts",
       diffStat: "src/example.ts | 1 +",
-      untrackedDiff: "",
+      untrackedInventory: "",
+      untrackedLinesChanged: 0,
       normalizedMoves: [],
     });
     mocks.getAllReposGitContextCancellable.mockResolvedValue({
@@ -118,7 +147,8 @@ describe("runConfirmAgent planfile context", () => {
             status: " M src/example.ts",
             diff: "diff --git a/src/example.ts b/src/example.ts",
             diffStat: "src/example.ts | 1 +",
-            untrackedDiff: "",
+            untrackedInventory: "",
+            untrackedLinesChanged: 0,
           },
         },
       ],
@@ -132,7 +162,8 @@ describe("runConfirmAgent planfile context", () => {
           status: " M src/example.ts",
           diff: "diff --git a/src/example.ts b/src/example.ts",
           diffStat: "src/example.ts | 1 +",
-          untrackedDiff: "",
+          untrackedInventory: "",
+          untrackedLinesChanged: 0,
         },
       },
       siblingOverview: "=== SIBLING REPOSITORY OVERVIEW ===\nsibling stat",
@@ -179,7 +210,40 @@ describe("runConfirmAgent planfile context", () => {
     expect(context).toContain(planPath);
     expect(context).toContain("PLANFILE CONTENT:");
     expect(context).toContain("Implement x.");
-    expect(mocks.resetDriftDetectionWindow).toHaveBeenCalledWith(getAgentFrameworkSessionDir({ projectDir: tempDir }));
+    expect(mocks.resetDriftDetectionWindow).toHaveBeenCalledWith(
+      canonicalHookRunIdForSession(getAgentFrameworkSessionDir({ projectDir: tempDir })),
+    );
+  });
+
+  it("injects the canonical current plan when optional_planfile is omitted", async () => {
+    const planPath = path.join(tempDir, "canonical-plan.md");
+    fs.writeFileSync(planPath, "Plan Name: canonical-plan\n\nImplement canonical fallback.\n");
+    const transcriptPath = readSessionTranscriptPath(sessionDir)!;
+    const restoreEnvironment = withEnvironmentForTest({
+      AGENT_FRAMEWORK_SCENARIO_ROOT: path.join(tempDir, "scenario-runtime"),
+    });
+    try {
+      await canonicalHookState({
+        adapter: activeSpec().name,
+        nativeSessionId: "confirm-current-plan-session",
+        transcriptPath,
+        projectDir: tempDir,
+      }).setStateSlice(
+        "plan.current",
+        "agent-framework://state/current-plan",
+        { kind: "file", path: planPath, planName: "canonical-plan" },
+      );
+
+      const result = await runConfirmAgent(tempDir, "haiku");
+
+      expect(result).toContain("CONFIRMED");
+      const context = mocks.runAgent.mock.calls[0][1].context as string;
+      expect(context).toContain("PLANFILE PATH:");
+      expect(context).toContain(planPath);
+      expect(context).toContain("Implement canonical fallback.");
+    } finally {
+      restoreEnvironment();
+    }
   });
 
   it("resets drift detection after check-failure returns", async () => {
@@ -195,7 +259,9 @@ type error
     await runConfirmAgent(tempDir, "haiku");
 
     expect(mocks.runAgent).not.toHaveBeenCalled();
-    expect(mocks.resetDriftDetectionWindow).toHaveBeenCalledWith(getAgentFrameworkSessionDir({ projectDir: tempDir }));
+    expect(mocks.resetDriftDetectionWindow).toHaveBeenCalledWith(
+      canonicalHookRunIdForSession(getAgentFrameworkSessionDir({ projectDir: tempDir })),
+    );
   });
 
   it("resets drift detection after deterministic planfile-error returns", async () => {
@@ -204,14 +270,18 @@ type error
     await runConfirmAgent(tempDir, "haiku", undefined, missingPath);
 
     expect(mocks.runAgent).not.toHaveBeenCalled();
-    expect(mocks.resetDriftDetectionWindow).toHaveBeenCalledWith(getAgentFrameworkSessionDir({ projectDir: tempDir }));
+    expect(mocks.resetDriftDetectionWindow).toHaveBeenCalledWith(
+      canonicalHookRunIdForSession(getAgentFrameworkSessionDir({ projectDir: tempDir })),
+    );
   });
 
   it("resets drift detection after fullconfirm completion", async () => {
     await runFullConfirmAgent(tempDir, "haiku");
 
     expect(mocks.getRepoFullScopeContextsCancellable).toHaveBeenCalled();
-    expect(mocks.resetDriftDetectionWindow).toHaveBeenCalledWith(getAgentFrameworkSessionDir({ projectDir: tempDir }));
+    expect(mocks.resetDriftDetectionWindow).toHaveBeenCalledWith(
+      canonicalHookRunIdForSession(getAgentFrameworkSessionDir({ projectDir: tempDir })),
+    );
   });
 
   it("adds the Deduplication category to the confirm agent prompt and fallback output", async () => {
@@ -412,7 +482,8 @@ src/foo.ts:1: Type error.
       status: " D src/helper.ts\n?? lib/helper.ts",
       diff: "diff --git a/src/helper.ts b/lib/helper.ts\nrename from src/helper.ts\nrename to lib/helper.ts",
       diffStat: "src/helper.ts => lib/helper.ts | 0",
-      untrackedDiff: "",
+      untrackedInventory: "",
+      untrackedLinesChanged: 0,
       normalizedMoves: [
         {
           oldPath: "src/helper.ts",
@@ -444,7 +515,8 @@ src/foo.ts:1: Type error.
       status: " D src/removed.ts",
       diff: "diff --git a/src/removed.ts b/src/removed.ts\ndeleted file mode 100644",
       diffStat: "src/removed.ts | 1 -",
-      untrackedDiff: "",
+      untrackedInventory: "",
+      untrackedLinesChanged: 0,
       normalizedMoves: [],
     });
 
@@ -461,7 +533,7 @@ src/foo.ts:1: Type error.
       status: " M src/existing.ts\n?? src/new.ts",
       diff: `diff --git a/src/existing.ts b/src/existing.ts\n-old\n+new\n${inventory}`,
       diffStat: "src/existing.ts | 2 +-",
-      untrackedDiff: inventory,
+      untrackedInventory: inventory,
       untrackedLinesChanged: 500,
       normalizedMoves: [],
     });
@@ -478,7 +550,7 @@ src/foo.ts:1: Type error.
       status: "?? src/new.ts",
       diff: "UNTRACKED FILE INVENTORY",
       diffStat: "",
-      untrackedDiff: "UNTRACKED FILE INVENTORY",
+      untrackedInventory: "UNTRACKED FILE INVENTORY",
       untrackedLinesChanged: 1,
       untrackedMatchedLineDiff: `+++ b/src/new.ts\n+console.log("debug");\n+// ${tsIgnoreMarker}`,
       normalizedMoves: [],
@@ -497,7 +569,7 @@ src/foo.ts:1: Type error.
       status: "?? src/new.ts",
       diff: "UNTRACKED FILE INVENTORY",
       diffStat: "",
-      untrackedDiff: "UNTRACKED FILE INVENTORY",
+      untrackedInventory: "UNTRACKED FILE INVENTORY",
       untrackedLinesChanged: 25,
       untrackedMatchedLineDiff: "+++ b/src/new.ts\n+console.log();",
       untrackedOmittedMatchedLines: [{ path: "src/new.ts", count: 5 }],
@@ -518,7 +590,8 @@ src/foo.ts:1: Type error.
       status: `R  ${JSON.stringify(oldPath)} -> ${JSON.stringify(newPath)}`,
       diff: "rename",
       diffStat: "",
-      untrackedDiff: "",
+      untrackedInventory: "",
+      untrackedLinesChanged: 0,
       normalizedMoves: [{ oldPath, newPath, similarity: 100, mode: "moved" }],
     });
 
@@ -534,7 +607,8 @@ src/foo.ts:1: Type error.
       status: " D docs/before -> after.txt",
       diff: "deleted file mode 100644",
       diffStat: "docs/before -> after.txt | 1 -",
-      untrackedDiff: "",
+      untrackedInventory: "",
+      untrackedLinesChanged: 0,
       normalizedMoves: [],
     });
 
@@ -550,7 +624,8 @@ src/foo.ts:1: Type error.
       status: ` D ${JSON.stringify(deletedPath)}`,
       diff: "deleted file mode 100644",
       diffStat: "",
-      untrackedDiff: "",
+      untrackedInventory: "",
+      untrackedLinesChanged: 0,
       normalizedMoves: [],
     });
 
@@ -582,7 +657,8 @@ src/foo.ts:1: Type error.
             status: "R  src/item.ts -> lib/item.ts",
             diff: "rename from src/item.ts\nrename to lib/item.ts",
             diffStat: "",
-            untrackedDiff: "",
+            untrackedInventory: "",
+            untrackedLinesChanged: 0,
             normalizedMoves: [{ oldPath: "src/item.ts", newPath: "lib/item.ts", similarity: 100, mode: "moved" }],
           },
         },
@@ -593,7 +669,8 @@ src/foo.ts:1: Type error.
             status: " D src/item.ts",
             diff: "deleted file mode 100644",
             diffStat: "",
-            untrackedDiff: "",
+            untrackedInventory: "",
+            untrackedLinesChanged: 0,
             normalizedMoves: [],
           },
         },
@@ -672,7 +749,8 @@ src/foo.ts:1: Type error.
       status: " M src/example.ts",
       diff: "+line 1",
       diffStat: "src/example.ts | 1 +",
-      untrackedDiff: "",
+      untrackedInventory: "",
+      untrackedLinesChanged: 0,
       normalizedMoves: [],
     });
     mocks.runAgent
@@ -733,27 +811,36 @@ src/foo.ts:1: Type error.
     expect(CONFIRM_PATTERN_AGENT.systemPrompt).toContain("search for similar existing implementations");
   });
 
-  it("continues without plan input when stored session planfile is empty", async () => {
-    const transcriptPath = path.join(tempDir, "transcript.jsonl");
-    fs.writeFileSync(transcriptPath, "");
-    const sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: tempDir });
+  it("continues without plan input when the canonical current planfile is empty", async () => {
+    const transcriptPath = readSessionTranscriptPath(sessionDir)!;
     const planPath = path.join(tempDir, "empty-plan.md");
     fs.writeFileSync(planPath, "  \n");
-    fs.writeFileSync(
-      sessionCurrentPlanFile(sessionDir),
-      JSON.stringify({ kind: "file", path: planPath, planName: "empty-plan" }) + "\n",
-    );
+    const restoreEnvironment = withEnvironmentForTest({
+      AGENT_FRAMEWORK_SCENARIO_ROOT: path.join(tempDir, "scenario-runtime"),
+    });
+    try {
+      await canonicalHookState({
+        adapter: activeSpec().name,
+        nativeSessionId: "confirm-empty-plan-session",
+        transcriptPath,
+        projectDir: tempDir,
+      }).setStateSlice(
+        "plan.current",
+        "agent-framework://state/current-plan",
+        { kind: "file", path: planPath, planName: "empty-plan" },
+      );
 
-    const result = await runConfirmAgent(tempDir, "haiku");
+      const result = await runConfirmAgent(tempDir, "haiku");
 
-    expect(result).toContain("CONFIRMED");
-    const context = mocks.runAgent.mock.calls[0][1].context as string;
-    expect(context).toContain("PLANFILE CONTEXT: No planfile was provided through optional_planfile");
-
-    fs.rmSync(sessionDir, { recursive: true, force: true });
+      expect(result).toContain("CONFIRMED");
+      const context = mocks.runAgent.mock.calls[0][1].context as string;
+      expect(context).toContain("PLANFILE CONTEXT: No planfile was provided through optional_planfile");
+    } finally {
+      restoreEnvironment();
+    }
   });
 
-  it("uses the current session when available", async () => {
+  it("uses an explicitly supplied planfile", async () => {
     const transcriptPath = path.join(tempDir, "sidecar-transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
     const sessionDir = getAgentFrameworkSessionDir({ transcriptPath, projectDir: tempDir });
@@ -761,12 +848,7 @@ src/foo.ts:1: Type error.
     fs.utimesSync(path.join(sessionDir, "transcript-path.txt"), currentSessionTime, currentSessionTime);
     const planPath = path.join(tempDir, "session-plan.md");
     fs.writeFileSync(planPath, "Plan Name: session-plan\n\nUse session plan.\n");
-    fs.writeFileSync(
-      sessionCurrentPlanFile(sessionDir),
-      JSON.stringify({ kind: "file", path: planPath, planName: "session-plan" }) + "\n",
-    );
-
-    const result = await runConfirmAgent(tempDir, "haiku");
+    const result = await runConfirmAgent(tempDir, "haiku", undefined, planPath);
 
     expect(result).toContain("CONFIRMED");
     expect(mocks.runCheckAgent).toHaveBeenCalledWith(tempDir, undefined, expect.any(Object));

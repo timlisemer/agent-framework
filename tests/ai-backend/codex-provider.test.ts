@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -14,10 +13,165 @@ import {
   shouldPersistCodexHistory,
   startOrResumeCodexThread,
 } from "../../src/providers/codex-agent-runtime.js";
+import { runCodexTranscriptTurn } from "../../src/ai-backend/provider.js";
+import { mapCodexProviderEvent, mapCodexStructuredEvent } from "../../adapters/codex/provider-events.js";
+import { digestScenarioValue } from "../../src/scenario/protocol/digest.js";
 import { PROVIDER_TYPES } from "../../src/utils/provider-config.js";
 import { withEnvForTest } from "../helpers/provider-env.js";
+import { createTestScenarioRuntime } from "../helpers/scenario-runtime.js";
+import { testStartRunCommand } from "../helpers/scenario-fixtures.js";
+import {
+  withTemporaryTestRoot,
+  withTemporaryTestRootSync,
+} from "../helpers/temporary-root.js";
 
 describe("AI backend Codex provider helpers", () => {
+  it("maps completed-turn usage through the adapter-owned normalizer", () => {
+    expect(mapCodexProviderEvent({
+      type: "turn.completed",
+      usage: { input_tokens: 9, cached_input_tokens: 4, output_tokens: 2 },
+    }, "turn-1")).toEqual([{
+      type: "providerStateObserved",
+      data: {
+        usage: {
+          promptTokens: 9,
+          cachedTokens: 4,
+          completionTokens: 2,
+          reasoningTokens: null,
+          totalTokens: 11,
+        },
+      },
+    }]);
+  });
+
+  it("preserves the assistant response from a run-only Codex thread", async () => {
+    const events = [];
+    for await (const event of runCodexTranscriptTurn({
+      liveSession: {
+        thread: { async run() { return { finalResponse: "fallback response", usage: {} }; } },
+      },
+      prompt: "hello",
+      turnId: "turn-fallback",
+      signal: new AbortController().signal,
+    })) events.push(event);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "assistantMessageCompleted", turnId: "turn-fallback", content: "fallback response",
+    }));
+  });
+  it("represents Codex tool starts as post-start observations", () => {
+    expect(mapCodexStructuredEvent({
+      type: "item.started",
+      item: { id: "command-1", type: "command_execution", command: "pwd" },
+    }, "turn-1")).toEqual([{
+      type: "toolExecutionObserved",
+      toolCallId: "command-1",
+      turnId: "turn-1",
+      name: "Bash",
+      input: { command: "pwd" },
+      inputDigest: digestScenarioValue({ command: "pwd" }),
+    }]);
+  });
+
+  it("canonicalizes Codex SDK file changes through the adapter tool mapping", () => {
+    expect(mapCodexStructuredEvent({
+      type: "item.started",
+      item: {
+        id: "change-1",
+        type: "file_change",
+        changes: [{ path: "src/one.ts" }, { path: "src/two.ts" }],
+      },
+    }, "turn-1")).toEqual([{
+      type: "toolExecutionObserved",
+      toolCallId: "change-1",
+      turnId: "turn-1",
+      name: "Edit",
+      input: {
+        file_path: "src/one.ts",
+        file_paths: ["src/one.ts", "src/two.ts"],
+      },
+      inputDigest: digestScenarioValue({
+        file_path: "src/one.ts",
+        file_paths: ["src/one.ts", "src/two.ts"],
+      }),
+    }]);
+  });
+
+  it("canonicalizes structured Agent Framework MCP starts without losing their arguments", () => {
+    const input = { working_dir: "/workspace", nested: { retained: true } };
+    expect(mapCodexStructuredEvent({
+      type: "item.started",
+      item: {
+        id: "mcp-check-1",
+        type: "mcp_tool_call",
+        server: "agent-framework",
+        tool: "check",
+        arguments: input,
+      },
+    }, "turn-1")).toEqual([{
+      type: "toolExecutionObserved",
+      toolCallId: "mcp-check-1",
+      turnId: "turn-1",
+      name: "mcp-check",
+      input,
+      inputDigest: digestScenarioValue(input),
+    }]);
+  });
+
+  it("maps a complete Codex tool lifecycle without duplicating cumulative output", async () => {
+    await runCodexToolLifecycle({
+      temporaryPrefix: "agent-framework-codex-lifecycle-",
+      runId: "codex-lifecycle-run",
+      turnId: "turn-1",
+      frames: [
+        { type: "item.started", item: { id: "command-1", type: "command_execution", command: "pwd" } },
+        { type: "item.updated", item: { id: "command-1", type: "command_execution", command: "pwd", aggregated_output: "a" } },
+        { type: "item.updated", item: { id: "command-1", type: "command_execution", command: "pwd", aggregated_output: "ab" } },
+        { type: "item.completed", item: { id: "command-1", type: "command_execution", command: "pwd", aggregated_output: "ab", exit_code: 0 } },
+      ],
+      expectedTool: {
+        id: "command-1",
+        status: "completed",
+        output: ["ab"],
+      },
+    });
+  });
+
+  it("retains cumulative output from a failed Codex command in the canonical snapshot", async () => {
+    await runCodexToolLifecycle({
+      temporaryPrefix: "agent-framework-codex-failed-lifecycle-",
+      runId: "codex-failed-lifecycle-run",
+      turnId: "failed-turn",
+      frames: [
+        { type: "item.started", item: { id: "failed-command", type: "command_execution", command: "false" } },
+        {
+          type: "item.completed",
+          item: {
+            id: "failed-command",
+            type: "command_execution",
+            command: "false",
+            aggregated_output: "permission denied",
+            exit_code: 7,
+          },
+        },
+      ],
+      expectedTool: {
+        id: "failed-command",
+        status: "failed",
+        error: "Tool execution failed",
+        output: ["permission denied"],
+      },
+    });
+  });
+
+  it("ignores malformed Codex entity lifecycle frames without stable item IDs", () => {
+    for (const type of ["item.started", "item.updated", "item.completed"]) {
+      expect(mapCodexStructuredEvent({
+        type,
+        item: { type: "command_execution", command: "pwd", aggregated_output: "output" },
+      }, "turn-1")).toEqual([]);
+    }
+  });
+
   it("builds OpenRouter Codex config without forcing ChatGPT login", () => {
     const config = buildCodexConfig("isolated", "/tmp/codex-home", true);
 
@@ -87,27 +241,27 @@ describe("AI backend Codex provider helpers", () => {
   });
 
   it("scrubs API keys without overriding materialized runtime homes", () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-codex-test-"));
-    const restoreEnv = withEnvForTest({
-      HOME: home,
-      CODEX_HOME: "/native/codex",
-      OPENAI_API_KEY: "openai-key",
-      CODEX_API_KEY: "codex-key",
-      OPENROUTER_API_KEY: "openrouter-key",
-      ANTHROPIC_API_KEY: "anthropic-key",
-    });
-    try {
-      const env = buildCodexSessionEnv("user", null, true, "managedAstral");
+    withTemporaryTestRootSync("agent-framework-codex-test-", (home) => {
+      const restoreEnv = withEnvForTest({
+        HOME: home,
+        CODEX_HOME: "/native/codex",
+        OPENAI_API_KEY: "openai-key",
+        CODEX_API_KEY: "codex-key",
+        OPENROUTER_API_KEY: "openrouter-key",
+        ANTHROPIC_API_KEY: "anthropic-key",
+      });
+      try {
+        const env = buildCodexSessionEnv("user", null, true, "managed");
 
-      expect(env.CODEX_HOME).toBe("/native/codex");
-      expect(env.OPENAI_API_KEY).toBeUndefined();
-      expect(env.CODEX_API_KEY).toBeUndefined();
-      expect(env.OPENROUTER_API_KEY).toBeUndefined();
-      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-      restoreEnv();
-    }
+        expect(env.CODEX_HOME).toBe("/native/codex");
+        expect(env.OPENAI_API_KEY).toBeUndefined();
+        expect(env.CODEX_API_KEY).toBeUndefined();
+        expect(env.OPENROUTER_API_KEY).toBeUndefined();
+        expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+      } finally {
+        restoreEnv();
+      }
+    });
   });
 
   it("requires SDK support when resuming a native Codex thread", () => {
@@ -239,8 +393,7 @@ describe("AI backend Codex provider helpers", () => {
   });
 
   it("resolves transcript bindings by native thread id and project cwd", () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-codex-binding-test-"));
-    try {
+    withTemporaryTestRootSync("agent-framework-codex-binding-test-", (home) => {
       const projectDir = path.join(home, "project");
       const transcriptDir = path.join(home, "codex-home", "sessions", "2026", "06", "26");
       const transcriptPath = path.join(transcriptDir, "thread-1.jsonl");
@@ -260,14 +413,11 @@ describe("AI backend Codex provider helpers", () => {
         threadId: "thread-1",
         workingDir: path.join(home, "other-project"),
       })).toBeNull();
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-    }
+    });
   });
 
   it("prefers an explicit resume transcript path when present", () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-codex-explicit-binding-test-"));
-    try {
+    withTemporaryTestRootSync("agent-framework-codex-explicit-binding-test-", (home) => {
       const transcriptPath = path.join(home, "resume.jsonl");
       fs.writeFileSync(transcriptPath, "\n");
       expect(resolveCodexTranscriptBinding({
@@ -282,32 +432,60 @@ describe("AI backend Codex provider helpers", () => {
         workingDir: "/repo",
         resumeTranscriptPath: path.join(home, "missing.jsonl"),
       })).toBeNull();
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-    }
+    });
   });
 
   it("resolves native transcript bindings from CODEX_HOME when runtime home is native", () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-codex-native-binding-test-"));
-    const restoreEnv = withEnvForTest({ CODEX_HOME: path.join(home, "custom-codex-home") });
-    try {
-      const projectDir = path.join(home, "project");
-      const transcriptDir = path.join(home, "custom-codex-home", "sessions", "2026", "06", "26");
-      const transcriptPath = path.join(transcriptDir, "thread-native.jsonl");
-      fs.mkdirSync(transcriptDir, { recursive: true });
-      fs.writeFileSync(transcriptPath, `${JSON.stringify({
-        type: "session_meta",
-        payload: { id: "thread-native", cwd: projectDir },
-      })}\n`);
+    withTemporaryTestRootSync("agent-framework-codex-native-binding-test-", (home) => {
+      const restoreEnv = withEnvForTest({ CODEX_HOME: path.join(home, "custom-codex-home") });
+      try {
+        const projectDir = path.join(home, "project");
+        const transcriptDir = path.join(home, "custom-codex-home", "sessions", "2026", "06", "26");
+        const transcriptPath = path.join(transcriptDir, "thread-native.jsonl");
+        fs.mkdirSync(transcriptDir, { recursive: true });
+        fs.writeFileSync(transcriptPath, `${JSON.stringify({
+          type: "session_meta",
+          payload: { id: "thread-native", cwd: projectDir },
+        })}\n`);
 
-      expect(resolveCodexTranscriptBinding({
-        runtimeHomeRoot: null,
-        threadId: "thread-native",
-        workingDir: projectDir,
-      })).toBe(transcriptPath);
-    } finally {
-      restoreEnv();
-      fs.rmSync(home, { recursive: true, force: true });
-    }
+        expect(resolveCodexTranscriptBinding({
+          runtimeHomeRoot: null,
+          threadId: "thread-native",
+          workingDir: projectDir,
+        })).toBe(transcriptPath);
+      } finally {
+        restoreEnv();
+      }
+    });
   });
 });
+
+async function runCodexToolLifecycle(input: {
+  temporaryPrefix: string;
+  runId: string;
+  turnId: string;
+  frames: Record<string, unknown>[];
+  expectedTool: Record<string, unknown>;
+}): Promise<void> {
+  await withTemporaryTestRoot(input.temporaryPrefix, async (root) => {
+    const runtime = createTestScenarioRuntime({ root });
+    const source = { kind: "providerSdk" as const, provider: "codex" };
+    await runtime.dispatch(testStartRunCommand({ runId: input.runId, source }));
+    let commandIndex = 0;
+    for (const frame of input.frames) {
+      for (const payload of mapCodexStructuredEvent(frame, input.turnId)) {
+        commandIndex += 1;
+        await runtime.dispatch({
+          runId: input.runId,
+          commandId: `${input.runId}-lifecycle-${commandIndex}`,
+          source,
+          recordedAt: `2026-07-15T12:00:0${commandIndex}.000Z`,
+          payload,
+        });
+      }
+    }
+
+    expect(commandIndex).toBe(2);
+    expect((await runtime.snapshot(input.runId)).toolCalls).toMatchObject([input.expectedTool]);
+  });
+}

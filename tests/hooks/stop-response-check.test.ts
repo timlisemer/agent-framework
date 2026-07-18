@@ -2,17 +2,12 @@ import * as fs from "fs";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
+import { withEnvironmentForTest } from "../helpers/environment.js";
 import {
   getAgentFrameworkSessionDir,
-  sessionCurrentPlanFile,
   sessionPlanFile,
-  sessionPlanValidationStatusFile,
   testRunsRoot,
 } from "../../src/utils/paths.js";
-import {
-  hashPlanContent,
-  recordPlanValidationStatus,
-} from "../../src/utils/plan-validation-status.js";
 
 vi.mock("../../src/utils/hook-bootstrap.js", async () => {
   const actual = await vi.importActual<typeof import("../../src/utils/hook-bootstrap.js")>(
@@ -34,6 +29,7 @@ import { validatePlanFileWithContract } from "../../src/agents/mcp/validate-plan
 import { readTranscriptExact } from "../../src/utils/transcript.js";
 import { FIRST_RESPONSE_STOP_COUNTS } from "../../src/utils/transcript-presets.js";
 import { validPlanFixture } from "../helpers/plan-fixtures.js";
+import { canonicalHookState } from "../helpers/canonical-hook-state.js";
 
 const mockExitAfterFlush = vi.mocked(exitAfterFlush);
 const mockValidatePlanFileWithContract = vi.mocked(validatePlanFileWithContract);
@@ -159,7 +155,7 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
   let tempDir: string;
   let transcriptPath: string;
   let sessionDir: string;
-  let prevAdapter: string | undefined;
+  let restoreEnvironment: () => void;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -168,26 +164,17 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     transcriptPath = path.join(tempDir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
     sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
-    prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
-    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
+    restoreEnvironment = withEnvironmentForTest({
+      AGENT_FRAMEWORK_ADAPTER: "codex",
+      AGENT_FRAMEWORK_SCENARIO_ROOT: path.join(tempDir, "scenario-runtime"),
+    });
     mockValidatePlanFileWithContract.mockImplementation(async (input) => {
       const content = fs.readFileSync(input.planFile, "utf-8");
-      const contentHash = hashPlanContent(content);
-      if (input.sessionDir) {
-        recordPlanValidationStatus({
-          sessionDir: input.sessionDir,
-          planPath: input.planFile,
-          contentHash,
-          status: "pass",
-          reasons: [],
-        });
-      }
       return {
         status: "PASS",
         reasons: [],
         resolvedPath: input.planFile,
         content,
-        contentHash,
       };
     });
   });
@@ -196,8 +183,7 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     for (const dirPath of new Set([sessionDir, tempDir])) {
       fs.rmSync(dirPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 });
     }
-    if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
-    else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
+    restoreEnvironment();
   });
 
   it("detects whole-message proposed_plan Stop text while in plan mode", async () => {
@@ -362,10 +348,10 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     expect(output).toContain("Plan validation failed:");
     expect(output).toContain("Cannot exit plan mode without a planfile path");
     expect(output).not.toContain("response-align-stop");
-    expect(fs.readFileSync(transcriptPath, "utf-8")).toContain("plan-validate");
+    expect(fs.readFileSync(transcriptPath, "utf-8")).not.toContain("plan-validate");
   });
 
-  it("creates a missing planfile, runs shared validation, records status, writes current-plan, and allows silently on pass", async () => {
+  it("creates a missing planfile, records validation and canonical current-plan state, and allows silently on pass", async () => {
     seedPlanMode(transcriptPath);
     const planPath = sessionPlanFile(sessionDir, "test-plan");
     const plan = validPlan(planPath);
@@ -374,8 +360,13 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
 
     expect(fs.readFileSync(planPath, "utf-8").trim()).toBe(plan);
     expect(mockValidatePlanFileWithContract).toHaveBeenCalledOnce();
-    expect(fs.existsSync(sessionPlanValidationStatusFile(sessionDir))).toBe(true);
-    expect(JSON.parse(fs.readFileSync(sessionCurrentPlanFile(sessionDir), "utf-8"))).toEqual({
+    const snapshot = await canonicalHookState({
+      adapter: "codex",
+      nativeSessionId: "session-stop",
+      transcriptPath,
+      projectDir: tempDir,
+    }).snapshot();
+    expect(snapshot.stateSlices["plan.current"]?.value).toEqual({
       kind: "file",
       path: planPath,
       planName: "test-plan",
@@ -572,23 +563,15 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     expect(output).toContain(planPath);
   });
 
-  it("trusts exact recorded pass without revalidating", async () => {
+  it("revalidates an existing populated planfile", async () => {
     seedPlanMode(transcriptPath);
     const planPath = sessionPlanFile(sessionDir, "test-plan");
     const plan = validPlan(planPath);
     fs.mkdirSync(path.dirname(planPath), { recursive: true });
     fs.writeFileSync(planPath, plan);
-    recordPlanValidationStatus({
-      sessionDir,
-      planPath,
-      contentHash: hashPlanContent(plan),
-      status: "pass",
-      reasons: [],
-    });
-
     await runStop(transcriptPath, tempDir, plan);
 
-    expect(mockValidatePlanFileWithContract).not.toHaveBeenCalled();
+    expect(mockValidatePlanFileWithContract).toHaveBeenCalledOnce();
     expect(mockExitAfterFlush).toHaveBeenCalledWith(0, JSON.stringify({ continue: true }));
   });
 
@@ -598,14 +581,6 @@ describe("mainStop Codex proposed-plan presentation validation", () => {
     const plan = validPlan(planPath);
     fs.mkdirSync(path.dirname(planPath), { recursive: true });
     fs.writeFileSync(planPath, plan);
-    recordPlanValidationStatus({
-      sessionDir,
-      planPath,
-      contentHash: hashPlanContent(plan),
-      status: "fail",
-      reasons: ["bad"],
-    });
-
     await runStop(transcriptPath, tempDir, plan);
 
     expect(mockValidatePlanFileWithContract).toHaveBeenCalledOnce();

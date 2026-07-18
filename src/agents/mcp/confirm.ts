@@ -33,7 +33,6 @@ import {
   getAllReposGitContextCancellable,
   getSingleRepoGitContextWithSiblingOverviewCancellable,
   getUncommittedChangesCancellable,
-  countUnifiedDiffAddedLines,
   countUnifiedDiffChangedLines,
   REVIEW_CONTEXT_REDUCTION_LIMITS,
   type NormalizedMoveSummary,
@@ -43,7 +42,7 @@ import {
   type RepoGitContext,
 } from "../../utils/git-utils.js";
 import { formatGitPathForContext, parsePorcelainStatusLine } from "../../utils/git-status.js";
-import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
+import { logAgentResult } from "../../utils/logger.js";
 import {
   findDeduplicationUserRequirement,
   runConfirmPrefilter,
@@ -51,12 +50,14 @@ import {
   selectConfirmPrefilterCandidateLines,
 } from "../../utils/confirm-prefilter.js";
 import { getAgentFrameworkSessionDir, readSessionTranscriptPath } from "../../utils/paths.js";
-import { readStoredCurrentPlan } from "../../utils/plan-source.js";
 import { readRecentUserMessagesArray } from "../../utils/transcript.js";
 import { runCheckAgent } from "./check.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 import { parseCheckAgentResult } from "../../utils/check-result.js";
-import { resetDriftDetectionWindow } from "../../scenario/lifecycle.js";
+import { resetCanonicalDriftWindow } from "./drift-window.js";
+import { canonicalHookRunIdForSession } from "../../entrypoints/host-run-id.js";
+import { clipUtf8Bytes } from "../../utils/text-bounds.js";
+import { readPlanFileContent, resolveCanonicalCurrentPlanSource } from "../../utils/plan-source.js";
 
 import { activeSpec } from "../../adapter/spec.js";
 function getHookName(scopeKind: ConfirmReviewScopeKind = "uncommitted"): string {
@@ -108,6 +109,62 @@ DECLINED: Agent returned malformed output
 
 ## Raw Output
 $RAW`;
+
+const CONFIRM_TRACKED_DIFF_PROMPT_MAX_BYTES = 512 * 1024;
+const CONFIRM_FILE_DIFF_PROMPT_MAX_BYTES = 48 * 1024;
+const CONFIRM_UNTRACKED_INVENTORY_PROMPT_MAX_BYTES = 96 * 1024;
+
+function summarizeDiffSection(section: string): string {
+  const lines = section.split("\n");
+  const firstHunk = lines.findIndex((line) => line.startsWith("@@"));
+  const header = lines.slice(0, firstHunk < 0 ? Math.min(lines.length, 6) : firstHunk).join("\n");
+  const changedLines = countUnifiedDiffChangedLines(section);
+  const bytes = Buffer.byteLength(section, "utf8");
+  return `${header}\n[agent-framework: diff body omitted from the initial prompt (${changedLines} changed lines, ${bytes} bytes); inspect this file and Git history with read/search tools]`;
+}
+
+export function compactUnifiedDiffForConfirmPrompt(diff: string): string {
+  if (Buffer.byteLength(diff, "utf8") <= CONFIRM_TRACKED_DIFF_PROMPT_MAX_BYTES) return diff;
+
+  const sections = diff.split(/(?=^diff --git )/m).filter(Boolean);
+  const perFileCompacted = sections.map((section) =>
+    Buffer.byteLength(section, "utf8") > CONFIRM_FILE_DIFF_PROMPT_MAX_BYTES
+      ? summarizeDiffSection(section)
+      : section
+  );
+  const compacted = perFileCompacted.join("");
+  if (Buffer.byteLength(compacted, "utf8") <= CONFIRM_TRACKED_DIFF_PROMPT_MAX_BYTES) {
+    return compacted;
+  }
+
+  const summaries = sections.map(summarizeDiffSection).join("\n");
+  return clipUtf8Bytes(
+    summaries,
+    CONFIRM_TRACKED_DIFF_PROMPT_MAX_BYTES,
+    "\n[agent-framework: additional diff summaries omitted from the initial prompt; the complete file scope remains in GIT STATUS and is available through read/search tools]\n",
+  );
+}
+
+function compactGitChangesForConfirmPrompt(changes: GitChanges): GitChanges {
+  const inventory = changes.untrackedInventory ?? "";
+  const inventorySuffix = inventory && changes.diff.endsWith(`\n${inventory}`)
+    ? `\n${inventory}`
+    : "";
+  const trackedDiff = inventorySuffix
+    ? changes.diff.slice(0, -inventorySuffix.length)
+    : changes.diff;
+  const compactInventory = inventorySuffix
+    ? `\n${clipUtf8Bytes(
+        inventory,
+        CONFIRM_UNTRACKED_INVENTORY_PROMPT_MAX_BYTES,
+        "\n[agent-framework: untracked inventory clipped; the complete path scope remains in GIT STATUS]\n",
+      )}`
+    : "";
+  return {
+    ...changes,
+    diff: `${compactUnifiedDiffForConfirmPrompt(trackedDiff)}${compactInventory}`,
+  };
+}
 
 export function formatCheckFailure(checkResult: string, errorCount: number): string {
   void errorCount;
@@ -203,17 +260,14 @@ async function resolveConfirmPlanfile(
     return readPlanfileForConfirm(resolved);
   }
 
-  if (!sessionDir) return { kind: "missing" };
-  const stored = readStoredCurrentPlan(sessionDir);
-  if (!stored?.path) return { kind: "missing" };
-
-  try {
-    const content = await fs.promises.readFile(stored.path, "utf-8");
-    if (!content.trim()) return { kind: "missing" };
-    return { kind: "found", path: stored.path, content };
-  } catch {
-    return { kind: "missing" };
+  if (sessionDir) {
+    const current = await resolveCanonicalCurrentPlanSource(sessionDir);
+    if (current) {
+      const content = await readPlanFileContent(current.path).catch(() => null);
+      if (content?.trim()) return { kind: "found", path: current.path, content };
+    }
   }
+  return { kind: "missing" };
 }
 
 function formatPlanfileContext(planfile: ConfirmPlanfileResolution): string {
@@ -311,6 +365,7 @@ function formatReviewContextReductions(
     : "No delete/recreate move pair was normalized in this review context.";
   return `=== REVIEW CONTEXT REDUCTIONS ===
 - Tracked unified-diff hunks include ${REVIEW_CONTEXT_REDUCTION_LIMITS.trackedDiffContextLines} unchanged context line on each side instead of Git's default three. Every added/deleted line is retained unless an explicit truncation marker says otherwise; use read/search tools for wider surrounding context.
+- Oversized per-file diff bodies and aggregate diff context are replaced with explicit size/change-count markers before the initial reviewer prompt reaches model input limits. The complete changed-file list remains in GIT STATUS; reviewers must inspect marked files with read/search tools before deciding.
 - Every nonignored untracked path is represented either in the untracked-file inventory or, for a normalized move destination, in the NORMALIZED MOVES mapping. Raw untracked contents are not duplicated because each complete current file is directly available through read/search tools. Inventory-only does not mean reviewed: inspect every untracked file relevant to your verdict.
 - Untracked text is still scanned for deterministic debug and unused-workaround patterns. Up to ${REVIEW_CONTEXT_REDUCTION_LIMITS.untrackedPrefilterCandidateLinesPerFile} compact evidence lines per file feed the prefilter; additional matches are counted rather than duplicated.
 - Oversized individual logical lines are listed but skipped by deterministic matching rather than split into misleading fragments.
@@ -339,11 +394,9 @@ function countDiffReviewLines(diff: string): number {
 }
 
 function countGitChangesReviewLines(changes: GitChanges): number {
-  const untrackedArtifact = changes.untrackedInventory ?? changes.untrackedDiff;
-  const embeddedUntrackedArtifactLines = countDiffReviewLines(untrackedArtifact);
+  const embeddedUntrackedArtifactLines = countDiffReviewLines(changes.untrackedInventory);
   const trackedLines = Math.max(0, countDiffReviewLines(changes.diff) - embeddedUntrackedArtifactLines);
-  const untrackedLines = changes.untrackedLinesChanged ?? countUnifiedDiffAddedLines(changes.untrackedDiff);
-  return trackedLines + untrackedLines;
+  return trackedLines + changes.untrackedLinesChanged;
 }
 
 function summarizeRepoChanges(repos: RepoGitContext[]): Pick<
@@ -392,7 +445,16 @@ async function buildUncommittedReviewContext(
   if (allRepoInfo) {
     const allContext = await getAllReposGitContextCancellable(allRepoInfo, gitOptions);
     repos = allContext.repos;
-    gitContext = allContext.context;
+    const promptRepos = repos.map((repo) => ({
+      ...repo,
+      changes: compactGitChangesForConfirmPrompt(repo.changes),
+    }));
+    const contextWasCompacted = promptRepos.some(
+      (repo, index) => repo.changes.diff !== repos[index].changes.diff,
+    );
+    gitContext = contextWasCompacted
+      ? formatGitContextForRepos(promptRepos)
+      : allContext.context;
   } else if (
     options.repoScope?.mode === "single"
     && options.repoScope.repoInfo
@@ -405,7 +467,10 @@ async function buildUncommittedReviewContext(
       gitOptions,
     );
     repos = [singleContext.current];
-    gitContext = `${formatGitContextForRepos([singleContext.current])}${singleContext.siblingOverview ? `\n\n${singleContext.siblingOverview}` : ""}`;
+    gitContext = `${formatGitContextForRepos([{
+      ...singleContext.current,
+      changes: compactGitChangesForConfirmPrompt(singleContext.current.changes),
+    }])}${singleContext.siblingOverview ? `\n\n${singleContext.siblingOverview}` : ""}`;
   } else {
     const changes = await getUncommittedChangesCancellable(workingDir, gitOptions);
     repos = [{ path: workingDir, name: path.basename(workingDir), changes }];
@@ -413,7 +478,7 @@ async function buildUncommittedReviewContext(
 ${changes.status || "(no changes)"}
 
 GIT DIFF (all uncommitted changes):
-${changes.diff || "(no diff)"}`;
+${compactGitChangesForConfirmPrompt(changes).diff || "(no diff)"}`;
   }
 
   const summary = summarizeRepoChanges(repos);
@@ -577,7 +642,6 @@ async function runSharedConfirmAgent(
 ): Promise<string> {
   const sessionContext = resolveConfirmSessionContext(workingDir);
   const agentName = scopeKind === "full" ? "fullconfirm" : "confirm";
-  logAgentStarted(agentName, getHookName(scopeKind));
 
   try {
     const tier = parseTierName(tierName);
@@ -648,7 +712,8 @@ ${reviewContext.context}${extraContext ? `\n\nUSER INSTRUCTIONS:\n${extraContext
     return result.output;
   } finally {
     if (sessionContext.sessionDir) {
-      await resetDriftDetectionWindow(sessionContext.sessionDir).catch(() => undefined);
+      const runId = canonicalHookRunIdForSession(sessionContext.sessionDir);
+      if (runId) await resetCanonicalDriftWindow(runId).catch(() => undefined);
     }
   }
 }

@@ -2,9 +2,9 @@
 
 Use the `locate_scenario` MCP instead of following a manual shell recipe.
 
-The MCP accepts one or more quote substrings, runs the predefined transcript
-and session-log searches, resolves candidate session directories and capture
-sequences, and returns either:
+The MCP accepts one or more quote substrings, searches canonical run journals
+and their linked digest-verified artifacts, and resolves each candidate to a
+stable run ID, runtime root, and available record context. It returns either:
 
 - a haiku-level summary of successful findings plus materialization
   instructions, or

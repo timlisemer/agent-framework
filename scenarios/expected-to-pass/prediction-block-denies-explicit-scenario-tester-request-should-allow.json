@@ -1,66 +1,240 @@
 {
-  "schema_version": 2,
   "name": "prediction-block-denies-explicit-scenario-tester-request-should-allow",
   "description": "Prediction block should allow scenario_tester when the latest user message explicitly says to call the scenario tester, even if cached frustrated prediction state would otherwise deny the tool as not explicitly requested.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "prediction-block-denies-explicit-scenario-tester-request-should-allow-start",
+      "runId": "fixture-prediction-block-denies-explicit-scenario-tester-request-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": null,
+        "projectDir": null,
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": [
-        {
-          "type": "text",
-          "text": "call the scenario tester, you are still banned from bash, unless it is the mv command"
-        }
-      ]
+      "commandId": "prediction-block-denies-explicit-scenario-tester-request-should-allow-session-state",
+      "runId": "fixture-prediction-block-denies-explicit-scenario-tester-request-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "frustrated",
+            "trust": "low",
+            "intent": "The user is insisting that the assistant stay on the workflow and not deviate from it. They are rejecting any suggestion that the task has changed or been abandoned.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "no you are not you are sticking to the workflow",
+            "blockAllTools": false,
+            "timestamp": 1780409215400,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a"
+          },
+          "frustrationStreak": 1,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "You explicitly requested `scenario_tester` again. I’m retrying the scenario tester call, with no Bash."
-        },
-        {
-          "type": "tool_use",
-          "id": "call_vGGRP8gecp4wbrjZ9ElqXG8I",
+      "commandId": "prediction-block-denies-explicit-scenario-tester-request-should-allow-message-0",
+      "runId": "fixture-prediction-block-denies-explicit-scenario-tester-request-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-denies-explicit-scenario-tester-request-should-allow-message-0",
+        "turnId": "prediction-block-denies-explicit-scenario-tester-request-should-allow-turn-0",
+        "content": "call the scenario tester, you are still banned from bash, unless it is the mv command",
+        "contentDigest": "sha256:999c52b4a6192921e868807a0b9d9c4b95a812d84f11bd5f7dd133b60d999d45"
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-explicit-scenario-tester-request-should-allow-message-1",
+      "runId": "fixture-prediction-block-denies-explicit-scenario-tester-request-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-denies-explicit-scenario-tester-request-should-allow-message-1",
+        "turnId": null,
+        "content": "You explicitly requested `scenario_tester` again. I’m retrying the scenario tester call, with no Bash.\n[tool mcp__agent_frameworkscenario_tester] {\"action\":\"materialize_scenario\",\"session_dir\":\"/home/tim/.agent-framework/sessions/home-tim-Coding-public_repos-agent-framework/2026-06-02-1534_cdb2077e\",\"run_materialized\":true,\"working_dir\":\"/home/tim/Coding/public_repos/agent-framework\"}",
+        "contentDigest": "sha256:28ed67d66d3aa9ae424cfcd2074f5d09b909e3dd337b20ae273b7c3e4286eb9f"
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-explicit-scenario-tester-request-should-allow-target-tool",
+      "runId": "fixture-prediction-block-denies-explicit-scenario-tester-request-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "frustrated",
+              "trust": "low",
+              "intent": "The user is insisting that the assistant stay on the workflow and not deviate from it. They are rejecting any suggestion that the task has changed or been abandoned.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "no you are not you are sticking to the workflow",
+              "blockAllTools": false,
+              "timestamp": 1780409215400,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a"
+            },
+            "frustrationStreak": 1,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-prediction-block-denies-explicit-scenario-tester-request-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/prediction-block-denies-explicit-scenario-tester-request-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-prediction-block-denies-explicit-scenario-tester-request-should-allow",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": null,
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "preTool": {
+              "rawToolName": "mcp__agent_frameworkscenario_tester",
+              "rawToolInput": {
+                "action": "materialize_scenario",
+                "session_dir": "/home/tim/.agent-framework/sessions/home-tim-Coding-public_repos-agent-framework/2026-06-02-1534_cdb2077e",
+                "run_materialized": true,
+                "working_dir": "/home/tim/Coding/public_repos/agent-framework"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "call the scenario tester, you are still banned from bash, unless it is the mv command",
+              "latestUserLogicText": "call the scenario tester, you are still banned from bash, unless it is the mv command",
+              "recentUserMessages": [
+                "call the scenario tester, you are still banned from bash, unless it is the mv command"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "call_vGGRP8gecp4wbrjZ9ElqXG8I",
+          "turnId": null,
           "name": "mcp__agent_frameworkscenario_tester",
           "input": {
             "action": "materialize_scenario",
             "session_dir": "/home/tim/.agent-framework/sessions/home-tim-Coding-public_repos-agent-framework/2026-06-02-1534_cdb2077e",
             "run_materialized": true,
             "working_dir": "/home/tim/Coding/public_repos/agent-framework"
-          }
+          },
+          "inputDigest": "sha256:faa1b4e8eb6a755fbcb5174cbb566e10318ae652b0d194e9bfd3a95ddbaba866",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "call_vGGRP8gecp4wbrjZ9ElqXG8I"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "permission_mode": "default",
-    "adapter": "codex",
-    "session_start_permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "frustrated",
-      "trust": "low",
-      "intent": "The user is insisting that the assistant stay on the workflow and not deviate from it. They are rejecting any suggestion that the task has changed or been abandoned.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "no you are not you are sticking to the workflow",
-      "blockAllTools": false,
-      "timestamp": 1780409215400,
-      "contextSwitch": "no",
-      "questionIsStalling": "n/a"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 1,
-    "currentWindowSize": 4
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "The latest user turn literally says to call the scenario tester. The target preserves the captured malformed Codex MCP wire name so prediction identity normalization must still map it to mcp-scenario_tester."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "prediction-block-denies-explicit-scenario-tester-request-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

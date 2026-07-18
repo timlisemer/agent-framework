@@ -6,7 +6,8 @@
  */
 
 import { stripQuotedContent } from "./quote-detection.js";
-import { isHighFrictionPrediction, type ToolPrediction } from "./prediction-types.js";
+import { isHighFrictionPrediction } from "./prediction-types.js";
+import type { ToolPrediction } from "./prediction-schema.js";
 
 /**
  * Capability-denial morphology covering BOTH:

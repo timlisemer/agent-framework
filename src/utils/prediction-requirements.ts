@@ -1,15 +1,4 @@
-import { z } from "zod";
-import type { ToolRequirement } from "./prediction-types.js";
-
-const scalarRequirementValueSchema = z.union([z.string(), z.number(), z.boolean()]);
-
-export const toolRequirementSchema = z.object({
-  tool: z.string().min(1),
-  input: z.record(z.string().min(1), scalarRequirementValueSchema).optional(),
-  inputArrayLengths: z.record(z.string().min(1), z.number().int().nonnegative()).optional(),
-  inputSubstrings: z.array(z.string()).optional(),
-  reason: z.string().optional(),
-});
+import { toolRequirementSchema, type ToolRequirement } from "./prediction-schema.js";
 
 export function validateToolRequirements(
   value: unknown,

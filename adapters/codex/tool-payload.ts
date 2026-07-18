@@ -1,8 +1,10 @@
-import { isToolLogFailureStatus } from "../../src/utils/agent-framework-tool-log.js";
-import { trimmedStringField } from "../../src/utils/output.js";
-import { errorMessage, outputBlocks } from "../../src/utils/output.js";
-import type { AiErrorInfo, AiToolOutputBlock } from "../../src/ai-protocol/index.js";
-import type { ToolLogEntry } from "../../src/utils/session-store.js";
+import { errorMessage, trimmedStringField } from "../../src/utils/output.js";
+import { outputBlocks } from "../../src/providers/provider-output.js";
+import type {
+  ProviderError,
+  ProviderToolOutputBlock,
+} from "../../src/providers/provider-contract.js";
+import type { ToolLogEntry } from "../../src/utils/tool-log-types.js";
 
 const SINGLE_PATH_KEYS = ["file_path", "path", "notebook_path"] as const;
 const ARRAY_PATH_KEYS = ["file_paths", "paths", "files"] as const;
@@ -35,10 +37,10 @@ export function parseCodexToolObjectInput(payload: Record<string, unknown>): Rec
 export function interpretCodexToolOutputPayload(
   payload: Record<string, unknown>,
   outputValue: unknown = payload.output
-): { output: AiToolOutputBlock[]; error: AiErrorInfo | null } {
+): { output: ProviderToolOutputBlock[]; error: ProviderError | null } {
   const output = outputBlocks(outputValue);
   const status = trimmedStringField(payload, "status");
-  const failed = isToolLogFailureStatus(status) || payload.error !== undefined;
+  const failed = isCodexToolFailureStatus(status) || payload.error !== undefined;
   return {
     output,
     error: failed
@@ -49,6 +51,10 @@ export function interpretCodexToolOutputPayload(
         }
       : null,
   };
+}
+
+export function isCodexToolFailureStatus(status: string | null | undefined): boolean {
+  return status === "failed" || status === "error";
 }
 
 export function extractCodexToolPaths(input: unknown): string[] {
@@ -92,8 +98,8 @@ export function codexToolLogEntryMatchesToolCall(
   const hookToolName = codexHookToolName(toolName);
   if (entry.tool !== hookToolName && entry.tool !== toolName) return false;
 
-  const command = trimmedStringField(rawInput, "command");
-  if (toolName === "exec_command" || entry.tool === "Bash" || entry.cmd) {
+  const command = codexShellCommand(toolName, rawInput);
+  if (toolName === "exec_command" || toolName === "write_stdin" || entry.tool === "Bash" || entry.cmd) {
     return Boolean(command && entry.cmd && command === entry.cmd);
   }
 
@@ -115,8 +121,8 @@ export function codexTranscriptToolLogIdentityKey(toolName: string, input: unkno
     ? input as Record<string, unknown>
     : {};
   const hookToolName = codexHookToolName(toolName);
-  const command = trimmedStringField(rawInput, "command");
-  if ((toolName === "exec_command" || hookToolName === "Bash") && command) {
+  const command = codexShellCommand(toolName, rawInput);
+  if ((toolName === "exec_command" || toolName === "write_stdin" || hookToolName === "Bash") && command) {
     return `${hookToolName}:cmd:${command}`;
   }
   const paths = extractCodexToolPaths(rawInput);
@@ -133,6 +139,7 @@ function canonicalizeCodexPaths(paths: readonly (string | null | undefined)[]): 
 function codexHookToolName(toolName: string): string {
   switch (toolName) {
     case "exec_command":
+    case "write_stdin":
       return "Bash";
     case "read_file":
       return "Read";
@@ -144,6 +151,10 @@ function codexHookToolName(toolName: string): string {
     default:
       return toolName;
   }
+}
+
+function codexShellCommand(toolName: string, input: Record<string, unknown>): string | null {
+  return trimmedStringField(input, toolName === "write_stdin" ? "chars" : "command");
 }
 
 function sameStringList(left: readonly string[], right: readonly string[]): boolean {

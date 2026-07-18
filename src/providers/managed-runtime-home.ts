@@ -20,8 +20,8 @@ export type ManagedRuntimeHomeConfig = {
 };
 
 export function assertManagedRuntimeHomeConfig(config: ManagedRuntimeHomeConfig): void {
-  if (config.sdkRuntimeHome === "managedAstral" && config.sdkRuntimeEnvironment !== "user") {
-    throw new Error("managedAstral runtime home requires sdkRuntimeEnvironment user");
+  if (config.sdkRuntimeHome === "managed" && config.sdkRuntimeEnvironment !== "user") {
+    throw new Error("managed runtime home requires sdkRuntimeEnvironment user");
   }
 }
 
@@ -31,7 +31,7 @@ export function prepareManagedRuntimeHome(
 ): ManagedRuntimeHome {
   const home = materializeRuntimeHome({
     provider,
-    profile: "managedAstral",
+    profile: "managed",
     env,
     runId: `managed-${provider}`,
   });

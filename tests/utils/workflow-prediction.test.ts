@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { describe, expect, it } from "vitest";
 import {
+  advanceRequiredToolsAfterAllowedTool,
   advanceRequiredToolsAfterAllowedToolSequence,
   decidePrediction,
   decideRequiredWorkflowToolSequence,
@@ -9,13 +10,17 @@ import {
   toolRequirementMatches,
   toolCapabilityMatchesRequirement,
   uniqueToolRequirements,
-  type ToolPrediction,
-  type ToolRequirement,
 } from "../../src/utils/prediction-types.js";
+import type {
+  ToolPrediction,
+  ToolRequirement,
+} from "../../src/utils/prediction-schema.js";
 import type { CanonicalWorkflow, HostContext } from "../../src/adapter/types.js";
 import { activeSpec } from "../../src/adapter/spec.js";
 import { claudeSpec } from "../../adapters/claude/index.js";
 import { codexSpec } from "../../adapters/codex/index.js";
+import { CODEX_LOCAL_INSPECTION_TOOL_INVENTORY } from "../../adapters/codex/hook-config.js";
+import { parseSentimentOutput } from "../../src/utils/prediction-parser.js";
 import {
   codexPlan3InitialAgentBatchRequirements,
   implementWorkflowRequirementSignatures,
@@ -422,8 +427,11 @@ Spawn exactly one \`default\` agent.
   });
 
   it("normalizes raw Codex requirement names through adapter canonicalization", () => {
-    const rawRequirement: ToolRequirement = { tool: "exec_command" };
-    const prediction = makePrediction([rawRequirement]);
+    const rawRequirements: ToolRequirement[] = [
+      { tool: "exec_command" },
+      { tool: "functions.exec_command" },
+    ];
+    const prediction = makePrediction([rawRequirements[0]]);
     const observed = codexSpec.canonicalizeToolCall("exec_command", {
       command: "pwd",
     });
@@ -439,7 +447,9 @@ Spawn exactly one \`default\` agent.
       prediction,
       [observed],
     ).explicitlyRequiredTools).toEqual([]);
-    expect(uniqueToolRequirements([rawRequirement])).toEqual([{ tool: "Bash" }]);
+    for (const rawRequirement of rawRequirements) {
+      expect(uniqueToolRequirements([rawRequirement])).toEqual([{ tool: "Bash" }]);
+    }
 
     for (const { raw, canonical } of [
       { raw: "apply_patch", canonical: "Edit" },
@@ -642,6 +652,106 @@ Spawn exactly one \`default\` agent.
         quoted.toolInput,
       ), quotedCommand).toBe(true);
     }
+  });
+
+  it("lets Codex read-only rg through exec_command consume a canonical Read requirement", () => {
+    const prediction = makePrediction([{ tool: "Read" }]);
+    const codexRead = codexSpec.canonicalizeToolCall("exec_command", {
+      cmd: "rg -n canonical src | head -n 20",
+    });
+
+    expect(codexRead.toolName).toBe("Bash");
+    expect(toolRequirementMatches(
+      { tool: "Read" },
+      codexRead.toolName,
+      codexRead.toolInput,
+    )).toBe(true);
+    expect(decidePrediction(
+      prediction,
+      codexRead.toolName,
+      codexRead.toolInput,
+      0,
+    )).toMatchObject({ decision: "allow" });
+    expect(advanceRequiredToolsAfterAllowedTool(
+      prediction,
+      codexRead.toolName,
+      codexRead.toolInput,
+    ).explicitlyRequiredTools).toEqual([]);
+  });
+
+  it("explains when a read-only exec_command exposes no canonical Read capability", () => {
+    const prediction = makePrediction([{ tool: "Read" }]);
+    const codexReadOnly = codexSpec.canonicalizeToolCall("exec_command", {
+      cmd: "pwd",
+    });
+
+    expect(decidePrediction(
+      prediction,
+      codexReadOnly.toolName,
+      codexReadOnly.toolInput,
+      0,
+    )).toMatchObject({
+      decision: "deny",
+      reason: expect.stringContaining("exposes no canonical Read capability"),
+    });
+  });
+
+  it("permits review inspection through the real Codex local tool inventory", () => {
+    expect(CODEX_LOCAL_INSPECTION_TOOL_INVENTORY).toEqual(["exec_command"]);
+    const prediction = makePrediction([{ tool: "Read" }]);
+
+    for (const command of [
+      "rg -n 'ScenarioRuntime' src tests",
+      "git diff -- src tests",
+      "sed -n '1,120p' src/scenario/runtime/runtime.ts",
+    ]) {
+      const call = codexSpec.canonicalizeToolCall(
+        CODEX_LOCAL_INSPECTION_TOOL_INVENTORY[0],
+        { command },
+      );
+      expect(call.toolName).toBe("Bash");
+      expect(decidePrediction(prediction, call.toolName, call.toolInput, 0), command)
+        .toMatchObject({ decision: "allow" });
+      expect(advanceRequiredToolsAfterAllowedToolSequence(prediction, [call]).explicitlyRequiredTools)
+        .toEqual([]);
+    }
+
+    const unavailable = codexSpec.canonicalizeToolCall("exec_command", { command: "cargo test" });
+    expect(decidePrediction(prediction, unavailable.toolName, unavailable.toolInput, 0))
+      .toMatchObject({
+        decision: "deny",
+        reason: expect.stringContaining("exec_command"),
+      });
+  });
+
+  it("does not turn abstract review prose into an impossible Read input constraint", () => {
+    const parsed = parseSentimentOutput(`---MOOD---
+neutral
+---TRUST---
+normal
+---INTENT---
+Review the implementation.
+---BLOCKED-INTENT---
+(none)
+---EXPLICITLY-ALLOWED-TOOLS---
+(none)
+---EXPLICITLY-REQUIRED-TOOLS---
+Read | | changed code and relevant files | inspect review scope
+---NON-BLOCKING-TOOLS---
+(none)
+---EXPLICITLY-BLOCKED---
+(none)
+---CONTEXT-SWITCH---
+no
+---QUESTION-IS-STALLING---
+n/a
+---BLOCK-ALL-TOOLS---
+no`);
+
+    expect(parsed?.explicitlyRequiredTools).toEqual([{
+      tool: "Read",
+      reason: "inspect review scope",
+    }]);
   });
 
   it("advances a canonical Read through Codex Bash before the native MCP call", () => {

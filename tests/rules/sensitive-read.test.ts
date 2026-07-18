@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { trustedPathRule } from "../../src/rules/trusted-path.js";
-import { sessionStateDefaults } from "../../src/utils/session-store.js";
+import { sessionStateDefaults } from "../helpers/session-workflow.js";
 import { makeRuleContext } from "../helpers/rule-context.js";
 
 describe("sensitive Read blocking", () => {

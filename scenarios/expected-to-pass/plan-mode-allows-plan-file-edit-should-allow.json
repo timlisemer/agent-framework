@@ -1,56 +1,225 @@
 {
-  "schema_version": 1,
   "name": "plan-mode-allows-plan-file-edit-should-allow",
   "description": "Live repro: while in plan mode, the assistant attempted Write to its assigned plan file at /home/tim/.claude/plans/<slug>.md. plan-mode-block (15) correctly skips on the exempt path, tool-approve (100) correctly skips on isPlanFile, but the rule-gate LLM at priority 70 (gate.ts) samples DENY with hallucinated 'no approval for plan-file edits post-validation' reasoning because its prompt only explicitly approves read-only tools in plan mode. After the fix, plan-mode-block fastAllows plan-file edits in plan mode so the gate LLM never sees this case.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "plan-mode-allows-plan-file-edit-should-allow-start",
+      "runId": "fixture-plan-mode-allows-plan-file-edit-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "please look at X and propose a fix"
+      "commandId": "plan-mode-allows-plan-file-edit-should-allow-session-state",
+      "runId": "fixture-plan-mode-allows-plan-file-edit-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "User wants the assistant to plan a fix.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "please look at X and propose a fix",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 2
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Consolidating the plan with the validator's findings before exiting plan mode."
-        },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_plan_mode_write",
+      "commandId": "plan-mode-allows-plan-file-edit-should-allow-message-0",
+      "runId": "fixture-plan-mode-allows-plan-file-edit-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "plan-mode-allows-plan-file-edit-should-allow-message-0",
+        "turnId": "plan-mode-allows-plan-file-edit-should-allow-turn-0",
+        "content": "please look at X and propose a fix",
+        "contentDigest": "sha256:9292d1bdfa64cc3374f7fb02aad4cb1086562f9c9e445c0c4e786e0c087c84c4"
+      }
+    },
+    {
+      "commandId": "plan-mode-allows-plan-file-edit-should-allow-message-1",
+      "runId": "fixture-plan-mode-allows-plan-file-edit-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "plan-mode-allows-plan-file-edit-should-allow-message-1",
+        "turnId": null,
+        "content": "Consolidating the plan with the validator's findings before exiting plan mode.\n[tool Write] {\"file_path\":\"/home/tim/.claude/plans/please-look-in-the-glistening-phoenix.md\",\"content\":\"# Plan\\n\\n## Context\\nFix proposed.\"}",
+        "contentDigest": "sha256:037d1402c8e88487a1fc90b76eac939ea8334232dcaea812df55b0e9b92da74d"
+      }
+    },
+    {
+      "commandId": "plan-mode-allows-plan-file-edit-should-allow-target-tool",
+      "runId": "fixture-plan-mode-allows-plan-file-edit-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "User wants the assistant to plan a fix.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "please look at X and propose a fix",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 2
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-plan-mode-allows-plan-file-edit-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/plan-mode-allows-plan-file-edit-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-plan-mode-allows-plan-file-edit-should-allow",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "plan",
+            "collaborationMode": null,
+            "planMode": true,
+            "planModeDetection": {
+              "active": true,
+              "mode": "plan",
+              "source": "hook-permission-mode"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Write",
+              "rawToolInput": {
+                "file_path": "/home/tim/.claude/plans/please-look-in-the-glistening-phoenix.md",
+                "content": "# Plan\n\n## Context\nFix proposed."
+              },
+              "outsideRootPath": "/home/tim/.claude/plans/please-look-in-the-glistening-phoenix.md",
+              "latestUserMessage": "please look at X and propose a fix",
+              "latestUserLogicText": "please look at X and propose a fix",
+              "recentUserMessages": [
+                "please look at X and propose a fix"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_plan_mode_write",
+          "turnId": null,
           "name": "Write",
           "input": {
             "file_path": "/home/tim/.claude/plans/please-look-in-the-glistening-phoenix.md",
             "content": "# Plan\n\n## Context\nFix proposed."
-          }
+          },
+          "inputDigest": "sha256:8ed4cab3ea335c52007cc33c2ae8ee5726431efb144f3561e319cd857cb0a950",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_plan_mode_write"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "plan"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "User wants the assistant to plan a fix.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "please look at X and propose a fix"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 2
-  },
-  "expect": {
-    "expected": "allow",
-    "by": "plan-mode-block",
-    "notes": "After Part B1, plan-mode-block fastAllows the plan-file Write before gate runs. Before the fix the scenario fails — gate LLM samples DENY with hallucinated reasoning."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "plan-mode-allows-plan-file-edit-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

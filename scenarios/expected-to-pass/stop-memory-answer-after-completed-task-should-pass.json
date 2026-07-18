@@ -1,48 +1,220 @@
 {
-  "schema_version": 1,
   "name": "stop-memory-answer-after-completed-task-should-pass",
   "description": "Live repro from Codex session rollout-2026-06-12T17-40-53-019ebc7e-4a6e-7011-92df-5c6b8eb06cbe, agent-framework capture seq 464. After a completed task, the user asked whether the assistant remembered the first message of the session. The assistant answered the factual memory question and stopped. The Stop hook incorrectly blocked with response-align-stop feedback claiming the assistant was arguing with or working around prior actionable tool failure feedback. This should pass: there was no latest actionable tool failure to resume, and the user asked a direct memory question.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "stop-memory-answer-after-completed-task-should-pass-start",
+      "runId": "fixture-stop-memory-answer-after-completed-task-should-pass",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/iocto/hmi-pc-scripts-iocto",
+        "projectDir": "/home/tim/Coding/iocto/hmi-pc-scripts-iocto",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "Can you remember the first message of this session?"
+      "commandId": "stop-memory-answer-after-completed-task-should-pass-session-state",
+      "runId": "fixture-stop-memory-answer-after-completed-task-should-pass",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "The user is asking whether I can remember the first message of this session.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a",
+            "userMessageSnippet": "Can you remember the first message of this session?",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 6
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Yes. Your first message said that `.github/workflows/tauri-windows-build.yml` has an error, but you explicitly did **not** want the workflow fixed directly. You framed the error as evidence of a broader structural problem: `just check` did not catch it because part of the codebase was doing something wrong structurally.\n\nYou wanted the codebase refactored so `just check` would catch that class of error, without changing how `just check` works. You included the Rust `E0119` conflict from `tauri-utils 2.9.2` / `time` as the example failure."
+      "commandId": "stop-memory-answer-after-completed-task-should-pass-message-0",
+      "runId": "fixture-stop-memory-answer-after-completed-task-should-pass",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "stop-memory-answer-after-completed-task-should-pass-message-0",
+        "turnId": "stop-memory-answer-after-completed-task-should-pass-turn-0",
+        "content": "Can you remember the first message of this session?",
+        "contentDigest": "sha256:608e466911915921a2963866ab0fd59f3ce2aa51405540177c6234948fbe0635"
+      }
+    },
+    {
+      "commandId": "stop-memory-answer-after-completed-task-should-pass-message-1",
+      "runId": "fixture-stop-memory-answer-after-completed-task-should-pass",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "stop-memory-answer-after-completed-task-should-pass-message-1",
+        "turnId": null,
+        "content": "Yes. Your first message said that `.github/workflows/tauri-windows-build.yml` has an error, but you explicitly did **not** want the workflow fixed directly. You framed the error as evidence of a broader structural problem: `just check` did not catch it because part of the codebase was doing something wrong structurally.\n\nYou wanted the codebase refactored so `just check` would catch that class of error, without changing how `just check` works. You included the Rust `E0119` conflict from `tauri-utils 2.9.2` / `time` as the example failure.",
+        "contentDigest": "sha256:1181737ebc18b74aefdc38064d6a9ae82a0da6c3756706a796748d8237c83678"
+      }
+    },
+    {
+      "commandId": "stop-memory-answer-after-completed-task-should-pass-target-Stop",
+      "runId": "fixture-stop-memory-answer-after-completed-task-should-pass",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostStopped",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "The user is asking whether I can remember the first message of this session.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "userMessageSnippet": "Can you remember the first message of this session?",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 6
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-stop-memory-answer-after-completed-task-should-pass",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/stop-memory-answer-after-completed-task-should-pass.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-stop-memory-answer-after-completed-task-should-pass",
+            "projectDir": "/home/tim/Coding/iocto/hmi-pc-scripts-iocto",
+            "workingDir": "/home/tim/Coding/iocto/hmi-pc-scripts-iocto",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/iocto/hmi-pc-scripts-iocto",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "stop": {
+              "lastAssistantMessage": "Yes. Your first message said that `.github/workflows/tauri-windows-build.yml` has an error, but you explicitly did **not** want the workflow fixed directly. You framed the error as evidence of a broader structural problem: `just check` did not catch it because part of the codebase was doing something wrong structurally.\n\nYou wanted the codebase refactored so `just check` would catch that class of error, without changing how `just check` works. You included the Rust `E0119` conflict from `tauri-utils 2.9.2` / `time` as the example failure.",
+              "assistantTextCandidates": [
+                "Yes. Your first message said that `.github/workflows/tauri-windows-build.yml` has an error, but you explicitly did **not** want the workflow fixed directly. You framed the error as evidence of a broader structural problem: `just check` did not catch it because part of the codebase was doing something wrong structurally.\n\nYou wanted the codebase refactored so `just check` would catch that class of error, without changing how `just check` works. You included the Rust `E0119` conflict from `tauri-utils 2.9.2` / `time` as the example failure."
+              ],
+              "latestAssistantText": "Yes. Your first message said that `.github/workflows/tauri-windows-build.yml` has an error, but you explicitly did **not** want the workflow fixed directly. You framed the error as evidence of a broader structural problem: `just check` did not catch it because part of the codebase was doing something wrong structurally.\n\nYou wanted the codebase refactored so `just check` would catch that class of error, without changing how `just check` works. You included the Rust `E0119` conflict from `tauri-utils 2.9.2` / `time` as the example failure.",
+              "latestUserText": "Can you remember the first message of this session?",
+              "priorErrorContext": [],
+              "planExitText": null,
+              "stopBlockDisabled": false
+            }
+          },
+          "lastAssistantMessage": "Yes. Your first message said that `.github/workflows/tauri-windows-build.yml` has an error, but you explicitly did **not** want the workflow fixed directly. You framed the error as evidence of a broader structural problem: `just check` did not catch it because part of the codebase was doing something wrong structurally.\n\nYou wanted the codebase refactored so `just check` would catch that class of error, without changing how `just check` works. You included the Rust `E0119` conflict from `tauri-utils 2.9.2` / `time` as the example failure."
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "Stop"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/iocto/hmi-pc-scripts-iocto",
-    "permission_mode": "default",
-    "adapter": "codex"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "The user is asking whether I can remember the first message of this session.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "contextSwitch": "no",
-      "questionIsStalling": "n/a",
-      "userMessageSnippet": "Can you remember the first message of this session?"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 6
-  },
-  "expect": {
-    "expected": "pass",
-    "notes": "The live Stop hook blocked with response-align-stop feedback: `You stopped by arguing with or working around prior actionable tool failure feedback instead of addressing it.` That block is wrong here. The latest user message is a direct memory question, and the assistant answered it without evading an active correction."
-  }
+    {
+      "kind": "record",
+      "eventType": "effect.completed",
+      "payloadContains": {
+        "effectId": "hook:Stop:stop-memory-answer-after-completed-task-should-pass-target-Stop",
+        "result": {
+          "kind": "hookRuleEvaluation",
+          "event": "Stop",
+          "decision": "allow"
+        }
+      },
+      "count": 1
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "Stop"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    }
+  ]
 }

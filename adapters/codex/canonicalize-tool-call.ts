@@ -2,6 +2,7 @@ import type { CanonicalToolCall } from "../../src/adapter/types.js";
 import { recognizeMcp } from "./recognize-mcp.js";
 import { extractApplyPatchPaths } from "./apply-patch-parser.js";
 import { serializeShellCommandTokens } from "../../src/utils/shell-command-parser.js";
+import { recordFromUnknown } from "../../src/utils/output.js";
 
 const ALIAS: Readonly<Record<string, string>> = {
   apply_patch: "Edit",
@@ -16,6 +17,7 @@ const ALIAS: Readonly<Record<string, string>> = {
   tool_search: "ToolSearch",
   wait: "Wait",
   wait_agent: "TaskOutput",
+  write_stdin: "Bash",
   write_file: "Write",
 };
 
@@ -33,6 +35,16 @@ function normalizeExecCommandInput(rawInput: unknown): unknown {
     };
   }
   return { command };
+}
+
+function normalizeWriteStdinInput(rawInput: unknown): unknown {
+  const input = recordFromUnknown(rawInput);
+  return {
+    command: typeof input.chars === "string" ? input.chars : "",
+    ...(typeof input.session_id === "number" || typeof input.session_id === "string"
+      ? { continuation_session_id: input.session_id }
+      : {}),
+  };
 }
 
 function normalizeSpawnAgentInput(rawInput: unknown): unknown {
@@ -71,21 +83,27 @@ function normalizeWaitAgentInput(rawInput: unknown): unknown {
 }
 
 export function canonicalizeToolCall(rawName: string, rawInput: unknown): CanonicalToolCall {
-  const mcp = recognizeMcp(rawName);
+  const codexName = rawName.startsWith("functions.")
+    ? rawName.slice("functions.".length)
+    : rawName;
+  const mcp = recognizeMcp(codexName);
   if (mcp) return { toolName: `mcp-${mcp}`, toolInput: rawInput };
 
-  const aliased = ALIAS[rawName];
-  if (aliased === "Edit" && rawName === "apply_patch") {
+  const aliased = ALIAS[codexName];
+  if (aliased === "Edit" && codexName === "apply_patch") {
     const paths = extractApplyPatchPaths(rawInput);
     return { toolName: "Edit", toolInput: { file_path: paths[0], file_paths: paths } };
   }
-  if (aliased === "Bash" && rawName === "exec_command") {
+  if (aliased === "Bash" && codexName === "exec_command") {
     return { toolName: "Bash", toolInput: normalizeExecCommandInput(rawInput) };
   }
-  if (aliased === "Agent" && rawName === "spawn_agent") {
+  if (aliased === "Bash" && codexName === "write_stdin") {
+    return { toolName: "Bash", toolInput: normalizeWriteStdinInput(rawInput) };
+  }
+  if (aliased === "Agent" && codexName === "spawn_agent") {
     return { toolName: "Agent", toolInput: normalizeSpawnAgentInput(rawInput) };
   }
-  if (aliased === "TaskOutput" && rawName === "wait_agent") {
+  if (aliased === "TaskOutput" && codexName === "wait_agent") {
     return { toolName: "TaskOutput", toolInput: normalizeWaitAgentInput(rawInput) };
   }
   return { toolName: aliased ?? rawName, toolInput: rawInput };

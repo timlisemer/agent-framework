@@ -3,8 +3,8 @@
  * action. These are exposed via MCP resources (see src/mcp/server.ts) so clients
  * calling `resources/list` + `resources/read` can discover each tool's contract.
  *
- * The two test-harness tools export their own help strings (TESTER_HELP,
- * LABELER_HELP) from their implementation files; this module covers the rest.
+ * The scenario tester exports its own help string (TESTER_HELP) from its
+ * implementation file; this module covers the rest.
  */
 
 export const CHECK_HELP = `# check -- Linter + Type-Check Summarizer
@@ -69,26 +69,23 @@ materialization point.
 
 ## Flow
 
-1. Search raw Claude and Codex transcripts for each quote.
-2. Search agent-framework \`tool-log.jsonl\`, \`captures.jsonl\`, and
-   \`session-injections.jsonl\` for each quote.
-3. Resolve raw transcript hits back to session directories through
-   \`transcript-path.txt\` sidecars.
-4. Cross-reference tool-log \`toolUseId\` and injection \`seq\` values against
-   \`captures.jsonl\` where possible.
-5. If no predefined search finds anything, return a user-facing failure notice
+1. Search canonical \`~/.agent-framework/runs/*/scenario.records.jsonl\`
+   journals for each quote.
+2. Return the stable run identifier, runtime root, record cursor, event type,
+   and entity identity for each match.
+3. If no predefined search finds anything, return a user-facing failure notice
    plus manual fallback guidance.
-6. If candidates are found, summarize them with a haiku-tier LLM and append
+4. If candidates are found, summarize them with a haiku-tier LLM and append
    required next-step instructions.
 
 ## Output
 
 On success, returns \`## Findings\` plus instructions to notify the user and
-only materialize through the active \`scenario_tester\` MCP if the user already
-requested materialization.
+only materialize the located \`run_id\` and \`runtime_root\` through the active
+\`scenario_tester\` MCP if the user already requested materialization.
 
 On failure, returns \`## Locate Scenario Failed\`, the predefined commands tried,
-and manual guidance for locating scenarios by transcript/session logs.`;
+and manual guidance for locating canonical runs.`;
 
 export const CONFIRM_HELP = `# confirm -- Code Review Confirmation
 
@@ -209,7 +206,7 @@ Per-repo results with commit hash on success, DECLINED reason on failure.
 const IMPLEMENTATION_WORKFLOW_INPUT_HELP = `## Inputs
 
 - working_dir (optional): working directory, defaults to the server cwd
-- planfile (optional): path to the plan file. If omitted, the active current-plan sidecar for working_dir is used.
+- planfile (optional): path to the plan file. If omitted, the active session's canonical plan.current snapshot slice for working_dir is used.
 - model_tier (optional): haiku | sonnet | opus (default sonnet)
 - extra_context (optional string array): exact quoted user text only
 
@@ -386,4 +383,4 @@ The absolute path to the transcript file as a plain string.
 ## When to use
 
 - Via the /transcript slash command to get the current session's transcript path
-- When you need to pass a session folder name to scenario_labeler scaffold or list and want the sidecar to be up-to-date`;
+- When you need the native transcript path for transcript inspection`;

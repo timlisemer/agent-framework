@@ -1,51 +1,229 @@
 {
-  "schema_version": 1,
   "name": "sentiment-angry-allows-explicit",
   "description": "Even when angry, an explicitly allowed Read tool succeeds.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "sentiment-angry-allows-explicit-start",
+      "runId": "fixture-sentiment-angry-allows-explicit",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": null,
+        "projectDir": null,
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "stop everything except just READ src/foo.ts please."
+      "commandId": "sentiment-angry-allows-explicit-session-state",
+      "runId": "fixture-sentiment-angry-allows-explicit",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "normal",
+            "intent": "user wants only the Read on src/foo.ts",
+            "blockedIntent": "no edits or commands",
+            "explicitlyAllowedTools": [
+              "Read"
+            ],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "stop everything except just READ src/foo.ts please.",
+            "blockAllTools": true,
+            "timestamp": 1
+          },
+          "frustrationStreak": 1,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "I'll read it."
-        },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_read",
+      "commandId": "sentiment-angry-allows-explicit-message-0",
+      "runId": "fixture-sentiment-angry-allows-explicit",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "sentiment-angry-allows-explicit-message-0",
+        "turnId": "sentiment-angry-allows-explicit-turn-0",
+        "content": "stop everything except just READ src/foo.ts please.",
+        "contentDigest": "sha256:57e259d89229c291a55108752918e63794dde7cb98911f919e651f5c5bc38c6e"
+      }
+    },
+    {
+      "commandId": "sentiment-angry-allows-explicit-message-1",
+      "runId": "fixture-sentiment-angry-allows-explicit",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "sentiment-angry-allows-explicit-message-1",
+        "turnId": null,
+        "content": "I'll read it.\n[tool Read] {\"file_path\":\"src/foo.ts\"}",
+        "contentDigest": "sha256:d77d0c06c1a73d048fa21f5da6f077c93aa9e09ed304a25d89ecc3b50a973932"
+      }
+    },
+    {
+      "commandId": "sentiment-angry-allows-explicit-target-tool",
+      "runId": "fixture-sentiment-angry-allows-explicit",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "normal",
+              "intent": "user wants only the Read on src/foo.ts",
+              "blockedIntent": "no edits or commands",
+              "explicitlyAllowedTools": [
+                "Read"
+              ],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "stop everything except just READ src/foo.ts please.",
+              "blockAllTools": true,
+              "timestamp": 1
+            },
+            "frustrationStreak": 1,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-sentiment-angry-allows-explicit",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/sentiment-angry-allows-explicit.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-sentiment-angry-allows-explicit",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": null,
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Read",
+              "rawToolInput": {
+                "file_path": "src/foo.ts"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "stop everything except just READ src/foo.ts please.",
+              "latestUserLogicText": "stop everything except just READ src/foo.ts please.",
+              "recentUserMessages": [
+                "stop everything except just READ src/foo.ts please."
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_read",
+          "turnId": null,
           "name": "Read",
           "input": {
             "file_path": "src/foo.ts"
-          }
+          },
+          "inputDigest": "sha256:b7da35328240dc8a25917ec74bcb85fdb75e7d1273712df9428e665a1c5a880c",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_read"
+  "effects": {
+    "mode": "live"
   },
-  "expect": {
-    "expected": "allow"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "normal",
-      "intent": "user wants only the Read on src/foo.ts",
-      "blockedIntent": "no edits or commands",
-      "explicitlyAllowedTools": [
-        "Read"
-      ],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "stop everything except just READ src/foo.ts please.",
-      "blockAllTools": true
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 1,
-    "currentWindowSize": 4
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "sentiment-angry-allows-explicit-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

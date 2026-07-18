@@ -6,10 +6,8 @@ import { activeSpec } from "../../../src/adapter/spec.js";
 import { validPlanFixture } from "../../helpers/plan-fixtures.js";
 import {
   getAgentFrameworkSessionDir,
-  sessionCurrentPlanFile,
   sessionPlanFile,
   sessionTranscriptPathSidecar,
-  sessionPlanValidationStatusFile,
 } from "../../../src/utils/paths.js";
 
 function planBody(): string {
@@ -68,13 +66,6 @@ describe("runCreatePlanfileAgent", () => {
       expect(written).toMatch(/^Plan Name: created-plan/);
       expect(written).toContain(`Planfile Path: ${planPath}\nPlan Name: created-plan`);
       expect(written).not.toContain("stale-name");
-      expect(JSON.parse(fs.readFileSync(sessionCurrentPlanFile(sessionDir), "utf-8"))).toEqual({
-        kind: "file",
-        path: planPath,
-        planName: "created-plan",
-      });
-      const status = JSON.parse(fs.readFileSync(sessionPlanValidationStatusFile(sessionDir), "utf-8"));
-      expect(Object.values(status)[0]).toMatchObject({ status: "pass", planPath });
     } finally {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
       if (previousProjectDir === undefined) {
@@ -110,7 +101,6 @@ describe("runCreatePlanfileAgent", () => {
       expect(result).not.toContain("<proposed_plan>");
       expect(result).not.toContain("Do not summarize it or replace it with only the plan name, planfile path, or validation status.");
       expect(fs.existsSync(sessionPlanFile(sessionDir, "continue-workflow-plan"))).toBe(true);
-      expect(fs.existsSync(sessionCurrentPlanFile(sessionDir))).toBe(true);
     } finally {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
       if (previousProjectDir === undefined) {
@@ -218,7 +208,6 @@ describe("runCreatePlanfileAgent", () => {
       }, { signal: controller.signal })).rejects.toThrow("Operation cancelled");
 
       expect(fs.existsSync(sessionPlanFile(sessionDir, "cancelled-plan"))).toBe(false);
-      expect(fs.existsSync(sessionCurrentPlanFile(sessionDir))).toBe(false);
     } finally {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
       if (previousProjectDir === undefined) {
@@ -253,7 +242,6 @@ describe("runCreatePlanfileAgent", () => {
       expect(result).toContain("Do not call create_planfile again for this plan");
       expect(result).toContain(activeSpec().mcpWireName("validate_plan"));
       expect(fs.existsSync(sessionPlanFile(sessionDir, "failing-plan"))).toBe(true);
-      expect(fs.existsSync(sessionCurrentPlanFile(sessionDir))).toBe(false);
     } finally {
       if (sessionDir) fs.rmSync(sessionDir, { recursive: true, force: true });
       if (previousProjectDir === undefined) {

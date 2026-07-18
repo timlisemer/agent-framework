@@ -42,7 +42,7 @@ describe("recentMessagesRule", () => {
     const result = await recentMessagesRule.check(makeCtx());
 
     expect(mockReadTranscriptExact).toHaveBeenCalledWith("/tmp/transcript.jsonl", {
-      counts: { user: 3 },
+      counts: { user: { count: 3 } },
       excludeSlashCommandPrompts: true,
     });
     expect(result).toHaveProperty("llmContext");

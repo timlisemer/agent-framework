@@ -50,6 +50,20 @@ describe("Codex canonicalizeToolCall", () => {
     });
   });
 
+  it("canonicalizes interactive PTY input as continuation shell work", () => {
+    expect(canonicalizeToolCall("write_stdin", {
+      session_id: 42,
+      chars: "rm -rf ./generated\n",
+      yield_time_ms: 1_000,
+    })).toEqual({
+      toolName: "Bash",
+      toolInput: {
+        command: "rm -rf ./generated\n",
+        continuation_session_id: 42,
+      },
+    });
+  });
+
   it("distinguishes MCP continuation waits from agent waits", () => {
     expect(canonicalizeToolCall("wait", { cell_id: "cell-1" })).toEqual({
       toolName: "Wait",

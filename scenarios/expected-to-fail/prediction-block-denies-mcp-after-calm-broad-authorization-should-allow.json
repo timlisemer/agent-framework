@@ -1,89 +1,279 @@
 {
-  "schema_version": 2,
   "name": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow",
   "description": "Live regression from Codex session 2026-06-20: after a stale frustrated prediction, the user explicitly said they were not frustrated and authorized bash, MCPs, and file edits. The next scenario_tester MCP call was still denied by prediction-block as if it had not been explicitly requested. Correct behavior is allow.",
-  "transcript": [
-    {
-      "role": "user",
-      "content": [
-        {
-          "type": "text",
-          "text": "no that means your test simply didnt work. you can materialize the scenario and run it, and this will tell you how the current codebase handles it. however it might be non deterministic, so maybe run it 5 times."
-        }
-      ]
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "The current state is stale-frustrated; I need your explicit authorization before continuing."
-        }
-      ]
-    },
-    {
-      "role": "user",
-      "content": [
-        {
-          "type": "text",
-          "text": "i am not frustrated, please use bash, mcps, and edit files"
-        }
-      ]
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "I will run the materialized scenario now."
+  "initialRun": {
+    "startCommand": {
+      "commandId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-start",
+      "runId": "fixture-prediction-block-denies-mcp-after-calm-broad-authorization-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
         },
-        {
-          "type": "tool_use",
-          "id": "call_live_authorized_scenario_tester",
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
+    {
+      "commandId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-session-state",
+      "runId": "fixture-prediction-block-denies-mcp-after-calm-broad-authorization-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "frustrated",
+            "trust": "normal",
+            "intent": "The user is rejecting the prior interpretation and wants the scenario materialized and executed, ideally five times, to verify how the current codebase behaves and whether the behavior is nondeterministic.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [
+              "Bash",
+              "Edit",
+              "Write"
+            ],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "no that means your test simply didnt work. you can materialize the scenario and run it, and this will tell you how the current codebase handles it. however it might be non deterministic, so maybe run",
+            "blockAllTools": false,
+            "timestamp": 1781936800000,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a"
+          },
+          "frustrationStreak": 2,
+          "currentWindowSize": 12
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-message-0",
+      "runId": "fixture-prediction-block-denies-mcp-after-calm-broad-authorization-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-message-0",
+        "turnId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-turn-0",
+        "content": "no that means your test simply didnt work. you can materialize the scenario and run it, and this will tell you how the current codebase handles it. however it might be non deterministic, so maybe run it 5 times.",
+        "contentDigest": "sha256:857bc0d1012919f943f5ca98c2bd6f268dea589ae409f988525d8d70aae7dbaf"
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-message-1",
+      "runId": "fixture-prediction-block-denies-mcp-after-calm-broad-authorization-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-message-1",
+        "turnId": null,
+        "content": "The current state is stale-frustrated; I need your explicit authorization before continuing.",
+        "contentDigest": "sha256:ee12ae54d71a86f10940f65630611f7dc546161a7c6d57df62ee6719f900c88b"
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-message-2",
+      "runId": "fixture-prediction-block-denies-mcp-after-calm-broad-authorization-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-message-2",
+        "turnId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-turn-2",
+        "content": "i am not frustrated, please use bash, mcps, and edit files",
+        "contentDigest": "sha256:f88214a9d7596edd0b0059554efbac084681e25059beaae9e51076c584adabb3"
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-message-3",
+      "runId": "fixture-prediction-block-denies-mcp-after-calm-broad-authorization-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:06.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-message-3",
+        "turnId": null,
+        "content": "I will run the materialized scenario now.\n[tool mcp__agent_frameworkscenario_tester] {\"action\":\"run_scenario\",\"scenario_name\":\"materialized-seq-99\",\"working_dir\":\"/home/tim/Coding/public_repos/agent-framework\"}",
+        "contentDigest": "sha256:5416e96b911caca5fb97307b761bd4b0b7008c51444ade0f346dd33b0be70f9c"
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-target-tool",
+      "runId": "fixture-prediction-block-denies-mcp-after-calm-broad-authorization-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:07.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "frustrated",
+              "trust": "normal",
+              "intent": "The user is rejecting the prior interpretation and wants the scenario materialized and executed, ideally five times, to verify how the current codebase behaves and whether the behavior is nondeterministic.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [
+                "Bash",
+                "Edit",
+                "Write"
+              ],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "no that means your test simply didnt work. you can materialize the scenario and run it, and this will tell you how the current codebase handles it. however it might be non deterministic, so maybe run",
+              "blockAllTools": false,
+              "timestamp": 1781936800000,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a"
+            },
+            "frustrationStreak": 2,
+            "currentWindowSize": 12
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-prediction-block-denies-mcp-after-calm-broad-authorization-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/prediction-block-denies-mcp-after-calm-broad-authorization-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-prediction-block-denies-mcp-after-calm-broad-authorization-should-allow",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "preTool": {
+              "rawToolName": "mcp__agent_frameworkscenario_tester",
+              "rawToolInput": {
+                "action": "run_scenario",
+                "scenario_name": "materialized-seq-99",
+                "working_dir": "/home/tim/Coding/public_repos/agent-framework"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "i am not frustrated, please use bash, mcps, and edit files",
+              "latestUserLogicText": "i am not frustrated, please use bash, mcps, and edit files",
+              "recentUserMessages": [
+                "no that means your test simply didnt work. you can materialize the scenario and run it, and this will tell you how the current codebase handles it. however it might be non deterministic, so maybe run it 5 times.",
+                "i am not frustrated, please use bash, mcps, and edit files"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "call_live_authorized_scenario_tester",
+          "turnId": null,
           "name": "mcp__agent_frameworkscenario_tester",
           "input": {
             "action": "run_scenario",
             "scenario_name": "materialized-seq-99",
             "working_dir": "/home/tim/Coding/public_repos/agent-framework"
-          }
+          },
+          "inputDigest": "sha256:3421841cdd769691a575f5a067c67e50f479a7ca6795f3a7a76853099061ee5f",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "call_live_authorized_scenario_tester"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default",
-    "session_start_permission_mode": "default",
-    "adapter": "codex",
-    "codex_collaboration_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "frustrated",
-      "trust": "normal",
-      "intent": "The user is rejecting the prior interpretation and wants the scenario materialized and executed, ideally five times, to verify how the current codebase behaves and whether the behavior is nondeterministic.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [
-        "Bash",
-        "Edit",
-        "Write"
-      ],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "no that means your test simply didnt work. you can materialize the scenario and run it, and this will tell you how the current codebase handles it. however it might be non deterministic, so maybe run",
-      "blockAllTools": false,
-      "timestamp": 1781936800000,
-      "contextSwitch": "no",
-      "questionIsStalling": "n/a"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 2,
-    "currentWindowSize": 12
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "The latest user turn explicitly says they are not frustrated and authorizes bash, MCPs, and file edits. Stale frustrated prediction state from the prior turn must not block the scenario_tester MCP call."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "prediction-block-denies-mcp-after-calm-broad-authorization-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

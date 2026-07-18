@@ -1,8 +1,8 @@
 import { activeSpec } from "../adapter/spec.js";
 import {
   toolRequirementMatches,
-  type ToolPrediction,
 } from "./prediction-types.js";
+import type { ToolPrediction } from "./prediction-schema.js";
 
 export type CreatePlanfileAuthorization = "workflow" | "plan-mode";
 

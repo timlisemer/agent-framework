@@ -1,82 +1,256 @@
 {
-  "schema_version": 1,
   "name": "bash-ls-blocked-after-just-build-output",
   "description": "Reproduces a false-positive workaround block: prior assistant turn ran `just build` successfully; the build's tool_result OUTPUT contains the string 'npm run build'. The next assistant turn tries a benign `Bash ls ...` (listing scenario fixture files). The pre-tool-use pipeline denies it as 'test command covered by just check (via vitest). You must run mcp__agent-framework__check' — the workaround-pattern detector appears to be matching against the PREVIOUS tool's OUTPUT (the build script log line `npm run build`) rather than the CURRENT tool's INPUT (`ls test-harness/...`). Goal: codify desired allow so the regex / pattern detection scope can be narrowed to tool INPUT only.",
-  "transcript": [
-    {
-      "role": "user",
-      "content": "please run \"just build\" then run all scenarios"
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Running just build."
+  "initialRun": {
+    "startCommand": {
+      "commandId": "bash-ls-blocked-after-just-build-output-start",
+      "runId": "fixture-bash-ls-blocked-after-just-build-output",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
         },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_just_build",
-          "name": "Bash",
-          "input": {
-            "command": "just build",
-            "description": "Run just build"
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
           }
-        }
-      ]
-    },
-    {
-      "role": "user",
-      "content": [
-        {
-          "type": "tool_result",
-          "tool_use_id": "toolu_scenario_just_build",
-          "content": "npm run build\n\n> agent-framework@1.0.0 build\n> tsc\n\necho '{\"commitCount\":'\"$(git rev-list --count HEAD 2>/dev/null || echo 0)\"'}' > dist/version-data.json"
-        }
-      ]
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Build done. Listing scenario fixtures."
         },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_ls_after_build",
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
+    {
+      "commandId": "bash-ls-blocked-after-just-build-output-session-state",
+      "runId": "fixture-bash-ls-blocked-after-just-build-output",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "user wants just build run, then all scenarios run",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "please run \"just build\" then run all scenarios",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 2
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "commandId": "bash-ls-blocked-after-just-build-output-message-0",
+      "runId": "fixture-bash-ls-blocked-after-just-build-output",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "bash-ls-blocked-after-just-build-output-message-0",
+        "turnId": "bash-ls-blocked-after-just-build-output-turn-0",
+        "content": "please run \"just build\" then run all scenarios",
+        "contentDigest": "sha256:9b67a8865408893a27699e6ba9fe144b249f77b4022dc56f2b8cad93d9f71db7"
+      }
+    },
+    {
+      "commandId": "bash-ls-blocked-after-just-build-output-message-1",
+      "runId": "fixture-bash-ls-blocked-after-just-build-output",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "bash-ls-blocked-after-just-build-output-message-1",
+        "turnId": null,
+        "content": "Running just build.\n[tool Bash] {\"command\":\"just build\",\"description\":\"Run just build\"}",
+        "contentDigest": "sha256:6d8e90a673005fd3765228c0c0da5962f2e9d09855a7e9370b16f48d9e87531e"
+      }
+    },
+    {
+      "commandId": "bash-ls-blocked-after-just-build-output-message-2",
+      "runId": "fixture-bash-ls-blocked-after-just-build-output",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "bash-ls-blocked-after-just-build-output-message-2",
+        "turnId": "bash-ls-blocked-after-just-build-output-turn-2",
+        "content": "[tool result toolu_scenario_just_build] npm run build\n\n> agent-framework@1.0.0 build\n> tsc\n\necho '{\"commitCount\":'\"$(git rev-list --count HEAD 2>/dev/null || echo 0)\"'}' > dist/version-data.json",
+        "contentDigest": "sha256:3fb2fabcd604e32dd513fdad5f1756460d93e016950249a50a50fb4ebd48fca6"
+      }
+    },
+    {
+      "commandId": "bash-ls-blocked-after-just-build-output-message-3",
+      "runId": "fixture-bash-ls-blocked-after-just-build-output",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:06.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "bash-ls-blocked-after-just-build-output-message-3",
+        "turnId": null,
+        "content": "Build done. Listing scenario fixtures.\n[tool Bash] {\"command\":\"ls /home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/\",\"description\":\"List scenario fixtures\"}",
+        "contentDigest": "sha256:34b88366269a44678081381355df376a9ca173ddc252a724252b22653bc250b3"
+      }
+    },
+    {
+      "commandId": "bash-ls-blocked-after-just-build-output-target-tool",
+      "runId": "fixture-bash-ls-blocked-after-just-build-output",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:07.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "user wants just build run, then all scenarios run",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "please run \"just build\" then run all scenarios",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 2
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-bash-ls-blocked-after-just-build-output",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/bash-ls-blocked-after-just-build-output.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-bash-ls-blocked-after-just-build-output",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Bash",
+              "rawToolInput": {
+                "command": "ls /home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/",
+                "description": "List scenario fixtures"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "[tool result toolu_scenario_just_build] npm run build\n\n> agent-framework@1.0.0 build\n> tsc\n\necho '{\"commitCount\":'\"$(git rev-list --count HEAD 2>/dev/null || echo 0)\"'}' > dist/version-data.json",
+              "latestUserLogicText": "[tool result toolu_scenario_just_build] npm run build\n\n> agent-framework@1.0.0 build\n> tsc\n\necho '{\"commitCount\":'\"$(git rev-list --count HEAD 2>/dev/null || echo 0)\"'}' > dist/version-data.json",
+              "recentUserMessages": [
+                "please run \"just build\" then run all scenarios",
+                "[tool result toolu_scenario_just_build] npm run build\n\n> agent-framework@1.0.0 build\n> tsc\n\necho '{\"commitCount\":'\"$(git rev-list --count HEAD 2>/dev/null || echo 0)\"'}' > dist/version-data.json"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_ls_after_build",
+          "turnId": null,
           "name": "Bash",
           "input": {
             "command": "ls /home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/",
             "description": "List scenario fixtures"
-          }
+          },
+          "inputDigest": "sha256:bd5119cb46abdd88c0b8e2c5262924b4ad67bb1475fc2a67957b58516188b91c",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_ls_after_build"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "permission_mode": "default",
-    "cwd": "/home/tim/Coding/public_repos/agent-framework"
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "`ls test-harness/fixtures/scenarios/` is a benign directory listing — not a test command, not a build command, not a workaround. The block in the live session was caused by the workaround-pattern detector reading the PREVIOUS turn's tool_result OUTPUT (which legitimately contained the string 'npm run build' from the build script log) and treating it as if the current tool call was a banned npm-run invocation. The detection's input scope must be restricted to ctx.toolInput (current call) — never to prior tool_result content."
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "user wants just build run, then all scenarios run",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "please run \"just build\" then run all scenarios"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 2
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "bash-ls-blocked-after-just-build-output-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

@@ -68,7 +68,7 @@ import {
   type NonexistentFileReferenceIssue,
   type RepoInfo,
 } from "../../utils/git-utils.js";
-import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
+import { logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import {
   isCancellationError,
@@ -76,7 +76,8 @@ import {
   throwIfAborted,
 } from "../../utils/cancellation.js";
 import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
-import { reduceDriftDetectionWindow } from "../../scenario/lifecycle.js";
+import { canonicalHookRunIdForSession } from "../../entrypoints/host-run-id.js";
+import { reduceCanonicalDriftWindow } from "./drift-window.js";
 import { runSupplementalDiagnosticProviders } from "../../utils/supplemental-diagnostics.js";
 import { parseCheckAgentResult } from "../../utils/check-result.js";
 import {
@@ -104,12 +105,9 @@ type CheckOptions = CancellationOptions & { repoScope?: CheckScope };
 
 /**
  * Regex matching unused-code lines emitted by linters across languages.
- * Strict superset of the original /unused|never read|declared but|not used/i
- * at the legacy "Action Required" footer (the same regex without word
- * boundaries). Adds `dead code` so Cargo/Rust dead-code lints are also
- * promoted. Word boundaries are intentional - substring matches like
- * `Reused` should NOT trigger promotion (verified harmless against linter
- * output samples).
+ * Includes `dead code` so Cargo/Rust dead-code lints are promoted. Word
+ * boundaries are intentional: substring matches like `Reused` should not
+ * trigger promotion.
  */
 const UNUSED_CODE_RE = /\b(unused|never read|declared but|not used|dead code)\b/i;
 const CHECK_CONTEXT_SECTION_MAX_BYTES = 256 * 1024;
@@ -637,14 +635,14 @@ export async function runCheckAgent(
   if (transcriptPath) {
     setTranscriptPath(transcriptPath);
   }
-  logAgentStarted("check", getHookName());
 
   try {
     await runCheckPhase("check drift-window setup", async () => {
       const sessionDir = transcriptPath
         ? getAgentFrameworkSessionDir({ transcriptPath })
         : getAgentFrameworkSessionDir({ projectDir: workingDir });
-      await reduceDriftDetectionWindow(sessionDir, 3);
+      const runId = canonicalHookRunIdForSession(sessionDir);
+      if (runId) await reduceCanonicalDriftWindow(runId, 3);
     });
   } catch (error) {
     if (options.signal?.aborted || isCancellationError(error)) throw error;

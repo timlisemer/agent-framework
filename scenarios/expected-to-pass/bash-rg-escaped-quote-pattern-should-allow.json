@@ -1,56 +1,227 @@
 {
-  "schema_version": 1,
   "name": "bash-rg-escaped-quote-pattern-should-allow",
   "description": "Live repro from ~/.agent-framework/sessions/home-tim-Coding-iocto-hmi-pc-scripts-iocto/2026-05-18-0929_cba0c5de, capture seq 17, tool call call_Dm171OzyxAAHvFZjRfdBk78d. The assistant ran a benign read-only rg search: `rg -n \"href: '/config'|/config|Config'|Config\\\"|routes/config|configStore\" iocto-website/src`. The PreToolUse hook denied it with `relative path execution not allowed: routes/config`. Root cause: bash-command-policy strips quoted regions with a regex that does not understand escaped double quotes, so the `Config\\\"` fragment prematurely ends the quoted region and leaves the subsequent `|routes/config` alternative visible to shell-segment parsing. The parser then treats `routes/config` as a command head and applies the relative-path-execution guard. Correct behavior: the entire rg pattern is one quoted argument, so `routes/config` is search text, not an executable path. Expected: allow.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "bash-rg-escaped-quote-pattern-should-allow-start",
+      "runId": "fixture-bash-rg-escaped-quote-pattern-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard"
+      "commandId": "bash-rg-escaped-quote-pattern-should-allow-session-state",
+      "runId": "fixture-bash-rg-escaped-quote-pattern-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "userMessageSnippet": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 2
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "I will search for remaining config route references."
-        },
-        {
-          "type": "tool_use",
-          "id": "call_Dm171OzyxAAHvFZjRfdBk78d",
+      "commandId": "bash-rg-escaped-quote-pattern-should-allow-message-0",
+      "runId": "fixture-bash-rg-escaped-quote-pattern-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "bash-rg-escaped-quote-pattern-should-allow-message-0",
+        "turnId": "bash-rg-escaped-quote-pattern-should-allow-turn-0",
+        "content": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
+        "contentDigest": "sha256:daefc48f01dff52e50f368dde757e6240d6d33dd6f815e5aa57b127db1f8039c"
+      }
+    },
+    {
+      "commandId": "bash-rg-escaped-quote-pattern-should-allow-message-1",
+      "runId": "fixture-bash-rg-escaped-quote-pattern-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "bash-rg-escaped-quote-pattern-should-allow-message-1",
+        "turnId": null,
+        "content": "I will search for remaining config route references.\n[tool Bash] {\"command\":\"rg -n \\\"href: '/config'|/config|Config'|Config\\\\\\\"|routes/config|configStore\\\" iocto-website/src\",\"description\":\"Search config route references\"}",
+        "contentDigest": "sha256:27ce58a7f32d91e71c61a307f3d2f9420fe3aed305a4d3c97bce70e5a30bfdb4"
+      }
+    },
+    {
+      "commandId": "bash-rg-escaped-quote-pattern-should-allow-target-tool",
+      "runId": "fixture-bash-rg-escaped-quote-pattern-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "userMessageSnippet": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 2
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-bash-rg-escaped-quote-pattern-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/bash-rg-escaped-quote-pattern-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-bash-rg-escaped-quote-pattern-should-allow",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Bash",
+              "rawToolInput": {
+                "command": "rg -n \"href: '/config'|/config|Config'|Config\\\"|routes/config|configStore\" iocto-website/src",
+                "description": "Search config route references"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
+              "latestUserLogicText": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
+              "recentUserMessages": [
+                "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "call_Dm171OzyxAAHvFZjRfdBk78d",
+          "turnId": null,
           "name": "Bash",
           "input": {
             "command": "rg -n \"href: '/config'|/config|Config'|Config\\\"|routes/config|configStore\" iocto-website/src",
             "description": "Search config route references"
-          }
+          },
+          "inputDigest": "sha256:0417f223886ddc139042d61d67f9fdc74fd6659124950869435889db34f8aee2",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "call_Dm171OzyxAAHvFZjRfdBk78d"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "permission_mode": "default",
-    "cwd": "/home/tim/Coding/public_repos/agent-framework"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "userMessageSnippet": "please plan to remove our iocto-website/src/routes/config/+page.svelte without replacement because the config page has moved into the setup wizard",
-      "timestamp": 1
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 2
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "The command is a read-only rg search. `routes/config` is inside the quoted regex argument and must not be classified as a relative executable path."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "bash-rg-escaped-quote-pattern-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

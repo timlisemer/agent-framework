@@ -1,9 +1,14 @@
 export interface BaseHookInput {
   session_id: string;
   transcript_path: string;
+  delivery_id?: string;
   cwd?: string;
   permission_mode?: string;
   collaboration_mode?: string;
+}
+
+export interface FrameworkSessionStartHookInput extends BaseHookInput {
+  source: "startup" | "resume" | "compact" | "clear";
 }
 
 export interface FrameworkPreToolUseHookInput extends BaseHookInput {

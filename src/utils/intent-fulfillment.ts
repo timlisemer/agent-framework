@@ -1,5 +1,5 @@
-import type { ToolPrediction } from "./prediction-types.js";
-import type { ToolLogEntry } from "./session-store.js";
+import type { ToolPrediction } from "./prediction-schema.js";
+import type { ToolLogEntry } from "./tool-log-types.js";
 
 export interface FulfillmentEvidence {
   tool: string;
@@ -47,7 +47,7 @@ export function detectIntentFulfillment(
 ): IntentFulfillmentSignal | null {
   if (!prediction.intent) return null;
   if (toolLog.length === 0) return null;
-  const cutoff = prediction.timestamp ?? 0;
+  const cutoff = prediction.timestamp;
   const after = toolLog.filter((e) => e.ts > cutoff);
   if (after.length === 0) return null;
 
@@ -68,6 +68,14 @@ export function detectIntentFulfillment(
 
   if (matchedKeywords.length === 0) return null;
   return { intent: prediction.intent, matchedKeywords, evidence, predictionTimestamp: cutoff };
+}
+
+/** Apply the canonical recent-history window before fulfillment detection. */
+export function detectRecentIntentFulfillment(
+  prediction: ToolPrediction,
+  toolLog: readonly ToolLogEntry[],
+): IntentFulfillmentSignal | null {
+  return detectIntentFulfillment(prediction, toolLog.slice(-50));
 }
 
 export function formatIntentFulfillment(s: IntentFulfillmentSignal): string {

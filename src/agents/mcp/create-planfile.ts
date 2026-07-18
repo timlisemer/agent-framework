@@ -2,9 +2,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { activeSpec, mcpWireNameForText } from "../../adapter/spec.js";
 import { appendPlanfileValidationWorkflow, getPathToPlanfile } from "../../utils/planfile.js";
-import { getAgentFrameworkSessionDir, sessionCurrentPlanFile } from "../../utils/paths.js";
-import { writeJson } from "../../utils/file-io.js";
+import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
+import { isMissingFileError } from "../../utils/filesystem-errors.js";
 import {
   formatPlanValidationPassInstructions,
   validatePlanFileWithContract,
@@ -38,10 +38,6 @@ function normalizePlanContent(planName: string, planPath: string, content: strin
   return `Plan Name: ${planName}\n\n${body.trim()}\n\nPlanfile Path: ${planPath}\nPlan Name: ${planName}\n`;
 }
 
-function writeCurrentPlanSidecar(sessionDir: string, planPath: string, planName: string): void {
-  writeJson(sessionCurrentPlanFile(sessionDir), { kind: "file", path: planPath, planName });
-}
-
 export async function createPlanfileAndValidate(
   input: CreatePlanfileAndValidateInput,
   options: CancellationOptions = {},
@@ -69,9 +65,8 @@ export async function createPlanfileAndValidate(
     throwIfAborted(options.signal);
     try {
       previousContent = await fs.promises.readFile(planPath, "utf-8");
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT") throw err;
+    } catch (error) {
+      if (!isMissingFileError(error)) throw error;
     }
   }
 
@@ -107,10 +102,6 @@ export async function runCreatePlanfileAgent(
     existingPolicy: "reject",
   }, options);
   throwIfAborted(options.signal);
-  if (validation.status === "PASS") {
-    writeCurrentPlanSidecar(sessionDir, planPath, input.planName);
-  }
-
   const validatePlanWireName = mcpWireNameForText("validate_plan", input.content);
   const reasons = validation.reasons.length > 0 ? validation.reasons.join("\n") : "(none)";
   const failureReminder = validation.status === "FAIL"

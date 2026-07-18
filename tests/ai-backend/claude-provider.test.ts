@@ -1,21 +1,27 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  overlayPendingToolApprovals,
-  type PendingToolApproval,
-} from "../../src/ai-backend/provider.js";
-import {
-  createClaudeControlStreamState,
-  mapClaudeControlStreamMessage,
-  normalizeClaudeAiUsage,
-  recordClaudePlanUpdate,
   resolveClaudeTranscriptBinding,
   sanitizeClaudeEnv,
 } from "../../src/providers/claude-agent-runtime.js";
+import { normalizeClaudeAiUsage } from "../../adapters/claude/usage.js";
+import {
+  createClaudeControlStreamState,
+  claudePlanUpdateForTool,
+  mapClaudeControlStreamMessage,
+  recordClaudePlanUpdate,
+} from "../../adapters/claude/provider-events.js";
+import { withTemporaryTestRootSync } from "../helpers/temporary-root.js";
 
 describe("AI backend Claude provider helpers", () => {
+  it.each(["approve", "deny"])("publishes an ExitPlanMode update once before a %s decision", () => {
+    const state = createClaudeControlStreamState();
+    expect(claudePlanUpdateForTool(state, "ExitPlanMode", { plan: "Decide once" })).toMatchObject({
+      type: "planStateChanged",
+    });
+    expect(claudePlanUpdateForTool(state, "ExitPlanMode", { plan: "Decide once" })).toBeNull();
+  });
   it("maps OpenRouter credentials to Anthropic-compatible Claude env", () => {
     const env = sanitizeClaudeEnv({ OPENROUTER_API_KEY: "key" }, false);
 
@@ -53,7 +59,10 @@ describe("AI backend Claude provider helpers", () => {
     }, state);
 
     expect(mapped.events).toEqual([
-      { type: "plan.updated", state: { mode: "awaitingApproval", planText: "Do it", approved: false } },
+      {
+        type: "planStateChanged",
+        data: { mode: "awaitingApproval", planText: "Do it", approved: false },
+      },
     ]);
     expect(recordClaudePlanUpdate(state, "Do it")).toBe(false);
   });
@@ -77,6 +86,8 @@ describe("AI backend Claude provider helpers", () => {
 
     const mapped = mapClaudeControlStreamMessage({
       type: "result",
+      subtype: "success",
+      is_error: false,
       session_id: "native-1",
       usage: {
         input_tokens: 10,
@@ -95,64 +106,64 @@ describe("AI backend Claude provider helpers", () => {
     });
     expect(mapped.events).toEqual([]);
     expect(normalizeClaudeAiUsage(null)).toBeNull();
+    expect(normalizeClaudeAiUsage({}, {
+      "claude-sonnet": { cacheReadInputTokens: 7 },
+      "claude-haiku": { cacheReadInputTokens: 2 },
+    })).toMatchObject({ cachedTokens: 9 });
   });
 
-  it("overlays pending manual tool approval onto transcript snapshots", () => {
-    const pending: PendingToolApproval = {
-      id: "native-tool-1",
-      turnId: "turn-1",
-      name: "Read",
-      input: { text: "Read(file_path=\"src/index.ts\")" },
-      wait: { reason: "approval", since: "2026-06-20T10:00:00.000Z" },
-      createdAt: "2026-06-20T10:00:00.000Z",
-      updatedAt: "2026-06-20T10:00:00.000Z",
-    };
-    const runningProjection = {
-      transcript: [],
-      toolCalls: [{
-        id: "native-tool-1",
-        sequenceId: 1,
-        turnId: "turn-1",
-        name: "Read",
-        input: pending.input,
-        status: "running" as const,
-        wait: null,
-        output: [],
-        result: null,
-        processId: null,
-        progress: null,
-        elapsedMs: null,
-        createdAt: "2026-06-20T10:00:00.000Z",
-        updatedAt: "2026-06-20T10:00:00.000Z",
-        completedAt: null,
-      }],
-      providerPatch: {},
-      digest: "base",
-      agentFrameworkSessionDir: null,
-    };
+  it("maps gateway cache usage from per-model totals when direct usage omits it", () => {
+    const mapped = mapClaudeControlStreamMessage({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      usage: { input_tokens: 12, output_tokens: 5 },
+      modelUsage: {
+        "claude-sonnet": { cacheReadInputTokens: 8 },
+        "claude-haiku": { cacheReadInputTokens: 3 },
+      },
+    }, createClaudeControlStreamState());
 
-    expect(overlayPendingToolApprovals(runningProjection, [pending], "turn-1").toolCalls).toEqual([
-      expect.objectContaining({
-        id: "native-tool-1",
-        status: "waiting",
-        wait: pending.wait,
-        result: null,
-        completedAt: null,
-      }),
-    ]);
-    expect(overlayPendingToolApprovals({ ...runningProjection, toolCalls: [] }, [pending], "turn-1").toolCalls).toEqual([
-      expect.objectContaining({
-        id: "native-tool-1",
-        sequenceId: 1,
-        status: "waiting",
-        wait: pending.wait,
-      }),
-    ]);
+    expect(mapped.usage).toEqual({
+      promptTokens: 12,
+      cachedTokens: 11,
+      completionTokens: 5,
+      reasoningTokens: null,
+      totalTokens: 17,
+    });
+  });
+
+  it.each([
+    ["error_during_execution", false, ["tool process exited unexpectedly"]],
+    ["error_max_turns", false, []],
+    ["error_max_budget_usd", false, []],
+    ["error_max_structured_output_retries", false, []],
+    ["success", true, []],
+    ["success", false, ["success result carried an SDK error"]],
+  ])("maps an erroneous Claude %s result to a fatal runtime error", (subtype, isError, errors) => {
+    const mapped = mapClaudeControlStreamMessage({
+      type: "result",
+      subtype,
+      is_error: isError,
+      errors,
+      usage: { input_tokens: 2, output_tokens: 1 },
+    }, createClaudeControlStreamState());
+
+    expect(mapped).toMatchObject({
+      terminal: true,
+      events: [{
+        type: "runtimeErrorObserved",
+        data: {
+          code: "runtime_error",
+          recoverable: false,
+          metadata: { claudeResultSubtype: subtype, errors },
+        },
+      }],
+    });
   });
 
   it("resolves a Claude transcript by native session id under a runtime home", () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-claude-binding-"));
-    try {
+    withTemporaryTestRootSync("agent-framework-claude-binding-", (home) => {
       const transcriptPath = path.join(home, "projects", "repo", "session.jsonl");
       fs.mkdirSync(path.dirname(transcriptPath), { recursive: true });
       fs.writeFileSync(transcriptPath, `${JSON.stringify({
@@ -167,8 +178,6 @@ describe("AI backend Claude provider helpers", () => {
         sessionId: "native-1",
         workingDir: "/repo",
       })).toBe(transcriptPath);
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-    }
+    });
   });
 });

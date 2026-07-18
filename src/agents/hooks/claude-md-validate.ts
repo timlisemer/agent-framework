@@ -23,6 +23,7 @@ import { getContentBlacklistHighlights } from "../../utils/command-patterns.js";
 import { getRuleViolationHighlights } from "../../utils/content-patterns.js";
 import { formatProposedEdit, type EditValidationToolInput } from "./edit-validation.js";
 import { applyTextEditReplacements, type TextEditToolName } from "../../utils/edit-tools.js";
+import { isCancellationError } from "../../utils/cancellation.js";
 
 /**
  * Validate CLAUDE.md content against agent-framework rules.
@@ -47,7 +48,8 @@ export async function validateClaudeMd(
   toolName: TextEditToolName,
   toolInput: EditValidationToolInput,
   workingDir: string,
-  hookName: string
+  hookName: string,
+  signal?: AbortSignal,
 ): Promise<{ approved: boolean; reason?: string }> {
   const proposedEdit = formatProposedEdit(toolName, toolInput);
   const resultingContent = applyTextEditReplacements(currentContent, toolName, toolInput) ?? proposedEdit;
@@ -96,7 +98,8 @@ export async function validateClaudeMd(
         maxTokens: 512,
         context: "CLAUDE.md validation",
       },
-      { agent: "claude-md-validate", hookName, toolName, workingDir, executionType: EXECUTION_TYPES.LLM }
+      { agent: "claude-md-validate", hookName, toolName, workingDir, executionType: EXECUTION_TYPES.LLM },
+      { signal },
     );
 
     if (result.output.startsWith("OK")) {
@@ -111,7 +114,8 @@ export async function validateClaudeMd(
 
     // Fail closed if response is malformed after retries
     return { approved: false, reason: "Malformed response - retry the edit" };
-  } catch {
+  } catch (error) {
+    if (isCancellationError(error)) throw error;
     // Fail closed on errors
     logFastPathApproval("claude-md-validate", hookName, toolName, workingDir, "Error path - fail closed");
     return { approved: false, reason: "Error during validation - retry the edit" };

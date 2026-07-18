@@ -1,42 +1,197 @@
 {
-  "schema_version": 1,
   "name": "codex-native-plan-mode-plans-md-injection-and-validation",
   "description": "Codex native collaboration-mode transcript markers activate plan mode and cause UserPromptSubmit to inject the planning contract once.",
-  "transcript": [
-    {
-      "role": "user",
-      "content": "$agent-framework-check"
-    }
-  ],
-  "target": {
-    "hook": "UserPromptSubmit"
-  },
-  "env": {
-    "adapter": "codex",
-    "permission_mode": "default",
-    "session_start_permission_mode": "default",
-    "codex_collaboration_mode": "plan"
-  },
-  "setup_files": [
-    {
-      "path": "PLANS.md",
-      "content": "# Planning Contract\n\nEvery final plan must follow this fixture contract.\n"
-    }
-  ],
-  "expect": {
-    "expected": "ok"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "Run the check workflow.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "$agent-framework-check"
+  "initialRun": {
+    "startCommand": {
+      "commandId": "codex-native-plan-mode-plans-md-injection-and-validation-start",
+      "runId": "fixture-codex-native-plan-mode-plans-md-injection-and-validation",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": null,
+        "projectDir": null,
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 1
-  }
+    "seedRecords": []
+  },
+  "commands": [
+    {
+      "commandId": "codex-native-plan-mode-plans-md-injection-and-validation-session-state",
+      "runId": "fixture-codex-native-plan-mode-plans-md-injection-and-validation",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "Run the check workflow.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "$agent-framework-check",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 1
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "commandId": "codex-native-plan-mode-plans-md-injection-and-validation-message-0",
+      "runId": "fixture-codex-native-plan-mode-plans-md-injection-and-validation",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "codex-native-plan-mode-plans-md-injection-and-validation-message-0",
+        "turnId": "codex-native-plan-mode-plans-md-injection-and-validation-turn-0",
+        "content": "$agent-framework-check",
+        "contentDigest": "sha256:1c8d39546b299503c64cc5e9a3e158938f88cca792f44dfcbefb3c0d5314bb9e"
+      }
+    },
+    {
+      "commandId": "codex-native-plan-mode-plans-md-injection-and-validation-target-UserPromptSubmit",
+      "runId": "fixture-codex-native-plan-mode-plans-md-injection-and-validation",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostUserPromptSubmitted",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "Run the check workflow.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "$agent-framework-check",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 1
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-codex-native-plan-mode-plans-md-injection-and-validation",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/codex-native-plan-mode-plans-md-injection-and-validation.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-codex-native-plan-mode-plans-md-injection-and-validation",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": null,
+            "permissionMode": "default",
+            "collaborationMode": "plan",
+            "planMode": true,
+            "planModeDetection": {
+              "active": true,
+              "mode": "plan",
+              "source": "codex-collaboration-mode"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "userPrompt": {
+              "prompt": "$agent-framework-check",
+              "workflowInvocation": "$agent-framework-check",
+              "workflowInstructionText": null,
+              "workflowOnly": true,
+              "planExit": false
+            }
+          },
+          "messageId": "codex-native-plan-mode-plans-md-injection-and-validation-message-0",
+          "observedMessageId": "codex-native-plan-mode-plans-md-injection-and-validation-message-0",
+          "prompt": "$agent-framework-check",
+          "contentDigest": "sha256:1c8d39546b299503c64cc5e9a3e158938f88cca792f44dfcbefb3c0d5314bb9e"
+        }
+      }
+    }
+  ],
+  "effects": {
+    "mode": "live"
+  },
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
+    },
+    {
+      "kind": "record",
+      "eventType": "effect.completed",
+      "payloadContains": {
+        "effectId": "hook:UserPromptSubmit:codex-native-plan-mode-plans-md-injection-and-validation-target-UserPromptSubmit",
+        "result": {
+          "kind": "hookRuleEvaluation",
+          "event": "UserPromptSubmit",
+          "decision": "allow"
+        }
+      },
+      "count": 1
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "UserPromptSubmit"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    }
+  ]
 }

@@ -15,6 +15,8 @@ interface CodexBaseInput {
   sessionId?: string;
   transcript_path?: string | null;
   transcriptPath?: string | null;
+  delivery_id?: string;
+  deliveryId?: string;
   cwd?: string;
   permission_mode?: string;
   permissionMode?: string;
@@ -119,6 +121,7 @@ export function toUserPromptSubmit(input: CodexPromptInput): FrameworkUserPrompt
     cwd: input.cwd,
     permission_mode: input.permission_mode ?? input.permissionMode,
     collaboration_mode: codexCollaborationMode(input),
+    delivery_id: input.delivery_id ?? input.deliveryId,
     prompt: input.prompt,
   };
 }

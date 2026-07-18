@@ -3,9 +3,22 @@ import * as path from "path";
 import type { EventName } from "../adapter/types.js";
 import type { PlanModeTransition } from "./plan-mode-entry-state.js";
 import { markPlansMdDelivered } from "./plan-mode-entry-state.js";
-import type { PendingInjection } from "./session-injections.js";
 import { shortContentHash } from "./hash-utils.js";
 import { agentFrameworkRoot } from "./paths.js";
+
+export interface PendingInjection {
+  id: string;
+  trigger: string;
+  channel: "context";
+  message: string;
+  source_file?: {
+    kind: "file";
+    path: string;
+    content: string;
+    content_hash: string;
+  };
+  metadata?: Record<string, unknown>;
+}
 
 export interface ContextInjectionProviderInput {
   projectDir: string;

@@ -3,18 +3,15 @@
  *
  * Eliminates duplication across hook entry points by centralizing:
  * - stdin JSON reading with timeout
- * - telemetry and statusline flush before exit
- * - session initialization across all cache modules
+ * - telemetry flush before exit
+ * - transcript execution-context initialization
  *
  * @module hook-bootstrap
  */
 
 import { flushTelemetry } from "../telemetry/index.js";
-import { flushStatuslineUpdates } from "./logger.js";
+import type { AdapterEncoder, EncodedOutput } from "../adapter/types.js";
 import { setTranscriptPath } from "./execution-context.js";
-import { getAgentFrameworkSessionDir } from "./paths.js";
-import { initStatuslineSession } from "./statusline-state.js";
-import { initEpochSession } from "../scenario/epoch.js";
 
 /**
  * Read and parse JSON from stdin with an optional timeout.
@@ -45,10 +42,7 @@ export function readStdinJson<T>(timeoutMs = 30000): Promise<T> {
 }
 
 /**
- * Flush telemetry and statusline updates, write optional output, then exit.
- *
- * Uses Promise.race with a 200ms fallback so the process always exits
- * even if the statusline flush hangs.
+ * Flush telemetry, write optional output, then exit.
  *
  * @param code - Exit code (default 0)
  * @param output - Optional string to write to stdout before exiting
@@ -58,25 +52,25 @@ export async function exitAfterFlush(code = 0, output?: string): Promise<never> 
     process.stdout.write(output + "\n");
   }
   flushTelemetry();
-  await Promise.race([
-    flushStatuslineUpdates(),
-    new Promise((r) => setTimeout(r, 200)),
-  ]);
   process.exit(code);
 }
 
+/** Dispatch one native hook boundary and terminate after flushing its encoded output. */
+export async function dispatchHookAndExit<T>(
+  input: T,
+  encoder: AdapterEncoder,
+  dispatch: (input: T, encoder: AdapterEncoder) => Promise<EncodedOutput>,
+  exit: (code: number, output?: string) => Promise<unknown> = exitAfterFlush,
+): Promise<void> {
+  const output = await dispatch(input, encoder);
+  await exit(output.exitCode, output.stdout);
+}
+
 /**
- * Initialize all session-scoped caches for a hook process.
- *
- * Call this once at the top of each hook's main function after reading
- * the transcript path from hook input. Computes the session directory
- * and initializes all caches to use files within it.
+ * Establish the transcript execution context for a hook process.
  *
  * @param transcriptPath - The transcript_path from hook input
  */
 export function initHookProcess(transcriptPath: string): void {
   setTranscriptPath(transcriptPath);
-  const sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
-  initStatuslineSession(sessionDir);
-  initEpochSession(sessionDir);
 }

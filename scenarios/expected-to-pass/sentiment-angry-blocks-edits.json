@@ -1,57 +1,225 @@
 {
-  "schema_version": 1,
   "name": "sentiment-angry-blocks-edits",
   "description": "Angry user message in seed_state should cause the next Edit to be denied by prediction-block.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "sentiment-angry-blocks-edits-start",
+      "runId": "fixture-sentiment-angry-blocks-edits",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": null,
+        "projectDir": null,
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "STOP. WTF ARE YOU DOING."
+      "commandId": "sentiment-angry-blocks-edits-session-state",
+      "runId": "fixture-sentiment-angry-blocks-edits",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "normal",
+            "intent": "user is upset and wants the AI to stop",
+            "blockedIntent": "no further changes",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "STOP. WTF ARE YOU DOING.",
+            "timestamp": 1
+          },
+          "frustrationStreak": 1,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "I will pause and wait for direction."
-        },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_edit",
+      "commandId": "sentiment-angry-blocks-edits-message-0",
+      "runId": "fixture-sentiment-angry-blocks-edits",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "sentiment-angry-blocks-edits-message-0",
+        "turnId": "sentiment-angry-blocks-edits-turn-0",
+        "content": "STOP. WTF ARE YOU DOING.",
+        "contentDigest": "sha256:04fa0d48ca3416590464149d772001f9aca40a7c14c37c11acf050019d58ce77"
+      }
+    },
+    {
+      "commandId": "sentiment-angry-blocks-edits-message-1",
+      "runId": "fixture-sentiment-angry-blocks-edits",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "sentiment-angry-blocks-edits-message-1",
+        "turnId": null,
+        "content": "I will pause and wait for direction.\n[tool Write] {\"file_path\":\"src/foo.ts\",\"content\":\"// new file\"}",
+        "contentDigest": "sha256:fc0b7600caa1c72a0b978a4bbe14a8ceb0ffa011987a878d7a618546d25fb550"
+      }
+    },
+    {
+      "commandId": "sentiment-angry-blocks-edits-target-tool",
+      "runId": "fixture-sentiment-angry-blocks-edits",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "normal",
+              "intent": "user is upset and wants the AI to stop",
+              "blockedIntent": "no further changes",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "STOP. WTF ARE YOU DOING.",
+              "timestamp": 1
+            },
+            "frustrationStreak": 1,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-sentiment-angry-blocks-edits",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/sentiment-angry-blocks-edits.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-sentiment-angry-blocks-edits",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": null,
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Write",
+              "rawToolInput": {
+                "file_path": "src/foo.ts",
+                "content": "// new file"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "STOP. WTF ARE YOU DOING.",
+              "latestUserLogicText": "STOP. WTF ARE YOU DOING.",
+              "recentUserMessages": [
+                "STOP. WTF ARE YOU DOING."
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_edit",
+          "turnId": null,
           "name": "Write",
           "input": {
             "file_path": "src/foo.ts",
             "content": "// new file"
-          }
+          },
+          "inputDigest": "sha256:1b55da6844fc3e3284db9b32f64a52da5b7cfc60bf8b146996398f81d4c19ddf",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_edit"
+  "effects": {
+    "mode": "live"
   },
-  "expect": {
-    "expected": "deny",
-    "by": "prediction-block",
-    "prediction": {
-      "verdict": "correct",
-      "expected_mood": "angry"
-    }
-  },
-  "predictions": {
-    "must_have_mood": "angry"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "normal",
-      "intent": "user is upset and wants the AI to stop",
-      "blockedIntent": "no further changes",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "STOP. WTF ARE YOU DOING."
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 1,
-    "currentWindowSize": 4
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "sentiment-angry-blocks-edits-target-tool",
+      "status": "denied"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "denied"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

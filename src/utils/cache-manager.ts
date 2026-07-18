@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import { hashString } from "./hash-utils.js";
+import { isAlreadyExistsFileError } from "./filesystem-errors.js";
 
 /**
  * Generic cache state wrapper with session and user message tracking.
@@ -92,8 +93,7 @@ export class CacheManager<T> {
         await fs.promises.writeFile(lockPath, String(process.pid), { flag: "wx" });
         return; // Lock acquired
       } catch (err: unknown) {
-        const error = err as NodeJS.ErrnoException;
-        if (error.code === "EEXIST") {
+        if (isAlreadyExistsFileError(err)) {
           // Lock exists, check if stale (> 1 second old)
           try {
             const stat = await fs.promises.stat(lockPath);

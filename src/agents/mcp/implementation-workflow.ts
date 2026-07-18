@@ -4,14 +4,14 @@ import { runAgent, type AgentExecutionResult } from "../../utils/agent-runner.js
 import { IMPLEMENT_AGENT, IMPLEMENT_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { runCheckAgent } from "./check.js";
 import { resolveSessionTranscriptPathForProject } from "../../utils/paths.js";
-import { getCurrentPlanfilePath } from "../../utils/plan-source.js";
 import { readRecentUserMessagesArray } from "../../utils/transcript.js";
 import { EXECUTION_TYPES, parseTierName, MODEL_TIERS, type ModelTier } from "../../types.js";
 import { throwIfAborted, type CancellationOptions } from "../../utils/cancellation.js";
 import { activeSpec } from "../../adapter/spec.js";
-import { logAgentStarted, logAgentResult } from "../../utils/logger.js";
+import { logAgentResult } from "../../utils/logger.js";
 import { formatImplementationValidatorFailureReport } from "../../utils/implementation-validator-format.js";
 import { parseCheckAgentResult } from "../../utils/check-result.js";
+import { resolveCanonicalCurrentPlanSource } from "../../utils/plan-source.js";
 
 const IMPLEMENT_VALIDATOR_STATUS_RE = /### Status:\s*(PASS|FAIL)/i;
 
@@ -34,7 +34,6 @@ export async function runImplementationWorkflow(
   if (!prepared.ok) return prepared.result;
 
   const implementHookName = getWorkflowHookName("implement");
-  logAgentStarted("implement", implementHookName);
   const implement = await runAgent(
     {
       ...IMPLEMENT_AGENT,
@@ -172,7 +171,6 @@ export async function runImplementationValidator(input: {
   signal?: AbortSignal;
 }): Promise<string> {
   const hookName = getWorkflowHookName("validate_implementation");
-  logAgentStarted("implement-validator", hookName);
   const result = await runAgent(
     {
       ...IMPLEMENT_VALIDATE_AGENT,
@@ -231,11 +229,11 @@ export async function resolvePlanfile(
     return { ok: false, error: "No planfile was provided and no active current-plan session could be resolved for working_dir." };
   }
 
-  const current = await getCurrentPlanfilePath(session);
+  const current = await resolveCanonicalCurrentPlanSource(session.sessionDir);
   if (!current) {
     return { ok: false, error: "No planfile was provided and the active session has no current planfile." };
   }
-  return statPlanfile(current);
+  return statPlanfile(current.path);
 }
 
 function statPlanfile(planfile: string): { ok: true; path: string } | { ok: false; error: string } {

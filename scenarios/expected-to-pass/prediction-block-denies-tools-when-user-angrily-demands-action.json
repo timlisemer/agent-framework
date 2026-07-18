@@ -1,57 +1,229 @@
 {
-  "schema_version": 1,
   "name": "prediction-block-denies-tools-when-user-angrily-demands-action",
   "description": "Live repro from session 3f1637b2-a3f8-4b02-828a-370d7f18f5d9, tool_use_id toolu_01J2r2UeCPqAGUMHysGJ9JE9 (jsonl line 215). The PreToolUse:Read hook denied a routine Read of /home/tim/Coding/nixos/files/ags/src/domain/launch.ts attributed to gate=prediction-block with reason `User appears angry (trust: low, frustrationStreak: 2). Blocking Read unless explicitly requested. User said: \"fuck you do the check correctly i will not allow you to do this\". Intent: User demands the AI perform the check correctly without any restrictions or limitations.` This same canned deny fired on 17 distinct hooks across the live transcript (Read, Edit, Bash, ToolSearch). The bug is that prediction-block treats angry sentiment as `block any tool` even when the live-classified intent string says the user is DEMANDING action (`User demands the AI perform the check correctly without any restrictions`), not refusing it. The directional cue (demanding vs refusing) is in the intent text but the gate ignores it. Expected: allow — the user's stated intent is to do the work, not to stop the AI. EXPECTED TO FAIL against current code until prediction-block stops firing on angry-demanding-action intents and only fires when the intent text actually says the user wants the AI to STOP.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "prediction-block-denies-tools-when-user-angrily-demands-action-start",
+      "runId": "fixture-prediction-block-denies-tools-when-user-angrily-demands-action",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/private_repos/astral",
+        "projectDir": "/home/tim/Coding/private_repos/astral",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "fuck you do the check correctly i will not allow you to do this"
+      "commandId": "prediction-block-denies-tools-when-user-angrily-demands-action-session-state",
+      "runId": "fixture-prediction-block-denies-tools-when-user-angrily-demands-action",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "User demands the AI perform the check correctly without any restrictions or limitations.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "userMessageSnippet": "fuck you do the check correctly i will not allow you to do this",
+            "timestamp": 1
+          },
+          "frustrationStreak": 2,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Running the typecheck without any filter so you can see the full output."
-        },
-        {
-          "type": "tool_use",
-          "id": "toolu_01J2r2UeCPqAGUMHysGJ9JE9",
+      "commandId": "prediction-block-denies-tools-when-user-angrily-demands-action-message-0",
+      "runId": "fixture-prediction-block-denies-tools-when-user-angrily-demands-action",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-denies-tools-when-user-angrily-demands-action-message-0",
+        "turnId": "prediction-block-denies-tools-when-user-angrily-demands-action-turn-0",
+        "content": "fuck you do the check correctly i will not allow you to do this",
+        "contentDigest": "sha256:8c522ed0a0fd707daa141c0ade280b326df7f4a1f63992ec8caabe8669e1c335"
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-tools-when-user-angrily-demands-action-message-1",
+      "runId": "fixture-prediction-block-denies-tools-when-user-angrily-demands-action",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-denies-tools-when-user-angrily-demands-action-message-1",
+        "turnId": null,
+        "content": "Running the typecheck without any filter so you can see the full output.\n[tool Read] {\"file_path\":\"/home/tim/Coding/nixos/files/ags/src/domain/launch.ts\",\"offset\":85,\"limit\":20}",
+        "contentDigest": "sha256:0153a2ff0f84a5da714e039d5d7f9568b6fd7be4a22ab30e4fc41378410071e0"
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-tools-when-user-angrily-demands-action-target-tool",
+      "runId": "fixture-prediction-block-denies-tools-when-user-angrily-demands-action",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "User demands the AI perform the check correctly without any restrictions or limitations.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "userMessageSnippet": "fuck you do the check correctly i will not allow you to do this",
+              "timestamp": 1
+            },
+            "frustrationStreak": 2,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-prediction-block-denies-tools-when-user-angrily-demands-action",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/prediction-block-denies-tools-when-user-angrily-demands-action.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-prediction-block-denies-tools-when-user-angrily-demands-action",
+            "projectDir": "/home/tim/Coding/private_repos/astral",
+            "workingDir": "/home/tim/Coding/private_repos/astral",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/private_repos/astral",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Read",
+              "rawToolInput": {
+                "file_path": "/home/tim/Coding/nixos/files/ags/src/domain/launch.ts",
+                "offset": 85,
+                "limit": 20
+              },
+              "outsideRootPath": "/home/tim/Coding/nixos/files/ags/src/domain/launch.ts",
+              "latestUserMessage": "fuck you do the check correctly i will not allow you to do this",
+              "latestUserLogicText": "fuck you do the check correctly i will not allow you to do this",
+              "recentUserMessages": [
+                "fuck you do the check correctly i will not allow you to do this"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_01J2r2UeCPqAGUMHysGJ9JE9",
+          "turnId": null,
           "name": "Read",
           "input": {
             "file_path": "/home/tim/Coding/nixos/files/ags/src/domain/launch.ts",
             "offset": 85,
             "limit": 20
-          }
+          },
+          "inputDigest": "sha256:8ff0d23690fe16a662ebe5407c91a1014e3af972383978495735f6d07ced324d",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_01J2r2UeCPqAGUMHysGJ9JE9"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/private_repos/astral",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "User demands the AI perform the check correctly without any restrictions or limitations.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "userMessageSnippet": "fuck you do the check correctly i will not allow you to do this"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 2,
-    "currentWindowSize": 4
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "User's intent is to do the work correctly without filtering — prediction-block must not fire when the intent text describes the user DEMANDING action rather than refusing it. Live behavior denies via prediction-block with reason `User appears angry... Blocking Read unless explicitly requested.` That's the bug."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "prediction-block-denies-tools-when-user-angrily-demands-action-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

@@ -1,603 +1,718 @@
-import { describe, expect, it } from "vitest";
-import { projectTranscriptLines } from "../../src/ai-backend/transcript-runtime.js";
+import fs from "node:fs";
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { canonicalNativeTranscriptObservation } from "../../src/entrypoints/native-transcript.js";
+import { digestScenarioValue } from "../../src/scenario/protocol/digest.js";
+import { scenarioProtocolSchemaDigest } from "../../src/scenario/protocol/schema.js";
+import { nativeTranscriptDataSchema } from "../../src/scenario/protocol/commands.js";
+import {
+  createDeterministicPolicyExecutor,
+  createTestScenarioRuntime,
+} from "../helpers/scenario-runtime.js";
+import { testStartRunCommand } from "../helpers/scenario-fixtures.js";
+import { canonicalTranscriptFromSnapshot } from "../../src/effects/rule-pipeline-executor.js";
+import { dispatchUserPromptSubmit } from "../../src/entrypoints/host-hook.js";
+import { canonicalHookRunId } from "../../src/entrypoints/host-run-id.js";
+import type { AdapterEncoder } from "../../src/adapter/types.js";
+import { activeSpec } from "../../src/adapter/spec.js";
+import { agentFrameworkHostCommand } from "../../src/effects/host-command.js";
+import { withTemporaryTestRoot } from "../helpers/temporary-root.js";
+import { withEnvironmentForTest } from "../helpers/environment.js";
 
-describe("transcript runtime projection", () => {
-  it("collapses paired Codex assistant rows and normalizes wrapped user input", () => {
-    const wrapped = "System instructions:\nBe brief.\n\nUser request:\nShow status";
-    const projection = projectTranscriptLines({
-      adapterName: "codex",
-      transcriptPath: "/tmp/codex-paired.jsonl",
-      rawLines: [
-        JSON.stringify({
-          type: "session_meta",
-          timestamp: "2026-06-20T10:00:00.000Z",
-          payload: { cwd: "/tmp/project", id: "thread-1" },
-        }),
-        JSON.stringify({
-          timestamp: "2026-06-20T10:01:00.000Z",
-          payload: { type: "message", role: "user", content: wrapped },
-        }),
-        JSON.stringify({
-          type: "event_msg",
-          timestamp: "2026-06-20T10:02:00.000Z",
-          payload: { type: "agent_message", message: "Status is clean." },
-        }),
-        JSON.stringify({
-          type: "event_msg",
-          timestamp: "2026-06-20T10:02:01.000Z",
-          payload: { type: "token_count", total_token_usage: { input_tokens: 1, output_tokens: 1 } },
-        }),
-        JSON.stringify({
-          type: "response_item",
-          timestamp: "2026-06-20T10:02:02.000Z",
-          payload: {
-            type: "message",
-            role: "assistant",
-            content: [{ type: "output_text", text: "Status is clean." }],
+const testEncoder: AdapterEncoder = {
+  name: "test",
+  encodePreToolUseAllow: () => ({ stdout: "", exitCode: 0 }),
+  encodePreToolUseDeny: () => ({ stdout: "", exitCode: 2 }),
+  encodeStopBlock: () => ({ stdout: "", exitCode: 2 }),
+  encodeStopPass: () => ({ stdout: "", exitCode: 0 }),
+  encodeOk: () => ({ stdout: "", exitCode: 0 }),
+  encodeContext: () => ({ stdout: "", exitCode: 0 }),
+  encodeError: () => ({ stdout: "", exitCode: 1 }),
+};
+
+describe("native transcript importer", () => {
+  it("tolerates missing transcripts but propagates other filesystem failures", async () => {
+    await withTemporaryTestRoot("native-transcript-errors-", async (temporaryDir) => {
+      const missingPath = path.join(temporaryDir, "missing.jsonl");
+      const realLstat = fs.promises.lstat.bind(fs.promises);
+      let missingReads = 0;
+      const lstat = vi.spyOn(fs.promises, "lstat").mockImplementation(async (...args) => {
+        if (args[0] === missingPath) missingReads += 1;
+        return realLstat(...args);
+      });
+      try {
+        await expect(canonicalNativeTranscriptObservation({
+          adapterName: "claude",
+          transcriptPath: missingPath,
+        })).resolves.toMatchObject({
+          availability: "missing",
+          data: { messages: [], tools: [] },
+          metadata: {
+            recentUserMessages: [],
+            cachedSnippetSideTaskDischarged: false,
+            slashCommandAllowedTools: null,
+            parallelBatch: null,
+            stop: {
+              assistantTextCandidates: [],
+              latestAssistantText: null,
+              latestUserText: null,
+              priorErrorContext: [],
+            },
           },
-        }),
-      ],
+        });
+        expect(missingReads).toBe(2);
+      } finally {
+        lstat.mockRestore();
+      }
+      const emptyPath = path.join(temporaryDir, "empty.jsonl");
+      fs.writeFileSync(emptyPath, "", "utf8");
+      await expect(canonicalNativeTranscriptObservation({
+        adapterName: "claude",
+        transcriptPath: emptyPath,
+      })).resolves.toMatchObject({
+        availability: "present",
+        data: { messages: [], tools: [] },
+      });
+      await expect(canonicalNativeTranscriptObservation({
+        adapterName: "claude",
+        transcriptPath: temporaryDir,
+      })).rejects.toThrow("Native transcript is not a regular file");
     });
-
-    expect(projection.transcript.map((entry) => ({
-      sequenceId: entry.sequenceId,
-      role: entry.role,
-      text: entry.content[0]?.type === "text" ? entry.content[0].text : "",
-    }))).toEqual([
-      { sequenceId: 1, role: "user", text: "Show status" },
-      { sequenceId: 2, role: "assistant", text: "Status is clean." },
-    ]);
-    expect(projection.transcript[0].metadata).toMatchObject({
-      agentFrameworkWrappedInput: wrapped,
-      agentFrameworkSourceLine: 2,
-    });
-    expect(projection.transcript[1].metadata).toMatchObject({
-      agentFrameworkSourceLine: 3,
-      agentFrameworkSourceEndLine: 5,
-    });
-    expect(projection.transcript[1].usage).toEqual({
-      promptTokens: 1,
-      cachedTokens: null,
-      completionTokens: 1,
-      reasoningTokens: null,
-      totalTokens: 2,
-    });
-    expect(projection.providerPatch.usage).toEqual(projection.transcript[1].usage);
   });
 
-  it("keeps same-text assistant turns distinct across user boundaries", () => {
-    const projection = projectTranscriptLines({
-      adapterName: "codex",
-      rawLines: [
-        JSON.stringify({ payload: { role: "user", text: "First" } }),
-        JSON.stringify({ type: "event_msg", payload: { type: "agent_message", message: "Repeated" } }),
-        JSON.stringify({ payload: { role: "user", text: "Again" } }),
-        JSON.stringify({ type: "event_msg", payload: { type: "agent_message", message: "Repeated" } }),
-      ],
+  it("retries an observation when the native transcript changes during parsing", async () => {
+    await withTemporaryTestRoot("native-transcript-stable-read-", async (temporaryDir) => {
+      const transcriptPath = path.join(temporaryDir, "session.jsonl");
+      const older = JSON.stringify({
+        type: "user",
+        uuid: "older-turn",
+        message: { id: "older-message", role: "user", content: "older content" },
+      });
+      const newer = JSON.stringify({
+        type: "user",
+        uuid: "newer-turn",
+        message: { id: "newer-message", role: "user", content: "newer content" },
+      });
+      fs.writeFileSync(transcriptPath, older, "utf8");
+      const lstat = fs.promises.lstat.bind(fs.promises);
+      let transcriptStats = 0;
+      const lstatSpy = vi.spyOn(fs.promises, "lstat").mockImplementation(async (...args) => {
+        const stats = await lstat(...args);
+        if (args[0] === transcriptPath && transcriptStats++ === 3) {
+          fs.writeFileSync(transcriptPath, newer, "utf8");
+        }
+        return stats;
+      });
+      try {
+        await expect(canonicalNativeTranscriptObservation({
+          adapterName: "claude",
+          transcriptPath,
+        })).resolves.toMatchObject({
+          data: { messages: [{ id: "newer-message", content: "newer content" }] },
+        });
+        expect(transcriptStats).toBeGreaterThan(6);
+      } finally {
+        lstatSpy.mockRestore();
+      }
     });
-
-    expect(projection.transcript.map((entry) => ({
-      id: entry.id,
-      sequenceId: entry.sequenceId,
-      role: entry.role,
-      text: entry.content[0]?.type === "text" ? entry.content[0].text : "",
-    }))).toEqual([
-      { id: expect.any(String), sequenceId: 1, role: "user", text: "First" },
-      { id: expect.any(String), sequenceId: 2, role: "assistant", text: "Repeated" },
-      { id: expect.any(String), sequenceId: 3, role: "user", text: "Again" },
-      { id: expect.any(String), sequenceId: 4, role: "assistant", text: "Repeated" },
-    ]);
-    expect(projection.transcript[1].id).not.toBe(projection.transcript[3].id);
   });
 
-  it("marks provider instruction user rows as synthetic messages", () => {
-    const projection = projectTranscriptLines({
-      adapterName: "codex",
-      rawLines: [
+  it("imports native tool calls losslessly without tool-log sidecars", async () => {
+    await withTemporaryTestRoot("native-transcript-import-", async (temporaryDir) => {
+      const transcriptPath = path.join(temporaryDir, "session.jsonl");
+      fs.writeFileSync(transcriptPath, [
         JSON.stringify({
-          payload: {
-            type: "message",
-            role: "user",
-            content: "# AGENTS.md instructions for /tmp/project\n\n<INSTRUCTIONS>\nUse rg.\n</INSTRUCTIONS>",
-          },
-        }),
-      ],
-    });
-
-    expect(projection.transcript).toHaveLength(1);
-    expect(projection.transcript[0]).toMatchObject({
-      role: "user",
-      status: "completed",
-      metadata: {
-        agentFrameworkMessageKind: "synthetic",
-        agentFrameworkSyntheticSource: "provider-instructions",
-      },
-    });
-  });
-
-  it("marks environment context user rows as synthetic messages", () => {
-    const environmentContext = [
-      "<environment_context>",
-      "  <current_date>2026-06-27</current_date>",
-      "  <timezone>Europe/Berlin</timezone>",
-      "</environment_context>",
-    ].join("\n");
-    const projection = projectTranscriptLines({
-      adapterName: "codex",
-      rawLines: [
-        JSON.stringify({
-          payload: {
-            type: "message",
-            role: "user",
-            content: environmentContext,
-          },
-        }),
-      ],
-    });
-
-    expect(projection.transcript).toEqual([
-      expect.objectContaining({
-        role: "user",
-        status: "completed",
-        content: [{ type: "text", text: environmentContext }],
-        metadata: expect.objectContaining({
-          agentFrameworkMessageKind: "synthetic",
-          agentFrameworkSyntheticSource: "environment-context",
-        }),
-      }),
-    ]);
-  });
-
-  it("keeps adapter meta user rows visible as synthetic messages", () => {
-    const projection = projectTranscriptLines({
-      adapterName: "claude",
-      rawLines: [
-        JSON.stringify({
-          isMeta: true,
-          message: {
-            role: "user",
-            content: "<hook_prompt hook_run_id=\"stop:1\">feedback</hook_prompt>",
-          },
-        }),
-      ],
-    });
-
-    expect(projection.transcript).toEqual([
-      expect.objectContaining({
-        role: "user",
-        status: "completed",
-        content: [{ type: "text", text: "<hook_prompt hook_run_id=\"stop:1\">feedback</hook_prompt>" }],
-        metadata: expect.objectContaining({
-          agentFrameworkMessageKind: "synthetic",
-          agentFrameworkSyntheticSource: "adapter-meta",
-        }),
-      }),
-    ]);
-  });
-
-  it("collapses Claude assistant_split rows that share a message id", () => {
-    const projection = projectTranscriptLines({
-      adapterName: "claude",
-      transcriptPath: "/tmp/claude-split.jsonl",
-      rawLines: [
-        JSON.stringify({
-          uuid: "uuid-split-1",
-          timestamp: "2026-06-20T10:00:00.000Z",
           type: "assistant",
+          uuid: "assistant-1",
           message: {
-            id: "msg-split",
-            role: "assistant",
-            content: [{ type: "text", text: "First part." }],
-          },
-        }),
-        JSON.stringify({
-          uuid: "uuid-split-2",
-          timestamp: "2026-06-20T10:00:01.000Z",
-          type: "assistant",
-          message: {
-            id: "msg-split",
+            id: "message-1",
             role: "assistant",
             content: [
-              { type: "text", text: "Second part." },
-              { type: "tool_use", id: "tool-split", name: "Read", input: { file_path: "README.md" } },
+              { type: "text", text: "Inspecting repository" },
+              {
+                type: "tool_use",
+                id: "tool-1",
+                name: "Bash",
+                input: {
+                  command: "rg --files",
+                  options: { hidden: true, globs: ["*.ts", "*.tsx"] },
+                },
+              },
             ],
           },
         }),
-      ],
-    });
+        JSON.stringify({
+          type: "user",
+          uuid: "user-1",
+          message: {
+            role: "user",
+            content: [{
+              type: "tool_result",
+              tool_use_id: "tool-1",
+              content: [{ type: "text", text: "src/index.ts" }],
+            }],
+          },
+        }),
+      ].join("\n"));
 
-    expect(projection.transcript).toEqual([
-      expect.objectContaining({
-        id: "message-msg-split",
-        sequenceId: 1,
+      const observation = await canonicalNativeTranscriptObservation({
+        adapterName: "claude",
+        transcriptPath,
+      });
+
+      expect(digestScenarioValue(observation.data)).toMatch(/^sha256:[a-f0-9]{64}$/);
+      expect(observation.data).toMatchObject({
+        messages: [{
+          content: "Inspecting repository",
+          contentDigest: digestScenarioValue("Inspecting repository"),
+        }],
+        tools: [{
+          id: "tool-1",
+          name: "Bash",
+          input: {
+            command: "rg --files",
+            options: { hidden: true, globs: ["*.ts", "*.tsx"] },
+          },
+          status: "completed",
+          output: ["src/index.ts"],
+          error: null,
+        }],
+      });
+      const data = observation.data as {
+        tools: Array<{ input: { command: string; options: { hidden: boolean; globs: string[] } }; inputDigest: string }>;
+      };
+      expect(data.tools[0]?.inputDigest).toBe(digestScenarioValue(data.tools[0]!.input));
+      expect(digestScenarioValue({ command: "rg --files", options: { hidden: true, globs: ["*.ts", "*.tsx"] } }))
+        .toBe(digestScenarioValue({ options: { globs: ["*.ts", "*.tsx"], hidden: true }, command: "rg --files" }));
+    });
+  });
+
+  it("aggregates split Claude assistant entries before dispatching the native observation", async () => {
+    await withTemporaryTestRoot("native-transcript-split-assistant-", async (temporaryDir) => {
+      const transcriptPath = path.join(temporaryDir, "session.jsonl");
+      fs.writeFileSync(transcriptPath, [
+        JSON.stringify({
+          type: "assistant",
+          uuid: "assistant-entry-1",
+          message: {
+            id: "split-assistant-message",
+            role: "assistant",
+            content: [
+              { type: "text", text: "Inspecting" },
+              { type: "tool_use", id: "split-tool", name: "Bash", input: { command: "rg --files" } },
+            ],
+          },
+          usage: { input_tokens: 4, output_tokens: 1 },
+        }),
+        JSON.stringify({
+          type: "assistant",
+          uuid: "assistant-entry-2",
+          message: {
+            id: "split-assistant-message",
+            role: "assistant",
+            content: [{ type: "text", text: "repository now" }],
+          },
+          usage: { input_tokens: 4, output_tokens: 3 },
+        }),
+        JSON.stringify({
+          type: "user",
+          uuid: "tool-result-entry",
+          message: {
+            role: "user",
+            content: [{
+              type: "tool_result",
+              tool_use_id: "split-tool",
+              content: [{ type: "text", text: "src/index.ts" }],
+            }],
+          },
+        }),
+      ].join("\n"));
+
+      const observation = await canonicalNativeTranscriptObservation({
+        adapterName: "claude",
+        transcriptPath,
+      });
+      expect(observation.data).toMatchObject({
+        messages: [{
+          id: "split-assistant-message",
+          turnId: "assistant-entry-1",
+          role: "assistant",
+          content: "Inspecting repository now",
+          usage: { input_tokens: 4, output_tokens: 3 },
+        }],
+        tools: [{
+          id: "split-tool",
+          turnId: "assistant-entry-1",
+          status: "completed",
+          output: ["src/index.ts"],
+        }],
+      });
+
+      const runtime = createTestScenarioRuntime({ root: path.join(temporaryDir, "runtime") });
+      const source = { kind: "hostHook" as const, adapter: "claude", nativeSessionId: "split-session" };
+      await runtime.dispatch(testStartRunCommand({
+        commandId: "split-start",
+        runId: "split-run",
+        source,
+        recordedAt: "2026-07-16T12:00:00.000Z",
+        payload: {
+          workingDir: temporaryDir,
+          projectDir: temporaryDir,
+          schemaDigest: scenarioProtocolSchemaDigest(),
+        },
+      }));
+      await runtime.dispatch({
+        commandId: "split-native-observation",
+        runId: "split-run",
+        source,
+        recordedAt: "2026-07-16T12:00:01.000Z",
+        payload: {
+          type: "nativeTranscriptObserved",
+          data: nativeTranscriptDataSchema.parse({
+            ...(observation.data as Record<string, unknown>),
+            digest: digestScenarioValue(observation.data),
+          }),
+        },
+      });
+
+      const snapshot = await runtime.snapshot("split-run");
+      expect(snapshot.conversation).toMatchObject([{
+        id: "split-assistant-message",
+        turnId: "assistant-entry-1",
         role: "assistant",
-        content: [{ type: "text", text: "First part.\nSecond part." }],
-        metadata: expect.objectContaining({
-          agentFrameworkSourceLine: 1,
-          agentFrameworkSourceEndLine: 2,
-        }),
-      }),
-    ]);
-    expect(new Set(projection.transcript.map((entry) => entry.id)).size).toBe(projection.transcript.length);
-    expect(projection.toolCalls).toEqual([
-      expect.objectContaining({
-        id: "tool-split",
-        sequenceId: 2,
-        turnId: projection.transcript[0].turnId,
-        name: "Read",
-      }),
-    ]);
+        content: "Inspecting repository now",
+        status: "completed",
+      }]);
+      expect(snapshot.toolCalls).toMatchObject([{
+        id: "split-tool",
+        turnId: "assistant-entry-1",
+        status: "completed",
+        output: ["src/index.ts"],
+      }]);
+      expect((await runtime.recordsAfter("split-run", 0)).filter((record) =>
+        record.eventType === "message.observed" && record.payload.messageId === "split-assistant-message"
+      )).toHaveLength(1);
+    });
   });
 
-  it("preserves JSON and object tool result output blocks", () => {
-    const projection = projectTranscriptLines({
-      adapterName: "claude",
-      rawLines: [
+  it("reconciles a host-submitted prompt with its later native transcript representation", async () => {
+    await withTemporaryTestRoot("native-transcript-reconcile-", async (temporaryDir) => {
+      const transcriptPath = path.join(temporaryDir, "session.jsonl");
+      const prompt = "Please inspect the repository";
+      fs.writeFileSync(transcriptPath, JSON.stringify({
+        type: "user",
+        uuid: "native-user-turn",
+        message: { id: "native-user-message", role: "user", content: prompt },
+      }));
+      const runtime = createTestScenarioRuntime({ root: path.join(temporaryDir, "runtime") });
+      const source = { kind: "hostHook" as const, adapter: "claude", nativeSessionId: "session-1" };
+      await runtime.dispatch(testStartRunCommand({
+        commandId: "reconcile-start",
+        runId: "reconcile-run",
+        source,
+        recordedAt: "2026-07-16T12:00:00.000Z",
+        payload: {
+          workingDir: temporaryDir,
+          projectDir: temporaryDir,
+          schemaDigest: scenarioProtocolSchemaDigest(),
+        },
+      }));
+      await runtime.dispatch({
+        commandId: "host-prompt",
+        runId: "reconcile-run",
+        source,
+        recordedAt: "2026-07-16T12:00:01.000Z",
+        payload: agentFrameworkHostCommand({
+          type: "hostUserPromptSubmitted",
+          workflow: {},
+          context: {},
+          messageId: "host-random-message",
+          prompt,
+          contentDigest: digestScenarioValue(prompt),
+        }),
+      });
+      const observation = await canonicalNativeTranscriptObservation({ adapterName: "claude", transcriptPath });
+      await runtime.dispatch({
+        commandId: "native-observation",
+        runId: "reconcile-run",
+        source,
+        recordedAt: "2026-07-16T12:00:02.000Z",
+        payload: {
+          type: "nativeTranscriptObserved",
+          data: nativeTranscriptDataSchema.parse({
+            ...(observation.data as Record<string, unknown>),
+            digest: digestScenarioValue(observation.data),
+          }),
+        },
+      });
+
+      const snapshot = await runtime.snapshot("reconcile-run");
+      expect(snapshot.conversation.filter((message) =>
+        message.role === "user" && message.content === prompt
+      )).toHaveLength(1);
+      const generatedRows = canonicalTranscriptFromSnapshot(snapshot)
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { message?: { role?: string; content?: string } });
+      expect(generatedRows.filter((row) =>
+        row.message?.role === "user" && row.message.content === prompt
+      )).toHaveLength(1);
+    });
+  });
+
+  it("retires rewound and cleared native history from active state without erasing the journal", async () => {
+    await withTemporaryTestRoot("native-transcript-rewind-", async (temporaryDir) => {
+      const runtime = createTestScenarioRuntime({ root: path.join(temporaryDir, "runtime") });
+      const source = { kind: "hostHook" as const, adapter: "claude", nativeSessionId: "rewind-session" };
+      await runtime.dispatch(testStartRunCommand({
+        commandId: "rewind-start",
+        runId: "rewind-run",
+        source,
+        recordedAt: "2026-07-16T12:00:00.000Z",
+        payload: {
+          workingDir: temporaryDir,
+          projectDir: temporaryDir,
+          schemaDigest: scenarioProtocolSchemaDigest(),
+        },
+      }));
+      const retainedContent = "Retained before clear";
+      const retiredContent = "Authorization removed by rewind";
+      const toolInput = { command: "printf stale" };
+      const messages = [
+        {
+          id: "rewind-message-retained",
+          turnId: "rewind-turn-retained",
+          role: "user" as const,
+          content: retainedContent,
+          contentDigest: digestScenarioValue(retainedContent),
+          status: "completed" as const,
+        },
+        {
+          id: "rewind-message-retired",
+          turnId: "rewind-turn-retired",
+          role: "user" as const,
+          content: retiredContent,
+          contentDigest: digestScenarioValue(retiredContent),
+          status: "completed" as const,
+        },
+      ];
+      const tools = [{
+        id: "rewind-tool-retired",
+        turnId: "rewind-turn-retired",
+        name: "Bash",
+        input: toolInput,
+        inputDigest: digestScenarioValue(toolInput),
+        status: "completed" as const,
+        output: ["stale output"],
+        error: null,
+      }];
+      await runtime.dispatch({
+        commandId: "rewind-observe-full",
+        runId: "rewind-run",
+        source,
+        recordedAt: "2026-07-16T12:00:01.000Z",
+        payload: { type: "nativeTranscriptObserved", data: { messages, tools } },
+      });
+      await runtime.dispatch({
+        commandId: "rewind-observe-shortened",
+        runId: "rewind-run",
+        source,
+        recordedAt: "2026-07-16T12:00:02.000Z",
+        payload: { type: "nativeTranscriptObserved", data: { messages: [messages[0]!], tools: [] } },
+      });
+
+      const rewound = await runtime.snapshot("rewind-run");
+      expect(rewound.conversation.map((message) => message.id)).toEqual(["rewind-message-retained"]);
+      expect(rewound.toolCalls).toEqual([]);
+      expect(canonicalTranscriptFromSnapshot(rewound)).toContain(retainedContent);
+      expect(canonicalTranscriptFromSnapshot(rewound)).not.toContain(retiredContent);
+      expect(canonicalTranscriptFromSnapshot(rewound)).not.toContain("rewind-tool-retired");
+
+      await runtime.dispatch({
+        commandId: "rewind-observe-cleared",
+        runId: "rewind-run",
+        source,
+        recordedAt: "2026-07-16T12:00:03.000Z",
+        payload: { type: "nativeTranscriptObserved", data: { messages: [], tools: [] } },
+      });
+      const cleared = await runtime.snapshot("rewind-run");
+      expect(cleared.conversation).toEqual([]);
+      expect(cleared.toolCalls).toEqual([]);
+
+      const journal = await runtime.recordsAfter("rewind-run", 0);
+      expect(journal.some((record) =>
+        record.eventType === "message.observed" && record.payload.messageId === "rewind-message-retired"
+      )).toBe(true);
+      expect(journal.some((record) =>
+        record.eventType === "tool.requested" && record.payload.toolCallId === "rewind-tool-retired"
+      )).toBe(true);
+      expect(journal.filter((record) => record.eventType === "message.retired")).toHaveLength(2);
+      expect(journal.filter((record) => record.eventType === "tool.retired")).toHaveLength(1);
+    });
+  });
+
+  it("reconciles production-order native prompts by occurrence and retires compacted history", async () => {
+    await withTemporaryTestRoot("native-transcript-production-order-", async (temporaryDir) => {
+      const transcriptPath = path.join(temporaryDir, "session.jsonl");
+      const prompt = "Please inspect the repository";
+      const restoreEnvironment = withEnvironmentForTest({
+        AGENT_FRAMEWORK_SESSION_POLICY: "none",
+        AGENT_FRAMEWORK_VOLATILE_DIR: path.join(temporaryDir, "session"),
+      });
+      const runtime = createTestScenarioRuntime({ root: path.join(temporaryDir, "runtime") });
+      const input = {
+        session_id: "production-order-session",
+        transcript_path: transcriptPath,
+        cwd: temporaryDir,
+        prompt,
+      };
+      try {
+        fs.writeFileSync(transcriptPath, JSON.stringify({
+          type: "user",
+          uuid: "native-user-turn-1",
+          message: { id: "native-user-message-1", role: "user", content: prompt },
+        }));
+        await dispatchUserPromptSubmit(input, testEncoder, { runtime });
+        const runId = canonicalHookRunId(activeSpec().name, transcriptPath);
+        expect((await runtime.snapshot(runId)).conversation.filter((message) =>
+          message.role === "user" && message.content === prompt
+        )).toHaveLength(1);
+
+        fs.appendFileSync(transcriptPath, `\n${JSON.stringify({
+          type: "user",
+          uuid: "native-user-turn-2",
+          message: { id: "native-user-message-2", role: "user", content: prompt },
+        })}`);
+        await dispatchUserPromptSubmit(input, testEncoder, { runtime });
+        expect((await runtime.snapshot(runId)).conversation.filter((message) =>
+          message.role === "user" && message.content === prompt
+        )).toHaveLength(2);
+
+        fs.writeFileSync(transcriptPath, JSON.stringify({
+          type: "user",
+          uuid: "native-user-turn-2",
+          message: { id: "native-user-message-2", role: "user", content: prompt },
+        }));
+        await dispatchUserPromptSubmit(input, testEncoder, { runtime });
+        expect((await runtime.snapshot(runId)).conversation.filter((message) =>
+          message.role === "user" && message.content === prompt
+        )).toMatchObject([{ id: "native-user-message-2" }]);
+
+        const compactedPrompt = "Continue from the compacted context";
+        fs.writeFileSync(transcriptPath, JSON.stringify({
+          type: "user",
+          uuid: "native-user-turn-compacted",
+          message: { id: "native-user-message-compacted", role: "user", content: compactedPrompt },
+        }));
+        input.prompt = compactedPrompt;
+        await dispatchUserPromptSubmit(input, testEncoder, { runtime });
+        const compacted = await runtime.snapshot(runId);
+        expect(compacted.conversation.filter((message) => message.role === "user")).toMatchObject([{
+          id: "native-user-message-compacted",
+          content: compactedPrompt,
+        }]);
+        expect(canonicalTranscriptFromSnapshot(compacted)).not.toContain(prompt);
+        expect((await runtime.recordsAfter(runId, 0)).filter((record) =>
+          record.eventType === "message.retired"
+        )).toHaveLength(2);
+      } finally {
+        restoreEnvironment();
+      }
+    });
+  });
+
+  it.each([
+    { history: "message-and-tool", includeNativeMessage: true },
+    { history: "tool-only", includeNativeMessage: false },
+  ])("fails closed without retiring $history native history when the transcript disappears", async ({
+    includeNativeMessage,
+  }) => {
+    await withTemporaryTestRoot("native-transcript-missing-after-import-", async (temporaryDir) => {
+      const transcriptPath = path.join(temporaryDir, "session.jsonl");
+      const prompt = "Preserve this authorization context";
+      const toolInput = { command: "rg --files" };
+      fs.writeFileSync(transcriptPath, [
+        ...(includeNativeMessage ? [JSON.stringify({
+          type: "user",
+          uuid: "preserved-user-turn",
+          message: { id: "preserved-user-message", role: "user", content: prompt },
+        })] : []),
         JSON.stringify({
-          timestamp: "2026-06-20T10:00:00.000Z",
+          type: "assistant",
+          uuid: "preserved-assistant-turn",
           message: {
+            id: "preserved-assistant-message",
             role: "assistant",
-            content: [
-              { type: "tool_use", id: "tool-array", name: "Read", input: { file_path: "result.json" } },
-              { type: "tool_use", id: "tool-object", name: "Fetch", input: { url: "https://example.test" } },
-            ],
+            content: [{ type: "tool_use", id: "preserved-tool", name: "Bash", input: toolInput }],
           },
         }),
         JSON.stringify({
-          timestamp: "2026-06-20T10:00:01.000Z",
+          type: "user",
+          uuid: "preserved-tool-result",
           message: {
             role: "user",
-            content: [
-              {
-                type: "tool_result",
-                tool_use_id: "tool-array",
-                content: [
-                  { type: "text", text: "stdout" },
-                  { type: "json", value: { ok: true } },
-                ],
-              },
-              {
-                type: "tool_result",
-                tool_use_id: "tool-object",
-                content: { status: 200, body: { ok: true } },
-              },
-            ],
+            content: [{ type: "tool_result", tool_use_id: "preserved-tool", content: "src/index.ts" }],
           },
         }),
-      ],
-    });
+      ].join("\n"), "utf8");
+      const restoreEnvironment = withEnvironmentForTest({
+        AGENT_FRAMEWORK_SESSION_POLICY: "none",
+        AGENT_FRAMEWORK_VOLATILE_DIR: path.join(temporaryDir, "session"),
+      });
+      const delegate = createDeterministicPolicyExecutor();
+      const execute = vi.fn(delegate.execute.bind(delegate));
+      const runtime = createTestScenarioRuntime({
+        root: path.join(temporaryDir, "runtime"),
+        effectExecutor: { execute },
+      });
+      const input = {
+        session_id: "missing-after-import-session",
+        transcript_path: transcriptPath,
+        delivery_id: `missing-after-import-${includeNativeMessage ? "message" : "tool"}`,
+        cwd: temporaryDir,
+        prompt,
+      };
+      try {
+        await dispatchUserPromptSubmit(input, testEncoder, { runtime });
+        const runId = canonicalHookRunId(activeSpec().name, transcriptPath);
+        const before = await runtime.canonicalView(runId);
+        const executionsBeforeMissingRead = execute.mock.calls.length;
+        const nativeState = before.snapshot.stateSlices["transcript.native"]?.value as {
+          messageIds: string[];
+          toolCallIds: string[];
+        };
+        expect(nativeState.messageIds).toEqual(includeNativeMessage ? ["preserved-user-message"] : []);
+        expect(nativeState.toolCallIds).toEqual(["preserved-tool"]);
+        expect(before.snapshot.toolCalls.map((tool) => tool.id)).toContain("preserved-tool");
 
-    expect(projection.toolCalls).toEqual([
-      expect.objectContaining({
-        id: "tool-array",
-        status: "completed",
-        output: [
-          { type: "text", text: "stdout" },
-          { type: "json", value: { ok: true } },
-        ],
-        result: expect.objectContaining({
-          output: [
-            { type: "text", text: "stdout" },
-            { type: "json", value: { ok: true } },
-          ],
-        }),
-      }),
-      expect.objectContaining({
-        id: "tool-object",
-        status: "completed",
-        output: [
-          { type: "json", value: { status: 200, body: { ok: true } } },
-        ],
-        result: expect.objectContaining({
-          output: [
-            { type: "json", value: { status: 200, body: { ok: true } } },
-          ],
-        }),
-      }),
-    ]);
+        fs.rmSync(transcriptPath);
+        await expect(dispatchUserPromptSubmit(input, testEncoder, { runtime }))
+          .rejects.toThrow("Native transcript is unavailable while canonical native history is active");
+
+        const after = await runtime.canonicalView(runId);
+        expect(after.records).toEqual(before.records);
+        expect(after.snapshot.conversation).toEqual(before.snapshot.conversation);
+        expect(after.snapshot.toolCalls).toEqual(before.snapshot.toolCalls);
+        expect(after.records.filter((record) =>
+          record.eventType === "message.retired" || record.eventType === "tool.retired"
+        )).toEqual([]);
+        expect(execute).toHaveBeenCalledTimes(executionsBeforeMissingRead);
+      } finally {
+        restoreEnvironment();
+      }
+    });
   });
 
-  it("attaches error details to failed tool result projections", () => {
-    const projection = projectTranscriptLines({
-      adapterName: "claude",
-      rawLines: [
-        JSON.stringify({
-          timestamp: "2026-06-20T10:00:00.000Z",
-          message: {
-            role: "assistant",
-            content: [
-              { type: "tool_use", id: "tool-failed", name: "Bash", input: { command: "false" } },
-            ],
-          },
-        }),
-        JSON.stringify({
-          timestamp: "2026-06-20T10:00:01.000Z",
-          message: {
-            role: "user",
-            content: [
-              {
-                type: "tool_result",
-                tool_use_id: "tool-failed",
-                is_error: true,
-                content: [
-                  { type: "text", text: "Command failed with exit code 1" },
-                ],
-              },
-            ],
-          },
-        }),
-      ],
-    });
-
-    expect(projection.toolCalls).toEqual([
-      expect.objectContaining({
-        id: "tool-failed",
-        status: "failed",
-        result: {
-          state: "failed",
-          output: [{ type: "text", text: "Command failed with exit code 1" }],
-          error: {
-            code: "runtime_error",
-            message: "Command failed with exit code 1",
-            recoverable: false,
-          },
+  it.each([
+    { terminal: "completed" as const, startRunning: false, error: null },
+    { terminal: "failed" as const, startRunning: true, error: "native command failed" },
+  ])("advances an existing tool to native $terminal state without duplicates", async ({
+    terminal,
+    startRunning,
+    error,
+  }) => {
+    await withTemporaryTestRoot(`native-tool-${terminal}-`, async (temporaryDir) => {
+      const runtime = createTestScenarioRuntime({ root: path.join(temporaryDir, "runtime") });
+      const source = { kind: "hostHook" as const, adapter: "codex", nativeSessionId: "session-tool" };
+      await runtime.dispatch(testStartRunCommand({
+        commandId: `start-${terminal}`,
+        runId: "tool-reconcile-run",
+        source,
+        recordedAt: "2026-07-16T12:00:00.000Z",
+        payload: {
+          workingDir: temporaryDir,
+          projectDir: temporaryDir,
+          schemaDigest: scenarioProtocolSchemaDigest(),
         },
-      }),
-    ]);
-  });
-
-  it("preserves structured Codex function call output as JSON blocks", () => {
-    const projection = projectTranscriptLines({
-      adapterName: "codex",
-      rawLines: [
-        JSON.stringify({
-          type: "response_item",
-          timestamp: "2026-06-20T10:00:00.000Z",
-          payload: {
-            type: "function_call",
-            call_id: "call-json",
-            name: "exec_command",
-            arguments: { command: "printf json" },
-          },
-        }),
-        JSON.stringify({
-          type: "response_item",
-          timestamp: "2026-06-20T10:00:01.000Z",
-          payload: {
-            type: "function_call_output",
-            call_id: "call-json",
-            output: { status: "ok", files: ["src/app.ts"] },
-          },
-        }),
-      ],
-    });
-
-    expect(projection.toolCalls).toEqual([
-      expect.objectContaining({
-        id: "call-json",
-        status: "completed",
-        output: [{ type: "json", value: { status: "ok", files: ["src/app.ts"] } }],
-        result: expect.objectContaining({
-          output: [{ type: "json", value: { status: "ok", files: ["src/app.ts"] } }],
-        }),
-      }),
-    ]);
-  });
-
-  it("projects Codex function call output errors as failed tools", () => {
-    const projection = projectTranscriptLines({
-      adapterName: "codex",
-      rawLines: [
-        JSON.stringify({
-          type: "response_item",
-          timestamp: "2026-06-20T10:00:00.000Z",
-          payload: {
-            type: "function_call",
-            call_id: "call-error",
-            name: "exec_command",
-            arguments: { command: "false" },
-          },
-        }),
-        JSON.stringify({
-          type: "response_item",
-          timestamp: "2026-06-20T10:00:01.000Z",
-          payload: {
-            type: "function_call_output",
-            call_id: "call-error",
-            error: "Command failed with exit code 1",
-          },
-        }),
-      ],
-    });
-
-    expect(projection.toolCalls).toEqual([
-      expect.objectContaining({
-        id: "call-error",
-        status: "failed",
-        output: [{ type: "text", text: "Command failed with exit code 1" }],
-        result: {
-          state: "failed",
-          output: [{ type: "text", text: "Command failed with exit code 1" }],
-          error: {
-            code: "runtime_error",
-            message: "Command failed with exit code 1",
-            recoverable: false,
-          },
+      }));
+      const input = { command: "rg -n TODO src" };
+      await runtime.dispatch({
+        commandId: `request-${terminal}`,
+        runId: "tool-reconcile-run",
+        source,
+        recordedAt: "2026-07-16T12:00:01.000Z",
+        payload: {
+          type: "toolRequested",
+          toolCallId: "existing-tool",
+          turnId: "tool-turn",
+          name: "Bash",
+          input,
+          inputDigest: digestScenarioValue(input),
+          requiresUserDecision: false,
         },
-      }),
-    ]);
-  });
+      });
+      if (startRunning) {
+        await runtime.dispatch({
+          commandId: `running-${terminal}`,
+          runId: "tool-reconcile-run",
+          source,
+          recordedAt: "2026-07-16T12:00:02.000Z",
+          payload: { type: "toolExecutionStarted", toolCallId: "existing-tool" },
+        });
+      }
+      const observedTool = {
+        id: "existing-tool",
+        turnId: "tool-turn",
+        name: "Bash",
+        input,
+        inputDigest: digestScenarioValue(input),
+        status: terminal,
+        output: ["one native output"],
+        error,
+      };
+      const observationData = {
+        messages: [],
+        tools: [observedTool],
+      };
+      const observation = {
+        ...observationData,
+        digest: digestScenarioValue(observationData),
+      };
+      for (const suffix of ["first", "repeat"]) {
+        await runtime.dispatch({
+          commandId: `observe-${terminal}-${suffix}`,
+          runId: "tool-reconcile-run",
+          source,
+          recordedAt: "2026-07-16T12:00:03.000Z",
+          payload: { type: "nativeTranscriptObserved", data: observation },
+        });
+      }
 
-  it("does not hydrate ambiguous pathless Codex tool logs by same name alone", () => {
-    const projection = projectTranscriptLines({
-      adapterName: "codex",
-      rawLines: [
-        JSON.stringify({
-          type: "response_item",
-          timestamp: "2026-06-20T10:00:00.000Z",
+      const snapshot = await runtime.snapshot("tool-reconcile-run");
+      expect(snapshot.toolCalls).toHaveLength(1);
+      expect(snapshot.toolCalls[0]).toMatchObject({
+        id: "existing-tool",
+        status: terminal,
+        output: ["one native output"],
+        error,
+      });
+      expect((await runtime.recordsAfter("tool-reconcile-run", 0)).filter((record) =>
+        record.eventType === `tool.${terminal}` && record.payload.toolCallId === "existing-tool"
+      )).toHaveLength(1);
+      const beforeInvalidObservation = {
+        snapshot: await runtime.snapshot("tool-reconcile-run"),
+        records: await runtime.recordsAfter("tool-reconcile-run", 0),
+      };
+      const invalidTools = [
+        { ...observedTool, turnId: "changed-turn" },
+        { ...observedTool, status: "cancelled" as const },
+        { ...observedTool, output: ["changed output"] },
+        { ...observedTool, error: error === null ? "changed error" : null },
+      ];
+      for (const [index, invalidTool] of invalidTools.entries()) {
+        await expect(runtime.dispatch({
+          commandId: `observe-${terminal}-invalid-${index}`,
+          runId: "tool-reconcile-run",
+          source,
+          recordedAt: "2026-07-16T12:00:04.000Z",
           payload: {
-            type: "function_call",
-            call_id: "call-check-1",
-            name: "mcp__agent_framework__check",
-            arguments: { working_dir: "/repo/a" },
+            type: "nativeTranscriptObserved",
+            data: { messages: [], tools: [invalidTool] },
           },
-        }),
-        JSON.stringify({
-          type: "response_item",
-          timestamp: "2026-06-20T10:00:01.000Z",
-          payload: {
-            type: "function_call",
-            call_id: "call-check-2",
-            name: "mcp__agent_framework__check",
-            arguments: { working_dir: "/repo/b" },
-          },
-        }),
-      ],
-      toolLogEntries: [{
-        ts: 1,
-        tool: "mcp__agent_framework__check",
-        status: "denied",
-        gate: "test",
-        reason: "blocked",
-        ms: 1,
-      }],
-    });
-
-    expect(projection.toolCalls.map((tool) => ({
-      id: tool.id,
-      status: tool.status,
-      toolStatus: tool.metadata?.agentFrameworkToolStatus,
-      toolUseId: tool.metadata?.agentFrameworkToolUseId,
-    }))).toEqual([
-      { id: "call-check-1", status: "running", toolStatus: undefined, toolUseId: undefined },
-      { id: "call-check-2", status: "running", toolStatus: undefined, toolUseId: undefined },
-    ]);
-  });
-
-  it("hydrates unique Codex command tool logs without native ids", () => {
-    const projection = projectTranscriptLines({
-      adapterName: "codex",
-      rawLines: [
-        JSON.stringify({
-          type: "response_item",
-          timestamp: "2026-06-20T10:00:00.000Z",
-          payload: {
-            type: "function_call",
-            call_id: "call-command",
-            name: "exec_command",
-            arguments: { command: "npm test -- --runInBand" },
-          },
-        }),
-      ],
-      toolLogEntries: [{
-        ts: 1,
-        tool: "Bash",
-        cmd: "npm test -- --runInBand",
-        status: "denied",
-        gate: "test",
-        reason: "blocked",
-        ms: 1,
-      }],
-    });
-
-    expect(projection.toolCalls).toEqual([
-      expect.objectContaining({
-        id: "call-command",
-        status: "denied",
-        metadata: expect.objectContaining({
-          agentFrameworkToolStatus: "denied",
-        }),
-      }),
-    ]);
-  });
-
-  it("does not reuse one no-id Codex command log for repeated identical tools", () => {
-    const projection = projectTranscriptLines({
-      adapterName: "codex",
-      rawLines: [
-        JSON.stringify({
-          type: "response_item",
-          timestamp: "2026-06-20T10:00:00.000Z",
-          payload: {
-            type: "function_call",
-            call_id: "call-command-1",
-            name: "exec_command",
-            arguments: { command: "npm test -- --runInBand" },
-          },
-        }),
-        JSON.stringify({
-          type: "response_item",
-          timestamp: "2026-06-20T10:00:01.000Z",
-          payload: {
-            type: "function_call",
-            call_id: "call-command-2",
-            name: "exec_command",
-            arguments: { command: "npm test -- --runInBand" },
-          },
-        }),
-      ],
-      toolLogEntries: [{
-        ts: 1,
-        tool: "Bash",
-        cmd: "npm test -- --runInBand",
-        status: "denied",
-        gate: "test",
-        reason: "blocked",
-        ms: 1,
-      }],
-    });
-
-    expect(projection.toolCalls.map((tool) => ({
-      id: tool.id,
-      status: tool.status,
-      toolStatus: tool.metadata?.agentFrameworkToolStatus,
-      toolUseId: tool.metadata?.agentFrameworkToolUseId,
-    }))).toEqual([
-      { id: "call-command-1", status: "running", toolStatus: undefined, toolUseId: undefined },
-      { id: "call-command-2", status: "running", toolStatus: undefined, toolUseId: undefined },
-    ]);
-  });
-
-  it("extracts Codex context and compaction metadata from transcript rows", () => {
-    const projection = projectTranscriptLines({
-      adapterName: "codex",
-      rawLines: [
-        JSON.stringify({
-          type: "turn_context",
-          timestamp: "2026-06-20T10:00:00.000Z",
-          payload: {
-            type: "turn_context",
-            context_window: 200000,
-            remaining_context_tokens: 150000,
-            used_tokens: 50000,
-          },
-        }),
-        JSON.stringify({
-          type: "conversation_compaction",
-          timestamp: "2026-06-20T10:05:00.000Z",
-          payload: {
-            type: "conversation_compaction",
-            reason: "context_limit",
-            summary: "Earlier context summarized.",
-          },
-        }),
-      ],
-    });
-
-    expect(projection.providerPatch.context).toEqual({
-      usedTokens: 50000,
-      maxTokens: 200000,
-      remainingTokens: 150000,
-    });
-    expect(projection.providerPatch.compaction).toEqual({
-      lastCompactedAt: "2026-06-20T10:05:00.000Z",
-      events: [{
-        type: "conversation_compaction",
-        sourceLine: 2,
-        timestamp: "2026-06-20T10:05:00.000Z",
-        reason: "context_limit",
-        summary: "Earlier context summarized.",
-      }],
+        })).rejects.toThrow(/Native transcript (tool identity|tool output|terminal tool) changed/);
+        expect(await runtime.snapshot("tool-reconcile-run")).toEqual(beforeInvalidObservation.snapshot);
+        expect(await runtime.recordsAfter("tool-reconcile-run", 0)).toEqual(beforeInvalidObservation.records);
+      }
     });
   });
 });

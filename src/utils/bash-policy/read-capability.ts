@@ -63,6 +63,73 @@ const FILE_CONTENT_OPERAND_POLICIES: Readonly<Record<string, CommandOperandPolic
 };
 
 export function bashReadFileOperands(command: string): string[] {
+  return directStandaloneInvocations(command)
+    .flatMap(readFileOperandsForInvocation);
+}
+
+/** Prove repository-content inspection that has no single file target. */
+export function bashReviewReadCapabilities(command: string): CanonicalToolCapability[] {
+  const invocation = directStandaloneInvocations(command)[0];
+  if (!invocation) return [];
+  if (invocation.executable === "rg") {
+    if (invocation.args.length === 0 || invocation.args.some((arg) =>
+      ["--help", "--version", "--type-list"].includes(arg)
+    )) return [];
+    return [{ tool: "Read" }];
+  }
+  if (
+    invocation.executable === "git" &&
+    invocation.args[0] === "diff" &&
+    !invocation.args.includes("--help")
+  ) return [{ tool: "Read" }];
+  return [];
+}
+
+/**
+ * Project an already-classified read-only Bash call into canonical Read
+ * capabilities, including safe pipelines and command chains.
+ */
+export function readOnlyBashCapabilities(command: string): CanonicalToolCapability[] {
+  const invocations = directReadOnlyInvocations(command);
+  if (invocations.some(invocationSuppressesReadOutput)) return [];
+  const capabilities: CanonicalToolCapability[] = invocations.flatMap((invocation) =>
+    readFileOperandsForInvocation(invocation).map((path) => ({
+      tool: "Read",
+      input: { file_path: path, path },
+    }))
+  );
+  if (invocations.some(isRepositoryInspectionInvocation)) {
+    capabilities.push({ tool: "Read" });
+  }
+  return capabilities.filter((capability, index) =>
+    capabilities.findIndex((candidate) =>
+      JSON.stringify(candidate) === JSON.stringify(capability)
+    ) === index
+  );
+}
+
+function invocationSuppressesReadOutput(invocation: BashInvocation): boolean {
+  if (!Object.hasOwn(FILE_CONTENT_OPERAND_POLICIES, invocation.executable)) return false;
+  const policy = FILE_CONTENT_OPERAND_POLICIES[invocation.executable]!;
+  const trackedOptions = new Set(policy.disablesFileOperands ?? []);
+  const knownOptions = new Set([
+    ...(policy.optionsWithOneValue ?? []),
+    ...(policy.disablesFileOperands ?? []),
+    ...(policy.optionsWithoutValue ?? []),
+  ]);
+  const parsed = parseShellOptionArgumentsDetailed(
+    invocation.args,
+    { ...policy, trackedOptions, knownOptions },
+  );
+  if (setsOverlap(parsed.encounteredOptions, policy.disablesFileOperands ?? EMPTY_OPTIONS)) {
+    return true;
+  }
+  return [...parsed.optionValues].some(([option, values]) =>
+    values.some((value) => policy.rejectsOptionValue?.(option, value) === true)
+  );
+}
+
+function directStandaloneInvocations(command: string): BashInvocation[] {
   return collectBashInvocations(command, {
     shouldTraverseCommand: ({ command: candidateCommand, source, segments }) =>
       source === "direct" &&
@@ -79,7 +146,39 @@ export function bashReadFileOperands(command: string): string[] {
     shouldTraversePayload: () => false,
   }).filter((invocation) =>
     invocation.source === "direct" && invocation.wrapperChain.length === 0
-  ).flatMap(readFileOperandsForInvocation);
+  );
+}
+
+function directReadOnlyInvocations(command: string): BashInvocation[] {
+  return collectBashInvocations(command, {
+    shouldTraverseCommand: ({ command: candidateCommand, source, segments }) =>
+      source === "direct" &&
+      hasValidShellLexing(candidateCommand) &&
+      !hasActiveCommandOrProcessSubstitution(candidateCommand) &&
+      !hasActiveOutputRedirect(candidateCommand) &&
+      !hasActiveInputRedirect(candidateCommand) &&
+      !hasActiveShellGrouping(candidateCommand) &&
+      !hasActiveShellExpansion(candidateCommand) &&
+      segments.every((segment) =>
+        !segment.backgrounded &&
+        segment.invocation !== null &&
+        (segment.operator === null || segment.operator === "|")
+      ),
+    shouldTraversePayload: () => false,
+  }).filter((invocation) =>
+    invocation.source === "direct" && invocation.wrapperChain.length === 0
+  );
+}
+
+function isRepositoryInspectionInvocation(invocation: BashInvocation): boolean {
+  if (invocation.executable === "rg") {
+    return invocation.args.length > 0 && !invocation.args.some((arg) =>
+      ["--help", "--version", "--type-list"].includes(arg)
+    );
+  }
+  return invocation.executable === "git" &&
+    invocation.args[0] === "diff" &&
+    !invocation.args.includes("--help");
 }
 
 /**

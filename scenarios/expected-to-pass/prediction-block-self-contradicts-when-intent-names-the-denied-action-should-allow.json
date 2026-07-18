@@ -1,177 +1,383 @@
 {
-  "schema_version": 1,
   "name": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
   "description": "Live repro from the agent-framework session that ran the test-harness labeler/tester to author the FIRST todo scenario in this folder ('prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow'). After that scenario was committed and the assistant explained the two bugs, the user pushed back on an irrelevant implementation detail in the explanation ('which doesn't map slash-command target plan3 → canonical Skill — why is that relevant?'). The user's literal message was a corrective rhetorical question that ALSO carried an implicit 'fix the description' instruction. The assistant responded with a one-line agreement and reached for Read on the scenario file to amend the description. Live PreToolUse hook fastDenied: 'User appears angry (trust: low, frustrationStreak: 2). Blocking Read unless explicitly requested. User said: \"\\\"which doesn't map slash-command target plan3 → canonical Skill\\\" why is that relevant? Isnt the only thing that is relevant the fact that it correctly repeated the user intent, but then blocked the ai\". Intent: User is challenging the relevance of the AI's prior point and insisting the key issue is that the AI correctly repeated the user intent but then blocked enforcing it.' The same hook then blocked Edit on the next attempt with the same reason. This is the SAME bug class as Bug A in the prior scenario, but the LIVE PROOF is much sharper here because there is NO prior-turn intent contamination (Bug B is absent), no slash-command, no plan-mode, no /plan3 — just a frustrated user pointing out that the hook has been blocking actions it itself describes as the user's intent. The cached intent literally describes the bug ('the AI correctly repeated the user intent but then blocked enforcing it') and the hook then blocks the AI from fixing the description that codifies that very bug. Recursive: the bug blocked the work to document the bug. Fixed by decidePrediction's new step 3.9 (SELF_CONTRADICTING_BLOCK_INTENT_RE): when the cached intent prose itself paraphrases the AI as having previously blocked the user's stated wish, mood-driven re-deny is suppressed because compounding the meta-complaint would have the hook contradict its own description of user intent. Same prohibition / per-tool-revocation / per-target-block guards as steps 3.6-3.8 so a paraphrase containing \"freeze. no tools.\" or per-tool revocation in the snippet still denies via step 4.",
-  "transcript": [
-    {
-      "role": "user",
-      "isMeta": false,
-      "content": "i need you to create me a new scenario in @test-harness/fixtures/scenarios/todo/ as per @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md . The hook blocked Skill /plan3 and Bash, and the intent text drags content from a prior user message. Find the live transcript by grep, read it via the labeler mcp, build the scenario, and run it with the tester mcp until it reproduces. Then wait for my input."
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Building the scenario now."
+  "initialRun": {
+    "startCommand": {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-start",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
         },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_self_grep",
-          "name": "Bash",
-          "input": {
-            "command": "grep -rl \"first 30 sentence apology\" ~/.claude/projects/ 2>/dev/null | head -20",
-            "description": "Find transcript files containing the user message"
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
           }
-        }
-      ]
-    },
-    {
-      "role": "user",
-      "isMeta": false,
-      "content": [
-        {
-          "type": "tool_result",
-          "tool_use_id": "toolu_scenario_self_grep",
-          "content": "/home/tim/.claude/projects/-home-tim-Coding-nixos/e05c9f83-d2ae-4b48-84d9-6296f5e5905d.jsonl"
-        }
-      ]
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_self_labeler_scaffold",
-          "name": "mcp__agent-framework__scenario_labeler",
-          "input": {
-            "action": "scaffold",
-            "transcript_name": "e05c9f83-d2ae-4b48-84d9-6296f5e5905d",
-            "transcript_path": "/home/tim/.claude/projects/-home-tim-Coding-nixos/e05c9f83-d2ae-4b48-84d9-6296f5e5905d.jsonl"
-          }
-        }
-      ]
-    },
-    {
-      "role": "user",
-      "isMeta": false,
-      "content": [
-        {
-          "type": "tool_result",
-          "tool_use_id": "toolu_scenario_self_labeler_scaffold",
-          "content": "Scaffold written: 28 hooks (1 flagged INVESTIGATE)"
-        }
-      ]
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_self_write_first_todo",
-          "name": "Write",
-          "input": {
-            "file_path": "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/todo/prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow.json",
-            "content": "{ ...full scenario JSON capturing the /plan3 block + merged-prior-turn intent... }"
-          }
-        }
-      ]
-    },
-    {
-      "role": "user",
-      "isMeta": false,
-      "content": [
-        {
-          "type": "tool_result",
-          "tool_use_id": "toolu_scenario_self_write_first_todo",
-          "content": "File created successfully."
-        }
-      ]
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_self_run_first_todo",
-          "name": "mcp__agent-framework__scenario_tester",
-          "input": {
-            "action": "run_scenario",
-            "scenario_name": "prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow",
-            "working_dir": "/home/tim/Coding/public_repos/agent-framework"
-          }
-        }
-      ]
-    },
-    {
-      "role": "user",
-      "isMeta": false,
-      "content": [
-        {
-          "type": "tool_result",
-          "tool_use_id": "toolu_scenario_self_run_first_todo",
-          "content": "{\"decision\":\"deny\",\"gate\":\"prediction-block\",\"reason\":\"User appears angry...\",\"expected\":\"allow\",\"pass\":false}"
-        }
-      ]
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Bug reproduced. The scenario faithfully reproduces the live behavior. Bug A: hook's intent names 'to read /plan3' but blocks Skill /plan3. Bug B: the cached intent merges content from a strictly earlier user turn ('starting 3 validation agents... use websearch...') with the current turn -- decidePrediction step 3.7 path (a) latestUserMessageReauthorizes returns false because the user's literal words don't name 'Skill' or 'plan3' (no TOOL_NAME_ALIASES entry maps slash-command target 'plan3' to canonical 'Skill'). Saved at test-harness/fixtures/scenarios/todo/. expectation_reality: 'broken' is now persisted. Waiting for your input."
-        }
-      ]
-    },
-    {
-      "role": "user",
-      "isMeta": false,
-      "content": "\"which doesn't map slash-command target plan3 → canonical Skill\" why is that relevant? Isnt the only thing that is relevant the fact that it correctly repeated the user intent, but then blocked the ai from actually enforcing the user intent."
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "You're right. The alias mechanic is implementation-detail noise -- the actual bug is that the hook stated the user's intent includes 'to read /plan3' and then blocked the exact tool call that fulfills it. Let me fix the description."
         },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_self_read_to_fix_firing",
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-session-state",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "User is challenging the relevance of the AI's prior point and insisting the key issue is that the AI correctly repeated the user intent but then blocked enforcing it.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "\"which doesn't map slash-command target plan3 → canonical Skill\" why is that relevant? Isnt the only thing that is relevant the fact that it correctly repeated the user intent, but then blocked the ai",
+            "blockAllTools": false,
+            "timestamp": 1
+          },
+          "frustrationStreak": 2,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-0",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-0",
+        "turnId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-turn-0",
+        "content": "i need you to create me a new scenario in @test-harness/fixtures/scenarios/todo/ as per @test-harness/fixtures/scenarios/REPRODUCTION-NOTES.md . The hook blocked Skill /plan3 and Bash, and the intent text drags content from a prior user message. Find the live transcript by grep, read it via the labeler mcp, build the scenario, and run it with the tester mcp until it reproduces. Then wait for my input.",
+        "contentDigest": "sha256:5724db10b9a146f8d296f9ca6612ccbfa7bc7735d766e709be4f83ea28eb5abc"
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-1",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-1",
+        "turnId": null,
+        "content": "Building the scenario now.\n[tool Bash] {\"command\":\"grep -rl \\\"first 30 sentence apology\\\" ~/.claude/projects/ 2>/dev/null | head -20\",\"description\":\"Find transcript files containing the user message\"}",
+        "contentDigest": "sha256:8209fe12bd34c384c258ce69cdcab17f3e2c2b277ab3de5e827720aceabed220"
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-2",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-2",
+        "turnId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-turn-2",
+        "content": "[tool result toolu_scenario_self_grep] /home/tim/.claude/projects/-home-tim-Coding-nixos/e05c9f83-d2ae-4b48-84d9-6296f5e5905d.jsonl",
+        "contentDigest": "sha256:76bab0e855c29c14023e65b074f135d666b1d9af585bf9f4185c30e884081ef5"
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-3",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:06.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-3",
+        "turnId": null,
+        "content": "[tool mcp__agent-framework__scenario_tester] {\"action\":\"list_fixtures\"}",
+        "contentDigest": "sha256:ccd5b356eeb41abd4d0f045181bdacaaa0d7e87f3d7a9cdbfb1759053c8ad841"
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-4",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:07.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-4",
+        "turnId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-turn-4",
+        "content": "[tool result toolu_scenario_self_fixture_list] Fixture catalog loaded",
+        "contentDigest": "sha256:6122baba6e3516c0a7370cc62881ade5fe32c97f629a2119df4105fb9cfed35c"
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-5",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:08.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-5",
+        "turnId": null,
+        "content": "[tool Write] {\"file_path\":\"/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/todo/prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow.json\",\"content\":\"{ ...full scenario JSON capturing the /plan3 block + merged-prior-turn intent... }\"}",
+        "contentDigest": "sha256:ab5ff406b7a81a71d0db54f0744e6a05c82aabf2e974999f2b304acdf4eb3d35"
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-6",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:09.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-6",
+        "turnId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-turn-6",
+        "content": "[tool result toolu_scenario_self_write_first_todo] File created successfully.",
+        "contentDigest": "sha256:e28236dba9ef6bfd7811b97a41da32438cd19af537767167b2f32b7621b74581"
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-7",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:10.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-7",
+        "turnId": null,
+        "content": "[tool mcp__agent-framework__scenario_tester] {\"action\":\"run_scenario\",\"scenario_name\":\"prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow\",\"working_dir\":\"/home/tim/Coding/public_repos/agent-framework\"}",
+        "contentDigest": "sha256:e2887d9daec50b9f2ca4a0e91df5ab42b4d89eea2a9cab4c3762cd9240037769"
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-8",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:11.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-8",
+        "turnId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-turn-8",
+        "content": "[tool result toolu_scenario_self_run_first_todo] {\"decision\":\"deny\",\"gate\":\"prediction-block\",\"reason\":\"User appears angry...\",\"expected\":\"allow\",\"pass\":false}",
+        "contentDigest": "sha256:7d14ae22655d65931aefac890e59802262c60f574783c7103533ce0b87955f68"
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-9",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:12.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-9",
+        "turnId": null,
+        "content": "Bug reproduced. The scenario faithfully reproduces the live behavior. Bug A: hook's intent names 'to read /plan3' but blocks Skill /plan3. Bug B: the cached intent merges content from a strictly earlier user turn ('starting 3 validation agents... use websearch...') with the current turn -- decidePrediction step 3.7 path (a) latestUserMessageReauthorizes returns false because the user's literal words don't name 'Skill' or 'plan3' (no TOOL_NAME_ALIASES entry maps slash-command target 'plan3' to canonical 'Skill'). Saved at test-harness/fixtures/scenarios/todo/. expectation_reality: 'broken' is now persisted. Waiting for your input.",
+        "contentDigest": "sha256:6109107e3cbbffc569dbc3d65878d81dd7a741adb070fe5a611b5607abded6c4"
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-10",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:13.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-10",
+        "turnId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-turn-10",
+        "content": "\"which doesn't map slash-command target plan3 → canonical Skill\" why is that relevant? Isnt the only thing that is relevant the fact that it correctly repeated the user intent, but then blocked the ai from actually enforcing the user intent.",
+        "contentDigest": "sha256:aed718f3148da55e14fcc790170fa3eddaa8d88b9c4cf22c65f89e2e23c455dc"
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-11",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:14.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-message-11",
+        "turnId": null,
+        "content": "You're right. The alias mechanic is implementation-detail noise -- the actual bug is that the hook stated the user's intent includes 'to read /plan3' and then blocked the exact tool call that fulfills it. Let me fix the description.\n[tool Read] {\"file_path\":\"/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/todo/prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow.json\",\"offset\":1,\"limit\":5}",
+        "contentDigest": "sha256:21bd82f48b2e7cefa0d4a53d8463f1cd997fad51e2677a5641c4bd467dee48e5"
+      }
+    },
+    {
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-target-tool",
+      "runId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:15.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "User is challenging the relevance of the AI's prior point and insisting the key issue is that the AI correctly repeated the user intent but then blocked enforcing it.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "\"which doesn't map slash-command target plan3 → canonical Skill\" why is that relevant? Isnt the only thing that is relevant the fact that it correctly repeated the user intent, but then blocked the ai",
+              "blockAllTools": false,
+              "timestamp": 1
+            },
+            "frustrationStreak": 2,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Read",
+              "rawToolInput": {
+                "file_path": "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/todo/prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow.json",
+                "offset": 1,
+                "limit": 5
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "\"which doesn't map slash-command target plan3 → canonical Skill\" why is that relevant? Isnt the only thing that is relevant the fact that it correctly repeated the user intent, but then blocked the ai from actually enforcing the user intent.",
+              "latestUserLogicText": "\"which doesn't map slash-command target plan3 → canonical Skill\" why is that relevant? Isnt the only thing that is relevant the fact that it correctly repeated the user intent, but then blocked the ai from actually enforcing the user intent.",
+              "recentUserMessages": [
+                "[tool result toolu_scenario_self_grep] /home/tim/.claude/projects/-home-tim-Coding-nixos/e05c9f83-d2ae-4b48-84d9-6296f5e5905d.jsonl",
+                "[tool result toolu_scenario_self_fixture_list] Fixture catalog loaded",
+                "[tool result toolu_scenario_self_write_first_todo] File created successfully.",
+                "[tool result toolu_scenario_self_run_first_todo] {\"decision\":\"deny\",\"gate\":\"prediction-block\",\"reason\":\"User appears angry...\",\"expected\":\"allow\",\"pass\":false}",
+                "\"which doesn't map slash-command target plan3 → canonical Skill\" why is that relevant? Isnt the only thing that is relevant the fact that it correctly repeated the user intent, but then blocked the ai from actually enforcing the user intent."
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_self_read_to_fix_firing",
+          "turnId": null,
           "name": "Read",
           "input": {
             "file_path": "/home/tim/Coding/public_repos/agent-framework/test-harness/fixtures/scenarios/todo/prediction-block-cites-stale-prior-intent-and-ignores-fresh-instruction-should-allow.json",
             "offset": 1,
             "limit": 5
-          }
+          },
+          "inputDigest": "sha256:6f847cff5228878ff70989ee3004222a847bd8741696693e3abd6cfee4420df4",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_self_read_to_fix_firing"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "User is challenging the relevance of the AI's prior point and insisting the key issue is that the AI correctly repeated the user intent but then blocked enforcing it.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "\"which doesn't map slash-command target plan3 → canonical Skill\" why is that relevant? Isnt the only thing that is relevant the fact that it correctly repeated the user intent, but then blocked the ai",
-      "blockAllTools": false
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 2,
-    "currentWindowSize": 4
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "Live denied via prediction-block. The cached intent text literally describes the bug ('the AI correctly repeated the user intent but then blocked enforcing it') and the hook then blocks the AI from reading the scenario file to fix the description that codifies that very bug. The user's freshest message was a corrective rhetorical question that carried an implicit 'fix the description' instruction. There is NO prior-turn intent contamination in this scenario -- Bug B from the sibling scenario is absent. This isolates Bug A (self-contradicting deny) cleanly: the hook describes the user's instruction in its own intent field and then denies the tool call that would carry it out. Fixed by decidePrediction step 3.9 (SELF_CONTRADICTING_BLOCK_INTENT_RE) which suppresses mood-driven re-deny when the cached intent prose paraphrases the AI as having previously blocked the user's wish. Same bug class as the sibling scenario; this fixture exists to make the failure mode unambiguous (single-bug repro vs the sibling's two-bug compound)."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "prediction-block-self-contradicts-when-intent-names-the-denied-action-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

@@ -7,7 +7,7 @@ import {
   linkAbortSignal,
   throwIfAborted,
 } from "../utils/cancellation.js";
-import { numberOrNull, stringField } from "../utils/output.js";
+import { stringField } from "../utils/output.js";
 import { PROVIDER_TYPES } from "./registry.js";
 import type {
   ClaudeProviderContinuationState,
@@ -17,13 +17,12 @@ import type {
   SdkRuntimeHome,
 } from "./execution-types.js";
 import type { ResolvedProvider } from "./types.js";
-import type { AiRuntimeEvent } from "../ai-backend/runtime-events.js";
-import type { TokenUsage } from "../ai-protocol/index.js";
 import { assertManagedRuntimeHomeConfig, prepareManagedRuntimeHome, resolveNativeProviderRoot } from "./managed-runtime-home.js";
 import { materializeRuntimeHome, resolveRuntimeHomeProfile, type MaterializedRuntimeHome } from "../runtime-home/runtime-profiles.js";
 import { writePolicyRuntimeAccessSentence } from "./sdk-tool-policy-prompts.js";
 import { readJsonlTail } from "../utils/file-io.js";
 import { resolveTranscriptBinding } from "./transcript-binding.js";
+import { normalizeClaudeAiUsage } from "../../adapters/claude/usage.js";
 
 type ClaudeQueryOptionsConfig = {
   workingDir?: string | null;
@@ -60,24 +59,6 @@ export type ClaudeRuntimeHomeLease = {
   disposeCreatedRetainedHome(): void;
   dispose(): void;
 };
-
-export type ClaudeControlStreamState = {
-  planUpdates: Set<string>;
-  sessionRef: string | null;
-};
-
-export function createClaudeControlStreamState(sessionRef: string | null = null): ClaudeControlStreamState {
-  return {
-    planUpdates: new Set(),
-    sessionRef,
-  };
-}
-
-export function recordClaudePlanUpdate(state: Pick<ClaudeControlStreamState, "planUpdates">, plan: string): boolean {
-  if (state.planUpdates.has(plan)) return false;
-  state.planUpdates.add(plan);
-  return true;
-}
 
 export async function runClaudeAgent(
   input: ProviderRunInput,
@@ -193,19 +174,11 @@ Your final response should be your complete analysis in the required format.`;
                 lastResultErrors = (message as { errors: string[] }).errors;
               }
 
-              const resultUsage = msgAny.usage as Record<string, unknown> | undefined;
+              const resultUsage = normalizeClaudeAiUsage(msgAny.usage, msgAny.modelUsage);
               if (resultUsage) {
-                totalPromptTokens = (resultUsage.input_tokens ?? 0) as number;
-                totalCompletionTokens = (resultUsage.output_tokens ?? 0) as number;
-                totalCachedTokens = (resultUsage.cache_read_input_tokens ?? 0) as number;
-              }
-              const modelUsage = msgAny.modelUsage as Record<string, Record<string, unknown>> | undefined;
-              if (modelUsage && totalCachedTokens === 0) {
-                for (const modelData of Object.values(modelUsage)) {
-                  if (typeof modelData.cacheReadInputTokens === "number") {
-                    totalCachedTokens += modelData.cacheReadInputTokens;
-                  }
-                }
+                totalPromptTokens = resultUsage.promptTokens ?? 0;
+                totalCompletionTokens = resultUsage.completionTokens ?? 0;
+                totalCachedTokens = resultUsage.cachedTokens ?? 0;
               }
 
               if (
@@ -362,7 +335,7 @@ export function prepareClaudeRuntimeHome<T extends ClaudeQueryOptionsConfig>(
     sdkRuntimeEnvironment: config.sdkRuntimeEnvironment,
     sdkToolPolicy: config.sdkToolPolicy,
   });
-  return runtimeProfile === "managedAstral"
+  return runtimeProfile === "managed"
     ? prepareManagedRuntimeHome("claude", env)
     : materializeRuntimeHome({
       provider: "claude",
@@ -456,74 +429,6 @@ export function collectClaudeMessageResult(
     return { text: raw.result, nativeSessionId };
   }
   return { text: current.text, nativeSessionId };
-}
-
-export function mapClaudeControlStreamMessage(message: unknown, state: ClaudeControlStreamState): {
-  events: AiRuntimeEvent[];
-  usage: TokenUsage | null;
-  sessionRef: string | null;
-  terminal: boolean;
-} {
-  const raw = message as Record<string, unknown>;
-  if (!raw || typeof raw !== "object") {
-    return { events: [], usage: null, sessionRef: state.sessionRef, terminal: false };
-  }
-  if (typeof raw.session_id === "string") state.sessionRef = raw.session_id;
-  const events: AiRuntimeEvent[] = [];
-  let usage: TokenUsage | null = null;
-  let terminal = false;
-
-  if (raw.type === "assistant") {
-    events.push(...mapClaudeAssistantControlMessage(raw, state));
-  } else if (raw.type === "result") {
-    terminal = true;
-    usage = normalizeClaudeAiUsage(raw.usage);
-  }
-
-  return { events, usage, sessionRef: state.sessionRef, terminal };
-}
-
-function mapClaudeAssistantControlMessage(raw: Record<string, unknown>, state: ClaudeControlStreamState): AiRuntimeEvent[] {
-  const events: AiRuntimeEvent[] = [];
-  const content = messageContent(raw);
-  for (const block of content) {
-    if (!block || typeof block !== "object") continue;
-    const item = block as Record<string, unknown>;
-    if (item.type !== "tool_use") continue;
-    const name = stringField(item, "name") ?? "tool";
-    const input = item.input;
-    if (name === "ExitPlanMode" && input && typeof input === "object") {
-      const plan = stringField(input as Record<string, unknown>, "plan");
-      if (plan && recordClaudePlanUpdate(state, plan)) {
-        events.push({ type: "plan.updated", state: { mode: "awaitingApproval", planText: plan, approved: false } });
-      }
-    }
-  }
-  return events;
-}
-
-function messageContent(raw: Record<string, unknown>): unknown[] {
-  const message = raw.message;
-  if (!message || typeof message !== "object") return [];
-  const content = (message as Record<string, unknown>).content;
-  return Array.isArray(content) ? content : [];
-}
-
-export function normalizeClaudeAiUsage(usage: unknown): TokenUsage | null {
-  if (!usage || typeof usage !== "object") return null;
-  const data = usage as Record<string, unknown>;
-  const promptTokens = numberOrNull(data.input_tokens);
-  const completionTokens = numberOrNull(data.output_tokens);
-  const cachedTokens = numberOrNull(data.cache_read_input_tokens);
-  return {
-    promptTokens,
-    cachedTokens,
-    completionTokens,
-    reasoningTokens: null,
-    totalTokens: promptTokens === null && completionTokens === null
-      ? null
-      : (promptTokens ?? 0) + (completionTokens ?? 0),
-  };
 }
 
 export function resolveClaudeTranscriptBinding(input: {

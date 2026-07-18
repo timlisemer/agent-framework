@@ -33,8 +33,6 @@ describe("adapter MCP recognition", () => {
   it("recognizes validated canonical and adapter wire names through the shared helper", () => {
     expect(recognizeMcpToolName("mcp-check", codexMcp)).toBe("check");
     expect(recognizeMcpToolName("mcp__agent_framework__check", codexMcp)).toBe("check");
-    expect(recognizeMcpToolName("mcp__agent_frameworkscenario_tester", codexMcp))
-      .toBe("scenario_tester");
     expect(recognizeMcpToolName("mcp-not_real", codexMcp)).toBeNull();
     expect(recognizeMcpToolName("mcp__agent_frameworknotcheck", codexMcp)).toBeNull();
   });

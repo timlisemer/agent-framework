@@ -1,60 +1,241 @@
 {
-  "schema_version": 1,
   "name": "codex-apply-patch-canonicalizes-to-edit",
   "description": "Codex apply_patch call after user authorized 'Edit' via explicitlyAllowedTools. The Codex canonicalizeToolCall converts apply_patch to 'Edit'. tool-approve must allow because the canonical tool name is Edit and the user explicitly authorized Edit. env.adapter=codex.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "codex-apply-patch-canonicalizes-to-edit-start",
+      "runId": "fixture-codex-apply-patch-canonicalizes-to-edit",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "Please update the file now."
+      "commandId": "codex-apply-patch-canonicalizes-to-edit-session-state",
+      "runId": "fixture-codex-apply-patch-canonicalizes-to-edit",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "User wants the AI to update the configuration file.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [
+              "Edit"
+            ],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a",
+            "userMessageSnippet": "Please update the file now.",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "I will apply the patch to update the configuration file."
-        },
-        {
-          "type": "tool_use",
-          "id": "call_codex_apply_patch_canonicalize",
-          "name": "apply_patch",
+      "commandId": "codex-apply-patch-canonicalizes-to-edit-message-0",
+      "runId": "fixture-codex-apply-patch-canonicalizes-to-edit",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "codex-apply-patch-canonicalizes-to-edit-message-0",
+        "turnId": "codex-apply-patch-canonicalizes-to-edit-turn-0",
+        "content": "Please update the file now.",
+        "contentDigest": "sha256:2b008c0ce03f80abe0d00c4b588708a79f17fa40858ecf2b89fd6ae6bdbc6f5c"
+      }
+    },
+    {
+      "commandId": "codex-apply-patch-canonicalizes-to-edit-message-1",
+      "runId": "fixture-codex-apply-patch-canonicalizes-to-edit",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "codex-apply-patch-canonicalizes-to-edit-message-1",
+        "turnId": null,
+        "content": "I will apply the patch to update the configuration file.\n[tool apply_patch] {\"command\":\"*** Begin Patch\\n*** Update File: /home/tim/Coding/public_repos/agent-framework/src/version.ts\\n@@\\n-export const VERSION = \\\"1.0.0\\\";\\n+export const VERSION = \\\"1.0.1\\\";\\n*** End Patch\\n\"}",
+        "contentDigest": "sha256:eebf3223cb1e3e246c23bfbce6186ec57afd9282ea0d8ea7e2012128c2c27bfd"
+      }
+    },
+    {
+      "commandId": "codex-apply-patch-canonicalizes-to-edit-target-tool",
+      "runId": "fixture-codex-apply-patch-canonicalizes-to-edit",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "User wants the AI to update the configuration file.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [
+                "Edit"
+              ],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "userMessageSnippet": "Please update the file now.",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-codex-apply-patch-canonicalizes-to-edit",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/codex-apply-patch-canonicalizes-to-edit.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-codex-apply-patch-canonicalizes-to-edit",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "preTool": {
+              "rawToolName": "apply_patch",
+              "rawToolInput": {
+                "command": "*** Begin Patch\n*** Update File: /home/tim/Coding/public_repos/agent-framework/src/version.ts\n@@\n-export const VERSION = \"1.0.0\";\n+export const VERSION = \"1.0.1\";\n*** End Patch\n"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "Please update the file now.",
+              "latestUserLogicText": "Please update the file now.",
+              "recentUserMessages": [
+                "Please update the file now."
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "call_codex_apply_patch_canonicalize",
+          "turnId": null,
+          "name": "Edit",
           "input": {
-            "command": "*** Begin Patch\n*** Update File: /home/tim/Coding/public_repos/agent-framework/src/version.ts\n@@\n-export const VERSION = \"1.0.0\";\n+export const VERSION = \"1.0.1\";\n*** End Patch\n"
-          }
+            "file_path": "/home/tim/Coding/public_repos/agent-framework/src/version.ts",
+            "file_paths": [
+              "/home/tim/Coding/public_repos/agent-framework/src/version.ts"
+            ]
+          },
+          "inputDigest": "sha256:e173ac2cd4c07e9ea96f75f19c53af8d124f77b49fc97a4a8c53b6f7a5817596",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "call_codex_apply_patch_canonicalize"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "adapter": "codex",
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "User wants the AI to update the configuration file.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [
-        "Edit"
-      ],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "contextSwitch": "no",
-      "questionIsStalling": "n/a",
-      "userMessageSnippet": "Please update the file now."
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 4
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "The Codex canonicalizeToolCall converts apply_patch to 'Edit'. The prediction's explicitlyAllowedTools contains 'Edit'. The tool is allowed because the canonical name matches the authorized tool."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "codex-apply-patch-canonicalizes-to-edit-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

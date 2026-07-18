@@ -5,7 +5,7 @@ vi.mock("../../src/utils/agent-runner.js", () => ({
 }));
 
 vi.mock("../../src/utils/git-utils.js", () => ({
-  getUncommittedChanges: vi.fn(),
+  getUncommittedChangesCancellable: vi.fn(),
 }));
 
 vi.mock("../../src/utils/plan-source.js", () => ({
@@ -32,19 +32,19 @@ vi.mock("../../src/utils/logger.js", () => ({
 }));
 
 import { validateIntentRule } from "../../src/rules/validate-intent.js";
-import { activeSpec } from "../../src/adapter/spec.js";
 import { runAgent } from "../../src/utils/agent-runner.js";
-import { getUncommittedChanges } from "../../src/utils/git-utils.js";
+import { getUncommittedChangesCancellable } from "../../src/utils/git-utils.js";
 import { readTranscriptExact } from "../../src/utils/transcript.js";
 import { makeRuleContext } from "../helpers/rule-context.js";
 
 const mockRunAgent = vi.mocked(runAgent);
-const mockGetUncommittedChanges = vi.mocked(getUncommittedChanges);
+const mockGetUncommittedChanges = vi.mocked(getUncommittedChangesCancellable);
 const mockReadTranscriptExact = vi.mocked(readTranscriptExact);
 
 function makeCtx(overrides: Parameters<typeof makeRuleContext>[0] = {}) {
   return makeRuleContext({
-    toolName: activeSpec().mcpWireName("validate_intent"),
+    toolName: "mcp-validate_intent",
+    rawToolName: undefined,
     toolInput: {},
     ...overrides,
   });
@@ -93,11 +93,12 @@ describe("validateIntentRule - deterministic null paths", () => {
       tool: [],
       totalCount: 2,
     });
-    mockGetUncommittedChanges.mockReturnValueOnce({
+    mockGetUncommittedChanges.mockResolvedValueOnce({
       status: "",
       diff: "",
       diffStat: "",
-      untrackedDiff: "",
+      untrackedInventory: "",
+      untrackedLinesChanged: 0,
     });
     const ctx = makeCtx();
     const result = await validateIntentRule.check(ctx);
@@ -118,11 +119,12 @@ describe("validateIntentRule - LLM-call path", () => {
       tool: [],
       totalCount: 2,
     });
-    mockGetUncommittedChanges.mockReturnValue({
+    mockGetUncommittedChanges.mockResolvedValue({
       status: "M src/foo.ts",
       diff: "diff --git a/src/foo.ts b/src/foo.ts\n+const fixed = true;",
       diffStat: " src/foo.ts | 1 +",
-      untrackedDiff: "",
+      untrackedInventory: "",
+      untrackedLinesChanged: 0,
     });
   });
 

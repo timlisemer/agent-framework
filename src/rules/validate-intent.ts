@@ -1,11 +1,12 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { runAgent } from "../utils/agent-runner.js";
-import { activeSpec } from "../adapter/spec.js";
-import { getUncommittedChanges } from "../utils/git-utils.js";
+import { getUncommittedChangesCancellable } from "../utils/git-utils.js";
 import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
 import { VALIDATE_INTENT_COUNTS } from "../utils/transcript-presets.js";
 import { readCurrentPlanContent } from "../utils/plan-source.js";
 import { VALIDATE_INTENT_AGENT } from "../utils/agent-configs.js";
+import { recognizeMcpToolName } from "../adapter/mcp-wire.js";
+import { adapterSpecFromRuleContext } from "./tool-call-context.js";
 
 export const validateIntentRule: PreToolRule = {
   name: "validate-intent",
@@ -17,12 +18,17 @@ export const validateIntentRule: PreToolRule = {
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
-    if (activeSpec().recognizeMcp(ctx.rawToolName ?? ctx.toolName) !== "validate_intent") return null;
+    if (
+      recognizeMcpToolName(
+        ctx.rawToolName ?? ctx.toolName,
+        adapterSpecFromRuleContext(ctx),
+      ) !== "validate_intent"
+    ) return null;
 
     const tx = await readTranscriptExact(ctx.transcriptPath, VALIDATE_INTENT_COUNTS).catch(() => null);
     if (!tx || tx.user.length === 0) return null;
 
-    const { status, diff } = getUncommittedChanges(ctx.projectDir);
+    const { status, diff } = await getUncommittedChangesCancellable(ctx.projectDir, { signal: ctx.signal });
     if (!diff && !status) return null;
 
     const plan = (await readCurrentPlanContent({
@@ -38,7 +44,8 @@ export const validateIntentRule: PreToolRule = {
           `CONVERSATION:\n${formatTranscriptResult(tx)}\n\n---\n\n` +
           `UNCOMMITTED CHANGES:\n${diff || "(no diff)"}\n\n---\n\n` +
           `PLAN FILE:\n${plan}`,
-      }
+      },
+      { signal: ctx.signal },
     );
 
     return { fastDeny: result.output };

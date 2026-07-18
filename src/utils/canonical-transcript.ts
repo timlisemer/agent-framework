@@ -62,9 +62,11 @@ export function userEntryHasToolResult(entry: TranscriptEntry): boolean {
 export function buildAssistantGroups(
   parsedEntries: readonly ParsedTranscriptEntry[],
   boundaryPolicy: AssistantGroupBoundaryPolicy = "human-user-text",
+  messageGroupKey?: (entry: TranscriptEntry) => string | null,
 ): Map<number, AssistantGroup> {
   const byIndex = new Map<number, AssistantGroup>();
   let activeGroup: AssistantGroup | undefined;
+  let activeGroupKey: string | null | undefined;
 
   for (let i = 0; i < parsedEntries.length; i++) {
     const entry = parsedEntries[i];
@@ -74,13 +76,15 @@ export function buildAssistantGroups(
     if (entry.message.role !== "assistant") {
       if (userEntryResetsAssistantGroup(entry, boundaryPolicy)) {
         activeGroup = undefined;
+        activeGroupKey = undefined;
       }
       continue;
     }
 
     if (entry.isMeta === true) continue;
 
-    if (!activeGroup) {
+    const entryGroupKey = messageGroupKey?.(entry) ?? null;
+    if (!activeGroup || (messageGroupKey !== undefined && entryGroupKey !== activeGroupKey)) {
       activeGroup = {
         msgId: entry.message.id ?? `__assistant_run_${i}`,
         indices: [],
@@ -91,6 +95,7 @@ export function buildAssistantGroups(
         toolUseIds: [],
         entryCount: 0,
       };
+      activeGroupKey = entryGroupKey;
     }
 
     addAssistantEntryToGroup(activeGroup, entry, i);

@@ -1,89 +1,256 @@
 {
-  "schema_version": 1,
   "name": "bash-npx-tsc-blocked-wrong-reason",
   "description": "Regression fixture for deterministic check-MCP ownership of `npx tsc --noEmit`. The live bug denied this command through a generic sentiment/trust path after the user said `please delete correctly`. The correct behavior is a blacklist/check-routed denial that attributes the command to the `tsc` policy and directs the assistant to the agent-framework check MCP.",
-  "transcript": [
-    {
-      "role": "user",
-      "content": "please delete correctly"
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Deleting the empty placeholder files now, then I will verify with a typecheck."
+  "initialRun": {
+    "startCommand": {
+      "commandId": "bash-npx-tsc-blocked-wrong-reason-start",
+      "runId": "fixture-bash-npx-tsc-blocked-wrong-reason",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
         },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_rm_placeholders",
-          "name": "Bash",
-          "input": {
-            "command": "rm src/utils/summary-updater.ts src/utils/summary-cache.ts",
-            "description": "Delete empty placeholder source files"
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
           }
-        }
-      ]
-    },
-    {
-      "role": "user",
-      "content": [
-        {
-          "type": "tool_result",
-          "tool_use_id": "toolu_scenario_rm_placeholders",
-          "content": "(files deleted)"
-        }
-      ]
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Now running a typecheck to confirm nothing regressed."
         },
-        {
-          "type": "tool_use",
-          "id": "toolu_scenario_npx_tsc",
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
+    {
+      "commandId": "bash-npx-tsc-blocked-wrong-reason-session-state",
+      "runId": "fixture-bash-npx-tsc-blocked-wrong-reason",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "frustrated",
+            "trust": "normal",
+            "intent": "user wants the empty placeholder files deleted correctly this time",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "userMessageSnippet": "please delete correctly",
+            "timestamp": 1
+          },
+          "frustrationStreak": 1,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "commandId": "bash-npx-tsc-blocked-wrong-reason-message-0",
+      "runId": "fixture-bash-npx-tsc-blocked-wrong-reason",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "bash-npx-tsc-blocked-wrong-reason-message-0",
+        "turnId": "bash-npx-tsc-blocked-wrong-reason-turn-0",
+        "content": "please delete correctly",
+        "contentDigest": "sha256:28336db49f397073d4d03c6f2c0a3dbc351aca6e3e8dd82f366e9e875e64f136"
+      }
+    },
+    {
+      "commandId": "bash-npx-tsc-blocked-wrong-reason-message-1",
+      "runId": "fixture-bash-npx-tsc-blocked-wrong-reason",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "bash-npx-tsc-blocked-wrong-reason-message-1",
+        "turnId": null,
+        "content": "Deleting the empty placeholder files now, then I will verify with a typecheck.\n[tool Bash] {\"command\":\"rm src/utils/summary-updater.ts src/utils/summary-cache.ts\",\"description\":\"Delete empty placeholder source files\"}",
+        "contentDigest": "sha256:5cd42199fa0289501072d5c648e7a1a98612483478c3293f05e3de98312b55eb"
+      }
+    },
+    {
+      "commandId": "bash-npx-tsc-blocked-wrong-reason-message-2",
+      "runId": "fixture-bash-npx-tsc-blocked-wrong-reason",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "bash-npx-tsc-blocked-wrong-reason-message-2",
+        "turnId": "bash-npx-tsc-blocked-wrong-reason-turn-2",
+        "content": "[tool result toolu_scenario_rm_placeholders] (files deleted)",
+        "contentDigest": "sha256:05c679aab9554abd501f51fc5071cb379dc1e67ffe7db1192312ffecf4ed1cdf"
+      }
+    },
+    {
+      "commandId": "bash-npx-tsc-blocked-wrong-reason-message-3",
+      "runId": "fixture-bash-npx-tsc-blocked-wrong-reason",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:06.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "bash-npx-tsc-blocked-wrong-reason-message-3",
+        "turnId": null,
+        "content": "Now running a typecheck to confirm nothing regressed.\n[tool Bash] {\"command\":\"npx tsc --noEmit\",\"description\":\"Typecheck after real deletion\"}",
+        "contentDigest": "sha256:baa8c329345c36c794fa7c36b361d9a755070081c560fc8873cf7ad3219cd043"
+      }
+    },
+    {
+      "commandId": "bash-npx-tsc-blocked-wrong-reason-target-tool",
+      "runId": "fixture-bash-npx-tsc-blocked-wrong-reason",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:07.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "frustrated",
+              "trust": "normal",
+              "intent": "user wants the empty placeholder files deleted correctly this time",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "userMessageSnippet": "please delete correctly",
+              "timestamp": 1
+            },
+            "frustrationStreak": 1,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-bash-npx-tsc-blocked-wrong-reason",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/bash-npx-tsc-blocked-wrong-reason.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-bash-npx-tsc-blocked-wrong-reason",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "Bash",
+              "rawToolInput": {
+                "command": "npx tsc --noEmit",
+                "description": "Typecheck after real deletion"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "[tool result toolu_scenario_rm_placeholders] (files deleted)",
+              "latestUserLogicText": "[tool result toolu_scenario_rm_placeholders] (files deleted)",
+              "recentUserMessages": [
+                "please delete correctly",
+                "[tool result toolu_scenario_rm_placeholders] (files deleted)"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "toolu_scenario_npx_tsc",
+          "turnId": null,
           "name": "Bash",
           "input": {
             "command": "npx tsc --noEmit",
             "description": "Typecheck after real deletion"
-          }
+          },
+          "inputDigest": "sha256:bc1a182e640cb698a77bb48904cfbc452395e46e0af14600443673c222ba566d",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_scenario_npx_tsc"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "permission_mode": "default",
-    "cwd": "/home/tim/Coding/public_repos/agent-framework"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "frustrated",
-      "trust": "normal",
-      "intent": "user wants the empty placeholder files deleted correctly this time",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "userMessageSnippet": "please delete correctly"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 1,
-    "currentWindowSize": 4
-  },
-  "expect": {
-    "expected": "deny",
-    "by": "blacklist",
-    "reason_must": {
-      "contains": [
-        "tsc",
-        "agent-framework check"
-      ]
+    {
+      "kind": "commandResult",
+      "commandId": "bash-npx-tsc-blocked-wrong-reason-target-tool",
+      "status": "denied"
     },
-    "notes": "`npx tsc --noEmit` is owned by the structured check-routed Bash policy. The denial must come from deterministic blacklist handling with `tsc` attribution and check MCP guidance, not from sentiment or prediction-block."
-  }
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "denied"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

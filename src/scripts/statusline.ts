@@ -24,17 +24,20 @@
 
 import { execSync } from "child_process";
 import * as path from "path";
+import { pathToFileURL } from "node:url";
+import { createAgentFrameworkScenarioRuntime } from "../effects/scenario-runtime-factory.js";
+import { canonicalHookRunId } from "../entrypoints/host-run-id.js";
+import { activeSpec } from "../adapter/spec.js";
 import {
-  readStatusLineEntries,
-  initStatuslineSession,
-  type StatusLineEntry,
-} from "../utils/statusline-state.js";
-import { getAgentFrameworkSessionDir } from "../utils/paths.js";
+  canonicalRuleStatusLineEntries,
+  filterRuleStatusLineEntries,
+  type CanonicalRuleStatusLineEntry,
+} from "./statusline-projection.js";
 
 /**
  * JSON input structure from the host agent's statusLine.
  */
-interface StatusLineInput {
+export interface StatusLineInput {
   transcript_path: string;
   cwd: string;
 }
@@ -82,7 +85,8 @@ const AGENT_DISPLAY_NAMES: Record<string, string> = {
  * Get display name for an agent.
  */
 function getAgentDisplayName(agent: string): string {
-  return AGENT_DISPLAY_NAMES[agent] || capitalizeWords(agent);
+  const canonicalName = agent.replace(/^agent-framework\.rule\./, "");
+  return AGENT_DISPLAY_NAMES[canonicalName] || capitalizeWords(canonicalName);
 }
 
 /**
@@ -154,7 +158,7 @@ function getFolderName(cwd: string): string {
 /**
  * Format a single entry for statusline display.
  */
-function formatEntry(entry: StatusLineEntry): string {
+export function formatStatusLineEntry(entry: CanonicalRuleStatusLineEntry): string {
   const agentName = getAgentDisplayName(entry.agent);
 
   if (entry.status === "running") {
@@ -174,39 +178,25 @@ const COMPLETED_FADE_MS = 5000;
 /**
  * Filter entries to show: all running (except orphaned) + recent completed.
  *
- * Orphan detection: If there's BOTH a running AND completed entry for the
- * same agent+tool, the running one is orphaned (written after completion
- * due to race condition) and should be hidden.
+ * Supersession: A terminal record hides only the running row for the same
+ * canonical evaluation identity. Older evaluations never hide newer work.
  *
  * Fade out: Each completed entry fades out 5 seconds after completion.
  */
-function filterEntries(entries: StatusLineEntry[]): StatusLineEntry[] {
-  // Build set of agent+tool combos that have completed entries
-  const completedAgentTools = new Set<string>();
-  for (const entry of entries) {
-    if (entry.status === "completed") {
-      completedAgentTools.add(`${entry.agent}:${entry.toolName}`);
-    }
+function filterEntries(entries: CanonicalRuleStatusLineEntry[]): CanonicalRuleStatusLineEntry[] {
+  return filterRuleStatusLineEntries(entries, Date.now(), COMPLETED_FADE_MS);
+}
+
+export async function readCanonicalStatusLineEntries(
+  transcriptPath: string,
+): Promise<CanonicalRuleStatusLineEntry[]> {
+  try {
+    const runId = canonicalHookRunId(activeSpec().name, transcriptPath);
+    const records = await createAgentFrameworkScenarioRuntime().recordsAfter(runId, 0);
+    return canonicalRuleStatusLineEntries(records);
+  } catch {
+    return [];
   }
-
-  // Filter running entries - exclude orphaned ones
-  const running = entries.filter((e) => {
-    if (e.status !== "running") return false;
-    const key = `${e.agent}:${e.toolName}`;
-    // If there's a completed entry for same agent+tool, this running entry is orphaned
-    return !completedAgentTools.has(key);
-  });
-
-  // Get completed entries (newest first since entries are already reversed)
-  const completed = entries.filter((e) => e.status === "completed");
-  const now = Date.now();
-
-  // Filter completed: each entry fades out individually after 5 seconds
-  const lastCompleted = completed.filter((entry) => {
-    return now - entry.timestamp < COMPLETED_FADE_MS;
-  });
-
-  return [...running, ...lastCompleted];
 }
 
 /**
@@ -227,55 +217,38 @@ async function main(): Promise<void> {
       return;
     }
 
-    const input: StatusLineInput = JSON.parse(raw);
-    if (!input.cwd) {
-      return;
-    }
-
-    // Build left side: 📁 folder-name  branch
-    const folderName = getFolderName(input.cwd);
-    const gitBranch = getGitBranch(input.cwd);
-
-    let leftSide = `${SYMBOLS.folder} ${folderName}`;
-    if (gitBranch) {
-      leftSide += ` ${SYMBOLS.gitBranch} ${gitBranch}`;
-    }
-
-    // Build right side: agent activity
-    let rightSide = "";
-    if (input.transcript_path) {
-      initStatuslineSession(getAgentFrameworkSessionDir({ transcriptPath: input.transcript_path }));
-      const entries = await readStatusLineEntries();
-
-      if (entries.length > 0) {
-        const filtered = filterEntries(entries);
-        if (filtered.length > 0) {
-          // Separate running and completed entries
-          const runningEntries = filtered.filter((e) => e.status === "running");
-          const completedEntries = filtered.filter((e) => e.status === "completed");
-
-          const runningSide = runningEntries.map(formatEntry).join(` ${SYMBOLS.entryDivider} `);
-          const completedSide = completedEntries.map(formatEntry).join(` ${SYMBOLS.entryDivider} `);
-
-          // Join sections with double line ║
-          if (runningSide && completedSide) {
-            rightSide = `${runningSide} ${SYMBOLS.sectionDivider} ${completedSide}`;
-          } else {
-            rightSide = runningSide || completedSide;
-          }
-        }
-      }
-    }
-
-    // Combine: left ║ right (or just left if no activity)
-    if (rightSide) {
-      process.stdout.write(`${leftSide} ${SYMBOLS.sectionDivider} ${rightSide}`);
-    } else {
-      process.stdout.write(leftSide);
-    }
+    process.stdout.write(await renderStatusLine(JSON.parse(raw) as StatusLineInput));
   } catch {
     // On error, output nothing (don't break statusLine)
   }
 }
 
-main();
+/** Render the stable folder/branch prefix even when canonical activity is unavailable. */
+export async function renderStatusLine(input: StatusLineInput): Promise<string> {
+  if (!input.cwd) return "";
+  const folderName = getFolderName(input.cwd);
+  const gitBranch = getGitBranch(input.cwd);
+  let leftSide = `${SYMBOLS.folder} ${folderName}`;
+  if (gitBranch) leftSide += ` ${SYMBOLS.gitBranch} ${gitBranch}`;
+
+  const entries = input.transcript_path
+    ? await readCanonicalStatusLineEntries(input.transcript_path)
+    : [];
+  const filtered = filterEntries(entries);
+  const runningSide = filtered
+    .filter((entry) => entry.status === "running")
+    .map(formatStatusLineEntry)
+    .join(` ${SYMBOLS.entryDivider} `);
+  const completedSide = filtered
+    .filter((entry) => entry.status === "completed")
+    .map(formatStatusLineEntry)
+    .join(` ${SYMBOLS.entryDivider} `);
+  const rightSide = runningSide && completedSide
+    ? `${runningSide} ${SYMBOLS.sectionDivider} ${completedSide}`
+    : runningSide || completedSide;
+  return rightSide ? `${leftSide} ${SYMBOLS.sectionDivider} ${rightSide}` : leftSide;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  void main();
+}

@@ -22,7 +22,7 @@ vi.mock("../../src/utils/quote-detection.js", () => ({
 import { responseAlignStopRule } from "../../src/rules/response-align-stop.js";
 import { runAgent } from "../../src/utils/agent-runner.js";
 import type { RuleContext } from "../../src/rules/types.js";
-import { sessionStateDefaults, type SessionState } from "../../src/utils/session-store.js";
+import { sessionStateDefaults, type SessionState } from "../helpers/session-workflow.js";
 import { makeRuleContext } from "../helpers/rule-context.js";
 
 const mockRunAgent = vi.mocked(runAgent);

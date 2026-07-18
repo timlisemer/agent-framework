@@ -5,7 +5,7 @@ import {
   extractDriftTargets,
 } from "../utils/drift-detector.js";
 import { isEditToolName } from "../utils/edit-tools.js";
-import { readToolLogEntries, type DriftTargetState } from "../utils/session-store.js";
+import type { DriftTargetState } from "../effects/session-workflow.js";
 
 export const driftDetectRule: PreToolRule = {
   name: "drift-block",
@@ -20,7 +20,7 @@ export const driftDetectRule: PreToolRule = {
     // bumps lastUserMessageTimestamp, so prior-turn allowed edits no longer
     // count toward the warning threshold - drift counters reset per turn.
     const sinceTs = ctx.state.lastUserMessageTimestamp ?? 0;
-    const recentLog = readToolLogEntries(ctx.sessionDir, 50)
+    const recentLog = [...(ctx.toolHistory ?? [])].slice(-50)
       .filter((e) => e.ts >= sinceTs);
     const drift = detectDrift(
       ctx.toolName,

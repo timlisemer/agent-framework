@@ -34,7 +34,7 @@ export const respondFirstRule: PreToolRule = {
     }
 
     const rfResult = await readTranscriptExact(ctx.transcriptPath, {
-      counts: { user: 1 },
+      counts: { user: { count: 1 } },
       excludeSlashCommandPrompts: true,
       includeSlashCommandContext: true,
     });

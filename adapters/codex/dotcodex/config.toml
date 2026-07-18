@@ -18,19 +18,19 @@ trusted_hash = "sha256:62a39c4172a840abe3edcc4afe039e01834e40008358318af94aef886
 
 [hooks.state."/home/tim/.codex/hooks.json:pre_tool_use:0:0"]
 enabled = true
-trusted_hash = "sha256:89693a6ffb78a57c1d167dfd25ce56d82d934135efccf641209a1e7db45361bf"
+trusted_hash = "sha256:1ce9253c218178949067c5b49d0a911a952813ff2474c3d32ddefd8a53c36f88"
 
 [hooks.state."/home/tim/.codex/hooks.json:permission_request:0:0"]
 enabled = true
-trusted_hash = "sha256:de30c6379c87b30dd004185060580ee528abf3b4830dbfd38168bedad7217e97"
+trusted_hash = "sha256:6b042b2c18bd1465ca98cc7f8911821426c6f92f26a073829746323cc9b83749"
 
 [hooks.state."/home/tim/.codex/hooks.json:post_tool_use:0:0"]
 enabled = true
-trusted_hash = "sha256:2512f6002ffa7b17619782e37de37bc0b9c411519042c5024e6ca8623dd05af2"
+trusted_hash = "sha256:adb2621b562f7426f606cccf39edc6ce6b1593d3692f1c93ddd619ed71107b55"
 
 [hooks.state."/home/tim/.codex/hooks.json:post_tool_use_failure:0:0"]
 enabled = true
-trusted_hash = "sha256:bab2be897706261e6dcfbea7b654a59c07b0491f569cb0be8b4d9d68a493ed87"
+trusted_hash = "sha256:804b2dbbdfdc9a0f40e80be9484a7d559c4e62a2b7d6f2765e353826896d4ed7"
 
 [hooks.state."/home/tim/.codex/hooks.json:stop:0:0"]
 enabled = true

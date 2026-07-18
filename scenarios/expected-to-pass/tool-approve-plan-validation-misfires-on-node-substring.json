@@ -1,67 +1,233 @@
 {
-  "schema_version": 1,
   "name": "tool-approve-plan-validation-misfires-on-node-substring",
   "description": "Promoted to expected-to-pass on 2026-05-19 after three scenario_tester sweeps consistently allowed this case. This live repro originally covered plan-validation incorrectly matching the word `node` in plan prose as a shell `node` invocation. The current command-pattern tightening prevents that false positive; this scenario now pins the allowed behavior for prose containing menu-node wording above Manual User Verification.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "tool-approve-plan-validation-misfires-on-node-substring-start",
+      "runId": "fixture-tool-approve-plan-validation-misfires-on-node-substring",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/astral",
+        "projectDir": "/home/tim/Coding/public_repos/astral",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "please read the following 3 individual plans and merge and consolidate them all together into one single giant plan and then start the validate agents as described in /plan3 DO NOT LEAVE OUT ANY DETAIL FROM THE GIANT PLAN! I CALL IT GIANT ON PURPOSE, I DONT CARE HOW LONG IT GETS. ~/.claude/plans/session-1-phase-sparkling-peacock.md ~/.claude/plans/session-2-phase-fancy-dongarra.md ~/.claude/plans/session-3-phase-nested-cupcake.md"
+      "commandId": "tool-approve-plan-validation-misfires-on-node-substring-session-state",
+      "runId": "fixture-tool-approve-plan-validation-misfires-on-node-substring",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "User wants three prior plans merged into one giant consolidated plan and validators rerun on it.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "userMessageSnippet": "please read the following 3 individual plans and merge and consolidate them all together into one single giant plan and then start the validate agents as described in /plan3 DO NOT LEAVE OUT ANY DETAIL FROM THE GIANT PLAN!",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 2,
+          "planFile": {
+            "slug": "fixture-tool-approve-plan-validation-misfires-on-node-substring",
+            "content": "# Phases 2a + 2b + 2c — Unified MPRIS / Notifd / Tray Replacement (slice)\n\n## Integration tests (Phase 2c)\n\n### `tests/tray_menu_flatten.rs` (pure logic, no D-Bus)\n\nHand-build synthetic `MenuNode` trees, assert `menu::flatten` produces the same `TrayMenu` shape. Cases:\n- single-section flat menu (3 leaves) → 1 section with 3 actions.\n- separator between two leaves → 2 sections.\n- **leading separator → no empty section emitted**.\n- **trailing separator → no empty section emitted**.\n- **double separator → no empty section between them**.\n- submenu node with `children-display = \"submenu\"` and 2 leaves, with submenu label promotion to first child section's label.\n- **submenu where the recursed first sub-section already has a non-null label → submenu's own label is NOT promoted**.\n- submenu pre-flush: a leaf preceding a submenu produces its own section.\n- `visible == false` skipped.\n- `enabled == false` skipped.\n- leaf with missing `label` property → `label: \"\"`.\n- empty children array → `TrayMenu { sections: [] }`.\n\n## Assistant Verification\n\nAfter implementation:\n\n1. Run `mcp__agent-framework__check`.\n2. From `/home/tim/Coding/public_repos/astral/`, exercise the tray watcher manually.\n\n## Manual User Verification\n\n1. With clean session bus, open Discord/Steam/Slack and verify each emits a tray icon.\n2. Right-click a tray icon, navigate the submenu, confirm menu items dispatch correctly.\n3. Kill an SNI app and confirm the icon disappears within ~1s.\n"
+          }
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant_split",
-      "msg_id": "msg_01J8pHScAjSqhdWZFoy4kHjD",
-      "lines": [
-        {
-          "blocks": [
-            {
-              "type": "text",
-              "text": "Plan corrections complete. Now exiting plan mode."
+      "commandId": "tool-approve-plan-validation-misfires-on-node-substring-message-0",
+      "runId": "fixture-tool-approve-plan-validation-misfires-on-node-substring",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "tool-approve-plan-validation-misfires-on-node-substring-message-0",
+        "turnId": "tool-approve-plan-validation-misfires-on-node-substring-turn-0",
+        "content": "please read the following 3 individual plans and merge and consolidate them all together into one single giant plan and then start the validate agents as described in /plan3 DO NOT LEAVE OUT ANY DETAIL FROM THE GIANT PLAN! I CALL IT GIANT ON PURPOSE, I DONT CARE HOW LONG IT GETS. ~/.claude/plans/session-1-phase-sparkling-peacock.md ~/.claude/plans/session-2-phase-fancy-dongarra.md ~/.claude/plans/session-3-phase-nested-cupcake.md",
+        "contentDigest": "sha256:989a4a260a5ced060f603e1884e8dcb1361c8e803c79c377c62e1278bea4bf18"
+      }
+    },
+    {
+      "commandId": "tool-approve-plan-validation-misfires-on-node-substring-message-1",
+      "runId": "fixture-tool-approve-plan-validation-misfires-on-node-substring",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "msg_01J8pHScAjSqhdWZFoy4kHjD",
+        "turnId": null,
+        "content": "Plan corrections complete. Now exiting plan mode.\n[tool ExitPlanMode] {\"plan\":\"# Phases 2a + 2b + 2c — Unified MPRIS / Notifd / Tray Replacement (slice)\\n\\n## Integration tests (Phase 2c)\\n\\n### `tests/tray_menu_flatten.rs` (pure logic, no D-Bus)\\n\\nHand-build synthetic `MenuNode` trees, assert `menu::flatten` produces the same `TrayMenu` shape. Cases:\\n- single-section flat menu (3 leaves) → 1 section with 3 actions.\\n- separator between two leaves → 2 sections.\\n- **leading separator → no empty section emitted**.\\n- **trailing separator → no empty section emitted**.\\n- **double separator → no empty section between them**.\\n- submenu node with `children-display = \\\"submenu\\\"` and 2 leaves, with submenu label promotion to first child section's label.\\n- **submenu where the recursed first sub-section already has a non-null label → submenu's own label is NOT promoted**.\\n- submenu pre-flush: a leaf preceding a submenu produces its own section.\\n- `visible == false` skipped.\\n- `enabled == false` skipped.\\n- leaf with missing `label` property → `label: \\\"\\\"`.\\n- empty children array → `TrayMenu { sections: [] }`.\\n\\n## Assistant Verification\\n\\nAfter implementation:\\n\\n1. Run `mcp__agent-framework__check`.\\n2. From `/home/tim/Coding/public_repos/astral/`, exercise the tray watcher manually.\\n\\n## Manual User Verification\\n\\n1. With clean session bus, open Discord/Steam/Slack and verify each emits a tray icon.\\n2. Right-click a tray icon, navigate the submenu, confirm menu items dispatch correctly.\\n3. Kill an SNI app and confirm the icon disappears within ~1s.\\n\"}",
+        "contentDigest": "sha256:139754a86a1f167308308d10e3ac4e133b26649ca702161251c4ba7ad909e13c"
+      }
+    },
+    {
+      "commandId": "tool-approve-plan-validation-misfires-on-node-substring-target-tool",
+      "runId": "fixture-tool-approve-plan-validation-misfires-on-node-substring",
+      "source": {
+        "kind": "scenarioFixture"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "User wants three prior plans merged into one giant consolidated plan and validators rerun on it.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "userMessageSnippet": "please read the following 3 individual plans and merge and consolidate them all together into one single giant plan and then start the validate agents as described in /plan3 DO NOT LEAVE OUT ANY DETAIL FROM THE GIANT PLAN!",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 2,
+            "planFile": {
+              "slug": "fixture-tool-approve-plan-validation-misfires-on-node-substring",
+              "content": "# Phases 2a + 2b + 2c — Unified MPRIS / Notifd / Tray Replacement (slice)\n\n## Integration tests (Phase 2c)\n\n### `tests/tray_menu_flatten.rs` (pure logic, no D-Bus)\n\nHand-build synthetic `MenuNode` trees, assert `menu::flatten` produces the same `TrayMenu` shape. Cases:\n- single-section flat menu (3 leaves) → 1 section with 3 actions.\n- separator between two leaves → 2 sections.\n- **leading separator → no empty section emitted**.\n- **trailing separator → no empty section emitted**.\n- **double separator → no empty section between them**.\n- submenu node with `children-display = \"submenu\"` and 2 leaves, with submenu label promotion to first child section's label.\n- **submenu where the recursed first sub-section already has a non-null label → submenu's own label is NOT promoted**.\n- submenu pre-flush: a leaf preceding a submenu produces its own section.\n- `visible == false` skipped.\n- `enabled == false` skipped.\n- leaf with missing `label` property → `label: \"\"`.\n- empty children array → `TrayMenu { sections: [] }`.\n\n## Assistant Verification\n\nAfter implementation:\n\n1. Run `mcp__agent-framework__check`.\n2. From `/home/tim/Coding/public_repos/astral/`, exercise the tray watcher manually.\n\n## Manual User Verification\n\n1. With clean session bus, open Discord/Steam/Slack and verify each emits a tray icon.\n2. Right-click a tray icon, navigate the submenu, confirm menu items dispatch correctly.\n3. Kill an SNI app and confirm the icon disappears within ~1s.\n"
             }
-          ]
-        },
-        {
-          "blocks": [
-            {
-              "type": "tool_use",
-              "id": "toolu_0142KNRCbMBmddpdtJuq17h2",
-              "name": "ExitPlanMode",
-              "input": {
+          },
+          "context": {
+            "adapter": "claude",
+            "nativeSessionId": "fixture-tool-approve-plan-validation-misfires-on-node-substring",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/tool-approve-plan-validation-misfires-on-node-substring.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-tool-approve-plan-validation-misfires-on-node-substring",
+            "projectDir": "/home/tim/Coding/public_repos/astral",
+            "workingDir": "/home/tim/Coding/public_repos/astral",
+            "permissionMode": "plan",
+            "collaborationMode": null,
+            "planMode": true,
+            "planModeDetection": {
+              "active": true,
+              "mode": "plan",
+              "source": "hook-permission-mode"
+            },
+            "host": {
+              "adapter": "claude",
+              "projectDir": "/home/tim/Coding/public_repos/astral",
+              "configRoot": "/home/tim/.claude",
+              "plansRoot": "/home/tim/.claude/plans",
+              "instructionFiles": [],
+              "instructionLabel": "CLAUDE.md"
+            },
+            "preTool": {
+              "rawToolName": "ExitPlanMode",
+              "rawToolInput": {
                 "plan": "# Phases 2a + 2b + 2c — Unified MPRIS / Notifd / Tray Replacement (slice)\n\n## Integration tests (Phase 2c)\n\n### `tests/tray_menu_flatten.rs` (pure logic, no D-Bus)\n\nHand-build synthetic `MenuNode` trees, assert `menu::flatten` produces the same `TrayMenu` shape. Cases:\n- single-section flat menu (3 leaves) → 1 section with 3 actions.\n- separator between two leaves → 2 sections.\n- **leading separator → no empty section emitted**.\n- **trailing separator → no empty section emitted**.\n- **double separator → no empty section between them**.\n- submenu node with `children-display = \"submenu\"` and 2 leaves, with submenu label promotion to first child section's label.\n- **submenu where the recursed first sub-section already has a non-null label → submenu's own label is NOT promoted**.\n- submenu pre-flush: a leaf preceding a submenu produces its own section.\n- `visible == false` skipped.\n- `enabled == false` skipped.\n- leaf with missing `label` property → `label: \"\"`.\n- empty children array → `TrayMenu { sections: [] }`.\n\n## Assistant Verification\n\nAfter implementation:\n\n1. Run `mcp__agent-framework__check`.\n2. From `/home/tim/Coding/public_repos/astral/`, exercise the tray watcher manually.\n\n## Manual User Verification\n\n1. With clean session bus, open Discord/Steam/Slack and verify each emits a tray icon.\n2. Right-click a tray icon, navigate the submenu, confirm menu items dispatch correctly.\n3. Kill an SNI app and confirm the icon disappears within ~1s.\n"
-              }
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "please read the following 3 individual plans and merge and consolidate them all together into one single giant plan and then start the validate agents as described in /plan3 DO NOT LEAVE OUT ANY DETAIL FROM THE GIANT PLAN! I CALL IT GIANT ON PURPOSE, I DONT CARE HOW LONG IT GETS. ~/.claude/plans/session-1-phase-sparkling-peacock.md ~/.claude/plans/session-2-phase-fancy-dongarra.md ~/.claude/plans/session-3-phase-nested-cupcake.md",
+              "latestUserLogicText": "please read the following 3 individual plans and merge and consolidate them all together into one single giant plan and then start the validate agents as described in /plan3 DO NOT LEAVE OUT ANY DETAIL FROM THE GIANT PLAN! I CALL IT GIANT ON PURPOSE, I DONT CARE HOW LONG IT GETS. ~/.claude/plans/session-1-phase-sparkling-peacock.md ~/.claude/plans/session-2-phase-fancy-dongarra.md ~/.claude/plans/session-3-phase-nested-cupcake.md",
+              "recentUserMessages": [
+                "please read the following 3 individual plans and merge and consolidate them all together into one single giant plan and then start the validate agents as described in /plan3 DO NOT LEAVE OUT ANY DETAIL FROM THE GIANT PLAN! I CALL IT GIANT ON PURPOSE, I DONT CARE HOW LONG IT GETS. ~/.claude/plans/session-1-phase-sparkling-peacock.md ~/.claude/plans/session-2-phase-fancy-dongarra.md ~/.claude/plans/session-3-phase-nested-cupcake.md"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": true,
+              "batch": null
             }
-          ]
+          },
+          "toolCallId": "toolu_0142KNRCbMBmddpdtJuq17h2",
+          "turnId": null,
+          "name": "ExitPlanMode",
+          "input": {
+            "plan": "# Phases 2a + 2b + 2c — Unified MPRIS / Notifd / Tray Replacement (slice)\n\n## Integration tests (Phase 2c)\n\n### `tests/tray_menu_flatten.rs` (pure logic, no D-Bus)\n\nHand-build synthetic `MenuNode` trees, assert `menu::flatten` produces the same `TrayMenu` shape. Cases:\n- single-section flat menu (3 leaves) → 1 section with 3 actions.\n- separator between two leaves → 2 sections.\n- **leading separator → no empty section emitted**.\n- **trailing separator → no empty section emitted**.\n- **double separator → no empty section between them**.\n- submenu node with `children-display = \"submenu\"` and 2 leaves, with submenu label promotion to first child section's label.\n- **submenu where the recursed first sub-section already has a non-null label → submenu's own label is NOT promoted**.\n- submenu pre-flush: a leaf preceding a submenu produces its own section.\n- `visible == false` skipped.\n- `enabled == false` skipped.\n- leaf with missing `label` property → `label: \"\"`.\n- empty children array → `TrayMenu { sections: [] }`.\n\n## Assistant Verification\n\nAfter implementation:\n\n1. Run `mcp__agent-framework__check`.\n2. From `/home/tim/Coding/public_repos/astral/`, exercise the tray watcher manually.\n\n## Manual User Verification\n\n1. With clean session bus, open Discord/Steam/Slack and verify each emits a tray icon.\n2. Right-click a tray icon, navigate the submenu, confirm menu items dispatch correctly.\n3. Kill an SNI app and confirm the icon disappears within ~1s.\n"
+          },
+          "inputDigest": "sha256:743e096282f198b26c3145720481839a8a3bf34e46907164723e9d4190ff1bd5",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "toolu_0142KNRCbMBmddpdtJuq17h2"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/astral",
-    "permission_mode": "plan"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "User wants three prior plans merged into one giant consolidated plan and validators rerun on it.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "userMessageSnippet": "please read the following 3 individual plans and merge and consolidate them all together into one single giant plan and then start the validate agents as described in /plan3 DO NOT LEAVE OUT ANY DETAIL FROM THE GIANT PLAN!"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 2,
-    "planFile": {
-      "slug": "fixture-tool-approve-plan-validation-misfires-on-node-substring",
-      "content": "# Phases 2a + 2b + 2c — Unified MPRIS / Notifd / Tray Replacement (slice)\n\n## Integration tests (Phase 2c)\n\n### `tests/tray_menu_flatten.rs` (pure logic, no D-Bus)\n\nHand-build synthetic `MenuNode` trees, assert `menu::flatten` produces the same `TrayMenu` shape. Cases:\n- single-section flat menu (3 leaves) → 1 section with 3 actions.\n- separator between two leaves → 2 sections.\n- **leading separator → no empty section emitted**.\n- **trailing separator → no empty section emitted**.\n- **double separator → no empty section between them**.\n- submenu node with `children-display = \"submenu\"` and 2 leaves, with submenu label promotion to first child section's label.\n- **submenu where the recursed first sub-section already has a non-null label → submenu's own label is NOT promoted**.\n- submenu pre-flush: a leaf preceding a submenu produces its own section.\n- `visible == false` skipped.\n- `enabled == false` skipped.\n- leaf with missing `label` property → `label: \"\"`.\n- empty children array → `TrayMenu { sections: [] }`.\n\n## Assistant Verification\n\nAfter implementation:\n\n1. Run `mcp__agent-framework__check`.\n2. From `/home/tim/Coding/public_repos/astral/`, exercise the tray watcher manually.\n\n## Manual User Verification\n\n1. With clean session bus, open Discord/Steam/Slack and verify each emits a tray icon.\n2. Right-click a tray icon, navigate the submenu, confirm menu items dispatch correctly.\n3. Kill an SNI app and confirm the icon disappears within ~1s.\n"
+    {
+      "kind": "commandResult",
+      "commandId": "tool-approve-plan-validation-misfires-on-node-substring-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
     }
-  },
-  "expect": {
-    "expected": "allow"
-  }
+  ]
 }

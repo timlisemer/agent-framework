@@ -1,10 +1,18 @@
-import type { SessionState } from "../utils/session-store.js";
-import type { CacheManager } from "../utils/cache-manager.js";
-import type { LatestUserTurn, Mood, Trust } from "../utils/prediction-types.js";
+import type { SessionWorkflowState as SessionState } from "../effects/session-workflow.js";
+import type { ToolLogEntry } from "../utils/tool-log-types.js";
+import type { LatestUserTurn } from "../utils/prediction-types.js";
+import type { Mood, Trust } from "../utils/prediction-schema.js";
 import type { HostContext } from "../utils/host-context.js";
+import type { PlanSourceDescriptor } from "../adapter/types.js";
 import type { PriorErrorContext } from "../utils/prior-error-context.js";
+import type { JsonValue } from "../scenario/protocol/common.js";
 
 export type HookEvent = "PreToolUse" | "UserPromptSubmit" | "Stop";
+
+export interface RuleStateManager<T> {
+  load(): Promise<T>;
+  update(update: (value: T) => T): Promise<void>;
+}
 
 export interface RuleContext {
   hookEvent?: HookEvent;
@@ -24,13 +32,23 @@ export interface RuleContext {
   userText?: string;
   priorErrorContext?: PriorErrorContext[];
   // Common
+  /** Registered adapter that originated this canonical rule evaluation. */
+  adapter?: string;
   projectDir: string;
   host?: HostContext;
   transcriptPath: string;
   sessionDir: string;
   sessionId: string;
+  /** Cancellation for the canonical effect that owns this rule evaluation. */
+  signal?: AbortSignal;
   state: SessionState;
-  stateManager: CacheManager<SessionState>;
+  stateManager: RuleStateManager<SessionState>;
+  /** Canonical tool history projected from ScenarioSnapshot; oldest first. */
+  toolHistory?: readonly ToolLogEntry[];
+  /** Canonical gate/appeal history projected from the gate.reasoning state slice. */
+  reasoningHistory?: string;
+  /** Current file-backed plan projected from the canonical plan.current state slice. */
+  currentPlan?: PlanSourceDescriptor | null;
   planMode: boolean;
   planModeCtx: { active: boolean; contextString: string };
   /**
@@ -44,8 +62,8 @@ export interface RuleContext {
    */
   outsideRootPath?: string;
   /**
-   * The user's latest non-meta full text message from the live transcript at
-   * PreToolUse entry, without quote/paste stripping. Independent of
+   * The user's latest non-meta full text message from the committed
+   * `host.context` projection, without quote/paste stripping. Independent of
    * `state.currentPrediction.userMessageSnippet`, which can be stale when
    * sentiment refresh failed/timed out/anchored on a prior negative read,
    * and is also capped at 200 chars by user-prompt-submit. Optional so
@@ -58,7 +76,7 @@ export interface RuleContext {
    */
   latestUserMessage?: string;
   /**
-   * Canonical latest live user turn from the transcript at PreToolUse entry.
+   * Canonical latest user turn from the committed host observation.
    * Unlike `state.currentPrediction`, this is not cached sentiment state.
    * Prediction-block uses `logicText` as the authoritative current-turn
    * authorization/prohibition input before falling back to historical mood.
@@ -66,8 +84,8 @@ export interface RuleContext {
   latestUserTurn?: LatestUserTurn;
   /**
    * The last 5 non-meta, non-slash-command full user-text turns from the
-   * transcript at PreToolUse entry, OLDEST-FIRST.
-   * Read once in pre-tool-use.ts and threaded so prediction-block /
+   * committed host observation, OLDEST-FIRST.
+   * Projected once at the boundary so prediction-block /
    * decidePrediction step 3.10 can scan for an outer user turn that
    * authorizes the firing tool when the cached prediction is anchored on
    * a discharged side-clarification. Optional so unit-test mocks can omit
@@ -91,7 +109,7 @@ export interface RuleContext {
   /**
    * Tools authorized by the active slash-command workflow, resolved from
    * the most recent <command-name>/NAME</command-name> entry in the
-   * transcript via SLASH_COMMAND_ALLOWED_TOOLS. Undefined when no slash
+   * committed host observation via SLASH_COMMAND_ALLOWED_TOOLS. Undefined when no slash
    * command is active or the command has no entry. Read by
    * decidePrediction step 3.11 (via prediction-block) to allow the
    * workflow's authorized tools through mood-driven policy. Optional so
@@ -148,10 +166,17 @@ export interface PreToolRule {
   /** Whether this rule involves an LLM call. Used by exitPipeline to decide
    *  whether to write gate reasoning entries. Replaces the hardcoded isLlmAgent array. */
   usesLlm: boolean;
+  /** Versioned, serializable rule configuration exposed to runtime clients. */
+  version?: string;
+  configuration?: Record<string, JsonValue>;
   /** Hook events this rule participates in. Defaults to ["PreToolUse"] when omitted. */
   events?: ReadonlyArray<HookEvent>;
   check(ctx: RuleContext): Promise<RuleCheckResult>;
   promptSection: string;
+  /** Optional rule-specific context appended to the canonical appeal prompt. */
+  appealGuidance?: string | ((ctx: RuleContext, reason: string) => string);
+  /** Optional state transition performed only after the canonical appeal overturns a denial. */
+  onAppealOverturned?(ctx: RuleContext, reason: string): Promise<void>;
   /** Optional hook called when denial is confirmed (appeal failed or not appealable). */
   onDenialConfirmed?(ctx: RuleContext, reason: string): Promise<void>;
 }

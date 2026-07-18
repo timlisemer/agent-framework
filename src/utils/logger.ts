@@ -6,13 +6,6 @@
  */
 
 import { trackAgentExecution, extractDecision } from "./telemetry-tracker.js";
-import { getTranscriptPath } from "./execution-context.js";
-import {
-  updateStatusLineState,
-  markAgentStarted,
-  trackStatuslinePromise,
-  flushStatuslineUpdates,
-} from "./statusline-state.js";
 import type { DecisionType } from "../telemetry/types.js";
 import {
   MODEL_TIERS,
@@ -131,7 +124,6 @@ function agentExecutionLogFields(
  * ```
  */
 export function logAgentDecision(log: AgentLog): void {
-  const transcriptPath = getTranscriptPath();
   const agentName = log.agent;
 
   trackAgentExecution({
@@ -159,19 +151,6 @@ export function logAgentDecision(log: AgentLog): void {
     provider: log.provider,
   });
 
-  // Update statusline state (fire-and-forget, non-blocking)
-  if (transcriptPath) {
-    const promise = updateStatusLineState({
-      agent: agentName,
-      decision: log.decision,
-      toolName: log.toolName,
-      executionType: log.executionType,
-      latencyMs: log.latencyMs,
-    }).catch(() => {
-      // Ignore errors - statusline is best-effort
-    });
-    trackStatuslinePromise(promise);
-  }
 }
 
 /**
@@ -467,38 +446,4 @@ export function logFastPathDeny(
   );
 }
 
-/**
- * Log that an agent has started running.
- *
- * Use this to mark an agent as "running" in the statusline before
- * it begins execution. When the agent completes, the normal logging
- * functions (logApprove, logDeny, etc.) will update the entry to "completed".
- *
- * @example
- * ```typescript
- * // Before running agent
- * logAgentStarted("tool-approve", "Bash");
- *
- * // Run agent...
- * const result = await runAgent(config, input);
- *
- * // Log completion (this updates the running entry)
- * logApprove(result, "tool-approve", "PreToolUse", "Bash", workingDir, "llm");
- * ```
- */
-export function logAgentStarted(agent: string, toolName: string): void {
-  const transcriptPath = getTranscriptPath();
-  const agentName = agent;
-  if (transcriptPath) {
-    const promise = markAgentStarted({
-      agent: agentName,
-      toolName,
-    }).catch(() => {
-      // Ignore errors - statusline is best-effort
-    });
-    trackStatuslinePromise(promise);
-  }
-}
-
-// Re-export for convenience
-export { extractDecision, flushStatuslineUpdates };
+export { extractDecision };

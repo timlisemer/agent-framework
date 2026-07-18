@@ -1,5 +1,7 @@
+export const CODEX_LOCAL_INSPECTION_TOOL_INVENTORY = ["exec_command"] as const;
+
 export const CODEX_TOOL_LIFECYCLE_MATCHER =
-  "Read|Bash|apply_patch|edit_file|write_file|Edit|MultiEdit|Write|NotebookEdit|spawn_agent|send_input|resume_agent|wait|wait_agent|close_agent|mcp__.*";
+  "Read|Bash|exec_command|write_stdin|apply_patch|edit_file|write_file|Edit|MultiEdit|Write|NotebookEdit|spawn_agent|send_input|resume_agent|wait|wait_agent|close_agent|mcp__.*";
 
 export const CODEX_HOOK_EVENTS = [
   "PreToolUse",

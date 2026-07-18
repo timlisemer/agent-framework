@@ -8,7 +8,7 @@
  * @module edit-intent
  */
 
-import type { ToolPrediction } from "./prediction-types.js";
+import type { ToolPrediction } from "./prediction-schema.js";
 import { getBlacklistHighlights } from "./bash-command-policy.js";
 import { isPlanModeBashWrite } from "./plan-mode-bash-write.js";
 import { activeSpec } from "../adapter/spec.js";

@@ -3,12 +3,12 @@ import {
   evaluateBashPolicy,
   getHardBlacklistHighlights,
 } from "../utils/command-patterns.js";
-import { activeSpec } from "../adapter/spec.js";
 import {
   decideRequiredWorkflowToolSequence,
   requiredMcpToolSequence,
   requireToolSequenceNext,
 } from "../utils/prediction-types.js";
+import { adapterSpecFromRuleContext } from "./tool-call-context.js";
 
 export const blacklistRule: PreToolRule = {
   name: "blacklist",
@@ -45,7 +45,7 @@ export const blacklistRule: PreToolRule = {
     const policy = evaluateBashPolicy(command, ctx.projectDir);
     if (policy.terminal.ownerTopic !== "check-routed") return;
 
-    const spec = activeSpec();
+    const spec = adapterSpecFromRuleContext(ctx);
     const required = requiredMcpToolSequence(
       "check",
       `The denied ${policy.terminal.ownerName} command must be run through ${spec.renderCheckMcpHint()}`,

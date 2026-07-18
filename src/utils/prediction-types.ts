@@ -44,99 +44,15 @@ import {
   type BashCommandClassification,
 } from "./command-patterns.js";
 import type { CanonicalToolCapability } from "./tool-capabilities.js";
-
-export type Mood = "angry" | "frustrated" | "neutral" | "satisfied" | "happy";
-export type Trust = "low" | "normal" | "high";
-
-export interface ToolRequirement {
-  /** Canonical tool name such as "Agent", "Read", or "mcp-commit". */
-  tool: string;
-  /** Exact scalar input constraints. Example: { subagent_type: "implementer" }. */
-  input?: Record<string, string | number | boolean>;
-  /** Exact array-length constraints on canonical input fields. */
-  inputArrayLengths?: Record<string, number>;
-  /** Input keys that must be present, with environment-specific values. */
-  inputRequiredKeys?: string[];
-  /** Literal substrings that must appear in the serialized tool input. */
-  inputSubstrings?: string[];
-  /** Human-readable source/reason for debugging and prediction context. */
-  reason?: string;
-}
+import type {
+  Mood,
+  ToolPrediction,
+  ToolRequirement,
+} from "./prediction-schema.js";
 
 export interface PredictionToolCall {
   toolName: string;
   toolInput: unknown;
-}
-
-export interface ToolPrediction {
-  mood: Mood;
-  trust: Trust;
-  /** 1-2 sentences: what the user wants. */
-  intent: string;
-  /** 1-2 sentences: what the user explicitly does NOT want, or "". */
-  blockedIntent: string;
-
-  /** LITERAL tool names - exact match, no regex. */
-  explicitlyAllowedTools: string[];
-
-  /**
-   * Ordered tool calls that must happen before arbitrary workflow progress.
-   * The first entry is the only required call currently accepted. Calls
-   * matching nonBlockingTools may run without consuming this queue.
-   */
-  explicitlyRequiredTools?: ToolRequirement[];
-
-  /**
-   * Tool calls allowed while explicitlyRequiredTools is non-empty. These do
-   * not consume the required queue.
-   */
-  nonBlockingTools?: ToolRequirement[];
-
-  /** LITERAL substring filters - no regex. */
-  explicitlyBlockedSubstrings: Array<{
-    /** Exact tool name like "Bash" or "Edit". */
-    tool: string;
-    /** Literal substring of command/file_path. */
-    targetSubstring?: string;
-    /** Quote of user's words explaining the block. */
-    reason: string;
-  }>;
-
-  /**
-   * Set by SENTIMENT_AGENT when the user explicitly asked the AI to stop
-   * doing things entirely ("stop", "don't do anything", "halt everything",
-   * "STOP. WTF ARE YOU DOING."). When true, decidePrediction denies EVERY
-   * tool not in explicitlyAllowedTools - overrides the low-risk allowance.
-   */
-  blockAllTools?: boolean;
-
-  /**
-   * Full unstripped user message used for policy logic. Optional for
-   * backwards-compatible scenario seeds; logic must fall back to
-   * userMessageSnippet only when this is absent.
-   */
-  userMessageFull?: string;
-
-  /** Short display quote for denial text and reports. Do not use as logic. */
-  userMessageSnippet: string;
-  timestamp: number;
-
-  /** Whether the user just changed topic / opened a new unrelated task. */
-  contextSwitch?: "yes" | "no";
-  /**
-   * Only meaningful when SENTIMENT_AGENT was invoked with ASKUSERQUESTION CONTENT.
-   * Otherwise "n/a".
-   */
-  questionIsStalling?: "yes" | "no" | "n/a";
-
-  /**
-   * True when the user's full prompt (NOT the 200-char snippet) contains an
-   * explicit override phrase ("override the block", "do it anyway", etc.).
-   * Computed once at prediction-population time against the full prompt so
-   * downstream consumers (tool-appeal user-state, future outside-root rules)
-   * read a single source of truth.
-   */
-  hasExplicitOverride?: boolean;
 }
 
 function bashSafetyBlocksPredictionOverride(
@@ -310,7 +226,6 @@ export const ACTION_DEMAND_INTENT_RE =
  */
 export const TOOL_NAME_ALIASES: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
   ["mcp-scenario_tester", ["scenario_tester", "scenario tester", "the scenario tester", "scenario tester mcp", "tester mcp", "the tester", "via the tester"]],
-  ["mcp-scenario_labeler", ["scenario_labeler", "scenario labeler", "the scenario labeler", "scenario labeler mcp", "labeler mcp", "the labeler", "via the labeler"]],
   ["Agent", ["validator agent", "another validator agent", "spawn an agent", "spawn a subagent", "launch an agent", "launch a subagent", "start an agent", "start a subagent", "run an agent", "run a subagent", "another subagent"]],
 ]);
 
@@ -1201,7 +1116,10 @@ export function formatToolRequirement(requirement: ToolRequirement): string {
   const substrings = canonical.inputSubstrings?.length
     ? ` inputSubstrings=${JSON.stringify(canonical.inputSubstrings)}`
     : "";
-  return `${canonical.tool}${constraints ? `(${constraints})` : ""}${substrings}`;
+  const adapterHint = canonical.tool === "Read"
+    ? " (Codex: use read-only exec_command inspection)"
+    : "";
+  return `${canonical.tool}${constraints ? `(${constraints})` : ""}${substrings}${adapterHint}`;
 }
 
 export function advanceRequiredToolsAfterAllowedTool(
@@ -1289,7 +1207,7 @@ function consumeRequiredWorkflowTools(
       remaining,
       violation: {
         decision: "deny",
-        reason: `Workflow requires ${formatToolRequirement(nextRequired)} next before ${call.toolName}.`,
+        reason: unsatisfiedRequirementReason(nextRequired, call.toolName, matchContext),
       },
     };
   }
@@ -1470,7 +1388,7 @@ export function decidePrediction(
     }
     return {
       decision: "deny",
-      reason: `Workflow requires ${formatToolRequirement(nextRequiredTool)} next before ${toolName}.`,
+      reason: unsatisfiedRequirementReason(nextRequiredTool, toolName, matchContext),
     };
   }
 
@@ -1816,10 +1734,10 @@ export function decidePrediction(
 
   // 3.11. Active slash-command authorization.
   //
-  // Compatibility fallback for simple slash-command tool authorization. Strict
-  // workflow steps that need ordering or input constraints are handled above
-  // by explicitlyRequiredTools/nonBlockingTools derived from the command or
-  // skill body; this fallback must not authorize broad Agent dispatches.
+  // Simple slash commands authorize their declared tools here. Workflow steps
+  // that need ordering or input constraints are handled above by
+  // explicitlyRequiredTools/nonBlockingTools derived from the command or skill
+  // body; this path must not authorize broad Agent dispatches.
   //
   // The appealHelper LLM already grants this exemption when it sees
   // `=== SLASH COMMAND INVOKED ===` listing the firing tool
@@ -1938,9 +1856,24 @@ export function decidePrediction(
   return { decision: "allow" };
 }
 
+function unsatisfiedRequirementReason(
+  requirement: ToolRequirement,
+  toolName: string,
+  context: ToolMatchContext,
+): string {
+  if (canonicalPredictionToolName(requirement.tool) === "Read" && toolName === "Bash") {
+    const classification = context.bashClassification;
+    if (classification?.readOnly) {
+      return "Workflow requires Read next, but this exec_command exposes no canonical Read " +
+        "capability. Use read-only rg, git diff, or an exact cat/head/sed/tail file inspection.";
+    }
+    return "Workflow requires Read next; a non-read-only exec_command cannot satisfy that requirement.";
+  }
+  return `Workflow requires ${formatToolRequirement(requirement)} next before ${toolName}.`;
+}
+
 /**
  * Stop-hook helper: only block stopping when the user is genuinely hostile.
- * Replaces the legacy `blockStop` boolean field.
  */
 export function isHighFrictionPrediction(p: ToolPrediction | null): boolean {
   return !!p && (p.mood === "angry" || p.mood === "frustrated" || p.trust === "low");

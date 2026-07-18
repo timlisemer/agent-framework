@@ -1,50 +1,220 @@
 {
-  "schema_version": 1,
   "name": "codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed",
   "description": "Codex Stop hooks must allow ordinary planfile status responses when current Codex collaboration mode is plan, even when permission_mode is default.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed-start",
+      "runId": "fixture-codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "content": "Please investigate and produce a plan."
+      "commandId": "codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed-session-state",
+      "runId": "fixture-codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "User wants the assistant to investigate and produce a plan.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a",
+            "userMessageSnippet": "Please investigate and produce a plan.",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 2
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Wrote the named planfile for the requested investigation."
+      "commandId": "codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed-message-0",
+      "runId": "fixture-codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed-message-0",
+        "turnId": "codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed-turn-0",
+        "content": "Please investigate and produce a plan.",
+        "contentDigest": "sha256:2382e80e9d968a47a1f22bfa0e1f5bbe09c63ed9f10b8958249a4041f89cf0c0"
+      }
+    },
+    {
+      "commandId": "codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed-message-1",
+      "runId": "fixture-codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed-message-1",
+        "turnId": null,
+        "content": "Wrote the named planfile for the requested investigation.",
+        "contentDigest": "sha256:f221873efad4cd9bf5a85a22109884fa922efbc174d6b15fc264a5d59e332138"
+      }
+    },
+    {
+      "commandId": "codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed-target-Stop",
+      "runId": "fixture-codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostStopped",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "User wants the assistant to investigate and produce a plan.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "userMessageSnippet": "Please investigate and produce a plan.",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 2
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": "plan",
+            "planMode": true,
+            "planModeDetection": {
+              "active": true,
+              "mode": "plan",
+              "source": "codex-collaboration-mode"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "stop": {
+              "lastAssistantMessage": "Wrote the named planfile for the requested investigation.",
+              "assistantTextCandidates": [
+                "Wrote the named planfile for the requested investigation."
+              ],
+              "latestAssistantText": "Wrote the named planfile for the requested investigation.",
+              "latestUserText": "Please investigate and produce a plan.",
+              "priorErrorContext": [],
+              "planExitText": null,
+              "stopBlockDisabled": false
+            }
+          },
+          "lastAssistantMessage": "Wrote the named planfile for the requested investigation."
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "Stop"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "adapter": "codex",
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default",
-    "session_start_permission_mode": "default",
-    "codex_collaboration_mode": "plan"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "User wants the assistant to investigate and produce a plan.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "contextSwitch": "no",
-      "questionIsStalling": "n/a",
-      "userMessageSnippet": "Please investigate and produce a plan."
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 2
-  },
-  "expect": {
-    "expected": "pass",
-    "notes": "Codex plan mode is expressed through env.codex_collaboration_mode, not by seeding plan_mode_state."
-  }
+    {
+      "kind": "record",
+      "eventType": "effect.completed",
+      "payloadContains": {
+        "effectId": "hook:Stop:codex-stop-inline-plan-uses-stored-plan-mode-when-marker-missed-target-Stop",
+        "result": {
+          "kind": "hookRuleEvaluation",
+          "event": "Stop",
+          "decision": "allow"
+        }
+      },
+      "count": 1
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "Stop"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    }
+  ]
 }

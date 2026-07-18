@@ -30,7 +30,7 @@ export async function runProviderSdk(input: ProviderRunInput): Promise<ProviderE
 export function selectSdkRuntime(resolvedProvider: ResolvedProvider): SdkRuntimeSelection {
   switch (resolvedProvider.type) {
     case PROVIDER_TYPES.OPENROUTER:
-      return resolvedProvider.sdkRuntime === "codex" ? "codex" : "claude";
+      return resolvedProvider.sdkRuntime ?? "claude";
     case PROVIDER_TYPES.CLAUDE_SUBSCRIPTION:
       return "claude";
     case PROVIDER_TYPES.OPENAI_SUBSCRIPTION:

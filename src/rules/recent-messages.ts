@@ -13,7 +13,7 @@ export const recentMessagesRule: PreToolRule = {
     const oldestFirst = ctx.recentUserMessages && ctx.recentUserMessages.length > 0
       ? ctx.recentUserMessages.map((content, index) => ({ role: "user" as const, content, index }))
       : (await readTranscriptExact(ctx.transcriptPath, {
-          counts: { user: 3 },
+          counts: { user: { count: 3 } },
           excludeSlashCommandPrompts: true,
         }).catch(() => null))?.user.slice().reverse() ?? [];
     if (oldestFirst.length < 2) return null;

@@ -1,16 +1,19 @@
-import type { AiMetadata, AiProviderMetadataState } from "../../src/ai-protocol/index.js";
+import type {
+  ProviderMetadata,
+  ProviderMetadataState,
+} from "../../src/providers/provider-contract.js";
 import type { ProviderMetadataExtractionInput } from "../../src/adapter/types.js";
 import { parseJsonlLines } from "../../src/utils/file-io.js";
 import { isRecord, nonEmptyStringField, numberOrNull, recordFromUnknown, stringField } from "../../src/utils/output.js";
 
 export function extractProviderMetadata(
   input: ProviderMetadataExtractionInput
-): Partial<AiProviderMetadataState> {
+): Partial<ProviderMetadataState> {
   let usedTokens: number | null = null;
   let maxTokens: number | null = null;
   let remainingTokens: number | null = null;
   let lastCompactedAt: string | null = null;
-  const compactionEvents: AiMetadata[] = [];
+  const compactionEvents: ProviderMetadata[] = [];
 
   input.rawLines.forEach((line, index) => {
     const raw = recordFromUnknown(parseJsonlLines<unknown>([line])[0]);
@@ -57,7 +60,7 @@ export function extractProviderMetadata(
     }
   });
 
-  const patch: Partial<AiProviderMetadataState> = {};
+  const patch: Partial<ProviderMetadataState> = {};
   if (usedTokens !== null || maxTokens !== null || remainingTokens !== null) {
     patch.context = { usedTokens, maxTokens, remainingTokens };
   }

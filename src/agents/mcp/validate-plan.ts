@@ -13,16 +13,12 @@ import { EXECUTION_TYPES } from "../../types.js";
 import { runAgentWithRetryAndTelemetry } from "../../utils/agent-runner.js";
 import { PLAN_VALIDATE_AGENT } from "../../utils/agent-configs.js";
 import { startsWithAny } from "../../utils/retry.js";
-import { logAgentResult, logAgentStarted } from "../../utils/logger.js";
+import { logAgentResult } from "../../utils/logger.js";
 import { setTranscriptPath } from "../../utils/execution-context.js";
 import { type CancellationOptions, throwIfAborted } from "../../utils/cancellation.js";
 import { activeSpec, mcpWireNameForText } from "../../adapter/spec.js";
 import { collectPlanValidationViolations } from "../hooks/plan-validate.js";
-import {
-  hashPlanContent,
-  recordPlanValidationStatus,
-} from "../../utils/plan-validation-status.js";
-import { getAgentFrameworkSessionDir } from "../../utils/paths.js";
+import { hashSha256 } from "../../utils/hash-utils.js";
 import { formatPlanfileValidationWorkflow } from "../../utils/planfile.js";
 
 const VALIDATE_PLAN_SYSTEM_PROMPT = `You are a plan validator. Validate the PLAN CONTENT itself.
@@ -154,29 +150,6 @@ export async function runValidatePlanAgent(
   );
 }
 
-function recordValidationResult(input: ValidatePlanInput, result: PlanValidationRunResult): void {
-  if (!result.resolvedPath || result.contentHash === undefined) return;
-  let sessionDir = input.sessionDir ??
-    (input.transcriptPath
-      ? getAgentFrameworkSessionDir({ transcriptPath: input.transcriptPath })
-      : undefined);
-  if (!sessionDir) {
-    try {
-      sessionDir = getAgentFrameworkSessionDir({ projectDir: input.workingDir });
-    } catch {
-      sessionDir = undefined;
-    }
-  }
-  if (!sessionDir) return;
-  recordPlanValidationStatus({
-    sessionDir,
-    planPath: result.resolvedPath,
-    contentHash: result.contentHash,
-    status: result.status === "PASS" ? "pass" : "fail",
-    reasons: result.reasons,
-  });
-}
-
 export async function validatePlanFileWithContract(
   input: ValidatePlanInput,
   options: CancellationOptions = {},
@@ -185,7 +158,6 @@ export async function validatePlanFileWithContract(
     setTranscriptPath(input.transcriptPath);
   }
   const hookName = getHookName();
-  logAgentStarted("plan-validate", hookName);
 
   const source = resolvePlanContent(input);
   if (source.error) {
@@ -200,7 +172,7 @@ export async function validatePlanFileWithContract(
   const baseResult = {
     resolvedPath: source.resolvedPath,
     content: plan,
-    contentHash: hashPlanContent(plan),
+    contentHash: hashSha256(Buffer.from(plan, "utf8")),
   };
   if (!plan.trim()) {
     const result: PlanValidationRunResult = {
@@ -208,7 +180,6 @@ export async function validatePlanFileWithContract(
       status: "FAIL",
       reasons: ["Plan content is empty."],
     };
-    recordValidationResult(input, result);
     return result;
   }
 
@@ -221,7 +192,6 @@ export async function validatePlanFileWithContract(
       status: "FAIL",
       reasons: deterministicReasons,
     };
-    recordValidationResult(input, result);
     return result;
   }
 
@@ -266,7 +236,6 @@ export async function validatePlanFileWithContract(
       status: "PASS",
       reasons: [],
     };
-    recordValidationResult(input, validationResult);
     return validationResult;
   }
 
@@ -280,7 +249,6 @@ export async function validatePlanFileWithContract(
           "Malformed plan-validate response - retry validation with a specific heading, line, or rule.",
         ],
       };
-      recordValidationResult(input, validationResult);
       return validationResult;
     }
     logAgentResult(result, {
@@ -297,7 +265,6 @@ export async function validatePlanFileWithContract(
       status: "FAIL",
       reasons: [reason || "Plan validation failed."],
     };
-    recordValidationResult(input, validationResult);
     return validationResult;
   }
 
@@ -306,6 +273,5 @@ export async function validatePlanFileWithContract(
     status: "FAIL",
     reasons: ["Malformed plan-validate response - retry validation."],
   };
-  recordValidationResult(input, validationResult);
   return validationResult;
 }

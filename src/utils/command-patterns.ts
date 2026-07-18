@@ -7,6 +7,7 @@ export {
   WORKAROUND_PATTERNS,
   checkReadOnlyBashAllowlist,
   bashReadCapabilities,
+  bashReviewReadCapabilities,
   bashReadFileOperands,
   classifyBashCommand,
   commandBare,

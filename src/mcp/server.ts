@@ -25,12 +25,13 @@ import { prepareCommitConfirmContext, runCommitAgent, runCommitAgentWithSharedCo
 import { runPushAgent } from "../agents/mcp/push.js";
 import { runTranscriptAgent } from "../agents/mcp/transcript.js";
 import { runLocateScenarioMcp } from "../agents/mcp/locate-scenario.js";
-import { evaluateRules } from "../rules/index.js";
-import { validateIntentRule } from "../rules/validate-intent.js";
-import { getSessionState } from "../utils/session-store.js";
-import { getAgentFrameworkSessionDir } from "../utils/paths.js";
-import { handleScenarioLabeler, LABELER_HELP } from "../agents/mcp/scenario-labeler.js";
-import { handleScenarioTester, TESTER_HELP } from "../agents/mcp/scenario-tester.js";
+import { dispatchPreToolUseResult } from "../entrypoints/host-hook.js";
+import {
+  handleScenarioTester,
+  SCENARIO_TESTER_ACTIONS,
+  TESTER_HELP,
+} from "../agents/mcp/scenario-tester.js";
+import { SCENARIO_SOURCE_TAGS } from "../agents/mcp/scenario-catalog.js";
 import {
   CHECK_HELP,
   CONFIRM_HELP,
@@ -63,10 +64,8 @@ import {
   parseUncertainties,
   elicitUncertaintyClarification,
 } from "../utils/elicitation.js";
-import {
-  richExpectationSchema,
-  scenarioSchema,
-} from "./scenario-schema.js";
+import { scenarioFixtureSchema } from "../scenario/fixtures/types.js";
+import { scenarioNameSchema } from "../scenario/name.js";
 import {
   McpToolTimeoutError,
   formatMcpTimeoutError,
@@ -82,7 +81,7 @@ const coercibleBoolean = z.preprocess(
 function implementationWorkflowInputSchema() {
   return {
     working_dir: z.string().optional().describe("Working directory (defaults to cwd)"),
-    planfile: z.string().optional().describe("Path to the plan file. If omitted, resolves the active current-plan sidecar for working_dir."),
+    planfile: z.string().optional().describe("Path to the plan file. If omitted, resolves the active session's canonical plan.current snapshot slice for working_dir."),
     model_tier: z.enum(["haiku", "sonnet", "opus"]).optional().describe("Model tier for the implementation workflow (default: sonnet)"),
     extra_context: z.array(z.string()).optional().describe("Optional exact quoted user text only; each entry must appear verbatim in recovered user transcript text. Do not populate with assistant-inferred context")
   };
@@ -760,28 +759,17 @@ registerTimedTool(
   async (args) => {
     const projectDir = args.working_dir || process.cwd();
     const transcriptPath = args.transcript_path;
-    const sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
-    const stateManager = getSessionState(sessionDir);
-    const state = await stateManager.load();
-    const ctx = {
-      hookEvent: "PreToolUse" as const,
-      toolName: "mcp-validate_intent",
-      rawToolName: activeSpec().mcpWireName("validate_intent"),
-      toolInput: {},
-      toolUseId: "validate-intent-mcp",
-      projectDir,
-      transcriptPath,
-      sessionDir,
-      sessionId: "mcp",
-      state,
-      stateManager,
-      planMode: false,
-      planModeCtx: { active: false, contextString: "" },
-    };
-    const result = await evaluateRules([validateIntentRule], ctx, "PreToolUse");
+    const result = await dispatchPreToolUseResult({
+      session_id: "mcp-validate-intent",
+      transcript_path: transcriptPath,
+      cwd: projectDir,
+      tool_name: activeSpec().mcpWireName("validate_intent"),
+      tool_input: { working_dir: projectDir, transcript_path: transcriptPath },
+      tool_use_id: `validate-intent-${Date.now()}`,
+    });
     const text =
-      result?.decision === "deny"
-        ? result.reason
+      result.status === "denied"
+        ? result.reason ?? "DRIFTED: Intent validation denied the current changes"
         : "## Verdict\nALIGNED: No code changes / no requests to evaluate";
     return { content: [{ type: "text", text }] };
   }
@@ -803,7 +791,7 @@ registerTimedTool(
   "locate_scenario",
   {
     title: "Locate Scenario",
-    description: "Locate a captured scenario from one or more quote substrings. Runs predefined searches over adapter transcripts and agent-framework session logs, then summarizes candidate captures.",
+    description: "Locate a captured scenario from one or more quote substrings. Searches canonical run journals and digest-verified artifacts, then summarizes matching run and record context.",
     inputSchema: {
       quotes: z.array(z.string()).min(1).describe("One or more distinctive quote substrings to search for"),
       working_dir: z.string().optional().describe("Working directory for telemetry/context (defaults to cwd)"),
@@ -824,91 +812,20 @@ registerTimedTool(
 );
 
 registerTimedTool(
-  "scenario_labeler",
-  {
-    title: "Scenario Labeler",
-    description: "Label test harness transcripts. Actions: find_work, auto_label, generate_labels, scaffold, list, expand, validate, update_label, update_labels, set_label, update_label_prediction, update_label_predictions, reset_for_relabel, finalize, read_file, append_notes, git_hash, help. Use help action for full documentation.",
-    inputSchema: {
-      action: z.enum([
-        "find_work", "auto_label", "generate_labels", "scaffold", "list", "expand", "validate",
-        "update_label", "update_labels", "set_label",
-        "update_label_prediction", "update_label_predictions", "reset_for_relabel",
-        "finalize", "read_file", "append_notes",
-        "git_hash", "help"
-      ]).describe("The action to perform"),
-      transcript_name: z.string().optional().describe("Transcript name (without .jsonl extension)"),
-      target: z.string().optional().describe("For expand: tool_use_id or stop:N key"),
-      depth: z.number().optional().describe("For expand: context radius multiplier (default 1)"),
-      key: z.string().optional().describe("For update_label/set_label/update_label_prediction: the label key to update"),
-      value: z.string().optional().describe("For update_label: the new label value (allow/deny/pass/block)"),
-      reasoning: z.string().optional().describe("For update_label/set_label/update_label_prediction: explanation for this label decision"),
-      updates: z.array(z.object({
-        key: z.string(),
-        value: z.string(),
-        reasoning: z.string(),
-      })).optional().describe("For update_labels: array of {key, value, reasoning} updates"),
-      expectation: z.union([richExpectationSchema, z.array(richExpectationSchema)]).optional().describe("For set_label: a rich expectation object (or array of them) with {expected, by?, at?, notes?, prediction?}. Use this when you need 'expected deny by rule X' or per-truncation assertions that the plain update_label string form cannot express."),
-      verdict: z.enum(["correct", "too_broad", "wrong", "INVESTIGATE"]).optional().describe("For update_label_prediction: hindsight verdict on the prediction that caused this deny."),
-      forbidden_blocks: z.array(z.object({
-        tool: z.string().optional(),
-        target_pattern: z.string().optional(),
-      })).optional().describe("For update_label_prediction: required when verdict='too_broad'. LITERAL tool names the prediction MUST NOT match after narrowing."),
-      intent_must_contain: z.string().optional().describe("For update_label_prediction: substring that must appear in the live prediction's intent."),
-      prediction_updates: z.array(z.object({
-        key: z.string(),
-        verdict: z.enum(["correct", "too_broad", "wrong", "INVESTIGATE"]),
-        forbidden_blocks: z.array(z.object({
-          tool: z.string().optional(),
-          target_pattern: z.string().optional(),
-        })).optional(),
-        intent_must_contain: z.string().optional(),
-        expected_mood: z.enum(["angry", "frustrated", "neutral", "satisfied", "happy"]).optional(),
-        expected_trust: z.enum(["low", "normal", "high"]).optional(),
-        notes: z.string().optional(),
-        reasoning: z.string(),
-      })).optional().describe("For update_label_predictions: batch updates of prediction annotations."),
-      filename: z.string().optional().describe("For read_file: labels.draft.json, labels.json, notes_and_questions.md, or report.json"),
-      content: z.string().optional().describe("For append_notes: content to append"),
-      date_from: z.string().optional().describe("For find_work: only transcripts modified on or after this date (YYYY-MM-DD)"),
-      date_to: z.string().optional().describe("For find_work: only transcripts modified on or before this date (YYYY-MM-DD)"),
-      limit: z.number().optional().describe("For find_work: how many transcripts to process. Omit=1, 0=unlimited, N=N"),
-      transcript_path: z.string().optional().describe("Absolute path to a transcript .jsonl file. Use when the transcript lives outside the active adapter's default transcript storage (Claude: ~/.claude/projects/<encoded-project>/; Codex: ~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl). You may also pass a session folder name (e.g. '2025-01-15-1430_abc12345') and the resolver will look up the path via the session sidecar at ~/.agent-framework/sessions/. Applies to auto_label/generate_labels/scaffold/list/expand/validate. Only needed once; subsequent actions find the transcript in ~/.agent-framework/test-runs/<name>/ after the first copy."),
-      working_dir: z.string().optional().describe("Local repo path. When set, the labeler invokes replay.ts from this directory instead of the deployed AGENT_FRAMEWORK_ROOT, so locally edited test-harness/ source is used. Mirrors the tester's `working_dir`."),
-    }
-  },
-  async (args) => {
-    const result = await handleScenarioLabeler(args);
-    return { content: [{ type: "text", text: result }] };
-  }
-);
-
-registerTimedTool(
   "scenario_tester",
   {
     title: "Scenario Tester",
-    description: "Run test harness against labeled transcripts OR against synthetic scenarios. Actions: find_work, run_test, run_single_hook, list, expand, read_file, append_notes, materialize_scenario, run_scenario, run_scenarios, list_scenarios, read_scenario, git_hash, help. Use help action for full documentation.",
+    description: "List, read, materialize, and run canonical Scenario fixtures. Use help for details.",
     inputSchema: {
-      action: z.enum([
-        "find_work", "run_test", "run_single_hook", "list", "expand", "read_file", "append_notes", "materialize_scenario",
-        "run_scenario", "run_scenarios", "list_scenarios", "read_scenario",
-        "git_hash", "help"
-      ]).describe("The action to perform"),
-      transcript_name: z.string().optional().describe("Transcript name (without .jsonl extension)"),
-      target: z.string().optional().describe("For expand: tool_use_id or stop:N key"),
-      depth: z.number().optional().describe("For expand: context radius multiplier (default 1)"),
-      filename: z.string().optional().describe("For read_file: report.json, labels.json, labels.draft.json, or notes_and_questions.md. For read_scenario: scenario.json or report-scenario.json."),
-      content: z.string().optional().describe("For append_notes: content to append"),
-      hook_key: z.string().optional().describe("For run_single_hook: hook key to test (tool_use_id or stop:N from report failures)"),
-      session_dir: z.string().optional().describe("For materialize_scenario: agent-framework session directory containing captures.jsonl, state-snapshots.jsonl, and transcript-path.txt"),
-      capture_seq: z.number().optional().describe("For materialize_scenario: numeric capture seq from captures.jsonl"),
-      run_materialized: z.boolean().optional().describe("For materialize_scenario: immediately run the stored materialized scenario after writing it"),
-      working_dir: z.string().optional().describe("Local repo path for run_test/run_single_hook/list/expand/run_scenario/run_scenarios/list_scenarios (overrides AGENT_FRAMEWORK_ROOT so edited code AND locally-edited fixture scenarios are used)"),
-      truncate_to_line: z.number().optional().describe("For run_single_hook: 1-based line cap. When set, the harness appends only transcript lines <= truncate_to_line before firing the target hook. The hook still fires with its full tool_use_id because input is synthesized from the in-memory parsed lines. Use this to reproduce timing-sensitive states like pre-flush replay."),
-      transcript_path: z.string().optional().describe("Absolute path to a transcript .jsonl file. Use when the transcript lives outside the active adapter's default transcript storage (Claude: ~/.claude/projects/<encoded-project>/; Codex: ~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-*.jsonl). You may also pass a session folder name (e.g. '2025-01-15-1430_abc12345') and the resolver will look up the path via the session sidecar at ~/.agent-framework/sessions/. Only needed if the test-runs copy is not yet in place."),
-      scenario_name: z.string().optional().describe("For run_scenario / read_scenario: slug identifying a scenario. For run_scenario, resolved across the union of four sources: ~/.agent-framework/test-runs/scenarios/<name>/scenario.json (home) and <AGENT_FRAMEWORK_ROOT>/scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/<name>.json (committed fixtures). Slugs must be unique across all four sources. read_scenario still reads only from the home tree. Must match [A-Za-z0-9._-]+."),
-      scenario: scenarioSchema.optional().describe("For run_scenario: inline Scenario JSON. When set, overwrites the on-disk scenarios/<name>/scenario.json before running. Omit to re-run a previously stored scenario. See the 'help' action (Workflow B) for the full schema and examples."),
-      scenario_names: z.array(z.string()).optional().describe("For run_scenarios: explicit list of scenario slugs to run. Resolved against the UNION of four sources: ~/.agent-framework/test-runs/scenarios/<name>/scenario.json (home) and <AGENT_FRAMEWORK_ROOT>/scenarios/{expected-to-pass,non-deterministic,expected-to-fail}/<name>.json (committed fixtures). A slug present in two or more sources is a hard error. Fixtures run in place; reports + cache always land under the home tree. Omit or pass an empty array to run EVERY scenario in the union, alphabetically. Returns aggregated JSON {total, passed, failed, results[]} with per-result {source: \"home\"|\"expected-to-pass\"|\"non-deterministic\"|\"expected-to-fail\"}. Each result also carries `expectation_reality: \"expected-to-pass\" | \"non-deterministic\" | \"expected-to-fail\" | null` and `expectation_reality_last_run_at: ISO-8601` - the most recent run's reality, written to last-run.json sidecar. A mismatch between folder and reality surfaces regressions or landed features. The aggregate response does NOT summarize mismatches; callers inspect `results[]` directly."),
-      scenario_source: z.enum(["expected-to-pass", "non-deterministic", "expected-to-fail", "home"]).optional().describe("For run_scenarios / list_scenarios: scope to ONE source. 'expected-to-pass' | 'non-deterministic' | 'expected-to-fail' select fixture subfolders (<AGENT_FRAMEWORK_ROOT>/scenarios/<sub>/). 'home' selects ~/.agent-framework/test-runs/scenarios/. Omit to include all four. Slug uniqueness is enforced across all four roots regardless of filter."),
+      action: z.enum(SCENARIO_TESTER_ACTIONS).describe("The action to perform"),
+      working_dir: z.string().optional().describe("Agent-framework checkout used to discover repository fixtures"),
+      scenario_name: scenarioNameSchema.optional().describe("Canonical fixture slug"),
+      scenario: scenarioFixtureSchema.optional().describe("Inline canonical fixture"),
+      scenario_names: z.array(scenarioNameSchema).optional().describe("Explicit fixture slugs for run_fixtures; omit to run all fixtures"),
+      scenario_source: z.enum(SCENARIO_SOURCE_TAGS).optional().describe("Optional source filter for list_fixtures or run_fixtures"),
+      run_id: z.string().optional().describe("Canonical run identifier for materialize_scenario"),
+      runtime_root: z.string().optional().describe("Optional canonical runtime root containing runs/<run_id>"),
+      run_materialized: z.boolean().optional().describe("Immediately execute a newly materialized fixture"),
     }
   },
   async (args) => {
@@ -939,8 +856,7 @@ const HELP_RESOURCES: Array<{
   { tool: "create_planfile", title: "create_planfile -- Help", summary: "Planfile creator", body: CREATE_PLANFILE_HELP },
   { tool: "implement", title: "implement -- Help", summary: "Plan implementation workflow", body: IMPLEMENT_HELP },
   { tool: "validate_implementation", title: "validate_implementation -- Help", summary: "Implementation validator", body: VALIDATE_IMPLEMENTATION_HELP },
-  { tool: "scenario_tester", title: "scenario_tester -- Help", summary: "Scenario tester (transcripts + scenarios)", body: TESTER_HELP },
-  { tool: "scenario_labeler", title: "scenario_labeler -- Help", summary: "Scenario transcript labeler", body: LABELER_HELP },
+  { tool: "scenario_tester", title: "scenario_tester -- Help", summary: "Canonical Scenario fixture tester", body: TESTER_HELP },
   { tool: "transcript", title: "transcript -- Help", summary: "Session transcript path resolver", body: TRANSCRIPT_HELP },
   { tool: "locate_scenario", title: "locate_scenario -- Help", summary: "Captured scenario locator", body: LOCATE_SCENARIO_HELP },
 ];

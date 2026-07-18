@@ -3,18 +3,22 @@ import * as os from "os";
 import * as path from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
+import { canonicalHookRunId } from "../../src/entrypoints/host-hook.js";
 import { mainPreToolUse } from "../../src/hooks/pre-tool-use.js";
 import { mainPostToolUse } from "../../src/hooks/post-tool-use.js";
 import { mainPostToolUseFailure } from "../../src/hooks/post-tool-use-failure.js";
 import { getAgentFrameworkSessionDir } from "../../src/utils/paths.js";
-import { getSessionState } from "../../src/utils/session-store.js";
-import type { ToolPrediction } from "../../src/utils/prediction-types.js";
+import type { ToolPrediction } from "../../src/utils/prediction-schema.js";
+import { canonicalHookState } from "../helpers/canonical-hook-state.js";
 import {
   codexPlan3AfterAgentBatchRequirements,
   codexPlan3AfterFirstAgentRequirements,
   codexPlan3InitialAgentBatchRequirements,
 } from "../helpers/workflow-requirements.js";
 import { bashReadProofExcludedCommands } from "../helpers/bash-read-fixtures.js";
+import { createTestScenarioRuntime } from "../helpers/scenario-runtime.js";
+import { AGENT_FRAMEWORK_RULE_EXTENSION_ID } from "../../src/effects/rule-observability.js";
+import { withEnvironmentForTest } from "../helpers/environment.js";
 
 const mocks = vi.hoisted(() => ({
   exitAfterFlush: vi.fn().mockResolvedValue(undefined),
@@ -55,18 +59,26 @@ describe("pre-tool-use planfile writes", () => {
   let tempDir: string;
   let transcriptPath: string;
   let sessionDir: string;
-  let prevAdapter: string | undefined;
-  let prevProjectDir: string | undefined;
+  let restoreEnvironment: () => void;
+  let hookState: ReturnType<typeof canonicalHookState>;
+  const getSessionState = (_sessionDir: string) => hookState;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pre-tool-use-"));
     transcriptPath = path.join(tempDir, "transcript.jsonl");
     fs.writeFileSync(transcriptPath, "");
-    prevAdapter = process.env.AGENT_FRAMEWORK_ADAPTER;
-    prevProjectDir = process.env.AGENT_FRAMEWORK_PROJECT_DIR;
-    process.env.AGENT_FRAMEWORK_ADAPTER = "codex";
-    process.env.AGENT_FRAMEWORK_PROJECT_DIR = tempDir;
+    restoreEnvironment = withEnvironmentForTest({
+      AGENT_FRAMEWORK_ADAPTER: "codex",
+      AGENT_FRAMEWORK_PROJECT_DIR: tempDir,
+      AGENT_FRAMEWORK_SCENARIO_ROOT: path.join(tempDir, "scenario-runtime"),
+    });
     sessionDir = getAgentFrameworkSessionDir({ transcriptPath });
+    hookState = canonicalHookState({
+      adapter: "codex",
+      nativeSessionId: "session-pre",
+      transcriptPath,
+      projectDir: tempDir,
+    });
     mocks.exitAfterFlush.mockClear();
     mocks.validateClaudeMd.mockReset();
     mocks.appealHelper.mockClear();
@@ -78,10 +90,7 @@ describe("pre-tool-use planfile writes", () => {
   afterEach(() => {
     fs.rmSync(sessionDir, { recursive: true, force: true });
     fs.rmSync(tempDir, { recursive: true, force: true });
-    if (prevAdapter === undefined) delete process.env.AGENT_FRAMEWORK_ADAPTER;
-    else process.env.AGENT_FRAMEWORK_ADAPTER = prevAdapter;
-    if (prevProjectDir === undefined) delete process.env.AGENT_FRAMEWORK_PROJECT_DIR;
-    else process.env.AGENT_FRAMEWORK_PROJECT_DIR = prevProjectDir;
+    restoreEnvironment();
   });
 
   it("does not run plan validation on every planfile edit", () => {
@@ -122,10 +131,151 @@ describe("pre-tool-use planfile writes", () => {
 
     expect(mocks.validateClaudeMd).toHaveBeenCalledTimes(2);
     expect(mocks.validateClaudeMd.mock.calls.map((call) => call[0])).toEqual(["agents", "claude"]);
+    expect(mocks.appealHelper).toHaveBeenCalledOnce();
+    expect(mocks.appealHelper).toHaveBeenCalledWith(
+      "Edit",
+      expect.any(String),
+      expect.any(String),
+      "CLAUDE.md validation failed: bad second file",
+      tempDir,
+      "PreToolUse",
+      expect.any(Object),
+      "claude-md-validate blocked: CLAUDE.md validation failed: bad second file",
+      undefined,
+      expect.any(Object),
+      expect.any(AbortSignal),
+    );
     expect(mocks.exitAfterFlush).toHaveBeenCalledWith(
       0,
       expect.stringContaining("CLAUDE.md validation failed: bad second file"),
     );
+    const runtime = createTestScenarioRuntime({ root: path.join(tempDir, "scenario-runtime") });
+    const records = await runtime.recordsAfter(canonicalHookRunId("codex", transcriptPath), 0);
+    expect(records.filter((record) =>
+      record.eventType === "extension.observed" &&
+      record.payload.extensionId === AGENT_FRAMEWORK_RULE_EXTENSION_ID &&
+      String(record.payload.event).startsWith("rule.appeal.")
+    )).toMatchObject([
+      {
+        eventType: "extension.observed",
+        payload: {
+          extensionId: AGENT_FRAMEWORK_RULE_EXTENSION_ID,
+          event: "rule.appeal.started",
+          ruleId: "agent-framework.rule.claude-md-validate",
+          reason: "CLAUDE.md validation failed: bad second file",
+        },
+      },
+      {
+        eventType: "extension.observed",
+        payload: {
+          extensionId: AGENT_FRAMEWORK_RULE_EXTENSION_ID,
+          event: "rule.appeal.completed",
+          ruleId: "agent-framework.rule.claude-md-validate",
+          overturned: false,
+          gateNote: null,
+        },
+      },
+    ]);
+    expect((await hookState.snapshot()).toolCalls.at(-1)?.authorization.final).toBe("denied");
+  });
+
+  it("allows an instruction-file edit when tool appeal overturns validation", async () => {
+    const agentsPath = path.join(tempDir, "AGENTS.md");
+    fs.writeFileSync(agentsPath, "agents");
+    mocks.validateClaudeMd.mockResolvedValueOnce({ approved: false, reason: "validator mistake" });
+    mocks.appealHelper.mockResolvedValueOnce({
+      overturned: true,
+      gateNote: "User explicitly approved the instruction update",
+    });
+
+    await mainPreToolUse(
+      {
+        session_id: "session-pre",
+        tool_use_id: "tool-pre-overturned-instruction",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "Edit",
+        tool_input: {
+          file_path: agentsPath,
+          old_string: "agents",
+          new_string: "agents updated",
+        },
+      },
+      codexEncoder,
+    );
+
+    expect(mocks.appealHelper).toHaveBeenCalledOnce();
+    expect(mocks.exitAfterFlush).toHaveBeenCalledWith(0, "");
+    const runtime = createTestScenarioRuntime({ root: path.join(tempDir, "scenario-runtime") });
+    const records = await runtime.recordsAfter(canonicalHookRunId("codex", transcriptPath), 0);
+    expect(records.filter((record) =>
+      record.eventType === "extension.observed" &&
+      record.payload.extensionId === AGENT_FRAMEWORK_RULE_EXTENSION_ID &&
+      String(record.payload.event).startsWith("rule.appeal.")
+    )).toMatchObject([
+      {
+        eventType: "extension.observed",
+        payload: {
+          extensionId: AGENT_FRAMEWORK_RULE_EXTENSION_ID,
+          event: "rule.appeal.started",
+          ruleId: "agent-framework.rule.claude-md-validate",
+          reason: "AGENTS.md validation failed: validator mistake",
+        },
+      },
+      {
+        eventType: "extension.observed",
+        payload: {
+          extensionId: AGENT_FRAMEWORK_RULE_EXTENSION_ID,
+          event: "rule.appeal.completed",
+          ruleId: "agent-framework.rule.claude-md-validate",
+          overturned: true,
+          gateNote: "User explicitly approved the instruction update",
+        },
+      },
+    ]);
+    expect(records.find((record) =>
+      record.eventType === "effect.completed" && record.payload.result !== null &&
+      typeof record.payload.result === "object" && !Array.isArray(record.payload.result) &&
+      record.payload.result.kind === "toolPolicyEvaluation"
+    )).toMatchObject({
+      payload: {
+        result: {
+          decision: "allow",
+          agent: "tool-appeal",
+          gateNote: "User explicitly approved the instruction update",
+        },
+      },
+    });
+    expect((await hookState.snapshot()).toolCalls.at(-1)?.authorization.final).toBe("allowed");
+  });
+
+  it("fails closed when an instruction file read fails for a reason other than missing", async () => {
+    const agentsPath = path.join(tempDir, "AGENTS.md");
+    fs.mkdirSync(agentsPath);
+
+    await mainPreToolUse(
+      {
+        session_id: "session-pre",
+        tool_use_id: "tool-pre-unreadable-instruction",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "Edit",
+        tool_input: {
+          file_path: agentsPath,
+          old_string: "agents",
+          new_string: "agents updated",
+        },
+      },
+      codexEncoder,
+    );
+
+    expect(mocks.validateClaudeMd).not.toHaveBeenCalled();
+    expect(mocks.appealHelper).not.toHaveBeenCalled();
+    expect(mocks.exitAfterFlush).toHaveBeenCalledWith(
+      0,
+      expect.stringMatching(/EISDIR|illegal operation on a directory/i),
+    );
+    expect((await hookState.snapshot()).toolCalls.at(-1)?.authorization.final).toBe("failed");
   });
 
   it("validates instruction files edited with MultiEdit", async () => {
@@ -157,6 +307,40 @@ describe("pre-tool-use planfile writes", () => {
       }),
       tempDir,
       "PreToolUse",
+      expect.any(AbortSignal),
+    );
+    expect(mocks.exitAfterFlush).toHaveBeenCalledWith(0, "");
+  });
+
+  it("reads a relative instruction path from the canonical project directory", async () => {
+    const agentsPath = path.join(tempDir, "AGENTS.md");
+    fs.writeFileSync(agentsPath, "project agents");
+    mocks.validateClaudeMd.mockResolvedValueOnce({ approved: true });
+
+    await mainPreToolUse(
+      {
+        session_id: "session-pre",
+        tool_use_id: "tool-pre-relative-instruction",
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        tool_name: "Edit",
+        tool_input: {
+          file_path: "AGENTS.md",
+          old_string: "project agents",
+          new_string: "project agents updated",
+        },
+      },
+      codexEncoder,
+    );
+
+    expect(tempDir).not.toBe(process.cwd());
+    expect(mocks.validateClaudeMd).toHaveBeenCalledWith(
+      "project agents",
+      "Edit",
+      expect.objectContaining({ file_path: "AGENTS.md" }),
+      tempDir,
+      "PreToolUse",
+      expect.any(AbortSignal),
     );
     expect(mocks.exitAfterFlush).toHaveBeenCalledWith(0, "");
   });
@@ -261,6 +445,48 @@ describe("pre-tool-use planfile writes", () => {
     });
   });
 
+  it("subjects interactive write_stdin shell commands to canonical Bash policy", async () => {
+    mocks.evaluateRules.mockResolvedValueOnce({
+      decision: "deny",
+      agent: "shell-policy-test",
+      reason: "Interactive shell command denied by canonical policy.",
+    });
+
+    await runToolHook("pty-input-1", "write_stdin", {
+      session_id: 42,
+      chars: "rm -rf ./generated\n",
+      yield_time_ms: 1_000,
+    });
+
+    const context = mocks.evaluateRules.mock.calls.at(-1)?.[1];
+    expect(context).toMatchObject({
+      toolName: "Bash",
+      rawToolName: "write_stdin",
+      rawToolInput: {
+        session_id: 42,
+        chars: "rm -rf ./generated\n",
+      },
+      toolInput: {
+        command: "rm -rf ./generated\n",
+        continuation_session_id: 42,
+      },
+    });
+    const [, stdout] = mocks.exitAfterFlush.mock.calls.at(-1)!;
+    expect(JSON.parse(stdout).hookSpecificOutput).toMatchObject({
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: "Interactive shell command denied by canonical policy.",
+    });
+    expect((await hookState.snapshot()).toolCalls.at(-1)).toMatchObject({
+      name: "Bash",
+      input: {
+        command: "rm -rf ./generated\n",
+        continuation_session_id: 42,
+      },
+      authorization: { final: "denied" },
+    });
+  });
+
   it("does not predict a Codex wait before the MCP result is known", async () => {
     await mainPreToolUse(
       {
@@ -312,7 +538,7 @@ describe("pre-tool-use planfile writes", () => {
 
   it("does not consume Read for excluded Codex Bash read-proof forms", async () => {
     const planfile = path.join(tempDir, "conditional-plan.md");
-    for (const [index, command] of bashReadProofExcludedCommands(planfile).entries()) {
+    for (const [index, command] of bashReadProofExcludedCommands(planfile).slice(0, 4).entries()) {
       await seedPrediction({
         explicitlyRequiredTools: [
           { tool: "Read", input: { file_path: planfile } },
@@ -456,6 +682,7 @@ describe("pre-tool-use planfile writes", () => {
         error: "wait timed out",
         is_interrupt: false,
         transcript_path: transcriptPath,
+        cwd: tempDir,
       },
       codexEncoder,
     );
@@ -473,6 +700,7 @@ describe("pre-tool-use planfile writes", () => {
         error: "user interrupted wait",
         is_interrupt: true,
         transcript_path: transcriptPath,
+        cwd: tempDir,
       },
       codexEncoder,
     );

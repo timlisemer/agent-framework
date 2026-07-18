@@ -1,5 +1,6 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { runAgent, type AgentConfig } from "../utils/agent-runner.js";
+import { isCancellationError } from "../utils/cancellation.js";
 import { MODEL_TIERS } from "../types.js";
 import { detectUserDirectedQuestions } from "../utils/content-patterns.js";
 import { stripQuotedContent } from "../utils/quote-detection.js";
@@ -385,8 +386,12 @@ export const responseAlignStopRule: PreToolRule = {
 
       const classifyResult = await runAgent(
         { ...CLASSIFY_STOP_RESPONSE_AGENT_CONFIG, workingDir: ctx.projectDir },
-        { prompt: "Classify this response.", context }
-      ).catch(() => ({ output: "OK" }));
+        { prompt: "Classify this response.", context },
+        { signal: ctx.signal },
+      ).catch((error: unknown) => {
+        if (isCancellationError(error)) throw error;
+        return { output: "OK" };
+      });
 
       const normalizedOutput = classifyResult.output.trim().toUpperCase();
 
@@ -417,8 +422,12 @@ export const responseAlignStopRule: PreToolRule = {
               prompt: "Is this an actual question?",
               context:
                 `FULL USER MESSAGE:\n${userText}\n\nEXTRACTED TEXT (potential question):\n${userQuestion}\n\nIs the extracted text an actual question the user wants answered?`,
-            }
-          ).catch(() => ({ output: "NOT_QUESTION" }));
+            },
+            { signal: ctx.signal },
+          ).catch((error: unknown) => {
+            if (isCancellationError(error)) throw error;
+            return { output: "NOT_QUESTION" };
+          });
 
           const verifyTrimmed = verifyResult.output.trim().toUpperCase();
           const isQuestion =

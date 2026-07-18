@@ -13,11 +13,8 @@ allowed-tools: mcp__agent-framework__locate_scenario
 
 2. The MCP owns the scenario-location recipe:
 
-   - It searches raw Claude transcripts under `~/.claude/projects/`.
-   - It searches raw Codex transcripts under `~/.codex/sessions/`.
-   - It searches agent-framework `tool-log.jsonl`, `captures.jsonl`, and `session-injections.jsonl`.
-   - It resolves transcript hits through `transcript-path.txt` sidecars.
-   - It cross-references tool and injection hits against `captures.jsonl` where possible.
+   - It searches canonical Agent Framework run journals under `~/.agent-framework/runs/`.
+   - It returns stable `run_id`, `runtime_root`, record cursor, event, and entity context.
 
 3. Report the MCP result to the user:
 

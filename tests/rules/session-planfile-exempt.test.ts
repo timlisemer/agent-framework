@@ -7,7 +7,7 @@ import { ALL_RULES, evaluateRules } from "../../src/rules/index.js";
 import type { RuleContext } from "../../src/rules/types.js";
 import { getBlacklistHighlights } from "../../src/utils/command-patterns.js";
 import { sessionPlanFile } from "../../src/utils/paths.js";
-import { sessionStateDefaults } from "../../src/utils/session-store.js";
+import { sessionStateDefaults } from "../helpers/session-workflow.js";
 import { makeRuleContext } from "../helpers/rule-context.js";
 
 function makeCtx(overrides: Partial<RuleContext>): RuleContext {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { predictionContextRule } from "../../src/rules/prediction-context.js";
-import { sessionStateDefaults } from "../../src/utils/session-store.js";
+import { sessionStateDefaults } from "../helpers/session-workflow.js";
 import { makeRuleContext } from "../helpers/rule-context.js";
 
 function makeCtx() {

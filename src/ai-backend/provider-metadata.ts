@@ -1,8 +1,8 @@
-import type { AiProviderMetadataState } from "../ai-protocol/index.js";
+import type { ProviderMetadataState } from "../providers/provider-contract.js";
 
 export function createDefaultProviderMetadata(
-  overrides: Partial<AiProviderMetadataState> = {}
-): AiProviderMetadataState {
+  overrides: Partial<ProviderMetadataState> = {}
+): ProviderMetadataState {
   return mergeProviderMetadata({
     provider: null,
     runtime: null,
@@ -25,17 +25,17 @@ export function createDefaultProviderMetadata(
 }
 
 export function mergeProviderMetadata(
-  existing: AiProviderMetadataState,
-  incoming: Partial<AiProviderMetadataState>
-): AiProviderMetadataState;
+  existing: ProviderMetadataState,
+  incoming: Partial<ProviderMetadataState>
+): ProviderMetadataState;
 export function mergeProviderMetadata(
-  existing: Partial<AiProviderMetadataState>,
-  incoming: Partial<AiProviderMetadataState>
-): Partial<AiProviderMetadataState>;
+  existing: Partial<ProviderMetadataState>,
+  incoming: Partial<ProviderMetadataState>
+): Partial<ProviderMetadataState>;
 export function mergeProviderMetadata(
-  existing: Partial<AiProviderMetadataState>,
-  incoming: Partial<AiProviderMetadataState>
-): Partial<AiProviderMetadataState> {
+  existing: Partial<ProviderMetadataState>,
+  incoming: Partial<ProviderMetadataState>
+): Partial<ProviderMetadataState> {
   return {
     ...existing,
     ...incoming,

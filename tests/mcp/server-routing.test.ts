@@ -25,9 +25,7 @@ const mocks = vi.hoisted(() => ({
   runTranscriptAgent: vi.fn(),
   runLocateScenarioMcp: vi.fn(),
   evaluateRules: vi.fn(),
-  getSessionState: vi.fn(),
   getAgentFrameworkSessionDir: vi.fn(),
-  handleScenarioLabeler: vi.fn(),
   handleScenarioTester: vi.fn(),
   getRepoInfo: vi.fn(),
   getRepoInfoCancellable: vi.fn(),
@@ -99,23 +97,18 @@ vi.mock("../../src/rules/index.js", () => ({
   evaluateRules: mocks.evaluateRules,
 }));
 
-vi.mock("../../src/utils/session-store.js", () => ({
-  getSessionState: mocks.getSessionState,
-}));
-
 vi.mock("../../src/utils/paths.js", () => ({
   getAgentFrameworkSessionDir: mocks.getAgentFrameworkSessionDir,
 }));
 
-vi.mock("../../src/agents/mcp/scenario-labeler.js", () => ({
-  LABELER_HELP: "labeler help",
-  handleScenarioLabeler: mocks.handleScenarioLabeler,
-}));
-
-vi.mock("../../src/agents/mcp/scenario-tester.js", () => ({
-  TESTER_HELP: "tester help",
-  handleScenarioTester: mocks.handleScenarioTester,
-}));
+vi.mock("../../src/agents/mcp/scenario-tester.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/agents/mcp/scenario-tester.js")>();
+  return {
+    ...actual,
+    TESTER_HELP: "tester help",
+    handleScenarioTester: mocks.handleScenarioTester,
+  };
+});
 
 vi.mock("../../src/utils/git-utils.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/utils/git-utils.js")>();

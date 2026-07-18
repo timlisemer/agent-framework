@@ -1,4 +1,4 @@
-import { hashSha256, stableJsonStringify } from "../../src/utils/hash-utils.js";
+import { digestCanonicalJson } from "../../src/scenario/protocol/digest.js";
 import {
   CODEX_HOOK_EVENTS,
   type CodexHookEvent,
@@ -91,5 +91,5 @@ function hookIdentity(eventName: CodexHookEvent, group: unknown, hook: unknown):
 }
 
 function currentHash(value: unknown): string {
-  return `sha256:${hashSha256(stableJsonStringify(value))}`;
+  return digestCanonicalJson(value);
 }

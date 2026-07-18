@@ -1,93 +1,278 @@
 {
-  "schema_version": 1,
   "name": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow",
   "description": "Live repro from agent-framework session /home/tim/.agent-framework/sessions/home-tim-Coding-nixos/2026-06-09-1957_431335dc, capture seq 91. The user asked the assistant to first reproduce a Fontconfig error and then edit. The assistant ran `fc-match Arial`, which reproduced `Fontconfig error: \"/etc/fonts/local.conf\", line 9: junk after document element`, then attempted the Nix config edit. The live PreToolUse hook denied the edit with `this edit contradicts the live latest user intent to first reproduce the fontconfig error before making changes.` Correct behavior: allow, because the requested prerequisite had already been satisfied in the transcript.",
-  "transcript": [
-    {
-      "role": "user",
-      "isMeta": false,
-      "content": "please first try to reproduce the fontconfig error, and then edit"
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "I'll reproduce it with Fontconfig itself first, using the current /etc/fonts/local.conf, then I'll make the smallest Nix config edit that fixes the malformed XML."
+  "initialRun": {
+    "startCommand": {
+      "commandId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-start",
+      "runId": "fixture-prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/nixos",
+        "projectDir": "/home/tim/Coding/nixos",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
         },
-        {
-          "type": "tool_use",
-          "id": "call_fontconfig_repro",
-          "name": "exec_command",
-          "input": {
-            "cmd": "fc-match Arial",
-            "workdir": "/home/tim/Coding/nixos",
-            "yield_time_ms": 10000,
-            "max_output_tokens": 12000
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
           }
-        }
-      ]
-    },
-    {
-      "role": "user",
-      "isMeta": false,
-      "content": [
-        {
-          "type": "tool_result",
-          "tool_use_id": "call_fontconfig_repro",
-          "content": "Chunk ID: repro\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nFontconfig error: \"/etc/fonts/local.conf\", line 9: junk after document element\nArial.ttf: \"Arial\" \"Regular\"\n"
-        }
-      ]
-    },
-    {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "Reproduced: fc-match Arial reports Fontconfig error: \"/etc/fonts/local.conf\", line 9: junk after document element. I'm now wrapping the local fontconfig fragment in the required XML root."
         },
-        {
-          "type": "tool_use",
-          "id": "call_wrap_fontconfig_local_conf",
-          "name": "apply_patch",
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
+    {
+      "commandId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-session-state",
+      "runId": "fixture-prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "neutral",
+            "trust": "normal",
+            "intent": "User wants the assistant to first reproduce the fontconfig error before making changes, then edit the Nix configuration to fix the malformed XML.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [
+              "exec_command",
+              "apply_patch",
+              "Edit"
+            ],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a",
+            "userMessageSnippet": "please first try to reproduce the fontconfig error, and then edit",
+            "timestamp": 1
+          },
+          "frustrationStreak": 0,
+          "currentWindowSize": 4
+        },
+        "diagnostics": []
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-message-0",
+      "runId": "fixture-prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-message-0",
+        "turnId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-turn-0",
+        "content": "please first try to reproduce the fontconfig error, and then edit",
+        "contentDigest": "sha256:ad66f44ab4b9fecae67c67cf6d6c144ae27f592dbaa34c90e8e0d926cf8a85b6"
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-message-1",
+      "runId": "fixture-prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-message-1",
+        "turnId": null,
+        "content": "I'll reproduce it with Fontconfig itself first, using the current /etc/fonts/local.conf, then I'll make the smallest Nix config edit that fixes the malformed XML.\n[tool exec_command] {\"cmd\":\"fc-match Arial\",\"workdir\":\"/home/tim/Coding/nixos\",\"yield_time_ms\":10000,\"max_output_tokens\":12000}",
+        "contentDigest": "sha256:702e2e44d2cf3990d4857097dee3df2bf245b3f244ba2014afa332b1695409b1"
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-message-2",
+      "runId": "fixture-prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-message-2",
+        "turnId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-turn-2",
+        "content": "[tool result call_fontconfig_repro] Chunk ID: repro\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nFontconfig error: \"/etc/fonts/local.conf\", line 9: junk after document element\nArial.ttf: \"Arial\" \"Regular\"\n",
+        "contentDigest": "sha256:782888b6e803c91d718effcb213175bbe21fa08ef4a5688ecc036b5e73ddf17c"
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-message-3",
+      "runId": "fixture-prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:06.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-message-3",
+        "turnId": null,
+        "content": "Reproduced: fc-match Arial reports Fontconfig error: \"/etc/fonts/local.conf\", line 9: junk after document element. I'm now wrapping the local fontconfig fragment in the required XML root.\n[tool apply_patch] {\"command\":\"*** Begin Patch\\n*** Update File: /home/tim/Coding/nixos/common/common.nix\\n@@\\n-      localConf = ''\\n-        <match target=\\\"pattern\\\">\\n+      localConf = ''\\n+        <?xml version=\\\"1.0\\\"?>\\n+        <!DOCTYPE fontconfig SYSTEM \\\"urn:fontconfig:fonts.dtd\\\">\\n+        <fontconfig>\\n+        <match target=\\\"pattern\\\">\\n@@\\n-        </match>\\n+        </match>\\n+        </fontconfig>\\n       '';\\n*** End Patch\\n\"}",
+        "contentDigest": "sha256:e4445048f6caa0aa3fe22303ff58fce4dd89432e820609ff971e2e85176b24c6"
+      }
+    },
+    {
+      "commandId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-target-tool",
+      "runId": "fixture-prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:07.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "neutral",
+              "trust": "normal",
+              "intent": "User wants the assistant to first reproduce the fontconfig error before making changes, then edit the Nix configuration to fix the malformed XML.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [
+                "exec_command",
+                "apply_patch",
+                "Edit"
+              ],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "userMessageSnippet": "please first try to reproduce the fontconfig error, and then edit",
+              "timestamp": 1
+            },
+            "frustrationStreak": 0,
+            "currentWindowSize": 4
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow",
+            "projectDir": "/home/tim/Coding/nixos",
+            "workingDir": "/home/tim/Coding/nixos",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/nixos",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "preTool": {
+              "rawToolName": "apply_patch",
+              "rawToolInput": {
+                "command": "*** Begin Patch\n*** Update File: /home/tim/Coding/nixos/common/common.nix\n@@\n-      localConf = ''\n-        <match target=\"pattern\">\n+      localConf = ''\n+        <?xml version=\"1.0\"?>\n+        <!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n+        <fontconfig>\n+        <match target=\"pattern\">\n@@\n-        </match>\n+        </match>\n+        </fontconfig>\n       '';\n*** End Patch\n"
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "[tool result call_fontconfig_repro] Chunk ID: repro\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nFontconfig error: \"/etc/fonts/local.conf\", line 9: junk after document element\nArial.ttf: \"Arial\" \"Regular\"\n",
+              "latestUserLogicText": "[tool result call_fontconfig_repro] Chunk ID: repro\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nFontconfig error: \"/etc/fonts/local.conf\", line 9: junk after document element\nArial.ttf: \"Arial\" \"Regular\"\n",
+              "recentUserMessages": [
+                "please first try to reproduce the fontconfig error, and then edit",
+                "[tool result call_fontconfig_repro] Chunk ID: repro\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\nFontconfig error: \"/etc/fonts/local.conf\", line 9: junk after document element\nArial.ttf: \"Arial\" \"Regular\"\n"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "call_wrap_fontconfig_local_conf",
+          "turnId": null,
+          "name": "Edit",
           "input": {
-            "command": "*** Begin Patch\n*** Update File: /home/tim/Coding/nixos/common/common.nix\n@@\n-      localConf = ''\n-        <match target=\"pattern\">\n+      localConf = ''\n+        <?xml version=\"1.0\"?>\n+        <!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n+        <fontconfig>\n+        <match target=\"pattern\">\n@@\n-        </match>\n+        </match>\n+        </fontconfig>\n       '';\n*** End Patch\n"
-          }
+            "file_path": "/home/tim/Coding/nixos/common/common.nix",
+            "file_paths": [
+              "/home/tim/Coding/nixos/common/common.nix"
+            ]
+          },
+          "inputDigest": "sha256:417de1d4df4b9f260bf94f320f2971bc886aff9c01b5ff5655e519f5da2c3fe4",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "call_wrap_fontconfig_local_conf"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "adapter": "codex",
-    "cwd": "/home/tim/Coding/nixos",
-    "permission_mode": "default"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "neutral",
-      "trust": "normal",
-      "intent": "User wants the assistant to first reproduce the fontconfig error before making changes, then edit the Nix configuration to fix the malformed XML.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [
-        "exec_command",
-        "apply_patch",
-        "Edit"
-      ],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "contextSwitch": "no",
-      "questionIsStalling": "n/a",
-      "userMessageSnippet": "please first try to reproduce the fontconfig error, and then edit"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 0,
-    "currentWindowSize": 4
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "The user's sequencing condition was satisfied by the earlier `fc-match Arial` tool result, which contains the exact Fontconfig error. The following edit is the requested continuation and should not be denied as if reproduction had not happened."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "prediction-block-denies-edit-after-requested-fontconfig-repro-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

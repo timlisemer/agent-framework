@@ -10,11 +10,14 @@
  * @module adapters/codex/apply-patch-parser
  */
 
-import { extractCodexToolPaths } from "./tool-payload.js";
+import { recordFromUnknown } from "../../src/utils/output.js";
+import { extractCodexFileChangePaths, extractCodexToolPaths } from "./tool-payload.js";
 
 export function extractApplyPatchPaths(toolInput: unknown): string[] {
   const structured = extractCodexToolPaths(toolInput);
   if (structured.length > 0) return structured;
+  const changed = extractCodexFileChangePaths(recordFromUnknown(toolInput));
+  if (changed.length > 0) return changed;
 
   const command = typeof toolInput === "string"
     ? toolInput

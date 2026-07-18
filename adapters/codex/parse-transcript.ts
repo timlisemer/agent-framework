@@ -17,10 +17,13 @@ import type {
 } from "../../src/adapter/types.js";
 import { isRecord, nonEmptyStringField } from "../../src/utils/output.js";
 import { buildLineTranscriptSource, withTranscriptSource } from "../shared/transcript-source.js";
-import type { TokenUsage } from "../../src/ai-protocol/index.js";
+import type { TokenUsage } from "../../src/providers/provider-contract.js";
 import { AGENT_FRAMEWORK_METADATA_KEYS } from "../../src/utils/agent-framework-metadata.js";
-import { isToolLogFailureStatus } from "../../src/utils/agent-framework-tool-log.js";
-import { normalizeCodexToolName, parseCodexToolObjectInput } from "./tool-payload.js";
+import {
+  isCodexToolFailureStatus,
+  normalizeCodexToolName,
+  parseCodexToolObjectInput,
+} from "./tool-payload.js";
 import { normalizeCodexTokenUsage } from "./usage.js";
 
 const ADAPTER = "codex";
@@ -276,7 +279,7 @@ export function parseTranscript(
               type: "tool_result",
               tool_use_id: typeof payload.call_id === "string" ? payload.call_id : undefined,
               content: payload.error ?? payload.output ?? payload.result ?? "",
-              is_error: isToolLogFailureStatus(nonEmptyStringField(payload, "status")) || payload.error !== undefined,
+              is_error: isCodexToolFailureStatus(nonEmptyStringField(payload, "status")) || payload.error !== undefined,
               source,
             },
           ],
@@ -470,6 +473,3 @@ function tokenUsageFromRaw(raw: RawEntry | null): TokenUsage | null {
 function messageId(message: unknown): string | null {
   return isRecord(message) && typeof message.id === "string" ? message.id : null;
 }
-
-// Re-export ContentBlock so scenario-materializer can use it without importing from src/.
-export type { ContentBlock };

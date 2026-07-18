@@ -83,7 +83,7 @@ This scenario covers preserving and enforcing an explicit prediction block for
   no matching fixture exists in this folder.
 - Promoted two fixed prediction identity scenarios to `expected-to-pass/`.
 - Promoted two additional fixed scenarios to `expected-to-pass/`: one for
-  scenario labeler authorization under stale anger, and one for legitimate
+  scenario tester authorization under stale anger, and one for legitimate
   multi-region same-file edits.
 
 2026-05-19 scenario reclassification after three full scenario sweeps:

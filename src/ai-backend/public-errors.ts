@@ -1,10 +1,10 @@
 import { isCancellationError } from "../utils/cancellation.js";
-import type { AiErrorInfo, AiMetadata } from "../ai-protocol/index.js";
+import type { ProviderError, ProviderMetadata } from "../providers/provider-contract.js";
 
 export function toPublicError(
   error: unknown,
-  options: { publicMessage?: string; metadata?: AiMetadata } = {}
-): AiErrorInfo {
+  options: { publicMessage?: string; metadata?: ProviderMetadata } = {}
+): ProviderError {
   if (isCancellationError(error)) {
     return withMetadata(
       { code: "cancelled", message: "Operation cancelled", recoverable: true },
@@ -19,12 +19,12 @@ export function toPublicError(
 }
 
 export function protocolError(
-  code: Exclude<AiErrorInfo["code"], "cancelled" | "runtime_error">,
+  code: Exclude<ProviderError["code"], "cancelled" | "runtime_error">,
   message: string
-): AiErrorInfo {
+): ProviderError {
   return { code, message, recoverable: code !== "conflict" };
 }
 
-function withMetadata(error: AiErrorInfo, metadata: AiMetadata | undefined): AiErrorInfo {
+function withMetadata(error: ProviderError, metadata: ProviderMetadata | undefined): ProviderError {
   return metadata && Object.keys(metadata).length > 0 ? { ...error, metadata } : error;
 }

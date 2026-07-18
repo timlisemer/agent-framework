@@ -8,12 +8,13 @@ import { validatePlanFileWithContract } from "../agents/mcp/validate-plan.js";
 import { formatTranscriptResult, readTranscriptExact } from "./transcript.js";
 import { PLAN_VALIDATE_COUNTS } from "./transcript-presets.js";
 import type { TextEditToolName } from "./edit-tools.js";
-import { readJson, writeJson } from "./file-io.js";
-import { sessionCurrentPlanFile, sessionPlanFile } from "./paths.js";
-import {
-  hashPlanContent,
-  readPlanValidationStatus,
-} from "./plan-validation-status.js";
+import { hashSha256 } from "./hash-utils.js";
+import { sessionPlanFile } from "./paths.js";
+import { isMissingFileError } from "./filesystem-errors.js";
+import { isRecord } from "./output.js";
+import { canonicalHookRunIdForSession } from "../entrypoints/host-run-id.js";
+import { ScenarioRuntime } from "../scenario/runtime/runtime.js";
+import { resolveAgentFrameworkScenarioRoot } from "../effects/scenario-root.js";
 import {
   appendPlanfileValidationWorkflow,
   extractPlanName,
@@ -29,28 +30,39 @@ export interface CurrentPlanLookupInput {
   prompt?: string;
 }
 
-export function readStoredCurrentPlan(sessionDir: string): PlanSourceDescriptor | null {
-  try {
-    const parsed = readJson<PlanSourceDescriptor>(sessionCurrentPlanFile(sessionDir));
-    if (parsed.kind === "file" && typeof parsed.path === "string") return parsed;
-  } catch {
+/** Parse the canonical file-backed plan.current state descriptor. */
+export function planSourceFromStateValue(value: unknown): PlanSourceDescriptor | null {
+  if (!isRecord(value) || value.kind !== "file" || typeof value.path !== "string" || !value.path.trim()) {
     return null;
   }
-  return null;
+  if (value.planName !== undefined && typeof value.planName !== "string") return null;
+  return {
+    kind: "file",
+    path: value.path,
+    ...(typeof value.planName === "string" && value.planName.length > 0
+      ? { planName: value.planName }
+      : {}),
+  };
 }
 
-export function writeCurrentPlanSidecar(
+/** Resolve plan.current from the canonical hook run identified by a session sidecar. */
+export async function resolveCanonicalCurrentPlanSource(
   sessionDir: string,
-  descriptor: PlanSourceDescriptor,
-): void {
-  writeJson(sessionCurrentPlanFile(sessionDir), descriptor);
+): Promise<PlanSourceDescriptor | null> {
+  const runId = canonicalHookRunIdForSession(sessionDir);
+  if (!runId) return null;
+  const snapshot = await new ScenarioRuntime({ root: resolveAgentFrameworkScenarioRoot() })
+    .snapshot(runId)
+    .catch(() => null);
+  return planSourceFromStateValue(snapshot?.stateSlices["plan.current"]?.value);
 }
 
 export async function readPlanFileContent(planPath: string): Promise<string | null> {
   try {
     return await fs.promises.readFile(planPath, "utf-8");
-  } catch {
-    return null;
+  } catch (error) {
+    if (isMissingFileError(error)) return null;
+    throw error;
   }
 }
 
@@ -66,7 +78,7 @@ export async function readCurrentPlan(
   if (pathToPlanfile) {
     return { kind: "file", path: pathToPlanfile, planName };
   }
-  return input.sessionDir ? readStoredCurrentPlan(input.sessionDir) : null;
+  return null;
 }
 
 export async function readCurrentPlanContent(
@@ -85,8 +97,7 @@ export async function getCurrentPlanfilePath(input: CurrentPlanLookupInput & { p
     planName: input.planName,
   }, (lookup) => activeSpec().findNativePlanFile(lookup));
   if (pathToPlanfile) return pathToPlanfile;
-  const stored = input.sessionDir ? readStoredCurrentPlan(input.sessionDir) : null;
-  return stored?.path ?? null;
+  return null;
 }
 
 export async function validateCurrentPlanExit(input: {
@@ -96,14 +107,21 @@ export async function validateCurrentPlanExit(input: {
   hookName: string;
   assistantText?: string | null;
   prompt?: string;
-}): Promise<{ approved: boolean; reason?: string; source?: PlanSourceDescriptor }> {
-  const pathToPlanfile = await getCurrentPlanfilePath(input);
+  currentPlan?: PlanSourceDescriptor | null;
+}): Promise<{ approved: boolean; reason?: string; source?: PlanSourceDescriptor; contentHash?: string }> {
+  const pathToPlanfile = input.currentPlan?.kind === "file"
+    ? input.currentPlan.path
+    : await getCurrentPlanfilePath(input);
   if (!pathToPlanfile) return { approved: false, reason: "Cannot exit plan mode without a plan." };
 
   const content = await readPlanFileContent(pathToPlanfile) ?? "";
   if (!content.trim()) return { approved: false, reason: "Cannot exit plan mode without a plan." };
 
-  return { approved: true, source: { kind: "file", path: pathToPlanfile, planName: extractPlanName(content) ?? undefined } };
+  return {
+    approved: true,
+    source: { kind: "file", path: pathToPlanfile, planName: extractPlanName(content) ?? undefined },
+    contentHash: hashSha256(Buffer.from(content, "utf8")),
+  };
 }
 
 function missingPlanfileWorkflow(sessionDir?: string): string {
@@ -183,22 +201,8 @@ async function validateExistingPlanfileForStop(input: {
   sessionDir?: string;
   projectDir: string;
   transcriptPath: string;
-}): Promise<{ approved: boolean; reason?: string; source?: PlanSourceDescriptor }> {
+}): Promise<{ approved: boolean; reason?: string; source?: PlanSourceDescriptor; contentHash?: string }> {
   const source = { kind: "file" as const, path: input.planPath, planName: input.planName };
-  const contentHash = hashPlanContent(input.content);
-  const cached = input.sessionDir
-    ? readPlanValidationStatus({
-        sessionDir: input.sessionDir,
-        planPath: input.planPath,
-        contentHash,
-      })
-    : null;
-
-  if (cached?.status === "pass") {
-    if (input.sessionDir) writeCurrentPlanSidecar(input.sessionDir, source);
-    return { approved: true, source };
-  }
-
   const validation = await validatePlanFileWithContract({
     workingDir: input.projectDir,
     planFile: input.planPath,
@@ -206,8 +210,7 @@ async function validateExistingPlanfileForStop(input: {
     sessionDir: input.sessionDir,
   });
   if (validation.status === "PASS") {
-    if (input.sessionDir) writeCurrentPlanSidecar(input.sessionDir, source);
-    return { approved: true, source };
+    return { approved: true, source, contentHash: hashSha256(Buffer.from(input.content, "utf8")) };
   }
 
   return {
@@ -222,7 +225,7 @@ export async function validatePlanExitPresentation(input: {
   projectDir: string;
   hookName: string;
   assistantText?: string | null;
-}): Promise<{ approved: boolean; reason?: string; source?: PlanSourceDescriptor }> {
+}): Promise<{ approved: boolean; reason?: string; source?: PlanSourceDescriptor; contentHash?: string }> {
   void input.hookName;
   const spec = activeSpec();
   const extractedContent = spec.extractStopProposedPlan(input.assistantText);
@@ -250,9 +253,8 @@ export async function validatePlanExitPresentation(input: {
   let existingContent: string | null = null;
   try {
     existingContent = await fs.promises.readFile(resolvedPath, "utf-8");
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT") {
+  } catch (error) {
+    if (!isMissingFileError(error)) {
       return {
         approved: false,
         reason: appendPlanfileValidationWorkflow(
@@ -302,8 +304,11 @@ export async function validatePlanExitPresentation(input: {
     const updatedContent = await readPlanFileContent(planPath);
     if (updatedContent?.trim()) {
       const source = { kind: "file" as const, path: planPath, planName: extractPlanName(updatedContent) ?? planName };
-      if (input.sessionDir) writeCurrentPlanSidecar(input.sessionDir, source);
-      return { approved: true, source };
+      return {
+        approved: true,
+        source,
+        contentHash: hashSha256(Buffer.from(updatedContent, "utf8")),
+      };
     }
     return {
       approved: false,

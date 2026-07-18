@@ -4,7 +4,7 @@ import { activeSpec } from "../adapter/spec.js";
 import {
   SLASH_COMMAND_ALLOWED_TOOLS,
 } from "./slash-commands.js";
-import type { ContentBlock } from "../adapter/types.js";
+import type { AdapterSpec, ContentBlock } from "../adapter/types.js";
 import type { PriorErrorContext, PriorErrorSource } from "./prior-error-context.js";
 import {
   buildAssistantGroups,
@@ -29,7 +29,6 @@ export interface TranscriptToolResultMessage extends TranscriptMessage {
 
 /**
  * Count specification for a message type.
- * Can be a simple number (backward compatible) or an object with staleness.
  */
 export interface CountSpec {
   /** Number of this message type to collect */
@@ -47,14 +46,11 @@ export interface CountSpec {
  * Each field specifies exact number of that type to collect.
  * The scanner will read backwards until these counts are satisfied (or transcript exhausted).
  *
- * Each field can be:
- * - A number: backward compatible, no staleness check
- * - A CountSpec object: { count: N, maxStale?: M }
  */
 export interface MessageCounts {
-  user?: number | CountSpec;
-  assistant?: number | CountSpec;
-  tool?: number | CountSpec;
+  user?: CountSpec;
+  assistant?: CountSpec;
+  tool?: CountSpec;
 }
 
 /**
@@ -177,12 +173,12 @@ export function trimToolOutput(output: string, maxLines = 20): string {
  * Detect if content is a workflow invocation message.
  * Delegates to the active adapter to recognize adapter-specific syntax.
  */
-function isSlashCommandPrompt(content: string): boolean {
-  return activeSpec().recognizeWorkflowInvocation(content) !== null;
+function isSlashCommandPrompt(content: string, spec: AdapterSpec = activeSpec()): boolean {
+  return spec.recognizeWorkflowInvocation(content) !== null;
 }
 
-function isWorkflowInvocationOnlyPrompt(content: string): boolean {
-  return activeSpec().isWorkflowInvocationOnly(content);
+function isWorkflowInvocationOnlyPrompt(content: string, spec: AdapterSpec = activeSpec()): boolean {
+  return spec.isWorkflowInvocationOnly(content);
 }
 
 
@@ -194,9 +190,12 @@ function isWorkflowInvocationOnlyPrompt(content: string): boolean {
  * the allowed tools from the canonical SLASH_COMMAND_ALLOWED_TOOLS table.
  * Also parses YAML frontmatter for description and allowed-tools fields.
  */
-function extractSlashCommandMetadata(content: string): SlashCommandContext | null {
+function extractSlashCommandMetadata(
+  content: string,
+  spec: AdapterSpec = activeSpec(),
+): SlashCommandContext | null {
   // Live path: detect workflow invocation via active adapter
-  const canonical = activeSpec().recognizeWorkflowInvocation(content);
+  const canonical = spec.recognizeWorkflowInvocation(content);
   if (canonical) {
     const allowedTools = SLASH_COMMAND_ALLOWED_TOOLS[canonical];
     return {
@@ -237,7 +236,6 @@ function extractSlashCommandMetadata(content: string): SlashCommandContext | nul
     const toolsStr = toolsMatch[1].trim();
     const rawTools = toolsStr.split(",").map((t) => t.trim()).filter(Boolean);
     // Resolve any wire-name tools to canonical names
-    const spec = activeSpec();
     const resolvedTools: string[] = [];
     for (const tool of rawTools) {
       const mcp = spec.recognizeMcp(tool);
@@ -253,8 +251,8 @@ function extractSlashCommandMetadata(content: string): SlashCommandContext | nul
     for (const tool of resolvedTools) {
       const mcpMatch = tool.match(/^mcp-(\w+)$/);
       if (mcpMatch) {
-        const canonicalCheck = activeSpec().recognizeMcp(
-          activeSpec().mcpWireName(mcpMatch[1] as import("../adapter/types.js").CanonicalMcp)
+        const canonicalCheck = spec.recognizeMcp(
+          spec.mcpWireName(mcpMatch[1] as import("../adapter/types.js").CanonicalMcp)
         );
         if (canonicalCheck) {
           commandName = canonicalCheck;
@@ -368,12 +366,9 @@ export function extractActionableToolResultFeedback(
 /**
  * Normalize a count specification to a consistent format.
  */
-function normalizeCount(
-  spec: number | CountSpec | undefined
-): { count: number; maxStale?: number } {
+function normalizeCount(spec: CountSpec | undefined): CountSpec {
   if (spec === undefined) return { count: 0 };
-  if (typeof spec === "number") return { count: spec };
-  return { count: spec.count, maxStale: spec.maxStale };
+  return spec;
 }
 
 /**
@@ -430,6 +425,20 @@ export async function readTranscriptExact(
   transcriptPath: string,
   options: TranscriptReadOptions
 ): Promise<TranscriptReadResult> {
+  const content = await fs.promises.readFile(transcriptPath, "utf-8");
+  const allLines = content.trim().split("\n");
+  return readTranscriptExactFromEntries(
+    parseActiveTranscriptLines(allLines, transcriptPath),
+    options,
+  );
+}
+
+/** Project one already-parsed, stable native observation into rule transcript context. */
+export function readTranscriptExactFromEntries(
+  parsedEntries: readonly (import("../adapter/types.js").TranscriptEntry | null)[],
+  options: TranscriptReadOptions,
+  spec: AdapterSpec = activeSpec(),
+): TranscriptReadResult {
   const {
     counts,
     toolOptions = {},
@@ -448,9 +457,6 @@ export async function readTranscriptExact(
   const targetAssistant = assistantSpec.count;
   const targetTool = toolSpec.count;
 
-  const content = await fs.promises.readFile(transcriptPath, "utf-8");
-  const allLines = content.trim().split("\n");
-
   const collected: TranscriptReadResult = {
     user: [],
     assistant: [],
@@ -460,9 +466,6 @@ export async function readTranscriptExact(
 
   const toolUseIdToName = new Map<string, string>();
   let slashCommandContext: SlashCommandContext | undefined;
-
-  // Parse all lines using the active adapter's parseTranscript
-  const parsedEntries = parseActiveTranscriptLines(allLines, transcriptPath);
 
   const assistantGroupByIndex = buildAssistantGroups(parsedEntries, "user-text-or-tool-result");
   collected.assistantTextCandidates = collectAssistantTextCandidates(
@@ -498,7 +501,7 @@ export async function readTranscriptExact(
       }
 
       if (textContent) {
-        const metadata = extractSlashCommandMetadata(textContent);
+        const metadata = extractSlashCommandMetadata(textContent, spec);
         if (metadata) {
           slashCommandContext = metadata;
         }
@@ -550,7 +553,7 @@ export async function readTranscriptExact(
           }
         }
         if (probe !== undefined) {
-          collected.newestUserWasSlashCommand = isSlashCommandPrompt(probe);
+          collected.newestUserWasSlashCommand = isSlashCommandPrompt(probe, spec);
         }
       }
 
@@ -569,6 +572,7 @@ export async function readTranscriptExact(
           excludeSlashCommandPrompts,
           toolOptions,
           toolUseIdToName,
+          spec,
         });
         if (firstUserSeenIndex === null && collected.user.length > beforeLen) {
           firstUserSeenIndex = i;
@@ -604,13 +608,13 @@ export async function readTranscriptExact(
 
         if (typeof msgContent === "string") {
           if (excludeSystemReminders && msgContent.startsWith("<system-reminder>")) continue;
-          if (excludeSlashCommandPrompts && isWorkflowInvocationOnlyPrompt(msgContent)) continue;
+          if (excludeSlashCommandPrompts && isWorkflowInvocationOnlyPrompt(msgContent, spec)) continue;
           text = msgContent;
         } else if (Array.isArray(msgContent)) {
           for (const block of msgContent) {
             if (block.type === "text" && block.text) {
               if (excludeSystemReminders && block.text.startsWith("<system-reminder>")) continue;
-              if (excludeSlashCommandPrompts && isWorkflowInvocationOnlyPrompt(block.text)) continue;
+              if (excludeSlashCommandPrompts && isWorkflowInvocationOnlyPrompt(block.text, spec)) continue;
               text = block.text;
               break;
             }
@@ -710,6 +714,7 @@ function processUserEntry(
     excludeSlashCommandPrompts: boolean;
     toolOptions: TranscriptReadOptions['toolOptions'];
     toolUseIdToName: Map<string, string>;
+    spec: AdapterSpec;
   }
 ): void {
   const {
@@ -719,6 +724,7 @@ function processUserEntry(
     excludeSlashCommandPrompts,
     toolOptions,
     toolUseIdToName,
+    spec,
   } = config;
   const { trim = false, maxLines = 20, excludeToolNames = [] } = toolOptions ?? {};
 
@@ -726,7 +732,7 @@ function processUserEntry(
     if (excludeSystemReminders && msgContent.startsWith('<system-reminder>')) {
       return;
     }
-    if (excludeSlashCommandPrompts && isWorkflowInvocationOnlyPrompt(msgContent)) {
+    if (excludeSlashCommandPrompts && isWorkflowInvocationOnlyPrompt(msgContent, spec)) {
       return;
     }
     if (collected.user.length < targetUser) {
@@ -744,7 +750,7 @@ function processUserEntry(
 
         let toolContent = extractToolResultContent(block);
 
-        if (toolContent && activeSpec().isInterruptionMessage(toolContent)) {
+        if (toolContent && spec.isInterruptionMessage(toolContent)) {
           continue;
         }
 
@@ -767,7 +773,7 @@ function processUserEntry(
         if (excludeSystemReminders && block.text.startsWith('<system-reminder>')) {
           continue;
         }
-        if (excludeSlashCommandPrompts && isWorkflowInvocationOnlyPrompt(block.text)) {
+        if (excludeSlashCommandPrompts && isWorkflowInvocationOnlyPrompt(block.text, spec)) {
           continue;
         }
         if (collected.user.length < targetUser) {
@@ -832,52 +838,11 @@ export async function readRecentUserMessages(
   withIndices: boolean = false,
   opts: { stripQuoted?: boolean } = {},
 ): Promise<string> {
-  let raw: string;
-  try {
-    raw = await fs.promises.readFile(transcriptPath, "utf-8");
-  } catch {
-    return "";
-  }
-  const lines = raw.trim().split("\n");
-  const parsedEntries = parseActiveTranscriptLines(lines, transcriptPath);
-  const collected: string[] = [];
-  for (let i = parsedEntries.length - 1; i >= 0 && collected.length < n; i--) {
-    const entry = parsedEntries[i];
-    if (!entry || !entry.message || entry.message.role !== "user") continue;
-    if (entry.isMeta === true) continue;
-
-    const content = entry.message.content;
-    let text: string | undefined;
-    if (typeof content === "string") {
-      if (content.startsWith("<system-reminder>")) continue;
-      if (isWorkflowInvocationOnlyPrompt(content)) continue;
-      text = content;
-    } else if (Array.isArray(content)) {
-      let foundText: string | undefined;
-      let onlyToolResults = true;
-      for (const block of content) {
-        if (block.type === "text" && block.text) {
-          if (block.text.startsWith("<system-reminder>")) continue;
-          if (isWorkflowInvocationOnlyPrompt(block.text)) continue;
-          foundText = block.text;
-          onlyToolResults = false;
-          break;
-        }
-        if (block.type !== "tool_result") onlyToolResults = false;
-      }
-      if (onlyToolResults) continue;
-      text = foundText;
-    }
-    if (!text) continue;
-    const message = opts.stripQuoted === false ? text : stripQuotedAndPastedContent(text);
-    if (!message.trim()) continue;
-    collected.push(message);
-  }
-  const reversed = collected.reverse();
-  const total = reversed.length;
+  const messages = await readRecentUserMessagesArray(transcriptPath, n, opts);
+  const total = messages.length;
   return withIndices
-    ? reversed.map((msg, i) => `[T${total - 1 - i}] ${msg}`).join("\n---\n")
-    : reversed.join("\n---\n");
+    ? messages.map((msg, i) => `[T${total - 1 - i}] ${msg}`).join("\n---\n")
+    : messages.join("\n---\n");
 }
 
 /**
@@ -895,7 +860,16 @@ export async function readRecentUserMessagesArray(
     return [];
   }
   const lines = raw.trim().split("\n");
-  const parsedEntries = parseActiveTranscriptLines(lines, transcriptPath);
+  return recentUserMessagesFromEntries(parseActiveTranscriptLines(lines, transcriptPath), n, opts);
+}
+
+/** Select recent human user messages from one already-parsed observation. */
+export function recentUserMessagesFromEntries(
+  parsedEntries: readonly (import("../adapter/types.js").TranscriptEntry | null)[],
+  n: number,
+  opts: { stripQuoted?: boolean } = {},
+  spec: AdapterSpec = activeSpec(),
+): string[] {
   const collected: string[] = [];
   for (let i = parsedEntries.length - 1; i >= 0 && collected.length < n; i--) {
     const entry = parsedEntries[i];
@@ -906,7 +880,7 @@ export async function readRecentUserMessagesArray(
     let text: string | undefined;
     if (typeof content === "string") {
       if (content.startsWith("<system-reminder>")) continue;
-      if (isWorkflowInvocationOnlyPrompt(content)) continue;
+      if (isWorkflowInvocationOnlyPrompt(content, spec)) continue;
       text = content;
     } else if (Array.isArray(content)) {
       let foundText: string | undefined;
@@ -914,7 +888,7 @@ export async function readRecentUserMessagesArray(
       for (const block of content) {
         if (block.type === "text" && block.text) {
           if (block.text.startsWith("<system-reminder>")) continue;
-          if (isWorkflowInvocationOnlyPrompt(block.text)) continue;
+          if (isWorkflowInvocationOnlyPrompt(block.text, spec)) continue;
           foundText = block.text;
           onlyToolResults = false;
           break;
@@ -941,8 +915,6 @@ export async function userTurnFollowedByCompletedToolRoundtrip(
   transcriptPath: string,
   snippet: string,
 ): Promise<boolean> {
-  const trimmed = snippet.trim();
-  if (!trimmed) return false;
   let raw: string;
   try {
     raw = await fs.promises.readFile(transcriptPath, "utf-8");
@@ -950,7 +922,20 @@ export async function userTurnFollowedByCompletedToolRoundtrip(
     return false;
   }
   const lines = raw.trim().split("\n");
-  const parsed = parseActiveTranscriptLines(lines, transcriptPath);
+  return userTurnFollowedByCompletedToolRoundtripFromEntries(
+    parseActiveTranscriptLines(lines, transcriptPath),
+    snippet,
+  );
+}
+
+/** Evaluate completed-roundtrip evidence from one already-parsed observation. */
+export function userTurnFollowedByCompletedToolRoundtripFromEntries(
+  parsed: readonly (import("../adapter/types.js").TranscriptEntry | null)[],
+  snippet: string,
+  spec: AdapterSpec = activeSpec(),
+): boolean {
+  const trimmed = snippet.trim();
+  if (!trimmed) return false;
 
   let anchorIndex = -1;
   for (let i = parsed.length - 1; i >= 0; i--) {
@@ -961,13 +946,13 @@ export async function userTurnFollowedByCompletedToolRoundtrip(
     let firstText: string | undefined;
     if (typeof content === "string") {
       if (content.startsWith("<system-reminder>")) continue;
-      if (isWorkflowInvocationOnlyPrompt(content)) continue;
+      if (isWorkflowInvocationOnlyPrompt(content, spec)) continue;
       firstText = content;
     } else if (Array.isArray(content)) {
       for (const block of content) {
         if (block.type === "text" && block.text) {
           if (block.text.startsWith("<system-reminder>")) continue;
-          if (isWorkflowInvocationOnlyPrompt(block.text)) continue;
+          if (isWorkflowInvocationOnlyPrompt(block.text, spec)) continue;
           firstText = block.text;
           break;
         }
@@ -1014,7 +999,7 @@ export async function userTurnFollowedByCompletedToolRoundtrip(
           if (inner.type === "text" && inner.text) text += inner.text;
         }
       }
-      if (text && activeSpec().isInterruptionMessage(text)) continue;
+      if (text && spec.isInterruptionMessage(text)) continue;
       return true;
     }
   }
@@ -1034,7 +1019,16 @@ export async function resolveActiveSlashCommandAllowedTools(
     return undefined;
   }
   const lines = raw.trim().split("\n");
-  const parsed = parseActiveTranscriptLines(lines, transcriptPath);
+  return resolveActiveSlashCommandAllowedToolsFromEntries(
+    parseActiveTranscriptLines(lines, transcriptPath),
+  );
+}
+
+/** Resolve workflow authorization from one already-parsed observation. */
+export function resolveActiveSlashCommandAllowedToolsFromEntries(
+  parsed: readonly (import("../adapter/types.js").TranscriptEntry | null)[],
+  spec: AdapterSpec = activeSpec(),
+): readonly string[] | undefined {
   for (let i = parsed.length - 1; i >= 0; i--) {
     const entry = parsed[i];
     if (!entry || !entry.message || entry.message.role !== "user") continue;
@@ -1053,9 +1047,9 @@ export async function resolveActiveSlashCommandAllowedTools(
       }
     }
     if (!text) continue;
-    if (!isSlashCommandPrompt(text)) continue;
+    if (!isSlashCommandPrompt(text, spec)) continue;
 
-    const metadata = extractSlashCommandMetadata(text);
+    const metadata = extractSlashCommandMetadata(text, spec);
     if (metadata?.allowedTools && metadata.allowedTools.length > 0) {
       return metadata.allowedTools;
     }
@@ -1087,8 +1081,18 @@ export async function detectParallelBatch(
 ): Promise<ParallelBatchInfo | null> {
   const content = await fs.promises.readFile(transcriptPath, "utf-8");
   const lines = content.trim().split("\n");
+  return detectParallelBatchFromEntries(
+    parseActiveTranscriptLines(lines, transcriptPath),
+    toolUseId,
+  );
+}
 
-  const parsed = parseActiveTranscriptLines(lines, transcriptPath);
+/** Detect a parallel batch from one already-parsed observation. */
+export function detectParallelBatchFromEntries(
+  parsed: readonly (import("../adapter/types.js").TranscriptEntry | null)[],
+  toolUseId: string,
+  spec: AdapterSpec = activeSpec(),
+): ParallelBatchInfo | null {
 
   interface ToolUseEntry {
     lineIndex: number;
@@ -1166,7 +1170,7 @@ export async function detectParallelBatch(
       break;
     }
   } else {
-    if (!activeSpec().canInferUnflushedParallelToolUse(toolUseId)) return null;
+    if (!spec.canInferUnflushedParallelToolUse(toolUseId)) return null;
     for (let i = parsed.length - 1; i >= 0; i--) {
       if (isNonMessageLine(i) || isThinkingOnlyLine(i)) continue;
       if (isAssistantToolUseLine(i)) {

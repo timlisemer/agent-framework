@@ -1,23 +1,199 @@
 {
-  "schema_version": 1,
   "name": "prediction-block-latest-user-message-move-reuse-quote-should-allow",
   "description": "Regression from Codex session 2026-05-18-1024_d0cf8faf, capture seq 506 / tool_use_id call_x6MCRYJD51ib7ci9gqTOMgND. The cached prediction was angry/low and the latest message included a quoted/list fragment \" - Move/reuse\" followed by an explicit correction: do not move duplicate code, remove it and reuse existing code. Correct behavior: prediction-block must use the quote-stripped latest live message as authoritative. Read-only Bash inspection that supports the requested fix must not be denied by cached mood, and the quoted word Move must not authorize a move command.",
-  "transcript": [
+  "initialRun": {
+    "startCommand": {
+      "commandId": "prediction-block-latest-user-message-move-reuse-quote-should-allow-start",
+      "runId": "fixture-prediction-block-latest-user-message-move-reuse-quote-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:00.000Z",
+      "payload": {
+        "type": "startRun",
+        "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+        "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+        "capabilities": {
+          "conversationInput": true,
+          "toolExecution": true,
+          "interactiveToolDecisions": true,
+          "planControl": true,
+          "feedbackSubmission": true,
+          "artifactRead": true,
+          "fullStateInspection": true,
+          "runCancellation": true
+        },
+        "storagePolicy": "ephemeral",
+        "runtimeHome": {
+          "kind": "internal",
+          "configuration": {
+            "policy": "direct"
+          }
+        },
+        "engineVersion": "scenario-fixture",
+        "schemaDigest": "sha256:758356378dbb9c77cdda5508ec5c495b4d401aceba9b87bd3a7a67d21b7fe8a1",
+        "configuration": {}
+      }
+    },
+    "seedRecords": []
+  },
+  "commands": [
     {
-      "role": "user",
-      "isMeta": false,
-      "content": "\" - Move/reuse\" dont you dare to move the duplicate code into a different location fuck you for even suggesting that! now fucking remove the duplicate code and reuse the existing code"
+      "commandId": "prediction-block-latest-user-message-move-reuse-quote-should-allow-session-state",
+      "runId": "fixture-prediction-block-latest-user-message-move-reuse-quote-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:02.000Z",
+      "payload": {
+        "type": "stateSliceChanged",
+        "key": "session.workflow",
+        "schemaId": "agent-framework://state/session-workflow",
+        "status": "loaded",
+        "source": "scenarioFixture",
+        "visibility": "localSensitive",
+        "value": {
+          "currentPrediction": {
+            "mood": "angry",
+            "trust": "low",
+            "intent": "The user wants the duplicate code removed and the implementation changed to reuse the existing code path instead of introducing another copy or relocating the logic.",
+            "blockedIntent": "",
+            "explicitlyAllowedTools": [
+              "apply_patch",
+              "Edit",
+              "Write"
+            ],
+            "explicitlyBlockedSubstrings": [],
+            "blockAllTools": false,
+            "contextSwitch": "no",
+            "questionIsStalling": "n/a",
+            "userMessageSnippet": "\" - Move/reuse\" dont you dare to move the duplicate code into a different location fuck you for even suggesting that! now fucking remove the duplicate code and reuse the existing code",
+            "timestamp": 1
+          },
+          "frustrationStreak": 3,
+          "currentWindowSize": 15,
+          "driftState": {},
+          "toolLog": []
+        },
+        "diagnostics": []
+      }
     },
     {
-      "role": "assistant",
-      "content": [
-        {
-          "type": "text",
-          "text": "I will remove the duplicate path and reuse the existing implementation. I am inspecting the package metadata first."
-        },
-        {
-          "type": "tool_use",
-          "id": "call_x6MCRYJD51ib7ci9gqTOMgND",
+      "commandId": "prediction-block-latest-user-message-move-reuse-quote-should-allow-message-0",
+      "runId": "fixture-prediction-block-latest-user-message-move-reuse-quote-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:03.000Z",
+      "payload": {
+        "type": "userMessageSubmitted",
+        "messageId": "prediction-block-latest-user-message-move-reuse-quote-should-allow-message-0",
+        "turnId": "prediction-block-latest-user-message-move-reuse-quote-should-allow-turn-0",
+        "content": "\" - Move/reuse\" dont you dare to move the duplicate code into a different location fuck you for even suggesting that! now fucking remove the duplicate code and reuse the existing code",
+        "contentDigest": "sha256:bc933a383f4ea5f7d8ea8e89374f2914de7e1758c7381091eb55a214ec1b827f"
+      }
+    },
+    {
+      "commandId": "prediction-block-latest-user-message-move-reuse-quote-should-allow-message-1",
+      "runId": "fixture-prediction-block-latest-user-message-move-reuse-quote-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:04.000Z",
+      "payload": {
+        "type": "assistantMessageCompleted",
+        "messageId": "prediction-block-latest-user-message-move-reuse-quote-should-allow-message-1",
+        "turnId": null,
+        "content": "I will remove the duplicate path and reuse the existing implementation. I am inspecting the package metadata first.\n[tool Bash] {\"command\":\"cat package.json | sed -n '1,80p'\",\"description\":\"Inspect package scripts\",\"workdir\":\"/home/tim/Coding/public_repos/agent-framework\",\"yield_time_ms\":1000,\"max_output_tokens\":12000}",
+        "contentDigest": "sha256:a35cb8e93588a19e081f1588ade4ba86df3ac67094bf29c22154784b1fe3145e"
+      }
+    },
+    {
+      "commandId": "prediction-block-latest-user-message-move-reuse-quote-should-allow-target-tool",
+      "runId": "fixture-prediction-block-latest-user-message-move-reuse-quote-should-allow",
+      "source": {
+        "kind": "scenarioFixture",
+        "adapter": "codex"
+      },
+      "recordedAt": "2026-01-01T00:00:05.000Z",
+      "payload": {
+        "type": "extensionCommand",
+        "extensionId": "agent-framework.host",
+        "data": {
+          "type": "hostPreToolUse",
+          "workflow": {
+            "currentPrediction": {
+              "mood": "angry",
+              "trust": "low",
+              "intent": "The user wants the duplicate code removed and the implementation changed to reuse the existing code path instead of introducing another copy or relocating the logic.",
+              "blockedIntent": "",
+              "explicitlyAllowedTools": [
+                "apply_patch",
+                "Edit",
+                "Write"
+              ],
+              "explicitlyBlockedSubstrings": [],
+              "blockAllTools": false,
+              "contextSwitch": "no",
+              "questionIsStalling": "n/a",
+              "userMessageSnippet": "\" - Move/reuse\" dont you dare to move the duplicate code into a different location fuck you for even suggesting that! now fucking remove the duplicate code and reuse the existing code",
+              "timestamp": 1
+            },
+            "frustrationStreak": 3,
+            "currentWindowSize": 15,
+            "driftState": {},
+            "toolLog": []
+          },
+          "context": {
+            "adapter": "codex",
+            "nativeSessionId": "fixture-prediction-block-latest-user-message-move-reuse-quote-should-allow",
+            "transcriptPath": "/home/tim/.agent-framework/fixtures/prediction-block-latest-user-message-move-reuse-quote-should-allow.jsonl",
+            "sessionDir": "/home/tim/.agent-framework/sessions/fixture-prediction-block-latest-user-message-move-reuse-quote-should-allow",
+            "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+            "workingDir": "/home/tim/Coding/public_repos/agent-framework",
+            "permissionMode": "default",
+            "collaborationMode": null,
+            "planMode": false,
+            "planModeDetection": {
+              "active": false,
+              "mode": null,
+              "source": "none"
+            },
+            "host": {
+              "adapter": "codex",
+              "projectDir": "/home/tim/Coding/public_repos/agent-framework",
+              "configRoot": "/home/tim/.codex",
+              "plansRoot": "/home/tim/.codex/plans",
+              "instructionFiles": [],
+              "instructionLabel": "AGENTS.md"
+            },
+            "preTool": {
+              "rawToolName": "Bash",
+              "rawToolInput": {
+                "command": "cat package.json | sed -n '1,80p'",
+                "description": "Inspect package scripts",
+                "workdir": "/home/tim/Coding/public_repos/agent-framework",
+                "yield_time_ms": 1000,
+                "max_output_tokens": 12000
+              },
+              "outsideRootPath": null,
+              "latestUserMessage": "\" - Move/reuse\" dont you dare to move the duplicate code into a different location fuck you for even suggesting that! now fucking remove the duplicate code and reuse the existing code",
+              "latestUserLogicText": "\" - Move/reuse\" dont you dare to move the duplicate code into a different location fuck you for even suggesting that! now fucking remove the duplicate code and reuse the existing code",
+              "recentUserMessages": [
+                "\" - Move/reuse\" dont you dare to move the duplicate code into a different location fuck you for even suggesting that! now fucking remove the duplicate code and reuse the existing code"
+              ],
+              "cachedSnippetSideTaskDischarged": false,
+              "slashCommandAllowedTools": null,
+              "planExit": false,
+              "batch": null
+            }
+          },
+          "toolCallId": "call_x6MCRYJD51ib7ci9gqTOMgND",
+          "turnId": null,
           "name": "Bash",
           "input": {
             "command": "cat package.json | sed -n '1,80p'",
@@ -25,44 +201,54 @@
             "workdir": "/home/tim/Coding/public_repos/agent-framework",
             "yield_time_ms": 1000,
             "max_output_tokens": 12000
-          }
+          },
+          "inputDigest": "sha256:8774b2df6571fdebc21bd8107acbfc01e9cca694d83efb442ad155983ad29f61",
+          "requiresUserDecision": false
         }
-      ]
+      }
     }
   ],
-  "target": {
-    "hook": "PreToolUse",
-    "tool_use_ref": "call_x6MCRYJD51ib7ci9gqTOMgND"
+  "effects": {
+    "mode": "live"
   },
-  "env": {
-    "cwd": "/home/tim/Coding/public_repos/agent-framework",
-    "permission_mode": "default",
-    "adapter": "codex"
-  },
-  "seed_state": {
-    "currentPrediction": {
-      "mood": "angry",
-      "trust": "low",
-      "intent": "The user wants the duplicate code removed and the implementation changed to reuse the existing code path instead of introducing another copy or relocating the logic.",
-      "blockedIntent": "",
-      "explicitlyAllowedTools": [
-        "apply_patch",
-        "Edit",
-        "Write"
-      ],
-      "explicitlyBlockedSubstrings": [],
-      "blockAllTools": false,
-      "contextSwitch": "no",
-      "questionIsStalling": "n/a",
-      "userMessageSnippet": "\" - Move/reuse\" dont you dare to move the duplicate code into a different location fuck you for even suggesting that! now fucking remove the duplicate code and reuse the existing code"
+  "expectations": [
+    {
+      "kind": "absentRecord",
+      "eventType": "runtime.error"
     },
-    "frustrationStreak": 3,
-    "currentWindowSize": 15,
-    "driftState": {},
-    "toolLog": []
-  },
-  "expect": {
-    "expected": "allow",
-    "notes": "The latest quote-stripped user message authorizes the fix/reuse work and therefore read-only Bash inspection that supports it; cached anger must not produce a prediction-block denial."
-  }
+    {
+      "kind": "commandResult",
+      "commandId": "prediction-block-latest-user-message-move-reuse-quote-should-allow-target-tool",
+      "status": "allowed"
+    },
+    {
+      "kind": "snapshot",
+      "path": "toolCalls.0.authorization.final",
+      "equals": "allowed"
+    },
+    {
+      "kind": "record",
+      "eventType": "extension.observed",
+      "count": 1,
+      "payloadContains": {
+        "extensionId": "agent-framework.host",
+        "event": "PreToolUse"
+      }
+    },
+    {
+      "kind": "snapshot",
+      "path": "/stateSlices/host.context/status",
+      "equals": "validated"
+    },
+    {
+      "kind": "snapshot",
+      "path": "/effects/0/metadata/executor",
+      "equals": "agent-framework-rule-pipeline"
+    },
+    {
+      "kind": "snapshotArrayMinLength",
+      "path": "/effects/0/result/evaluations",
+      "minLength": 1
+    }
+  ]
 }

@@ -890,9 +890,6 @@ If "PLAN MODE ACTIVE" appears in context, the allow/deny list in the plan-mode b
 - Agent / Task subagent dispatch for exploration or research (e.g. subagent_type "Explore", "general-purpose", "Plan", code-reviewer-style agents) → APPROVE by default. DENY only when the dispatch prompt itself instructs the subagent to edit/write/commit/push/build, or the subagent_type is inherently write-oriented (e.g. "implementer", "tester"). Any write the subagent later attempts hits this same hook and is blocked there, so do not pre-block exploration dispatches defensively.`;
 }
 
-/** @deprecated Use buildToolApprovePromptSection() */
-export const TOOL_APPROVE_PROMPT_SECTION: string = buildToolApprovePromptSection();
-
 /**
  * Tool Appeal Agent Configuration
  *
@@ -925,7 +922,7 @@ The single rule: OVERTURN if and only if the user EXPLICITLY authorized this exa
   - "use npx vitest run" authorizes Bash 'npx vitest run'.
   - "call ${commitWire}" authorizes that MCP tool.
   - "edit src/foo.ts to ..." authorizes Edit on src/foo.ts.
-  - "run the scenario" authorizes the agent-framework scenario tester MCP action=run_scenario (the action name IS the user's verb-object phrase).
+  - "run the scenario" authorizes the agent-framework scenario tester MCP action=run_fixture (the action name IS the user's verb-object phrase).
   - "test the harness against X" authorizes the agent-framework scenario tester MCP (the tool's purpose IS test-harness execution).
   When in doubt about "1-to-1 paraphrase": ask "if the user wanted this tool, is there a clearer way they could have phrased it that would not be ambiguous between this tool and a sibling?" If their phrasing already pins THIS tool unambiguously, the paraphrase counts.
 
@@ -981,9 +978,6 @@ If the original denial reason contains any of the following phrases, it is fabri
 These fingerprints indicate the denial was not grounded in the actual rule set. Override them.`,
   };
 }
-
-/** @deprecated Use buildToolAppealAgent() */
-export const TOOL_APPEAL_AGENT: Omit<AgentConfig, 'workingDir'> = buildToolAppealAgent();
 
 /**
  * Plan Validate Agent Configuration
@@ -1286,10 +1280,6 @@ Examples of good BLOCK feedback:
   };
 }
 
-/** @deprecated Use buildQuestionValidateAgent() */
-export const QUESTION_VALIDATE_AGENT: Omit<AgentConfig, "workingDir"> = buildQuestionValidateAgent();
-
-
 /**
  * Validate Intent Agent Configuration
  *
@@ -1509,6 +1499,7 @@ EXPLICITLY-REQUIRED-TOOLS / NON-BLOCKING-TOOLS:
 - Use EXPLICITLY-REQUIRED-TOOLS when the latest message itself is workflow/skill/command text that prescribes a strict next-tool order such as "call X, then spawn Y, then call Z".
 - Put only concrete parent-agent tool calls in the required queue, in order. If the workflow says "spawn exactly one implementer agent", write Agent | subagent_type=implementer | | spawn implementer agent.
 - Include exact scalar constraints when the text names them, especially Agent subagent_type, MCP booleans such as auto_push=true, and fixed model/elicitation flags. Do not use regex.
+- For Read, express an exact named target with path=... or file_path=.... Never put prose such as "changed code" or "relevant files" in input_substrings; those phrases are goals, not tool input.
 - Include exact array-length constraints as key.length=N when the text names a count for an array-valued input, especially TaskOutput waits such as "wait for all three agents" => TaskOutput | targets.length=3 | | wait for all three agents.
 - Use NON-BLOCKING-TOOLS for support tools that may run without advancing the queue, such as rereading workflow text or closing an unneeded agent. If the workflow says to wait at a specific point, put the wait tool in EXPLICITLY-REQUIRED-TOOLS instead.
 - If there is no strict ordered workflow text in LATEST, output "(none)" for both sections.

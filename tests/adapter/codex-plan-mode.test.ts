@@ -4,9 +4,8 @@ import * as os from "os";
 import * as path from "path";
 import { detectPlanMode } from "../../adapters/codex/plan-mode.js";
 import { codexSpec } from "../../adapters/codex/index.js";
-import { materializeScenarioEntry } from "../../adapters/codex/scenario-materializer.js";
 import { detectPlanModeForHook } from "../../src/utils/plan-mode-detector.js";
-import { sessionPlanModeStateFile } from "../../src/utils/paths.js";
+import type { PlanModeStoredState } from "../../src/utils/plan-mode-entry-state.js";
 
 function withTranscript(lines: unknown[], fn: (filePath: string) => void): void {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-plan-mode-"));
@@ -19,19 +18,16 @@ function withTranscript(lines: unknown[], fn: (filePath: string) => void): void 
   }
 }
 
-function seedActivePlanModeSidecar(sessionDir: string): void {
-  fs.writeFileSync(
-    sessionPlanModeStateFile(sessionDir),
-    JSON.stringify({
-      active: true,
-      updatedAt: Date.now(),
-      lastSource: "UserPromptSubmit",
-      mode: "plan",
-      detection_source: "codex-collaboration-mode",
-      deliveredPlansMdHash: null,
-      deliveredPlansMdAt: null,
-    }) + "\n",
-  );
+function activePlanModeState(): PlanModeStoredState {
+  return {
+    active: true,
+    updatedAt: Date.now(),
+    lastSource: "UserPromptSubmit",
+    mode: "plan",
+    detection_source: "codex-collaboration-mode",
+    deliveredPlansMdHash: null,
+    deliveredPlansMdAt: null,
+  };
 }
 
 describe("Codex plan-mode detection", () => {
@@ -102,7 +98,7 @@ describe("Codex plan-mode detection", () => {
     });
   });
 
-  it("finds the latest collaboration marker outside the old transcript tail window", () => {
+  it("finds the latest collaboration marker throughout the transcript", () => {
     withTranscript([
       { type: "event_msg", payload: { collaboration_mode_kind: "plan" } },
       { type: "turn_context", payload: { collaboration_mode: { mode: "default" } } },
@@ -137,67 +133,18 @@ describe("Codex plan-mode detection", () => {
     });
   });
 
-  it("materializes Codex collaboration-mode markers for scenarios", () => {
-    const lines = materializeScenarioEntry(
-      { role: "user", content: "plan please" },
-      {
-        sessionId: "session",
-        cwd: "/tmp/project",
-        permissionMode: "default",
-        codexCollaborationMode: "plan",
-        prevUuid: null,
-        baseTs: 0,
-      },
-    );
-    expect(lines).toHaveLength(3);
-    expect(JSON.parse(lines[0].jsonl)).toMatchObject({
-      type: "event_msg",
-      payload: { collaboration_mode_kind: "plan" },
-    });
-    expect(JSON.parse(lines[1].jsonl)).toMatchObject({
-      type: "turn_context",
-      payload: { collaboration_mode: { mode: "plan" } },
-    });
-  });
-
-  it("materializes Codex default collaboration-mode markers for scenarios", () => {
-    const lines = materializeScenarioEntry(
-      { role: "user", content: "implement now" },
-      {
-        sessionId: "session",
-        cwd: "/tmp/project",
-        permissionMode: "default",
-        codexCollaborationMode: "default",
-        prevUuid: null,
-        baseTs: 0,
-      },
-    );
-    expect(lines).toHaveLength(3);
-    expect(JSON.parse(lines[0].jsonl)).toMatchObject({
-      type: "event_msg",
-      payload: { collaboration_mode_kind: "default" },
-    });
-    expect(JSON.parse(lines[1].jsonl)).toMatchObject({
-      type: "turn_context",
-      payload: { collaboration_mode: { mode: "default" } },
-    });
-  });
-
-  it("does not let a stale sidecar override direct Codex default mode", async () => {
+  it("does not let stored state override direct Codex default mode", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-plan-mode-hook-"));
     try {
-      const sessionDir = path.join(dir, "session");
       const transcriptPath = path.join(dir, "transcript.jsonl");
-      fs.mkdirSync(sessionDir, { recursive: true });
       fs.writeFileSync(transcriptPath, "");
-      seedActivePlanModeSidecar(sessionDir);
 
       await expect(detectPlanModeForHook({
         spec: codexSpec,
         permissionMode: "default",
         collaborationMode: "default",
         transcriptPath,
-        sessionDir,
+        storedState: activePlanModeState(),
       })).resolves.toEqual({
         active: false,
         mode: "default",
@@ -208,13 +155,10 @@ describe("Codex plan-mode detection", () => {
     }
   });
 
-  it("does not let a stale sidecar override Codex transcript default mode", async () => {
+  it("does not let stored state override Codex transcript default mode", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-plan-mode-hook-"));
     try {
-      const sessionDir = path.join(dir, "session");
       const transcriptPath = path.join(dir, "transcript.jsonl");
-      fs.mkdirSync(sessionDir, { recursive: true });
-      seedActivePlanModeSidecar(sessionDir);
       fs.writeFileSync(
         transcriptPath,
         JSON.stringify({
@@ -227,7 +171,7 @@ describe("Codex plan-mode detection", () => {
         spec: codexSpec,
         permissionMode: "default",
         transcriptPath,
-        sessionDir,
+        storedState: activePlanModeState(),
       })).resolves.toEqual({
         active: false,
         mode: "default",
@@ -238,13 +182,10 @@ describe("Codex plan-mode detection", () => {
     }
   });
 
-  it("does not let a stale sidecar override Codex transcript default mode outside the old tail window", async () => {
+  it("does not let stored state override a transcript default mode", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-plan-mode-hook-"));
     try {
-      const sessionDir = path.join(dir, "session");
       const transcriptPath = path.join(dir, "transcript.jsonl");
-      fs.mkdirSync(sessionDir, { recursive: true });
-      seedActivePlanModeSidecar(sessionDir);
       fs.writeFileSync(
         transcriptPath,
         [
@@ -264,7 +205,7 @@ describe("Codex plan-mode detection", () => {
         spec: codexSpec,
         permissionMode: "default",
         transcriptPath,
-        sessionDir,
+        storedState: activePlanModeState(),
       })).resolves.toEqual({
         active: false,
         mode: "default",
@@ -275,20 +216,17 @@ describe("Codex plan-mode detection", () => {
     }
   });
 
-  it("uses stored active plan mode when Codex has no fresh collaboration marker", async () => {
+  it("uses stored active plan mode when Codex has no collaboration marker", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-plan-mode-hook-"));
     try {
-      const sessionDir = path.join(dir, "session");
       const transcriptPath = path.join(dir, "transcript.jsonl");
-      fs.mkdirSync(sessionDir, { recursive: true });
       fs.writeFileSync(transcriptPath, "");
-      seedActivePlanModeSidecar(sessionDir);
 
       await expect(detectPlanModeForHook({
         spec: codexSpec,
         permissionMode: "default",
         transcriptPath,
-        sessionDir,
+        storedState: activePlanModeState(),
       })).resolves.toEqual({
         active: true,
         mode: "plan",

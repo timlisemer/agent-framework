@@ -1,6 +1,6 @@
 export type RuntimeHomeProfile =
   | "native"
-  | "managedAstral"
+  | "managed"
   | "internalDirect"
   | "internalReadOnly"
   | "internalWrite";
@@ -18,7 +18,7 @@ export const RUNTIME_PROFILE_DESCRIPTORS: Record<RuntimeHomeProfile, RuntimeProf
   native: {
     sessionPolicy: "normal",
   },
-  managedAstral: {
+  managed: {
     sessionPolicy: "normal",
   },
   internalDirect: {
