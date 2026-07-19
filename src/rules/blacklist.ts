@@ -9,6 +9,7 @@ import {
   requireToolSequenceNext,
 } from "../utils/prediction-types.js";
 import { adapterSpecFromRuleContext } from "./tool-call-context.js";
+import { BLACKLIST_RULE_POLICY } from "./policies.js";
 
 export const blacklistRule: PreToolRule = {
   name: "blacklist",
@@ -16,21 +17,29 @@ export const blacklistRule: PreToolRule = {
   priority: 34,
   appealable: false,
   usesLlm: false,
+  version: "1",
+  configuration: BLACKLIST_RULE_POLICY,
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     const prediction = ctx.state.currentPrediction;
     if (
       prediction?.explicitlyRequiredTools?.length &&
-      decideRequiredWorkflowToolSequence(prediction, [{
+      decideRequiredWorkflowToolSequence(prediction, [
+        {
         toolName: ctx.toolName,
         toolInput: ctx.toolInput,
-      }]).decision === "deny"
+        },
+      ]).decision === "deny"
     ) {
       return null;
     }
 
-    const highlights = getHardBlacklistHighlights(ctx.toolName, ctx.toolInput, ctx.projectDir);
+    const highlights = getHardBlacklistHighlights(
+      ctx.toolName,
+      ctx.toolInput,
+      ctx.projectDir,
+    );
     if (highlights.length === 0) return null;
 
     const reason = highlights
@@ -50,7 +59,8 @@ export const blacklistRule: PreToolRule = {
       "check",
       `The denied ${policy.terminal.ownerName} command must be run through ${spec.renderCheckMcpHint()}`,
     );
-    const userMessage = ctx.latestUserMessage ??
+    const userMessage =
+      ctx.latestUserMessage ??
       ctx.state.currentPrediction?.userMessageFull ??
       ctx.state.currentPrediction?.userMessageSnippet ??
       "Run the supported repository check.";
@@ -60,7 +70,8 @@ export const blacklistRule: PreToolRule = {
         s.currentPrediction,
         required,
         {
-          intent: "Run the repository checks through the agent-framework check MCP.",
+          intent:
+            "Run the repository checks through the agent-framework check MCP.",
           userMessage,
         },
       ),

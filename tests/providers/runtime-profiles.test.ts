@@ -31,14 +31,28 @@ describe("runtime profiles", () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "agent-framework-runtime-profile-"));
     const restore = withEnvForTest({ HOME: home, AGENT_FRAMEWORK_ROOT: undefined });
     try {
-      const first = materializeRuntimeHome({ provider: "codex", profile: "managed", runId: "test" });
+      const first = materializeRuntimeHome({
+        provider: "codex",
+        profile: "managed",
+        runId: "test",
+        scenarioBinding: {
+          runId: "provider-run-1",
+          root: path.join(home, "canonical-runs"),
+        },
+      });
       expect(first.root).toBe(path.join(home, ".agent-framework", "managed", "default", "codex"));
+      expect(first.env.AGENT_FRAMEWORK_SCENARIO_RUN_ID).toBe("provider-run-1");
+      expect(first.env.AGENT_FRAMEWORK_SCENARIO_ROOT).toBe(
+        path.join(home, "canonical-runs"),
+      );
       const sessionFile = path.join(first.root!, "sessions", "session.jsonl");
       fs.mkdirSync(path.dirname(sessionFile), { recursive: true });
       fs.writeFileSync(sessionFile, "{}\n");
       fs.writeFileSync(path.join(first.root!, "config.toml"), "stale config");
 
       const second = materializeRuntimeHome({ provider: "codex", profile: "managed", runId: "test" });
+      expect(second.env.AGENT_FRAMEWORK_SCENARIO_RUN_ID).toBeUndefined();
+      expect(second.env.AGENT_FRAMEWORK_SCENARIO_ROOT).toBeUndefined();
       expect(fs.existsSync(path.join(second.root!, "hooks.json"))).toBe(true);
       expect(fs.existsSync(sessionFile)).toBe(true);
       expect(fs.readFileSync(path.join(second.root!, "config.toml"), "utf-8")).toContain(`${second.root}/hooks.json:pre_tool_use`);
@@ -46,6 +60,22 @@ describe("runtime profiles", () => {
       restore();
       fs.rmSync(home, { recursive: true, force: true });
     }
+  });
+
+  it("never exports a Scenario run binding into a native Codex home", () => {
+    const native = materializeRuntimeHome({
+      provider: "codex",
+      profile: "native",
+      runId: "native-run",
+      scenarioBinding: {
+        runId: "provider-run-should-not-bind",
+        root: path.join(os.tmpdir(), "native-scenario-root"),
+      },
+    });
+
+    expect(native.root).toBeNull();
+    expect(native.env.AGENT_FRAMEWORK_SCENARIO_RUN_ID).toBeUndefined();
+    expect(native.env.AGENT_FRAMEWORK_SCENARIO_ROOT).toBeUndefined();
   });
 
   it("refreshes managed Claude homes without deleting project history", () => {

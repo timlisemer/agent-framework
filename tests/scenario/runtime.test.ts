@@ -45,6 +45,7 @@ import {
   type RunStoreTransactionResult,
 } from "../../src/scenario/store/run-store.js";
 import { RunRegistry } from "../../src/scenario/store/run-registry.js";
+import { RunLockTimeoutError } from "../../src/scenario/store/lock.js";
 import type {
   RunManifest,
   RunRegistryEntry,
@@ -168,6 +169,50 @@ class FailEffectResultBeforeCommitStore extends RunStore {
       }
       return proposed;
     });
+  }
+}
+
+class FailNextBuiltCommandStore extends RunStore {
+  public readonly failure = new Error("simulated built-command persistence outage");
+  private armed = false;
+
+  public arm(): void {
+    this.armed = true;
+  }
+
+  public override async transact<T>(
+    runId: string,
+    callback: (run: OpenRun) => Promise<RunStoreTransactionProposal<T>>,
+  ): Promise<RunStoreTransactionResult<T>> {
+    return super.transact(runId, async (run) => {
+      const proposed = await callback(run);
+      if (this.armed) {
+        this.armed = false;
+        throw this.failure;
+      }
+      return proposed;
+    });
+  }
+}
+
+class TransientRunLockTimeoutStore extends RunStore {
+  public failures = 0;
+  private armed = false;
+
+  public arm(): void {
+    this.armed = true;
+  }
+
+  public override async transact<T>(
+    runId: string,
+    callback: (run: OpenRun) => Promise<RunStoreTransactionProposal<T>>,
+  ): Promise<RunStoreTransactionResult<T>> {
+    if (this.armed) {
+      this.armed = false;
+      this.failures += 1;
+      throw new RunLockTimeoutError(path.join(this.runDir(runId), ".write.lock"));
+    }
+    return super.transact(runId, callback);
   }
 }
 
@@ -1200,6 +1245,93 @@ describe("ScenarioRuntime", () => {
     }
   });
 
+  it("releases captured transcript artifacts when atomic built-command persistence fails", async () => {
+    const root = await createTemporaryTestRoot(
+      roots,
+      "scenario-runtime-atomic-artifact-cleanup-",
+    );
+    const store = new FailNextBuiltCommandStore(root);
+    const scenario = createTestScenarioRuntime({
+      root,
+      store,
+      maximumInlineBytes: 32,
+    });
+    await start(scenario, "atomic-artifact-cleanup-run");
+    const content = "large native transcript value ".repeat(16);
+    const observation = command(
+      "atomic-artifact-cleanup-run",
+      "atomic-artifact-cleanup-observation",
+      {
+        type: "nativeTranscriptObserved",
+        data: {
+          messages: [
+            {
+              id: "large-native-message",
+              turnId: "large-native-turn",
+              role: "assistant",
+              content,
+              contentDigest: digestScenarioValue(content),
+              status: "completed",
+            },
+          ],
+          tools: [],
+        },
+      },
+    );
+
+    store.arm();
+    await expect(
+      scenario.dispatchNativeTranscriptFromLatestSnapshot(
+        "atomic-artifact-cleanup-run",
+        () => observation,
+      ),
+    ).rejects.toBe(store.failure);
+    expect(
+      (
+        scenario as unknown as {
+          largeValues: Map<string, Map<string, unknown>>;
+        }
+      ).largeValues.size,
+    ).toBe(0);
+
+    await expect(
+      scenario.dispatchNativeTranscriptFromLatestSnapshot(
+        "atomic-artifact-cleanup-run",
+        () => observation,
+      ),
+    ).resolves.toMatchObject({ result: { status: "accepted" } });
+    expect(
+      (await scenario.recordsAfter("atomic-artifact-cleanup-run", 0)).some(
+        (record) => record.eventType === "artifact.linked",
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects effect-producing commands through atomic native transcript dispatch", async () => {
+    const context = await runtime();
+    await start(context.runtime);
+    const before = await context.runtime.canonicalView("run-1");
+    const effectFactory = (() =>
+      command("run-1", "atomic-effect-command", {
+        type: "requestEffect",
+        effectId: "atomic-effect",
+        effectType: "clock",
+        parameters: { zone: "UTC" },
+      })) as unknown as Parameters<
+      ScenarioRuntime["dispatchNativeTranscriptFromLatestSnapshot"]
+    >[1];
+
+    await expect(
+      context.runtime.dispatchNativeTranscriptFromLatestSnapshot(
+        "run-1",
+        effectFactory,
+      ),
+    ).rejects.toThrow(
+      "Atomic native transcript dispatch does not accept requestEffect",
+    );
+    expect(await context.runtime.canonicalView("run-1")).toEqual(before);
+  });
+
   it("executes effects outside the journal transaction and records their lifecycle", async () => {
     const root = await createTemporaryTestRoot(roots, "scenario-runtime-effect-");
     let id = 0;
@@ -1227,6 +1359,42 @@ describe("ScenarioRuntime", () => {
       status: "completed",
       result: { now: "12:00" },
     });
+  });
+
+  it("retries a transient run-lock timeout while recording effect progress", async () => {
+    const root = await createTemporaryTestRoot(roots, "scenario-runtime-effect-lock-retry-");
+    const store = new TransientRunLockTimeoutStore(root);
+    const runtime = createTestScenarioRuntime({
+      root,
+      store,
+      effectExecutor: {
+        async execute(request) {
+          store.arm();
+          await request.reportProgress?.({ phase: "running" });
+          return { result: { completed: true } };
+        },
+      },
+    });
+    await start(runtime);
+
+    await expect(runtime.dispatch(command("run-1", "effect-lock-retry", {
+      type: "requestEffect",
+      effectId: "effect-lock-retry",
+      effectType: "fixture",
+      parameters: {},
+    }))).resolves.toEqual({ status: "accepted" });
+
+    expect(store.failures).toBe(1);
+    expect((await runtime.snapshot("run-1")).effects[0]).toMatchObject({
+      status: "completed",
+      result: { completed: true },
+    });
+    expect(await runtime.recordsAfter("run-1", 0)).toContainEqual(
+      expect.objectContaining({
+        eventType: "effect.progressed",
+        payload: expect.objectContaining({ progress: { phase: "running" } }),
+      }),
+    );
   });
 
   it("recovers a committed generic effect after process exit and command retry", async () => {
@@ -2285,6 +2453,53 @@ describe("ScenarioRuntime", () => {
     ] as const) {
       await rejectWithoutMutation(command("run-1", commandId, payload), "already terminal");
     }
+  });
+
+  it("accepts duplicate completion without output after streamed tool output", async () => {
+    const context = await runtime();
+    await start(context.runtime);
+    const input = { command: "true" };
+    await context.runtime.dispatch(command("run-1", "streamed-tool-request", {
+      type: "toolRequested",
+      toolCallId: "streamed-tool",
+      turnId: "streamed-turn",
+      name: "Bash",
+      input,
+      inputDigest: digestScenarioValue(input),
+      requiresUserDecision: false,
+    }));
+    await context.runtime.dispatch(command("run-1", "streamed-tool-start", {
+      type: "toolExecutionStarted",
+      toolCallId: "streamed-tool",
+    }));
+    await context.runtime.dispatch(command("run-1", "streamed-tool-output", {
+      type: "toolOutputAppended",
+      toolCallId: "streamed-tool",
+      output: "streamed output",
+    }));
+    await context.runtime.dispatch(command("run-1", "streamed-tool-complete", {
+      type: "toolCompleted",
+      toolCallId: "streamed-tool",
+    }));
+
+    await expect(
+      context.runtime.dispatch(command("run-1", "streamed-tool-replay", {
+        type: "toolCompleted",
+        toolCallId: "streamed-tool",
+      })),
+    ).resolves.toMatchObject({ status: "accepted" });
+    expect(
+      (await context.runtime.snapshot("run-1")).toolCalls.find(
+        (tool) => tool.id === "streamed-tool",
+      )?.output,
+    ).toEqual(["streamed output"]);
+    expect(
+      (await context.runtime.recordsAfter("run-1", 0)).filter(
+        (record) =>
+          record.eventType === "tool.completed" &&
+          record.payload.toolCallId === "streamed-tool",
+      ),
+    ).toHaveLength(1);
   });
 
   it("rejects message identity collisions and terminal regressions without mutation", async () => {

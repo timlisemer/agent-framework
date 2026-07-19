@@ -1,6 +1,8 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { isEditTool, isEditIntentExemptPath } from "../utils/edit-intent.js";
 import { extractFilePaths } from "./utils.js";
+import { EDIT_INTENT_RULE_POLICY } from "./policies.js";
+import { RULE_GATE_AGENT } from "../utils/agent-configs.js";
 
 const EDIT_INTENT_APPEAL_GUIDANCE = `=== EDIT INTENT WARNING ===
 The edit intent classifier has determined the user does NOT want file edits right now.
@@ -17,6 +19,9 @@ export const editIntentRule: PreToolRule = {
   priority: 60,
   appealable: true,
   usesLlm: true,
+  evaluationAgent: RULE_GATE_AGENT,
+  version: "1",
+  configuration: EDIT_INTENT_RULE_POLICY,
   promptSection: "",
   appealGuidance: EDIT_INTENT_APPEAL_GUIDANCE,
 
@@ -26,7 +31,12 @@ export const editIntentRule: PreToolRule = {
       return {
         ...state,
         editIntentOverturnCount: overturnCount,
-        ...(overturnCount >= 2 ? { currentEditIntent: true as const, editIntentTimestamp: Date.now() } : {}),
+        ...(overturnCount >= EDIT_INTENT_RULE_POLICY.appealOverturnThreshold
+          ? {
+              currentEditIntent: true as const,
+              editIntentTimestamp: Date.now(),
+            }
+          : {}),
       };
     });
   },
@@ -38,11 +48,13 @@ export const editIntentRule: PreToolRule = {
 
     const filePaths = extractFilePaths(ctx.toolName, ctx.toolInput);
     if (filePaths.length === 0) {
-      return { fastDeny: `${ctx.toolName} must identify at least one target file.` };
+      return {
+        fastDeny: `${ctx.toolName} must identify at least one target file.`,
+      };
     }
 
-    const blockedPaths = filePaths.filter((filePath) =>
-      !isEditIntentExemptPath(filePath, ctx.sessionDir)
+    const blockedPaths = filePaths.filter(
+      (filePath) => !isEditIntentExemptPath(filePath, ctx.sessionDir),
     );
     if (blockedPaths.length === 0) {
       return null;

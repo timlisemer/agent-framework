@@ -1,12 +1,16 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { runAgent } from "../utils/agent-runner.js";
 import { getUncommittedChangesCancellable } from "../utils/git-utils.js";
-import { readTranscriptExact, formatTranscriptResult } from "../utils/transcript.js";
+import {
+  readTranscriptExact,
+  formatTranscriptResult,
+} from "../utils/transcript.js";
 import { VALIDATE_INTENT_COUNTS } from "../utils/transcript-presets.js";
 import { readCurrentPlanContent } from "../utils/plan-source.js";
 import { VALIDATE_INTENT_AGENT } from "../utils/agent-configs.js";
 import { recognizeMcpToolName } from "../adapter/mcp-wire.js";
 import { adapterSpecFromRuleContext } from "./tool-call-context.js";
+import { VALIDATE_INTENT_RULE_POLICY } from "./policies.js";
 
 export const validateIntentRule: PreToolRule = {
   name: "validate-intent",
@@ -14,6 +18,9 @@ export const validateIntentRule: PreToolRule = {
   priority: 50,
   appealable: false,
   usesLlm: true,
+  evaluationAgent: VALIDATE_INTENT_AGENT,
+  version: "1",
+  configuration: VALIDATE_INTENT_RULE_POLICY,
   events: ["PreToolUse"],
   promptSection: "",
 
@@ -23,21 +30,29 @@ export const validateIntentRule: PreToolRule = {
         ctx.rawToolName ?? ctx.toolName,
         adapterSpecFromRuleContext(ctx),
       ) !== "validate_intent"
-    ) return null;
+    )
+      return null;
 
-    const tx = await readTranscriptExact(ctx.transcriptPath, VALIDATE_INTENT_COUNTS).catch(() => null);
+    const tx = await readTranscriptExact(
+      ctx.transcriptPath,
+      VALIDATE_INTENT_COUNTS,
+    ).catch(() => null);
     if (!tx || tx.user.length === 0) return null;
 
-    const { status, diff } = await getUncommittedChangesCancellable(ctx.projectDir, { signal: ctx.signal });
+    const { status, diff } = await getUncommittedChangesCancellable(
+      ctx.projectDir,
+      { signal: ctx.signal },
+    );
     if (!diff && !status) return null;
 
-    const plan = (await readCurrentPlanContent({
+    const plan =
+      (await readCurrentPlanContent({
       transcriptPath: ctx.transcriptPath,
       sessionDir: ctx.sessionDir,
     }).catch(() => null)) || "(no plan file for this session)";
 
     const result = await runAgent(
-      { ...VALIDATE_INTENT_AGENT, workingDir: ctx.projectDir },
+      { ...validateIntentRule.evaluationAgent!, workingDir: ctx.projectDir },
       {
         prompt: "Evaluate if the AI followed user intentions:",
         context:

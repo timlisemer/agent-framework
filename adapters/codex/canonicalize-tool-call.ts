@@ -10,6 +10,7 @@ const ALIAS: Readonly<Record<string, string>> = {
   edit_file: "Edit",
   exec_command: "Bash",
   list_mcp_resources: "ListMcpResources",
+  read_file: "Read",
   read_mcp_resource: "ReadMcpResource",
   resume_agent: "ResumeAgent",
   send_input: "SendInput",
@@ -24,9 +25,10 @@ const ALIAS: Readonly<Record<string, string>> = {
 function normalizeExecCommandInput(rawInput: unknown): unknown {
   const input = rawInput as { command?: unknown; cmd?: unknown; args?: unknown[] } | null | undefined;
   if (!input) return rawInput;
-  // exec_command uses { command, args } shape; Bash uses { command: string }
-  const command = String(input.command ?? input.cmd ?? "");
-  if (Array.isArray(input.args)) {
+  // Current exec_command payloads carry one full `cmd`; legacy payloads
+  // separate an executable `command` from a non-empty argv list.
+  const command = String(input.cmd ?? input.command ?? "");
+  if (input.cmd === undefined && Array.isArray(input.args) && input.args.length > 0) {
     return {
       command: serializeShellCommandTokens([
         command,
@@ -94,7 +96,7 @@ export function canonicalizeToolCall(rawName: string, rawInput: unknown): Canoni
     const paths = extractApplyPatchPaths(rawInput);
     return { toolName: "Edit", toolInput: { file_path: paths[0], file_paths: paths } };
   }
-  if (aliased === "Bash" && codexName === "exec_command") {
+  if ((aliased === "Bash" && codexName === "exec_command") || codexName === "Bash") {
     return { toolName: "Bash", toolInput: normalizeExecCommandInput(rawInput) };
   }
   if (aliased === "Bash" && codexName === "write_stdin") {
@@ -106,5 +108,5 @@ export function canonicalizeToolCall(rawName: string, rawInput: unknown): Canoni
   if (aliased === "TaskOutput" && codexName === "wait_agent") {
     return { toolName: "TaskOutput", toolInput: normalizeWaitAgentInput(rawInput) };
   }
-  return { toolName: aliased ?? rawName, toolInput: rawInput };
+  return { toolName: aliased ?? codexName, toolInput: rawInput };
 }

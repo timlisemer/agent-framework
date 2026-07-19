@@ -1,6 +1,6 @@
 # Agent Framework
 
-A TypeScript framework for custom AI agents using the Anthropic API. Agents are exposed via three mechanisms:
+A provider-neutral TypeScript framework for custom AI agents using direct APIs and Claude or Codex SDK runtimes. Agent behavior is exposed through four mechanisms:
 
 1. **MCP Server** - For `check`, `confirm`, `fullconfirm`, `commit`, `push`, `implement`, `validate_implementation`, `validate_intent`, `create_planfile`, `validate_plan`, `scenario_tester`, `locate_scenario` tools (portable, works with any MCP client)
 2. **PreToolUse Hook** - Rule-based safety pipeline with `rule-gate`, `tool-approve`, `tool-appeal`, `claude-md-validate`, `question-validate`, `edit-intent`, and `error-acknowledge` agents
@@ -42,6 +42,15 @@ capability-dependent. Retirement records preserve compacted history in the
 append-only journal without exposing it to current rule evaluation. None selects
 a different rule engine, reducer, journal, or state model.
 
+Provider authorization differences are serialized run configuration, not
+separate backends. Claude exposes a provider callback before execution. The
+Codex SDK stream is observation-only; in a managed Codex home, configured host
+hooks are explicitly bound to the provider run and execute the shared rule
+effect before the SDK later reports the same tool. The runtime coalesces those
+two views into one canonical tool. A Codex runtime without configured managed
+hooks has no provider pre-execution decision boundary and remains
+observation-only.
+
 The protocol and generated schema bundle are owned by this repository. Build
 before running the backend:
 
@@ -49,6 +58,20 @@ before running the backend:
 npm run build
 npm run ai-backend
 ```
+
+Regenerate every checked-in Scenario protocol artifact with
+`npm run generate:scenario-protocol`; verify that they are current without
+rewriting them with `npx tsx scripts/generate-scenario-protocol.ts --check`. Files under
+`src/scenario/protocol/generated/` are generated from the protocol schemas and
+must not be edited manually. External consumers import the compiled contract
+CLI rather than maintaining handwritten protocol inventories.
+
+A canonical run under `~/.agent-framework/runs/<run-id>/` owns semantic
+records, authorization, rule state, effects, and the authoritative snapshot. A
+host-session workspace under `~/.agent-framework/sessions/` has a different,
+nonsemantic role: it locates native transcripts, adapter planfiles, and other
+per-session files used by host integrations and MCP tools. No decision may
+depend on a workspace-only value when the same concept has canonical state.
 
 Provider cancellation and shutdown are bounded. If an SDK runner ignores abort
 or disposal, the backend terminalizes and detaches it, ignores late events, and

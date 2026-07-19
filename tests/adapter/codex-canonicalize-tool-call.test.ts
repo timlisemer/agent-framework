@@ -37,6 +37,15 @@ describe("Codex canonicalizeToolCall", () => {
     });
     expect(canonicalizeToolCall("exec_command", {
       cmd: "sed -n '1,20p' plan.md",
+      args: [],
+    })).toEqual({
+      toolName: "Bash",
+      toolInput: { command: "sed -n '1,20p' plan.md" },
+    });
+    expect(canonicalizeToolCall("Bash", {
+      command: "sed -n '1,20p' plan.md",
+      args: [],
+      workdir: "/repo",
     })).toEqual({
       toolName: "Bash",
       toolInput: { command: "sed -n '1,20p' plan.md" },
@@ -47,6 +56,13 @@ describe("Codex canonicalizeToolCall", () => {
     })).toEqual({
       toolName: "Bash",
       toolInput: { command: `head -n '1"0' C:/plan.md` },
+    });
+  });
+
+  it("canonicalizes namespaced and file-read aliases", () => {
+    expect(canonicalizeToolCall("functions.read_file", { path: "/repo/README.md" })).toEqual({
+      toolName: "Read",
+      toolInput: { path: "/repo/README.md" },
     });
   });
 

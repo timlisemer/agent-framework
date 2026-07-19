@@ -22,15 +22,25 @@ import {
   type ArtifactRef,
   type ArtifactValueReference,
 } from "../protocol/artifacts.js";
-import { canonicalJson, canonicalJsonEqual } from "../protocol/canonical-json.js";
+import {
+  canonicalJson,
+  canonicalJsonEqual,
+} from "../protocol/canonical-json.js";
 import { toJsonValue, type JsonValue } from "../protocol/common.js";
-import { assertScenarioCommandDigests, digestScenarioValue } from "../protocol/digest.js";
+import {
+  assertScenarioCommandDigests,
+  digestScenarioValue,
+} from "../protocol/digest.js";
 import {
   scenarioEffectProjectionRecordSchema,
   scenarioEffectStateChangeSchema,
   type ScenarioEffectProjection,
 } from "../protocol/effects.js";
-import { feedbackEntrySchema, validateFeedbackNote, type FeedbackEntry } from "../protocol/feedback.js";
+import {
+  feedbackEntrySchema,
+  validateFeedbackNote,
+  type FeedbackEntry,
+} from "../protocol/feedback.js";
 import {
   eventBatchSchema,
   type EventBatch,
@@ -49,8 +59,13 @@ import {
 } from "../protocol/snapshot.js";
 import { runArtifactsDir } from "../store/paths.js";
 import { RunRegistry } from "../store/run-registry.js";
-import { RunStore, type CommittedRunBatch, type OpenRun } from "../store/run-store.js";
+import {
+  RunStore,
+  type CommittedRunBatch,
+  type OpenRun,
+} from "../store/run-store.js";
 import { ArtifactStore } from "../store/artifact-store.js";
+import { RunLockTimeoutError } from "../store/lock.js";
 import { runManifestSchema, type RunManifest } from "../store/types.js";
 import {
   emptyScenarioSnapshot,
@@ -69,12 +84,26 @@ import {
   redactScenarioValue,
   sanitizeScenarioValueForPersistence,
 } from "./redaction.js";
-import { hydrateArtifactValues, trustedArtifactValueReferences } from "./artifact-values.js";
-import { FeedbackTargetConflictError, SnapshotRevisionConflictError } from "./errors.js";
-import { scenarioTerminalResultSchema, type ScenarioTerminalResult } from "./results.js";
 import {
+  hydrateArtifactValues,
+  trustedArtifactValueReferences,
+} from "./artifact-values.js";
+import {
+  FeedbackTargetConflictError,
+  SnapshotRevisionConflictError,
+} from "./errors.js";
+import {
+  scenarioTerminalResultSchema,
+  type ScenarioTerminalResult,
+} from "./results.js";
+import {
+  canonicalToolTerminalPayload,
+  canonicalToolTerminalTarget,
   canonicalToolRequestedRecord,
+  isIdenticalToolTerminalReplay,
   observedToolLifecycleRecords,
+  toolTerminalLifecycle,
+  toolTerminalLifecycleFromCommandType,
   type ObservedToolAuthorization,
 } from "./tool-lifecycle.js";
 import type { ScenarioStateSlicePolicy } from "./state-slice-policy.js";
@@ -131,9 +160,15 @@ type SemanticResult = {
 };
 type DispatchOnceResult = {
   result: ScenarioTerminalResult;
+  command: ScenarioCommand | null;
+  snapshot: ScenarioSnapshot;
+  records?: ScenarioRecord[];
 };
 type StartRunCommand = ScenarioCommand & {
   payload: Extract<ScenarioCommandPayload, { type: "startRun" }>;
+};
+type NativeTranscriptObservedCommand = ScenarioCommand & {
+  payload: Extract<ScenarioCommandPayload, { type: "nativeTranscriptObserved" }>;
 };
 type EffectOrigin = Pick<ScenarioCommand, "runId" | "source"> & {
   commandId: string;
@@ -154,12 +189,21 @@ type CapturedLargeValues = {
   store: ArtifactStore;
 };
 
+const DEFAULT_EFFECT_CLAIM_LEASE_MS = 30_000;
+const EFFECT_LIFECYCLE_LOCK_ATTEMPTS = 4;
+
 export class ScenarioRuntime {
   private readonly store: RunStore;
   private readonly registry: RunRegistry;
   private readonly subscribers = new Map<string, Set<ScenarioSubscriber>>();
-  private readonly activeEffects = new Map<string, Map<string, AbortController>>();
-  private readonly effectCancellationReasons = new WeakMap<AbortController, string>();
+  private readonly activeEffects = new Map<
+    string,
+    Map<string, AbortController>
+  >();
+  private readonly effectCancellationReasons = new WeakMap<
+    AbortController,
+    string
+  >();
   private readonly clock: () => Date;
   private readonly idFactory: () => string;
   private readonly largeValues = new Map<string, Map<string, ArtifactRef>>();
@@ -171,7 +215,14 @@ export class ScenarioRuntime {
     this.idFactory = options.idFactory ?? randomUUID;
   }
 
-  public async dispatch(commandInput: ScenarioCommand): Promise<ScenarioTerminalResult> {
+  /** Canonical storage root that managed host hooks must use with bound run IDs. */
+  public get storageRoot(): string {
+    return this.options.root;
+  }
+
+  public async dispatch(
+    commandInput: ScenarioCommand,
+  ): Promise<ScenarioTerminalResult> {
     return this.commitCommand(commandInput, true);
   }
 
@@ -180,7 +231,9 @@ export class ScenarioRuntime {
    * commands. Contract importers use this to replay an explicit journal stream;
    * production dispatch continues to drain the durable effect outbox.
    */
-  public async replayCommand(commandInput: ScenarioCommand): Promise<ScenarioTerminalResult> {
+  public async replayCommand(
+    commandInput: ScenarioCommand,
+  ): Promise<ScenarioTerminalResult> {
     return this.commitCommand(commandInput, false);
   }
 
@@ -188,20 +241,19 @@ export class ScenarioRuntime {
     commandInput: ScenarioCommand,
     drainEffects: boolean,
   ): Promise<ScenarioTerminalResult> {
-    const command = scenarioCommandSchema.parse(commandInput);
-    assertScenarioCommandDigests(command);
-    if (command.payload.type === "extensionCommand") {
-      this.options.extensionHandler?.validate?.(command as ScenarioCommand & {
-        payload: Extract<ScenarioCommand["payload"], { type: "extensionCommand" }>;
-      });
-    }
-    assertScenarioSchemaDigest(command);
+    const command = this.validateCommand(commandInput);
     try {
-      if (command.payload.type === "startRun" && !(await this.store.exists(command.runId))) {
+      if (
+        command.payload.type === "startRun" &&
+        !(await this.store.exists(command.runId))
+      ) {
         await this.createRun(command);
       }
       const committed = await this.dispatchOnce(command);
-      if (command.payload.type === "cancelRun" || command.payload.type === "closeRun") {
+      if (
+        command.payload.type === "cancelRun" ||
+        command.payload.type === "closeRun"
+      ) {
         this.abortRunEffects(
           command.runId,
           command.payload.type === "cancelRun" ? "Run cancelled" : "Run closed",
@@ -217,16 +269,82 @@ export class ScenarioRuntime {
       const effectResults = await this.drainPendingEffects(command.runId);
       return effectResults.get(command.commandId) ?? committed.result;
     } finally {
-      this.largeValues.delete(commandArtifactScope(command.runId, command.commandId));
+      this.largeValues.delete(
+        commandArtifactScope(command.runId, command.commandId),
+      );
     }
   }
 
+  /**
+   * Atomically compare a prepared, effect-free observation with the latest
+   * snapshot and commit it. This path does not drain the effect outbox;
+   * callers receive the exact transaction snapshot and only the history facts
+   * selected while that transaction held the run lock.
+   */
+  public async dispatchNativeTranscriptFromLatestSnapshot(
+    runId: string,
+    commandFactory: (
+      snapshot: ScenarioSnapshot,
+    ) => NativeTranscriptObservedCommand | null,
+    historyFilter: (record: ScenarioRecord) => boolean = () => false,
+  ): Promise<{
+    result: ScenarioTerminalResult;
+    snapshot: ScenarioSnapshot;
+    records: ScenarioRecord[];
+  }> {
+    const committed = await this.dispatchBuiltCommand(
+      runId,
+      (snapshot) => {
+        const commandInput = commandFactory(snapshot);
+        if (commandInput === null) return null;
+        const command = this.validateCommand(commandInput);
+        if (command.runId !== runId) {
+          throw new Error(
+            `Canonical command factory changed run identity: ${command.runId}`,
+          );
+        }
+        if (command.payload.type !== "nativeTranscriptObserved") {
+          throw new Error(
+            `Atomic native transcript dispatch does not accept ${command.payload.type}`,
+          );
+        }
+        return command;
+      },
+      historyFilter,
+    );
+    return {
+      result: committed.result,
+      snapshot: committed.snapshot,
+      records: committed.records ?? [],
+    };
+  }
+
+  private validateCommand(commandInput: ScenarioCommand): ScenarioCommand {
+    const command = scenarioCommandSchema.parse(commandInput);
+    assertScenarioCommandDigests(command);
+    if (command.payload.type === "extensionCommand") {
+      this.options.extensionHandler?.validate?.(
+        command as ScenarioCommand & {
+          payload: Extract<
+            ScenarioCommand["payload"],
+            { type: "extensionCommand" }
+          >;
+        },
+      );
+    }
+    assertScenarioSchemaDigest(command);
+    return command;
+  }
+
   /** Create or repair a run's initial transition, tolerating equivalent concurrent callers. */
-  public async ensureRunStarted(commandInput: ScenarioCommand): Promise<ScenarioTerminalResult> {
+  public async ensureRunStarted(
+    commandInput: ScenarioCommand,
+  ): Promise<ScenarioTerminalResult> {
     const parsed = scenarioCommandSchema.parse(commandInput);
     assertScenarioCommandDigests(parsed);
     assertScenarioSchemaDigest(parsed);
-    if (parsed.payload.type !== "startRun") throw new Error("ensureRunStarted requires a startRun command");
+    if (parsed.payload.type !== "startRun")
+      throw new Error("ensureRunStarted requires a startRun command");
     const command = parsed as StartRunCommand;
     if (!(await this.store.exists(command.runId))) {
       try {
@@ -236,8 +354,12 @@ export class ScenarioRuntime {
       }
     }
     const opened = await this.openAndPublish(command.runId);
-    if (!equivalentRunStart(command, opened.manifest, this.options.redactionPaths)) {
-      throw new Error(`Run initializer conflicts with existing identity: ${command.runId}`);
+    if (
+      !equivalentRunStart(command, opened.manifest, this.options.redactionPaths)
+    ) {
+      throw new Error(
+        `Run initializer conflicts with existing identity: ${command.runId}`,
+      );
     }
     if (opened.snapshot.status === "running") {
       return { status: "accepted" };
@@ -248,7 +370,11 @@ export class ScenarioRuntime {
       const current = await this.openAndPublish(command.runId);
       if (
         current.snapshot.status === "running" &&
-        equivalentRunStart(command, current.manifest, this.options.redactionPaths)
+        equivalentRunStart(
+          command,
+          current.manifest,
+          this.options.redactionPaths,
+        )
       ) {
         return { status: "accepted" };
       }
@@ -260,8 +386,13 @@ export class ScenarioRuntime {
     return (await this.openAndPublish(runId)).snapshot;
   }
 
-  public async recordsAfter(runId: string, afterSeq: number): Promise<ScenarioRecord[]> {
-    return (await this.openAndPublish(runId)).records.filter((record) => record.recordSeq > afterSeq);
+  public async recordsAfter(
+    runId: string,
+    afterSeq: number,
+  ): Promise<ScenarioRecord[]> {
+    return (await this.openAndPublish(runId)).records.filter(
+      (record) => record.recordSeq > afterSeq,
+    );
   }
 
   /** Return one revision-consistent journal and snapshot view from a single locked store read. */
@@ -274,24 +405,35 @@ export class ScenarioRuntime {
   }
 
   /** Resolve one immutable feedback revision from canonical journal history. */
-  public async feedbackById(runId: string, feedbackId: string): Promise<FeedbackEntry | undefined> {
+  public async feedbackById(
+    runId: string,
+    feedbackId: string,
+  ): Promise<FeedbackEntry | undefined> {
     const records = (await this.openAndPublish(runId)).records;
     for (let index = records.length - 1; index >= 0; index -= 1) {
       const record = records[index];
       if (record.eventType !== "feedback.changed") continue;
       const parsed = feedbackEntrySchema.safeParse(record.payload.feedback);
-      if (parsed.success && parsed.data.feedbackId === feedbackId) return parsed.data;
+      if (parsed.success && parsed.data.feedbackId === feedbackId)
+        return parsed.data;
     }
     return undefined;
   }
 
   /** Persist an internal failure without exposing it through a public protocol response. */
-  public async recordDiagnostic(runId: string, message: string, source: string): Promise<void> {
-    await this.recordPostCommitDiagnostics(this.createCommand({
+  public async recordDiagnostic(
+    runId: string,
+    message: string,
+    source: string,
+  ): Promise<void> {
+    await this.recordPostCommitDiagnostics(
+      this.createCommand({
       runId,
       source: { kind: "gateway" },
       payload: { type: "runtimeErrorObserved", data: { recoverable: true } },
-    }), [{ message, source }]);
+      }),
+      [{ message, source }],
+    );
   }
 
   /** Resume durable requested effects and expired started-effect claims. */
@@ -299,17 +441,22 @@ export class ScenarioRuntime {
     await this.drainPendingEffects(runId);
   }
 
-  private async drainPendingEffects(runId: string): Promise<Map<string, ScenarioTerminalResult>> {
+  private async drainPendingEffects(
+    runId: string,
+  ): Promise<Map<string, ScenarioTerminalResult>> {
     const results = new Map<string, ScenarioTerminalResult>();
     while (true) {
       const run = await this.openAndPublish(runId);
       if (run.snapshot.status !== "running") return results;
-      const pending = await Promise.all(run.snapshot.effects
+      const pending = await Promise.all(
+        run.snapshot.effects
         .filter((effect) => isPendingEffectStatus(effect.status))
-        .map((effect) => this.outboxEffect(run, effect)));
+          .map((effect) => this.outboxEffect(run, effect)),
+      );
       let progressed = false;
       for (const effect of pending) {
-        if (this.activeEffects.get(runId)?.has(effect.request.effectId)) continue;
+        if (this.activeEffects.get(runId)?.has(effect.request.effectId))
+          continue;
         const result = await this.claimAndExecuteEffect(effect);
         if (!result) continue;
         progressed = true;
@@ -323,16 +470,27 @@ export class ScenarioRuntime {
     run: OpenRun,
     effect: ScenarioSnapshot["effects"][number],
   ): Promise<OutboxEffect> {
-    const requestRecord = run.records.find((record) =>
-      record.eventType === "effect.requested" && record.payload.effectId === effect.effectId
+    const requestRecord = run.records.find(
+      (record) =>
+        record.eventType === "effect.requested" &&
+        record.payload.effectId === effect.effectId,
     );
-    if (!requestRecord) throw new Error(`Effect request record is missing: ${effect.effectId}`);
-    const acceptedRequest = run.records.find((record) =>
-      record.eventType === "command.accepted" && record.commandId === requestRecord.commandId
+    if (!requestRecord)
+      throw new Error(`Effect request record is missing: ${effect.effectId}`);
+    const acceptedRequest = run.records.find(
+      (record) =>
+        record.eventType === "command.accepted" &&
+        record.commandId === requestRecord.commandId,
     );
-    const capturedRequest = scenarioCommandSchema.safeParse(acceptedRequest?.payload.command);
-    const originSource = capturedRequest.success ? capturedRequest.data.source : run.manifest.source;
-    const artifacts = new Map(run.snapshot.artifacts.map((artifact) => [artifact.digest, artifact]));
+    const capturedRequest = scenarioCommandSchema.safeParse(
+      acceptedRequest?.payload.command,
+    );
+    const originSource = capturedRequest.success
+      ? capturedRequest.data.source
+      : run.manifest.source;
+    const artifacts = new Map(
+      run.snapshot.artifacts.map((artifact) => [artifact.digest, artifact]),
+    );
     const trustedReferences = trustedArtifactValueReferences(run.records);
     const parameters = await hydrateArtifactValues(
       this,
@@ -342,21 +500,28 @@ export class ScenarioRuntime {
       new Map(),
       trustedReferences,
     );
-    const priorRecords = run.records.filter((record) => record.recordSeq < requestRecord.recordSeq);
+    const priorRecords = run.records.filter(
+      (record) => record.recordSeq < requestRecord.recordSeq,
+    );
     const projected = reduceScenarioRecords(
       emptyScenarioSnapshot(run.manifest),
       priorRecords,
       scenarioJournalRevision(priorRecords),
     );
-    const hydratedSnapshot = scenarioSnapshotSchema.parse(await hydrateArtifactValues(
+    const hydratedSnapshot = scenarioSnapshotSchema.parse(
+      await hydrateArtifactValues(
       this,
       run.snapshot.runId,
       toJsonValue(projected),
       artifacts,
       new Map(),
       trustedReferences,
-    ));
-    const executionContext = toJsonValue({ snapshot: hydratedSnapshot, parameters });
+      ),
+    );
+    const executionContext = toJsonValue({
+      snapshot: hydratedSnapshot,
+      parameters,
+    });
     return {
       request: {
         effectId: effect.effectId,
@@ -378,9 +543,14 @@ export class ScenarioRuntime {
     };
   }
 
-  private async claimAndExecuteEffect(effect: OutboxEffect): Promise<ScenarioTerminalResult | null> {
+  private async claimAndExecuteEffect(
+    effect: OutboxEffect,
+  ): Promise<ScenarioTerminalResult | null> {
     const claimId = this.idFactory();
-    const controller = this.registerEffect(effect.origin.runId, effect.request.effectId);
+    const controller = this.registerEffect(
+      effect.origin.runId,
+      effect.request.effectId,
+    );
     let heartbeat: { stop(): Promise<void> } | undefined;
     try {
       let observed = {
@@ -392,11 +562,15 @@ export class ScenarioRuntime {
       };
       let claimed = false;
       for (let attempt = 0; attempt < 8; attempt += 1) {
-        if (observed.status === "started" && !isEffectClaimExpired(
+        if (
+          observed.status === "started" &&
+          !isEffectClaimExpired(
           observed,
           this.clock().getTime(),
-          this.options.effectClaimLeaseMs ?? 30_000,
-        )) return null;
+            this.options.effectClaimLeaseMs ?? DEFAULT_EFFECT_CLAIM_LEASE_MS,
+          )
+        )
+          return null;
         try {
           await this.commitInternalCommand({
             ...this.effectLifecycleCommand(effect.origin, {
@@ -404,7 +578,9 @@ export class ScenarioRuntime {
               effectId: effect.request.effectId,
               effectType: effect.request.effectType,
               claimId,
-              ...(observed.claimId === null ? {} : { previousClaimId: observed.claimId }),
+              ...(observed.claimId === null
+                ? {}
+                : { previousClaimId: observed.claimId }),
             }),
             expectedSnapshotRevision: observed.snapshotRevision,
           });
@@ -412,20 +588,28 @@ export class ScenarioRuntime {
           break;
         } catch (error) {
           const snapshot = await this.snapshot(effect.origin.runId);
-          const current = snapshot.effects.find((candidate) =>
-            candidate.effectId === effect.request.effectId
+          const current = snapshot.effects.find(
+            (candidate) => candidate.effectId === effect.request.effectId,
           );
           if (current?.status === "started" && current.claimId === claimId) {
             claimed = true;
             break;
           }
           if (!(error instanceof SnapshotRevisionConflictError)) {
-            if (!current || !isPendingEffectStatus(current.status) || current.claimId !== observed.claimId) {
+            if (
+              !current ||
+              !isPendingEffectStatus(current.status) ||
+              current.claimId !== observed.claimId
+            ) {
               return null;
             }
             throw error;
           }
-          if (!current || (current.status !== "requested" && current.status !== "started")) return null;
+          if (
+            !current ||
+            (current.status !== "requested" && current.status !== "started")
+          )
+            return null;
           observed = {
             status: current.status,
             claimId: current.claimId,
@@ -435,16 +619,25 @@ export class ScenarioRuntime {
           };
         }
       }
-      if (!claimed) throw new Error(`Effect claim did not converge: ${effect.request.effectId}`);
+      if (!claimed)
+        throw new Error(
+          `Effect claim did not converge: ${effect.request.effectId}`,
+        );
 
-      heartbeat = this.startEffectClaimHeartbeat(effect.origin, effect.request, claimId, controller);
+      heartbeat = this.startEffectClaimHeartbeat(
+        effect.origin,
+        effect.request,
+        claimId,
+        controller,
+      );
       let completedCommand: ScenarioCommand;
       try {
         const effectResult = await this.executeEffect({
           ...effect.request,
           fencingToken: claimId,
           signal: controller.signal,
-          reportProgress: (progress) => this.reportEffectProgress(
+          reportProgress: (progress) =>
+            this.reportEffectProgress(
             effect.origin,
             effect.request.effectId,
             claimId,
@@ -452,46 +645,70 @@ export class ScenarioRuntime {
             controller.signal,
           ),
         });
-        completedCommand = scenarioCommandSchema.parse(this.effectLifecycleCommand(effect.origin, {
+        completedCommand = scenarioCommandSchema.parse(
+          this.effectLifecycleCommand(effect.origin, {
           type: "effectResultSupplied",
           effectId: effect.request.effectId,
           claimId,
           result: effectResult.result,
           metadata: effectResult.metadata ?? {},
-          ...(effectResult.projection === undefined ? {} : { projection: effectResult.projection }),
-        }));
+            ...(effectResult.projection === undefined
+              ? {}
+              : { projection: effectResult.projection }),
+          }),
+        );
       } catch (error) {
         if (controller.signal.aborted) {
-          await this.recordEffectCancellation(effect.origin, effect.request, claimId, controller);
+          await this.recordEffectCancellation(
+            effect.origin,
+            effect.request,
+            claimId,
+            controller,
+          );
           return { status: "cancelled", reason: "Effect cancelled" };
         }
         if (error instanceof ScenarioEffectCancellationError) {
-          return await this.commitInternalCommand(this.effectLifecycleCommand(effect.origin, {
+          return await this.commitInternalCommand(
+            this.effectLifecycleCommand(effect.origin, {
             type: "effectCancelled",
             effectId: effect.request.effectId,
             effectType: effect.request.effectType,
             claimId,
             reason: error.reason,
-          }));
+            }),
+          );
         }
         try {
-          return await this.commitInternalCommand(this.effectLifecycleCommand(effect.origin, {
+          return await this.commitInternalCommand(
+            this.effectLifecycleCommand(effect.origin, {
             type: "effectFailed",
             effectId: effect.request.effectId,
             effectType: effect.request.effectType,
             claimId,
             error: errorMessage(error),
-          }));
-        } catch (terminalError) {
-          const current = (await this.snapshot(effect.origin.runId)).effects.find((candidate) =>
-            candidate.effectId === effect.request.effectId
+            }),
           );
-          if (current?.claimId !== claimId || !isPendingEffectStatus(current.status)) return null;
+        } catch (terminalError) {
+          const current = (
+            await this.snapshot(effect.origin.runId)
+          ).effects.find(
+            (candidate) => candidate.effectId === effect.request.effectId,
+          );
+          if (
+            current?.claimId !== claimId ||
+            !isPendingEffectStatus(current.status)
+          )
+            return null;
           throw terminalError;
         }
       }
       if (controller.signal.aborted) {
-        await this.recordEffectCancellation(effect.origin, effect.request, claimId, controller);
+        await this.recordEffectCancellation(
+          effect.origin,
+          effect.request,
+          claimId,
+          controller,
+        );
         return { status: "cancelled", reason: "Effect cancelled" };
       }
       try {
@@ -503,7 +720,11 @@ export class ScenarioRuntime {
       }
     } finally {
       await heartbeat?.stop();
-      this.unregisterEffect(effect.origin.runId, effect.request.effectId, controller);
+      this.unregisterEffect(
+        effect.origin.runId,
+        effect.request.effectId,
+        controller,
+      );
     }
   }
 
@@ -513,11 +734,15 @@ export class ScenarioRuntime {
     claimId: string,
     controller: AbortController,
   ): { stop(): Promise<void> } {
-    const leaseMs = this.options.effectClaimLeaseMs ?? 30_000;
-    const intervalMs = Math.max(1, Math.min(
+    const leaseMs =
+      this.options.effectClaimLeaseMs ?? DEFAULT_EFFECT_CLAIM_LEASE_MS;
+    const intervalMs = Math.max(
+      1,
+      Math.min(
       this.options.effectClaimHeartbeatMs ?? Math.floor(leaseMs / 3),
       Math.max(1, leaseMs - 1),
-    ));
+      ),
+    );
     let stopped = false;
     let renewal = Promise.resolve();
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -530,12 +755,14 @@ export class ScenarioRuntime {
     const renew = async (): Promise<void> => {
       if (stopped || controller.signal.aborted) return;
       try {
-        await this.commitInternalCommand(this.effectLifecycleCommand(origin, {
+        await this.commitInternalCommand(
+          this.effectLifecycleCommand(origin, {
           type: "effectClaimRenewed",
           effectId: request.effectId,
           effectType: request.effectType,
           claimId,
-        }));
+          }),
+        );
       } catch (error) {
         if (stopped) return;
         this.effectCancellationReasons.set(
@@ -571,17 +798,37 @@ export class ScenarioRuntime {
   }
 
   /** Commit runtime-owned effect lifecycle state without recursively draining the durable outbox. */
-  private commitInternalCommand(command: ScenarioCommand): Promise<ScenarioTerminalResult> {
-    return this.replayCommand(command);
+  private async commitInternalCommand(
+    command: ScenarioCommand,
+  ): Promise<ScenarioTerminalResult> {
+    for (let attempt = 0; attempt < EFFECT_LIFECYCLE_LOCK_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.replayCommand(command);
+      } catch (error) {
+        if (
+          !(error instanceof RunLockTimeoutError) ||
+          attempt === EFFECT_LIFECYCLE_LOCK_ATTEMPTS - 1
+        ) {
+          throw error;
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, attempt + 1));
+      }
+    }
+    throw new Error("Effect lifecycle command exhausted its lock attempts");
   }
 
-  private async committedEffectResult(command: ScenarioCommand): Promise<ScenarioTerminalResult | null> {
+  private async committedEffectResult(
+    command: ScenarioCommand,
+  ): Promise<ScenarioTerminalResult | null> {
     try {
       const { run } = await this.store.open(command.runId);
-      const accepted = run.records.find((record) =>
-        record.commandId === command.commandId && record.eventType === "command.accepted"
+      const accepted = run.records.find(
+        (record) =>
+          record.commandId === command.commandId &&
+          record.eventType === "command.accepted",
       );
-      if (accepted?.payload.commandDigest !== commandIdentityDigest(command)) return null;
+      if (accepted?.payload.commandDigest !== commandIdentityDigest(command))
+        return null;
       return scenarioTerminalResultSchema.parse(accepted.payload.result);
     } catch {
       return null;
@@ -595,33 +842,45 @@ export class ScenarioRuntime {
     });
   }
 
-  public async committedBatchesAfter(runId: string, afterSeq: number): Promise<EventBatch[]> {
+  public async committedBatchesAfter(
+    runId: string,
+    afterSeq: number,
+  ): Promise<EventBatch[]> {
     const { snapshot, records } = await this.openAndPublish(runId);
     if (afterSeq > snapshot.lastRecordSeq) {
-      throw new Error(`Cursor ${afterSeq} exceeds last record ${snapshot.lastRecordSeq}`);
+      throw new Error(
+        `Cursor ${afterSeq} exceeds last record ${snapshot.lastRecordSeq}`,
+      );
     }
     const groups: ScenarioRecord[][] = [];
     for (const record of records) {
       const current = groups.at(-1);
-      if (!current || current[0]?.commandId !== record.commandId) groups.push([record]);
+      if (!current || current[0]?.commandId !== record.commandId)
+        groups.push([record]);
       else current.push(record);
     }
-    const priorGroups = groups.filter((group) => (group.at(-1)?.recordSeq ?? 0) <= afterSeq).length;
+    const priorGroups = groups.filter(
+      (group) => (group.at(-1)?.recordSeq ?? 0) <= afterSeq,
+    ).length;
     const pendingGroups = groups.slice(priorGroups);
     const first = pendingGroups[0]?.[0];
     if (!first) return [];
     if (first.recordSeq !== afterSeq + 1) {
-      throw new Error(`Cursor ${afterSeq} splits or gaps a committed batch at ${first.recordSeq}`);
+      throw new Error(
+        `Cursor ${afterSeq} splits or gaps a committed batch at ${first.recordSeq}`,
+      );
     }
     const baseRevision = Math.max(0, snapshot.revision - pendingGroups.length);
-    return pendingGroups.map((recordsForCommand, index) => eventBatchSchema.parse({
+    return pendingGroups.map((recordsForCommand, index) =>
+      eventBatchSchema.parse({
       runId,
       fromSeq: recordsForCommand[0]?.recordSeq,
       toSeq: recordsForCommand.at(-1)?.recordSeq,
       baseSnapshotRevision: baseRevision + index,
       resultingSnapshotRevision: baseRevision + index + 1,
       records: recordsForCommand,
-    }));
+      }),
+    );
   }
 
   public async readArtifact(
@@ -630,20 +889,29 @@ export class ScenarioRuntime {
     maximumBytes: number,
   ): Promise<{ artifact: ArtifactRef; bytes: Uint8Array }> {
     const snapshot = await this.snapshot(runId);
-    const artifact = snapshot.artifacts.find((candidate) =>
-      candidate.artifactId === requested.artifactId && candidate.digest === requested.digest
+    const artifact = snapshot.artifacts.find(
+      (candidate) =>
+        candidate.artifactId === requested.artifactId &&
+        candidate.digest === requested.digest,
     );
-    if (!artifact) throw new Error("Artifact is not linked to the requested run");
-    if (artifact.byteLength > maximumBytes) throw new Error("Artifact exceeds negotiated maximum size");
-    const bytes = await new ArtifactStore(runArtifactsDir(runId, this.options.root)).get(artifact);
+    if (!artifact)
+      throw new Error("Artifact is not linked to the requested run");
+    if (artifact.byteLength > maximumBytes)
+      throw new Error("Artifact exceeds negotiated maximum size");
+    const bytes = await new ArtifactStore(
+      runArtifactsDir(runId, this.options.root),
+    ).get(artifact);
     return { artifact, bytes };
   }
 
   public async listRuns(): Promise<RunManifest[]> {
     const discovered = await this.registry.list();
-    return Promise.all(discovered.map(async (manifest) =>
-      (await this.openAndPublish(manifest.runId)).manifest
-    ));
+    return Promise.all(
+      discovered.map(
+        async (manifest) =>
+          (await this.openAndPublish(manifest.runId)).manifest,
+      ),
+    );
   }
 
   /** Initialize canonical state for fixture execution or a validated import. */
@@ -655,16 +923,22 @@ export class ScenarioRuntime {
     const startCommand = scenarioCommandSchema.parse(startCommandInput);
     assertScenarioCommandDigests(startCommand);
     assertScenarioSchemaDigest(startCommand);
-    if (startCommand.payload.type !== "startRun") throw new Error("Seeded runs require a startRun command");
-    if (await this.store.exists(startCommand.runId)) throw new Error(`Run already exists: ${startCommand.runId}`);
-    const manifest = manifestForStartCommand(startCommand, this.options.redactionPaths);
+    if (startCommand.payload.type !== "startRun")
+      throw new Error("Seeded runs require a startRun command");
+    if (await this.store.exists(startCommand.runId))
+      throw new Error(`Run already exists: ${startCommand.runId}`);
+    const manifest = manifestForStartCommand(
+      startCommand,
+      this.options.redactionPaths,
+    );
     const created = await this.store.createSeeded(manifest, records, snapshot);
     await this.registry.append(manifest, "created");
     return created;
   }
 
   public subscribe(runId: string, subscriber: ScenarioSubscriber): () => void {
-    const subscribers = this.subscribers.get(runId) ?? new Set<ScenarioSubscriber>();
+    const subscribers =
+      this.subscribers.get(runId) ?? new Set<ScenarioSubscriber>();
     subscribers.add(subscriber);
     this.subscribers.set(runId, subscribers);
     return () => {
@@ -680,14 +954,19 @@ export class ScenarioRuntime {
 
   private registerEffect(runId: string, effectId: string): AbortController {
     const controller = new AbortController();
-    const effects = this.activeEffects.get(runId) ?? new Map<string, AbortController>();
+    const effects =
+      this.activeEffects.get(runId) ?? new Map<string, AbortController>();
     effects.get(effectId)?.abort();
     effects.set(effectId, controller);
     this.activeEffects.set(runId, effects);
     return controller;
   }
 
-  private unregisterEffect(runId: string, effectId: string, controller: AbortController): void {
+  private unregisterEffect(
+    runId: string,
+    effectId: string,
+    controller: AbortController,
+  ): void {
     const effects = this.activeEffects.get(runId);
     if (effects?.get(effectId) !== controller) return;
     effects.delete(effectId);
@@ -708,47 +987,110 @@ export class ScenarioRuntime {
     controller: AbortController,
   ): Promise<void> {
     const snapshot = await this.snapshot(origin.runId);
-    const effect = snapshot.effects.find((candidate) => candidate.effectId === request.effectId);
+    const effect = snapshot.effects.find(
+      (candidate) => candidate.effectId === request.effectId,
+    );
     if (effect?.status !== "started" || effect.claimId !== claimId) return;
-    await this.commitInternalCommand(this.effectLifecycleCommand(origin, {
+    await this.commitInternalCommand(
+      this.effectLifecycleCommand(origin, {
       type: "effectCancelled",
       effectId: request.effectId,
       effectType: request.effectType,
       claimId,
-      reason: this.effectCancellationReasons.get(controller) ?? "Effect cancelled",
-    }));
+        reason:
+          this.effectCancellationReasons.get(controller) ?? "Effect cancelled",
+      }),
+    );
   }
 
   private async createRun(command: ScenarioCommand): Promise<void> {
-    if (command.payload.type !== "startRun") throw new Error("Only startRun can create a run");
-    const manifest = manifestForStartCommand(command, this.options.redactionPaths);
+    if (command.payload.type !== "startRun")
+      throw new Error("Only startRun can create a run");
+    const manifest = manifestForStartCommand(
+      command,
+      this.options.redactionPaths,
+    );
     await this.store.create(manifest, emptyScenarioSnapshot(manifest));
     await this.registry.append(manifest, "created");
   }
 
-  private async dispatchOnce(command: ScenarioCommand): Promise<DispatchOnceResult> {
+  private async dispatchOnce(
+    command: ScenarioCommand,
+  ): Promise<DispatchOnceResult> {
+    return this.dispatchBuiltCommand(command.runId, () => command);
+  }
+
+  private async dispatchBuiltCommand(
+    runId: string,
+    commandFactory: (snapshot: ScenarioSnapshot) => ScenarioCommand | null,
+    historyFilter?: (record: ScenarioRecord) => boolean,
+  ): Promise<DispatchOnceResult> {
     let committedRecords: ScenarioRecord[] = [];
     let committedManifest: RunManifest | undefined;
     let artifactsNeedReconciliation = false;
-    const transaction = await this.store.transact(command.runId, async (run) => {
-      const prior = run.snapshot.commandResults[command.commandId];
+    const artifactScopesForCleanup = new Set<string>();
+    try {
+      const transaction = await this.store
+      .transact<{
+        result: ScenarioTerminalResult;
+        command: ScenarioCommand | null;
+        records?: ScenarioRecord[];
+      }>(runId, async (run) => {
+        const builtCommand = commandFactory(structuredClone(run.snapshot));
+        if (builtCommand !== null) {
+          artifactScopesForCleanup.add(
+            commandArtifactScope(builtCommand.runId, builtCommand.commandId),
+          );
+        }
+        if (builtCommand === null) {
+          return {
+            records: [],
+            value: {
+              result: { status: "accepted" as const },
+              command: null,
+              ...(historyFilter
+                ? { records: run.records.filter(historyFilter) }
+                : {}),
+            },
+          };
+        }
+        const prior = run.snapshot.commandResults[builtCommand.commandId];
       if (prior !== undefined) {
-        assertCommandRetryMatches(command, run);
-        return { records: [], value: scenarioTerminalResultSchema.parse(prior) };
+          assertCommandRetryMatches(builtCommand, run);
+          return {
+            records: [],
+            value: {
+              result: scenarioTerminalResultSchema.parse(prior),
+              command: builtCommand,
+              ...(historyFilter
+                ? { records: run.records.filter(historyFilter) }
+                : {}),
+            },
+          };
       }
-      if (command.expectedSnapshotRevision !== undefined && command.expectedSnapshotRevision !== run.snapshot.revision) {
-        throw new SnapshotRevisionConflictError(command.expectedSnapshotRevision, run.snapshot.revision);
+        if (
+          builtCommand.expectedSnapshotRevision !== undefined &&
+          builtCommand.expectedSnapshotRevision !== run.snapshot.revision
+        ) {
+          throw new SnapshotRevisionConflictError(
+            builtCommand.expectedSnapshotRevision,
+            run.snapshot.revision,
+          );
       }
-      assertCommandCapabilities(command.payload, run.snapshot);
-      assertRunLifecycle(command.payload, run.snapshot);
-      const persistentCommand = scenarioCommandSchema.parse(sanitizeScenarioValueForPersistence(
-        toJsonValue(command),
-        [],
-        { secretPaths: this.options.redactionPaths },
-      ));
+        assertCommandCapabilities(builtCommand.payload, run.snapshot);
+        assertRunLifecycle(builtCommand.payload, run.snapshot);
+        const persistentCommand = scenarioCommandSchema.parse(
+          sanitizeScenarioValueForPersistence(toJsonValue(builtCommand), [], {
+            secretPaths: this.options.redactionPaths,
+          }),
+        );
       const semantic = this.semanticRecords(persistentCommand, run);
-      const capturedArtifacts = await this.captureLargeValues(persistentCommand);
-      const artifactScope = commandArtifactScope(command.runId, command.commandId);
+        const capturedArtifacts =
+          await this.captureLargeValues(persistentCommand);
+        const artifactScope = commandArtifactScope(
+          builtCommand.runId,
+          builtCommand.commandId,
+        );
       if (capturedArtifacts.references.size > 0) {
         this.largeValues.set(artifactScope, capturedArtifacts.references);
       }
@@ -757,61 +1099,95 @@ export class ScenarioRuntime {
         const result = semantic.result;
         const artifactRefs = [
           ...new Map(
-            Array.from(this.largeValues.get(artifactScope)?.values() ?? [])
-              .map((artifact) => [artifact.digest, artifact] as const),
+              Array.from(
+                this.largeValues.get(artifactScope)?.values() ?? [],
+              ).map((artifact) => [artifact.digest, artifact] as const),
           ).values(),
         ];
         committedRecords = [
-          this.record(persistentCommand, run.snapshot.lastRecordSeq + 1, "command.accepted", {
+            this.record(
+              persistentCommand,
+              run.snapshot.lastRecordSeq + 1,
+              "command.accepted",
+              {
             commandType: persistentCommand.payload.type,
             command: toJsonValue(persistentCommand),
-            commandDigest: commandIdentityDigest(command),
+                commandDigest: commandIdentityDigest(builtCommand),
             result: toJsonValue(result),
-          }, undefined, commandVisibility(persistentCommand.payload)),
-          ...artifactRefs
-            .map((artifact, index) => this.record(
+              },
+              undefined,
+              commandVisibility(persistentCommand.payload),
+            ),
+            ...artifactRefs.map((artifact, index) =>
+              this.record(
               persistentCommand,
               run.snapshot.lastRecordSeq + index + 2,
               "artifact.linked",
               { artifact: toJsonValue(artifact) },
               { kind: "artifact", id: artifact.artifactId },
               "artifactReference",
-            )),
-          ...semantic.records.map((record, index) => this.record(
+              ),
+            ),
+            ...semantic.records.map((record, index) =>
+              this.record(
             persistentCommand,
             run.snapshot.lastRecordSeq + index + 2 + artifactRefs.length,
             record.eventType,
             record.payload,
             record.entityRef,
             record.visibility ?? "localSensitive",
-          )),
+              ),
+            ),
         ];
-        const status = manifestStatus(command.payload, run.manifest.status);
+          const status = manifestStatus(
+            builtCommand.payload,
+            run.manifest.status,
+          );
         committedManifest = {
           ...run.manifest,
-          adapter: command.source.adapter ?? run.manifest.adapter,
-          provider: command.source.provider ?? run.manifest.provider,
-          nativeSessionIds: command.source.nativeSessionId && !run.manifest.nativeSessionIds.includes(command.source.nativeSessionId)
-            ? [...run.manifest.nativeSessionIds, command.source.nativeSessionId]
+            adapter: builtCommand.source.adapter ?? run.manifest.adapter,
+            provider: builtCommand.source.provider ?? run.manifest.provider,
+            nativeSessionIds:
+              builtCommand.source.nativeSessionId &&
+              !run.manifest.nativeSessionIds.includes(
+                builtCommand.source.nativeSessionId,
+              )
+                ? [
+                    ...run.manifest.nativeSessionIds,
+                    builtCommand.source.nativeSessionId,
+                  ]
             : run.manifest.nativeSessionIds,
           status,
-          updatedAt: command.recordedAt,
+            updatedAt: builtCommand.recordedAt,
         };
         return {
           records: committedRecords,
           manifest: committedManifest,
-          ...(semantic.feedback === undefined ? {} : { feedback: semantic.feedback }),
-          value: result,
+            ...(semantic.feedback === undefined
+              ? {}
+              : { feedback: semantic.feedback }),
+            value: {
+              result,
+              command: builtCommand,
+              ...(historyFilter
+                ? {
+                    records: [...run.records, ...committedRecords].filter(
+                      historyFilter,
+                    ),
+                  }
+                : {}),
+            },
         };
       } catch (error) {
         await this.removeCreatedArtifacts(capturedArtifacts);
         artifactsNeedReconciliation = false;
         throw error;
       }
-    }).catch(async (error: unknown) => {
+      })
+      .catch(async (error: unknown) => {
       if (artifactsNeedReconciliation) {
         try {
-          await this.openAndPublish(command.runId);
+            await this.openAndPublish(runId);
         } catch {
           // Preserve the transaction failure; a later canonical open retries artifact reconciliation.
         }
@@ -819,26 +1195,50 @@ export class ScenarioRuntime {
       throw error;
     });
     artifactsNeedReconciliation = false;
-    const subscriberFailures = this.publishCommittedBatches(command.runId, transaction.committedBatches);
+    const committedCommand = transaction.value.command;
+    const subscriberFailures = this.publishCommittedBatches(
+      runId,
+      transaction.committedBatches,
+    );
+    if (committedCommand === null) {
+      return {
+        result: transaction.value.result,
+        command: null,
+        snapshot: transaction.snapshot,
+        records: transaction.value.records,
+      };
+    }
     if (subscriberFailures.length > 0) {
-      await this.recordSubscriberFailures(command, subscriberFailures);
+      await this.recordSubscriberFailures(committedCommand, subscriberFailures);
     }
     if (committedRecords.length > 0) {
-      if (committedManifest && shouldUpdateRegistry(command.payload)) {
+      if (committedManifest && shouldUpdateRegistry(committedCommand.payload)) {
         try {
           await this.registry.append(
             committedManifest,
             committedManifest.status === "closed" ? "closed" : "updated",
           );
         } catch (error) {
-          await this.recordPostCommitDiagnostics(command, [{
+          await this.recordPostCommitDiagnostics(committedCommand, [
+            {
             message: `Run registry publication failed: ${errorMessage(error)}`,
             source: "runRegistry",
-          }]);
+            },
+          ]);
+        }
         }
       }
+      return {
+        result: transaction.value.result,
+        command: committedCommand,
+        snapshot: transaction.snapshot,
+        records: transaction.value.records,
+      };
+    } finally {
+      for (const artifactScope of artifactScopesForCleanup) {
+        this.largeValues.delete(artifactScope);
+      }
     }
-    return { result: transaction.value };
   }
 
   private publishBatch(
@@ -860,7 +1260,10 @@ export class ScenarioRuntime {
     return failures;
   }
 
-  private publishCommittedBatches(runId: string, committedBatches: readonly CommittedRunBatch[]): string[] {
+  private publishCommittedBatches(
+    runId: string,
+    committedBatches: readonly CommittedRunBatch[],
+  ): string[] {
     const failures: string[] = [];
     for (const committed of committedBatches) {
       const batch = eventBatchSchema.parse({
@@ -879,7 +1282,10 @@ export class ScenarioRuntime {
   /** Open one canonical view and publish any recovery records committed by that read. */
   private async openAndPublish(runId: string): Promise<OpenRun> {
     const opened = await this.store.open(runId);
-    const failures = this.publishCommittedBatches(runId, opened.committedBatches);
+    const failures = this.publishCommittedBatches(
+      runId,
+      opened.committedBatches,
+    );
     if (failures.length === 0) return opened.run;
     const diagnosticCommand = this.createCommand({
       runId,
@@ -890,11 +1296,17 @@ export class ScenarioRuntime {
     return this.openAndPublish(runId);
   }
 
-  private async recordSubscriberFailures(command: ScenarioCommand, failures: readonly string[]): Promise<void> {
-    await this.recordPostCommitDiagnostics(command, failures.map((failure) => ({
+  private async recordSubscriberFailures(
+    command: ScenarioCommand,
+    failures: readonly string[],
+  ): Promise<void> {
+    await this.recordPostCommitDiagnostics(
+      command,
+      failures.map((failure) => ({
       message: `Scenario subscriber failed: ${failure}`,
       source: "subscriber",
-    })));
+      })),
+    );
   }
 
   private async recordPostCommitDiagnostics(
@@ -911,21 +1323,33 @@ export class ScenarioRuntime {
         data: { failures: failures.map((failure) => failure.message) },
       },
     });
-    const transaction = await this.store.transact(command.runId, async (run) => {
-      const diagnosticRecords = failures.map((failure, index) => this.record(
+    const transaction = await this.store.transact(
+      command.runId,
+      async (run) => {
+        const diagnosticRecords = failures.map((failure, index) =>
+          this.record(
         diagnosticCommand,
         run.snapshot.lastRecordSeq + index + 1,
         "store.diagnostic",
-        { message: failure.message, source: failure.source, status: "recovered" },
+            {
+              message: failure.message,
+              source: failure.source,
+              status: "recovered",
+            },
         { kind: "stateSlice", id: "store.health" },
         "localSensitive",
-      ));
+          ),
+        );
       return {
         records: diagnosticRecords,
-        manifest: { ...run.manifest, updatedAt: diagnosticCommand.recordedAt },
+          manifest: {
+            ...run.manifest,
+            updatedAt: diagnosticCommand.recordedAt,
+          },
         value: undefined,
       };
-    });
+      },
+    );
     const subscriberFailures = this.publishCommittedBatches(
       command.runId,
       transaction.committedBatches,
@@ -938,28 +1362,38 @@ export class ScenarioRuntime {
         renderMessage: (error, context) =>
           `Scenario runtime background failure during ${context.operation} for ${context.runId}: ` +
           errorMessage(error),
-        reportingFailurePrefix: "Scenario runtime background error reporting failed",
+        reportingFailurePrefix:
+          "Scenario runtime background error reporting failed",
       });
     }
   }
 
-  private semanticRecords(command: ScenarioCommand, run: OpenRun): SemanticResult {
+  private semanticRecords(
+    command: ScenarioCommand,
+    run: OpenRun,
+  ): SemanticResult {
     const payload = command.payload;
     switch (payload.type) {
       case "startRun":
         return {
           records: [
-            { eventType: "run.started", payload: { schemaDigest: payload.schemaDigest }, visibility: "localSensitive" },
+            {
+              eventType: "run.started",
+              payload: { schemaDigest: payload.schemaDigest },
+              visibility: "localSensitive",
+            },
             {
               eventType: "capabilities.declared",
               payload: { capabilities: toJsonValue(payload.capabilities) },
               visibility: "public",
             },
             ...projectedMutationRecords(
-              (this.options.stateSlicePolicy?.initialChanges?.() ?? []).map((change) => ({
+              (this.options.stateSlicePolicy?.initialChanges?.() ?? []).map(
+                (change) => ({
                 kind: "stateChange" as const,
                 change,
-              })),
+                }),
+              ),
               command,
               run,
               this.options.stateSlicePolicy,
@@ -968,13 +1402,22 @@ export class ScenarioRuntime {
           result: { status: "accepted" },
         };
       case "resumeRun":
-        return simple("run.resumed", payload, { status: "accepted" }, "localSensitive");
+        return simple(
+          "run.resumed",
+          payload,
+          { status: "accepted" },
+          "localSensitive",
+        );
       case "closeRun":
         return {
           records: [
             ...terminalToolCancellationRecords(run.snapshot, "Run closed"),
             ...terminalEffectCancellationRecords(run.snapshot, "Run closed"),
-            { eventType: "run.closed", payload: toJsonValue(payload) as Record<string, JsonValue>, visibility: "localSensitive" },
+            {
+              eventType: "run.closed",
+              payload: toJsonValue(payload) as Record<string, JsonValue>,
+              visibility: "localSensitive",
+            },
           ],
           result: { status: "accepted" },
         };
@@ -983,18 +1426,35 @@ export class ScenarioRuntime {
           records: [
             ...terminalToolCancellationRecords(run.snapshot, "Run cancelled"),
             ...terminalEffectCancellationRecords(run.snapshot, "Run cancelled"),
-            { eventType: "run.cancelled", payload: toJsonValue(payload) as Record<string, JsonValue>, visibility: "localSensitive" },
+            {
+              eventType: "run.cancelled",
+              payload: toJsonValue(payload) as Record<string, JsonValue>,
+              visibility: "localSensitive",
+            },
           ],
           result: { status: "cancelled" },
         };
       case "userMessageSubmitted":
         return messageRecord("message.userSubmitted", payload, run.snapshot);
       case "assistantMessageObserved":
-        return messageRecord("message.assistantObserved", payload, run.snapshot);
+        return messageRecord(
+          "message.assistantObserved",
+          payload,
+          run.snapshot,
+        );
       case "assistantMessageCompleted":
-        return messageRecord("message.assistantCompleted", payload, run.snapshot);
+        return messageRecord(
+          "message.assistantCompleted",
+          payload,
+          run.snapshot,
+        );
       case "toolRequested":
-        return toolRequestedRecords(payload, command, run.snapshot, this.options.effectPlanner);
+        return toolRequestedRecords(
+          payload,
+          command,
+          run.snapshot,
+          this.options.effectPlanner,
+        );
       case "toolExecutionObserved":
         return toolExecutionObservedRecords(payload, run.snapshot);
       case "extensionCommand":
@@ -1007,13 +1467,21 @@ export class ScenarioRuntime {
       case "toolDecisionSubmitted":
         return toolDecisionRecords(payload, run.snapshot);
       case "toolExecutionStarted":
-        return toolLifecycleRecord("tool.executionStarted", payload, run.snapshot);
+        return toolLifecycleRecord(
+          "tool.executionStarted",
+          payload,
+          run.snapshot,
+        );
       case "toolOutputAppended":
-        return toolLifecycleRecord("tool.outputAppended", payload, run.snapshot);
+        return toolLifecycleRecord(
+          "tool.outputAppended",
+          payload,
+          run.snapshot,
+        );
       case "toolCompleted":
-        return toolLifecycleRecord("tool.completed", payload, run.snapshot);
+        return terminalToolLifecycleRecord(payload, run.snapshot);
       case "toolFailed":
-        return toolLifecycleRecord("tool.failed", payload, run.snapshot);
+        return terminalToolLifecycleRecord(payload, run.snapshot);
       case "toolCancelled":
         return toolCancellationRecords(payload, run.snapshot);
       case "stateSliceChanged": {
@@ -1034,27 +1502,40 @@ export class ScenarioRuntime {
           assertIdempotentFeedbackMatches(prior, payload);
           return {
             records: [],
-            result: { status: "accepted", data: { feedbackId: prior.feedbackId } },
+            result: {
+              status: "accepted",
+              data: { feedbackId: prior.feedbackId },
+            },
           };
         }
         const entry = this.feedbackEntry(command, run.snapshot, payload);
         return {
-          records: [{
+          records: [
+            {
             eventType: "feedback.changed",
             entityRef: { kind: payload.targetKind, id: payload.targetId },
             payload: { feedback: toJsonValue(entry) },
             visibility: "localSensitive",
-          }],
-          result: { status: "accepted", data: { feedbackId: entry.feedbackId } },
+            },
+          ],
+          result: {
+            status: "accepted",
+            data: { feedbackId: entry.feedbackId },
+          },
           feedback: entry,
         };
       }
       case "requestEffect":
-        if (run.snapshot.effects.some((effect) => effect.effectId === payload.effectId)) {
+        if (
+          run.snapshot.effects.some(
+            (effect) => effect.effectId === payload.effectId,
+          )
+        ) {
           throw new Error(`Effect already exists: ${payload.effectId}`);
         }
         return {
-          records: [{
+          records: [
+            {
             eventType: "effect.requested",
             entityRef: { kind: "effect", id: payload.effectId },
             payload: {
@@ -1062,36 +1543,59 @@ export class ScenarioRuntime {
               effectType: payload.effectType ?? "unknown",
               parameters: payload.parameters ?? null,
             },
-          }],
+            },
+          ],
           result: { status: "accepted" },
         };
       case "effectStarted":
-        if (run.snapshot.effects.find((effect) => effect.effectId === payload.effectId)?.status === "started") {
-          assertEffectClaim(run.snapshot, payload.effectId, payload.previousClaimId);
+        if (
+          run.snapshot.effects.find(
+            (effect) => effect.effectId === payload.effectId,
+          )?.status === "started"
+        ) {
+          assertEffectClaim(
+            run.snapshot,
+            payload.effectId,
+            payload.previousClaimId,
+          );
           assertEffectClaimExpired(
             run.snapshot,
             payload.effectId,
             this.clock().getTime(),
-            this.options.effectClaimLeaseMs ?? 30_000,
+            this.options.effectClaimLeaseMs ?? DEFAULT_EFFECT_CLAIM_LEASE_MS,
           );
           if (payload.claimId === payload.previousClaimId) {
-            throw new Error(`Effect reclaim must use a new claim: ${payload.effectId}`);
+            throw new Error(
+              `Effect reclaim must use a new claim: ${payload.effectId}`,
+            );
           }
         } else {
           assertEffectState(run.snapshot, payload.effectId, ["requested"]);
           if (payload.previousClaimId !== undefined) {
-            throw new Error(`New effect claim cannot name a previous claim: ${payload.effectId}`);
+            throw new Error(
+              `New effect claim cannot name a previous claim: ${payload.effectId}`,
+            );
           }
         }
         return simple("effect.started", payload, { status: "accepted" });
       case "effectClaimRenewed":
         assertEffectState(run.snapshot, payload.effectId, ["started"]);
         assertEffectClaim(run.snapshot, payload.effectId, payload.claimId);
-        return simple("effect.claimRenewed", payload, { status: "accepted" }, "localSensitive");
+        return simple(
+          "effect.claimRenewed",
+          payload,
+          { status: "accepted" },
+          "localSensitive",
+        );
       case "effectResultSupplied": {
         assertEffectState(run.snapshot, payload.effectId, ["started"]);
         assertEffectClaim(run.snapshot, payload.effectId, payload.claimId);
-        return completedEffectRecords(payload, command, run, this.options.stateSlicePolicy);
+        return completedEffectRecords(
+          payload,
+          command,
+          run,
+          this.options.stateSlicePolicy,
+        );
       }
       case "effectProgressed":
         assertEffectClaim(run.snapshot, payload.effectId, payload.claimId);
@@ -1110,25 +1614,53 @@ export class ScenarioRuntime {
       case "effectCancelled":
         assertEffectState(run.snapshot, payload.effectId, ["started"]);
         assertEffectClaim(run.snapshot, payload.effectId, payload.claimId);
-        return simple("effect.cancelled", {
+        return simple(
+          "effect.cancelled",
+          {
           effectId: payload.effectId,
           reason: payload.reason ?? "Effect cancelled",
-        }, { status: "cancelled", reason: payload.reason ?? "Effect cancelled" }, "localSensitive");
+          },
+          { status: "cancelled", reason: payload.reason ?? "Effect cancelled" },
+          "localSensitive",
+        );
       case "providerStateObserved":
-        return simple("provider.stateObserved", { state: payload.data ?? {} }, { status: "accepted" }, "localSensitive");
+        return simple(
+          "provider.stateObserved",
+          { state: payload.data ?? {} },
+          { status: "accepted" },
+          "localSensitive",
+        );
       case "planStateChanged":
-        return simple("plan.stateChanged", { state: payload.data ?? {} }, { status: "accepted" }, "localSensitive");
+        return simple(
+          "plan.stateChanged",
+          { state: payload.data ?? {} },
+          { status: "accepted" },
+          "localSensitive",
+        );
       case "continuationStateChanged":
-        return simple("continuation.stateChanged", { state: payload.data ?? {} }, { status: "accepted" }, "localSensitive");
+        return simple(
+          "continuation.stateChanged",
+          { state: payload.data ?? {} },
+          { status: "accepted" },
+          "localSensitive",
+        );
       case "nativeTranscriptObserved":
-        return nativeTranscriptRecords(payload.data, run.snapshot, command.recordedAt);
+        return nativeTranscriptRecords(
+          payload.data,
+          run.snapshot,
+          command.recordedAt,
+        );
       case "runtimeErrorObserved": {
         const error = normalizeRuntimeError(payload.data);
         const fatal = error.recoverable !== true;
         return {
           records: [
-            ...(fatal ? terminalToolCancellationRecords(run.snapshot, "Run failed") : []),
-            ...(fatal ? terminalEffectCancellationRecords(run.snapshot, "Run failed") : []),
+            ...(fatal
+              ? terminalToolCancellationRecords(run.snapshot, "Run failed")
+              : []),
+            ...(fatal
+              ? terminalEffectCancellationRecords(run.snapshot, "Run failed")
+              : []),
             ...simple(
               "runtime.error",
               error,
@@ -1142,8 +1674,11 @@ export class ScenarioRuntime {
     }
   }
 
-  private async executeEffect(request: ScenarioEffectRequest): Promise<ScenarioEffectResult> {
-    if (this.options.effectExecutor) return this.options.effectExecutor.execute(request);
+  private async executeEffect(
+    request: ScenarioEffectRequest,
+  ): Promise<ScenarioEffectResult> {
+    if (this.options.effectExecutor)
+      return this.options.effectExecutor.execute(request);
     throw new Error(`Unsupported scenario effect: ${request.effectType}`);
   }
 
@@ -1155,25 +1690,26 @@ export class ScenarioRuntime {
     signal: AbortSignal,
   ): Promise<void> {
     if (signal.aborted) return;
-    const snapshot = await this.snapshot(origin.runId);
-    const effect = snapshot.effects.find((candidate) => candidate.effectId === effectId);
-    if (
-      snapshot.status !== "running" ||
-      effect?.status !== "started" ||
-      effect.claimId !== claimId ||
-      signal.aborted
-    ) return;
     try {
-      await this.commitInternalCommand(this.effectLifecycleCommand(origin, {
+      await this.commitInternalCommand(
+        this.effectLifecycleCommand(origin, {
         type: "effectProgressed",
         effectId,
         claimId,
         progress,
-      }));
+        }),
+      );
     } catch (error) {
       const current = await this.snapshot(origin.runId);
-      const currentEffect = current.effects.find((candidate) => candidate.effectId === effectId);
-      if (signal.aborted || current.status !== "running" || currentEffect?.claimId !== claimId) return;
+      const currentEffect = current.effects.find(
+        (candidate) => candidate.effectId === effectId,
+      );
+      if (
+        signal.aborted ||
+        current.status !== "running" ||
+        currentEffect?.claimId !== claimId
+      )
+        return;
       throw error;
     }
   }
@@ -1183,26 +1719,52 @@ export class ScenarioRuntime {
     snapshot: ScenarioSnapshot,
     payload: Extract<ScenarioCommandPayload, { type: "submitFeedback" }>,
   ): FeedbackEntry {
-    if (!snapshot.capabilities.feedbackSubmission) throw new Error("Run does not allow feedback submission");
-    if (payload.expectedTargetDigest === undefined && payload.targetRecordSeq === undefined) {
-      throw new Error("Feedback requires a stable target digest or record sequence");
+    if (!snapshot.capabilities.feedbackSubmission)
+      throw new Error("Run does not allow feedback submission");
+    if (
+      payload.expectedTargetDigest === undefined &&
+      payload.targetRecordSeq === undefined
+    ) {
+      throw new Error(
+        "Feedback requires a stable target digest or record sequence",
+      );
     }
-    const target = payload.targetKind === "assistantMessage"
-      ? snapshot.conversation.find((message) => message.id === payload.targetId && message.role === "assistant")
+    const target =
+      payload.targetKind === "assistantMessage"
+        ? snapshot.conversation.find(
+            (message) =>
+              message.id === payload.targetId && message.role === "assistant",
+          )
       : snapshot.toolCalls.find((tool) => tool.id === payload.targetId);
-    if (!target) throw new FeedbackTargetConflictError(`Feedback target does not exist: ${payload.targetId}`);
-    if (payload.targetKind === "assistantMessage" && "status" in target && target.status !== "completed") {
+    if (!target)
+      throw new FeedbackTargetConflictError(
+        `Feedback target does not exist: ${payload.targetId}`,
+      );
+    if (
+      payload.targetKind === "assistantMessage" &&
+      "status" in target &&
+      target.status !== "completed"
+    ) {
       throw new Error("Assistant feedback target is not stable");
     }
     if ("feedbackDigest" in target && !isTerminalToolStatus(target.status)) {
       throw new Error("Tool feedback target is not terminal");
     }
-    const digest = "contentDigest" in target ? target.contentDigest : target.feedbackDigest;
-    if (payload.expectedTargetDigest && payload.expectedTargetDigest !== digest) {
+    const digest =
+      "contentDigest" in target ? target.contentDigest : target.feedbackDigest;
+    if (
+      payload.expectedTargetDigest &&
+      payload.expectedTargetDigest !== digest
+    ) {
       throw new FeedbackTargetConflictError("Feedback target digest is stale");
     }
-    if (payload.targetRecordSeq && payload.targetRecordSeq !== target.recordSeq) {
-      throw new FeedbackTargetConflictError("Feedback target record sequence is stale");
+    if (
+      payload.targetRecordSeq &&
+      payload.targetRecordSeq !== target.recordSeq
+    ) {
+      throw new FeedbackTargetConflictError(
+        "Feedback target record sequence is stale",
+      );
     }
     const key = `${payload.author.subjectId}:${payload.targetKind}:${payload.targetId}`;
     const previous = snapshot.feedback[key];
@@ -1216,7 +1778,9 @@ export class ScenarioRuntime {
         digest,
       },
       vote: payload.vote,
-      ...(validateFeedbackNote(payload.note) === undefined ? {} : { note: validateFeedbackNote(payload.note) }),
+      ...(validateFeedbackNote(payload.note) === undefined
+        ? {}
+        : { note: validateFeedbackNote(payload.note) }),
       createdAt: command.recordedAt,
       author: payload.author,
       supersedesFeedbackId: previous?.feedbackId ?? null,
@@ -1239,8 +1803,12 @@ export class ScenarioRuntime {
       recordId: this.idFactory(),
       recordedAt: command.recordedAt,
       commandId: command.commandId,
-      ...(command.correlationId === undefined ? {} : { correlationId: command.correlationId }),
-      ...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+      ...(command.correlationId === undefined
+        ? {}
+        : { correlationId: command.correlationId }),
+      ...(command.causationId === undefined
+        ? {}
+        : { causationId: command.causationId }),
       eventType,
       ...(entityRef === undefined ? {} : { entityRef }),
       visibility,
@@ -1248,13 +1816,19 @@ export class ScenarioRuntime {
         command.runId,
         command.commandId,
         eventType,
-        sanitizeScenarioValueForPersistence(payload, [], { secretPaths: this.options.redactionPaths }),
+        sanitizeScenarioValueForPersistence(payload, [], {
+          secretPaths: this.options.redactionPaths,
+        }),
       ) as Record<string, JsonValue>,
     };
   }
 
-  private async captureLargeValues(command: ScenarioCommand): Promise<CapturedLargeValues> {
-    const store = new ArtifactStore(runArtifactsDir(command.runId, this.options.root));
+  private async captureLargeValues(
+    command: ScenarioCommand,
+  ): Promise<CapturedLargeValues> {
+    const store = new ArtifactStore(
+      runArtifactsDir(command.runId, this.options.root),
+    );
     const threshold = Math.max(1, this.options.maximumInlineBytes ?? 64 * 1024);
     const persistentPayload = redactScenarioValue(
       toJsonValue(command.payload),
@@ -1263,7 +1837,11 @@ export class ScenarioRuntime {
       { secretPaths: this.options.redactionPaths },
     );
     const found = collectLargeValues(persistentPayload, threshold);
-    const captured: CapturedLargeValues = { references: new Map(), created: [], store };
+    const captured: CapturedLargeValues = {
+      references: new Map(),
+      created: [],
+      store,
+    };
     try {
       for (const [digest, value] of found) {
         const serialized = canonicalJson(value);
@@ -1285,8 +1863,12 @@ export class ScenarioRuntime {
     }
   }
 
-  private async removeCreatedArtifacts(captured: CapturedLargeValues): Promise<void> {
-    await Promise.all(captured.created.map((artifact) => captured.store.remove(artifact)));
+  private async removeCreatedArtifacts(
+    captured: CapturedLargeValues,
+  ): Promise<void> {
+    await Promise.all(
+      captured.created.map((artifact) => captured.store.remove(artifact)),
+    );
   }
 
   private protectRecordPayload(
@@ -1295,8 +1877,16 @@ export class ScenarioRuntime {
     eventType: string,
     value: JsonValue,
   ): JsonValue {
-    const artifacts = this.largeValues.get(commandArtifactScope(runId, commandId));
-    return replaceLargeValues(value, artifacts ?? new Map(), commandId, eventType, []);
+    const artifacts = this.largeValues.get(
+      commandArtifactScope(runId, commandId),
+    );
+    return replaceLargeValues(
+      value,
+      artifacts ?? new Map(),
+      commandId,
+      eventType,
+      [],
+    );
   }
 }
 
@@ -1305,7 +1895,8 @@ function immutablePublication<T>(value: T): DeepReadonly<T> {
 }
 
 function deepFreeze<T>(value: T): T {
-  if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
+  if (typeof value !== "object" || value === null || Object.isFrozen(value))
+    return value;
   for (const child of Object.values(value)) deepFreeze(child);
   return Object.freeze(value);
 }
@@ -1343,12 +1934,18 @@ function collectLargeValues(
   const serialized = JSON.stringify(value);
   const isLarge = Buffer.byteLength(serialized, "utf8") >= threshold;
   const canReplace = depth > 0;
-  if (isLarge && canReplace && (typeof value === "string" || typeof value === "object" && value !== null)) {
+  if (
+    isLarge &&
+    canReplace &&
+    (typeof value === "string" || (typeof value === "object" && value !== null))
+  ) {
     found.set(digestScenarioValue(value), value);
     return found;
   }
   if (Array.isArray(value)) {
-    value.forEach((item, index) => collectLargeValues(item, threshold, found, depth + 1, String(index)));
+    value.forEach((item, index) =>
+      collectLargeValues(item, threshold, found, depth + 1, String(index)),
+    );
   } else if (typeof value === "object" && value !== null) {
     for (const [childKey, child] of Object.entries(value)) {
       collectLargeValues(child, threshold, found, depth + 1, childKey);
@@ -1366,7 +1963,8 @@ function replaceLargeValues(
   key?: string,
 ): JsonValue {
   const depth = path.length;
-  if (depth > 0 && REDUCER_STRUCTURAL_KEYS.has(key ?? "")) return escapeReservedArtifactValues(value);
+  if (depth > 0 && REDUCER_STRUCTURAL_KEYS.has(key ?? ""))
+    return escapeReservedArtifactValues(value);
   const artifact = artifacts.get(digestScenarioValue(value));
   const canReplace = depth > 0;
   if (artifact && canReplace) {
@@ -1380,7 +1978,10 @@ function replaceLargeValues(
       },
     };
     return typeof value === "string"
-      ? artifactStringReference(reference, artifact.preview ?? value.slice(0, 512))
+      ? artifactStringReference(
+          reference,
+          artifact.preview ?? value.slice(0, 512),
+        )
       : reference;
   }
   if (isReservedArtifactValue(value)) {
@@ -1388,14 +1989,28 @@ function replaceLargeValues(
   }
   if (Array.isArray(value)) {
     return value.map((item, index) =>
-      replaceLargeValues(item, artifacts, commandId, eventType, [...path, String(index)], String(index))
+      replaceLargeValues(
+        item,
+        artifacts,
+        commandId,
+        eventType,
+        [...path, String(index)],
+        String(index),
+      ),
     );
   }
   if (typeof value === "object" && value !== null) {
     return Object.fromEntries(
       Object.entries(value).map(([childKey, child]) => [
         childKey,
-        replaceLargeValues(child, artifacts, commandId, eventType, [...path, childKey], childKey),
+        replaceLargeValues(
+          child,
+          artifacts,
+          commandId,
+          eventType,
+          [...path, childKey],
+          childKey,
+        ),
       ]),
     );
   }
@@ -1406,7 +2021,12 @@ function escapeReservedArtifactValues(value: JsonValue): JsonValue {
   if (isReservedArtifactValue(value)) return escapeArtifactLiteralValue(value);
   if (Array.isArray(value)) return value.map(escapeReservedArtifactValues);
   if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, escapeReservedArtifactValues(child)]));
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [
+        key,
+        escapeReservedArtifactValues(child),
+      ]),
+    );
   }
   return value;
 }
@@ -1418,23 +2038,39 @@ function simple(
   visibility?: ScenarioRecord["visibility"],
 ): { records: SemanticRecord[]; result: ScenarioTerminalResult } {
   return {
-    records: [{
+    records: [
+      {
       eventType,
       payload: toJsonValue(payload) as Record<string, JsonValue>,
       ...(visibility === undefined ? {} : { visibility }),
-    }],
+      },
+    ],
     result,
   };
 }
 
 function messageRecord(
-  eventType: "message.userSubmitted" | "message.assistantObserved" | "message.assistantCompleted",
-  payload: Extract<ScenarioCommandPayload, { type: "userMessageSubmitted" | "assistantMessageObserved" | "assistantMessageCompleted" }>,
+  eventType:
+    | "message.userSubmitted"
+    | "message.assistantObserved"
+    | "message.assistantCompleted",
+  payload: Extract<
+    ScenarioCommandPayload,
+    {
+      type:
+        | "userMessageSubmitted"
+        | "assistantMessageObserved"
+        | "assistantMessageCompleted";
+    }
+  >,
   snapshot: ScenarioSnapshot,
 ): ReturnType<typeof simple> {
-  const existing = snapshot.conversation.find((message) => message.id === payload.messageId);
+  const existing = snapshot.conversation.find(
+    (message) => message.id === payload.messageId,
+  );
   if (eventType === "message.userSubmitted") {
-    if (existing) throw new Error(`Message ID is already committed: ${payload.messageId}`);
+    if (existing)
+      throw new Error(`Message ID is already committed: ${payload.messageId}`);
   } else if (existing) {
     if (existing.role !== "assistant" || existing.turnId !== payload.turnId) {
       throw new Error(`Message identity changed: ${payload.messageId}`);
@@ -1447,48 +2083,147 @@ function messageRecord(
 }
 
 function toolLifecycleRecord(
-  eventType: "tool.executionStarted" | "tool.outputAppended" | "tool.completed" | "tool.failed" | "tool.cancelled",
-  payload: Extract<ScenarioCommandPayload, { type: "toolExecutionStarted" | "toolOutputAppended" | "toolCompleted" | "toolFailed" | "toolCancelled" }>,
+  eventType:
+    | "tool.executionStarted"
+    | "tool.outputAppended",
+  payload: Extract<
+    ScenarioCommandPayload,
+    {
+      type:
+        | "toolExecutionStarted"
+        | "toolOutputAppended"
+        | "toolCompleted"
+        | "toolFailed"
+        | "toolCancelled";
+    }
+  >,
   snapshot: ScenarioSnapshot,
 ): ReturnType<typeof simple> {
-  const tool = snapshot.toolCalls.find((candidate) => candidate.id === payload.toolCallId);
-  if (!tool) throw new Error(`Unknown tool call: ${payload.toolCallId}`);
-  if (isTerminalToolStatus(tool.status)) throw new Error(`Tool call is already terminal: ${payload.toolCallId}`);
-  if (eventType === "tool.executionStarted") {
-    if (tool.status !== "requested" && tool.status !== "waiting") {
-      throw new Error(`toolExecutionStarted is not allowed while tool status is ${tool.status}`);
-    }
-  } else if (tool.status !== "running") {
-    throw new Error(`${payload.type} requires a running tool call; current status is ${tool.status}`);
-  }
-  return simple(eventType, payload, { status: eventType === "tool.failed" ? "failed" : "accepted" });
-}
-
-function toolCancellationRecords(
-  payload: Extract<ScenarioCommandPayload, {
-    type: "toolExecutionStarted" | "toolOutputAppended" | "toolCompleted" | "toolFailed" | "toolCancelled";
-  }>,
-  snapshot: ScenarioSnapshot,
-): SemanticResult {
-  const tool = snapshot.toolCalls.find((candidate) => candidate.id === payload.toolCallId);
+  const tool = snapshot.toolCalls.find(
+    (candidate) => candidate.id === payload.toolCallId,
+  );
   if (!tool) throw new Error(`Unknown tool call: ${payload.toolCallId}`);
   if (isTerminalToolStatus(tool.status)) {
     throw new Error(`Tool call is already terminal: ${payload.toolCallId}`);
   }
-  const reason = payload.error ?? "Tool cancelled";
+  if (eventType === "tool.executionStarted") {
+    if (tool.status !== "requested" && tool.status !== "waiting") {
+      throw new Error(
+        `toolExecutionStarted is not allowed while tool status is ${tool.status}`,
+      );
+    }
+  } else if (tool.status !== "running") {
+    throw new Error(
+      `${payload.type} requires a running tool call; current status is ${tool.status}`,
+    );
+  }
+  return simple(eventType, payload, { status: "accepted" });
+}
+
+function terminalToolLifecycleRecord(
+  payload: Extract<
+    ScenarioCommandPayload,
+    {
+      type:
+        | "toolExecutionStarted"
+        | "toolOutputAppended"
+        | "toolCompleted"
+        | "toolFailed"
+        | "toolCancelled";
+    }
+  >,
+  snapshot: ScenarioSnapshot,
+): ReturnType<typeof simple> {
+  const lifecycle = toolTerminalLifecycleFromCommandType(payload.type);
+  if (lifecycle === null) {
+    throw new Error(`Unsupported terminal tool command: ${payload.type}`);
+  }
+  const tool = snapshot.toolCalls.find(
+    (candidate) => candidate.id === payload.toolCallId,
+  );
+  if (!tool) throw new Error(`Unknown tool call: ${payload.toolCallId}`);
+  const target = {
+    status: lifecycle.status,
+    ...(payload.output === undefined
+      ? {}
+      : { terminalOutput: payload.output }),
+    error: payload.error,
+  };
+  if (isTerminalToolStatus(tool.status)) {
+    if (isIdenticalToolTerminalReplay(tool, target)) {
+      return {
+        records: [],
+        result:
+          lifecycle.status === "failed"
+          ? { status: "failed", reason: tool.error ?? "Tool failed" }
+          : { status: "accepted" },
+      };
+    }
+    throw new Error(`Tool call is already terminal: ${payload.toolCallId}`);
+  }
+  if (tool.status !== "running") {
+    throw new Error(
+      `${payload.type} requires a running tool call; current status is ${tool.status}`,
+    );
+  }
+  return simple(
+    lifecycle.eventType,
+    canonicalToolTerminalPayload(payload.toolCallId, target),
+    { status: lifecycle.status === "failed" ? "failed" : "accepted" },
+  );
+}
+
+function toolCancellationRecords(
+  payload: Extract<
+    ScenarioCommandPayload,
+    {
+      type:
+        | "toolExecutionStarted"
+        | "toolOutputAppended"
+        | "toolCompleted"
+        | "toolFailed"
+        | "toolCancelled";
+    }
+  >,
+  snapshot: ScenarioSnapshot,
+): SemanticResult {
+  const tool = snapshot.toolCalls.find(
+    (candidate) => candidate.id === payload.toolCallId,
+  );
+  if (!tool) throw new Error(`Unknown tool call: ${payload.toolCallId}`);
+  const target = canonicalToolTerminalTarget({
+    status: toolTerminalLifecycle("cancelled").status,
+    error: payload.error,
+  });
+  if (isTerminalToolStatus(tool.status)) {
+    if (isIdenticalToolTerminalReplay(tool, target)) {
+      return {
+        records: [],
+        result: { status: "cancelled", reason: tool.error ?? undefined },
+      };
+    }
+    throw new Error(`Tool call is already terminal: ${payload.toolCallId}`);
+  }
+  const reason = target.error ?? "Tool cancelled";
   return {
     records: toolCancellationSemanticRecords(tool, reason),
     result: { status: "cancelled", reason },
   };
 }
 
-function terminalToolCancellationRecords(snapshot: ScenarioSnapshot, reason: string): SemanticRecord[] {
+function terminalToolCancellationRecords(
+  snapshot: ScenarioSnapshot,
+  reason: string,
+): SemanticRecord[] {
   return snapshot.toolCalls
     .filter((tool) => !isTerminalToolStatus(tool.status))
     .flatMap((tool) => toolCancellationSemanticRecords(tool, reason));
 }
 
-function terminalEffectCancellationRecords(snapshot: ScenarioSnapshot, reason: string): SemanticRecord[] {
+function terminalEffectCancellationRecords(
+  snapshot: ScenarioSnapshot,
+  reason: string,
+): SemanticRecord[] {
   return snapshot.effects
     .filter((effect) => isPendingEffectStatus(effect.status))
     .map((effect): SemanticRecord => ({
@@ -1512,7 +2247,7 @@ function toolCancellationSemanticRecords(
       payload: { toolCallId: tool.id, final: "cancelled", reason },
     },
     {
-      eventType: "tool.cancelled",
+      eventType: toolTerminalLifecycle("cancelled").eventType,
       entityRef,
       visibility: "localSensitive",
       payload: { toolCallId: tool.id, error: reason },
@@ -1555,7 +2290,10 @@ function plannedEffect(
   planner: ScenarioEffectPlanner | undefined,
 ): PlannedScenarioEffect {
   const effect = planner?.plan(command, snapshot);
-  if (!effect) throw new Error(`Scenario effect planner is unavailable for ${command.payload.type}`);
+  if (!effect)
+    throw new Error(
+      `Scenario effect planner is unavailable for ${command.payload.type}`,
+    );
   return effect;
 }
 
@@ -1563,10 +2301,19 @@ function toolExecutionObservedRecords(
   payload: Extract<ScenarioCommandPayload, { type: "toolExecutionObserved" }>,
   snapshot: ScenarioSnapshot,
 ): SemanticResult {
-  if (snapshot.toolCalls.some((tool) => tool.id === payload.toolCallId)) {
-    throw new Error(`Tool call already exists: ${payload.toolCallId}`);
+  const existing = snapshot.toolCalls.find(
+    (tool) => tool.id === payload.toolCallId,
+  );
+  if (
+    existing &&
+    (existing.name !== payload.name ||
+    existing.inputDigest !== payload.inputDigest ||
+      (existing.turnId !== null && existing.turnId !== payload.turnId))
+  ) {
+    throw new Error(`Observed tool identity changed: ${payload.toolCallId}`);
   }
-  const reason = "Provider runtime began this tool before emitting an observation; canonical pre-execution policy was not enforced";
+  const reason =
+    "Provider runtime began this tool before emitting an observation; canonical pre-execution policy was not enforced";
   return {
     records: observedToolLifecycleRecords({
       tool: {
@@ -1576,6 +2323,7 @@ function toolExecutionObservedRecords(
         input: payload.input,
         inputDigest: payload.inputDigest,
       },
+      ...(existing ? { existing } : {}),
       authorization: {
         policy: "notEnforced",
         final: "observed",
@@ -1597,9 +2345,20 @@ function extensionCommandRecords(
   stateSlicePolicy: ScenarioStateSlicePolicy | undefined,
 ): SemanticResult {
   const result = handler?.project(command, run.snapshot);
-  if (!result) throw new Error(`Scenario command extension is unavailable: ${command.payload.extensionId}`);
-  const records = projectedMutationRecords(result.mutations, command, run, stateSlicePolicy);
-  return { records, result: scenarioTerminalResultSchema.parse(result.terminalResult) };
+  if (!result)
+    throw new Error(
+      `Scenario command extension is unavailable: ${command.payload.extensionId}`,
+    );
+  const records = projectedMutationRecords(
+    result.mutations,
+    command,
+    run,
+    stateSlicePolicy,
+  );
+  return {
+    records,
+    result: scenarioTerminalResultSchema.parse(result.terminalResult),
+  };
 }
 
 function projectedMutationRecords(
@@ -1613,21 +2372,34 @@ function projectedMutationRecords(
   for (const mutation of mutations) {
     if (mutation.kind === "stateChange") {
       const change = scenarioEffectStateChangeSchema.parse(mutation.change);
-      const slice = stateSliceFromChange(projectedSnapshot, command, change, stateSlicePolicy);
+      const slice = stateSliceFromChange(
+        projectedSnapshot,
+        command,
+        change,
+        stateSlicePolicy,
+      );
       projectedSnapshot.stateSlices[slice.key] = slice;
       records.push(stateSliceChangedRecord(slice));
       continue;
     }
-    const projected = scenarioEffectProjectionRecordSchema.parse(mutation.record);
-    if (projected.dedupeByEventAndEntity && (
-      run.records.some((record) => sameEventAndEntity(record, projected)) ||
-      records.some((record) => sameEventAndEntity(record, projected))
-    )) continue;
+    const projected = scenarioEffectProjectionRecordSchema.parse(
+      mutation.record,
+    );
+    if (
+      projected.dedupeByEventAndEntity &&
+      (run.records.some((record) => sameEventAndEntity(record, projected)) ||
+        records.some((record) => sameEventAndEntity(record, projected)))
+    )
+      continue;
     records.push({
       eventType: projected.eventType,
       payload: projected.payload,
-      ...(projected.entityRef === undefined ? {} : { entityRef: projected.entityRef }),
-      ...(projected.visibility === undefined ? {} : { visibility: projected.visibility }),
+      ...(projected.entityRef === undefined
+        ? {}
+        : { entityRef: projected.entityRef }),
+      ...(projected.visibility === undefined
+        ? {}
+        : { visibility: projected.visibility }),
     });
   }
   return records;
@@ -1637,9 +2409,11 @@ function sameEventAndEntity(
   left: Pick<SemanticRecord, "eventType" | "entityRef">,
   right: Pick<SemanticRecord, "eventType" | "entityRef">,
 ): boolean {
-  return left.eventType === right.eventType &&
+  return (
+    left.eventType === right.eventType &&
     left.entityRef?.kind === right.entityRef?.kind &&
-    left.entityRef?.id === right.entityRef?.id;
+    left.entityRef?.id === right.entityRef?.id
+  );
 }
 
 function stateSliceFromChange(
@@ -1657,13 +2431,14 @@ function stateSliceFromChange(
   },
   stateSlicePolicy?: ScenarioStateSlicePolicy,
 ): ScenarioSnapshot["stateSlices"][string] {
-  const resolved = change.baseValue !== undefined
-    ? stateSlicePolicy?.merge?.({
+  const resolved =
+    change.baseValue !== undefined
+      ? (stateSlicePolicy?.merge?.({
         key: change.key,
         baseValue: change.baseValue,
         incomingValue: change.value,
         currentValue: snapshot.stateSlices[change.key]?.value,
-      }) ?? change.value
+        }) ?? change.value)
     : change.value;
   return {
     key: change.key,
@@ -1693,9 +2468,14 @@ function toolDecisionRecords(
   payload: Extract<ScenarioCommandPayload, { type: "toolDecisionSubmitted" }>,
   snapshot: ScenarioSnapshot,
 ): SemanticResult {
-  const tool = snapshot.toolCalls.find((item) => item.id === payload.toolCallId);
+  const tool = snapshot.toolCalls.find(
+    (item) => item.id === payload.toolCallId,
+  );
   if (!tool) throw new Error(`Unknown tool call: ${payload.toolCallId}`);
-  if (tool.authorization.user !== "pending") throw new Error(`Tool call is not awaiting a decision: ${payload.toolCallId}`);
+  if (tool.authorization.user !== "pending")
+    throw new Error(
+      `Tool call is not awaiting a decision: ${payload.toolCallId}`,
+    );
   const final = payload.decision === "approve" ? "allowed" : "denied";
   const entityRef = { kind: "toolCall", id: payload.toolCallId };
   return {
@@ -1708,12 +2488,19 @@ function toolDecisionRecords(
       },
       {
         eventType: "tool.authorization.finalResolved",
-        payload: { toolCallId: payload.toolCallId, final, reason: payload.reason },
+        payload: {
+          toolCallId: payload.toolCallId,
+          final,
+          reason: payload.reason,
+        },
         entityRef,
         visibility: "localSensitive",
       },
     ],
-    result: { status: final === "allowed" ? "allowed" : "denied", ...(payload.reason ? { reason: payload.reason } : {}) },
+    result: {
+      status: final === "allowed" ? "allowed" : "denied",
+      ...(payload.reason ? { reason: payload.reason } : {}),
+    },
   };
 }
 
@@ -1746,17 +2533,21 @@ function effectProgressRecords(
   payload: Extract<ScenarioCommandPayload, { type: "effectProgressed" }>,
   snapshot: ScenarioSnapshot,
 ): SemanticResult {
-  const effect = snapshot.effects.find((candidate) => candidate.effectId === payload.effectId);
+  const effect = snapshot.effects.find(
+    (candidate) => candidate.effectId === payload.effectId,
+  );
   if (!effect) throw new Error(`Unknown effect: ${payload.effectId}`);
   assertEffectState(snapshot, payload.effectId, ["started"]);
 
   return {
-    records: [{
+    records: [
+      {
       eventType: "effect.progressed",
       entityRef: { kind: "effect", id: payload.effectId },
       visibility: "localSensitive",
       payload: { effectId: payload.effectId, progress: payload.progress },
-    }],
+      },
+    ],
     result: { status: "accepted" },
   };
 }
@@ -1768,13 +2559,20 @@ function failedEffectRecords(
   planner: ScenarioEffectPlanner | undefined,
   stateSlicePolicy: ScenarioStateSlicePolicy | undefined,
 ): SemanticResult {
-  const effect = run.snapshot.effects.find((candidate) => candidate.effectId === payload.effectId);
+  const effect = run.snapshot.effects.find(
+    (candidate) => candidate.effectId === payload.effectId,
+  );
   if (!effect) throw new Error(`Unknown effect: ${payload.effectId}`);
-  const projection = planner?.projectFailure({
+  const projection =
+    planner?.projectFailure(
+      {
     effectId: effect.effectId,
     effectType: effect.effectType,
     parameters: effect.parameters,
-  }, payload.error, run.snapshot) ?? undefined;
+      },
+      payload.error,
+      run.snapshot,
+    ) ?? undefined;
   return projectedEffectRecords({
     baseRecord: {
       eventType: "effect.failed",
@@ -1798,12 +2596,19 @@ function projectedEffectRecords(input: {
   run: OpenRun;
   stateSlicePolicy: ScenarioStateSlicePolicy | undefined;
 }): SemanticResult {
-  const terminal = input.projection === undefined
+  const terminal =
+    input.projection === undefined
     ? input.defaultTerminal
     : scenarioTerminalResultSchema.parse(input.projection.terminalResult);
   const projectionMutations: ScenarioCommandExtensionMutation[] = [
-    ...(input.projection?.records ?? []).map((record) => ({ kind: "record" as const, record })),
-    ...(input.projection?.stateChanges ?? []).map((change) => ({ kind: "stateChange" as const, change })),
+    ...(input.projection?.records ?? []).map((record) => ({
+      kind: "record" as const,
+      record,
+    })),
+    ...(input.projection?.stateChanges ?? []).map((change) => ({
+      kind: "stateChange" as const,
+      change,
+    })),
   ];
   const records: SemanticRecord[] = [
     input.baseRecord,
@@ -1818,7 +2623,10 @@ function projectedEffectRecords(input: {
     records.push({
       eventType: "command.completed",
       visibility: "localSensitive",
-      payload: { commandId: input.command.causationId, result: toJsonValue(terminal) },
+      payload: {
+        commandId: input.command.causationId,
+        result: toJsonValue(terminal),
+      },
     });
   }
   return { records, result: terminal };
@@ -1833,73 +2641,123 @@ function nativeTranscriptRecords(
   const priorActive = nativeTranscriptActiveIds(snapshot);
   for (const message of imported.messages) {
     if (message.contentDigest !== digestScenarioValue(message.content)) {
-      throw new Error(`Native transcript message digest mismatch: ${message.id}`);
+      throw new Error(
+        `Native transcript message digest mismatch: ${message.id}`,
+      );
     }
-    const existing = snapshot.conversation.find((candidate) => candidate.id === message.id);
+    const existing = snapshot.conversation.find(
+      (candidate) => candidate.id === message.id,
+    );
     if (!existing) continue;
     if (existing.role !== message.role || existing.turnId !== message.turnId) {
-      throw new Error(`Native transcript message identity changed: ${message.id}`);
+      throw new Error(
+        `Native transcript message identity changed: ${message.id}`,
+      );
     }
-    if (existing.role === "user" && (
-      existing.contentDigest !== message.contentDigest || existing.status !== message.status
-    )) {
+    if (
+      existing.role === "user" &&
+      (existing.contentDigest !== message.contentDigest ||
+        existing.status !== message.status)
+    ) {
       throw new Error(`Native transcript user message changed: ${message.id}`);
     }
-    if (isTerminalMessageStatus(existing.status) && (
-      existing.contentDigest !== message.contentDigest || existing.status !== message.status
-    )) {
-      throw new Error(`Native transcript terminal message changed: ${message.id}`);
+    if (
+      isTerminalMessageStatus(existing.status) &&
+      (existing.contentDigest !== message.contentDigest ||
+        existing.status !== message.status)
+    ) {
+      throw new Error(
+        `Native transcript terminal message changed: ${message.id}`,
+      );
     }
   }
-  const reconciledTools = reconcileNativeTranscriptTools(imported.tools, snapshot, priorActive);
+  const reconciledTools = reconcileNativeTranscriptTools(
+    imported.tools,
+    snapshot,
+    priorActive,
+  );
   for (const { tool, existing } of reconciledTools) {
     if (!existing) continue;
-    const terminalHostTool = existing.turnId === null && isTerminalToolStatus(existing.status);
+    const terminalHostTool =
+      existing.turnId === null && isTerminalToolStatus(existing.status);
     if (
       existing.name !== tool.name ||
       (!terminalHostTool && existing.turnId !== tool.turnId) ||
       existing.inputDigest !== tool.inputDigest
     ) {
-      throw new Error(`Native transcript tool identity changed: ${tool.id}`);
+      throw new Error(
+        `Native transcript tool identity changed: ${tool.id} ` +
+          `(canonical=${existing.name}/${existing.inputDigest}, native=${tool.name}/${tool.inputDigest})`,
+      );
     }
-    const outputIsOrderedPrefix = terminalHostTool || existing.output.length <= tool.output.length &&
-      existing.output.every((output, index) => canonicalJsonEqual(output, tool.output[index]));
+    // Host hooks own the canonical terminal payload. Native transcripts may
+    // represent that same result differently, so identity reconciliation must
+    // not replace or reinterpret the already-terminal host record.
+    const outputIsOrderedPrefix =
+      terminalHostTool ||
+      (existing.output.length <= tool.output.length &&
+        existing.output.every((output, index) =>
+          canonicalJsonEqual(output, tool.output[index]),
+        ));
     if (!outputIsOrderedPrefix) {
       throw new Error(`Native transcript tool output changed: ${tool.id}`);
     }
-    if (isTerminalToolStatus(existing.status) && !terminalHostTool && (
-      existing.status !== tool.status ||
+    if (isTerminalToolStatus(existing.status) && !terminalHostTool) {
+      const observedTerminalStatus =
+        tool.status === "completed" ||
+        tool.status === "failed" ||
+        tool.status === "cancelled"
+          ? tool.status
+          : null;
+      if (
+        observedTerminalStatus === null ||
       existing.output.length !== tool.output.length ||
-      existing.error !== tool.error
-    )) {
+        !isIdenticalToolTerminalReplay(existing, {
+          status: observedTerminalStatus,
+          error: tool.error,
+        })
+      ) {
       throw new Error(`Native transcript terminal tool changed: ${tool.id}`);
     }
   }
-  const records: SemanticRecord[] = [{
+  }
+  const records: SemanticRecord[] = [
+    {
     eventType: "transcript.observed",
     visibility: "localSensitive",
-    payload: { messageCount: imported.messages.length, toolCount: imported.tools.length },
-  }];
+      payload: {
+        messageCount: imported.messages.length,
+        toolCount: imported.tools.length,
+      },
+    },
+  ];
   const activeMessageIds = new Set<string>();
   const claimedExistingMessageIds = new Set<string>();
   const messageRecords: SemanticRecord[] = [];
   for (const message of imported.messages) {
-    const existingById = snapshot.conversation.find((existing) => existing.id === message.id);
+    const existingById = snapshot.conversation.find(
+      (existing) => existing.id === message.id,
+    );
     if (existingById) {
       activeMessageIds.add(existingById.id);
       claimedExistingMessageIds.add(existingById.id);
     }
-    if (existingById &&
+    if (
+      existingById &&
       existingById.contentDigest === message.contentDigest &&
       existingById.status === message.status
-    ) continue;
-    const matchingHostMessage = existingById ? undefined : snapshot.conversation.find((existing) =>
+    )
+      continue;
+    const matchingHostMessage = existingById
+      ? undefined
+      : snapshot.conversation.find(
+          (existing) =>
       !priorActive.messageIds.has(existing.id) &&
       !claimedExistingMessageIds.has(existing.id) &&
       existing.role === message.role &&
       existing.contentDigest === message.contentDigest &&
       existing.status === message.status &&
-      (existing.turnId === message.turnId || message.role === "user")
+            (existing.turnId === message.turnId || message.role === "user"),
     );
     if (matchingHostMessage) {
       activeMessageIds.add(message.id);
@@ -1933,7 +2791,8 @@ function nativeTranscriptRecords(
   }
   for (const messageId of priorActive.messageIds) {
     if (activeMessageIds.has(messageId)) continue;
-    if (!snapshot.conversation.some((message) => message.id === messageId)) continue;
+    if (!snapshot.conversation.some((message) => message.id === messageId))
+      continue;
     records.push({
       eventType: "message.retired",
       entityRef: { kind: "message", id: messageId },
@@ -1943,10 +2802,13 @@ function nativeTranscriptRecords(
   }
   records.push(...messageRecords);
 
-  const activeToolCallIds = new Set(reconciledTools.map(({ canonicalToolCallId }) => canonicalToolCallId));
+  const activeToolCallIds = new Set(
+    reconciledTools.map(({ canonicalToolCallId }) => canonicalToolCallId),
+  );
   for (const toolCallId of priorActive.toolCallIds) {
     if (activeToolCallIds.has(toolCallId)) continue;
-    if (!snapshot.toolCalls.some((toolCall) => toolCall.id === toolCallId)) continue;
+    if (!snapshot.toolCalls.some((toolCall) => toolCall.id === toolCallId))
+      continue;
     records.push({
       eventType: "tool.retired",
       entityRef: { kind: "toolCall", id: toolCallId },
@@ -1956,7 +2818,8 @@ function nativeTranscriptRecords(
   }
   for (const { tool, canonicalToolCallId, existing } of reconciledTools) {
     if (existing && isTerminalToolStatus(existing.status)) continue;
-    records.push(...observedToolLifecycleRecords({
+    records.push(
+      ...observedToolLifecycleRecords({
       tool: {
         toolCallId: canonicalToolCallId,
         turnId: tool.turnId,
@@ -1971,9 +2834,11 @@ function nativeTranscriptRecords(
         appendedOutput: tool.output,
         error: tool.error,
       },
-    }));
+      }),
+    );
   }
-  records.push(stateSliceChangedRecord({
+  records.push(
+    stateSliceChangedRecord({
     key: "transcript.native",
     schemaId: "scenario://state/native-transcript",
     revision: (snapshot.stateSlices["transcript.native"]?.revision ?? 0) + 1,
@@ -1982,15 +2847,24 @@ function nativeTranscriptRecords(
     updatedAt: recordedAt,
     visibility: "localSensitive",
     value: {
-      digest: imported.digest ?? digestScenarioValue({ messages: imported.messages, tools: imported.tools }),
+        digest:
+          imported.digest ??
+          digestScenarioValue({
+            messages: imported.messages,
+            tools: imported.tools,
+          }),
       messageIds: [...activeMessageIds],
       toolCallIds: [...activeToolCallIds],
-      toolAliases: Object.fromEntries(reconciledTools.map(({ tool, canonicalToolCallId }) =>
-        [tool.id, canonicalToolCallId]
-      )),
+        toolAliases: Object.fromEntries(
+          reconciledTools.map(({ tool, canonicalToolCallId }) => [
+            tool.id,
+            canonicalToolCallId,
+          ]),
+        ),
     },
     diagnostics: [],
-  }));
+    }),
+  );
   return { records, result: { status: "accepted" } };
 }
 
@@ -2001,7 +2875,11 @@ function nativeTranscriptActiveIds(snapshot: ScenarioSnapshot): {
 } {
   const value = snapshot.stateSlices["transcript.native"]?.value;
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return { messageIds: new Set(), toolCallIds: new Set(), toolAliases: new Map() };
+    return {
+      messageIds: new Set(),
+      toolCallIds: new Set(),
+      toolAliases: new Map(),
+    };
   }
   const messageIds = Array.isArray(value.messageIds)
     ? value.messageIds.filter((id): id is string => typeof id === "string")
@@ -2009,7 +2887,8 @@ function nativeTranscriptActiveIds(snapshot: ScenarioSnapshot): {
   const toolCallIds = Array.isArray(value.toolCallIds)
     ? value.toolCallIds.filter((id): id is string => typeof id === "string")
     : [];
-  const toolAliases = typeof value.toolAliases === "object" &&
+  const toolAliases =
+    typeof value.toolAliases === "object" &&
       value.toolAliases !== null &&
       !Array.isArray(value.toolAliases)
     ? Object.entries(value.toolAliases).filter(
@@ -2041,39 +2920,56 @@ function reconcileNativeTranscriptTools(
     if (tool.inputDigest !== digestScenarioValue(tool.input)) {
       throw new Error(`Native transcript tool digest mismatch: ${tool.id}`);
     }
-    const exact = snapshot.toolCalls.find((candidate) => candidate.id === tool.id);
+    const exact = snapshot.toolCalls.find(
+      (candidate) => candidate.id === tool.id,
+    );
     const priorAliasId = priorActive.toolAliases.get(tool.id);
-    const aliased = priorAliasId === undefined
+    const aliased =
+      priorAliasId === undefined
       ? undefined
       : snapshot.toolCalls.find((candidate) => candidate.id === priorAliasId);
     if (priorAliasId !== undefined && !aliased) {
-      throw new Error(`Native transcript tool alias target is missing: ${tool.id}`);
+      throw new Error(
+        `Native transcript tool alias target is missing: ${tool.id}`,
+      );
     }
     if (exact && aliased && exact.id !== aliased.id) {
-      throw new Error(`Native transcript tool alias conflicts with canonical ID: ${tool.id}`);
+      throw new Error(
+        `Native transcript tool alias conflicts with canonical ID: ${tool.id}`,
+      );
     }
-    const hostMatches = exact || aliased ? [] : snapshot.toolCalls.filter((candidate) =>
+    const hostMatches =
+      exact || aliased
+        ? []
+        : snapshot.toolCalls.filter(
+            (candidate) =>
       candidate.turnId === null &&
       isTerminalToolStatus(candidate.status) &&
       candidate.name === tool.name &&
       candidate.inputDigest === tool.inputDigest &&
       !priorActive.toolCallIds.has(candidate.id) &&
-      !claimedCanonicalIds.has(candidate.id)
+              !claimedCanonicalIds.has(candidate.id),
     );
     if (hostMatches.length > 1) {
-      throw new Error(`Native transcript tool identity is ambiguous: ${tool.id}`);
+      throw new Error(
+        `Native transcript tool identity is ambiguous: ${tool.id}`,
+      );
     }
     const existing = exact ?? aliased ?? hostMatches[0];
     const canonicalToolCallId = existing?.id ?? tool.id;
     if (claimedCanonicalIds.has(canonicalToolCallId)) {
-      throw new Error(`Native transcript tool identity is duplicated: ${tool.id}`);
+      throw new Error(
+        `Native transcript tool identity is duplicated: ${tool.id}`,
+      );
     }
     claimedCanonicalIds.add(canonicalToolCallId);
     return { tool, canonicalToolCallId, existing };
   });
 }
 
-function nativeTranscriptToolAuthorization(tool: NativeTranscriptTool): ObservedToolAuthorization {
+function nativeTranscriptToolAuthorization(
+  tool: NativeTranscriptTool,
+): ObservedToolAuthorization {
   if (tool.status === "waiting") {
     return {
       policy: "allowed",
@@ -2094,7 +2990,9 @@ function nativeTranscriptToolAuthorization(tool: NativeTranscriptTool): Observed
   };
 }
 
-function commandVisibility(payload: ScenarioCommandPayload): ScenarioRecord["visibility"] {
+function commandVisibility(
+  payload: ScenarioCommandPayload,
+): ScenarioRecord["visibility"] {
   if (payload.type === "stateSliceChanged") return payload.visibility;
   if (
     payload.type === "extensionCommand" ||
@@ -2113,7 +3011,8 @@ function commandVisibility(payload: ScenarioCommandPayload): ScenarioRecord["vis
     payload.type === "planStateChanged" ||
     payload.type === "continuationStateChanged" ||
     payload.type === "submitFeedback"
-  ) return "localSensitive";
+  )
+    return "localSensitive";
   return "public";
 }
 
@@ -2129,7 +3028,8 @@ function priorFeedbackForIdempotencyKey(
     if (
       parsed.data.idempotencyKey === payload.idempotencyKey &&
       parsed.data.author.subjectId === payload.author.subjectId
-    ) return parsed.data;
+    )
+      return parsed.data;
   }
   return undefined;
 }
@@ -2144,7 +3044,9 @@ function assertIdempotentFeedbackMatches(
     prior.vote !== payload.vote ||
     prior.note !== validateFeedbackNote(payload.note)
   ) {
-    throw new Error("Feedback idempotency key was reused with different content");
+    throw new Error(
+      "Feedback idempotency key was reused with different content",
+    );
   }
 }
 
@@ -2153,9 +3055,12 @@ function assertEffectState(
   effectId: string,
   allowed: Array<ScenarioSnapshot["effects"][number]["status"]>,
 ): void {
-  const effect = snapshot.effects.find((candidate) => candidate.effectId === effectId);
+  const effect = snapshot.effects.find(
+    (candidate) => candidate.effectId === effectId,
+  );
   if (!effect) throw new Error(`Unknown effect: ${effectId}`);
-  if (!allowed.includes(effect.status)) throw new Error(`Effect ${effectId} is already ${effect.status}`);
+  if (!allowed.includes(effect.status))
+    throw new Error(`Effect ${effectId} is already ${effect.status}`);
 }
 
 function assertEffectClaim(
@@ -2163,7 +3068,9 @@ function assertEffectClaim(
   effectId: string,
   claimId: string | undefined,
 ): void {
-  const effect = snapshot.effects.find((candidate) => candidate.effectId === effectId);
+  const effect = snapshot.effects.find(
+    (candidate) => candidate.effectId === effectId,
+  );
   if (!effect) throw new Error(`Unknown effect: ${effectId}`);
   if (!claimId || effect.claimId !== claimId) {
     throw new Error(`Effect claim is stale: ${effectId}`);
@@ -2171,13 +3078,20 @@ function assertEffectClaim(
 }
 
 function isEffectClaimExpired(
-  effect: Pick<ScenarioSnapshot["effects"][number], "claimId" | "claimRenewedAt" | "startedAt">,
+  effect: Pick<
+    ScenarioSnapshot["effects"][number],
+    "claimId" | "claimRenewedAt" | "startedAt"
+  >,
   now: number,
   leaseMs: number,
 ): boolean {
   const leaseTimestamp = effect.claimRenewedAt ?? effect.startedAt;
   const renewedAt = leaseTimestamp ? Date.parse(leaseTimestamp) : Number.NaN;
-  return Boolean(effect.claimId) && Number.isFinite(renewedAt) && now - renewedAt >= leaseMs;
+  return (
+    Boolean(effect.claimId) &&
+    Number.isFinite(renewedAt) &&
+    now - renewedAt >= leaseMs
+  );
 }
 
 function assertEffectClaimExpired(
@@ -2186,7 +3100,9 @@ function assertEffectClaimExpired(
   now: number,
   leaseMs: number,
 ): void {
-  const effect = snapshot.effects.find((candidate) => candidate.effectId === effectId);
+  const effect = snapshot.effects.find(
+    (candidate) => candidate.effectId === effectId,
+  );
   if (!effect) throw new Error(`Unknown effect: ${effectId}`);
   if (!isEffectClaimExpired(effect, now, leaseMs)) {
     throw new Error(`Effect claim lease is still active: ${effectId}`);
@@ -2194,32 +3110,49 @@ function assertEffectClaimExpired(
 }
 
 function commandIdentityDigest(command: ScenarioCommand): string {
-  return digestScenarioValue(toJsonValue({
+  return digestScenarioValue(
+    toJsonValue({
     commandId: command.commandId,
     runId: command.runId,
     source: command.source,
     ...(command.expectedSnapshotRevision === undefined
       ? {}
       : { expectedSnapshotRevision: command.expectedSnapshotRevision }),
-    ...(command.correlationId === undefined ? {} : { correlationId: command.correlationId }),
-    ...(command.causationId === undefined ? {} : { causationId: command.causationId }),
+      ...(command.correlationId === undefined
+        ? {}
+        : { correlationId: command.correlationId }),
+      ...(command.causationId === undefined
+        ? {}
+        : { causationId: command.causationId }),
     payload: command.payload,
-  }));
+    }),
+  );
 }
 
-function assertCommandRetryMatches(command: ScenarioCommand, run: OpenRun): void {
-  const accepted = run.records.find((record) =>
-    record.commandId === command.commandId && record.eventType === "command.accepted"
+function assertCommandRetryMatches(
+  command: ScenarioCommand,
+  run: OpenRun,
+): void {
+  const accepted = run.records.find(
+    (record) =>
+      record.commandId === command.commandId &&
+      record.eventType === "command.accepted",
   );
-  if (accepted?.payload.commandDigest === commandIdentityDigest(command)) return;
+  if (accepted?.payload.commandDigest === commandIdentityDigest(command))
+    return;
   throw new Error(`Command ID collision: ${command.commandId}`);
 }
 
-function assertRunLifecycle(payload: ScenarioCommandPayload, snapshot: ScenarioSnapshot): void {
+function assertRunLifecycle(
+  payload: ScenarioCommandPayload,
+  snapshot: ScenarioSnapshot,
+): void {
   const status = snapshot.status;
   if (payload.type === "startRun") {
     if (status === "created") return;
-    throw new Error(`startRun requires a newly created run; current status is ${status}`);
+    throw new Error(
+      `startRun requires a newly created run; current status is ${status}`,
+    );
   }
   if (payload.type === "resumeRun") {
     if (isTerminalRunStatus(status)) return;
@@ -2229,21 +3162,38 @@ function assertRunLifecycle(payload: ScenarioCommandPayload, snapshot: ScenarioS
     throw new Error(`Run must be started before ${payload.type}`);
   }
   if (isTerminalRunStatus(status) && payload.type !== "submitFeedback") {
-    throw new Error(`${payload.type} is not allowed while run status is ${status}`);
+    throw new Error(
+      `${payload.type} is not allowed while run status is ${status}`,
+    );
   }
 }
 
-function assertCommandCapabilities(payload: ScenarioCommandPayload, snapshot: ScenarioSnapshot): void {
-  if (payload.type === "userMessageSubmitted" && !snapshot.capabilities.conversationInput) {
+function assertCommandCapabilities(
+  payload: ScenarioCommandPayload,
+  snapshot: ScenarioSnapshot,
+): void {
+  if (
+    payload.type === "userMessageSubmitted" &&
+    !snapshot.capabilities.conversationInput
+  ) {
     throw new Error("Run does not allow conversation input");
   }
-  if (payload.type === "planStateChanged" && !snapshot.capabilities.planControl) {
+  if (
+    payload.type === "planStateChanged" &&
+    !snapshot.capabilities.planControl
+  ) {
     throw new Error("Run does not allow plan control");
   }
-  if (payload.type === "toolDecisionSubmitted" && !snapshot.capabilities.interactiveToolDecisions) {
+  if (
+    payload.type === "toolDecisionSubmitted" &&
+    !snapshot.capabilities.interactiveToolDecisions
+  ) {
     throw new Error("Run does not allow interactive tool decisions");
   }
-  if (payload.type === "toolExecutionObserved" && !snapshot.capabilities.toolExecution) {
+  if (
+    payload.type === "toolExecutionObserved" &&
+    !snapshot.capabilities.toolExecution
+  ) {
     throw new Error("Run does not allow tool execution observations");
   }
   if (payload.type === "cancelRun" && !snapshot.capabilities.runCancellation) {
@@ -2255,28 +3205,42 @@ function manifestStatus(
   payload: ScenarioCommandPayload,
   current: RunManifest["status"],
 ): RunManifest["status"] {
-  if (payload.type === "startRun" || payload.type === "resumeRun") return "running";
+  if (payload.type === "startRun" || payload.type === "resumeRun")
+    return "running";
   if (payload.type === "closeRun") return "closed";
   if (payload.type === "cancelRun") return "cancelled";
   if (payload.type === "runtimeErrorObserved") {
-    return normalizeRuntimeError(payload.data).recoverable === true ? current : "failed";
+    return normalizeRuntimeError(payload.data).recoverable === true
+      ? current
+      : "failed";
   }
   return current;
 }
 
 function shouldUpdateRegistry(payload: ScenarioCommandPayload): boolean {
-  return !isScenarioEffectLifecycleCommand(payload) &&
+  return (
+    !isScenarioEffectLifecycleCommand(payload) &&
     payload.type !== "toolOutputAppended" &&
-    payload.type !== "assistantMessageObserved";
+    payload.type !== "assistantMessageObserved"
+  );
 }
 
 function manifestForStartCommand(
-  command: ScenarioCommand & { payload: Extract<ScenarioCommandPayload, { type: "startRun" }> },
+  command: ScenarioCommand & {
+    payload: Extract<ScenarioCommandPayload, { type: "startRun" }>;
+  },
   redactionPaths?: readonly string[],
 ): RunManifest;
-function manifestForStartCommand(command: ScenarioCommand, redactionPaths?: readonly string[]): RunManifest;
-function manifestForStartCommand(command: ScenarioCommand, redactionPaths?: readonly string[]): RunManifest {
-  if (command.payload.type !== "startRun") throw new Error("Only startRun can define a manifest");
+function manifestForStartCommand(
+  command: ScenarioCommand,
+  redactionPaths?: readonly string[],
+): RunManifest;
+function manifestForStartCommand(
+  command: ScenarioCommand,
+  redactionPaths?: readonly string[],
+): RunManifest {
+  if (command.payload.type !== "startRun")
+    throw new Error("Only startRun can define a manifest");
   assertScenarioSchemaDigest(command);
   const payload = command.payload;
   return runManifestSchema.parse({
@@ -2286,7 +3250,9 @@ function manifestForStartCommand(command: ScenarioCommand, redactionPaths?: read
     projectDir: payload.projectDir,
     adapter: command.source.adapter ?? null,
     provider: command.source.provider ?? null,
-    nativeSessionIds: command.source.nativeSessionId ? [command.source.nativeSessionId] : [],
+    nativeSessionIds: command.source.nativeSessionId
+      ? [command.source.nativeSessionId]
+      : [],
     engineVersion: payload.engineVersion,
     schemaDigest: payload.schemaDigest,
     capabilities: payload.capabilities,
@@ -2325,7 +3291,9 @@ function equivalentRunStart(
   redactionPaths?: readonly string[],
 ): boolean {
   const expected = manifestForStartCommand(command, redactionPaths);
-  const identity = (candidate: RunManifest) => canonicalJson(toJsonValue({
+  const identity = (candidate: RunManifest) =>
+    canonicalJson(
+      toJsonValue({
     source: {
       kind: candidate.source.kind,
       adapter: candidate.source.adapter ?? null,
@@ -2341,17 +3309,24 @@ function equivalentRunStart(
     storagePolicy: candidate.storagePolicy,
     runtimeHome: candidate.runtimeHome,
     configuration: candidate.configuration,
-  }));
+      }),
+    );
   return identity(expected) === identity(manifest);
 }
 
-function normalizeRuntimeError(value: JsonValue | undefined): Record<string, JsonValue> {
+function normalizeRuntimeError(
+  value: JsonValue | undefined,
+): Record<string, JsonValue> {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     return runtimeErrorSchema.parse({
       code: typeof value.code === "string" ? value.code : "runtime_error",
-      message: typeof value.message === "string" ? value.message : "Runtime error",
+      message:
+        typeof value.message === "string" ? value.message : "Runtime error",
       recoverable: value.recoverable === true,
-      metadata: typeof value.metadata === "object" && value.metadata !== null && !Array.isArray(value.metadata)
+      metadata:
+        typeof value.metadata === "object" &&
+        value.metadata !== null &&
+        !Array.isArray(value.metadata)
         ? value.metadata
         : {},
     });

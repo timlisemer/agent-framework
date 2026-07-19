@@ -5,7 +5,8 @@ import type { Mood, Trust } from "../utils/prediction-schema.js";
 import type { HostContext } from "../utils/host-context.js";
 import type { PlanSourceDescriptor } from "../adapter/types.js";
 import type { PriorErrorContext } from "../utils/prior-error-context.js";
-import type { JsonValue } from "../scenario/protocol/common.js";
+import type { AgentConfig } from "../utils/agent-runner.js";
+import type { ReadonlyJsonObject } from "../scenario/protocol/common.js";
 
 export type HookEvent = "PreToolUse" | "UserPromptSubmit" | "Stop";
 
@@ -166,9 +167,11 @@ export interface PreToolRule {
   /** Whether this rule involves an LLM call. Used by exitPipeline to decide
    *  whether to write gate reasoning entries. Replaces the hardcoded isLlmAgent array. */
   usesLlm: boolean;
-  /** Versioned, serializable rule configuration exposed to runtime clients. */
+  /** Exact agent configuration consumed when this rule performs or requests evaluation. */
+  evaluationAgent?: Omit<AgentConfig, "workingDir">;
+  /** Versioned rule-owned configuration, canonicalized at the descriptor boundary. */
   version?: string;
-  configuration?: Record<string, JsonValue>;
+  configuration?: ReadonlyJsonObject;
   /** Hook events this rule participates in. Defaults to ["PreToolUse"] when omitted. */
   events?: ReadonlyArray<HookEvent>;
   check(ctx: RuleContext): Promise<RuleCheckResult>;

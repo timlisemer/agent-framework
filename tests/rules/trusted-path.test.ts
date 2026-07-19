@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { trustedPathRule } from "../../src/rules/trusted-path.js";
+import { SENSITIVE_PATH_RULE_POLICY } from "../../src/rules/policies.js";
 import { isSensitivePath } from "../../src/rules/utils.js";
 import { sessionStateDefaults } from "../helpers/session-workflow.js";
 import { makeRuleContext } from "../helpers/rule-context.js";
@@ -63,6 +64,27 @@ describe("sensitive path classification", () => {
 });
 
 describe("trustedPathRule", () => {
+  it("enforces the exact tool boundary published by its production policy", async () => {
+    for (const toolName of SENSITIVE_PATH_RULE_POLICY.fileTools) {
+      const result = await trustedPathRule.check(makeCtx({
+        toolName,
+        toolInput: {
+          path: ".env.local",
+          file_path: ".env.local",
+          file_paths: [".env.local"],
+          edits: [],
+        },
+      }));
+      expect(result, toolName).toEqual({
+        fastDeny: expect.stringContaining("Sensitive path blocked"),
+      });
+    }
+    await expect(trustedPathRule.check(makeCtx({
+      toolName: "AskUserQuestion",
+      toolInput: { file_path: ".env.local" },
+    }))).resolves.toBeNull();
+  });
+
   it("allows editing documented provider configuration template", async () => {
     const result = await trustedPathRule.check(makeCtx({
       toolInput: { file_path: "docs/provider-configuration.md" },

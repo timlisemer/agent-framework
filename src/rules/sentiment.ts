@@ -14,14 +14,17 @@ import {
   uniqueToolRequirements,
 } from "../utils/prediction-types.js";
 import type { ToolRequirement } from "../utils/prediction-schema.js";
-import { preClassifyMood, extractDirectiveHint, preClassifyCalm } from "../utils/sentiment-prefilter.js";
+import {
+  preClassifyMood,
+  extractDirectiveHint,
+  preClassifyCalm,
+} from "../utils/sentiment-prefilter.js";
 import {
   deriveEditIntentFromPrediction,
   deriveAllowedToolsFromIntent,
 } from "../utils/edit-intent.js";
 import { isCancellationError } from "../utils/cancellation.js";
-
-const SENTIMENT_TIMEOUT_MS = 12000;
+import { SENTIMENT_RULE_POLICY } from "./policies.js";
 
 function dropWorkflowBroadAllows(
   explicitlyAllowedTools: readonly string[],
@@ -37,6 +40,9 @@ export const sentimentRule: PreToolRule = {
   priority: 10,
   appealable: false,
   usesLlm: true,
+  evaluationAgent: SENTIMENT_AGENT,
+  version: "1",
+  configuration: SENTIMENT_RULE_POLICY,
   events: ["UserPromptSubmit"],
   promptSection: "",
 
@@ -53,7 +59,8 @@ export const sentimentRule: PreToolRule = {
     const previousPrediction = reloadedState.currentPrediction;
     const recent = await readRecentUserMessages(
       ctx.transcriptPath,
-      reloadedState.currentWindowSize ?? 2,
+      reloadedState.currentWindowSize ??
+        SENTIMENT_RULE_POLICY.defaultWindowSize,
       true,
       { stripQuoted: false },
     ).catch(() => "");
@@ -76,18 +83,20 @@ export const sentimentRule: PreToolRule = {
       ? `DIRECTIVE HINT (regex pre-extractor - last imperative sentence in full LATEST; the user's directive should be reflected in INTENT):\n  ${JSON.stringify(directiveHint)}\n\n`
       : "";
 
-    const strippedHelperSection = strippedForPrefilter !== userPrompt
+    const strippedHelperSection =
+      strippedForPrefilter !== userPrompt
       ? `LATEST USER MESSAGE WITH QUOTED/PASTED CONTENT REMOVED (helper only; raw message above is authoritative):\n${strippedForPrefilter}\n\n`
       : "";
 
     const sentimentPromise = runAgent(
-      { ...SENTIMENT_AGENT, workingDir: projectDir },
+      { ...sentimentRule.evaluationAgent!, workingDir: projectDir },
       {
-        prompt: "Classify the user's most recent message and produce a sentiment-aware prediction.",
+        prompt:
+          "Classify the user's most recent message and produce a sentiment-aware prediction.",
         context:
           `PREVIOUS PREDICTION (historical context -- re-evaluate LATEST on its own terms, do NOT copy forward):\n${previousSummary}\n\n` +
           `FRUSTRATION STREAK (informational -- TS applies promotion deterministically after you output): ${reloadedState.frustrationStreak ?? 0}\n` +
-          `CURRENT WINDOW SIZE: ${reloadedState.currentWindowSize ?? 2}\n\n` +
+          `CURRENT WINDOW SIZE: ${reloadedState.currentWindowSize ?? SENTIMENT_RULE_POLICY.defaultWindowSize}\n\n` +
           moodHintSection +
           directiveHintSection +
           `RECENT USER MESSAGES (with [Tn] indices, T0 = newest; full unstripped text):\n${recent}\n\n` +
@@ -97,12 +106,17 @@ export const sentimentRule: PreToolRule = {
       { signal: ctx.signal },
     );
     const timeoutPromise = new Promise<null>((resolve) =>
-      setTimeout(() => resolve(null), SENTIMENT_TIMEOUT_MS)
+      setTimeout(() => resolve(null), SENTIMENT_RULE_POLICY.timeoutMs),
     );
 
     try {
-      const sentimentResult = await Promise.race([sentimentPromise, timeoutPromise]);
-      const parsed = sentimentResult ? parseSentimentOutput(sentimentResult.output) : null;
+      const sentimentResult = await Promise.race([
+        sentimentPromise,
+        timeoutPromise,
+      ]);
+      const parsed = sentimentResult
+        ? parseSentimentOutput(sentimentResult.output)
+        : null;
       if (parsed && sentimentResult?.success) {
         // TS-side overrides
         parsed.explicitlyAllowedTools = [
@@ -112,7 +126,8 @@ export const sentimentRule: PreToolRule = {
           ]),
         ];
 
-        const workflowRequirements = deriveWorkflowToolRequirementsFromText(userPrompt);
+        const workflowRequirements =
+          deriveWorkflowToolRequirementsFromText(userPrompt);
         if (workflowRequirements.explicitlyRequiredTools.length > 0) {
           parsed.explicitlyRequiredTools = [
             ...(parsed.explicitlyRequiredTools ?? []),
@@ -151,16 +166,27 @@ export const sentimentRule: PreToolRule = {
         }
 
         const oldStreak = reloadedState.frustrationStreak ?? 0;
-        const oldWindow = reloadedState.currentWindowSize ?? 2;
-        const negativeMood = parsed.mood === "angry" || parsed.mood === "frustrated";
-        const newStreak = negativeMood ? Math.min(oldStreak + 1, 5) : 0;
+        const oldWindow =
+          reloadedState.currentWindowSize ??
+          SENTIMENT_RULE_POLICY.defaultWindowSize;
+        const negativeMood =
+          parsed.mood === "angry" || parsed.mood === "frustrated";
+        const newStreak = negativeMood
+          ? Math.min(
+              oldStreak + 1,
+              SENTIMENT_RULE_POLICY.maximumFrustrationStreak,
+            )
+          : 0;
 
         let effectiveMood = parsed.mood;
-        if (newStreak >= 3) {
+        if (newStreak >= SENTIMENT_RULE_POLICY.moodEscalationStreak) {
           if (parsed.mood === "frustrated") effectiveMood = "angry";
           else if (parsed.mood === "neutral") effectiveMood = "frustrated";
         }
-        const effectiveTrust = newStreak >= 5 ? "low" : parsed.trust;
+        const effectiveTrust =
+          newStreak >= SENTIMENT_RULE_POLICY.lowTrustStreak
+            ? "low"
+            : parsed.trust;
 
         const prevMood = previousPrediction?.mood;
         const nextWindow = decideNextWindowSize({
@@ -177,10 +203,15 @@ export const sentimentRule: PreToolRule = {
         const predictionForDerivation = {
           ...parsed,
           userMessageFull: userPrompt,
-          userMessageSnippet: userPrompt.slice(0, 200),
+          userMessageSnippet: userPrompt.slice(
+            0,
+            SENTIMENT_RULE_POLICY.userMessageSnippetCharacters,
+          ),
           timestamp: Date.now(),
         };
-        const derivedEditIntent = deriveEditIntentFromPrediction(predictionForDerivation);
+        const derivedEditIntent = deriveEditIntentFromPrediction(
+          predictionForDerivation,
+        );
         const finalEditIntent = planMode ? false : derivedEditIntent;
 
         await stateManager.update((s) => ({
@@ -197,14 +228,20 @@ export const sentimentRule: PreToolRule = {
             mood: effectiveMood,
             trust: effectiveTrust,
             userMessageFull: userPrompt,
-            userMessageSnippet: userPrompt.slice(0, 200),
+            userMessageSnippet: userPrompt.slice(
+              0,
+              SENTIMENT_RULE_POLICY.userMessageSnippetCharacters,
+            ),
             timestamp: Date.now(),
             hasExplicitOverride,
           },
           lastProcessedPlanApprovalToolUseId: null,
           driftState: {},
           lastUserMessageTimestamp: Date.now(),
-          gateReasoningResetAt: parsed.contextSwitch === "yes" ? Date.now() : s.gateReasoningResetAt,
+          gateReasoningResetAt:
+            parsed.contextSwitch === "yes"
+              ? Date.now()
+              : s.gateReasoningResetAt,
         }));
       } else {
         const reason = !sentimentResult
@@ -214,7 +251,7 @@ export const sentimentRule: PreToolRule = {
             : "sentiment output failed structural parse";
         const telemetryResult = sentimentResult ?? {
           output: "(no output)",
-          latencyMs: SENTIMENT_TIMEOUT_MS,
+          latencyMs: SENTIMENT_RULE_POLICY.timeoutMs,
           success: false,
           errorCount: 1,
           modelTier: MODEL_TIERS.HAIKU,
@@ -227,10 +264,10 @@ export const sentimentRule: PreToolRule = {
           "(classify-prompt)",
           projectDir,
           EXECUTION_TYPES.LLM,
-          `${reason}; keeping previous prediction. raw (first 500 chars): ${sentimentResult?.output?.slice(0, 500) ?? "(no output)"}`
+          `${reason}; keeping previous prediction. raw (first 500 chars): ${sentimentResult?.output?.slice(0, 500) ?? "(no output)"}`,
         );
         console.error(
-          `[sentiment-rule] ${reason}; keeping previous prediction.`
+          `[sentiment-rule] ${reason}; keeping previous prediction.`,
         );
         await stateManager.update((s) => ({
           ...s,

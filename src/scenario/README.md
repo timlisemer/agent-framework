@@ -160,6 +160,12 @@ npm run --silent scenario:contract -- materialize <run-root> <run-id> <name>
 npm run --silent scenario:contract -- validate-snapshot <snapshot-path>
 ```
 
+Repository maintainers regenerate all checked-in protocol exports with
+`npm run generate:scenario-protocol` and use
+`npx tsx scripts/generate-scenario-protocol.ts --check` for a non-writing stale-file check. The
+artifact inventory is exported by the contract itself; consumers must not
+duplicate that inventory or protocol limits in handwritten lists.
+
 `apply-commands` is explicit-command replay: it validates and commits only the
 commands present in the input array, in order. It does not run effect executors
 or synthesize outbox lifecycle commands. A replay that includes

@@ -32,6 +32,13 @@ data; record, reducer, cursor, and recovery semantics do not vary by entry path.
 Fixture expectations are authored test assertions, while manual feedback is
 validated and appended independently.
 
+Operational recovery is current-format correctness: journal repair, snapshot
+repair, retries, resynchronization, effect claims, provider settlement bounds,
+and native tool-ID reconciliation restore or fence the contract documented
+here. A compatibility shim instead accepts a superseded name or wire format.
+The Scenario core contains no old `ai-protocol` or `managedAstral` path; its
+recovery machinery must not be removed merely because it resembles a fallback.
+
 ## Directory Structure
 
 ```
@@ -665,6 +672,13 @@ as `host.context` with the host command. Rule effects consume that committed
 context and a canonical transcript reconstructed from the same snapshot; they
 never re-read the adapter-native file. Internal SDK scratch/runtime homes remain
 deployment details, not scenario state.
+
+Host-session workspaces under `~/.agent-framework/sessions/` remain
+nonsemantic locators for native transcripts, adapter planfiles, and MCP
+coordination. They do not compete with canonical run identity. Managed Codex
+homes receive the canonical provider run ID explicitly so configured hooks
+join that run; provider events and hook commands retain their own source data
+inside the same journal.
 
 Named Markdown planfiles under `plans/<name>.md` are external artifacts. The
 active file-backed plan descriptor and validation outcome are canonical state

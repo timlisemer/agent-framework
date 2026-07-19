@@ -35,6 +35,105 @@ export type ObservedToolTarget = {
   error?: string | null;
 };
 
+export type ToolTerminalTarget = {
+  status: "completed" | "failed" | "cancelled";
+  terminalOutput?: JsonValue;
+  error?: string | null;
+};
+
+export type ToolTerminalLifecycle = {
+  status: ToolTerminalTarget["status"];
+  commandType: "toolCompleted" | "toolFailed" | "toolCancelled";
+  eventType: "tool.completed" | "tool.failed" | "tool.cancelled";
+  defaultError: string | null;
+};
+
+const TOOL_TERMINAL_LIFECYCLES = {
+  completed: {
+    status: "completed",
+    commandType: "toolCompleted",
+    eventType: "tool.completed",
+    defaultError: null,
+  },
+  failed: {
+    status: "failed",
+    commandType: "toolFailed",
+    eventType: "tool.failed",
+    defaultError: "Tool execution failed",
+  },
+  cancelled: {
+    status: "cancelled",
+    commandType: "toolCancelled",
+    eventType: "tool.cancelled",
+    defaultError: "Tool cancelled",
+  },
+} as const satisfies Record<ToolTerminalTarget["status"], ToolTerminalLifecycle>;
+
+export function toolTerminalLifecycle(
+  status: ToolTerminalTarget["status"],
+): ToolTerminalLifecycle {
+  return TOOL_TERMINAL_LIFECYCLES[status];
+}
+
+export function toolTerminalLifecycleFromCommandType(
+  commandType: string,
+): ToolTerminalLifecycle | null {
+  return Object.values(TOOL_TERMINAL_LIFECYCLES).find(
+    (lifecycle) => lifecycle.commandType === commandType,
+  ) ?? null;
+}
+
+export type CanonicalToolTerminalTarget = {
+  status: ToolTerminalTarget["status"];
+  terminalOutput?: JsonValue;
+  error: string | null;
+};
+
+type TerminalToolSnapshot = Pick<
+  ScenarioSnapshot["toolCalls"][number],
+  "status" | "output" | "error"
+>;
+
+/** Normalize every entry path to the terminal state authored by the reducer. */
+export function canonicalToolTerminalTarget(target: ToolTerminalTarget): CanonicalToolTerminalTarget {
+  const lifecycle = toolTerminalLifecycle(target.status);
+  return {
+    status: lifecycle.status,
+    ...(target.terminalOutput === undefined ? {} : { terminalOutput: target.terminalOutput }),
+    error: lifecycle.defaultError === null
+      ? null
+      : target.error ?? lifecycle.defaultError,
+  };
+}
+
+/** Compare a repeated terminal observation after canonical normalization. */
+export function isIdenticalToolTerminalReplay(
+  tool: TerminalToolSnapshot,
+  target: ToolTerminalTarget,
+): boolean {
+  const canonical = canonicalToolTerminalTarget(target);
+  return tool.status === canonical.status &&
+    tool.error === canonical.error &&
+    (canonical.terminalOutput === undefined
+      ? true
+      :
+      canonicalJsonEqual(tool.output.at(-1), canonical.terminalOutput));
+}
+
+export function canonicalToolTerminalPayload(
+  toolCallId: string,
+  target: ToolTerminalTarget,
+): Record<string, JsonValue> {
+  const canonical = canonicalToolTerminalTarget(target);
+  const lifecycle = toolTerminalLifecycle(canonical.status);
+  return {
+    type: lifecycle.commandType,
+    toolCallId,
+    ...(canonical.terminalOutput === undefined ? {} : { output: canonical.terminalOutput }),
+    ...(canonical.error === null ? {} : { error: canonical.error }),
+  };
+}
+
 type ExistingTool = Pick<
   ScenarioSnapshot["toolCalls"][number],
   "status" | "authorization" | "output"
@@ -108,18 +207,19 @@ export function observedToolLifecycleRecords(input: {
   }
   if (target.status === "running") return records;
 
-  const terminalType = target.status === "completed"
-    ? "tool.completed"
-    : target.status === "failed" ? "tool.failed" : "tool.cancelled";
-  const payloadType = target.status === "completed"
-    ? "toolCompleted"
-    : target.status === "failed" ? "toolFailed" : "toolCancelled";
-  records.push(lifecycleRecord(tool.toolCallId, terminalType, {
-    type: payloadType,
-    toolCallId: tool.toolCallId,
-    ...(target.terminalOutput === undefined ? {} : { output: target.terminalOutput }),
-    ...(target.error === undefined || target.error === null ? {} : { error: target.error }),
-  }));
+  const terminalTarget: ToolTerminalTarget = {
+    status: target.status === "completed"
+      ? "completed"
+      : target.status === "failed" ? "failed" : "cancelled",
+    ...(target.terminalOutput === undefined ? {} : { terminalOutput: target.terminalOutput }),
+    error: target.error,
+  };
+  const terminalType = toolTerminalLifecycle(terminalTarget.status).eventType;
+  records.push(lifecycleRecord(
+    tool.toolCallId,
+    terminalType,
+    canonicalToolTerminalPayload(tool.toolCallId, terminalTarget),
+  ));
   return records;
 }
 

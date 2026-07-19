@@ -25,6 +25,11 @@ export type RuntimeProvider = string;
 export type SdkToolPolicy = RuntimeToolPolicy;
 export type { RuntimeHomeProfile, SessionPolicy } from "./profiles.js";
 
+export type ScenarioBinding = {
+  runId: string;
+  root: string;
+};
+
 export type MaterializedRuntimeHome = {
   provider: RuntimeProvider;
   profile: RuntimeHomeProfile;
@@ -72,11 +77,18 @@ export function materializeRuntimeHome(input: {
   toolPolicy?: SdkToolPolicy;
   env?: NodeJS.ProcessEnv;
   runId?: string;
+  scenarioBinding?: ScenarioBinding;
+  rootOverride?: string;
 }): MaterializedRuntimeHome {
   const env = { ...(input.env ?? process.env) };
   const runId = input.runId ?? makeRuntimeRunId(`${input.provider}-${input.profile}`);
   const sessionPolicy = sessionPolicyForProfile(input.profile);
-  const root = runtimeProfileRoot(input.profile, input.provider, runId);
+  if (input.rootOverride && input.profile !== "managed") {
+    throw new Error("A runtime-home root override is valid only for the managed profile");
+  }
+  const root = input.rootOverride
+    ? path.resolve(input.rootOverride)
+    : runtimeProfileRoot(input.profile, input.provider, runId);
   let volatileDir: string | undefined;
 
   try {
@@ -116,6 +128,8 @@ export function materializeRuntimeHome(input: {
     sessionPolicy,
     runId,
     volatileDir,
+    scenarioBinding:
+      input.profile === "managed" ? input.scenarioBinding : undefined,
   });
 
   return {
@@ -173,6 +187,7 @@ function withRuntimeEnv(
     sessionPolicy: SessionPolicy;
     runId: string;
     volatileDir?: string;
+    scenarioBinding?: ScenarioBinding;
   },
 ): NodeJS.ProcessEnv {
   const next: NodeJS.ProcessEnv = {
@@ -183,6 +198,15 @@ function withRuntimeEnv(
     AGENT_FRAMEWORK_ROOT: env.AGENT_FRAMEWORK_ROOT ?? agentFrameworkRoot(),
   };
   if (marker.volatileDir) next.AGENT_FRAMEWORK_VOLATILE_DIR = marker.volatileDir;
+  if (marker.scenarioBinding) {
+    next.AGENT_FRAMEWORK_SCENARIO_RUN_ID = marker.scenarioBinding.runId;
+    next.AGENT_FRAMEWORK_SCENARIO_ROOT = path.resolve(
+      marker.scenarioBinding.root,
+    );
+  } else {
+    delete next.AGENT_FRAMEWORK_SCENARIO_RUN_ID;
+    delete next.AGENT_FRAMEWORK_SCENARIO_ROOT;
+  }
   if (marker.sessionPolicy === "write") {
     next.AGENT_FRAMEWORK_DISABLE_STOP_BLOCK = "1";
   } else {

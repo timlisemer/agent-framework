@@ -91,6 +91,21 @@ describe("Scenario Magna Lingua dependency boundaries", () => {
     expect(runtime).not.toMatch(/fixtures\/expectations|WebSocket|GTK|Astral/);
   });
 
+  it("keeps current-format operational recovery separate from compatibility shims", () => {
+    const scenario = contents(sourceFiles("src/scenario"));
+    const runtime = fs.readFileSync(path.join(ROOT, "src/scenario/runtime/runtime.ts"), "utf8");
+    const store = contents(sourceFiles("src/scenario/store"));
+    const providerManager = fs.readFileSync(
+      path.join(ROOT, "src/ai-backend/scenario-provider-manager.ts"),
+      "utf8",
+    );
+
+    expect(scenario).not.toMatch(/ai-protocol|managedAstral/);
+    expect(runtime).toContain("recoverPendingEffects");
+    expect(providerManager).toContain("providerShutdown");
+    expect(store).toContain("recovery.completed");
+  });
+
   it("keeps native hooks as thin boundary adapters", () => {
     const hooks = contents(sourceFiles("src/hooks"));
     expect(hooks).not.toMatch(/rules\/evaluator|gate-reasoning-cache|tool-log-types/);

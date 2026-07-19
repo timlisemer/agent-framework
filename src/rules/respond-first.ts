@@ -8,6 +8,7 @@ import {
   INACTION_COMPLAINT_RE,
   EXPLICIT_PROHIBITION_RE,
 } from "../utils/prediction-types.js";
+import { RESPOND_FIRST_RULE_POLICY } from "./policies.js";
 
 // Deterministic rule: AI must produce text in the current turn before calling
 // tools. Carve-outs are narrow and explicit (slash commands, confirmation
@@ -21,6 +22,8 @@ export const respondFirstRule: PreToolRule = {
   priority: 5,
   appealable: false,
   usesLlm: false,
+  version: "1",
+  configuration: RESPOND_FIRST_RULE_POLICY,
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
@@ -28,14 +31,24 @@ export const respondFirstRule: PreToolRule = {
       return null;
     }
 
-    if (ctx.toolName === "AskUserQuestion" || ctx.toolName === "ExitPlanMode") {
-      await ctx.stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
+    if (
+      RESPOND_FIRST_RULE_POLICY.exemptTools.some(
+        (tool) => tool === ctx.toolName,
+      )
+    ) {
+      await ctx.stateManager.update((s) => ({
+        ...s,
+        respondFirstChecked: true,
+      }));
       return null;
     }
 
     const rfResult = await readTranscriptExact(ctx.transcriptPath, {
-      counts: { user: { count: 1 } },
-      excludeSlashCommandPrompts: true,
+      counts: {
+        user: { count: RESPOND_FIRST_RULE_POLICY.transcriptUserMessageCount },
+      },
+      excludeSlashCommandPrompts:
+        RESPOND_FIRST_RULE_POLICY.slashCommandPromptsExcluded,
       includeSlashCommandContext: true,
     });
     const lastUser = rfResult.user.length > 0 ? rfResult.user[0] : null;
@@ -45,7 +58,10 @@ export const respondFirstRule: PreToolRule = {
       rfResult.newestUserWasSlashCommand ||
       CONFIRMATION_PATTERN.test(lastUser.content)
     ) {
-      await ctx.stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
+      await ctx.stateManager.update((s) => ({
+        ...s,
+        respondFirstChecked: true,
+      }));
       return null;
     }
 
@@ -62,10 +78,7 @@ export const respondFirstRule: PreToolRule = {
       const userSaidProhibition = EXPLICIT_PROHIBITION_RE.test(
         lastUser.content,
       );
-      if (
-        !userSaidProhibition &&
-        INACTION_COMPLAINT_RE.test(pred.intent)
-      ) {
+      if (!userSaidProhibition && INACTION_COMPLAINT_RE.test(pred.intent)) {
         await ctx.stateManager.update((s) => ({
           ...s,
           respondFirstChecked: true,
@@ -74,7 +87,10 @@ export const respondFirstRule: PreToolRule = {
       }
     }
 
-    const state = await currentTurnAssistantState(ctx.transcriptPath, ctx.toolUseId);
+    const state = await currentTurnAssistantState(
+      ctx.transcriptPath,
+      ctx.toolUseId,
+    );
     await ctx.stateManager.update((s) => ({ ...s, respondFirstChecked: true }));
 
     switch (state.kind) {
@@ -82,7 +98,7 @@ export const respondFirstRule: PreToolRule = {
         return null;
       case "silent":
         return {
-          fastDeny: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, 150)}". Respond with text first, then proceed with tool calls.`,
+          fastDeny: `You must respond to the user with text before calling tools. The user said: "${lastUser.content.slice(0, RESPOND_FIRST_RULE_POLICY.userMessagePreviewCharacters)}". Respond with text first, then proceed with tool calls.`,
         };
       case "no-current-turn":
         return null;

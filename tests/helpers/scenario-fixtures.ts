@@ -13,12 +13,12 @@ type TestStartRunCommandOverrides = Omit<Partial<ScenarioCommand>, "payload"> & 
   payload?: Partial<StartRunPayload>;
 };
 
-export function testScenarioCommand(
+export function testScenarioCommand<Payload extends ScenarioCommand["payload"]>(
   runId: string,
   commandId: string,
-  payload: ScenarioCommand["payload"],
+  payload: Payload,
   overrides: ScenarioCommandEnvelopeOverrides | string = {},
-): ScenarioCommand {
+): ScenarioCommand & { payload: Payload } {
   const envelope = typeof overrides === "string" ? { recordedAt: overrides } : overrides;
   return createScenarioCommandEnvelope({
     runId,
@@ -31,7 +31,7 @@ export function testScenarioCommand(
     ...(envelope.correlationId === undefined ? {} : { correlationId: envelope.correlationId }),
     ...(envelope.causationId === undefined ? {} : { causationId: envelope.causationId }),
     payload,
-  });
+  }) as ScenarioCommand & { payload: Payload };
 }
 
 export function testScenarioCommandFactory(

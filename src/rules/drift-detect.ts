@@ -6,6 +6,10 @@ import {
 } from "../utils/drift-detector.js";
 import { isEditToolName } from "../utils/edit-tools.js";
 import type { DriftTargetState } from "../effects/session-workflow.js";
+import {
+  DRIFT_RULE_POLICY,
+  nextDriftEscalationLevel,
+} from "./policies.js";
 
 export const driftDetectRule: PreToolRule = {
   name: "drift-block",
@@ -13,6 +17,8 @@ export const driftDetectRule: PreToolRule = {
   priority: 40,
   appealable: false,
   usesLlm: false,
+  version: "1",
+  configuration: DRIFT_RULE_POLICY,
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
@@ -20,7 +26,8 @@ export const driftDetectRule: PreToolRule = {
     // bumps lastUserMessageTimestamp, so prior-turn allowed edits no longer
     // count toward the warning threshold - drift counters reset per turn.
     const sinceTs = ctx.state.lastUserMessageTimestamp ?? 0;
-    const recentLog = [...(ctx.toolHistory ?? [])].slice(-50)
+    const recentLog = [...(ctx.toolHistory ?? [])]
+      .slice(-DRIFT_RULE_POLICY.toolHistoryEntries)
       .filter((e) => e.ts >= sinceTs);
     const drift = detectDrift(
       ctx.toolName,
@@ -48,11 +55,14 @@ export const driftDetectRule: PreToolRule = {
     if (!/edits to "/.test(reason)) return;
 
     await ctx.stateManager.update((s) => {
-      const nextEntries: Record<string, DriftTargetState> = Object.fromEntries(targets.map((target) => {
+      const nextEntries: Record<string, DriftTargetState> = Object.fromEntries(
+        targets.map((target) => {
         const prior = s.driftState?.[target] ?? { level: 0 as const };
-        const nextLevel: DriftTargetState["level"] = prior.level === 0 ? 1 : 2;
+          const nextLevel: DriftTargetState["level"] =
+            nextDriftEscalationLevel(prior.level);
         return [target, { level: nextLevel }];
-      }));
+        }),
+      );
       return {
         ...s,
         driftState: {

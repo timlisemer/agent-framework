@@ -12,19 +12,18 @@ import {
   adapterSpecFromRuleContext,
   summarizeRuleToolCall,
 } from "./tool-call-context.js";
-import type { CanonicalMcp } from "../adapter/types.js";
 import { recognizeMcpToolName } from "../adapter/mcp-wire.js";
-
-const DENIAL_RESOLVING_MCPS = new Set<CanonicalMcp>([
-  "check",
-  "commit",
-  "confirm",
-  "fullconfirm",
-  "validate_implementation",
-]);
+import {
+  DENIAL_RESOLVING_MCPS,
+  ERROR_ACKNOWLEDGE_RULE_POLICY,
+} from "./policies.js";
+import { RULE_GATE_AGENT } from "../utils/agent-configs.js";
 
 function isDenialResolvingMcp(toolName: string, ctx: RuleContext): boolean {
-  const canonical = recognizeMcpToolName(toolName, adapterSpecFromRuleContext(ctx));
+  const canonical = recognizeMcpToolName(
+    toolName,
+    adapterSpecFromRuleContext(ctx),
+  );
   return canonical !== null && DENIAL_RESOLVING_MCPS.has(canonical);
 }
 
@@ -34,6 +33,9 @@ export const errorAcknowledgeRule: PreToolRule = {
   priority: 50,
   appealable: true,
   usesLlm: true,
+  evaluationAgent: RULE_GATE_AGENT,
+  version: "1",
+  configuration: ERROR_ACKNOWLEDGE_RULE_POLICY,
   promptSection: `Check if the AI acknowledged a previous tool denial before proceeding.
 
 APPROVE if:
@@ -52,17 +54,21 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
     const prediction = ctx.state.currentPrediction;
     if (
       prediction?.explicitlyRequiredTools?.length &&
-      decideRequiredWorkflowToolSequence(prediction, [{
+      decideRequiredWorkflowToolSequence(prediction, [
+        {
         toolName: ctx.toolName,
         toolInput: ctx.toolInput,
-      }]).decision === "allow"
+        },
+      ]).decision === "allow"
     ) {
       return null;
     }
 
     // Read recent tool log for denials. A successful framework validation
     // resolves older denials before subsequent workflow progress.
-    const recentLog = [...(ctx.toolHistory ?? [])].slice(-5);
+    const recentLog = [...(ctx.toolHistory ?? [])].slice(
+      -ERROR_ACKNOWLEDGE_RULE_POLICY.toolHistoryEntries,
+    );
     let recentDenial: ToolLogEntry | undefined;
     for (let i = recentLog.length - 1; i >= 0; i--) {
       const entry = recentLog[i];
@@ -91,11 +97,18 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
       isEditToolName(ctx.toolName) &&
       (recentDenial.paths?.length || recentDenial.path)
     ) {
-      const deniedPaths = recentDenial.paths?.length ? recentDenial.paths : [recentDenial.path!];
+      const deniedPaths = recentDenial.paths?.length
+        ? recentDenial.paths
+        : [recentDenial.path!];
       const currentPaths = extractFilePaths(ctx.toolName, ctx.toolInput);
-      if (currentPaths.some((currentPath) =>
-        deniedPaths.some((deniedPath) => path.resolve(currentPath) === path.resolve(deniedPath))
-      )) {
+      if (
+        currentPaths.some((currentPath) =>
+          deniedPaths.some(
+            (deniedPath) =>
+              path.resolve(currentPath) === path.resolve(deniedPath),
+          ),
+        )
+      ) {
         return null;
       }
     }
@@ -103,39 +116,59 @@ NO error can be ignored. Every denial must be acknowledged before moving on.`,
     // Check if this is a corrected retry (different parameters for same tool)
     if (recentDenial.tool === ctx.toolName) {
       const currentInput = stringifyToolInput(ctx.toolInput);
-      const denialPaths = recentDenial.paths?.length ? recentDenial.paths : [recentDenial.path || ""];
+      const denialPaths = recentDenial.paths?.length
+        ? recentDenial.paths
+        : [recentDenial.path || ""];
       const denialCmd = recentDenial.cmd || "";
       // If the tool is the same but input differs, it's likely a corrected retry
-      if (!denialPaths.some((denialPath) => denialPath && currentInput.includes(denialPath)) && !currentInput.includes(denialCmd)) {
+      if (
+        !denialPaths.some(
+          (denialPath) => denialPath && currentInput.includes(denialPath),
+        ) &&
+        !currentInput.includes(denialCmd)
+      ) {
         return null;
       }
     }
 
     // Read transcript to check for assistant acknowledgment
     const rfResult = await readTranscriptExact(ctx.transcriptPath, {
-      counts: { user: { count: 0 }, assistant: { count: 1 } },
+      counts: {
+        user: { count: 0 },
+        assistant: {
+          count: ERROR_ACKNOWLEDGE_RULE_POLICY.transcriptAssistantMessageCount,
+        },
+      },
     });
-    const lastAssistant = rfResult.assistant.length > 0 ? rfResult.assistant[0] : null;
+    const lastAssistant =
+      rfResult.assistant.length > 0 ? rfResult.assistant[0] : null;
 
     if (!lastAssistant) {
       // No assistant text after denial -- different tool means ignoring
       if (recentDenial.tool !== ctx.toolName) {
-        return { fastDeny: `Previous tool "${recentDenial.tool}" was denied: ${recentDenial.reason}. You must acknowledge the error before proceeding with a different tool.` };
+        return {
+          fastDeny: `Previous tool "${recentDenial.tool}" was denied: ${recentDenial.reason}. You must acknowledge the error before proceeding with a different tool.`,
+        };
       }
       return null;
     }
 
     // Assistant text exists -- check if it's clearly unrelated
     if (recentDenial.tool !== ctx.toolName) {
-      const denialKeywords = (recentDenial.reason || "").toLowerCase().split(/\s+/).slice(0, 5);
+      const denialKeywords = (recentDenial.reason || "")
+        .toLowerCase()
+        .split(/\s+/)
+        .slice(0, ERROR_ACKNOWLEDGE_RULE_POLICY.denialKeywordCount);
       const assistantLower = lastAssistant.content.toLowerCase();
-      const acknowledgesError = denialKeywords.some((kw) => kw.length > 3 && assistantLower.includes(kw));
+      const acknowledgesError = denialKeywords.some(
+        (kw) => kw.length > 3 && assistantLower.includes(kw),
+      );
 
       if (!acknowledgesError) {
         const toolDescription = summarizeRuleToolCall(ctx);
         // Ambiguous -- use LLM to decide
         return {
-          llmContext: `PREVIOUS DENIAL:\nTool: ${recentDenial.tool}\nReason: ${recentDenial.reason}\n\nASSISTANT TEXT AFTER DENIAL:\n${lastAssistant.content.slice(0, 300)}\n\nCURRENT TOOL CALL:\n${toolDescription}`,
+          llmContext: `PREVIOUS DENIAL:\nTool: ${recentDenial.tool}\nReason: ${recentDenial.reason}\n\nASSISTANT TEXT AFTER DENIAL:\n${lastAssistant.content.slice(0, ERROR_ACKNOWLEDGE_RULE_POLICY.assistantPreviewCharacters)}\n\nCURRENT TOOL CALL:\n${toolDescription}`,
         };
       }
     }

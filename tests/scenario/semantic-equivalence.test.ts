@@ -3,7 +3,10 @@ import * as path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeEncoder } from "../../adapters/claude/encoder.js";
 import { codexEncoder } from "../../adapters/codex/encoder.js";
-import { toPostToolUse, toPreToolUse } from "../../adapters/codex/hooks/input.js";
+import {
+  toPostToolUse,
+  toPreToolUse,
+} from "../../adapters/codex/hooks/input.js";
 import type { AdapterEncoder } from "../../src/adapter/types.js";
 import { ScenarioGateway } from "../../src/ai-backend/gateway.js";
 import type { ProviderRunner } from "../../src/ai-backend/provider.js";
@@ -20,18 +23,21 @@ import type { ScenarioFixture } from "../../src/scenario/fixtures/types.js";
 import type { ScenarioCommand } from "../../src/scenario/protocol/commands.js";
 import { digestScenarioValue } from "../../src/scenario/protocol/digest.js";
 import type { ScenarioRecord } from "../../src/scenario/protocol/records.js";
-import {
-  type ScenarioSnapshot,
-} from "../../src/scenario/protocol/snapshot.js";
-import {
-  agentFrameworkEffectPlanner,
-} from "../../src/effects/rule-pipeline-contract.js";
+import { type ScenarioSnapshot } from "../../src/scenario/protocol/snapshot.js";
+import { agentFrameworkEffectPlanner } from "../../src/effects/rule-pipeline-contract.js";
 import { ScenarioRuntime } from "../../src/scenario/runtime/runtime.js";
+import {
+  RunStore,
+  type OpenRun,
+  type RunStoreTransactionProposal,
+  type RunStoreTransactionResult,
+} from "../../src/scenario/store/run-store.js";
 import {
   createDeterministicPolicyExecutor,
   createTestScenarioRuntime,
 } from "../helpers/scenario-runtime.js";
 import { canonicalToolHistory } from "../../src/effects/tool-history.js";
+import { canonicalNativeTranscriptObservation } from "../../src/entrypoints/native-transcript.js";
 import { agentFrameworkHostExtensionHandler } from "../../src/effects/host-command.js";
 import { agentFrameworkStateSlicePolicy } from "../../src/effects/state-slices.js";
 import { agentFrameworkScenarioFixturePolicy } from "../../src/effects/scenario-fixture-policy.js";
@@ -74,7 +80,10 @@ describe("ScenarioRuntime real cross-entrypoint semantic equivalence", () => {
   });
 
   it("initializes simultaneous first-use host hooks with one run.started transition", async () => {
-    const root = await createTemporaryTestRoot(roots, "scenario-equivalence-host-start-race-");
+    const root = await createTemporaryTestRoot(
+      roots,
+      "scenario-equivalence-host-start-race-",
+    );
     const transcriptPath = path.join(root, "codex.jsonl");
     await fs.writeFile(transcriptPath, "", "utf8");
     setHostEnvironment("codex", root);
@@ -91,20 +100,39 @@ describe("ScenarioRuntime real cross-entrypoint semantic equivalence", () => {
     };
 
     await Promise.all([
-      dispatchPreToolUse({ ...base, tool_use_id: "concurrent-tool-1" }, codexEncoder, { runtime }),
-      dispatchPreToolUse({ ...base, tool_use_id: "concurrent-tool-2" }, codexEncoder, { runtime }),
-      dispatchPreToolUse({ ...base, tool_use_id: "concurrent-tool-3" }, codexEncoder, { runtime }),
+      dispatchPreToolUse(
+        { ...base, tool_use_id: "concurrent-tool-1" },
+        codexEncoder,
+        { runtime },
+      ),
+      dispatchPreToolUse(
+        { ...base, tool_use_id: "concurrent-tool-2" },
+        codexEncoder,
+        { runtime },
+      ),
+      dispatchPreToolUse(
+        { ...base, tool_use_id: "concurrent-tool-3" },
+        codexEncoder,
+        { runtime },
+      ),
     ]);
     const runId = canonicalHookRunId("codex", transcriptPath);
-    expect((await runtime.recordsAfter(runId, 0)).filter((record) =>
-      record.eventType === "run.started"
-    )).toHaveLength(1);
+    expect(
+      (await runtime.recordsAfter(runId, 0)).filter(
+        (record) => record.eventType === "run.started",
+      ),
+    ).toHaveLength(1);
   });
 
   it("keeps PreToolUse slash authorization and parallel-batch context from the committed observation", async () => {
-    const root = await createTemporaryTestRoot(roots, "scenario-pretool-observation-boundary-");
+    const root = await createTemporaryTestRoot(
+      roots,
+      "scenario-pretool-observation-boundary-",
+    );
     const transcriptPath = path.join(root, "claude.jsonl");
-    await fs.writeFile(transcriptPath, [
+    await fs.writeFile(
+      transcriptPath,
+      [
       JSON.stringify({
         message: {
           id: "workflow-user",
@@ -116,26 +144,50 @@ describe("ScenarioRuntime real cross-entrypoint semantic equivalence", () => {
         message: {
           id: "batch-leader-message",
           role: "assistant",
-          content: [{ type: "tool_use", id: "batch-leader", name: "Read", input: { file_path: "A.md" } }],
+            content: [
+              {
+                type: "tool_use",
+                id: "batch-leader",
+                name: "Read",
+                input: { file_path: "A.md" },
+              },
+            ],
         },
       }),
       JSON.stringify({
         message: {
           id: "batch-current-message",
           role: "assistant",
-          content: [{ type: "tool_use", id: "batch-current", name: "Edit", input: { file_path: "B.md" } }],
+            content: [
+              {
+                type: "tool_use",
+                id: "batch-current",
+                name: "Edit",
+                input: { file_path: "B.md" },
+              },
+            ],
         },
       }),
-    ].join("\n") + "\n", "utf8");
+      ].join("\n") + "\n",
+      "utf8",
+    );
     setHostEnvironment("claude", root);
 
     class MutatingTranscriptRuntime extends ScenarioRuntime {
       public override async dispatch(command: ScenarioCommand) {
         const result = await super.dispatch(command);
         if (command.payload.type === "nativeTranscriptObserved") {
-          await fs.writeFile(transcriptPath, JSON.stringify({
-            message: { id: "mutated-user", role: "user", content: "unrelated mutation" },
-          }) + "\n", "utf8");
+          await fs.writeFile(
+            transcriptPath,
+            JSON.stringify({
+              message: {
+                id: "mutated-user",
+                role: "user",
+                content: "unrelated mutation",
+              },
+            }) + "\n",
+            "utf8",
+          );
         }
         return result;
       }
@@ -148,16 +200,22 @@ describe("ScenarioRuntime real cross-entrypoint semantic equivalence", () => {
       stateSlicePolicy: agentFrameworkStateSlicePolicy,
     });
 
-    await dispatchPreToolUse({
+    await dispatchPreToolUse(
+      {
       session_id: "pretool-observation-session",
       transcript_path: transcriptPath,
       cwd: root,
       tool_name: "Edit",
       tool_input: { file_path: "B.md" },
       tool_use_id: "batch-current",
-    }, claudeEncoder, { runtime });
+      },
+      claudeEncoder,
+      { runtime },
+    );
 
-    const snapshot = await runtime.snapshot(canonicalHookRunId("claude", transcriptPath));
+    const snapshot = await runtime.snapshot(
+      canonicalHookRunId("claude", transcriptPath),
+    );
     expect(snapshot.stateSlices["host.context"]?.value).toMatchObject({
       preTool: {
         slashCommandAllowedTools: ["mcp-confirm", "Edit", "MultiEdit", "Write"],
@@ -171,31 +229,59 @@ describe("ScenarioRuntime real cross-entrypoint semantic equivalence", () => {
   });
 
   it("keeps Stop response and error context from the committed observation", async () => {
-    const root = await createTemporaryTestRoot(roots, "scenario-stop-observation-boundary-");
+    const root = await createTemporaryTestRoot(
+      roots,
+      "scenario-stop-observation-boundary-",
+    );
     const transcriptPath = path.join(root, "claude.jsonl");
-    await fs.writeFile(transcriptPath, [
-      JSON.stringify({ message: { id: "stop-user", role: "user", content: "fix the failing check" } }),
+    await fs.writeFile(
+      transcriptPath,
+      [
+        JSON.stringify({
+          message: {
+            id: "stop-user",
+            role: "user",
+            content: "fix the failing check",
+          },
+        }),
       JSON.stringify({
         message: {
           id: "stop-tool-request",
           role: "assistant",
-          content: [{ type: "tool_use", id: "failed-check", name: "Bash", input: { command: "just check" } }],
+            content: [
+              {
+                type: "tool_use",
+                id: "failed-check",
+                name: "Bash",
+                input: { command: "just check" },
+              },
+            ],
         },
       }),
       JSON.stringify({
         message: {
           id: "stop-tool-result",
           role: "user",
-          content: [{
+            content: [
+              {
             type: "tool_result",
             tool_use_id: "failed-check",
             content: "command failed with exit code 1",
             is_error: true,
-          }],
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          message: {
+            id: "stop-assistant",
+            role: "assistant",
+            content: "I still need to fix it.",
         },
       }),
-      JSON.stringify({ message: { id: "stop-assistant", role: "assistant", content: "I still need to fix it." } }),
-    ].join("\n") + "\n", "utf8");
+      ].join("\n") + "\n",
+      "utf8",
+    );
     setHostEnvironment("claude", root);
 
     class MutatingTranscriptRuntime extends ScenarioRuntime {
@@ -215,44 +301,64 @@ describe("ScenarioRuntime real cross-entrypoint semantic equivalence", () => {
       stateSlicePolicy: agentFrameworkStateSlicePolicy,
     });
 
-    await dispatchStop({
+    await dispatchStop(
+      {
       session_id: "stop-observation-session",
       transcript_path: transcriptPath,
       cwd: root,
       last_assistant_message: null,
-    }, claudeEncoder, { runtime });
+      },
+      claudeEncoder,
+      { runtime },
+    );
 
-    const snapshot = await runtime.snapshot(canonicalHookRunId("claude", transcriptPath));
+    const snapshot = await runtime.snapshot(
+      canonicalHookRunId("claude", transcriptPath),
+    );
     expect(snapshot.stateSlices["host.context"]?.value).toMatchObject({
       stop: {
         latestAssistantText: "I still need to fix it.",
         latestUserText: "fix the failing check",
-        priorErrorContext: [{
+        priorErrorContext: [
+          {
           source: "tool-failure",
           tool: "Bash",
           toolUseId: "failed-check",
           text: "command failed with exit code 1",
-        }],
+          },
+        ],
       },
     });
   });
 
   it("retries an older transcript observation after a newer replacement commits", async () => {
-    const root = await createTemporaryTestRoot(roots, "scenario-equivalence-transcript-race-");
+    const root = await createTemporaryTestRoot(
+      roots,
+      "scenario-equivalence-transcript-race-",
+    );
     const transcriptPath = path.join(root, "claude.jsonl");
     await fs.writeFile(transcriptPath, claudeTranscript(false), "utf8");
     setHostEnvironment("claude", root);
     let releaseOlder!: () => void;
     let markOlderDelayed!: () => void;
-    const olderRelease = new Promise<void>((resolve) => { releaseOlder = resolve; });
-    const olderDelayed = new Promise<void>((resolve) => { markOlderDelayed = resolve; });
+    const olderRelease = new Promise<void>((resolve) => {
+      releaseOlder = resolve;
+    });
+    const olderDelayed = new Promise<void>((resolve) => {
+      markOlderDelayed = resolve;
+    });
     class DelayedTranscriptRuntime extends ScenarioRuntime {
       private delayed = false;
 
       public override async dispatch(command: ScenarioCommand) {
-        if (!this.delayed && command.payload.type === "nativeTranscriptObserved") {
+        if (
+          !this.delayed &&
+          command.payload.type === "nativeTranscriptObserved"
+        ) {
           const messages = command.payload.data?.messages ?? [];
-          if (messages.some((message) => message.content === "older transcript")) {
+          if (
+            messages.some((message) => message.content === "older transcript")
+          ) {
             this.delayed = true;
             markOlderDelayed();
             await olderRelease;
@@ -293,33 +399,366 @@ describe("ScenarioRuntime real cross-entrypoint semantic equivalence", () => {
 
     const runId = canonicalHookRunId("claude", transcriptPath);
     const snapshot = await runtime.snapshot(runId);
-    expect(snapshot.conversation).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: "older-message", content: "older transcript" }),
-      expect.objectContaining({ id: "newer-message", content: "newer transcript" }),
-    ]));
-    expect(snapshot.toolCalls).toEqual(expect.arrayContaining([
+    expect(snapshot.conversation).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "older-message",
+          content: "older transcript",
+        }),
+        expect.objectContaining({
+          id: "newer-message",
+          content: "newer transcript",
+        }),
+      ]),
+    );
+    expect(snapshot.toolCalls).toEqual(
+      expect.arrayContaining([
       expect.objectContaining({ id: "older-tool", status: "completed" }),
       expect.objectContaining({ id: "newer-tool", status: "completed" }),
-    ]));
+      ]),
+    );
     expect(snapshot.stateSlices["transcript.native"]?.value).toMatchObject({
       messageIds: ["older-message", "newer-message"],
       toolCallIds: ["older-tool", "newer-tool"],
     });
-    expect((await runtime.recordsAfter(runId, 0))).not.toContainEqual(expect.objectContaining({
+    expect(await runtime.recordsAfter(runId, 0)).not.toContainEqual(
+      expect.objectContaining({
       eventType: "message.retired",
       payload: expect.objectContaining({ messageId: "newer-message" }),
-    }));
+      }),
+    );
+  });
+
+  it("atomically imports one managed Codex transcript across overlapping hook boundaries", async () => {
+    const root = await createTemporaryTestRoot(
+      roots,
+      "scenario-equivalence-transcript-contention-",
+    );
+    const transcriptPath = path.join(root, "codex.jsonl");
+    await fs.writeFile(
+      transcriptPath,
+      [
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call",
+            call_id: "managed-native-tool",
+            name: "exec_command",
+            arguments: JSON.stringify({ command: "printf managed" }),
+          },
+        }),
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "function_call_output",
+            call_id: "managed-native-tool",
+            output: "managed",
+          },
+        }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    setHostEnvironment("codex", root);
+    const runtimeRoot = path.join(root, "canonical-runs");
+    const runtimeOptions = {
+      root: runtimeRoot,
+      effectExecutor: allowPolicyExecutor,
+      effectPlanner: agentFrameworkEffectPlanner,
+      extensionHandler: agentFrameworkHostExtensionHandler,
+      stateSlicePolicy: agentFrameworkStateSlicePolicy,
+    };
+    let advanceProvider = async () => {};
+    let forcedConflicts = 0;
+    let providerRevision = 0;
+    let atomicContentionUpdates = 0;
+    let releaseInitialImports!: () => void;
+    const initialImportsReady = new Promise<void>((resolve) => {
+      releaseInitialImports = resolve;
+    });
+    class CoordinatedManagedRuntime extends ScenarioRuntime {
+      public override async dispatch(command: ScenarioCommand) {
+        if (
+          command.payload.type === "nativeTranscriptObserved" &&
+          forcedConflicts < 2
+        ) {
+          forcedConflicts += 1;
+          if (forcedConflicts === 2) releaseInitialImports();
+          await initialImportsReady;
+          await advanceProvider();
+        }
+        return super.dispatch(command);
+      }
+
+      public override async dispatchNativeTranscriptFromLatestSnapshot(
+        runId: string,
+        commandFactory: Parameters<
+          ScenarioRuntime["dispatchNativeTranscriptFromLatestSnapshot"]
+        >[1],
+        historyFilter: Parameters<
+          ScenarioRuntime["dispatchNativeTranscriptFromLatestSnapshot"]
+        >[2],
+      ) {
+        await advanceProvider();
+        atomicContentionUpdates += 1;
+        const committed = await super.dispatchNativeTranscriptFromLatestSnapshot(
+          runId,
+          commandFactory,
+          historyFilter,
+        );
+        await advanceProvider();
+        atomicContentionUpdates += 1;
+        return committed;
+      }
+    }
+    const runtime = new CoordinatedManagedRuntime(runtimeOptions);
+    const manager = new ScenarioProviderManager({
+      runtime,
+      resolveProvider: () => testResolvedProvider({ sdkRuntime: "codex" }),
+      createRunner: (resolvedProvider): ProviderRunner => ({
+        resolvedProvider,
+        async *runTurn() {},
+      }),
+    });
+    const { runId } = await manager.host.start({
+      model: null,
+      workingDir: root,
+      systemPrompt: null,
+      continuable: true,
+      sdkRuntimeEnvironment: "user",
+      runtimeHome: { kind: "managed", configuration: { profile: "default" } },
+    });
+    const providerWriter = new ScenarioRuntime(runtimeOptions);
+    const providerCommand = testScenarioCommandFactory(
+      runId,
+      { kind: "providerSdk", adapter: "codex", provider: "openai" },
+      "2026-07-19T12:00:00.000Z",
+    );
+    advanceProvider = async () => {
+      const revision = providerRevision;
+      providerRevision += 1;
+      await providerWriter.dispatch(
+        providerCommand(`provider-churn-${revision}`, {
+          type: "providerStateObserved",
+          data: { contentionRevision: revision },
+        }),
+      );
+    };
+    const expectedObservation = await canonicalNativeTranscriptObservation({
+      adapterName: "codex",
+      transcriptPath,
+    });
+    const expectedDigest = digestScenarioValue(expectedObservation.data);
+    const [output, overlappingOutput] = await Promise.all([
+      dispatchPreToolUse(
+        {
+          session_id: "managed-codex-contention",
+          transcript_path: transcriptPath,
+          cwd: root,
+          tool_name: "exec_command",
+          tool_input: { command: "pwd" },
+          tool_use_id: "hook-after-contention",
+        },
+        codexEncoder,
+        { runtime, scenarioRunId: runId },
+      ),
+      dispatchPreToolUse(
+        {
+          session_id: "managed-codex-contention",
+          transcript_path: transcriptPath,
+          cwd: root,
+          tool_name: "exec_command",
+          tool_input: { command: "sed -n '1,20p' README.md" },
+          tool_use_id: "overlapping-hook-after-contention",
+        },
+        codexEncoder,
+        { runtime, scenarioRunId: runId },
+      ),
+    ]);
+
+    expect(output.exitCode).toBe(0);
+    expect(overlappingOutput.exitCode).toBe(0);
+    expect(forcedConflicts).toBe(2);
+    expect([2, 4]).toContain(atomicContentionUpdates);
+    const view = await runtime.canonicalView(runId);
+    expect(view.snapshot.stateSlices["transcript.native"]?.value).toMatchObject(
+      {
+        digest: expectedDigest,
+      },
+    );
+    expect(view.snapshot.toolCalls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "hook-after-contention",
+          status: "requested",
+          authorization: expect.objectContaining({ final: "allowed" }),
+        }),
+      ]),
+    );
+    expect(
+      view.records.filter(
+        (record) => record.eventType === "transcript.observed",
+      ),
+    ).toHaveLength(1);
+    expect(
+      view.records.filter(
+        (record) =>
+          record.eventType === "tool.requested" &&
+          record.payload.toolCallId === "hook-after-contention",
+      ),
+    ).toHaveLength(1);
+    expect(
+      view.records.filter(
+        (record) =>
+          record.eventType === "provider.stateObserved" &&
+          typeof record.payload.state === "object" &&
+          record.payload.state !== null &&
+          !Array.isArray(record.payload.state) &&
+          "contentionRevision" in record.payload.state,
+      ),
+    ).toHaveLength(forcedConflicts + atomicContentionUpdates);
+    const followupOutput = await dispatchPreToolUse(
+      {
+        session_id: "managed-codex-contention",
+        transcript_path: transcriptPath,
+        cwd: root,
+        tool_name: "exec_command",
+        tool_input: { command: "sed -n '1,20p' README.md" },
+        tool_use_id: "read-only-hook-after-contention",
+      },
+      codexEncoder,
+      { runtime, scenarioRunId: runId },
+    );
+    expect(followupOutput.exitCode).toBe(0);
+    expect(
+      (await runtime.canonicalView(runId)).snapshot.toolCalls,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "read-only-hook-after-contention",
+          status: "requested",
+          authorization: expect.objectContaining({ final: "allowed" }),
+        }),
+        expect.objectContaining({
+          id: "overlapping-hook-after-contention",
+          status: "requested",
+          authorization: expect.objectContaining({ final: "allowed" }),
+        }),
+      ]),
+    );
+    await manager.dispose();
+  }, 15_000);
+
+  it("releases a contended hook transaction and allows a fresh tool lifecycle", async () => {
+    const root = await createTemporaryTestRoot(
+      roots,
+      "scenario-equivalence-hook-lock-recovery-",
+    );
+    const transcriptPath = path.join(root, "claude.jsonl");
+    await fs.writeFile(transcriptPath, claudeTranscript(false), "utf8");
+    setHostEnvironment("claude", root);
+    const runtimeRoot = path.join(root, "canonical-runs");
+    let releaseBlockedTransaction!: () => void;
+    let markTransactionBlocked!: () => void;
+    const transactionRelease = new Promise<void>((resolve) => {
+      releaseBlockedTransaction = resolve;
+    });
+    const transactionBlocked = new Promise<void>((resolve) => {
+      markTransactionBlocked = resolve;
+    });
+    class OneShotContendedStore extends RunStore {
+      private blockNextTranscriptImport = true;
+
+      public override async transact<T>(
+        runId: string,
+        callback: (run: OpenRun) => Promise<RunStoreTransactionProposal<T>>,
+      ): Promise<RunStoreTransactionResult<T>> {
+        return super.transact(runId, async (run) => {
+          const proposal = await callback(run);
+          if (
+            this.blockNextTranscriptImport &&
+            proposal.records.some(
+              (record) => record.eventType === "transcript.observed",
+            )
+          ) {
+            this.blockNextTranscriptImport = false;
+            markTransactionBlocked();
+            await transactionRelease;
+          }
+          return proposal;
+        });
+      }
+    }
+    const store = new OneShotContendedStore(runtimeRoot, {
+      timeoutMs: 40,
+      retryMs: 1,
+      staleAfterMs: 1_000,
+    });
+    const runtime = new ScenarioRuntime({
+      root: runtimeRoot,
+      store,
+      effectExecutor: allowPolicyExecutor,
+      effectPlanner: agentFrameworkEffectPlanner,
+      extensionHandler: agentFrameworkHostExtensionHandler,
+      stateSlicePolicy: agentFrameworkStateSlicePolicy,
+    });
+    const hookInput = {
+      session_id: "claude-lock-recovery",
+      transcript_path: transcriptPath,
+      cwd: root,
+      tool_name: "Read",
+      tool_input: nestedToolInput(),
+    };
+    const first = dispatchPreToolUse(
+      { ...hookInput, tool_use_id: "hook-lock-first" },
+      claudeEncoder,
+      { runtime },
+    );
+    await transactionBlocked;
+    const contended = dispatchPreToolUse(
+      { ...hookInput, tool_use_id: "hook-lock-contended" },
+      claudeEncoder,
+      { runtime },
+    );
+    try {
+      await expect(contended).rejects.toThrow(
+        "Timed out acquiring run transaction lock",
+      );
+    } finally {
+      releaseBlockedTransaction();
+    }
+    await expect(first).resolves.toMatchObject({ exitCode: 0 });
+
+    const runId = canonicalHookRunId("claude", transcriptPath);
+    await expect(
+      fs.access(path.join(store.runDir(runId), ".write.lock")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(
+      dispatchPreToolUse(
+        { ...hookInput, tool_use_id: "hook-lock-fresh" },
+        claudeEncoder,
+        { runtime },
+      ),
+    ).resolves.toMatchObject({ exitCode: 0 });
   });
 
   it.each([
-    { policyDecision: "allow" as const, terminalStatus: "completed" as const, transcriptError: false },
-    { policyDecision: "deny" as const, terminalStatus: "denied" as const, transcriptError: true },
-  ])("preserves a host-owned $terminalStatus tool when it later appears in the native transcript", async ({
-    policyDecision,
-    terminalStatus,
-    transcriptError,
-  }) => {
-    const root = await createTemporaryTestRoot(roots, `scenario-host-transcript-${terminalStatus}-`);
+    {
+      policyDecision: "allow" as const,
+      terminalStatus: "completed" as const,
+      transcriptError: false,
+    },
+    {
+      policyDecision: "deny" as const,
+      terminalStatus: "denied" as const,
+      transcriptError: true,
+    },
+  ])(
+    "preserves a host-owned $terminalStatus tool when it later appears in the native transcript",
+    async ({ policyDecision, terminalStatus, transcriptError }) => {
+      const root = await createTemporaryTestRoot(
+        roots,
+        `scenario-host-transcript-${terminalStatus}-`,
+      );
     const transcriptPath = path.join(root, "claude.jsonl");
     await fs.writeFile(transcriptPath, "", "utf8");
     setHostEnvironment("claude", root);
@@ -329,7 +768,12 @@ describe("ScenarioRuntime real cross-entrypoint semantic equivalence", () => {
       effectExecutor: createDeterministicPolicyExecutor({
         transformToolResult: (result, parameters) =>
           parameters.toolCallId === hostToolId && policyDecision === "deny"
-            ? { ...result, decision: "deny" as const, reason: "Denied by the host policy", agent: "test-policy" }
+              ? {
+                  ...result,
+                  decision: "deny" as const,
+                  reason: "Denied by the host policy",
+                  agent: "test-policy",
+                }
             : result,
         metadata: { transcriptOwnershipEffect: true },
       }),
@@ -343,72 +787,118 @@ describe("ScenarioRuntime real cross-entrypoint semantic equivalence", () => {
       tool_use_id: hostToolId,
     };
 
-    const firstOutput = await dispatchPreToolUse(hostInput, claudeEncoder, { runtime });
+      const firstOutput = await dispatchPreToolUse(hostInput, claudeEncoder, {
+        runtime,
+      });
     expect(firstOutput.exitCode).toBe(0);
     if (policyDecision === "allow") {
-      await dispatchPostToolUse({ ...hostInput, tool_response: { ok: true } }, claudeEncoder, { runtime });
+        await dispatchPostToolUse(
+          { ...hostInput, tool_response: { ok: true } },
+          claudeEncoder,
+          { runtime },
+        );
     }
     const runId = canonicalHookRunId("claude", transcriptPath);
-    const originalTool = (await runtime.snapshot(runId)).toolCalls.find((tool) => tool.id === hostToolId);
+      const originalTool = (await runtime.snapshot(runId)).toolCalls.find(
+        (tool) => tool.id === hostToolId,
+      );
     expect(originalTool?.status).toBe(terminalStatus);
 
-    await fs.writeFile(transcriptPath, [
+      await fs.writeFile(
+        transcriptPath,
+        [
       JSON.stringify({
         message: {
           id: "assistant-native-turn",
           role: "assistant",
-          content: [{
+              content: [
+                {
             type: "tool_use",
             id: hostToolId,
             name: "Read",
             input: nestedToolInput(),
-          }],
+                },
+              ],
         },
       }),
       JSON.stringify({
         message: {
           id: "user-native-turn",
           role: "user",
-          content: [{
+              content: [
+                {
             type: "tool_result",
             tool_use_id: hostToolId,
-            content: [{ type: "text", text: transcriptError ? "denied" : "done" }],
+                  content: [
+                    { type: "text", text: transcriptError ? "denied" : "done" },
+                  ],
             is_error: transcriptError,
-          }],
+                },
+              ],
         },
       }),
-    ].join("\n") + "\n", "utf8");
+        ].join("\n") + "\n",
+        "utf8",
+      );
 
-    const laterOutput = await dispatchPreToolUse({
+      const laterOutput = await dispatchPreToolUse(
+        {
       ...hostInput,
       tool_use_id: "toolu_later_hook",
-    }, claudeEncoder, { runtime });
+        },
+        claudeEncoder,
+        { runtime },
+      );
     expect(laterOutput.exitCode).toBe(0);
     const snapshot = await runtime.snapshot(runId);
-    expect(snapshot.toolCalls.filter((tool) => tool.id === hostToolId)).toHaveLength(1);
-    expect(snapshot.toolCalls.find((tool) => tool.id === hostToolId)).toEqual(originalTool);
-    expect(snapshot.toolCalls).toContainEqual(expect.objectContaining({ id: "toolu_later_hook" }));
-    expect((await runtime.recordsAfter(runId, 0))).not.toContainEqual(expect.objectContaining({
+      expect(
+        snapshot.toolCalls.filter((tool) => tool.id === hostToolId),
+      ).toHaveLength(1);
+      expect(snapshot.toolCalls.find((tool) => tool.id === hostToolId)).toEqual(
+        originalTool,
+      );
+      expect(snapshot.toolCalls).toContainEqual(
+        expect.objectContaining({ id: "toolu_later_hook" }),
+      );
+      expect(await runtime.recordsAfter(runId, 0)).not.toContainEqual(
+        expect.objectContaining({
       eventType: "tool.retired",
       entityRef: { kind: "toolCall", id: hostToolId },
-    }));
+        }),
+      );
 
     await fs.writeFile(transcriptPath, "", "utf8");
-    const afterCompaction = await dispatchPreToolUse({
+      const afterCompaction = await dispatchPreToolUse(
+        {
       ...hostInput,
       tool_use_id: "toolu_after_compaction",
-    }, claudeEncoder, { runtime });
+        },
+        claudeEncoder,
+        { runtime },
+      );
     expect(afterCompaction.exitCode).toBe(0);
     const compacted = await runtime.snapshot(runId);
-    expect(compacted.toolCalls).not.toContainEqual(expect.objectContaining({ id: hostToolId }));
-    expect(canonicalToolHistory(compacted)).not.toContainEqual(expect.objectContaining({ toolUseId: hostToolId }));
-    expect((await runtime.recordsAfter(runId, 0)).filter((record) =>
-      record.eventType === "tool.retired" && record.payload.toolCallId === hostToolId
-    )).toHaveLength(1);
-  });
+      expect(compacted.toolCalls).not.toContainEqual(
+        expect.objectContaining({ id: hostToolId }),
+      );
+      expect(canonicalToolHistory(compacted)).not.toContainEqual(
+        expect.objectContaining({ toolUseId: hostToolId }),
+      );
+      expect(
+        (await runtime.recordsAfter(runId, 0)).filter(
+          (record) =>
+            record.eventType === "tool.retired" &&
+            record.payload.toolCallId === hostToolId,
+        ),
+      ).toHaveLength(1);
+    },
+  );
 
   it("reconciles missing Codex hook IDs with the later native tool ID and retires it once", async () => {
-    const root = await createTemporaryTestRoot(roots, "scenario-codex-missing-tool-id-");
+    const root = await createTemporaryTestRoot(
+      roots,
+      "scenario-codex-missing-tool-id-",
+    );
     const transcriptPath = path.join(root, "codex.jsonl");
     await fs.writeFile(transcriptPath, "", "utf8");
     setHostEnvironment("codex", root);
@@ -423,7 +913,10 @@ describe("ScenarioRuntime real cross-entrypoint semantic equivalence", () => {
       toolName: "Read",
       toolInput: nestedToolInput(),
     };
-    const now = vi.spyOn(Date, "now").mockReturnValueOnce(100).mockReturnValueOnce(200);
+    const now = vi
+      .spyOn(Date, "now")
+      .mockReturnValueOnce(100)
+      .mockReturnValueOnce(200);
     const preInput = toPreToolUse(raw);
     const postInput = toPostToolUse({ ...raw, toolResponse: { ok: true } });
     now.mockRestore();
@@ -432,12 +925,16 @@ describe("ScenarioRuntime real cross-entrypoint semantic equivalence", () => {
     await dispatchPreToolUse(preInput, codexEncoder, { runtime });
     await dispatchPostToolUse(postInput, codexEncoder, { runtime });
     const runId = canonicalHookRunId("codex", transcriptPath);
-    expect((await runtime.snapshot(runId)).toolCalls).toMatchObject([{
+    expect((await runtime.snapshot(runId)).toolCalls).toMatchObject([
+      {
       id: preInput.tool_use_id,
       status: "completed",
-    }]);
+      },
+    ]);
 
-    await fs.writeFile(transcriptPath, [
+    await fs.writeFile(
+      transcriptPath,
+      [
       JSON.stringify({
         type: "response_item",
         payload: {
@@ -455,52 +952,171 @@ describe("ScenarioRuntime real cross-entrypoint semantic equivalence", () => {
           output: { ok: true },
         },
       }),
-    ].join("\n") + "\n", "utf8");
-    await dispatchPreToolUse({ ...preInput, tool_use_id: "codex-after-transcript" }, codexEncoder, { runtime });
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    await dispatchPreToolUse(
+      { ...preInput, tool_use_id: "codex-after-transcript" },
+      codexEncoder,
+      { runtime },
+    );
 
     const reconciled = await runtime.snapshot(runId);
-    expect(reconciled.toolCalls.filter((tool) =>
-      tool.id === preInput.tool_use_id || tool.id === "codex-real-tool-id"
-    )).toHaveLength(1);
+    expect(
+      reconciled.toolCalls.filter(
+        (tool) =>
+          tool.id === preInput.tool_use_id || tool.id === "codex-real-tool-id",
+      ),
+    ).toHaveLength(1);
     expect(reconciled.stateSlices["transcript.native"]?.value).toMatchObject({
       toolCallIds: [preInput.tool_use_id],
       toolAliases: { "codex-real-tool-id": preInput.tool_use_id },
     });
 
     await fs.writeFile(transcriptPath, "", "utf8");
-    await dispatchPreToolUse({ ...preInput, tool_use_id: "codex-after-clear" }, codexEncoder, { runtime });
-    await dispatchPreToolUse({ ...preInput, tool_use_id: "codex-after-second-clear" }, codexEncoder, { runtime });
-    expect((await runtime.recordsAfter(runId, 0)).filter((record) =>
-      record.eventType === "tool.retired" && record.payload.toolCallId === preInput.tool_use_id
-    )).toHaveLength(1);
+    await dispatchPreToolUse(
+      { ...preInput, tool_use_id: "codex-after-clear" },
+      codexEncoder,
+      { runtime },
+    );
+    await dispatchPreToolUse(
+      { ...preInput, tool_use_id: "codex-after-second-clear" },
+      codexEncoder,
+      { runtime },
+    );
+    expect(
+      (await runtime.recordsAfter(runId, 0)).filter(
+        (record) =>
+          record.eventType === "tool.retired" &&
+          record.payload.toolCallId === preInput.tool_use_id,
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("canonicalizes Codex native tool identity before reconciling a host-owned tool", async () => {
+    const root = await createTemporaryTestRoot(
+      roots,
+      "scenario-codex-native-tool-canonicalization-",
+    );
+    const transcriptPath = path.join(root, "codex.jsonl");
+    await fs.writeFile(transcriptPath, "", "utf8");
+    setHostEnvironment("codex", root);
+    const runtime = createTestScenarioRuntime({
+      root: path.join(root, "canonical-runs"),
+      effectExecutor: allowPolicyExecutor,
+    });
+    const commandInput = {
+      session_id: "codex-native-tool-canonicalization",
+      transcript_path: transcriptPath,
+      cwd: root,
+      tool_name: "exec_command",
+      tool_input: { command: "pwd" },
+      tool_use_id: "codex-command",
+    };
+
+    await dispatchPreToolUse(commandInput, codexEncoder, { runtime });
+    await dispatchPostToolUse(
+      { ...commandInput, tool_response: "workspace\n" },
+      codexEncoder,
+      { runtime },
+    );
+    await fs.writeFile(
+      transcriptPath,
+      [
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "function_call",
+          call_id: "codex-command",
+            namespace: "functions",
+          name: "exec_command",
+            arguments: JSON.stringify({ cmd: "pwd", workdir: root }),
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "function_call_output",
+          call_id: "codex-command",
+          output: "workspace\n",
+        },
+      }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+
+    const laterOutput = await dispatchPreToolUse(
+      {
+      ...commandInput,
+      tool_name: "Read",
+      tool_input: nestedToolInput(),
+      tool_use_id: "codex-later-hook",
+      },
+      codexEncoder,
+      { runtime },
+    );
+
+    expect(laterOutput.exitCode).toBe(0);
+    const snapshot = await runtime.snapshot(
+      canonicalHookRunId("codex", transcriptPath),
+    );
+    expect(snapshot.toolCalls).toEqual(
+      expect.arrayContaining([
+      expect.objectContaining({
+        id: "codex-command",
+        name: "Bash",
+        input: { command: "pwd" },
+        status: "completed",
+      }),
+      ]),
+    );
+    expect(snapshot.stateSlices["transcript.native"]?.value).toMatchObject({
+      toolCallIds: ["codex-command"],
+      toolAliases: { "codex-command": "codex-command" },
+    });
   });
 });
 
 async function executeDirectRuntime(): Promise<PathResult> {
-  const root = await createTemporaryTestRoot(roots, "scenario-equivalence-direct-");
-  const runtime = createTestScenarioRuntime({ root, effectExecutor: allowPolicyExecutor });
+  const root = await createTemporaryTestRoot(
+    roots,
+    "scenario-equivalence-direct-",
+  );
+  const runtime = createTestScenarioRuntime({
+    root,
+    effectExecutor: allowPolicyExecutor,
+  });
   const command = testScenarioCommandFactory(
     "direct-run",
     { kind: "gateway" },
     "2026-07-16T12:00:00.000Z",
   );
-  await runtime.dispatch(testStartRunCommand({
+  await runtime.dispatch(
+    testStartRunCommand({
     runId: "direct-run",
     source: { kind: "gateway" },
     payload: equivalenceStartPayload,
-  }));
+    }),
+  );
   const decision = await runtime.dispatch(command("tool", toolPayload(false)));
-  await runtime.dispatch(command("started", { type: "toolExecutionStarted", toolCallId: "tool-1" }));
-  await runtime.dispatch(command("completed", {
+  await runtime.dispatch(
+    command("started", { type: "toolExecutionStarted", toolCallId: "tool-1" }),
+  );
+  await runtime.dispatch(
+    command("completed", {
     type: "toolCompleted",
     toolCallId: "tool-1",
     output: { ok: true },
-  }));
+    }),
+  );
   return pathResult("direct runtime", decision.status, runtime, "direct-run");
 }
 
 async function executeFixtureRunner(): Promise<PathResult> {
-  const root = await createTemporaryTestRoot(roots, "scenario-equivalence-fixture-");
+  const root = await createTemporaryTestRoot(
+    roots,
+    "scenario-equivalence-fixture-",
+  );
   const command = testScenarioCommandFactory(
     "fixture-run",
     { kind: "scenarioFixture", adapter: "direct" },
@@ -518,8 +1134,15 @@ async function executeFixtureRunner(): Promise<PathResult> {
     },
     commands: [
       command("tool", toolPayload(false)),
-      command("started", { type: "toolExecutionStarted", toolCallId: "tool-1" }),
-      command("completed", { type: "toolCompleted", toolCallId: "tool-1", output: { ok: true } }),
+      command("started", {
+        type: "toolExecutionStarted",
+        toolCallId: "tool-1",
+      }),
+      command("completed", {
+        type: "toolCompleted",
+        toolCallId: "tool-1",
+        output: { ok: true },
+      }),
     ],
     effects: {
       mode: "deterministic",
@@ -535,8 +1158,10 @@ async function executeFixtureRunner(): Promise<PathResult> {
   });
   return {
     name: "scenario fixture runner",
-    decision: String(report.commandResults.tool &&
-      (report.commandResults.tool as { status?: string }).status),
+    decision: String(
+      report.commandResults.tool &&
+        (report.commandResults.tool as { status?: string }).status,
+    ),
     semantic: semanticProjection(report.finalSnapshot, report.records),
   };
 }
@@ -545,7 +1170,10 @@ async function executeHookAdapter(
   adapter: "claude" | "codex",
   encoder: AdapterEncoder,
 ): Promise<PathResult> {
-  const root = await createTemporaryTestRoot(roots, `scenario-equivalence-${adapter}-`);
+  const root = await createTemporaryTestRoot(
+    roots,
+    `scenario-equivalence-${adapter}-`,
+  );
   const transcriptPath = path.join(root, `${adapter}.jsonl`);
   await fs.writeFile(transcriptPath, "", "utf8");
   setHostEnvironment(adapter, root);
@@ -563,16 +1191,27 @@ async function executeHookAdapter(
   };
   const output = await dispatchPreToolUse(input, encoder, { runtime });
   expect(output.exitCode, `${adapter} native encoder`).toBe(0);
-  if (adapter === "claude") expect(output.stdout).toContain("\"permissionDecision\":\"allow\"");
-  await dispatchPostToolUse({ ...input, tool_response: { ok: true } }, encoder, { runtime });
+  if (adapter === "claude")
+    expect(output.stdout).toContain('"permissionDecision":"allow"');
+  await dispatchPostToolUse(
+    { ...input, tool_response: { ok: true } },
+    encoder,
+    { runtime },
+  );
 
   const runId = canonicalHookRunId(adapter, transcriptPath);
   return pathResult(`${adapter} hook adapter`, "allowed", runtime, runId);
 }
 
 async function executeProviderPermissionCallback(): Promise<PathResult> {
-  const root = await createTemporaryTestRoot(roots, "scenario-equivalence-provider-");
-  const runtime = createTestScenarioRuntime({ root, effectExecutor: allowPolicyExecutor });
+  const root = await createTemporaryTestRoot(
+    roots,
+    "scenario-equivalence-provider-",
+  );
+  const runtime = createTestScenarioRuntime({
+    root,
+    effectExecutor: allowPolicyExecutor,
+  });
   const manager = new ScenarioProviderManager({
     runtime,
     resolveProvider: () => testResolvedProvider({ sdkRuntime: "claude" }),
@@ -586,9 +1225,14 @@ async function executeProviderPermissionCallback(): Promise<PathResult> {
           toolInput: nestedToolInput(),
           signal: input.signal,
         });
-        if (decision.decision !== "approve") throw new Error(decision.reason ?? "tool denied");
+        if (decision.decision !== "approve")
+          throw new Error(decision.reason ?? "tool denied");
         yield { type: "toolExecutionStarted", toolCallId: "tool-1" };
-        yield { type: "toolCompleted", toolCallId: "tool-1", output: { ok: true } };
+        yield {
+          type: "toolCompleted",
+          toolCallId: "tool-1",
+          output: { ok: true },
+        };
       },
     }),
   });
@@ -614,9 +1258,17 @@ async function executeProviderPermissionCallback(): Promise<PathResult> {
       reason: null,
     },
   });
-  expect(response).toMatchObject({ ok: true, payload: { result: { status: "allowed" } } });
+  expect(response).toMatchObject({
+    ok: true,
+    payload: { result: { status: "allowed" } },
+  });
   await waitForTool(runtime, runId, "completed");
-  const result = await pathResult("provider permission callback", "allowed", runtime, runId);
+  const result = await pathResult(
+    "provider permission callback",
+    "allowed",
+    runtime,
+    runId,
+  );
   await gateway.dispose();
   await manager.dispose();
   return result;
@@ -658,8 +1310,13 @@ const POLICY_RECORDS = new Set([
   "tool.completed",
 ]);
 
-function semanticProjection(snapshot: ScenarioSnapshot, records: ScenarioRecord[]) {
-  const tool = snapshot.toolCalls.find((candidate) => candidate.id === "tool-1");
+function semanticProjection(
+  snapshot: ScenarioSnapshot,
+  records: ScenarioRecord[],
+) {
+  const tool = snapshot.toolCalls.find(
+    (candidate) => candidate.id === "tool-1",
+  );
   if (!tool) throw new Error("equivalence path did not record tool-1");
   return {
     tool: {
@@ -675,7 +1332,9 @@ function semanticProjection(snapshot: ScenarioSnapshot, records: ScenarioRecord[
   };
 }
 
-function toolPayload(requiresUserDecision: boolean): Extract<ScenarioCommand["payload"], { type: "toolRequested" }> {
+function toolPayload(
+  requiresUserDecision: boolean,
+): Extract<ScenarioCommand["payload"], { type: "toolRequested" }> {
   const input = nestedToolInput();
   return {
     type: "toolRequested",
@@ -689,54 +1348,95 @@ function toolPayload(requiresUserDecision: boolean): Extract<ScenarioCommand["pa
 }
 
 function nestedToolInput() {
-  return { file_path: "README.md", options: { line: 1, tags: ["safe", "structured"] } };
+  return {
+    file_path: "README.md",
+    options: { line: 1, tags: ["safe", "structured"] },
+  };
 }
 
 function setHostEnvironment(adapter: string, projectDir: string): void {
-  environmentRestorers.push(withEnvironmentForTest({
+  environmentRestorers.push(
+    withEnvironmentForTest({
     AGENT_FRAMEWORK_ADAPTER: adapter,
     AGENT_FRAMEWORK_PROJECT_DIR: projectDir,
-  }));
+    }),
+  );
 }
 
 function claudeTranscript(includeNewer: boolean): string {
   const turns = [
     {
-      message: { id: "older-message", role: "user", content: "older transcript" },
+      message: {
+        id: "older-message",
+        role: "user",
+        content: "older transcript",
+      },
     },
     {
       message: {
         id: "older-assistant",
         role: "assistant",
-        content: [{ type: "tool_use", id: "older-tool", name: "Read", input: nestedToolInput() }],
+        content: [
+          {
+            type: "tool_use",
+            id: "older-tool",
+            name: "Read",
+            input: nestedToolInput(),
+          },
+        ],
       },
     },
     {
       message: {
         id: "older-result",
         role: "user",
-        content: [{ type: "tool_result", tool_use_id: "older-tool", content: "older result" }],
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "older-tool",
+            content: "older result",
+          },
+        ],
       },
     },
-    ...(includeNewer ? [
+    ...(includeNewer
+      ? [
       {
-        message: { id: "newer-message", role: "user", content: "newer transcript" },
+            message: {
+              id: "newer-message",
+              role: "user",
+              content: "newer transcript",
+            },
       },
       {
         message: {
           id: "newer-assistant",
           role: "assistant",
-          content: [{ type: "tool_use", id: "newer-tool", name: "Read", input: nestedToolInput() }],
+              content: [
+                {
+                  type: "tool_use",
+                  id: "newer-tool",
+                  name: "Read",
+                  input: nestedToolInput(),
+                },
+              ],
         },
       },
       {
         message: {
           id: "newer-result",
           role: "user",
-          content: [{ type: "tool_result", tool_use_id: "newer-tool", content: "newer result" }],
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "newer-tool",
+                  content: "newer result",
         },
+              ],
       },
-    ] : []),
+          },
+        ]
+      : []),
   ];
   return `${turns.map((turn) => JSON.stringify(turn)).join("\n")}\n`;
 }
@@ -747,7 +1447,9 @@ async function waitForTool(
   status: "waiting" | "completed",
 ): Promise<void> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
-    const tool = (await runtime.snapshot(runId)).toolCalls.find((candidate) => candidate.id === "tool-1");
+    const tool = (await runtime.snapshot(runId)).toolCalls.find(
+      (candidate) => candidate.id === "tool-1",
+    );
     if (tool?.status === status) return;
     await new Promise((resolve) => setTimeout(resolve, 1));
   }

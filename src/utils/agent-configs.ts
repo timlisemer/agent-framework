@@ -1542,6 +1542,12 @@ no`,
   },
 };
 
+/** Exact sentiment-derived configuration used by the question-stalling rule. */
+export const PREDICTION_QUESTION_AGENT: Omit<AgentConfig, "workingDir"> = {
+  ...SENTIMENT_AGENT,
+  formatValidation: undefined,
+};
+
 /**
  * Rule Gate Agent Configuration
  *

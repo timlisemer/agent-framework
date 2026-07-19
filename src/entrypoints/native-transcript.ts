@@ -144,11 +144,12 @@ function canonicalNativeTranscriptObservationFromLines(
     for (const block of blocks) {
       if (block.type === "tool_use") {
         const id = block.id ?? block.tool_use_id ?? `native-tool:${adapterName}:${sourceLine}`;
-        const toolInput = jsonValue(block.input ?? {});
+        const canonicalTool = spec.canonicalizeToolCall(block.name ?? "tool", block.input ?? {});
+        const toolInput = jsonValue(canonicalTool.toolInput);
         tools.set(id, {
           id,
           turnId,
-          name: block.name ?? "tool",
+          name: canonicalTool.toolName,
           input: toolInput,
           inputDigest: digestScenarioValue(toolInput),
           status: "running",

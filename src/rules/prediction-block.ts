@@ -5,9 +5,8 @@ import {
   EXPLICIT_PROHIBITION_RE,
 } from "../utils/prediction-types.js";
 import { extractFilePaths } from "./utils.js";
-import {
-  createPlanfileAuthorization,
-} from "../utils/create-planfile.js";
+import { createPlanfileAuthorization } from "../utils/create-planfile.js";
+import { PREDICTION_BLOCK_RULE_POLICY } from "./policies.js";
 
 export const predictionBlockRule: PreToolRule = {
   name: "prediction-block",
@@ -18,6 +17,8 @@ export const predictionBlockRule: PreToolRule = {
   // fixes without re-opening that behavior.
   appealable: false,
   usesLlm: false,
+  version: "1",
+  configuration: PREDICTION_BLOCK_RULE_POLICY,
   promptSection: "",
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
@@ -28,7 +29,9 @@ export const predictionBlockRule: PreToolRule = {
     if (
       isEditTool(ctx.toolName) &&
       filePaths.length > 0 &&
-      filePaths.every((filePath) => isEditIntentExemptPath(filePath, ctx.sessionDir))
+      filePaths.every((filePath) =>
+        isEditIntentExemptPath(filePath, ctx.sessionDir),
+      )
     ) {
       return null;
     }
@@ -52,8 +55,13 @@ export const predictionBlockRule: PreToolRule = {
         planMode: ctx.planMode,
         currentPrediction: ctx.state.currentPrediction,
       });
-      const currentLogicText = (ctx.latestUserTurn?.logicText ?? ctx.latestUserMessage ?? "").trim();
-      const explicitNoTools = currentLogicText.length > 0
+      const currentLogicText = (
+        ctx.latestUserTurn?.logicText ??
+        ctx.latestUserMessage ??
+        ""
+      ).trim();
+      const explicitNoTools =
+        currentLogicText.length > 0
         ? EXPLICIT_PROHIBITION_RE.test(currentLogicText)
         : prediction.blockAllTools === true;
       if (
@@ -63,7 +71,9 @@ export const predictionBlockRule: PreToolRule = {
       ) {
         return null;
       }
-      return { fastDeny: decision.reason ?? "Tool blocked by user-state prediction" };
+      return {
+        fastDeny: decision.reason ?? "Tool blocked by user-state prediction",
+      };
     }
     return null;
   },

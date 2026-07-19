@@ -5,7 +5,12 @@ import type { ProviderExecutionResult, ProviderRunInput, SdkRuntimeEnvironment, 
 import type { ProviderUsage } from "./execution-types.js";
 import type { ResolvedProvider } from "./types.js";
 import { assertManagedRuntimeHomeConfig, copyCodexAuthToHome } from "./managed-runtime-home.js";
-import { makeRuntimeRunId, materializeRuntimeHome, resolveRuntimeHomeProfile } from "../runtime-home/runtime-profiles.js";
+import {
+  makeRuntimeRunId,
+  materializeRuntimeHome,
+  resolveRuntimeHomeProfile,
+  type ScenarioBinding,
+} from "../runtime-home/runtime-profiles.js";
 import type { RuntimeToolPolicy } from "../runtime-home/profiles.js";
 import { codexSessionsRoot, codexTranscriptCwd, codexTranscriptSessionId } from "../../adapters/codex/paths.js";
 import { sandboxModeForToolPolicy } from "../../adapters/codex/runtime-home.js";
@@ -21,6 +26,7 @@ export type CodexThreadOptionsConfig = {
   sdkToolPolicy?: ProviderRunInput["config"]["sdkToolPolicy"];
   runtimeRunId?: string;
   runtimeExecutionMode?: CodexRuntimeExecutionMode;
+  scenarioBinding?: ScenarioBinding;
 };
 
 export type CodexRuntimeExecutionMode = "direct" | "sdk";
@@ -206,6 +212,7 @@ export async function createCodexLiveSession(
       profile,
       toolPolicy: config.sdkToolPolicy,
       runId: config.runtimeRunId ?? makeRuntimeRunId(tempPrefix),
+      scenarioBinding: config.scenarioBinding,
     });
     const Codex = await loadCodexConstructor();
     const codexConfig = buildCodexConfig(

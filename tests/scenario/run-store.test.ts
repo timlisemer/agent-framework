@@ -774,6 +774,26 @@ describe("RunStore", () => {
     await lock.release();
   });
 
+  it("recovers a fresh lock immediately when its recorded owner is provably dead", async () => {
+    const root = await createTemporaryTestRoot(roots, "run-lock-dead-owner-");
+    const lockDir = path.join(root, ".write.lock");
+    await fs.mkdir(lockDir);
+    await fs.writeFile(path.join(lockDir, "owner.json"), JSON.stringify({
+      pid: process.pid,
+      processIdentity: "forged-process-identity",
+      lockId: "dead-owner-lock",
+      acquiredAt: new Date().toISOString(),
+    }), "utf8");
+
+    const lock = await acquireRunLock(root, {
+      staleAfterMs: 60_000,
+      timeoutMs: 100,
+      retryMs: 1,
+    });
+    expect(lock.diagnostics).toEqual(["Recovered a stale run transaction lock"]);
+    await lock.release();
+  });
+
   it("recovers an ownerless lock directory only after its stale threshold", async () => {
     const root = await createTemporaryTestRoot(roots, "run-lock-ownerless-");
     const lockDir = path.join(root, ".write.lock");

@@ -12,6 +12,7 @@ const ARRAY_PATH_KEYS = ["file_paths", "paths", "files"] as const;
 export function normalizeCodexToolName(payload: Record<string, unknown>): string {
   const name = typeof payload.name === "string" ? payload.name : "unknown";
   const namespace = typeof payload.namespace === "string" ? payload.namespace : "";
+  if (namespace === "functions") return `functions.${name}`;
   return `${namespace}${name}`;
 }
 

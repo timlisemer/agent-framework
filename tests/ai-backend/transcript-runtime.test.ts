@@ -604,12 +604,14 @@ describe("native transcript importer", () => {
   });
 
   it.each([
-    { terminal: "completed" as const, startRunning: false, error: null },
-    { terminal: "failed" as const, startRunning: true, error: "native command failed" },
+    { terminal: "completed" as const, startRunning: false, error: null, expectedError: null },
+    { terminal: "failed" as const, startRunning: true, error: null, expectedError: "Tool execution failed" },
+    { terminal: "cancelled" as const, startRunning: true, error: null, expectedError: "Tool cancelled" },
   ])("advances an existing tool to native $terminal state without duplicates", async ({
     terminal,
     startRunning,
     error,
+    expectedError,
   }) => {
     await withTemporaryTestRoot(`native-tool-${terminal}-`, async (temporaryDir) => {
       const runtime = createTestScenarioRuntime({ root: path.join(temporaryDir, "runtime") });
@@ -684,7 +686,7 @@ describe("native transcript importer", () => {
         id: "existing-tool",
         status: terminal,
         output: ["one native output"],
-        error,
+        error: expectedError,
       });
       expect((await runtime.recordsAfter("tool-reconcile-run", 0)).filter((record) =>
         record.eventType === `tool.${terminal}` && record.payload.toolCallId === "existing-tool"
@@ -695,9 +697,9 @@ describe("native transcript importer", () => {
       };
       const invalidTools = [
         { ...observedTool, turnId: "changed-turn" },
-        { ...observedTool, status: "cancelled" as const },
+        { ...observedTool, status: terminal === "completed" ? "failed" as const : "completed" as const },
         { ...observedTool, output: ["changed output"] },
-        { ...observedTool, error: error === null ? "changed error" : null },
+        ...(terminal === "completed" ? [] : [{ ...observedTool, error: "changed terminal error" }]),
       ];
       for (const [index, invalidTool] of invalidTools.entries()) {
         await expect(runtime.dispatch({

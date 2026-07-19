@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { digestScenarioValue } from "../../src/scenario/protocol/digest.js";
 import {
+  canonicalToolTerminalTarget,
+  isIdenticalToolTerminalReplay,
   observedToolLifecycleRecords,
+  toolTerminalLifecycle,
+  toolTerminalLifecycleFromCommandType,
   type ObservedToolAuthorization,
 } from "../../src/scenario/runtime/tool-lifecycle.js";
 
@@ -14,6 +18,34 @@ const tool = {
 };
 
 describe("observed tool lifecycle", () => {
+  it("owns every terminal status, command, event, and default in one mapping", () => {
+    expect(["completed", "failed", "cancelled"].map((status) =>
+      toolTerminalLifecycle(status as "completed" | "failed" | "cancelled")
+    )).toEqual([
+      {
+        status: "completed",
+        commandType: "toolCompleted",
+        eventType: "tool.completed",
+        defaultError: null,
+      },
+      {
+        status: "failed",
+        commandType: "toolFailed",
+        eventType: "tool.failed",
+        defaultError: "Tool execution failed",
+      },
+      {
+        status: "cancelled",
+        commandType: "toolCancelled",
+        eventType: "tool.cancelled",
+        defaultError: "Tool cancelled",
+      },
+    ]);
+    expect(toolTerminalLifecycleFromCommandType("toolFailed")?.eventType).toBe(
+      "tool.failed",
+    );
+  });
+
   it.each([
     ["provider", {
       policy: "notEnforced",
@@ -131,5 +163,49 @@ describe("observed tool lifecycle", () => {
         appendedOutput: [{ line: "different" }],
       },
     })).toThrow("does not extend the canonical output prefix");
+  });
+
+  it("normalizes terminal errors and compares replays through one canonical policy", () => {
+    expect(canonicalToolTerminalTarget({ status: "failed", error: null })).toMatchObject({
+      status: "failed",
+      error: "Tool execution failed",
+    });
+    expect(canonicalToolTerminalTarget({ status: "cancelled", error: null })).toMatchObject({
+      status: "cancelled",
+      error: "Tool cancelled",
+    });
+    expect(isIdenticalToolTerminalReplay({
+      status: "cancelled",
+      output: [],
+      error: "custom cancellation",
+    }, {
+      status: "cancelled",
+      error: null,
+    })).toBe(false);
+    expect(isIdenticalToolTerminalReplay({
+      status: "cancelled",
+      output: [],
+      error: "Tool cancelled",
+    }, {
+      status: "cancelled",
+      error: null,
+    })).toBe(true);
+    expect(isIdenticalToolTerminalReplay({
+      status: "cancelled",
+      output: ["existing output"],
+      error: "Tool cancelled",
+    }, {
+      status: "cancelled",
+      error: null,
+    })).toBe(true);
+    expect(isIdenticalToolTerminalReplay({
+      status: "cancelled",
+      output: ["existing output"],
+      error: "Tool cancelled",
+    }, {
+      status: "cancelled",
+      terminalOutput: "different output",
+      error: null,
+    })).toBe(false);
   });
 });

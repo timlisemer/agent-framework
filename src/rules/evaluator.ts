@@ -1,6 +1,5 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { runAgentWithRetryAndTelemetry } from "../utils/agent-runner.js";
-import { RULE_GATE_AGENT } from "../utils/agent-configs.js";
 import { extractGateNote } from "./gate-note.js";
 import { logFastPathDeny, logFastPathApproval } from "../utils/logger.js";
 import { EXECUTION_TYPES } from "../types.js";
@@ -236,6 +235,16 @@ async function evaluateRulesCore(
   ).join("\n\n");
 
   const toolDescription = summarizeCurrentTool();
+  const evaluationAgent = triggered[0]?.rule.evaluationAgent;
+  if (!evaluationAgent) {
+    throw new Error(`Triggered LLM rule ${triggered[0]?.rule.name ?? "unknown"} does not declare its execution agent`);
+  }
+  const inconsistentAgent = triggered.find(({ rule }) => rule.evaluationAgent !== evaluationAgent);
+  if (inconsistentAgent) {
+    throw new Error(
+      `Triggered LLM rule ${inconsistentAgent.rule.name} does not share the canonical evaluation agent`,
+    );
+  }
 
   let llmOutput = "APPROVE";
   traceOptions?.onStage?.({
@@ -248,7 +257,7 @@ async function evaluateRulesCore(
   });
   try {
     const llmResult = await runAgentWithRetryAndTelemetry(
-      { ...RULE_GATE_AGENT, workingDir: ctx.projectDir },
+      { ...evaluationAgent, workingDir: ctx.projectDir },
       {
         prompt: `Evaluate this tool call: ${toolDescription}`,
         context: promptSections,

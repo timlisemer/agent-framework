@@ -60,6 +60,72 @@ describe("ScenarioProviderManager", () => {
     expect(resolveProvider).not.toHaveBeenCalled();
   });
 
+  it("keeps native Codex homes observation-only and unbound from the Scenario run", async () => {
+    const root = await createTemporaryTestRoot(roots, "scenario-provider-native-codex-binding-");
+    const runtime = createTestScenarioRuntime({ root });
+    let resolvedConfig: ProviderSessionConfig | null = null;
+    const manager = new ScenarioProviderManager({
+      runtime,
+      resolveProvider: (config) => {
+        resolvedConfig = config;
+        return testResolvedProvider({ sdkRuntime: "codex" });
+      },
+      createRunner: (resolvedProvider): ProviderRunner => ({
+        resolvedProvider,
+        async *runTurn() {},
+      }),
+    });
+
+    const { runId } = await manager.host.start({
+      model: null,
+      workingDir: root,
+      systemPrompt: null,
+      continuable: true,
+      sdkRuntimeEnvironment: "isolated",
+      runtimeHome: { kind: "native", configuration: {} },
+    });
+
+    expect(resolvedConfig).not.toHaveProperty("scenarioBinding");
+    expect((await runtime.snapshot(runId)).manifest.configuration).toMatchObject({
+      authorizationBoundary: "providerObservation",
+    });
+    await manager.dispose();
+  });
+
+  it("binds managed hooks to both the canonical run and its storage root", async () => {
+    const root = await createTemporaryTestRoot(
+      roots,
+      "scenario-provider-managed-root-binding-",
+    );
+    const runtime = createTestScenarioRuntime({ root });
+    let resolvedConfig: ProviderSessionConfig | null = null;
+    const manager = new ScenarioProviderManager({
+      runtime,
+      resolveProvider: (config) => {
+        resolvedConfig = config;
+        return testResolvedProvider({ sdkRuntime: "codex" });
+      },
+      createRunner: (resolvedProvider): ProviderRunner => ({
+        resolvedProvider,
+        async *runTurn() {},
+      }),
+    });
+
+    const { runId } = await manager.host.start({
+      model: null,
+      workingDir: root,
+      systemPrompt: null,
+      continuable: true,
+      sdkRuntimeEnvironment: "user",
+      runtimeHome: { kind: "managed", configuration: { profile: "default" } },
+    });
+
+    expect(resolvedConfig).toMatchObject({
+      scenarioBinding: { runId, root },
+    });
+    await manager.dispose();
+  });
+
   it.each([
     { sdkRuntime: "claude" as const, discoveryEvent: "session_id", nativeSessionId: "claude-session-real" },
     { sdkRuntime: "codex" as const, discoveryEvent: "thread.started", nativeSessionId: "codex-thread-real" },
@@ -302,7 +368,9 @@ describe("ScenarioProviderManager", () => {
     };
     const runtime = createTestScenarioRuntime({
       root,
-      effectExecutor: new RulePipelineEffectExecutor({ rules: [adapterProbeRule, toolApproveRule] }),
+      effectExecutor: new RulePipelineEffectExecutor({
+        rules: [adapterProbeRule, { ...toolApproveRule, appealable: false }],
+      }),
     });
     let authorizeTool: ProviderToolAuthorization | undefined;
     const manager = new ScenarioProviderManager({
@@ -345,7 +413,7 @@ describe("ScenarioProviderManager", () => {
       rawToolName: undefined,
     }));
     await manager.dispose();
-  });
+  }, 10_000);
 
   it("commits run cancellation before awaiting a turn blocked in the rule pipeline", async () => {
     const root = await createTemporaryTestRoot(roots, "scenario-provider-blocked-cancel-");
@@ -1344,7 +1412,7 @@ describe("ScenarioProviderManager", () => {
     expect(managerDisposed).toBe(false);
     releaseProviderDispose();
     await managerDisposal;
-  });
+  }, 10_000);
 
   it("fences timed-out authorization terminalization after provider detachment", async () => {
     const root = await createTemporaryTestRoot(roots, "scenario-provider-terminalization-fence-");

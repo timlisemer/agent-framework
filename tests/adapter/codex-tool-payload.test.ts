@@ -4,10 +4,18 @@ import {
   codexTranscriptToolLogIdentityKey,
   codexTranscriptToolLogMatchIsStable,
   extractCodexToolPaths,
+  normalizeCodexToolName,
 } from "../../adapters/codex/tool-payload.js";
 import type { ToolLogEntry } from "../../src/utils/tool-log-types.js";
 
 describe("Codex tool payload helpers", () => {
+  it("normalizes the functions namespace to the hook wire name", () => {
+    expect(normalizeCodexToolName({ namespace: "functions", name: "exec_command" }))
+      .toBe("functions.exec_command");
+    expect(normalizeCodexToolName({ namespace: "functions.", name: "exec_command" }))
+      .toBe("functions.exec_command");
+  });
+
   it("canonicalizes path fields with one sorted unique policy", () => {
     expect(extractCodexToolPaths({
       file_path: " src/b.ts ",

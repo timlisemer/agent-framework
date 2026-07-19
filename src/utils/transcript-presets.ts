@@ -10,11 +10,15 @@
  * the exact count of each message type is collected (or transcript exhausted).
  */
 
-import type { TranscriptReadOptions } from "./transcript.js";
 import { validateTranscriptConfig } from "./transcript.js";
-
-/** Use Infinity to collect all messages of a type (scanner will exhaust transcript) */
-const ALL = Infinity;
+import { FIRST_RESPONSE_STOP_COUNTS } from "./transcript-preset-values.js";
+export {
+  APPEAL_COUNTS,
+  FIRST_RESPONSE_STOP_COUNTS,
+  PLAN_VALIDATE_COUNTS,
+  QUESTION_VALIDATE_COUNTS,
+  VALIDATE_INTENT_COUNTS,
+} from "./transcript-preset-values.js";
 
 /**
  * For appeal decisions.
@@ -24,10 +28,6 @@ const ALL = Infinity;
  * Includes first user message to capture initial request context.
  * Plan approval and todo state are always synthesized into transcript.
  */
-export const APPEAL_COUNTS: TranscriptReadOptions = {
-  counts: { user: { count: ALL }, assistant: { count: 10 }, tool: { count: 3 } },
-  includeFirstUserMessage: true,
-};
 
 /**
  * For plan drift validation.
@@ -36,13 +36,6 @@ export const APPEAL_COUNTS: TranscriptReadOptions = {
  * Includes assistant messages to see user approvals and confirmations.
  * Always includes first user message to capture initial request.
  */
-export const PLAN_VALIDATE_COUNTS: TranscriptReadOptions = {
-  counts: { user: { count: ALL }, assistant: { count: 10 }, tool: { count: 10 } },
-  includeFirstUserMessage: true,
-  toolOptions: {
-    trim: false,
-  },
-};
 
 /**
  * For validate-intent checks.
@@ -50,10 +43,6 @@ export const PLAN_VALIDATE_COUNTS: TranscriptReadOptions = {
  * Comprehensive user+assistant context without tool results.
  * Focus is on request vs response alignment, not intermediate tool calls.
  */
-export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
-  counts: { user: { count: ALL }, assistant: { count: 5 } },
-  includeFirstUserMessage: true,
-};
 
 /**
  * For first-response-intent stop checks.
@@ -66,13 +55,6 @@ export const VALIDATE_INTENT_COUNTS: TranscriptReadOptions = {
  * tool is included so the hook can see if work was done between
  * the user message and now.
  */
-export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
-  counts: {
-    user: { count: 3, maxStale: 5 },
-    assistant: { count: 3 },
-    tool: { count: 8 },
-  },
-};
 
 /**
  * For question validation (AskUserQuestion tool).
@@ -81,15 +63,6 @@ export const FIRST_RESPONSE_STOP_COUNTS: TranscriptReadOptions = {
  * Recent assistant messages - to check if referenced content was shown.
  * Recent tool results - to see what Claude has done (Write to plan, etc.).
  */
-export const QUESTION_VALIDATE_COUNTS: TranscriptReadOptions = {
-  counts: { user: { count: ALL }, assistant: { count: 20 }, tool: { count: 15 } },
-  includeFirstUserMessage: true,
-  toolOptions: {
-    trim: true,
-    maxLines: 80,
-    excludeToolNames: ["Task"],
-  },
-};
 
 // =============================================================================
 // COMPILE-TIME VALIDATION

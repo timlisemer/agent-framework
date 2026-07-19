@@ -177,6 +177,11 @@ export class ScenarioProviderManager {
             ...providerConfigurationState(config, resolved),
             continuable: config.continuable,
             toolAuthorization: adapter === "claude" ? "preExecution" : "observationOnly",
+            authorizationBoundary: adapter === "claude"
+              ? "providerCallback"
+              : config.runtimeHome.kind === "managed"
+                ? "managedHostHooksThenProviderObservation"
+                : "providerObservation",
             ...(adapter === "claude" ? { nonInteractiveToolFallback: "deny" } : {}),
             rulePipeline: "shared",
           },
@@ -296,7 +301,17 @@ export class ScenarioProviderManager {
     resumeTarget?: GatewayResumeTarget;
     validate?: (input: { resolved: ResolvedProvider; adapter: SdkRuntime }) => void;
   }): RegisteredProvider {
-    const providerConfig = this.providerConfig(input.gatewayConfig);
+    const providerConfig = {
+      ...this.providerConfig(input.gatewayConfig),
+      ...(input.gatewayConfig.runtimeHome.kind === "managed"
+        ? {
+            scenarioBinding: {
+              runId: input.runId,
+              root: this.runtime.storageRoot,
+            },
+          }
+        : {}),
+    };
     const resolved = this.options.resolveProvider?.(providerConfig) ?? resolveSessionProvider(providerConfig);
     const adapter = selectSdkRuntime(resolved);
     input.validate?.({ resolved, adapter });

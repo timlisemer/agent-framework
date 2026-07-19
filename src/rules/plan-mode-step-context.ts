@@ -1,6 +1,8 @@
 import type { PreToolRule, RuleContext, RuleCheckResult } from "./types.js";
 import { detectRecentIntentFulfillment } from "../utils/intent-fulfillment.js";
 import { EDIT_TOOL_NAMES_DISPLAY } from "../utils/edit-tools.js";
+import { RULE_GATE_AGENT } from "../utils/agent-configs.js";
+import { PLAN_MODE_STEP_CONTEXT_RULE_POLICY } from "./policies.js";
 
 const PLAN_MODE_STEP_CONTEXT_STRING = `=== PLAN MODE STEP AWARENESS ===
 Plan mode proceeds in steps:
@@ -22,13 +24,19 @@ export const planModeStepContextRule: PreToolRule = {
   priority: 77,
   appealable: false,
   usesLlm: true,
+  evaluationAgent: RULE_GATE_AGENT,
+  version: "1",
+  configuration: PLAN_MODE_STEP_CONTEXT_RULE_POLICY,
   promptSection: `If "PLAN MODE STEP AWARENESS" appears in context, plan mode is active and you must reason about which step the workflow is in. The block lists the appropriate next-step toolset. ExitPlanMode is the prescribed terminal step - APPROVE it when planning is done.`,
 
   async check(ctx: RuleContext): Promise<RuleCheckResult> {
     if (!ctx.planModeCtx.active) return null;
     const prediction = ctx.state.currentPrediction;
     if (!prediction) return null;
-    const signal = detectRecentIntentFulfillment(prediction, ctx.toolHistory ?? []);
+    const signal = detectRecentIntentFulfillment(
+      prediction,
+      ctx.toolHistory ?? [],
+    );
     if (!signal) return null;
     return { llmContext: PLAN_MODE_STEP_CONTEXT_STRING };
   },

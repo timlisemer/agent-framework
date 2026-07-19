@@ -11,6 +11,7 @@ import type {
 import type { PlannedScenarioEffect } from "../scenario/runtime/effects.js";
 import {
   canonicalToolRequestedRecord,
+  isIdenticalToolTerminalReplay,
   observedToolLifecycleRecords,
 } from "../scenario/runtime/tool-lifecycle.js";
 import { digestScenarioValue } from "../scenario/protocol/digest.js";
@@ -356,7 +357,13 @@ function postToolUseResult(
     throw new Error(`Host post-tool identity changed: ${payload.toolCallId}`);
   }
   if (existing && isTerminalToolStatus(existing.status)) {
-    throw new Error(`Tool call is already terminal: ${payload.toolCallId}`);
+    if (!isIdenticalToolTerminalReplay(existing, {
+      status: payload.outcome,
+      ...(payload.output === undefined ? {} : { terminalOutput: payload.output }),
+      error: payload.error,
+    })) {
+      throw new Error(`Tool call is already terminal: ${payload.toolCallId}`);
+    }
   }
   return accepted([
     ...boundaryStateChanges(
@@ -374,7 +381,7 @@ function postToolUseResult(
         ? {}
         : { observedToolCallId: payload.toolCallId }),
     }, { kind: "toolCall", id: canonicalToolCallId })),
-    ...observedToolLifecycleRecords({
+    ...(existing && isTerminalToolStatus(existing.status) ? [] : observedToolLifecycleRecords({
       tool: {
         toolCallId: canonicalToolCallId,
         turnId: existing?.turnId ?? null,
@@ -395,7 +402,7 @@ function postToolUseResult(
         ...(payload.output === undefined ? {} : { terminalOutput: payload.output }),
         error: payload.error,
       },
-    }).map(record),
+    }).map(record)),
   ]);
 }
 

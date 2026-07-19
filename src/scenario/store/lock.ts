@@ -23,6 +23,13 @@ export type RunLock = {
   release(): Promise<readonly string[]>;
 };
 
+export class RunLockTimeoutError extends Error {
+  public constructor(public readonly lockDir: string) {
+    super(`Timed out acquiring run transaction lock: ${lockDir}`);
+    this.name = "RunLockTimeoutError";
+  }
+}
+
 /** Acquire a run lock for one operation and release it with primary-error precedence. */
 export async function withAcquiredRunLock<T>(
   runDir: string,
@@ -114,7 +121,7 @@ export async function acquireRunLock(runDir: string, options: RunLockOptions = {
         continue;
       }
       if (Date.now() - startedAt >= timeoutMs) {
-        throw new Error(`Timed out acquiring run transaction lock: ${lockDir}`);
+        throw new RunLockTimeoutError(lockDir);
       }
       await delay(retryMs);
     }
@@ -135,8 +142,12 @@ async function refreshHeartbeat(ownerPath: string, lockId: string): Promise<void
 
 async function recoverDeadOwner(lockDir: string, staleAfterMs: number): Promise<boolean> {
   const observed = await observeLock(lockDir);
-  if (!observed || Date.now() - observed.mtimeMs <= staleAfterMs) return false;
-  if (observed.owner && await isOwnerProcessAlive(observed.owner)) return false;
+  if (!observed) return false;
+  if (observed.owner) {
+    if (await isOwnerProcessAlive(observed.owner)) return false;
+  } else if (Date.now() - observed.mtimeMs <= staleAfterMs) {
+    return false;
+  }
 
   const confirmed = await observeLock(lockDir);
   if (!confirmed || confirmed.directoryInode !== observed.directoryInode) return false;

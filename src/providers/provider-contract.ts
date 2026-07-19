@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { JsonValue, RuntimeHomeDescriptor } from "../scenario/protocol/common.js";
+import type { ScenarioBinding } from "../runtime-home/runtime-profiles.js";
 import type { SdkRuntime } from "./types.js";
 
 export const sdkRuntimeEnvironmentValues = ["isolated", "user"] as const;
@@ -80,6 +81,8 @@ export type ProviderSessionConfig = {
   continuable: boolean;
   sdkRuntimeEnvironment: SdkRuntimeEnvironment;
   sdkRuntimeHome?: SdkRuntimeHome;
+  /** Canonical Scenario storage binding that managed host hooks must join. */
+  scenarioBinding?: ScenarioBinding;
 };
 
 export type ProviderToolOutputBlock =
