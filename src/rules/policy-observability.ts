@@ -10,24 +10,44 @@ import { APPEAL_COUNTS } from "../utils/transcript-preset-values.js";
 import type { TranscriptReadOptions } from "../utils/transcript.js";
 import { BLACKLIST_PATTERNS } from "../utils/bash-command-policy.js";
 import { SENSITIVE_PATH_CLASSIFICATION_POLICY } from "../utils/sensitive-paths.js";
+import type { BlacklistPattern } from "../utils/bash-policy/types.js";
 import type { PreToolRule } from "./types.js";
 
 export function observableBlacklistPolicyDigest(): string {
   return digestScenarioValue(
-    BLACKLIST_PATTERNS.map((entry) => ({
-      pattern: entry.pattern.source,
-      flags: entry.pattern.flags,
-      contentPattern: entry.contentPattern?.source ?? null,
-      contentFlags: entry.contentPattern?.flags ?? null,
-      commandMatcher: entry.commandMatcher?.toString() ?? null,
-      contentMatcher: entry.contentMatcher?.toString() ?? null,
-      name: entry.name,
-      alternative: entry.alternative.toString(),
-      bashOnly: entry.bashOnly ?? false,
-      redactPaths: entry.redactPaths ?? false,
-      topic: entry.topic ?? null,
-    })),
+    BLACKLIST_PATTERNS.map(observableBlacklistPattern),
   );
+}
+
+export function observableBlacklistPattern(
+  entry: BlacklistPattern,
+): Record<string, JsonValue> {
+  return {
+    pattern: entry.pattern.source,
+    flags: entry.pattern.flags,
+    contentPattern: entry.contentPattern?.source ?? null,
+    contentFlags: entry.contentPattern?.flags ?? null,
+    commandMatcher: observableFunctionIdentity(entry.commandMatcher),
+    contentMatcher: observableFunctionIdentity(entry.contentMatcher),
+    name: entry.name,
+    alternative: typeof entry.alternative === "function"
+      ? {
+          kind: "dynamic",
+          functionName: observableFunctionIdentity(entry.alternative),
+        }
+      : {
+          kind: "literal",
+          value: entry.alternative,
+        },
+    bashOnly: entry.bashOnly ?? false,
+    redactPaths: entry.redactPaths ?? false,
+    topic: entry.topic ?? null,
+  };
+}
+
+function observableFunctionIdentity(value: unknown): string | null {
+  if (typeof value !== "function") return null;
+  return value.name.trim() || "anonymous";
 }
 
 export function observableSensitivePathPolicyDigest(): string {
