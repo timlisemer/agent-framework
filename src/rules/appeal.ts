@@ -43,8 +43,12 @@ export async function runAppealWithTrace(
     payload: {
       ruleId: input.ruleId,
       reason: input.reason,
-      guidanceSource: input.additionalContext === undefined ? "default" : "rule",
-      resolvedGuidanceDigest: digestScenarioValue(resolvedGuidance),
+      ...(input.additionalContext === undefined
+        ? {}
+        : {
+            guidanceSource: "rule",
+            resolvedGuidanceDigest: digestScenarioValue(resolvedGuidance),
+          }),
     },
   });
   const appeal = await appealHelper(
