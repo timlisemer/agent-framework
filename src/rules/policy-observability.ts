@@ -50,14 +50,13 @@ export function observableBlacklistPolicyDigest(
 
 function observableFunctionIdentity(
   value: { readonly name: string } | undefined,
-  label: string,
+  fallbackIdentity: string,
 ): JsonValue {
   if (!value) return null;
-  const name = value.name.trim();
-  if (!name) {
-    throw new Error(`${label} must be named for stable policy observability`);
-  }
-  return { kind: "namedFunction", name };
+  return {
+    kind: "namedFunction",
+    name: value.name.trim() || fallbackIdentity,
+  };
 }
 
 export function observableSensitivePathPolicyDigest(): string {
