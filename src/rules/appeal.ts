@@ -1,6 +1,7 @@
 import { appealHelper } from "../agents/hooks/tool-appeal.js";
 import { buildAppealUserState } from "../agents/hooks/tool-appeal-user-state.js";
 import type { JsonValue } from "../scenario/protocol/common.js";
+import { digestScenarioValue } from "../scenario/protocol/digest.js";
 import { formatTranscriptResult, readTranscriptExact } from "../utils/transcript.js";
 import { APPEAL_COUNTS } from "../utils/transcript-presets.js";
 import type { RuleContext } from "./types.js";
@@ -34,10 +35,21 @@ export async function runAppealWithTrace(
     ...APPEAL_COUNTS,
     includeSlashCommandContext: true,
   });
+  const resolvedGuidance =
+    input.additionalContext ?? `${input.blockedBy} blocked: ${input.reason}`;
   input.onStage?.({
     eventType: "rule.appeal.started",
     ruleId: input.ruleId,
-    payload: { ruleId: input.ruleId, reason: input.reason },
+    payload: {
+      ruleId: input.ruleId,
+      reason: input.reason,
+      ...(input.additionalContext === undefined
+        ? {}
+        : {
+            guidanceSource: "rule",
+            resolvedGuidanceDigest: digestScenarioValue(resolvedGuidance),
+          }),
+    },
   });
   const appeal = await appealHelper(
     input.context.toolName,
@@ -47,7 +59,7 @@ export async function runAppealWithTrace(
     input.context.projectDir,
     input.hookName,
     buildAppealUserState(input.context.state),
-    input.additionalContext ?? `${input.blockedBy} blocked: ${input.reason}`,
+    resolvedGuidance,
     transcriptResult.slashCommandContext,
     appealToolIdentityFromRuleContext(input.context),
     input.context.signal,
