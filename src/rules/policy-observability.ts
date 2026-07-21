@@ -8,26 +8,56 @@ import {
 import { digestScenarioValue } from "../scenario/protocol/digest.js";
 import { APPEAL_COUNTS } from "../utils/transcript-preset-values.js";
 import type { TranscriptReadOptions } from "../utils/transcript.js";
-import { BLACKLIST_PATTERNS } from "../utils/bash-command-policy.js";
+import {
+  BLACKLIST_PATTERNS,
+  type BlacklistPattern,
+} from "../utils/bash-command-policy.js";
 import { SENSITIVE_PATH_CLASSIFICATION_POLICY } from "../utils/sensitive-paths.js";
 import type { PreToolRule } from "./types.js";
 
-export function observableBlacklistPolicyDigest(): string {
-  return digestScenarioValue(
-    BLACKLIST_PATTERNS.map((entry) => ({
+export function observableBlacklistPolicyDigest(
+  patterns: readonly BlacklistPattern[] = BLACKLIST_PATTERNS,
+): string {
+  return digestScenarioValue({
+    identityVersion: 1,
+    patterns: patterns.map((entry) => ({
       pattern: entry.pattern.source,
       flags: entry.pattern.flags,
       contentPattern: entry.contentPattern?.source ?? null,
       contentFlags: entry.contentPattern?.flags ?? null,
-      commandMatcher: entry.commandMatcher?.toString() ?? null,
-      contentMatcher: entry.contentMatcher?.toString() ?? null,
+      commandMatcher: observableFunctionIdentity(
+        entry.commandMatcher,
+        `${entry.name} command matcher`,
+      ),
+      contentMatcher: observableFunctionIdentity(
+        entry.contentMatcher,
+        `${entry.name} content matcher`,
+      ),
       name: entry.name,
-      alternative: entry.alternative.toString(),
+      alternative:
+        typeof entry.alternative === "string"
+          ? entry.alternative
+          : observableFunctionIdentity(
+              entry.alternative,
+              `${entry.name} alternative`,
+            ),
       bashOnly: entry.bashOnly ?? false,
       redactPaths: entry.redactPaths ?? false,
       topic: entry.topic ?? null,
     })),
-  );
+  });
+}
+
+function observableFunctionIdentity(
+  value: { readonly name: string } | undefined,
+  label: string,
+): JsonValue {
+  if (!value) return null;
+  const name = value.name.trim();
+  if (!name) {
+    throw new Error(`${label} must be named for stable policy observability`);
+  }
+  return { kind: "namedFunction", name };
 }
 
 export function observableSensitivePathPolicyDigest(): string {
@@ -88,12 +118,19 @@ function observableLlmPolicy(rule: PreToolRule): Record<string, JsonValue> {
 }
 
 function observableAppealPolicy(rule: PreToolRule): Record<string, JsonValue> {
+  const guidance = rule.appealGuidance;
+  const appealGuidanceMode =
+    typeof guidance === "function"
+      ? "dynamic"
+      : typeof guidance === "string"
+        ? "static"
+        : "default";
   return {
     appealAgent: observableAgentConfiguration(buildToolAppealAgent()),
     appealTranscriptWindow: observableTranscriptWindow(APPEAL_COUNTS),
-    appealGuidanceDigest: digestScenarioValue(
-      typeof rule.appealGuidance === "string" ? rule.appealGuidance : null,
-    ),
+    appealGuidanceMode,
+    appealGuidanceDigest:
+      typeof guidance === "string" ? digestScenarioValue(guidance) : null,
   };
 }
 
